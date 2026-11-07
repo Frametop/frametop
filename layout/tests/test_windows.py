@@ -167,6 +167,15 @@ class Windows(unittest.TestCase):
         self.run_window("open", "oma7", "0x55aa20")
         self.assertEqual([d["client"] for d in self.displays() if d.get("window")], ["frametop-oma7-win1"])
 
+    def test_launch_reuses_a_closed_windows_client(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        self.answers["/api/frametop/windows"] = (200, dict(WINDOWS, windows=WINDOWS["windows"][1:]))
+        self.answers["/api/frametop/windows/open"] = (200, {"output": "FT-W2", "address": "0x77", "status": True})
+        self.m.log = lambda *_: None
+        self.run_window("launch", "oma7", "foot.desktop")
+        self.assertEqual([(d["app"], d["client"]) for d in self.displays() if d.get("window")],
+                         [("window:0x77", "frametop-oma7-win1")])
+
     def test_list_failure_forgets_nothing(self):
         self.run_window("open", "oma7", "0x55aa10")
         self.answers["/api/frametop/windows"] = (0, None)  # oma7 asleep

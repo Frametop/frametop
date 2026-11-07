@@ -1562,6 +1562,7 @@ def window_command(args):
             if not re.fullmatch(r"[A-Za-z0-9._@+-]+\.desktop", args[2]):
                 raise RuntimeError("window launch: APP is a desktop app's id (window apps)")
             size = window_size(opts, WINDOW_SIZE)
+            window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
             opened = window_api(host, port, "POST", "/api/frametop/windows/open",
                                 {"app": args[2], "width": size[0], "height": size[1]})
             address = opened.get("address", "")

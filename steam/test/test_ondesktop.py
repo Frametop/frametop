@@ -27,11 +27,29 @@ STEAM_ENV = {
 }
 
 
+OUR_PAD = """I: Bus=0003 Vendor=045e Product=028e Version=0114
+N: Name="frametop virtual gamepad"
+H: Handlers=event9 js1
+
+"""
+REAL_360 = """I: Bus=0003 Vendor=045e Product=028e Version=0114
+N: Name="Microsoft X-Box 360 pad"
+H: Handlers=event11 js2
+
+"""
+STEAM_PAD = """I: Bus=0003 Vendor=28de Product=11ff Version=0001
+N: Name="Microsoft X-Box 360 pad 0"
+H: Handlers=event7 js0
+
+"""
+
+
 class OnDesktop(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = pathlib.Path(self.tmp.name)
         self.home, self.proc, self.x11 = root / "home", root / "proc", root / "x11"
+        self.input = root / "input-devices"
         for d in (self.home, self.proc, self.x11):
             d.mkdir()
         self.sockets = []
@@ -61,7 +79,8 @@ class OnDesktop(unittest.TestCase):
 
     def run_script(self, *args, env=None):
         full = {"HOME": str(self.home), "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-                "FT_ONDESKTOP_PROC": str(self.proc), "FT_ONDESKTOP_X11": str(self.x11)}
+                "FT_ONDESKTOP_PROC": str(self.proc), "FT_ONDESKTOP_X11": str(self.x11),
+                "FT_ONDESKTOP_INPUT": str(self.input)}
         full.update(STEAM_ENV if env is None else env)
         return subprocess.run([str(SCRIPT), *args], env=full, capture_output=True, text=True, timeout=30,
                               stdin=subprocess.DEVNULL)
@@ -145,15 +164,44 @@ class OnDesktop(unittest.TestCase):
     def test_frametops_pad_leaves_sdls_ignore_list(self):
         self.frametop_shell()
         self.x_socket(2)
+        self.input.write_text(STEAM_PAD + OUR_PAD)
         for given, wanted in (("0x28de/0x11ff,0x045e/0x028e,0x054c/0x0ce6", "0x28de/0x11ff,0x054c/0x0ce6"),
                               ("0x045E/0x028E,0x28de/0x11ff", "0x28de/0x11ff"),
                               ("0x45e/0x28e", None), ("0x045e/0x028e", None),
-                              ("0x045e/0x02ea", "0x045e/0x02ea"), ("junk,0x045e/0x028e", "junk")):
+                              ("0x045e/0x02ea", "0x045e/0x02ea"), ("junk,0x045e/0x028e", "junk"),
+                              ("*,0x045e/0x028e", "*")):  # not a file name pattern
             with self.subTest(given):
                 _, env, _ = self.game(env=dict(STEAM_ENV, SDL_GAMECONTROLLER_IGNORE_DEVICES=given))
                 self.assertEqual(env.get("SDL_GAMECONTROLLER_IGNORE_DEVICES"), wanted)
         _, env, _ = self.game()
         self.assertNotIn("SDL_GAMECONTROLLER_IGNORE_DEVICES", env)
+
+    def test_a_real_xbox_360_pad_keeps_the_ignore_list(self):
+        """Same ids as Frametop's pad: Steam Input gives the game its own copy of a real one, so the
+        game reading it raw too would get every press twice."""
+        self.frametop_shell()
+        self.x_socket(2)
+        given = "0x28de/0x11ff,0x045e/0x028e"
+        for devices in (OUR_PAD + REAL_360, REAL_360, STEAM_PAD, ""):
+            with self.subTest(devices[:60]):
+                self.input.write_text(devices)
+                _, env, _ = self.game(env=dict(STEAM_ENV, SDL_GAMECONTROLLER_IGNORE_DEVICES=given))
+                self.assertEqual(env["SDL_GAMECONTROLLER_IGNORE_DEVICES"], given)
+        self.input.unlink()
+        _, env, _ = self.game(env=dict(STEAM_ENV, SDL_GAMECONTROLLER_IGNORE_DEVICES=given))
+        self.assertEqual(env["SDL_GAMECONTROLLER_IGNORE_DEVICES"], given)
+
+    def test_an_unreadable_shell_is_skipped_quietly(self):
+        """Another user's Plasma shell (or one exiting): its environ can't be read."""
+        self.process(150, "plasmashell", {})
+        (self.proc / "150" / "environ").unlink()
+        (self.proc / "160").mkdir()  # a process gone between the listing and the read: no comm
+        self.frametop_shell()
+        self.x_socket(2)
+        _, env, err = self.game()
+        self.assertEqual(env["DISPLAY"], ":2")
+        ours = [line for line in err.splitlines() if not line.startswith("ERROR: ld.so:")]  # the fake LD_PRELOAD
+        self.assertEqual(ours, ["ft-ondesktop: on the Frametop desktop (display :2): " + GAME[0]])
 
     def test_the_ignore_list_stays_in_the_theater(self):
         given = "0x045e/0x028e"
@@ -173,6 +221,9 @@ class OnDesktop(unittest.TestCase):
     def test_launch_option(self):
         r = self.run_script("--launch-option")
         self.assertEqual((r.returncode, r.stdout), (0, f"{self.home}/.local/bin/ft-ondesktop %command%\n"))
+        self.home = self.home.parent / "my home"
+        r = self.run_script("--launch-option")
+        self.assertEqual(r.stdout, f'"{self.home}/.local/bin/ft-ondesktop" %command%\n')
 
     def test_usage(self):
         for args in ((), ("--",), ("-h",)):

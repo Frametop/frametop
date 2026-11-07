@@ -276,11 +276,17 @@ def link_cli(link=None, target=None):
 def refresh():
     """At the relay's start: the CLI links (ft-cmd, ft-ondesktop) point at this install, and the
     aliases file matches the list (a release update moves the install)."""
-    link_cli()
-    link_cli(ONDESKTOP_LINK, ONDESKTOP)
+    failed = None
+    for link, target in ((CLI_LINK, FT_CMD), (ONDESKTOP_LINK, ONDESKTOP)):
+        try:
+            link_cli(link, target)
+        except OSError as e:  # one link that can't be made doesn't keep the rest back
+            failed = failed or e
     commands = load()
     if commands or os.path.exists(ALIASES_PATH):
         write_aliases(commands)
+    if failed:
+        raise failed
 
 
 def unit_name(name, now=None):

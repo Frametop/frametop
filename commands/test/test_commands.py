@@ -221,6 +221,13 @@ class Aliases(Home):
         fc.refresh()
         self.assertEqual(os.readlink(fc.ONDESKTOP_LINK), fc.ONDESKTOP)
 
+    def test_refresh_makes_ondesktop_when_ft_cmd_fails(self):
+        os.makedirs(os.path.dirname(fc.CLI_LINK))
+        os.symlink("/elsewhere", f"{fc.CLI_LINK}.tmp{os.getpid()}")  # a leftover: ft-cmd's link fails
+        with self.assertRaises(OSError):
+            fc.refresh()
+        self.assertEqual(os.readlink(fc.ONDESKTOP_LINK), fc.ONDESKTOP)
+
 
 class Running(Home):
     def test_unit_names(self):

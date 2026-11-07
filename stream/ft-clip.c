@@ -4,10 +4,13 @@
 // aren't focused, as a clipboard manager needs.
 //
 //   ft-clip get   the clipboard's text on stdout. Exit 1 when it holds no text (empty, an image
-//                 only, nothing copied) or more than kMax bytes, 2 when there's no desktop.
+//                 only, nothing copied), more than kMax bytes, or a password (the app that copied
+//                 it says so with x-kde-passwordManagerHint, as KeePassXC does for clipboard
+//                 managers), 2 when there's no desktop.
 //   ft-clip set   the text on stdin (at most kMax bytes, not empty) becomes the clipboard. It
 //                 exits once the desktop has taken it, leaving a child that hands the text to
 //                 the apps that paste it until something else is copied, or the desktop ends.
+//                 It reads all of stdin before it connects, so a writer never waits on it.
 //
 // WAYLAND_DISPLAY names the desktop (ft-stream gives $XDG_RUNTIME_DIR/frametop/wayland-0).
 // Nothing is logged of the text itself.
@@ -35,6 +38,7 @@ static const int kTimeoutMs = 2000;  // for the app that owns the clipboard to h
 // The text types offered and taken, best first.
 static const char *const kTypes[] = {"text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT"};
 enum { kNumTypes = sizeof kTypes / sizeof kTypes[0] };
+static const char kSecretHint[] = "x-kde-passwordManagerHint";  // offered with a password
 
 static struct wl_seat *g_seat;
 static struct zwlr_data_control_manager_v1 *g_manager;
@@ -54,6 +58,7 @@ static const struct wl_registry_listener registry_listener = {global, global_rem
 struct offer {
     struct zwlr_data_control_offer_v1 *offer;
     int best;  // index into kTypes, kNumTypes: no text type
+    bool secret;  // offers kSecretHint
 };
 static struct offer *g_selection;  // the clipboard's offer, NULL while it's empty
 static bool g_selection_seen;
@@ -61,6 +66,7 @@ static bool g_selection_seen;
 static void offer_type(void *data, struct zwlr_data_control_offer_v1 *o, const char *type) {
     (void)o;
     struct offer *of = data;
+    if (strcmp(type, kSecretHint) == 0) of->secret = true;
     for (int i = 0; i < of->best; ++i)
         if (strcmp(type, kTypes[i]) == 0) of->best = i;
 }
@@ -110,6 +116,7 @@ static int get(struct wl_display *dpy) {
     for (int i = 0; i < 2 && !g_selection_seen; ++i)
         if (wl_display_roundtrip(dpy) < 0) return 2;
     if (!g_selection || g_selection->best == kNumTypes) return 1;
+    if (g_selection->secret) return fprintf(stderr, "ft-clip: the clipboard holds a password, which isn't shared\n"), 1;
     int fds[2];
     if (pipe2(fds, O_CLOEXEC) != 0) return 2;
     zwlr_data_control_offer_v1_receive(g_selection->offer, kTypes[g_selection->best], fds[1]);
@@ -152,14 +159,17 @@ static bool g_cancelled;
 
 static void source_send(void *data, struct zwlr_data_control_source_v1 *s, const char *type, int32_t fd) {
     (void)data, (void)s, (void)type;
-    // A pasting app that stops reading mustn't hold the clipboard up for the others.
+    // A pasting app that stops reading mustn't hold the clipboard up for the others: the
+    // writes never block, and the app gets kTimeoutMs for all of it.
     const int flags = fcntl(fd, F_GETFL);
-    if (flags >= 0) fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    const int64_t until = now_ms() + kTimeoutMs;
     for (size_t at = 0; at < g_len;) {
+        const int64_t left = until - now_ms();
         struct pollfd p = {fd, POLLOUT, 0};
-        if (poll(&p, 1, kTimeoutMs) <= 0) break;
+        if (left <= 0 || poll(&p, 1, (int)left) <= 0) break;
         const ssize_t w = write(fd, g_text + at, g_len - at);
-        if (w < 0 && errno == EINTR) continue;
+        if (w < 0 && (errno == EINTR || errno == EAGAIN)) continue;
         if (w <= 0) break;
         at += (size_t)w;
     }
@@ -171,7 +181,8 @@ static void source_cancelled(void *data, struct zwlr_data_control_source_v1 *s) 
 }
 static const struct zwlr_data_control_source_v1_listener source_listener = {source_send, source_cancelled};
 
-static int set(struct wl_display *dpy) {
+// set's text, from stdin: all of it, before the desktop is asked anything.
+static int read_input(void) {
     g_text = malloc(kMax + 1);
     if (!g_text) return 2;
     for (;;) {
@@ -183,6 +194,10 @@ static int set(struct wl_display *dpy) {
         if (g_len > kMax) return fprintf(stderr, "ft-clip: more than %zu bytes to copy\n", kMax), 1;
     }
     if (g_len == 0) return fprintf(stderr, "ft-clip: nothing to copy\n"), 1;
+    return 0;
+}
+
+static int set(struct wl_display *dpy) {
     struct zwlr_data_control_source_v1 *src = zwlr_data_control_manager_v1_create_data_source(g_manager);
     zwlr_data_control_source_v1_add_listener(src, &source_listener, NULL);
     for (int i = 0; i < kNumTypes; ++i) zwlr_data_control_source_v1_offer(src, kTypes[i]);
@@ -209,6 +224,10 @@ int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     // What ft-stream left open (its sockets) mustn't stay open in the child that serves a copy.
     close_range(3, ~0U, 0);
+    if (want_set) {
+        const int r = read_input();
+        if (r != 0) return r;
+    }
     struct wl_display *dpy = wl_display_connect(NULL);
     if (!dpy) return fprintf(stderr, "ft-clip: no desktop at %s\n", getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "?"), 2;
     struct wl_registry *reg = wl_display_get_registry(dpy);

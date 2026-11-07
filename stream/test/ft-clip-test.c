@@ -1,6 +1,6 @@
 // ft-clip (stream/ft-clip.c) against a compositor of its own: a wlroots seat with
 // wlr-data-control, as KWin gives it, in this process. Runs build/tests/ft-clip (built with
-// FT_CLIP_MAX=65536) for each case while dispatching the compositor's clients.
+// FT_CLIP_MAX=262144, above a pipe's 64 KiB) for each case while dispatching the compositor's clients.
 //   ft-clip-test PATH-TO-FT-CLIP
 #define _GNU_SOURCE
 #define WLR_USE_UNSTABLE
@@ -127,6 +127,13 @@ static void expect_get(const char *want, size_t want_len, int want_status, const
 static void image_send(struct wlr_data_source *s, const char *type, int32_t fd) { (void)s, (void)type, close(fd); }
 static void image_destroy(struct wlr_data_source *s) { (void)s; }
 static const struct wlr_data_source_impl image_impl = {.send = image_send, .destroy = image_destroy};
+// A password a password manager copied: real text, which ft-clip mustn't take.
+static void secret_send(struct wlr_data_source *s, const char *type, int32_t fd) {
+    (void)s, (void)type;
+    if (write(fd, "hunter2", 7) != 7) perror("secret_send");
+    close(fd);
+}
+static const struct wlr_data_source_impl secret_impl = {.send = secret_send, .destroy = image_destroy};
 
 int main(int argc, char **argv) {
     if (argc != 2) return fprintf(stderr, "usage: ft-clip-test FT-CLIP\n"), 2;
@@ -162,15 +169,24 @@ int main(int argc, char **argv) {
     CHECK(run("set", "", 0, NULL, NULL) == 1, "nothing to copy");
     expect_get(second, sizeof second - 1, 0, "an empty set changes nothing");
 
-    // Up to FT_CLIP_MAX (65536 in the test build), and not more.
-    const size_t big = 60000;
-    char *text = malloc(70000);
-    for (size_t i = 0; i < 70000; ++i) text[i] = (char)('a' + i % 26);
-    CHECK(run("set", text, big, NULL, NULL) == 0, "set 60000 bytes");
+    // Up to FT_CLIP_MAX (262144 in the test build), and not more.
+    const size_t big = 200000, too_big = 300000;
+    char *text = malloc(too_big);
+    for (size_t i = 0; i < too_big; ++i) text[i] = (char)('a' + i % 26);
+    CHECK(run("set", text, big, NULL, NULL) == 0, "set 200000 bytes");
     pump(50);
-    expect_get(text, big, 0, "60000 bytes");
-    CHECK(run("set", text, 70000, NULL, NULL) == 1, "70000 bytes is too much to copy");
+    expect_get(text, big, 0, "200000 bytes");
+    CHECK(run("set", text, too_big, NULL, NULL) == 1, "300000 bytes is too much to copy");
     expect_get(text, big, 0, "a refused set changes nothing");
+
+    // An app that starts to paste, then stops reading with its end still open: past a pipe's
+    // worth, the child gives up on it in 2 s, and the next paste still gets all of it.
+    int stalled[2];
+    CHECK(pipe2(stalled, O_CLOEXEC) == 0, "pipe");
+    wlr_data_source_send(g_seat->selection_source, "text/plain;charset=utf-8", stalled[1]);  // takes the fd
+    pump(2500);
+    expect_get(text, big, 0, "after a paste that stalled");
+    close(stalled[0]);
 
     struct wlr_data_source image;
     wlr_data_source_init(&image, &image_impl);
@@ -180,6 +196,18 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 100 && clients() > 0; ++i) pump(20);
     CHECK(clients() == 0, "the text's child ended when an image was copied, %d clients", clients());
     expect_get(NULL, 0, 1, "an image only");
+
+    // A password manager's copy: text, with the hint that clipboard managers leave it alone.
+    struct wlr_data_source secret;
+    wlr_data_source_init(&secret, &secret_impl);
+    type = wl_array_add(&secret.mime_types, sizeof *type);
+    *type = strdup("text/plain;charset=utf-8");
+    type = wl_array_add(&secret.mime_types, sizeof *type);
+    *type = strdup("x-kde-passwordManagerHint");
+    wlr_seat_set_selection(g_seat, &secret, wl_display_next_serial(g_display));
+    pump(20);
+    expect_get(NULL, 0, 1, "a password");
+
     wlr_seat_set_selection(g_seat, NULL, wl_display_next_serial(g_display));
     expect_get(NULL, 0, 1, "cleared");
 

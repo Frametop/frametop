@@ -569,7 +569,12 @@ struct SharedClipboard {
         client = c, host = address;
         const char *run = std::getenv("XDG_RUNTIME_DIR");
         state = clipboard::StateFile(run, hostinput::RelayId(address));
-        wayland = std::string(run && *run ? run : "/tmp") + "/frametop/wayland-0";  // session/frametop-session.sh
+        if (state.empty()) {
+            std::printf("clipboard: no XDG_RUNTIME_DIR, so it isn't shared\n");
+            gone = true;
+            return;
+        }
+        wayland = std::string(run) + "/frametop/wayland-0";  // session/frametop-session.sh
         std::ifstream p(KeyDir("hosts") + "/" + address + ".pin");
         if (!(p >> pin)) pin.clear();
         char exe[4096];
@@ -647,6 +652,7 @@ struct SharedClipboard {
         return true;
     }
     void Send() {
+        if (!on) return;  // turned off while it waited
         std::string text;
         if (!Desktop(&text) || !clipboard::ShouldPush(text, clipboard::ReadLast(state))) return;
         std::string body = text;
@@ -655,6 +661,7 @@ struct SharedClipboard {
         std::printf("clipboard: sent %zu bytes to %s\n", text.size(), host.c_str());
     }
     void Bring() {
+        if (!on) return;
         std::string text, desktop;
         if (!Answered(client->Clipboard(false, &text, pin), false) || !Desktop(&desktop)) return;
         if (!clipboard::ShouldPull(text, desktop)) {
@@ -699,7 +706,7 @@ struct SharedClipboard {
         }
         close(to[1]);
         const int64_t until = MonoNs() + 3'000'000'000;  // its own wait is 2 s
-        bool late = false;
+        bool late = false, big = false;
         if (out) {
             char buf[65536];
             for (;;) {
@@ -713,7 +720,7 @@ struct SharedClipboard {
                 if (n < 0 && errno == EINTR) continue;
                 if (n <= 0) break;
                 if (out->size() + size_t(n) > clipboard::kMaxText) {  // ft-clip says no first; never more
-                    late = true;
+                    big = true;
                     break;
                 }
                 out->append(buf, size_t(n));
@@ -721,7 +728,7 @@ struct SharedClipboard {
         }
         close(from[0]);
         int st = 0;
-        while (!late) {
+        while (!late && !big) {
             const pid_t w = waitpid(pid, &st, WNOHANG);
             if (w == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
             if (w < 0 || MonoNs() >= until) break;
@@ -729,7 +736,7 @@ struct SharedClipboard {
         }
         kill(pid, SIGKILL);
         waitpid(pid, &st, 0);
-        Say(std::string("ft-clip ") + what + " didn't finish in time");
+        Say(std::string("ft-clip ") + what + (big ? " gave more than 1 MiB" : " didn't finish in time"));
         return -1;
     }
 };

@@ -60,17 +60,20 @@ int main() {
     CHECK(Classify(404, false, &why) == Answer::Gone);
     CHECK(Classify(400, true, &why) == Answer::Gone);
     CHECK(Classify(403, true, &why) == Answer::Retry);
-    CHECK(Classify(500, true, &why) == Answer::Gone && why.find("Linux") != std::string::npos);
+    // A Windows host's clipboard held open by another app for a moment: next time it works.
+    CHECK(Classify(500, true, &why) == Answer::Retry && why.find("another app") != std::string::npos);
     CHECK(Classify(500, false, &why) == Answer::Retry);
-    CHECK(Classify(-1, false, &why) == Answer::Retry && why == "no answer from the host");
+    CHECK(Classify(kNoAnswer, false, &why) == Answer::Retry && why == "no answer from the host");
+    CHECK(Classify(kTooBig, false, &why) == Answer::Retry && why.find("1 MiB") != std::string::npos);
+    CHECK(Classify(kNoPin, true, &why) == Answer::Gone && why.find("certificate") != std::string::npos);
     CHECK(Classify(502, false, &why) == Answer::Retry && why == "the host answered 502");
 
     // The state file.
     char dir[] = "/tmp/clipboard-test-XXXXXX";
     if (!mkdtemp(dir)) return std::perror("mkdtemp"), 1;
     CHECK(StateFile(dir, "host-1") == std::string(dir) + "/frametop-clipboard-host-1");
-    CHECK(StateFile(nullptr, "x") == "/tmp/frametop-clipboard-x");
-    CHECK(StateFile("", "x") == "/tmp/frametop-clipboard-x");
+    CHECK(StateFile(nullptr, "x").empty());  // no runtime folder: not shared, never in /tmp
+    CHECK(StateFile("", "x").empty());
     const std::string path = StateFile(dir, "h");
     CHECK(ReadLast(path) == 0);  // none yet
     CHECK(WriteLast(path, Hash("text")));

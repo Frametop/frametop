@@ -88,7 +88,7 @@ test-c:
     wayland-scanner client-header stream/protocols/wlr-data-control-unstable-v1.xml \
       build/tests/wlr-data-control-unstable-v1-client-protocol.h
     wayland-scanner private-code stream/protocols/wlr-data-control-unstable-v1.xml build/tests/wlr-data-control-protocol.c
-    gcc -std=gnu11 -Wall -Wextra -Werror -DFT_CLIP_MAX=65536 -Ibuild/tests stream/ft-clip.c \
+    gcc -std=gnu11 -Wall -Wextra -Werror -DFT_CLIP_MAX=262144 -Ibuild/tests stream/ft-clip.c \
       build/tests/wlr-data-control-protocol.c $(pkg-config --cflags --libs wayland-client) -o build/tests/ft-clip
     gcc -std=gnu11 -Wall -Wextra -Werror stream/test/ft-clip-test.c \
       $(pkg-config --cflags --libs wlroots-0.20 wayland-server) -o build/tests/ft-clip-test

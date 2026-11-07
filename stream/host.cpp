@@ -391,10 +391,13 @@ bool Client::Unpair() {
 
 // Vibepollo's /actions/clipboard (Apollo's), with this client's certificate: the host takes
 // it only from a client that streams. Its certificate is the Web UI's, so the Web UI's pin
-// holds here too. A connection of its own each time, closed after (see DropConnection).
+// holds here too, and is required: the text never goes to a host it can't check. A
+// connection of its own each time, closed after (see DropConnection). The status, or
+// clipboard::kNoAnswer, kTooBig (the host's text is over kMaxText), kNoPin.
 long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
+    if (pin.empty()) return clipboard::kNoPin;
     CURL *c = curl_easy_init();
-    if (!c) return -1;
+    if (!c) return clipboard::kNoAnswer;
     std::random_device rd;
     char url[4096];
     std::snprintf(url, sizeof url, "https://%s:%u/actions/clipboard?type=text&uniqueid=%s&uuid=%08x-0000-4000-8000-%012x",
@@ -409,7 +412,7 @@ long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
     curl_easy_setopt(c, CURLOPT_SSLKEY, key.c_str());
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-    if (!pin.empty()) curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, pin.c_str());
+    curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, pin.c_str());
     curl_easy_setopt(c, CURLOPT_FORBID_REUSE, 1L);
     curl_easy_setopt(c, CURLOPT_TIMEOUT, 5L);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, AppendClipboard);
@@ -421,8 +424,10 @@ long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
         curl_easy_setopt(c, CURLOPT_POSTFIELDS, text->data());
         curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, curl_off_t(text->size()));
     }
-    long code = -1;
-    if (curl_easy_perform(c) == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+    long code = clipboard::kNoAnswer;
+    const CURLcode r = curl_easy_perform(c);
+    if (r == CURLE_OK) curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+    else if (r == CURLE_WRITE_ERROR) code = clipboard::kTooBig;  // AppendClipboard's cap
     curl_slist_free_all(headers);
     curl_easy_cleanup(c);
     if (!set && code == 200) *text = std::move(got);

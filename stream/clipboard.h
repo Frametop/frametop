@@ -57,8 +57,11 @@ inline bool ShouldPull(const std::string &host, const std::string &desktop) {
 // What a host's answer to /actions/clipboard means. Ok, or why this stream stops asking (Gone)
 // or just this time (Retry). Vibepollo (Apollo's clipboard, Windows) answers 401 to a client
 // not allowed the clipboard, 403 while the client isn't streaming, and 500 when it can't set
-// it (its Linux version has no clipboard yet). Sunshine has no such request (404).
+// it: another app has the Windows clipboard open for a moment, or it's the Linux version,
+// which has no clipboard yet. Sunshine has no such request (404). Below 0, Client::Clipboard's
+// own: kNoAnswer, kTooBig, kNoPin.
 enum class Answer { Ok, Retry, Gone };
+constexpr long kNoAnswer = -1, kTooBig = -2, kNoPin = -3;
 inline Answer Classify(long code, bool set, std::string *why) {
     switch (code) {
         case 200:
@@ -75,17 +78,27 @@ inline Answer Classify(long code, bool set, std::string *why) {
             *why = "the host says this display isn't streaming yet";
             return Answer::Retry;
         case 500:
-            *why = set ? "the host couldn't take the text (Vibepollo on Linux has no clipboard yet)"
+            *why = set ? "the host couldn't take the text (another app had its clipboard open, or it's "
+                         "Vibepollo on Linux, which has no clipboard yet)"
                        : "the host couldn't read its clipboard";
-            return set ? Answer::Gone : Answer::Retry;
+            return Answer::Retry;
+        case kTooBig:
+            *why = "the host's text is over 1 MiB, so it stays there";
+            return Answer::Retry;
+        case kNoPin:
+            *why = "no saved certificate for this host, so its clipboard isn't shared (add it again in "
+                   "Frametop Remote Displays, which saves one when it signs in to its Web UI)";
+            return Answer::Gone;
         default:
             *why = code < 0 ? "no answer from the host" : "the host answered " + std::to_string(code);
             return Answer::Retry;
     }
 }
 
+// "" without a runtime folder: the clipboard isn't shared then (a shared /tmp is no place
+// for it, or for the desktop's socket).
 inline std::string StateFile(const char *runtimeDir, const std::string &id) {
-    return std::string(runtimeDir && *runtimeDir ? runtimeDir : "/tmp") + "/frametop-clipboard-" + id;
+    return runtimeDir && *runtimeDir ? std::string(runtimeDir) + "/frametop-clipboard-" + id : "";
 }
 
 // The last sync's hash, 0 if none (no file, or not one of ours: not a plain file of this

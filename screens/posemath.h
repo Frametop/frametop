@@ -112,4 +112,51 @@ M FacingPose(const double pt[3], const M &head) {
     return m;
 }
 
+// How pose p is turned from facing the head at its centre: p = FacingPose(centre, head) * turn, with
+// turn a rotation only. A panel facing you, level, has the identity.
+template <class M>
+M FacingTurn(const M &p, const M &head) {
+    const double c[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
+    M t = Mul(Inverse(FacingPose(c, head)), p);
+    t.m[0][3] = t.m[1][3] = t.m[2][3] = 0;
+    return t;
+}
+
+// Pose p turned about its own point (kx, ky, 0) (a corner, in metres from its centre) so it meets the
+// head at the angle `turn` (FacingTurn) at its new centre, the point staying where it was: *out. A panel
+// that grew from a corner kept still slid in its own plane, off the sphere round the head, and is
+// turned away from you; this turns it back (DEE-336). False (out untouched) within about 25 degrees of
+// straight above or below the head, at the old centre or the new: facing there has no steady level
+// (FacingPose's right edge swings round with a few centimetres of movement), so the panel would spin.
+template <class M>
+bool FaceAbout(const M &p, double kx, double ky, const M &turn, const M &head, M *out) {
+    auto steep = [&](const double c[3]) {
+        const double d[3] = {head.m[0][3] - c[0], head.m[1][3] - c[1], head.m[2][3] - c[2]};
+        return std::fabs(d[1]) > 0.9 * std::sqrt(Dot3(d, d));
+    };
+    const double c0[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
+    if (steep(c0)) return false;
+    const double K[3] = {p.m[0][0] * kx + p.m[0][1] * ky + p.m[0][3], p.m[1][0] * kx + p.m[1][1] * ky + p.m[1][3],
+                         p.m[2][0] * kx + p.m[2][1] * ky + p.m[2][3]};
+    M r = p;
+    // The centre depends on the turn and the turn on the centre: each round takes the error down by
+    // about the corner's distance from the centre over the head's, so a few rounds settle it.
+    for (int round = 0; round < 48; ++round) {
+        double c[3], moved = 0;
+        for (int i = 0; i < 3; ++i) c[i] = K[i] - (r.m[i][0] * kx + r.m[i][1] * ky);
+        if (steep(c)) return false;
+        r = Mul(FacingPose(c, head), turn);
+        for (int i = 0; i < 3; ++i) {
+            const double at = K[i] - (r.m[i][0] * kx + r.m[i][1] * ky);
+            moved = std::fmax(moved, std::fabs(at - c[i]));
+            r.m[i][3] = float(at);
+        }
+        if (moved < 1e-5) {   // (10 microns)
+            *out = r;
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace posemath

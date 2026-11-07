@@ -169,7 +169,9 @@ using Clock = std::chrono::steady_clock;
 Mat Identity() { return posemath::Identity<Mat>(); }
 using posemath::Column;
 using posemath::Dot3;
+using posemath::FaceAbout;
 using posemath::FacingPose;
+using posemath::FacingTurn;
 using posemath::Inverse;
 using posemath::Mul;
 Mat Translation(double x, double y, double z) { return posemath::Translation<Mat>(x, y, z); }
@@ -322,6 +324,8 @@ struct Screen {
     long cornerUntil = 0;                     // aimed at until this tick (then back to the bottom right)
     int keepX = -1, keepY = 1;                // a floating window's corner that stays put as it changes size
     long keepUntil = 0;                       // ...after a resize from another corner ends, until this tick (late answers)
+    bool resizeFacing = false;                // a floating window's resize: its turn from facing the head when
+    Mat resizeTurn = Identity();              // grabbed, which it turns back to when let go (FaceAfterResize)
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
     double rollRadius = 0;                    // roll: the laser's distance from the centre then (m)
@@ -1605,6 +1609,13 @@ vr::TrackedDeviceIndex_t WristOnLaser(const Screen &s, const Mat &d, const Mat &
     return kNone;
 }
 
+// A resize starts: a floating window in the room remembers how it meets the head now (FaceAfterResize).
+void BeginResizeFacing(Screen &s, const Mat &p) {
+    Mat head;
+    s.resizeFacing = s.floating && s.pinned == kNone && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
+    if (s.resizeFacing) s.resizeTurn = FacingTurn(p, head);
+}
+
 bool HandRay(uint32_t d);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     Mat d, p;
@@ -1621,6 +1632,8 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     }
     s.drag = mode;
     s.dragDevice = dev;
+    if (mode == Drag::Resize) BeginResizeFacing(s, p);
+    else s.resizeFacing = false;
     // A hand ray carrying it by the bar keeps it facing you (user, 2026-10-13: "the display should remain
     // centered facing the user since we have no way to tilt displays up and down without grabbing them"):
     // the ray places it, the wrist doesn't turn it. Controllers and the mouse carry it rigidly.
@@ -1651,7 +1664,8 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
 }
 
 // After a floating panel's size changed from oldW x oldH (m): the corner keepX, keepY (the top left, or
-// the one opposite a corner being dragged) stays where it was.
+// the one opposite a corner being dragged) stays where it was. It slides in its own plane: a resize by
+// the corner tab turns it back to the head when it ends (FaceAfterResize).
 void KeepCorner(Screen &s, double oldW, double oldH) {
     const bool keep = s.drag == Drag::Resize || g_tick < s.keepUntil;
     const int kx = keep ? s.keepX : -1, ky = keep ? s.keepY : 1;
@@ -1761,12 +1775,36 @@ void UpdateArrange() {
     RunLayout("scale");
 }
 
+// A floating window's resize by the corner tab (or a hand's pinch at a corner) let go: it slid in its own
+// plane, the opposite corner kept, which takes it off the sphere round the head and leaves it turned
+// away from you, more the farther it grew; a carry afterwards kept that turn (DEE-336). It turns back,
+// about that corner, to meet the head as it did when grabbed, over a quarter of a second. Not while
+// the resize goes on: the laser's point on the panel sets its size, and a panel turning under the
+// laser feeds back into it (a big panel close up flaps). Not straight above or below the head, where
+// facing it has no level way round (FaceAbout), nor in a universe from before a recentre.
+constexpr double kFaceAfterResizeMs = 250;
+void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms, bool easeOut, uint64_t universe);
+void FaceAfterResize(Screen &s, int index) {
+    const bool want = s.resizeFacing && s.floating && s.pinned == kNone && s.universe == g_universe;
+    s.resizeFacing = false;
+    Mat head, to;
+    if (!want || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ||
+        !FaceAbout(s.pose, s.keepX * s.metres / 2, s.keepY * s.heightMetres() / 2, s.resizeTurn, head, &to))
+        return;
+    double off = 0;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 4; ++j) off = std::max(off, double(std::fabs(to.m[i][j] - s.pose.m[i][j])));
+    if (off < 1e-4) return;   // (it didn't change size, or grew along the sphere)
+    StartGrabMove(index, s, to, s.metres, kFaceAfterResizeMs, false, s.universe);
+}
+
 // Let go: pin to the armed wrist, as the screen is now (a floating window carried onto a screen: docked there).
 void FinishDrag(Screen &s, int index) {
-    const bool moved = s.drag == Drag::Move;
+    const bool moved = s.drag == Drag::Move, resized = s.drag == Drag::Resize;
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
     const int dockOn = s.dockOn;
     EndDrag(s);
+    if (resized) FaceAfterResize(s, index);
     Mat p;
     if (!moved) return;
     if (s.floating && dockOn >= 0) {
@@ -3022,6 +3060,8 @@ void StartHandDrag(Screen &s, int side, handinput::Zone zone) {
     }
     s.drag = mode;
     s.dragDevice = kHandHolder[side];
+    if (mode == Drag::Resize) BeginResizeFacing(s, p);
+    else s.resizeFacing = false;
     s.onWrist = kNone;
     LightBar(s, s.pinTarget != kNone);
     ApplyAlpha(s);

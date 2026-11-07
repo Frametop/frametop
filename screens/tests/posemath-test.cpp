@@ -94,6 +94,35 @@ int main() {
     Column(f, 0, x);
     check("FacingPose: straight below the head, x falls back to +x", near(x[0], 1) && near(x[2], 0) && rigid(f));
 
+    // FacingTurn and FaceAbout (DEE-336): a panel to your left made 0.6 m wider from its left corners,
+    // its right ones kept, slides left in its own plane and ends up turned away from you; FaceAbout
+    // turns it back about the kept corner, and keeps a turn it had on purpose.
+    const double left[3] = {-0.9, 1.5, -1.4};
+    const M facing = FacingPose(left, head);
+    check("FacingTurn: a panel facing the head has none", same(FacingTurn(facing, head), I));
+    const double W = 1.2, H = 0.7, kx = W / 2 + 0.3, ky = H / 2;   // the kept top right corner, after the resize
+    auto cornerAt = [&](const M &p) { return Mul(p, Translation<M>(kx, ky, 0)); };
+    const M slid = Mul(facing, Translation<M>(-0.3, 0, 0));        // the resize as it was: in its plane
+    check("FacingTurn: a panel slid in its plane is turned from the head", !same(FacingTurn(slid, head), I, 1e-3));
+    M faced{};
+    check("FaceAbout: settles", FaceAbout(slid, kx, ky, I, head, &faced));
+    const M kept = cornerAt(slid), now = cornerAt(faced);
+    check("FaceAbout: the kept corner stays", near(now.m[0][3], kept.m[0][3], 1e-4) && near(now.m[1][3], kept.m[1][3], 1e-4) &&
+                                                   near(now.m[2][3], kept.m[2][3], 1e-4));
+    check("FaceAbout: facing the head again, level", rigid(faced) && same(FacingTurn(faced, head), I, 1e-4));
+    const M tilted = Mul(facing, PanelPose<M>(0, 0, 0, 12, -20, 0));   // turned and tipped back on purpose
+    const M turn = FacingTurn(tilted, head);
+    check("FaceAbout: a turn it had stays", FaceAbout(Mul(tilted, Translation<M>(-0.3, 0, 0)), kx, ky, turn, head, &faced) &&
+                                                rigid(faced) && same(FacingTurn(faced, head), turn, 1e-4));
+    check("FaceAbout: no size change, no move", FaceAbout(facing, W / 2, ky, I, head, &faced) && same(faced, facing, 1e-4));
+    // Overhead (lying down, a panel on the ceiling): facing has no steady level there, so no turn.
+    const double above[3] = {0.02, 2.6, 0};
+    M out = I;
+    check("FaceAbout: not straight above the head", !FaceAbout(FacingPose(above, head), 0.4, 0.2, I, head, &out) && same(out, I));
+    const double steepish[3] = {0, 2.2, -0.8};   // 37 degrees up: still turns
+    check("FaceAbout: steep but not overhead still turns",
+          FaceAbout(Mul(FacingPose(steepish, head), Translation<M>(-0.1, 0, 0)), 0.5, 0.2, I, head, &out) && rigid(out));
+
     // Mul and Inverse: a pose times its inverse is the identity, and Mul composes in order.
     const M a = Mul(Translation<M>(1, 0, 0), PanelPose<M>(0, 0, 0, 90, 0, 0));
     check("Mul: rotate, then translate", near(a.m[0][3], 1) && near(a.m[0][2], 1));

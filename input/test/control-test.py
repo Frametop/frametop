@@ -222,13 +222,21 @@ CASES += [
     ("watch", "watch", {}), ("watch 5", "watch 5", {}), ("watch long", "watch 9999", {}), ("watch junk", "watch x", {}),
     ("reload", "reload", {}), ("reload no pointer", "reload", {"no_pointer": True}),
     ("vrcapture", "vrcapture", {}), ("vrcapture 0", "vrcapture 0", {}), ("vrcapture long", "vrcapture 500", {}),
+    ("action screens_toggle", "action screens_toggle", {}), ("action dock_all", "action dock_all", {}),
+    ("action pause_toggle", "action pause_toggle", {}),
+    ("action screens_toggle, paused", "action screens_toggle", {"paused": True}),
+    ("action pause_toggle, paused", "action pause_toggle", {"paused": True}),
+    ("action screens_toggle, other user", "action screens_toggle", {"uid": OTHER}),
+    ("action not a menu one", "action left", {}), ("action run:", "action run:x", {}),
+    ("action keys:", "action keys:125+32", {}), ("action unbound", "action dock_all", {"addr": b""}),
 ]
 # Wrong word counts: each command with a word too many or too few.
 for w in ("vrbtn left/view 1 2", "vrhello 1", "vrgame 1 2", "vrdash", "gamepad", "gamepad desktop 1", "vrpad",
           "vrpad 1 0 0 0 0 0 0 0", "pause on off", "textfield", "textfield 1 renew 2", "hostdev pc", "hostev pc",
           "hostbye", "type", "kbhello 1 2", "kbkey 30", "kbkey 30 1 2", "kbtext", "kbpanel", "kbpanel show 1",
           "kbpoke left", "kbpoke right press 0.1 0.2", "calpanel", "calpanel 1 2", "gazeawake", "gazeawake 1 2",
-          "gazewoke 1", "devices 1", "watch 5 6", "reload 1", "vrcapture 1 2"):
+          "gazewoke 1", "devices 1", "watch 5 6", "reload 1", "vrcapture 1 2", "action",
+          "action dock_all 1"):
     CASES.append((w + ", arity", w, {"kb_addr": ADDR} if w.startswith("kb") else {}))
 
 

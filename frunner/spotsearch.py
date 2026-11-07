@@ -24,11 +24,11 @@ def fold(text):
 
 
 class Item:
-    """Something to search: an app, a remote display or a command."""
+    """Something to search: an app, a profile, a remote display, a command or a Frametop action."""
 
     def __init__(self, kind, key, title, generic="", keywords=(), exe="", data=None):
-        self.kind = kind          # "app", "profile", "remote" or "command"
-        self.key = key            # its usage key: the desktop file name, "remote:<id>" or "command:<name>"
+        self.kind = kind          # "app", "profile", "remote", "command" or "action"
+        self.key = key            # its usage key: the desktop file name, "remote:<id>", "command:<name>" or "action:<name>"
         self.title = title
         self.generic = generic
         self.keywords = list(keywords)

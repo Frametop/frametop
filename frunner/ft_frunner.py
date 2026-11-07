@@ -11,6 +11,9 @@ and the arrow keys move through what's found, and Enter or a click opens it:
   - an app that isn't: it starts, its first window floating (ft-floatd's launch).
   - a remote display: connected first if it isn't, then spun to.
   - a command: it runs in the background (a transient systemd user unit), with a word on the panel.
+  - one of Frametop's own actions (ft_input_actions.MENU_ACTIONS): the input relay does it
+    ("action NAME" to @frametop_relay). Opened as the OS menu (the relay's os_menu action),
+    an empty query lists them.
 Shift+Enter or a right click opens the item's menu: an app's own actions (a browser's private
 window), Open new window, Open docked on this screen, and its windows; a display's Go to and
 Disconnect. Esc goes back from a menu, and closes the search.
@@ -23,9 +26,10 @@ second; see compositor.c), from keyboards and Frametop's keyboard alike, so noth
 app or Steam meanwhile.
 
 Datagrams on @ft_frunner (--socket NAME); a sender with an address gets "ok ..." or "error":
-  toggle [keyboard|mouse|left|right]   the input relay's frunner action, and what pressed it:
-                                       from a mouse or controller, Frametop's keyboard opens too
-  open [SOURCE] | close | status       (status -> "ok open|closed list|menu <query>")
+  toggle [keyboard|mouse|left|right] [actions]   the input relay's frunner action, and what
+                                       pressed it: from a mouse or controller, Frametop's keyboard
+                                       opens too; actions: its os_menu, the OS menu
+  open [SOURCE] [actions] | close | status   (status -> "ok open|closed list|menu <query>")
   rows                                 -> "ok [titles]" (JSON): what's listed now, for tests
   key <code> <value>                   ft-screens: typing, while the search has it
   dismiss <why>                        ft-screens: something else took the typing (a click
@@ -39,7 +43,7 @@ the icons, rasterized for the panel, in ~/.cache/frametop/frunner. Log:
 /tmp/frametop-frunner.log.
 
 Usage: ft-frunner [--socket NAME] [--panel-socket NAME] [--screens NAME] [--float NAME]
-                    [--no-panel]
+                    [--relay NAME] [--no-panel]
 """
 import argparse
 import ctypes
@@ -66,6 +70,7 @@ sys.path.insert(0, HERE)
 import ft_layout  # noqa: E402  (the layout: remote displays)
 import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
 import ft_store  # noqa: E402  (files written by a temp file of their own and a rename; conf/ too)
+from ft_input_actions import MENU_ACTIONS  # noqa: E402  (Frametop's own actions; conf/ too)
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands)
 import spotsearch  # noqa: E402
@@ -87,6 +92,7 @@ KEY_ESC, KEY_ENTER, KEY_KPENTER, KEY_TAB, KEY_BACKSPACE = 1, 28, 96, 15, 14
 KEY_UP, KEY_DOWN, KEY_LEFT, KEY_PAGEUP, KEY_PAGEDOWN, KEY_U = 103, 108, 105, 104, 109, 22
 REMOTE_ICON = "video-display"
 COMMAND_ICON = "utilities-terminal"
+ACTION_ICON = "preferences-system"
 WINDOW_ICON = "window"
 
 
@@ -327,6 +333,11 @@ class Frunner:
         self.profiles = []      # spotsearch.Item, kind "profile"; data: {"name", "info"}
         self.remotes = []       # spotsearch.Item, kind "remote"; data: {"n", "id", "host", "label", "off"}
         self.commands = []      # spotsearch.Item, kind "command"; data: {"name", "run"}
+        # Frametop's own actions, kind "action"; data: {"name"}, the input relay's action.
+        # No "Frametop" among their words: a search for frame-anything would list them all.
+        self.actions = [spotsearch.Item("action", "action:" + name, title, "", keywords, "", {"name": name})
+                        for name, title, keywords in MENU_ACTIONS]
+        self.actions_menu = False  # opened as the OS menu: an empty query lists the actions
         self.running_remotes = {}  # screen number -> state, from ft-screens
         self.windows = []       # ft-floatd's spotlist
         self.usage = self.load_usage()
@@ -544,6 +555,8 @@ class Frunner:
     # ------------------------------------------------------------ the rows
 
     def result_entry(self, item):
+        if item.kind == "action":
+            return Entry("item", item.title, "Frametop", ACTION_ICON, "Do", run=lambda: self.run_action(item), item=item)
         if item.kind == "command":
             return Entry("item", item.title, f"Command · {item.data['run']}", COMMAND_ICON, "Run",
                          run=lambda: self.run_command(item), item=item)
@@ -571,7 +584,11 @@ class Frunner:
         was = self.entries[self.sel].item if keep and 0 <= self.sel < len(self.entries) else None
         for a in self.apps:
             a.running = bool(self.windows_of(a)) if self.windows else False
-        found = spotsearch.search(self.apps + self.profiles + self.remotes + self.commands, self.query, self.usage)
+        if self.actions_menu and not self.query.strip():
+            found = list(self.actions)  # the OS menu, in its own order
+        else:
+            found = spotsearch.search(self.apps + self.profiles + self.remotes + self.commands + self.actions,
+                                      self.query, self.usage)
         self.entries = [self.result_entry(it) for it in found]
         self.sel = next((i for i, e in enumerate(self.entries) if e.item is was), 0) if was else 0
         self.top = 0
@@ -580,6 +597,9 @@ class Frunner:
     def menu_for(self, entry):
         item = entry.item
         rows = [Entry("header", item.title, "", entry.icon)]  # (a click on it goes back)
+        if item.kind == "action":
+            rows.append(Entry("item", "Do it", "Frametop", run=lambda: self.run_action(item)))
+            return rows
         if item.kind == "command":
             rows.append(Entry("item", "Run", item.data["run"], run=lambda: self.run_command(item)))
             rows.append(Entry("item", "Stop", "where it still runs", run=lambda: self.stop_command(item)))
@@ -657,7 +677,8 @@ class Frunner:
 
     # ------------------------------------------------------------ open and close
 
-    def open(self, source="keyboard"):
+    def open(self, source="keyboard", actions=False):
+        """Open the search; actions: as the OS menu, Frametop's own actions listed until you type."""
         if self.is_open:
             return "ok open"
         if not self.panel and not self.args.no_panel:
@@ -675,7 +696,8 @@ class Frunner:
         self.refresh_windows()
         self.load_remotes()
         self.load_commands()
-        self.render()
+        self.actions_menu = actions
+        self.refilter()
         reply = self.ask(self.args.panel_socket, "show") if not self.args.no_panel else "ok"
         if not reply or not reply.startswith("ok"):
             log(f"ft-spotpanel: show: {reply or 'no answer'}")
@@ -684,7 +706,7 @@ class Frunner:
         self.renew = GLib.timeout_add(RENEW_MS, self.renew_lease)
         # Opened from a mouse or controller button: maybe no keyboard at hand.
         self.opened_keyboard = source != "keyboard" and self.screens("vrkeyboard show") == "ok opened"
-        log(f"open (from the {source})")
+        log(f"open (from the {source}{', the OS menu' if actions else ''})")
         return "ok"
 
     def renew_lease(self):
@@ -803,6 +825,22 @@ class Frunner:
         ok, message = ft_commands.run_named(item.data["name"])
         log(message)
         self.toast(f"Running {item.title}" if ok else message)
+
+    def run_action(self, item):
+        """One of Frametop's own actions: the input relay runs it, as a button would."""
+        self.close("action")
+        self.used(item.key)
+        reply = self.ask(self.args.relay, f"action {item.data['name']}")
+        try:
+            answer = json.loads(reply) if reply else {}
+        except ValueError:
+            answer = {}
+        if answer.get("t") == "action":
+            log(f"action {item.data['name']}")
+            return
+        why = answer.get("error") or "the input relay didn't answer"
+        log(f"action {item.data['name']}: {why}")
+        self.toast(f"{item.title}: {why}")
 
     def stop_command(self, item):
         self.close("command")
@@ -958,13 +996,14 @@ class Frunner:
             except ValueError:
                 return "error key CODE VALUE"
             return None
-        if cmd == "toggle":
-            if self.is_open:
+        if cmd in ("toggle", "open"):
+            # "toggle|open [SOURCE] [actions]": actions, the OS menu (the relay's os_menu).
+            actions = "actions" in rest
+            source = next((w for w in rest if w != "actions"), "keyboard")
+            if cmd == "toggle" and self.is_open:
                 self.close("toggle")
                 return "ok closed"
-            return self.open(rest[0] if rest else "keyboard")
-        if cmd == "open":
-            return self.open(rest[0] if rest else "keyboard")
+            return self.open(source, actions)
         if cmd == "close":
             self.close("asked")
             return "ok"
@@ -1029,6 +1068,7 @@ def main():
     p.add_argument("--panel-socket", default="ft_spotpanel")
     p.add_argument("--screens", default="ft_screens")
     p.add_argument("--float", default="frametop_float")
+    p.add_argument("--relay", default="frametop_relay", help="the input relay's control socket (Frametop's actions)")
     p.add_argument("--no-panel", action="store_true", help="no ft-spotpanel (tests)")
     args = p.parse_args()
     try:

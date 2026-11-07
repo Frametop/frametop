@@ -1,4 +1,282 @@
 {
+ "action dock_all": {
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "dock all",
+     "\u0000ft_control_test_float"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "dock_all",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action dock_all",
+  "log": [
+   "dock_all"
+  ],
+  "raised": null
+ },
+ "action dock_all 1, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'action'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action dock_all 1",
+  "log": [],
+  "raised": null
+ },
+ "action keys:": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not a menu action 'keys:125+32'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action keys:125+32",
+  "log": [],
+  "raised": null
+ },
+ "action not a menu one": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not a menu action 'left'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action left",
+  "log": [],
+  "raised": null
+ },
+ "action pause_toggle": {
+  "calls": [
+   [
+    "pause.toggle",
+    [
+     "frunner",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "pause_toggle",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action pause_toggle",
+  "log": [],
+  "raised": null
+ },
+ "action pause_toggle, paused": {
+  "calls": [
+   [
+    "pause.toggle",
+    [
+     "frunner",
+     100.0
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "pause_toggle",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action pause_toggle",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "action run:": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not a menu action 'run:x'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action run:x",
+  "log": [],
+  "raised": null
+ },
+ "action screens_toggle": {
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "toggle",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "screens_toggle",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action screens_toggle",
+  "log": [
+   "screens_toggle"
+  ],
+  "raised": null
+ },
+ "action screens_toggle, other user": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "another user's",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action screens_toggle",
+  "log": [],
+  "raised": null,
+  "uid": 1
+ },
+ "action screens_toggle, paused": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "paused",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action screens_toggle",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "action unbound": {
+  "addr": "",
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "dock all",
+     "\u0000ft_control_test_float"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "dock_all",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action dock_all",
+  "log": [
+   "dock_all"
+  ],
+  "raised": null
+ },
+ "action, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'action'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action",
+  "log": [],
+  "raised": null
+ },
  "calpanel 0": {
   "calls": [],
   "changed": {},
@@ -100,6 +378,7 @@
        "dictate",
        "dictate_hold",
        "frunner",
+       "os_menu",
        "hands_toggle",
        "release_keys",
        "key",
@@ -158,6 +437,7 @@
        "dictate",
        "dictate_hold",
        "frunner",
+       "os_menu",
        "hands_toggle",
        "release_keys",
        "key",

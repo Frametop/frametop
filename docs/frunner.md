@@ -1,12 +1,13 @@
 # Frunner
 
-Frunner is Frametop's search for apps, profiles and remote displays, like Spotlight on a Mac. Press Meta+Space and a glass search pill opens straight ahead of where your head points. Type part of an app's name, or a remote display's `{host} - {display}`, and pick from what it finds:
+Frunner is Frametop's search for apps, profiles, remote displays and Frametop's own actions, like Spotlight on a Mac. Press Meta+Space and a glass search pill opens straight ahead of where your head points. Type part of an app's name, or a remote display's `{host} - {display}`, and pick from what it finds:
 
 - **An app that's already running:** its most recent window comes to you. The lazy susan spins the panel it's on, a screen or its own floating window, to straight ahead, and typing goes to it.
 - **An app that isn't running:** it starts as a floating window, where that app last floated or in front of you.
 - **A profile:** it opens like Open profile in Display Settings (`ft-layout open NAME`): its screens, remote displays and apps, as saved. The quick reset only recenters, so this is how a profile comes back whole.
 - **A remote display:** frunner connects it if needed, then spins it to the front.
 - **One of your commands** ([commands.md](commands.md)): it runs in the background, and the pill says so.
+- **One of Frametop's own actions:** the input relay does it, as a button bound to it would. See [The OS menu](#the-os-menu).
 
 Use Tab, Shift+Tab, or the arrow keys to move through the results, and Enter or a click to open one. Shift+Enter or a right click opens the item's menu:
 
@@ -14,14 +15,34 @@ Use Tab, Shift+Tab, or the arrow keys to move through the results, and Enter or 
 - **For a profile:** Open profile.
 - **For a remote display:** Go to (connecting it first if needed) and Disconnect.
 - **For a command:** Run, and Stop (every copy still running).
+- **For one of Frametop's actions:** Do it.
 
 Esc goes back from a menu and closes the search. Meta+Space again, or a click anywhere else, closes it too.
 
 Frunner works while the Frametop desktop is running and Frametop isn't paused for a VR game. It's the `frunner` action in Frametop Input Settings, so a mouse button, a controller button, or another key combination can open it too. When it opens from a mouse or controller, Frametop's keyboard opens with it.
 
+## The OS menu
+
+The `os_menu` action opens frunner as an OS menu: before you type, it lists Frametop's own actions instead of nothing. Pick one with Tab, the arrow keys, the lasers or the 3D mouse, and Enter or a click does it. Typing searches everything as usual, and an empty query lists the actions again. `os_menu` has no default. Bind it to a controller button, a mouse button or a key combination in Frametop Input Settings. Opened from a controller or mouse, Frametop's keyboard opens too, as with `frunner`.
+
+The actions, in the menu's order (`MENU_ACTIONS` in `conf/ft_input_actions.py`):
+
+| Row | Action |
+|---|---|
+| Steam menu | `steam_menu`: open Steam's menu, or close the dashboard |
+| Hide or show the screens | `screens_toggle` |
+| Spin to the next panel, Spin to the previous panel | `spin_next`, `spin_prev` |
+| Put every floating window back | `dock_all` |
+| Hand tracking on or off | `hands_toggle` |
+| Pause for a VR game | `pause_toggle` |
+| Let go of every key | `release_keys` |
+
+Each one is an action that works without pointer mode. Frunner closes first, then sends `action NAME` to the input relay's control socket (`@frametop_relay`). The relay runs only the names in `MENU_ACTIONS`, and only from the same user, so the socket can't be used to run `run:`, `command:` or `keys:` actions. When the relay refuses one (paused, say), the pill shows why.
+
 ## Not built
 
-- Searching open windows by title, and Frametop's own actions ("Reset layout") (decision 4).
+- Searching open windows by title (decision 4).
+- In the OS menu: a passthrough switch (Frametop has no passthrough action; double-pressing the Steam button toggles it), a radial layout, and a "hold both mouse buttons" trigger (decision 14).
 - Moving the caret within the query. Typing and Backspace work at the end only.
 - A setting for its distance and size (`--distance` and `--width` on ft-spotpanel; 0.75 m and 0.42 m, `frunner/reserve.h`).
 
@@ -44,6 +65,7 @@ These were settled with the user on 2026-10-10. The numbers may be cited in the 
 | 11 | Shortcut | Meta+Space by default. Plasma's KRunner has Alt+Space, and nothing in Frametop used Meta+Space |
 | 12 | Branch | `spotwatch` (its first name; renamed frunner 2026-10-20), off `experimental`, merged into `experimental` |
 | 13 | Profiles (2026-10-26) | Found by their launchers (`X-Frametop-Profile=true`, written by ft-layout), and opened with `ft-layout open NAME` rather than as an app through ft-floatd. They came with PR #67, which made the quick reset only recenter |
+| 14 | Frametop's actions and the OS menu (2026-11-07, DEE-172) | Frametop's own actions are in the search, and the `os_menu` action opens frunner with them listed, rather than a new radial panel. That's a small change, and it reuses frunner's keys, lasers and 3D mouse |
 
 ## How it works
 

@@ -668,6 +668,16 @@ def tests():
     pause("off")
     typed()
     check("frunner works without pointer mode", relay.needs_pointer("frunner"), False)
+    # os_menu (DEE-172; no default): frunner opens with Frametop's own actions listed, its OS menu.
+    use({"42+125+57": "os_menu"})
+    key(META, 1); key(SHIFT, 1); key(SPACE, 1); key(SPACE, 0); key(SHIFT, 0); key(META, 0)
+    check("os_menu bound to Meta+Shift+Space: frunner toggles as the OS menu", frunner_got(), ["toggle keyboard actions"])
+    use(None)
+    check("os_menu works without pointer mode, has no default, and isn't paused-safe",
+          (relay.known_action("os_menu"), relay.needs_pointer("os_menu"), "os_menu" in relay.DEFAULT_KEY_BINDINGS.values(),
+           relay.works_paused("os_menu")), (True, False, False, False))
+    check("every menu action is an action that works without pointer mode",
+          [a for a in relay.MENU_ACTION_NAMES if not relay.known_action(a) or relay.needs_pointer(a)], [])
 
     # Meta+Shift+H (a default): ft-screens hides or shows the screens. Hidden, they give typing to
     # Steam and the keyboards aren't grabbed, but the relay still reads them, so a second press

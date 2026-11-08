@@ -100,8 +100,8 @@ No screenshots were needed or published.
 This validates basic visual concealment/restoration and unsaved-work preservation,
 not all input routes, auxiliary panels, lock latency or failure cases. Input
 blocking, observer failure, UI restart, cold boot and the wider suspend/resume
-matrix remain hardware-test gaps. A review PR should remain draft until that
-matrix is completed. This contribution covers Steam PIN protection only, not a
+matrix remain hardware-test gaps and must be completed before recommending
+general use. This contribution covers Steam PIN protection only, not a
 new remote-desktop hosting or client implementation.
 
 An early version actively requested another Steam lock after lost proof. During
@@ -139,7 +139,7 @@ user, privileged access, other unrestricted Steam applications or disk access.
 The existing local DevTools endpoint itself permits same-user UI access. Steam's
 PIN is not disk encryption or a Linux login boundary.
 
-## Required before general use or a ready-for-review PR
+## Required before general use
 
 1. Validate actual lock/unlock, cancellation, incorrect PIN (entered only in
    Steam), reset, UI restarts, suspend/resume and boot. Confirm no initial false

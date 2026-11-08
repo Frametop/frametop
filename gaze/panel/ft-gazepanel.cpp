@@ -90,6 +90,7 @@
 // --dump DIR each picture goes there as a PAM file). Runs in the dev container (gaze/build.sh
 // builds it into gaze/build).
 #include <openvr.h>
+#include "../../conf/ft_pinlock.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../conf/ftsock.h"
@@ -773,6 +774,7 @@ int main(int argc, char **argv) {
     // The rec mode's dot, once a frame: where it is at the next frame's photons, the overlay
     // moved there, and a targets row when it moved or changed.
     auto dotTick = [&](int64_t now) {
+        if (!noVr && !ft_pin_allowed()) return;
         if (!p.rec || !visible || dot.mode == "off") {
             if (dot.changed && targets.f && p.rec) {
                 uint64_t frame;
@@ -846,6 +848,13 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "ft-gazepanel running: @%s, %.2f m%s\n", sockName.c_str(), distance, noVr ? ", no SteamVR" : "");
 
     while (!g_stop) {
+        if (!noVr && !ft_pin_allowed()) {
+            std::lock_guard<std::mutex> lk(g_vr);
+            ov->HideOverlay(h);
+            ov->HideOverlay(dotH);
+            shown = dot.shown = false;
+            dirty = dot.changed = true;
+        }
         char buf[512];
         sockaddr_un from{};
         socklen_t fromLen = sizeof from;
@@ -1018,7 +1027,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        if (visible && dirty) {
+        if (visible && dirty && (noVr || ft_pin_allowed())) {
             Draw(p);
             ++pictures;
             if (!dumpDir.empty()) Dump(p, dumpDir + "/" + std::to_string(pictures) + ".pam");

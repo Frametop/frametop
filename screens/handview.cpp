@@ -52,6 +52,7 @@
 //                             second) -> "ok" and a line each: "<CLOCK_MONOTONIC ns> <3x4 row-major,
 //                             standing universe>" (ft-handsctl saves them with a flag)
 #include "../conf/ftsock.h"
+#include "../conf/ft_pinlock.h"
 #include "gpuctx.h"
 #include "handcut.h"
 #include "handhold.h"
@@ -1301,7 +1302,8 @@ int main(int argc, char **argv) {
             double palm[3] = {};
             if (tracked) tracked->Palm(palm);
             const char *why = nullptr;
-            if (!hp.bPoseIsValid) why = "no head pose";
+            if (!ft_pin_allowed()) why = "Steam PIN locked";
+            else if (!hp.bPoseIsValid) why = "no head pose";
             else if (roomOn && !demo && !look.inRoom) why = "Room View on";
             else if (demo) why = tracked ? nullptr : "not tracked";
             else if (heard ? g_word.side[si] == 2 : tracked && ControllerAt(si, palm, poses, now))

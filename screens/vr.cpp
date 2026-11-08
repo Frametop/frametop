@@ -117,6 +117,7 @@
 #include "grabthat.h"
 #include "handinput.h"
 #include "softglow.h"
+#include "../conf/ft_pinlock.h"
 #include "overlaytex.h"
 #include "palmmenu.h"
 #include "label.h"
@@ -265,6 +266,17 @@ constexpr long kControlsLinger = 35; // ticks (~0.4 s) the controls stay after a
 constexpr long kAimLinger = 25;      // ticks (~0.3 s) a panel keeps the laser on after the aim leaves it
 long g_tick = 0;                     // ft_vr_poll calls
 bool g_vr = false;                   // connected to SteamVR (ft-screens --no-vr runs without it)
+// Every overlay this compositor requests to show is registered here, including
+// auxiliary guides and popups, so security denial cannot leave a forgotten panel.
+std::map<vr::VROverlayHandle_t, bool> g_pinOverlays;
+vr::EVROverlayError PinShow(vr::VROverlayHandle_t overlay) {
+    g_pinOverlays[overlay] = true;
+    return ft_pin_allowed() ? vr::VROverlay()->ShowOverlay(overlay) : vr::VROverlay()->HideOverlay(overlay);
+}
+vr::EVROverlayError PinHide(vr::VROverlayHandle_t overlay) {
+    g_pinOverlays[overlay] = false;
+    return vr::VROverlay()->HideOverlay(overlay);
+}
 constexpr vr::TrackedDeviceIndex_t kNone = vr::k_unTrackedDeviceIndexInvalid;
 // Near hand input (handinput.cpp) holds KWin's button and carries panels as these, in place of
 // a device: no device has them, so DevicePose and LaserPose fail for them (no laser to follow or
@@ -755,8 +767,8 @@ struct GuidePart {
     void Show(bool on) {
         if (on == shown || overlay == vr::k_ulOverlayHandleInvalid) return;
         shown = on;
-        if (on) vr::VROverlay()->ShowOverlay(overlay);
-        else vr::VROverlay()->HideOverlay(overlay);
+        if (on) PinShow(overlay);
+        else PinHide(overlay);
     }
     void Light(bool on, const std::vector<uint8_t> &px, int n) {
         if (int(on) == lit) return;
@@ -1197,6 +1209,7 @@ void ApplyAlpha(const Screen &s) {
 }
 
 void SetVisible(Screen &s, bool visible, float alpha) {
+    visible = visible && ft_pin_allowed();
     if (visible && std::fabs(alpha - s.alpha) > 0.01f) {
         s.alpha = alpha;
         ApplyAlpha(s);
@@ -1204,15 +1217,15 @@ void SetVisible(Screen &s, bool visible, float alpha) {
     if (visible == s.visible) return;
     s.visible = visible;
     if (visible) {
-        vr::VROverlay()->ShowOverlay(s.overlay);
-        for (const auto &[k, sub] : s.subs) vr::VROverlay()->ShowOverlay(sub.overlay);
+        PinShow(s.overlay);
+        for (const auto &[k, sub] : s.subs) PinShow(sub.overlay);
         return;
     }
     // Hidden: the controls go at once (UpdateControls brings them back).
-    vr::VROverlay()->HideOverlay(s.overlay);
-    for (const auto &[k, sub] : s.subs) vr::VROverlay()->HideOverlay(sub.overlay);
+    PinHide(s.overlay);
+    for (const auto &[k, sub] : s.subs) PinHide(sub.overlay);
     for (auto o : s.Controls())
-        if (o != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->HideOverlay(o);
+        if (o != vr::k_ulOverlayHandleInvalid) PinHide(o);
     s.controls = 0, s.controlsUp = false;
 }
 
@@ -1447,7 +1460,7 @@ void UpdateControls() {
         // any device's laser, whatever its shape.
         if (s.visible && !s.controlsUp) {
             for (auto o : s.Controls())
-                if (o != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->ShowOverlay(o);
+                if (o != vr::k_ulOverlayHandleInvalid) PinShow(o);
             s.controlsUp = true;
             ApplyAlpha(s);
         }
@@ -2259,7 +2272,7 @@ void SetSub(Screen &s, int index, int k, int x, int y, int w, int h) {
             }
         }
         vr::VROverlay()->SetOverlayAlpha(sub.overlay, s.alpha);
-        if (s.visible) vr::VROverlay()->ShowOverlay(sub.overlay);
+        if (s.visible) PinShow(sub.overlay);
     }
     it->second.x = x, it->second.y = y, it->second.w = w, it->second.h = h;
     CropOverlay(it->second.overlay, s, x, y, w, h);
@@ -2378,8 +2391,8 @@ void ReleaseStuck(void (*handle)(const struct ft_event *, void *), void *data) {
 void ShowCatcher(bool on) {
     if (on == g_catcherShown || g_catcher == vr::k_ulOverlayHandleInvalid) return;
     g_catcherShown = on;
-    if (on) vr::VROverlay()->ShowOverlay(g_catcher);
-    else vr::VROverlay()->HideOverlay(g_catcher);
+    if (on) PinShow(g_catcher);
+    else PinHide(g_catcher);
 }
 
 // Every tick: while a button is held, find what the pressing laser is on. On one of our
@@ -4119,7 +4132,7 @@ void ShowCarousel() {
         for (int c = 0; c < 4; ++c) m.m[r][c] = at3.m[r][c];
     vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &m);
     vr::VROverlay()->SetOverlayAlpha(o, 1.f);
-    vr::VROverlay()->ShowOverlay(o);
+    PinShow(o);
     g_carousel.shownMs = NowMs();
 }
 
@@ -4127,7 +4140,7 @@ void UpdateCarousel() {
     if (g_carousel.shownMs < 0 || g_carousel.overlay == vr::k_ulOverlayHandleInvalid) return;
     const int64_t age = NowMs() - g_carousel.shownMs;
     if (age >= kCarouselMs || g_front.panel < 0) {
-        vr::VROverlay()->HideOverlay(g_carousel.overlay);
+        PinHide(g_carousel.overlay);
         g_carousel.shownMs = -1;
     } else if (age > kCarouselMs - kCarouselFadeMs) {
         vr::VROverlay()->SetOverlayAlpha(g_carousel.overlay, float(double(kCarouselMs - age) / kCarouselFadeMs));
@@ -4153,7 +4166,7 @@ constexpr int kResetAskH = 84;
 constexpr const char *kResetAskText = "Reset the layout? Tap";
 
 void HideResetAsk() {
-    if (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->HideOverlay(g_resetAsk.overlay);
+    if (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid) PinHide(g_resetAsk.overlay);
     g_resetAsk.panel = -1, g_resetAsk.shownMs = -1;
 }
 
@@ -4190,7 +4203,7 @@ void ShowResetAsk(int panel) {
     g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs(), g_resetAsk.px = W;
     g_resetAsk.tipZ[0] = g_resetAsk.tipZ[1] = 1;
     if (!PlaceResetAsk(it->second)) return HideResetAsk();
-    vr::VROverlay()->ShowOverlay(g_resetAsk.overlay);
+    PinShow(g_resetAsk.overlay);
 }
 
 void ResetTapped(int panel, int side) {
@@ -4294,7 +4307,7 @@ void EnsurePadOverlay() {
 
 void HidePill() {
     if (g_pill.shown < 0) return;
-    vr::VROverlay()->HideOverlay(g_pill.overlay);
+    PinHide(g_pill.overlay);
     g_pill.shown = -1, g_pill.hover = false;
 }
 
@@ -4343,7 +4356,7 @@ void UpdatePill() {
     const Mat at = Mul(p, OnSurface(s, 0, s.heightMetres() / 2 + h / 3 + h / 2, 0.003));
     vr::VROverlay()->SetOverlayTransformAbsolute(g_pill.overlay, vr::TrackingUniverseStanding, &at);
     if (g_pill.shown != g_pill.target) {
-        vr::VROverlay()->ShowOverlay(g_pill.overlay);
+        PinShow(g_pill.overlay);
         g_pill.shown = g_pill.target;
     }
 }
@@ -4599,7 +4612,7 @@ void UpdateTargetGlow() {
     if (best >= 0) g_target.panel = best;
     g_target.alpha = want > g_target.alpha ? std::min(want, g_target.alpha + dt / 0.12) : std::max(want, g_target.alpha - dt / 0.15);
     auto hide = [&] {
-        if (g_target.shown) vr::VROverlay()->HideOverlay(g_target.overlay), g_target.shown = false;
+        if (g_target.shown) PinHide(g_target.overlay), g_target.shown = false;
     };
     const auto pit = g_screens.find(g_target.panel);
     if (g_target.alpha < 0.01 || pit == g_screens.end() || !pit->second.visible) return hide();
@@ -4633,7 +4646,7 @@ void UpdateTargetGlow() {
         vr::VROverlay()->SetOverlayAlpha(g_target.overlay, float(g_target.alpha));
         g_target.shownAlpha = g_target.alpha;
     }
-    if (!g_target.shown) vr::VROverlay()->ShowOverlay(g_target.overlay), g_target.shown = true;
+    if (!g_target.shown) PinShow(g_target.overlay), g_target.shown = true;
 }
 
 // carry_toggle's carry-all (user, 2026-11-01: "while in carry mode, all floating screens, windows, and
@@ -4733,18 +4746,18 @@ bool UpdateCarryGlowSlot(CarryGlow &g) {
     double fade = g.letGoMs < 0 ? 1 : std::max(0.0, 1 - double(now - g.letGoMs) / kCarryFadeMs);
     fade = std::min(fade, double(now - g.startMs) / kCarryFadeMs);   // (fading in too: user, 2026-11-01)
     vr::VROverlay()->SetOverlayAlpha(g.border, float(std::clamp(fade, 0.0, 1.0)));
-    if (!g.shown) vr::VROverlay()->ShowOverlay(g.border), g.shown = true;
+    if (!g.shown) PinShow(g.border), g.shown = true;
     if (g.pulse == vr::k_ulOverlayHandleInvalid) return true;
     // the pulse: every kCarryPulseMs from the pick-up; let go, one from then
     const int64_t phase = g.letGoMs < 0 ? (now - g.startMs) % kCarryPulseMs : now - g.letGoMs;
     if (phase >= kCarryPulseRise) {
-        if (g.pulseShown) vr::VROverlay()->HideOverlay(g.pulse), g.pulseShown = false;
+        if (g.pulseShown) PinHide(g.pulse), g.pulseShown = false;
         return true;
     }
     const double e = double(phase) / kCarryPulseRise, out = 1 - (1 - e) * (1 - e);   // ease out
     place(g.pulse, width + 2 * kCarryPulseGrow * dist * out);
     vr::VROverlay()->SetOverlayAlpha(g.pulse, float(0.5 * (1 - e) * (1 - e)));
-    if (!g.pulseShown) vr::VROverlay()->ShowOverlay(g.pulse), g.pulseShown = true;
+    if (!g.pulseShown) PinShow(g.pulse), g.pulseShown = true;
     return true;
 }
 
@@ -4857,7 +4870,7 @@ void UpdateCarryAids() {
     };
     // the grids
     if (a.mode == 2) {
-        if (a.gridShown) vr::VROverlay()->HideOverlay(a.grid), a.gridShown = false;
+        if (a.gridShown) PinHide(a.grid), a.gridShown = false;
     } else if (make(a.grid, "frametop.guide.carry.grid", "Frametop: carry's grid")) {
         const double margin = std::clamp(kAidMargin * dist, 0.08, 0.5), Wq = W + 2 * margin, Hq = H + 2 * margin;
         const int gw = std::clamp(int(std::lround(Wq * kGridPpm)), 256, kGridMaxW);
@@ -4893,12 +4906,12 @@ void UpdateCarryAids() {
         vr::VROverlay()->SetOverlayCurvature(a.grid, c->curve > 0 ? float(std::clamp(Wq / (2 * M_PI * c->curve), 0.0, 1.0)) : 0.f);
         vr::VROverlay()->SetOverlayTransformAbsolute(a.grid, vr::TrackingUniverseStanding, &q);
         vr::VROverlay()->SetOverlayAlpha(a.grid, float(fade));
-        if (!a.gridShown) vr::VROverlay()->ShowOverlay(a.grid), a.gridShown = true;
+        if (!a.gridShown) PinShow(a.grid), a.gridShown = true;
     }
     // the rings
     if (a.mode != 2) {
         if (a.ringShown)
-            for (auto o : a.ring) vr::VROverlay()->HideOverlay(o);
+            for (auto o : a.ring) PinHide(o);
         a.ringShown = false;
         return;
     }
@@ -4940,7 +4953,7 @@ void UpdateCarryAids() {
         vr::VROverlay()->SetOverlayWidthInMeters(a.ring[k], float(D));
         vr::VROverlay()->SetOverlayAlpha(a.ring[k], float(fade));
         vr::VROverlay()->SetOverlayTransformAbsolute(a.ring[k], vr::TrackingUniverseStanding, &r);
-        if (!a.ringShown) vr::VROverlay()->ShowOverlay(a.ring[k]);
+        if (!a.ringShown) PinShow(a.ring[k]);
     }
     a.ringShown = true;
 }
@@ -4977,7 +4990,7 @@ void UpdateHandGuides() {
         else if (g.kind != handinput::Guide::None) want = 0;                         // ...first fade the old out
         hg.alpha = want > hg.alpha ? std::min(want, hg.alpha + dt / 0.08) : std::max(want, hg.alpha - dt / 0.15);
         auto hide = [&] {
-            if (hg.shown) vr::VROverlay()->HideOverlay(hg.overlay), hg.shown = false;
+            if (hg.shown) PinHide(hg.overlay), hg.shown = false;
         };
         // on one of our screens, or on one of SteamVR's panels (see "SteamVR's panels by hand")
         const auto it = g_screens.find(hg.g.panel);
@@ -5057,7 +5070,7 @@ void UpdateHandGuides() {
             vr::VROverlay()->SetOverlayAlpha(hg.overlay, float(hg.alpha));
             hg.shownAlpha = hg.alpha;
         }
-        if (!hg.shown) vr::VROverlay()->ShowOverlay(hg.overlay), hg.shown = true;
+        if (!hg.shown) PinShow(hg.overlay), hg.shown = true;
     }
 }
 
@@ -5632,7 +5645,7 @@ int ft_vr_modifiers(uint32_t format, uint64_t *out, int max) {
     return int(n < uint32_t(max) ? n : uint32_t(max));
 }
 
-bool ft_vr_screens_shown(void) { return g_vr && ModeVisible(); }
+bool ft_vr_screens_shown(void) { return g_vr && ft_pin_allowed() && ModeVisible(); }
 bool ft_vr_paused(void) { return g_paused; }
 
 void ft_vr_gamepad_target(int screen) {
@@ -6059,10 +6072,11 @@ bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void 
 
 bool ft_vr_screen_visible(int index) {
     const auto it = g_screens.find(index);
-    return !g_vr || (it != g_screens.end() && it->second.visible);
+    return !g_vr || (ft_pin_allowed() && it != g_screens.end() && it->second.visible);
 }
 
 enum ft_attention ft_vr_screen_attention(int index) {
+    if (g_vr && !ft_pin_allowed()) return FT_HIDDEN;
     const auto it = g_screens.find(index);
     return g_vr && it != g_screens.end() ? it->second.attention : FT_FOCUSED;
 }
@@ -6413,6 +6427,51 @@ void FollowUniverse(const universefix::Switch &sw) {
 
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (!g_vr) return;
+    static bool wasDenied = false;
+    const bool denied = !ft_pin_allowed();
+    if (denied || wasDenied) {
+        vr::VREvent_t ev;
+        for (auto it = g_pinOverlays.begin(); it != g_pinOverlays.end();) {
+            char key[256];
+            vr::EVROverlayError error;
+            vr::VROverlay()->GetOverlayKey(it->first, key, sizeof key, &error);
+            if (error != vr::VROverlayError_None) { it = g_pinOverlays.erase(it); continue; }
+            // Discard events through the first unlocked tick as well: no queued
+            // click or gesture from a locked interval may replay on the desktop.
+            while (vr::VROverlay()->PollNextOverlayEvent(it->first, &ev, sizeof ev)) {}
+            if (denied) vr::VROverlay()->HideOverlay(it->first);
+            else if (it->second && ft_pin_allowed()) vr::VROverlay()->ShowOverlay(it->first);
+            ++it;
+        }
+        if (denied && !wasDenied) {
+            for (auto &[index, s] : g_screens) {
+                EndDrag(s);
+                s.titleCarry = s.toggleCarry = false;
+                std::fill(std::begin(s.hover), std::end(s.hover), false);
+            }
+            // Drop pointer ownership, but never terminate the compositor or apps.
+            g_mouseScreen = -1;
+            g_press.buttons = 0;
+            g_ctrl = g_alt = false;
+            for (uint32_t code : {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTSHIFT, KEY_RIGHTSHIFT})
+                ft_vr_key(code, 0);
+            g_handInput = handinput::HandInput(g_handInput.params());
+            g_palm = palmmenu::PalmMenu(g_palm.params());
+            g_grabThat = grabthat::Detector(g_grabThat.params());
+            g_far = {};
+            g_resetHold = {};
+        }
+        wasDenied = denied;
+        if (denied) {
+            while (vr::VRSystem()->PollNextEvent(&ev, sizeof ev)) {
+                if (ev.eventType == vr::VREvent_Quit) {
+                    ft_event e{}; e.type = FT_QUIT; handle(&e, data);
+                }
+            }
+            return;
+        }
+        return;
+    }
     RefreshPoses();
     {
         trackwatch::Pose head;

@@ -57,7 +57,10 @@ HOST_GLIBC = (2, 39)  # the newest the pointer driver may need (pointer/driver/b
 # Packages in the OS image that Frametop depends on, and what to try by hand when one changes.
 PACKAGES = {
     "deckard-steamvr-rel": "the 3D mouse on the dashboard, on SteamVR Settings, and on a SteamVR "
-                           "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
+                           "window's grab bar; Steam PIN lock/unlock with STEAM_PIN_LOCK=1, including boot, "
+                           "suspend/resume and observer/UI restart (securitystore internal API, not logind); "
+                           "locked panels and Full Keyboard stay hidden and ignore input without ending apps; "
+                           "picking up a controller; mapped controller buttons; gaze, "
                            "and a gaze calibration with Track Dominant Eye Only on; the reset countdown stays "
                            "visible while turning, accepts no pointer input, and disappears before reset; "
                            "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "

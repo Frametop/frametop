@@ -1,0 +1,142 @@
+# Steam PIN protection (experimental)
+
+**Opt-in implementation; not yet installed or wearer-tested.** The running
+desktop is unchanged until the new components are installed, restarted and
+`STEAM_PIN_LOCK=1` is set in the configuration file. Default is off while this
+internal Steam API integration is experimental. Use the screens backend; the
+gamescope backend is refused in protected mode rather than silently unprotected.
+
+## Behavior
+
+- Steam's existing PIN remains the only unlock authority. No second password.
+- Unknown, locked, stale, disconnected or reset state denies access. An observer
+  restarting in an unlocked session requests Steam's real, non-cancellable PIN
+  screen instead of treating a false UI flag as proof of authentication.
+- Screens, floating windows, popups, controls and compositor-owned guides hide;
+  desktop input is rejected. Full Keyboard hides and cancels input, leaving
+  Steam's own keyboard available. Frunner and the hand/gaze panel views also hide.
+- Pending presses are released before focus is cleared; locked overlay events
+  are drained, including the first unlocked tick. Hand gesture/hold state resets.
+- The compositor, nested KWin and apps remain running, with all application
+  memory and unsaved work intact. Layout/profile metadata may update behind the
+  gate; normal hide/show/resume cannot override the security gate. Locking never
+  stops or restarts the desktop, uses SIGSTOP or freezes application cgroups.
+- **Remote desktop serving and notification forwarding are unavailable for the
+  entire protected session**, even when unlocked. These independent channels are
+  not secured by hiding VR panels, so this first version refuses them rather than
+  allowing a bypass. Incoming remote-display pictures use the same VR gate.
+- Audio and background jobs continue, as with a conventional desktop lock. This
+  is display/input protection, not a media mute or a suspension of applications.
+
+The installed `session/frametop-pin-lock.service` publishes a private, boot-local
+lease. Consumers fail closed without it. A lease is dated from the start of its
+Steam query, expires in 750 ms, requires a live publisher and rejects evidence
+spanning a suspend (boot and monotonic clocks disagree). A slow or failed query
+cannot renew access using old data. No unlock token survives reboot.
+
+This is **bounded-latency**, not an atomic lock transaction with Steam: normal
+queries run every 150 ms, expiry is 750 ms, and an overlay's next processing tick
+must hide it. A hung renderer cannot enforce its gate until it runs again. Do not
+claim protection against a compromised/hung SteamVR compositor or same-user code.
+Measure actual lock latency and test runtime-failure behavior before deployment.
+
+## What was found
+
+The nested KWin starts with its own lock screen disabled. Autostart waits for
+SteamVR, not for Steam authentication. Linux logind's locked hint is not evidence
+of the Steam six-digit PIN state. Steam owns the host screen-saver D-Bus name on
+the investigated Frame, but its advertised GetActive method returns an error.
+
+Steam's SharedJSContext exposes `securitystore.IsLockScreenActive()`. Existing
+Frametop tools already use the local Chrome DevTools connection through
+`steam/steamui.py`. Steam's UI source initializes active lock props to null before
+it loads settings and mounts its initial PIN screen: **false alone is not proof
+of unlock**. A dialog can also be cancellable, or a PIN-reset flow can clear it.
+
+The observer in `steam/pin_lock.py` returns only explicit lock/configuration/reset
+booleans and the UI context's time origin. It never returns the settings object,
+PIN, account name, callback or authentication ticket. It makes no calls to lock,
+unlock, change settings or submit credentials. Run locally on the Frame:
+
+```sh
+python3 steam/pin_lock.py --seconds 180
+```
+
+Output is only state changes: unknown, locked, or unlocked-after-observed-lock.
+Unknown is deliberately not interpreted as unlocked. The diagnostic requires
+observing a non-cancellable lock and then its dismissal in the same context.
+Connection failure, UI-context replacement, malformed data, PIN reset or changed
+lock configuration discard that evidence. Starting the probe in an already
+unlocked session therefore reports unknown until a real lock/unlock is observed.
+The default read-only probe exits after a bounded duration, at most ten minutes.
+`--watch` is the installed guard mode; unlike the diagnostic it publishes access
+leases and may request Steam's own PIN screen when fresh authentication is needed.
+Initialized settings explicitly reporting no Steam PIN configured permit access;
+uninitialized settings and active/reset prompts do not.
+
+This is an internal Steam UI API, not a supported authentication API. Two real
+PIN cycles were observed continuously: unknown → locked → unlocked. These only
+validate detection, not the new enforcement. Cold boot, suspend/resume and actual
+app-preserving concealment still require wearer testing. Unit tests do not prove
+the meaning or completeness of Steam's UI signal.
+
+## Intended boundary
+
+The goal is to prevent a person using a PIN-locked headset from viewing or
+interacting with an authenticated Frametop desktop. Steam remains the unlock
+authority. No second PIN, credential storage or Frametop password dialog.
+
+This is not a boundary against malicious code already running as the same Linux
+user, privileged access, other unrestricted Steam applications or disk access.
+The existing local DevTools endpoint itself permits same-user UI access. Steam's
+PIN is not disk encryption or a Linux login boundary.
+
+## Required before enabling or an upstream PR
+
+1. Validate actual lock/unlock, cancellation, incorrect PIN (entered only in
+   Steam), reset, UI restarts, suspend/resume and boot. Confirm no initial false
+   state can authorize content. Determine how an observer restarting in an
+   unlocked session can safely recover; absent reliable proof, require another
+   Steam lock/unlock rather than guessing.
+2. Verify the independent security gate, not ordinary hide/pause. Start denied
+   before displaying any sensitive texture or accepting input. Normal
+   visibility, profiles, resume and manual startup must not override it.
+3. Enforce at every output/input path: screens, floating windows and popups,
+   previews/captures, keyboard/clipboard/voice, controller/hand/pointer input,
+   notifications and remote desktop. Audit auxiliary overlays and queued events;
+   remote services and their start paths must also fail closed. Decide and document
+   audio behavior, rather than silently leaving a privacy leak.
+4. Use bounded, fresh state with context identity. Lost observer, stale response,
+   Steam restart, disconnect or resume invalidates access. Recheck before content
+   presentation and input dispatch. Polling/IPC latency is not atomic; measure and
+   document it, and prefer an event source that revokes access synchronously where
+   available. Do not claim instantaneous protection from a periodic poll.
+5. Verify that lock/unlock preserves running apps and unsaved work. Stopping the
+   desktop or applications is not an acceptable lock fallback for this feature.
+6. Add lifecycle/model tests for lock races, restarts, lost messages and attempts
+   to show/resume while denied. Add Steam-update API compatibility checks and
+   wearer validation before enabling or publishing.
+
+## Offline checks
+
+```sh
+python3 -m unittest discover -s steam/tests -v
+```
+
+Twenty-six tests cover initial false, mandatory vs cancellable prompts, relocking,
+context reload, disconnect, invalid snapshots and booleans, reset/configuration
+changes, inconsistent props and avoiding credential fields in the expression.
+They also exercise the guard loop using fake Steam, atomic/private lease writing,
+missing/bad/stale/dead-publisher leases, unsafe permissions, symlinks and FIFO
+rejection. The C test checks matching expiry/suspend rules and actual private-file
+reads without touching the real lease. All tests are offline and never send keys
+to the production desktop.
+
+Integration tripwires check overlay show-call coverage, that the lock path cannot
+stop applications, release-before-focus-clear ordering and the independent export
+channel guards. They supplement, rather than replace, wearer testing.
+
+An input-relay restart test currently fails its K3 expectation on untouched
+upstream as well. The control protocol's recorded fixture assumes UID 0; it
+matches when run as the image's default root user, not UID 1000. These limitations
+must not be reported as a fully green repository suite.

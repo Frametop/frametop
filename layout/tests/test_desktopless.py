@@ -37,6 +37,8 @@ class Screens:
     """ft-screens: answers what desktopless asks, records the rest."""
     def __init__(self):
         self.asked = []
+        self.running = set()
+        self.room = 99   # panels SteamVR makes before it makes no more
 
     def ask(self, text):
         self.asked.append(text)
@@ -44,7 +46,13 @@ class Screens:
         if w[0] == "head":
             return "ok 0 1.6 0 0"
         if w[0] == "remotes":
-            return "ok remotes"
+            return f"ok {len(self.running)} " + " ".join(f"{n}:c:live:1x1" for n in sorted(self.running))
+        if w[0] == "remote" and w[2] == "start":
+            if int(w[1]) not in self.running and len(self.running) >= self.room:
+                raise RuntimeError("error SteamVR made no panel (too many overlays?)")
+            self.running.add(int(w[1]))
+        if w[0] == "remote" and w[2] == "stop":
+            self.running.discard(int(w[1]))
         if w[0] == "get":
             # facing you 1.3 m ahead, 0.9 m wide, 0.5 m tall
             return "ok " + " ".join(map(str, [0, 1.5, -1.3, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 0.5, 0])) + " none"
@@ -147,6 +155,20 @@ class Desktopless(unittest.TestCase):
         self.m.REMOTE_MAX = 4   # 2 displays + 2 window panels
         self.d.command(["on"])
         self.assertEqual([d["app"] for d in self.panels()], ["window:0x30", "window:0x20"])
+
+    def test_when_steamvr_makes_no_more_panels_the_rest_wait(self):
+        self.screens.room = 1   # one window panel (the fake starts no display streams)
+        self.d.command(["on"])
+        layout = self.m.load_layout()
+        self.assertEqual([d["app"] for d in self.panels(layout)], ["window:0x30"])   # no entry left for the others
+        self.assertEqual(layout["desktopless"]["full"], 3)
+        self.assertNotIn("0x20", self.d.read_seen()["oma7"])
+        # one closes: the next comes out in its place
+        host = layout["hosts"][0]
+        self.m.window_close(layout, host, self.panels(layout)[0])
+        self.screens.running.discard(103)
+        self.d.open_windows(self.screens, (0, 1.6, 0), 0.0, self.d.read_seen())
+        self.assertEqual([d["app"] for d in self.panels()], ["window:0x20"])
 
     def test_one_you_sent_back_stays_on_the_pc(self):
         self.d.command(["on"])

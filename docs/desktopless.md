@@ -35,6 +35,8 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 
 ## Limits
 
+- SteamVR allows so many overlays for every app together, and each panel takes seven. When it makes no panel for a window, that window stays on its PC and the count reached is the cap. The rest come out as panels close. In the first live run (2026-11-08, oma7, 9 windows) it made 7 window panels next to 3 display panels.
+- Each window goes back to its own workspace and monitor. A tiled one on a workspace that isn't showing at off splits in next to the window last used there, so the order on that workspace and its split sizes can differ from before (Hyprland's dwindle tree isn't kept).
 - One change at a time: on, off, a profile and each pass of the watcher take turns (a lock in `$XDG_RUNTIME_DIR`). Pressing Meta+Shift+D twice turns the mode on, then off.
 - Frame windows float only while ft-floatd has spare outputs. Past that, or with ft-floatd not answering, the rest stay on their hidden screens until the mode goes off (the log says so).
 - ft-floatd keeps which windows floated before the mode only while it runs. After a desktop restart in the mode, off docks every floating window.

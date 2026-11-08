@@ -174,7 +174,7 @@ def open_windows(sock, eye, heading, seen, extra=()):
             if a in mine or w.get("output") or str(w.get("workspace", "")).startswith("special"):
                 continue
             todo.append((host, port, w))
-    free = L.REMOTE_MAX - len(L.remote_displays(layout))
+    free = panel_cap(layout) - len(L.remote_displays(layout))
     todo = sorted(todo, key=lambda t: rank(t[2]))[:max(0, free)]
     fan, new = [], []
     for host, port, w in todo:
@@ -208,6 +208,8 @@ def open_windows(sock, eye, heading, seen, extra=()):
         except RuntimeError as e:
             L.log(f"desktopless: {host_name(host)} {w.get('address')}: {e}")
             continue
+        if not got_panel(layout, sock, host, d):
+            break  # (no more panels: the rest come out once one closes)
         seen.setdefault(host_name(host), set()).add(w["address"])
         opened += 1
         if saved and room:
@@ -219,6 +221,30 @@ def open_windows(sock, eye, heading, seen, extra=()):
             except RuntimeError as e:
                 L.log(f"desktopless: {d['id']}: {e}")
     return opened
+
+
+def panel_cap(layout):
+    """How many remote displays there may be: REMOTE_MAX, or fewer once SteamVR made no panel
+    (it allows so many overlays for every app together, and each panel takes seven)."""
+    full = state(layout).get("full")
+    return min(L.REMOTE_MAX, full) if isinstance(full, int) else L.REMOTE_MAX
+
+
+def got_panel(layout, sock, host, d):
+    """Whether ft-screens made window panel d a panel. If SteamVR made none, the entry goes (its
+    window back on the PC, if it left), the count it got to is the cap until a panel closes, and
+    False."""
+    n = next((m for m, _, e in L.remote_displays(layout) if e is d), None)
+    try:
+        running = L.remotes_running(sock)
+    except RuntimeError:
+        return True  # (no desktop now: it starts with the desktop)
+    if running is None or n in running:
+        return True
+    state(layout)["full"] = len(L.remote_displays(layout)) - 1
+    L.log(f"desktopless: SteamVR made no panel for {d['id']}: at most {state(layout)['full']} remote displays now")
+    L.window_close(layout, host, d)
+    return False
 
 
 def room_anchor(sock, layout):
@@ -501,7 +527,7 @@ def start_apps(layout, sock, room, name, places, want, seen):
             if not key.startswith(host_name(host) + "|"):
                 continue
             for pose in places[key][have.get(key, 0):count]:
-                if len(L.remote_displays(layout)) >= L.REMOTE_MAX:
+                if len(L.remote_displays(layout)) >= panel_cap(layout):
                     L.log(f"desktopless: no panel free for {key}")
                     return
                 app = key.split("|", 1)[1]
@@ -515,6 +541,8 @@ def start_apps(layout, sock, room, name, places, want, seen):
                 except RuntimeError as e:
                     L.log(f"desktopless: {key}: {e}")
                     continue
+                if not got_panel(layout, sock, host, d):
+                    return
                 seen.setdefault(host_name(host), set()).add(d["app"][7:])
                 n = next((m for m, _, e in L.remote_displays(layout) if e is d), None)
                 try:

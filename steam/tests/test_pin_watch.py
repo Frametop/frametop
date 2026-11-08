@@ -19,13 +19,12 @@ def snapshot(**changes):
 class Watch(unittest.TestCase):
     def run_watch(self, samples, *, pauses=None, query_ms=0):
         samples = iter(samples)
-        publications, requests = [], []
+        publications = []
         clock = [1000, 1000]
         pauses = iter(pauses or [])
         def evaluate(expression):
-            if expression == pin_lock.REQUEST_LOCK:
-                requests.append(expression)
-                return True
+            self.assertEqual(expression, pin_lock.SNAPSHOT,
+                             "Guard must only read Steam state, never request locking/authentication")
             value = next(samples)
             clock[0] += query_ms
             clock[1] += query_ms
@@ -45,49 +44,62 @@ class Watch(unittest.TestCase):
                   patch.object(pin_lock.signal, "signal"), patch.object(pin_lock.time, "sleep", sleep)):
                 with self.assertRaises(StopIteration):
                     pin_lock.watch()
-        return publications, requests
+        return publications
 
-    def test_initial_false_requires_native_authentication(self):
-        states, requests = self.run_watch([snapshot(), snapshot(active=True, mandatory=True), snapshot()])
+    def test_initial_false_waits_for_steam_owned_lock_cycle(self):
+        states = self.run_watch([snapshot(), snapshot(active=True, mandatory=True), snapshot()])
         self.assertEqual(states, [False, False, False, True, False])
-        self.assertEqual(len(requests), 1)
 
     def test_unknown_and_reset_revoke_access(self):
         for failure in (None, snapshot(resetting=True), pin_lock.steamui.SteamUnreachable("test")):
-            states, _ = self.run_watch([snapshot(active=True, mandatory=True), snapshot(), failure])
+            states = self.run_watch([snapshot(active=True, mandatory=True), snapshot(), failure])
             self.assertEqual(states[:3], [False, False, True])
             self.assertFalse(states[-1])
             self.assertFalse(states[-2])
 
     def test_no_pin_only_when_explicit_and_well_formed(self):
-        states, requests = self.run_watch([None, snapshot(configured=False),
+        states = self.run_watch([None, snapshot(configured=False),
                                           snapshot(configured=False, generation=True),
                                           snapshot(configured=False, mandatory=True)])
         self.assertEqual(states, [False, False, True, False, False, False])
-        self.assertEqual(requests, [])
 
     def test_scheduling_gap_requires_new_authentication(self):
-        states, requests = self.run_watch(
+        states = self.run_watch(
             [snapshot(active=True, mandatory=True), snapshot(), snapshot()],
             pauses=[(150, 150), (800, 800)])
         self.assertEqual(states, [False, False, True, False, False, False])
-        self.assertEqual(len(requests), 1)
 
     def test_suspend_discards_unexpired_unlock(self):
-        states, requests = self.run_watch(
+        states = self.run_watch(
             [snapshot(active=True, mandatory=True), snapshot(), snapshot()],
             pauses=[(150, 150), (300, 150)])
         self.assertEqual(states, [False, False, True, False, False, False])
-        self.assertEqual(len(requests), 1)
 
     def test_slow_response_cannot_establish_unlock_proof(self):
-        states, _ = self.run_watch(
+        states = self.run_watch(
             [snapshot(active=True, mandatory=True), snapshot()], query_ms=800)
         self.assertFalse(any(states))
 
     def test_slow_no_pin_response_cannot_allow_access(self):
-        states, _ = self.run_watch([snapshot(configured=False)], query_ms=800)
+        states = self.run_watch([snapshot(configured=False)], query_ms=800)
         self.assertFalse(any(states))
+
+    def test_repeated_unknown_never_requests_a_prompt(self):
+        states = self.run_watch([snapshot()] * 20)
+        self.assertFalse(any(states))
+
+    def test_failed_observation_waits_for_real_lock_to_recover(self):
+        states = self.run_watch([snapshot(active=True, mandatory=True), snapshot(),
+                                 pin_lock.steamui.SteamUnreachable("test"), snapshot(), snapshot(),
+                                 snapshot(active=True, mandatory=True), snapshot()])
+        self.assertEqual(states, [False, False, True, False, False, False, False, True, False])
+
+    def test_ui_restart_cannot_reuse_old_unlock(self):
+        states = self.run_watch([snapshot(active=True, mandatory=True), snapshot(),
+                                 snapshot(generation=2000), snapshot(generation=2000),
+                                 snapshot(generation=2000, active=True, mandatory=True),
+                                 snapshot(generation=2000)])
+        self.assertEqual(states, [False, False, True, False, False, False, True, False])
 
     def test_atomic_private_publication(self):
         with tempfile.TemporaryDirectory(prefix="ft-pin-publish-") as folder:

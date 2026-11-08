@@ -10,8 +10,10 @@ gamescope backend is refused in protected mode rather than silently unprotected.
 
 - Steam's existing PIN remains the only unlock authority. No second password.
 - Unknown, locked, stale, disconnected or reset state denies access. An observer
-  restarting in an unlocked session requests Steam's real, non-cancellable PIN
-  screen instead of treating a false UI flag as proof of authentication.
+  restarting in an unlocked session stays denied until it observes Steam's next
+  real, non-cancellable lock and subsequent dismissal. **It never requests a PIN
+  screen, locks or unlocks Steam, or submits credentials. Steam alone owns those
+  actions.** An absent prompt is not treated as proof of authentication.
 - Screens, floating windows, popups, controls and compositor-owned guides hide;
   desktop input is rejected. Full Keyboard hides and cancels input, leaving
   Steam's own keyboard available. Frunner and the hand/gaze panel views also hide.
@@ -70,7 +72,12 @@ lock configuration discard that evidence. Starting the probe in an already
 unlocked session therefore reports unknown until a real lock/unlock is observed.
 The default read-only probe exits after a bounded duration, at most ten minutes.
 `--watch` is the installed guard mode; unlike the diagnostic it publishes access
-leases and may request Steam's own PIN screen when fresh authentication is needed.
+leases, but all Steam access remains read-only. If the guard starts too late to
+observe Steam's lock screen, or loses proof, leave it running and use Steam's own
+controls to lock and unlock once. Frametop stays hidden until that cycle is
+observed; the observer does not summon a prompt for you. Short-lived locks entirely
+between observations can be missed, so maintain the bounded-latency limitations
+above rather than claiming event-perfect observation.
 Initialized settings explicitly reporting no Steam PIN configured permit access;
 uninitialized settings and active/reset prompts do not.
 
@@ -94,6 +101,15 @@ This validates basic visual concealment/restoration and unsaved-work preservatio
 not all input routes, auxiliary panels, lock latency or failure cases. Input
 blocking, observer failure/restart, UI restart, cold boot and suspend/resume remain
 hardware-test gaps. A review PR should remain draft until that matrix is completed.
+
+An early version actively requested another Steam lock after lost proof. During
+the floating-window test, the wearer received repeated prompts; logs showed
+unknown states while unlocking, but the exact observation failure was not
+reproduced in the next monitored cycle. That behavior was removed: Frametop is
+now strictly passive. Fixed diagnostic reason codes identify invalid snapshots,
+inconsistent flags, UI-generation changes, observation gaps/suspend, stale replies
+and failed queries without logging raw Steam data or credentials. The passive
+revision needs another wearer cycle before treating that regression as validated.
 
 ## Intended boundary
 
@@ -138,7 +154,7 @@ PIN is not disk encryption or a Linux login boundary.
 python3 -m unittest discover -s steam/tests -v
 ```
 
-Thirty tests cover initial false, mandatory vs cancellable prompts, relocking,
+Thirty-five tests cover initial false, mandatory vs cancellable prompts, relocking,
 context reload, disconnect, invalid snapshots and booleans, reset/configuration
 changes, inconsistent props and avoiding credential fields in the expression.
 They also exercise the guard loop using fake Steam, atomic/private lease writing,
@@ -150,6 +166,9 @@ to the production desktop.
 The guard-loop tests use deterministic clocks to check scheduling gaps, a suspend
 within the lease interval, slow authentication responses and slow no-PIN responses.
 None may reuse stale evidence to permit access.
+They also reject every guard-side Steam expression except the read-only snapshot,
+check that repeated unknown states never request prompts, and verify passive
+recovery after a failed observation or UI restart requires a real Steam lock cycle.
 
 Integration tripwires check overlay show-call coverage, that the lock path cannot
 stop applications, release-before-focus-clear ordering and the independent export

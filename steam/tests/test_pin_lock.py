@@ -70,6 +70,20 @@ class PinState(unittest.TestCase):
         self.assertNotIn("strOwnerAccountName", pin_lock.SNAPSHOT)
         self.assertNotIn("LockTicket", pin_lock.SNAPSHOT)
 
+    def test_observer_is_strictly_passive(self):
+        source = (Path(__file__).resolve().parents[1] / "pin_lock.py").read_text()
+        self.assertNotIn("SetActiveLockScreenProps", source)
+        self.assertNotIn("REQUEST_LOCK", source)
+
+    def test_diagnostic_reason_identifies_lost_proof(self):
+        self.assertEqual(self.state(), "unknown")
+        self.assertEqual(self.observer.reason, "awaiting-observed-lock")
+        self.unlock()
+        self.assertEqual(self.state(mandatory=True), "unknown")
+        self.assertEqual(self.observer.reason, "inconsistent-lock-flags")
+        self.assertEqual(self.state(), "unknown")
+        self.assertEqual(self.observer.reason, "inconsistent-lock-flags")
+
 
 if __name__ == "__main__":
     unittest.main()

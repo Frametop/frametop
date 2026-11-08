@@ -1,9 +1,10 @@
-"""Steam PIN observer: read-only probe by default, opt-in access guard with --watch.
+"""Passive Steam PIN observer: diagnostic or opt-in access leases with --watch.
 
 Steam's UI starts with no active lock props before initialization. A false
 IsLockScreenActive() alone is NOT proof of unlock. Require a non-cancellable
 lock in the same live UI context before accepting its subsequent dismissal.
 Never fetch the settings object over CDP: it can contain the user's PIN.
+Steam alone controls locking and authentication; this module never requests either.
 """
 import argparse
 import json
@@ -43,20 +44,6 @@ SNAPSHOT = """(() => {
         configured: settings.bLockOnWake || settings.bLockDesktopMode
     };
 })()"""
-
-# This invokes Steam's own non-cancellable PIN UI, exactly as its wake path does.
-# It never submits a PIN or changes settings; do not replace an existing prompt.
-REQUEST_LOCK = """(() => {
-    const s = window.securitystore;
-    if (!s || typeof s.SetActiveLockScreenProps !== 'function' ||
-        typeof s.IsLockScreenActive !== 'function') return false;
-    const settings = s.GetSettings();
-    if (!settings || !(settings.bLockOnWake || settings.bLockDesktopMode)) return false;
-    if (!s.IsLockScreenActive())
-        s.SetActiveLockScreenProps({preventCancel:true, preventSteamButtons:true});
-    return true;
-})()"""
-
 
 def publish(permit, stamp):
     """Atomic, private, boot-local state; request time, not response time, dates proof."""
@@ -102,14 +89,14 @@ def watch():
             stamp = ft_pinlock.clocks()
             # Any scheduling gap or suspend discards proof before querying Steam.
             if not ft_pinlock.fresh(*last, *stamp):
-                observer.invalidate()
+                observer.invalidate("observation-gap-or-suspend")
                 publish(False, stamp)
             last = stamp
             try:
                 snap = steamui.evaluate(SNAPSHOT)
                 state = observer.sample(snap)
                 if not ft_pinlock.fresh(*stamp, *ft_pinlock.clocks()):
-                    observer.invalidate()
+                    observer.invalidate("stale-steam-response")
                     state = "unknown"
                 # Initialized, explicitly disabled Steam PIN is not an unlock inferred
                 # from UI absence. Protect active/reset prompts even in that case.
@@ -119,17 +106,17 @@ def watch():
                           ft_pinlock.fresh(*stamp, *ft_pinlock.clocks()))
                 permit = state == "unlocked-after-observed-lock" or no_pin
                 publish(permit, stamp)
-                if state == "unknown" and not no_pin and isinstance(snap, dict) and snap.get("configured") is True:
-                    # A restart in an unlocked session has no proof: request real Steam
-                    # authentication instead of opening access on a guessed false state.
-                    steamui.evaluate(REQUEST_LOCK)
+                reason = "steam-pin-disabled" if no_pin else observer.reason
             except (steamui.SteamUnreachable, OSError, ValueError, KeyError, TypeError):
-                observer.invalidate()
+                observer.invalidate("steam-query-failed")
                 state = "unknown"
+                reason = observer.reason
                 publish(False, ft_pinlock.clocks())
-            if state != previous:
-                print(f"Steam PIN gate: {state}", flush=True)
-                previous = state
+            # Fixed reason codes only: never log raw Steam data or exception text.
+            status = (state, reason)
+            if status != previous:
+                print(f"Steam PIN gate: {state} ({reason})", flush=True)
+                previous = status
             time.sleep(0.15)
     finally:
         publish(False, ft_pinlock.clocks())
@@ -142,27 +129,34 @@ class Observer:
     def __init__(self):
         self.invalidate()
 
-    def invalidate(self):
+    def invalidate(self, reason="awaiting-observed-lock"):
         self.generation = None
         self.saw_mandatory_lock = False
+        self.reason = reason
 
     def sample(self, snapshot):
         if not valid_snapshot(snapshot):
-            self.invalidate()
+            self.invalidate("invalid-steam-snapshot")
             return "unknown"
         if snapshot["generation"] != self.generation:
-            self.invalidate()
+            if self.generation is not None:
+                self.invalidate("steam-ui-generation-changed")
             self.generation = snapshot["generation"]
         if snapshot["resetting"] or not snapshot["configured"]:
             self.saw_mandatory_lock = False
+            self.reason = "pin-reset-or-configuration-change"
             return "unknown"
         if snapshot["mandatory"] and not snapshot["active"]:
-            self.invalidate()
+            self.invalidate("inconsistent-lock-flags")
             return "unknown"
         if snapshot["active"]:
             self.saw_mandatory_lock |= snapshot["mandatory"]
+            self.reason = "steam-locked" if self.saw_mandatory_lock else "cancellable-steam-prompt"
             return "locked"
-        return "unlocked-after-observed-lock" if self.saw_mandatory_lock else "unknown"
+        if self.saw_mandatory_lock:
+            self.reason = "observed-lock-dismissed"
+            return "unlocked-after-observed-lock"
+        return "unknown"
 
 
 def main():

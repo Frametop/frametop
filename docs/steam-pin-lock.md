@@ -108,8 +108,15 @@ unknown states while unlocking, but the exact observation failure was not
 reproduced in the next monitored cycle. That behavior was removed: Frametop is
 now strictly passive. Fixed diagnostic reason codes identify invalid snapshots,
 inconsistent flags, UI-generation changes, observation gaps/suspend, stale replies
-and failed queries without logging raw Steam data or credentials. The passive
-revision needs another wearer cycle before treating that regression as validated.
+and failed queries without logging raw Steam data or credentials.
+
+After an approved guard-only restart, the passive observer stayed denied without
+creating a PIN prompt. The wearer used Steam's configured PIN-on-wake flow via
+the headset power button and confirmed Frametop returned normally. Logs showed
+unknown (including an observation-gap/suspend invalidation), then a real locked
+state and unlocked-after-observed-lock. The original KWrite, KWin, compositor and
+keyboard processes remained alive. This verifies passive recovery through that
+normal sleep/wake cycle, not cold boot, prolonged suspend or all failure cases.
 
 ## Intended boundary
 

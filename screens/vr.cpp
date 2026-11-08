@@ -2192,10 +2192,13 @@ void UpdateDrag(Screen &s, int index) {
 // A carry_toggle carry goes along the ray (carryDist), or with Ctrl or Alt held moves its plane or
 // its centre. The same step a notch whatever is held (DEE-328's audit, 2026-11-01: no carry-only
 // Ctrl and Alt wheel bindings; the wheel pushes and pulls as on a title bar, DEE-246).
-// The rest of the scroll that tore a window off or pulled one off a PC's display (TearOff, PullOff)
-// doesn't pull the new panel on in: one spin of a wheel brought it 0.3 m from the eyes, over the hands
-// on the keyboard holding Super, which then poked and pinched it (Daenon, 2026-11-07). Pulls stay
-// hushed until the wheel rests kHushGapMs, at most kHushMaxMs after the tear; pushes away aren't.
+// The rest of the scroll that tore a window off a screen (TearOff) doesn't pull the new panel on in:
+// one spin of a wheel brought it 0.3 m from the eyes, over the hands on the keyboard holding Super,
+// which then poked and pinched it (Daenon, 2026-11-07). Pulls stay hushed until the wheel rests
+// kHushGapMs, at most kHushMaxMs after the tear; pushes away aren't. Not after a pull off a PC's
+// display (PullOff): there the rest of the scroll sets how far off it comes (user, 2026-11-07: "We
+// still need the ability to choose the depth at which we're pulling the apps off the display by
+// scrolling more or less").
 int64_t g_hushUntil = -1, g_hushEnd = -1;
 constexpr int64_t kHushFirstMs = 400, kHushGapMs = 250, kHushMaxMs = 1500;
 void HushPulls() {
@@ -2720,6 +2723,16 @@ void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handl
     if (g_press.buttons && dev == g_press.device) ReleaseAway(LinuxButton(vrButton), handle, data);
 }
 
+// The panel the held press carries (a window torn off a screen or pulled off a PC's display, or one moved
+// with the modifier). The wheel pushes or pulls that one wherever the cursor is: its depth is held
+// ("press carries"), so it's often on the screen behind (user, 2026-11-07: pulled off, "I can no longer
+// scroll to move it further off the display so it immediately hooks back in").
+Screen *CarriedByPress() {
+    for (auto &[i, s] : g_screens)
+        if (s.drag == Drag::Move && s.dragDevice == g_press.device) return &s;
+    return nullptr;
+}
+
 // Tearing a window off its screen (user, 2026-10-30): moving it by its title bar on a screen (a
 // real KWin move, which KWin's script reports: "moving"), a pull on the wheel floats it, and the laser
 // carries it on from there. KWin gets the release at the tear, which ends its move; the button stays held
@@ -2830,7 +2843,6 @@ bool PullOff(Screen &s, int index, double notches, void (*handle)(const struct f
         handle(&e, data);
     }
     g_press.torn = true;
-    HushPulls();
     g_pull = {index, -1, g_press.device, NowMs() + kPullMs, 0.5, 0.5, ++g_pullSeq, g_press.serial};
     const double u = std::clamp(g_press.x / s.width, 0.0, 1.0), v = std::clamp(g_press.y / s.height, 0.0, 1.0);
     std::printf("screen %d: pulling the window at %.2f,%.2f off it\n", index + 1, u, v);
@@ -6308,7 +6320,7 @@ bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void 
     Screen &s = it->second;
     if (s.titleCarry && s.drag == Drag::Move) return Push(s, notches), true;
     if (g_press.torn) {
-        if (s.drag == Drag::Move) Push(s, notches);
+        if (Screen *c = CarriedByPress()) Push(*c, notches);
         return true;
     }
     if (s.drag != Drag::None) return false;
@@ -6782,7 +6794,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     // (user, 2026-10-30); KWin, moving the window, gets none
                     if (s.titleCarry && s.drag == Drag::Move) return Push(s, ev.data.scroll.ydelta);
                     if (g_press.torn) {  // a torn-off window: carried, as by its title bar; not floating yet, none
-                        if (s.drag == Drag::Move) Push(s, ev.data.scroll.ydelta);
+                        if (Screen *c = CarriedByPress()) Push(*c, ev.data.scroll.ydelta);
                         return;
                     }
                     // a pull on a window KWin moves on its screen tears it off (TearOff)

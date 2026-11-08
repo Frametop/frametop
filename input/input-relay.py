@@ -2105,8 +2105,16 @@ class Relay:
             return
         if cmd == "notap" and len(words) == 1:
             # From ft-screens (no reply): a laser clicked with a modifier held (Super+drag, say).
-            # The relay never sees laser clicks, so the modifier's release isn't a tap.
+            # The relay never sees laser clicks, so the modifier's release isn't a tap. Nor is it
+            # on the desktop, where KWin may not have had the click either (ft-screens carried the
+            # window): with Meta held there, it gets an F24 press in between, as for a
+            # combination, so letting go of Meta doesn't open Plasma's launcher. Not with another
+            # key it holds (Shift): that already stops it, and a terminal would type F24.
             self.held.tap = None
+            if self.held.meta - self.held.meta_hidden and not any(
+                    c < BTN_MISC and c not in self.held.meta for c in self.held.desktop):
+                self.to_screens(KEY_F24, 1)
+                self.to_screens(KEY_F24, 0)
             return
         if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
             self.vr_button(words[1], int(words[2]), now)

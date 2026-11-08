@@ -43,6 +43,7 @@ struct Cmd {
     int ms = 0;                           // hold
     int k0 = 0;                           // sub
     int on = 0;                           // minimized
+    int seq = 0;                          // pulled
     int gx = 0, gy = 0;                   // torn
     char mod[16] = {}, b1[16] = {}, b2[16] = {}, b3[16] = {};  // windowdrag
     double da = 0, db = 0;                // carryturn
@@ -137,7 +138,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "carry %d", &c.n) == 1) return Carry;
     if (std::strcmp(cmd, "up") == 0) return Up;
     if (std::sscanf(cmd, "windowdrag %15s %15s %15s %15s", c.mod, c.b1, c.b2, c.b3) == 4) return WindowDrag;
-    if (std::sscanf(cmd, "pulled %d %lf %lf", &c.n, &c.x, &c.y) == 3) return Pulled;
+    if (std::sscanf(cmd, "pulled %d %lf %lf %d", &c.n, &c.x, &c.y, &c.seq) >= 3) return Pulled;   // (no SEQ: 0, refused)
     if (!std::strncmp(cmd, "spin ", 5)) return Spin;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;
     if (std::strcmp(cmd, "debug") == 0) return Debug;

@@ -133,8 +133,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      window panel N (a screen number) goes back onto its PC's
                                      display M, at U, V of the way across and down it, held at
                                      FX, FY of the window (0 to 1; ft-screens, window drag)
-  ft-layout window pull N U V        the window at U, V of PC display N becomes a panel, and
-                                     ft-screens is told ("pulled"): its laser carries it on
+  ft-layout window pull N U V [SEQ]  the window at U, V of PC display N becomes a panel, and
+                                     with SEQ (ft-screens' number for the pull) ft-screens is
+                                     told ("pulled N FX FY SEQ"): its laser carries it on
   ft-layout streams start|stop       streams only: the connected remote displays without the
                                      desktop (ft-screens with no KWin or Plasma); stop ends
                                      only that, never a running desktop
@@ -1596,7 +1597,13 @@ def window_drop(layout, args):
 
 def window_pull(layout, args):
     """Window drag (DEE-345): the window under a point of a PC's display, as a panel; ft-screens
-    hears where it was held, so the laser that pulled it carries it on."""
+    hears where it was held (with SEQ, its number for the pull), so the laser that pulled it
+    carries it on."""
+    seq = None
+    if len(args) == 4:
+        if not re.fullmatch(r"[1-9][0-9]{0,9}", args[3]):
+            raise RuntimeError(f"window pull: SEQ is a number from 1, not {args[3]!r}")
+        seq = int(args[3])
     host, d = numbered(layout, args[0], "pull")
     u, v = fractions(args[1:3], "pull")
     if not str(d.get("app", "")).startswith("display:"):
@@ -1607,14 +1614,24 @@ def window_pull(layout, args):
     if not re.fullmatch(r"0x[0-9a-fA-F]{1,16}", address):
         raise RuntimeError(f"window pull: the PC named no window ({address!r})")
     window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
-    size = window_size({}, (min(int(hit.get("width") or WINDOW_SIZE[0]), WINDOW_MAX[0]),
-                            min(int(hit.get("height") or WINDOW_SIZE[1]), WINDOW_MAX[1])))
+
+    def number(value, default, low, high):   # (a PC's odd answer: its default, not a traceback)
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            return default
+        return min(max(x, low), high) if math.isfinite(x) else default
+
+    size = window_size({}, (int(number(hit.get("width") or None, WINDOW_SIZE[0], 1, WINDOW_MAX[0])),
+                            int(number(hit.get("height") or None, WINDOW_SIZE[1], 1, WINDOW_MAX[1]))))
     panel = window_add(layout, host, port, address, str(hit.get("title") or hit.get("class") or ""), size)
     grab = hit.get("grab") if isinstance(hit.get("grab"), list) and len(hit["grab"]) == 2 else [0.5, 0.5]
-    fx, fy = (min(max(float(g), 0.0), 1.0) for g in grab)
+    fx, fy = (number(g, 0.5, 0.0, 1.0) for g in grab)
     n = next(k for k, _, e in remote_displays(layout) if e is panel)
     try:
-        screens_socket().ask(f"pulled {n} {fx:.4f} {fy:.4f}")
+        # SEQ: ft-screens' number for this pull, so an answer to an earlier one isn't taken for it
+        if seq is not None:
+            screens_socket().ask(f"pulled {n} {fx:.4f} {fy:.4f} {seq}")
     except (NoAnswer, RuntimeError) as e:
         log(f"pulled {panel['id']}; ft-screens didn't take it ({e}): it opened in front of you")
     log(f"pulled {address} off {d['app'][8:]} as {panel['id']} (screen {n})")
@@ -1692,7 +1709,7 @@ def window_command(args):
     if what == "drop" and len(args) == 7:
         window_drop(load_layout(), args[1:])
         return
-    if what == "pull" and len(args) == 4:
+    if what == "pull" and len(args) in (4, 5):
         window_pull(load_layout(), args[1:])
         return
     if what == "close" and len(args) == 2:

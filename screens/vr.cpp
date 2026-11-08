@@ -1737,6 +1737,7 @@ void EndDrag(Screen &s) {
     if (s.drag == Drag::Resize && s.floating) SendStretch(s);
     s.drag = Drag::None;
     s.dragDevice = kNone;
+    s.pushedMs = -1;
     s.dragFacing = s.toggleCarry = false;
     s.carryMode = 0;
     s.dockOn = -1;
@@ -2379,8 +2380,10 @@ struct Press {
     long upAt = -1;                           // the pointer helper saw left come up: release it at this tick
     int64_t idleSince = -1;                   // the pressing controller has held nothing since (ms, ReleaseStuck)
     bool torn = false;                        // KWin has had the release: a window torn off its screen (TearOff)
+    uint64_t serial = 0;                      // counts presses (a first button down): which press this is
 };
 Press g_press;
+uint64_t g_pressSerial = 0;
 // A window on a screen KWin moves by its title bar (KWin's script: "moving"), for TearOff. One press
 // moves one window: it's forgotten when the press starts and ends.
 struct KwinMove {
@@ -2396,7 +2399,8 @@ uint32_t ButtonBit(uint32_t linuxButton) { return 1u << (linuxButton - BTN_LEFT)
 
 void PressDown(vr::TrackedDeviceIndex_t dev, uint32_t button, int screen, double x, double y) {
     if (!g_press.buttons)
-        g_press.device = dev, g_press.origin = screen, g_press.remoteOn = screen, g_press.torn = false, g_kwinMove.window.clear();
+        g_press.device = dev, g_press.origin = screen, g_press.remoteOn = screen, g_press.torn = false, g_kwinMove.window.clear(),
+        g_press.serial = ++g_pressSerial;
     g_press.buttons |= ButtonBit(button);
     g_press.screen = screen, g_press.x = x, g_press.y = y;
 }
@@ -2780,8 +2784,11 @@ struct Pull {
     vr::TrackedDeviceIndex_t device = kNone;
     int64_t until = -1;                        // ms
     double fx = 0.5, fy = 0.5;                 // where the window was held, 0 to 1 of it
+    int seq = 0;                               // this pull's number: ft-layout's "pulled" names it
+    uint64_t press = 0;                        // the press that pulled it (g_press.serial)
 };
 Pull g_pull;
+int g_pullSeq = 0;
 constexpr int64_t kPullMs = 10000;   // (pairing a stream client can take seconds)
 
 bool PullOff(Screen &s, int index, void (*handle)(const struct ft_event *, void *), void *data) {
@@ -2800,12 +2807,12 @@ bool PullOff(Screen &s, int index, void (*handle)(const struct ft_event *, void 
         handle(&e, data);
     }
     g_press.torn = true;
-    g_pull = {index, -1, g_press.device, NowMs() + kPullMs, 0.5, 0.5};
+    g_pull = {index, -1, g_press.device, NowMs() + kPullMs, 0.5, 0.5, ++g_pullSeq, g_press.serial};
     const double u = std::clamp(g_press.x / s.width, 0.0, 1.0), v = std::clamp(g_press.y / s.height, 0.0, 1.0);
     std::printf("screen %d: pulling the window at %.2f,%.2f off it\n", index + 1, u, v);
     char a[2][16];
     std::snprintf(a[0], sizeof a[0], "%.4f", u), std::snprintf(a[1], sizeof a[1], "%.4f", v);
-    RunLayout({"window", "pull", std::to_string(index + 1), a[0], a[1]});
+    RunLayout({"window", "pull", std::to_string(index + 1), a[0], a[1], std::to_string(g_pull.seq)});
     return true;
 }
 
@@ -2822,7 +2829,14 @@ void PlacePulled() {
     const auto it = g_screens.find(g_pull.to), from = g_screens.find(g_pull.from);
     if (it == g_screens.end() || it->second.width <= 0 || it->second.metres <= 0) return;   // (not made, or no picture yet)
     Screen &s = it->second;
-    const bool held = g_press.torn && g_press.buttons && g_press.device == g_pull.device;
+    const char *app = s.remote ? ft_remote_app(g_pull.to) : nullptr;
+    if (!app || std::strncmp(app, "window:", 7)) {
+        std::printf("screen %d: answered as pulled, but it isn't a PC window panel: left alone\n", g_pull.to + 1);
+        g_pull = Pull{};
+        return;
+    }
+    // (still the press that pulled it: one let go and another started meanwhile doesn't carry it)
+    const bool held = g_press.torn && g_press.buttons && g_press.device == g_pull.device && g_press.serial == g_pull.press;
     Mat p, l;
     double u, v;
     if (from != g_screens.end() && ScreenPose(from->second, &p) && LaserPose(g_pull.device, &l) &&
@@ -6712,6 +6726,12 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     if (!e.pressed && s.remote && (g_press.remoteOn != index || !OnBuffer(s, e.x, e.y)) &&
                         g_press.screen >= 0)
                         e.screen = g_press.screen, e.x = g_press.x, e.y = g_press.y;
+                    if (e.pressed && g_press.torn && g_press.buttons && ev.trackedDeviceIndex == g_press.device) {
+                        // another button while a carried window's press goes nowhere: so does this one (its release
+                        // is swallowed above, so a press sent on would stay held on the PC or in KWin)
+                        g_press.buttons |= ButtonBit(e.button);
+                        return;
+                    }
                     if (e.pressed) {
                         // A laser clicking with a modifier held: its release isn't a tap (the relay sees no laser clicks)
                         if (g_meta || g_alt || g_ctrl || g_shift) SendRelay("notap");
@@ -7563,9 +7583,11 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         return;
     case vrcmd::Pulled:
         // ft-layout window pull: the window pulled off panel g_pull.from is on panel n, held at x, y of it
-        if (g_pull.from < 0) return (void)std::snprintf(reply, size, "ok no pull waits (let go, or too late)");
-        if (!(parsed.x >= 0 && parsed.x <= 1 && parsed.y >= 0 && parsed.y <= 1) || n < 1)
-            return (void)std::snprintf(reply, size, "error pulled N FX FY (0 to 1)");
+        if (!(parsed.x >= 0 && parsed.x <= 1 && parsed.y >= 0 && parsed.y <= 1) || n < 1 || parsed.seq < 1)
+            return (void)std::snprintf(reply, size, "error pulled N FX FY SEQ (0 to 1, SEQ the pull's)");
+        // (an answer to an earlier pull, the user since having pulled another, doesn't take this one's place)
+        if (g_pull.from < 0 || parsed.seq != g_pull.seq)
+            return (void)std::snprintf(reply, size, "ok no pull waits for that (let go, too late, or another since)");
         g_pull.to = n - 1, g_pull.fx = parsed.x, g_pull.fy = parsed.y;
         std::snprintf(reply, size, "ok");
         return;
@@ -7653,8 +7675,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 // Window drag (windowdrag.h):
 //   windowdrag <mod> <left> <right> <middle>   Frametop Settings: the modifier (meta|alt|off) and what each
 //                             button does with it held (move|resize|none)
-//   pulled <screen> <fx> <fy>   ft-layout window pull: the window pulled off a PC's display is on panel
-//                             <screen>, held at fx, fy of it (0 to 1): the laser that pulled it carries it on
+//   pulled <screen> <fx> <fy> <seq>   ft-layout window pull <...> <seq>: the window pulled off a PC's display
+//                             is on panel <screen>, held at fx, fy of it (0 to 1): the laser that pulled it carries it on
 // (size <screen> <w> <h> and key <code> <value> are handled in compositor.c.) Screens are
 // numbered from 1 here, like everywhere the user sees them. "screens" and "all" leave out
 // floating windows.

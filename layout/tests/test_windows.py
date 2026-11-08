@@ -274,13 +274,34 @@ class Windows(unittest.TestCase):
         self.m.screens_socket = Screens
         self.m.log = lambda *_: None
         number = 101  # oma7-dp-2, the first remote screen
-        out = self.run_window("pull", str(number), "0.4", "0.6")
+        out = self.run_window("pull", str(number), "0.4", "0.6", "7")
         at = [c for c in self.api if c[3] == "/api/frametop/windows/at"]
         self.assertEqual(at[0][1:], (48989, "POST", "/api/frametop/windows/at", {"monitor": "DP-2", "x": 0.4, "y": 0.6}))
         d = self.displays()[-1]
         self.assertEqual((d["app"], d["size"], d["label"]), ("window:0x55aa20", [1920, 1200], "GIMP"))  # capped
         self.assertEqual(out.split()[-1], d["id"])
-        self.assertEqual(told[-1], f"pulled {d['screen']} 0.2500 0.7500")
+        self.assertEqual(told[-1], f"pulled {d['screen']} 0.2500 0.7500 7")
+
+    def test_pull_takes_an_odd_answer_as_the_defaults(self):
+        self.answers["/api/frametop/windows/at"] = (200, {"address": "0x55aa30", "class": "x", "width": "wide",
+                                                          "height": None, "grab": ["a", 2], "status": True})
+        told, m = [], self.m
+
+        class Screens:  # as above: takes "pulled" only
+            def ask(self, text, timeout=10.0):
+                told.append(text)
+                if not text.startswith("pulled "):
+                    raise m.NoAnswer("no desktop here")
+                return "ok"
+
+        self.m.screens_socket = Screens
+        self.m.log = lambda *_: None
+        self.run_window("pull", "101", "0.5", "0.5", "3")
+        d = self.displays()[-1]
+        self.assertEqual(d["app"], "window:0x55aa30")
+        self.assertTrue(told[-1].startswith("pulled ") and told[-1].endswith(" 0.5000 1.0000 3"), told[-1])
+        with self.assertRaisesRegex(RuntimeError, "SEQ is a number"):
+            self.run_window("pull", "101", "0.5", "0.5", "-1")
 
     def test_pull_needs_a_window_there(self):
         self.answers["/api/frametop/windows/at"] = (400, {"error": "no window there"})

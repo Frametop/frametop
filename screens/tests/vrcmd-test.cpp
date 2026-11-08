@@ -40,7 +40,7 @@ int main() {
         {"sub 5 1 10 20 300 200", Sub}, {"sub 5 1 off", Sub}, {"minimized 5 1", Minimized},
         {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry toggle", CarryToggle}, {"carry take 5", CarryTake},
         {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up},
-        {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02", Pulled}, {"spin 30", Spin},
+        {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02 7", Pulled}, {"spin 30", Spin},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;
@@ -54,6 +54,9 @@ int main() {
           Parse("place 2 0.5 1.2 -2 10 -5 3", c) == Place && c.n == 2 && near(c.x, 0.5) && near(c.y, 1.2) &&
               near(c.z, -2) && near(c.yaw, 10) && near(c.pitch, -5) && near(c.roll, 3));
     c = {};
+    { Cmd p; check("pulled: screen, where held and the pull's number", Parse("pulled 103 0.25 0.75 7", p) == Pulled && p.n == 103 &&
+          near(p.x, 0.25) && near(p.y, 0.75) && p.seq == 7); }
+    { Cmd p; check("pulled without a number: seq 0 (refused)", Parse("pulled 103 0.25 0.75", p) == Pulled && p.seq == 0); }
     check("pin: two words scan 2", Parse("pin 1 left", c) == Pin && c.got == 2 && !std::strcmp(c.word, "1") &&
                                        !std::strcmp(c.hand, "left"));
     c = {};

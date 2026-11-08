@@ -13,6 +13,7 @@ FLOAT_DOCK_DISTANCE=0.10   # floating windows: carried this near a screen (m), o
 GRAB_BAR_PADDING_X=2      # drag bars: centimetres added to EACH left/right edge, 0..50; Display Settings > Visibility & pins, applies live
 GRAB_BAR_PADDING_Y=2      # centimetres added to EACH top/bottom edge, 0..50; 0 is the original target, no multipliers
 GRAB_BAR_PREVIEW=0         # show the draggable rectangle whenever its bar is visible
+GRAB_BAR_HAPTICS=1         # short hover-entry buzz, only the physical controller whose laser enters the move bar
 GRAB_BAR_PREVIEW_ALWAYS=0  # keep bars and their zones visible while their panels are visible; other buttons still fade (never through pause or hidden panels)
 GRAB_BAR_PREVIEW_COLOR='#66bbff' # zone fill, #RRGGBB (quoted for the config grammar)
 GRAB_BAR_PREVIEW_OPACITY=0.12    # fill opacity, 0..1 (also follows the bar's fade)

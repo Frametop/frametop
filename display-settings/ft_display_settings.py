@@ -640,6 +640,14 @@ class Backend(QObject):
         self._setBarNumber("GRAB_BAR_PADDING_X", cm, 2.0, 0.0, 50.0)
 
     @Property(bool, notify=changed)
+    def grabBarHaptics(self):
+        return ft_layout.read_conf().get("GRAB_BAR_HAPTICS", "1") == "1"
+
+    @Slot(bool)
+    def setGrabBarHaptics(self, on):
+        self._setBar("GRAB_BAR_HAPTICS", "1" if on else "0")
+
+    @Property(bool, notify=changed)
     def grabBarPreview(self):
         return ft_layout.read_conf().get("GRAB_BAR_PREVIEW", "0") == "1"
 

@@ -1108,6 +1108,11 @@ Kirigami.ApplicationWindow {
                         onToggled: backend.setGrabBarPreview(checked)
                     }
                     Controls.CheckBox {
+                        text: "Hover haptics (move bar, controller lasers only)"
+                        checked: backend.grabBarHaptics
+                        onToggled: backend.setGrabBarHaptics(checked)
+                    }
+                    Controls.CheckBox {
                         text: "Keep drag zones visible while their windows are visible"
                         enabled: backend.grabBarPreview
                         checked: backend.grabBarPreviewAlways

@@ -336,6 +336,7 @@ struct Screen {
     uint64_t barPaintedVersion = 0;
     bool barPaintedLit = false;
     barhit::Raster barPaintedRaster{};
+    hoverhaptics::Gate barBuzz;
     bool pinLit = false;          // the pin button shows it pinned to the head (LightPin)
     const void *key = nullptr;    // the client buffer on it now, and its dmabuf (for cutouts)
     ft_dmabuf buf{};
@@ -1450,6 +1451,7 @@ void UpdateControls() {
     g_laserCorner = g_laserCornerNext, g_laserCornerNext = {};   // (last tick's: UpdateCorner fills the next)
     for (auto &[i, s] : g_screens) {
         Mat p;
+        if (!s.visible) s.barBuzz.Leave();
         if (s.visible && ScreenPose(s, &p)) {
             // Points along the bar and at each button and the tab; a laser passing within
             // `reach` of one of them is close.
@@ -5533,6 +5535,7 @@ bool ft_vr_init(void) {
     num("GRAB_BAR_PADDING_Y", g_barPaddingY, 0, barhit::kMaxPaddingCm);
     g_barPreview.enabled = handcut::Setting("GRAB_BAR_PREVIEW", "0") == "1";
     g_barPreview.always = handcut::Setting("GRAB_BAR_PREVIEW_ALWAYS", "0") == "1";
+    g_barPreview.haptics = handcut::Setting("GRAB_BAR_HAPTICS", "1") == "1";
     num("GRAB_BAR_PREVIEW_OPACITY", g_barPreview.opacity, 0, 1);
     num("GRAB_BAR_OUTLINE_OPACITY", g_barPreview.outlineOpacity, 0, 1);
     num("GRAB_BAR_OUTLINE_WIDTH", g_barPreview.outlineWidth, 0, 8);
@@ -6600,6 +6603,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         };
         // The bar: move (and push/pull with the wheel while moving).
         while (vr::VROverlay()->PollNextOverlayEvent(s.bar, &ev, sizeof ev)) {
+            if (ev.eventType == vr::VREvent_FocusLeave) s.barBuzz.Leave(int(ev.trackedDeviceIndex));
+            if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_MouseButtonDown) {
+                if (s.barBuzz.Enter(int(ev.trackedDeviceIndex), IsHandController(ev.trackedDeviceIndex), g_barPreview.haptics) && s.drag == Drag::None)
+                    vr::VRSystem()->TriggerHapticPulse(ev.trackedDeviceIndex, 0, 1500);
+            }
             hover(0);
             if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
                 continue;
@@ -7092,6 +7100,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
                 if (setting && value >= lo && value <= hi) *setting = value, valid = true;
                 else if ((value == 0 || value == 1) && name == "GRAB_BAR_PREVIEW") g_barPreview.enabled = value != 0, valid = true;
                 else if ((value == 0 || value == 1) && name == "GRAB_BAR_PREVIEW_ALWAYS") g_barPreview.always = value != 0, valid = true;
+                else if ((value == 0 || value == 1) && name == "GRAB_BAR_HAPTICS") g_barPreview.haptics = value != 0, valid = true;
             }
             if (!valid) return (void)std::snprintf(reply, size, "error invalid drag-bar setting");
             ++g_barVersion;

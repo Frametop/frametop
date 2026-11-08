@@ -42,6 +42,15 @@ class GrabBar(unittest.TestCase):
         self.assertIn("# keep this", text)
         self.assertIn("# keep this too", text)
 
+    def test_move_bar_hover_haptics(self):
+        self.assertTrue(self.b.grabBarHaptics)
+        self.b.setGrabBarHaptics(False)
+        self.assertFalse(self.b.grabBarHaptics)
+        self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_HAPTICS 0")
+        self.b.setGrabBarHaptics(True)
+        self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_HAPTICS 1")
+        self.assertIn("backend.setGrabBarHaptics(checked)", (Path(fds.HERE) / "main.qml").read_text())
+
     def test_bad_persisted_values_use_default(self):
         for value in ("nan", "inf", "junk", "-1", "51"):
             Path(fds.CONF_PATH).write_text(f"GRAB_BAR_PADDING_Y={value}\n")

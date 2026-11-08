@@ -66,5 +66,15 @@ int main() {
     check("outline can be disabled", pixel(0, 0)[0] == 0x11 && pixel(0, 0)[3] == 51);
     im = barhit::Render(barhit::Pixels(0.006, 50, 50), style, pill);
     check("maximum canvas allocation bounded", im.width <= 1024 && im.height <= 1024 && im.pixels.size() <= 1024 * 1024 * 4);
+    check("move-bar haptics default on", barhit::Style{}.haptics);
+    hoverhaptics::Gate buzz;
+    check("one pulse for the entering right controller", buzz.Enter(2, true, true) && !buzz.Enter(2, true, true));
+    check("only the new source gets the next pulse", buzz.Enter(1, true, true) && buzz.device == 1);
+    buzz.Leave(2);
+    check("other controller's leave doesn't retrigger", !buzz.Enter(1, true, true));
+    buzz.Leave(1);
+    check("physical reentry buzzes", buzz.Enter(1, true, true));
+    check("virtual pointer never buzzes", !buzz.Enter(3, false, true));
+    check("checkbox disables buzzing", !buzz.Enter(2, true, false));
     return failed ? 1 : 0;
 }

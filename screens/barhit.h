@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include "hoverhaptics.h"
 
 namespace barhit {
 constexpr double kDefaultPaddingCm = 2, kMaxPaddingCm = 50;
@@ -37,6 +38,7 @@ inline Raster Pixels(double width, double xCm, double yCm) {
 
 struct Style {
     bool enabled = false, always = false;
+    bool haptics = true;
     uint32_t color = 0x66bbff, outlineColor = 0x99ddff;
     double opacity = 0.12, outlineOpacity = 0.7, outlineWidth = 1;
 };

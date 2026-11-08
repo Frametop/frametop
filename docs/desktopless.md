@@ -21,18 +21,23 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 
 - `ft-layout desktopless on` keeps which screens and PC displays were hidden already (`desktopless.before`). It then hides every screen and each Linux PC's display panels. It asks ft-floatd to `float all` and opens each PC window with `ft-layout window`'s window panels. Last, it fans out the new panels and starts the watcher.
 - A hidden display panel stays connected. Its stream holds the PC's keyboard and mouse for the Frame, since window streams don't take the input lock.
-- `off` keeps where each PC window panel is, closes them all (each PC puts its windows back), shows what wasn't hidden before, and docks every floating window (`dock all`). Windows whose screen is still hidden dock onto the first screen that shows.
+- `off` keeps where each PC window panel is, closes them all (each PC puts its windows back), shows what wasn't hidden before, and docks the floating windows (`dock desktopless`). Windows that floated before the mode came on stay floating (ft-floatd's `float keep` remembers them). Windows whose screen is still hidden dock onto the first screen that shows.
 - The PC side is the Frametop windows instance (oma7's fork, `hyprland_windows.cpp`). Its window list says which workspace shows, the focus order, whether a window floats, where it sits, and its desktop app. A window that comes back without being dropped on a monitor goes to its old place. A floating one gets its old position and size. A tiled one splits in where its middle was, when its workspace shows.
 
 ## Profiles and desktop start
 
 - A profile keeps whether desktopless mode was on when it was saved. With it on, the profile also keeps where each PC app's window panels were (`profiles[NAME].desktopless.places`, by PC and app). The Frame's apps are kept as a profile always keeps them ([profiles.md](profiles.md)).
 - Opening a desktopless profile hides the desktops before it arranges anything, so the screens don't show first. After its Frame apps open, every window comes out. Then each PC app it had that isn't open on its PC starts there (`/open`), as a window panel at its place. Only apps with a desktop file can start that way. A window the profile knows by its class alone comes out only if it's open.
-- Opening a profile saved with the mode off closes the PC window panels (the windows go back), shows the profile's screens, and docks the floating windows.
+- Opening a profile saved with the mode off, while it's on, closes the PC window panels (the windows go back), shows the profile's screens, and docks the windows the mode floated. With the mode off already, the profile's floating windows stay as they are.
+- A profile saved while the mode is on keeps the screens and displays that were hidden before the mode, not the ones the mode hides.
 - The desktop starts in the mode it stopped in. With the mode on, its window panels connect again, every Frame window floats once ft-floatd is up, and the watcher starts.
 - A PC that disconnects (it went to sleep, or the Frame left) puts its windows back by itself a minute later, each at its old place. When it connects again, the panels take the windows that are still there.
 
 ## Limits
+
+- One change at a time: on, off, a profile and each pass of the watcher take turns (a lock in `$XDG_RUNTIME_DIR`). Pressing Meta+Shift+D twice turns the mode on, then off.
+- Frame windows float only while ft-floatd has spare outputs. Past that, or with ft-floatd not answering, the rest stay on their hidden screens until the mode goes off (the log says so).
+- ft-floatd keeps which windows floated before the mode only while it runs. After a desktop restart in the mode, off docks every floating window.
 
 - Only Linux PCs with a Frametop windows instance (`windows=PORT`, [remote-displays.md](remote-displays.md)) give their windows up. A Windows PC's displays stay as they are (DEE-348).
 - A PC app's place is kept at `off` and when a profile is saved. A panel moved and then closed while the mode is on goes back to the place it had before next time.

@@ -69,6 +69,7 @@ def new_daemon():
     nf = floatd.Float("w3", types.SimpleNamespace(index=4), {"output": "WL-1"})
     nf.frame, nf.scale = None, 1.0
     d.floats = {"w2": f, "w3": nf}
+    d.kept = {"w3"}   # (floating before desktopless mode came on: "dock desktopless" leaves it)
     d.by_panel = lambda n: {3: f, 4: nf}.get(n)
     d.slots = [types.SimpleNamespace(output="FT-0", window=types.SimpleNamespace(id="w2")),
                types.SimpleNamespace(output="FT-1", window=None)]
@@ -103,7 +104,7 @@ CASES = [
     "resize 3 100 100", "resize 4 1000 600", "resize 3 1000", "resize 3 a b", "dock w1", "dock w2", "dock w9",
     "float w1", "float w9", "close w1", "close w9", "float w1 extra",
     "float pointer x", "dock all x", "close", "resize w1", "resize w1 1000 600", "scale", "density", "resize",
-    "float active x", "dock active x", "float all", "float all x", "tear", "dockat", "front 3 4", "profile  ", "dashlaunch  ",
+    "float active x", "dock active x", "float all", "float all x", "float keep", "dock desktopless", "dock desktopless x", "tear", "dockat", "front 3 4", "profile  ", "dashlaunch  ",
 ]
 
 

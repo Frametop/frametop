@@ -2322,7 +2322,7 @@ def main(argv):
                 return status
             use_named(layout, name)
             use_hidden(layout, name)
-            ft_desktopless.use_profile(layout, name)
+            mode = ft_desktopless.use_profile(layout, name)
             open_remotes(layout, name)
             save_on_the_way(layout)
             log(f"starting in profile {name!r}")
@@ -2333,6 +2333,7 @@ def main(argv):
                 except RuntimeError as e:   # (no head pose with the headset off): the scales still go
                     log(f"not arranged now: {e}")
                 if streams_only():
+                    ft_desktopless.resume(name, mode=mode)
                     return 0  # no KWin to scale, no Plasma to open apps in
                 for _ in range(30):  # Plasma may still be starting
                     try:
@@ -2344,7 +2345,7 @@ def main(argv):
                 else:
                     log(f"kwin: {last}")
             open_apps(name, wait=90)  # ft-floatd starts with Plasma
-            ft_desktopless.resume(name, wait=90)  # after its apps: they float too
+            ft_desktopless.resume(name, wait=90, mode=mode)  # after its apps: they float too
         elif cmd == "reset":
             # Keep a separate lock through the reset so repeated clicks cannot queue jumps.
             with open(LOCK_PATH + ".reset-delay", "w") as reset_lock:
@@ -2454,7 +2455,7 @@ def main(argv):
                     import ft_desktopless
                     use_named(layout, argv[2])
                     use_hidden(layout, argv[2])
-                    ft_desktopless.use_profile(layout, argv[2])
+                    mode = ft_desktopless.use_profile(layout, argv[2])
                     open_remotes(layout, argv[2])
                     save_layout(layout)
                     log(f"using layout {argv[2]!r}")
@@ -2469,7 +2470,7 @@ def main(argv):
                     else:
                         kwin_follow()
                     open_apps(argv[2])  # floating windows go relative to the screens, wherever they are
-                    ft_desktopless.resume(argv[2], wait=10)
+                    ft_desktopless.resume(argv[2], wait=10, mode=mode)
                 else:
                     changes = apply_scales()
                     log("kwin: " + (" ".join(changes) if changes else "unchanged"))
@@ -2483,4 +2484,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    sys.modules.setdefault("ft_layout", sys.modules[__name__])  # (ft_desktopless: this module, not a second copy)
     sys.exit(main(sys.argv))

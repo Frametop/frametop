@@ -293,6 +293,38 @@ class Windows(unittest.TestCase):
         self.assertEqual(len(self.api), calls)  # nothing asked of the PC
         self.assertEqual(len([d for d in self.displays() if d.get("window")]), 1)
 
+    def test_resize_starts_the_stream_over_at_that_size(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        told = []
+
+        class Screens:
+            def ask(self, text, timeout=10.0):
+                told.append(text)
+                return "ok"
+
+        self.m.screens_socket = Screens
+        said = []
+        self.m.log = said.append
+        d = next(d for d in self.displays() if d.get("window"))
+        self.run_window("resize", str(d["screen"]), "1601x903", "1.25")
+        d = next(d for d in self.displays() if d.get("window"))
+        self.assertEqual((d["size"], d["metres"]), ([1600, 902], 1.25))   # (even: hosts' encoders)
+        self.assertTrue(told[-1].startswith(f"remote {d['screen']} start {d['client']} 192.0.2.30:48989 window:0x55aa10 1600x902 "),
+                        told[-1])
+        self.assertEqual(said, [f"resized {d['id']} to 1600x902, 1.25 m wide"])
+
+    def test_resize_keeps_to_the_limits(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        self.m.log = lambda *_: None
+        d = next(d for d in self.displays() if d.get("window"))
+        self.run_window("resize", str(d["screen"]), "9000x100", "2")   # (no desktop: saved for the next start)
+        self.assertEqual(next(e for e in self.displays() if e.get("window"))["size"], [3840, 240])
+        for size, metres, why in (("16x9x2", "1", "WxH"), ("1280x720", "40", "0.15 to 12"), ("1280x720", "nan", "0.15 to 12")):
+            with self.assertRaisesRegex(RuntimeError, why):
+                self.run_window("resize", str(d["screen"]), size, metres)
+        with self.assertRaisesRegex(RuntimeError, "isn't a window"):
+            self.run_window("resize", "101", "1280x720", "1")   # (oma7-dp-2: a whole display)
+
     def test_pull_opens_the_window_under_the_point(self):
         self.answers["/api/frametop/windows/at"] = (200, {"address": "0x55aa20", "class": "gimp", "title": "GIMP",
                                                           "width": 2000, "height": 1200, "grab": [0.25, 0.75], "status": True})

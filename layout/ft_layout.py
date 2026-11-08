@@ -136,6 +136,10 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout window pull N U V [SEQ]  the window at U, V of PC display N becomes a panel, and
                                      with SEQ (ft-screens' number for the pull) ft-screens is
                                      told ("pulled N FX FY SEQ"): its laser carries it on
+  ft-layout window resize N WxH METRES
+                                     window panel N's window gets WxH pixels and the panel
+                                     METRES wide: its stream starts over at that size (ft-screens,
+                                     a corner dragged)
   ft-layout streams start|stop       streams only: the connected remote displays without the
                                      desktop (ft-screens with no KWin or Plasma); stop ends
                                      only that, never a running desktop
@@ -1436,6 +1440,8 @@ WINDOW_SIZE = (1280, 800)  # a launched app's first size
 WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
 WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height
 WINDOW_PIXELS_PER_METRE = 1400
+WINDOW_RESIZE_MIN = (320, 240)    # a window panel resized by hand (the host's own floor)
+WINDOW_RESIZE_MAX = (3840, 2160)  # ... at most: the Frame's decoder, next to the other streams
 
 
 def window_host(layout, name):
@@ -1608,6 +1614,37 @@ def window_drop(layout, args):
             raise
 
 
+def window_resize(layout, args):
+    """A window panel's corner dragged (user, 2026-11-07: "resize and change aspect ratio"): the
+    window on the PC gets that many pixels, and the stream starts over at that size. ft-stream
+    asks for the window at the panel's size on every start, which resizes the host's output."""
+    host, d = numbered(layout, args[0], "resize")
+    if not d.get("window"):
+        raise RuntimeError(f"window resize: {d['id']} isn't a window")
+    if not re.fullmatch(r"[1-9][0-9]{0,4}x[1-9][0-9]{0,4}", args[1].lower()):
+        raise RuntimeError(f"window resize: the size is WxH, not {args[1]!r}")
+    try:
+        metres = float(args[2])
+    except ValueError:
+        metres = math.nan
+    if not (math.isfinite(metres) and 0.15 <= metres <= 12):
+        raise RuntimeError(f"window resize: the width is 0.15 to 12 metres, not {args[2]!r}")
+    w, h = (int(v) for v in args[1].lower().split("x"))
+    w = min(max(w, WINDOW_RESIZE_MIN[0]), WINDOW_RESIZE_MAX[0])
+    h = min(max(h, WINDOW_RESIZE_MIN[1]), WINDOW_RESIZE_MAX[1])
+    d["size"] = list(stream_size(w, h))
+    d["metres"] = round(metres, 4)
+    save_layout(layout)
+    n = int(args[0])
+    log(f"resized {d['id']} to {d['size'][0]}x{d['size'][1]}, {d['metres']} m wide")
+    if d.get("off"):
+        return  # disconnected: its next connection has the size
+    try:
+        start_remote(screens_socket(), n, host, d)   # (ft-screens starts its stream over: the size changed)
+    except RuntimeError as e:
+        log(f"saved; not applied now: {e}")
+
+
 def window_pull(layout, args):
     """Window drag (DEE-345): the window under a point of a PC's display, as a panel; ft-screens
     hears where it was held (with SEQ, its number for the pull), so the laser that pulled it
@@ -1725,6 +1762,9 @@ def window_command(args):
     if what == "pull" and len(args) in (4, 5):
         window_pull(load_layout(), args[1:])
         return
+    if what == "resize" and len(args) == 4:
+        window_resize(load_layout(), args[1:])
+        return
     if what == "close" and len(args) == 2:
         layout = load_layout()
         _, host, d = find_display(layout, args[1])
@@ -1733,7 +1773,7 @@ def window_command(args):
         window_close(layout, host, d)
         return
     raise RuntimeError("window list HOST | apps HOST | catalog HOST | open HOST ADDRESS [--size WxH] | "
-                       "launch HOST APP [--size WxH] | close ID | drop N M U V FX FY | pull N U V")
+                       "launch HOST APP [--size WxH] | close ID | drop N M U V FX FY | pull N U V [SEQ] | resize N WxH METRES")
 
 
 def apply(wait=0):

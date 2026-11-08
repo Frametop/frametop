@@ -389,6 +389,7 @@ struct Screen {
     // and the window gets them in one resize when it ends (user, 2026-10-27: "it doesn't actually update
     // the pixels ... until I release so we can have the animation be smooth"). Kept until the answer's
     // "float", or until the tick stretchUntil if none comes (kStretchAnswerTicks). 0: the crop's own size.
+    // A PC window's panel the same, its stream's size for the crop (ResizeWindowPanel).
     int stretchW = 0, stretchH = 0;
     long stretchUntil = 0;
     // "hold" from ft-floatd, while KWin changes the window (its scale, its size): until holdUntilMs the
@@ -415,7 +416,7 @@ struct Screen {
     int64_t handPointerMs = INT64_MIN / 2;  // a hand last moved the pointer on it (kHandPointerMs)
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
-        if (floating && stretchW > 0) return metres * stretchH / stretchW;
+        if (stretchW > 0) return metres * stretchH / stretchW;   // (a floating window or a PC window's panel)
         if (floating && cropW > 0) return metres * cropH / cropW;
         return width > 0 ? metres * height / width : metres * 9 / 16;
     }
@@ -1693,20 +1694,31 @@ void KeepCorner(Screen &s, double oldW, double oldH) {
     }
 }
 
-// A stretched panel's texels aren't square: its crop drawn at stretchW x stretchH.
+// The pixels a panel shows: a floating window's crop, or the whole buffer.
+int PictureW(const Screen &s) { return s.floating ? s.cropW : s.width; }
+int PictureH(const Screen &s) { return s.floating ? s.cropH : s.height; }
+
+// A stretched panel's texels aren't square: its picture drawn at stretchW x stretchH.
 void ApplyTexelAspect(const Screen &s) {
-    const bool on = s.stretchW > 0 && s.stretchH > 0 && s.cropW > 0 && s.cropH > 0;
-    vr::VROverlay()->SetOverlayTexelAspect(
-        s.overlay, on ? float(double(s.stretchW) * s.cropH / (double(s.cropW) * s.stretchH)) : 1.0f);
+    const int pw = PictureW(s), ph = PictureH(s);
+    const bool on = s.stretchW > 0 && s.stretchH > 0 && pw > 0 && ph > 0;
+    vr::VROverlay()->SetOverlayTexelAspect(s.overlay, on ? float(double(s.stretchW) * ph / (double(pw) * s.stretchH)) : 1.0f);
 }
 
-// A floating panel the size of w x h pixels at its density, its picture stretched to fit, while a resize
-// goes on (no new pixels until it ends: SendStretch). 0, 0: back to its crop's own size.
+// A PC app window's panel (DEE-345): a remote screen streaming "window:ADDRESS".
+bool IsWindowPanel(const Screen &s) {
+    const char *app = s.remote ? ft_remote_app(ScreenIndexOf(s)) : nullptr;
+    return app && !std::strncmp(app, "window:", 7);
+}
+
+// A floating panel (or a PC window's) the size of w x h pixels at its density, its picture stretched to
+// fit, while a resize goes on (no new pixels until it ends: SendStretch). 0, 0: back to its own size.
 void Stretch(Screen &s, int w, int h) {
-    if (s.mpp <= 0 || s.cropW <= 0) return;
+    const int pw = PictureW(s);
+    if (s.mpp <= 0 || pw <= 0) return;
     const double oldW = s.metres, oldH = s.heightMetres();
     s.stretchW = w > 0 ? w : 0, s.stretchH = w > 0 ? h : 0;
-    s.metres = (s.stretchW > 0 ? s.stretchW : s.cropW) * s.mpp;
+    s.metres = (s.stretchW > 0 ? s.stretchW : pw) * s.mpp;
     vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
     ApplyTexelAspect(s);
     ApplyCurve(s);
@@ -1714,12 +1726,25 @@ void Stretch(Screen &s, int w, int h) {
 }
 
 constexpr long kStretchAnswerTicks = 120;   // about 1.3 s at 90 Hz for ft-floatd's answer to a resize
+constexpr long kWindowResizeTicks = 90 * 15; // about 15 s for a PC window's stream to come back at its new size
+void RunLayout(const std::vector<std::string> &args);
 
 // A stretch has ended: the window gets its pixels, in one resize. The answer ("float") sets the panel
 // to the new crop; if none comes (the window can't take that size) it goes back (stretchUntil).
 void SendStretch(Screen &s) {
     if (s.stretchW <= 0) return;
-    if (s.stretchW == s.cropW && s.stretchH == s.cropH) return Stretch(s, 0, 0);
+    if (s.stretchW == PictureW(s) && s.stretchH == PictureH(s)) return Stretch(s, 0, 0);
+    if (s.remote) {
+        // A PC window's panel: the window gets the pixels and its stream starts over at that size
+        // (ft-layout window resize); the stretch stays till a picture of a new size comes.
+        s.stretchUntil = g_tick + kWindowResizeTicks, s.keepUntil = g_tick + kWindowResizeTicks + 15;
+        char m[16];
+        std::snprintf(m, sizeof m, "%.4f", s.metres);
+        RunLayout({"window", "resize", std::to_string(ScreenIndexOf(s) + 1),
+                   std::to_string(s.stretchW) + "x" + std::to_string(s.stretchH), m});
+        std::printf("screen %d: the PC's window resized to %dx%d\n", ScreenIndexOf(s) + 1, s.stretchW, s.stretchH);
+        return;
+    }
     // (the corner stays kept a little past giving up on the answer, for one that comes just then)
     s.stretchUntil = g_tick + kStretchAnswerTicks, s.keepUntil = g_tick + kStretchAnswerTicks + 15;
     SendFloat("resize " + std::to_string(ScreenIndexOf(s) + 1) + " " + std::to_string(s.stretchW) + " " +
@@ -1734,7 +1759,7 @@ void EndDrag(Screen &s) {
     // (a floating window's last resize may be answered after the release: its corner stays kept a while)
     if (s.drag == Drag::Resize) s.keepUntil = g_tick + 45;
     else s.keepX = -1, s.keepY = 1;
-    if (s.drag == Drag::Resize && s.floating) SendStretch(s);
+    if (s.drag == Drag::Resize && (s.floating || s.remote)) SendStretch(s);   // (a whole PC display never stretches)
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.pushedMs = -1;
@@ -1805,7 +1830,7 @@ void UpdateArrange() {
 constexpr double kFaceAfterResizeMs = 250;
 void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms, bool easeOut, uint64_t universe);
 void FaceAfterResize(Screen &s, int index) {
-    const bool want = s.resizeFacing && s.floating && s.pinned == kNone && s.universe == g_universe;
+    const bool want = s.resizeFacing && (s.floating || IsWindowPanel(s)) && s.pinned == kNone && s.universe == g_universe;
     s.resizeFacing = false;
     Mat head, to;
     if (!want || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ||
@@ -1940,6 +1965,35 @@ void ResizeFloat(Screen &s, double hx, double hy, double grabX, double grabY, in
     const int h = std::max(200, int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)));
     if (w == (s.stretchW > 0 ? s.stretchW : s.cropW) && h == (s.stretchW > 0 ? s.stretchH : s.cropH)) return;
     Stretch(s, w, h);
+}
+
+// A PC window's panel resized (user, 2026-11-07: "resize and change aspect ratio and scale applications from
+// remote devices when they are in standalone mode. Right now, it only does fixed resizing"): as a floating
+// window, the corner goes where the laser is, both ways, the panel stretched to that many pixels at its
+// density; let go, the window on the PC gets them (SendStretch). Its density is the scale, the wheel on
+// the corner (ScaleWindowPanel).
+constexpr int kWindowMinW = 320, kWindowMinH = 240, kWindowMaxW = 3840, kWindowMaxH = 2160;   // (ft-layout's too)
+void ResizeWindowPanel(Screen &s, double hx, double hy, double grabX, double grabY, int sx, int sy) {
+    s.keepX = -sx, s.keepY = -sy;
+    if (s.width <= 0 || s.height <= 0 || s.metres <= 0) return;
+    if (s.stretchW <= 0) s.mpp = s.metres / s.width;   // its density now (a stretch still waiting keeps its own)
+    const int w = std::clamp(int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)), kWindowMinW, kWindowMaxW) & ~1;
+    const int h = std::clamp(int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)), kWindowMinH, kWindowMaxH) & ~1;
+    if (w == (s.stretchW > 0 ? s.stretchW : s.width) && h == (s.stretchW > 0 ? s.stretchH : s.height)) return;
+    Stretch(s, w, h);
+}
+
+// The wheel on a PC window's panel's corner: its scale, the same pixels bigger (up) or smaller, 5% a notch,
+// that corner kept (as a floating window's density).
+void ScaleWindowPanel(Screen &s, double notches) {
+    if (s.stretchW > 0 || s.width <= 0) return;   // (a resize waiting for its picture)
+    const double oldW = s.metres, oldH = s.heightMetres();
+    s.metres = std::clamp(s.metres * std::pow(1.05, notches), kMinWidth, 12.0);
+    if (std::fabs(s.metres - oldW) < 1e-6) return;
+    vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+    ApplyCurve(s);
+    s.keepX = s.cornerX, s.keepY = s.cornerY, s.keepUntil = g_tick + 2;
+    KeepCorner(s, oldW, oldH);
 }
 
 // A screen (or remote display) resized from the handle's corner to cu, cv (m from its centre, on its
@@ -2183,6 +2237,7 @@ void UpdateDrag(Screen &s, int index) {
     Mat l, p;
     if (!LaserPose(s.dragDevice, &l) || !ScreenPose(s, &p) || !RayOnSurface(s, p, l, &hx, &hy)) return;
     if (s.floating) return ResizeFloat(s, hx, hy, s.grabX, s.grabY, s.cornerX, s.cornerY);
+    if (IsWindowPanel(s)) return ResizeWindowPanel(s, hx, hy, s.grabX, s.grabY, s.cornerX, s.cornerY);
     ResizeScreen(s, hx - s.grabX, hy - s.grabY);
 }
 
@@ -6602,6 +6657,10 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
         } else {
             vr::HmdVector2_t scale = {float(s.width), float(s.height)};
             vr::VROverlay()->SetOverlayMouseScale(s.overlay, &scale);
+            // a PC window's panel resized: its stream is back at the new size, which ends the stretch
+            // (the corner kept); one still being resized stretches the new picture instead
+            if (s.stretchW > 0 && s.drag != Drag::Resize) s.keepUntil = std::max(s.keepUntil, g_tick + 1), Stretch(s, 0, 0);
+            else ApplyTexelAspect(s);
         }
         PlaceChrome(s);  // the height changed
         std::printf("screen %d: %dx%d\n", index + 1, s.width, s.height);
@@ -6856,6 +6915,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
                 EndDragsBy(ev.trackedDeviceIndex);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+            } else if (ev.eventType == vr::VREvent_ScrollDiscrete && IsWindowPanel(s) && s.drag == Drag::None &&
+                       ev.data.scroll.ydelta != 0) {
+                ScaleWindowPanel(s, ev.data.scroll.ydelta);
             } else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.floating && s.drag == Drag::None &&
                        ev.data.scroll.ydelta != 0) {
                 s.keepX = s.cornerX, s.keepY = s.cornerY;   // (this corner stays put: the tab stays under the laser)

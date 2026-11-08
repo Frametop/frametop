@@ -65,6 +65,8 @@ class Desktopless(unittest.TestCase):
             self.api.append((method, path, body))
             if path == "/api/frametop/windows" and method == "GET":
                 return 200, {"windows": self.windows, "outputs": [], "locked": False}
+            if path == "/api/frametop/windows/open":
+                return 200, {"address": "0x99", "output": "FT-W1"}
             return 200, {"status": True}
 
         self.m.ft_hostapi.request = fake_request
@@ -77,6 +79,7 @@ class Desktopless(unittest.TestCase):
             return "ok 21" if text == "float all" else "ok"
 
         self.m.ask_float = fake_float
+        self.m.streams_only = lambda: False
         self.d.start_watch = lambda: None
         self.d.stop_watch = lambda: None
         self.m.save_layout({"mode": "custom", "screens": [{}, {"hidden": True}, {}],
@@ -172,6 +175,14 @@ class Desktopless(unittest.TestCase):
         self.assertFalse(layout["desktopless"]["on"])
         self.assertEqual(sorted(layout["desktopless"]["places"]), ["oma7|brave.desktop", "oma7|foot", "oma7|slack.desktop"])
 
+    def test_an_app_that_was_not_out_keeps_its_place(self):
+        layout = self.m.load_layout()
+        layout["desktopless"] = {"on": False, "places": {"oma7|gimp.desktop": [{"pos": [0, 0, -1]}]}}
+        self.m.save_layout(layout)
+        self.d.command(["on"])
+        self.d.command(["off"])
+        self.assertIn("oma7|gimp.desktop", self.m.load_layout()["desktopless"]["places"])
+
     def test_next_time_an_app_opens_where_it_was(self):
         self.d.command(["on"])
         self.d.command(["off"])
@@ -182,6 +193,84 @@ class Desktopless(unittest.TestCase):
         self.d.command(["on"])
         slack = next(d for d in self.panels() if d["app"] == "window:0x10")
         self.assertEqual((slack["pos"], slack["metres"]), ([1.0, 0.2, -0.8], 1.5))
+
+    def profile(self, name, **kw):
+        layout = self.m.load_layout()
+        layout.setdefault("layouts", {})[name] = []
+        layout.setdefault("profiles", {})[name] = dict(kw)
+        self.m.save_layout(layout)
+
+    def test_a_profile_keeps_whether_it_was_desktopless_and_its_pc_apps(self):
+        self.d.command(["on"])
+        layout = self.m.load_layout()
+        profile = {}
+        self.d.capture(layout, profile)
+        self.assertTrue(profile["desktopless"]["on"])
+        self.assertEqual(sorted(profile["desktopless"]["places"]), ["oma7|brave.desktop", "oma7|foot", "oma7|slack.desktop"])
+        self.d.command(["off"])
+        profile = {}
+        self.d.capture(self.m.load_layout(), profile)
+        self.assertEqual(profile["desktopless"], {"on": False})
+
+    def test_using_a_desktopless_profile_hides_the_desktops_before_they_are_arranged(self):
+        self.profile("Work", hidden=[], desktopless={"on": True, "places": {}})
+        layout = self.m.load_layout()
+        self.assertTrue(self.d.use_profile(layout, "Work"))
+        self.assertTrue(all(s.get("hidden") for s in layout["screens"]))
+        self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": []})
+        self.assertEqual(self.screens.asked, [])   # (nothing shown or hidden yet: the arrangement does it)
+
+    def test_its_pc_apps_that_are_not_open_start_where_they_were(self):
+        place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}
+        self.profile("Work", desktopless={"on": True, "places": {"oma7|gimp.desktop": [place],
+                                                                 "oma7|slack.desktop": [place],
+                                                                 "oma7|foot": [place]}})
+        layout = self.m.load_layout()
+        self.d.use_profile(layout, "Work")
+        self.m.save_layout(layout)
+        self.d.resume("Work")
+        opened = [b["app"] for m, p, b in self.api if p == "/api/frametop/windows/open"]
+        self.assertEqual(opened, ["gimp.desktop"])   # slack is open; foot has no desktop file
+        gimp = next(d for d in self.panels() if d["app"] == "window:0x99")
+        self.assertEqual((gimp["key"], gimp["pos"], gimp["metres"]), ("oma7|gimp.desktop", [1.0, 0.2, -0.8], 1.5))
+        self.assertIn("0x99", self.d.read_seen()["oma7"])   # (the watcher leaves it alone)
+
+    def test_using_a_profile_that_was_not_desktopless_puts_the_windows_back(self):
+        self.d.command(["on"])
+        self.profile("Home", hidden=[3], desktopless={"on": False})
+        layout = self.m.load_layout()
+        self.m.use_hidden(layout, "Home")
+        self.assertFalse(self.d.use_profile(layout, "Home"))
+        self.m.save_layout(layout)
+        layout = self.m.load_layout()
+        self.assertEqual(self.panels(layout), [])
+        self.assertFalse(layout["desktopless"]["on"])
+        self.assertEqual([bool(s.get("hidden")) for s in layout["screens"]], [False, False, True])  # the profile's
+        self.floats.clear()
+        self.d.resume("Home")
+        self.assertEqual(self.floats, ["dock all"])
+
+    def test_a_profile_from_before_desktopless_mode_keeps_the_mode(self):
+        self.d.command(["on"])
+        self.profile("Old", hidden=[])
+        layout = self.m.load_layout()
+        self.m.use_hidden(layout, "Old")     # (shows every screen)
+        self.assertTrue(self.d.use_profile(layout, "Old"))
+        self.assertTrue(all(s.get("hidden") for s in layout["screens"]))
+
+    def test_the_desktop_starts_desktopless_again(self):
+        self.d.command(["on"])
+        self.floats.clear()
+        watched = []
+        self.d.start_watch = lambda: watched.append(1)
+        self.d.resume(wait=0)
+        self.assertEqual(self.floats, ["windows", "float all"])
+        self.assertEqual(watched, [1])
+        self.d.command(["off"])
+        self.floats.clear()
+        self.d.resume(wait=0)
+        self.assertEqual(self.floats, [])   # off, and no profile: nothing to do
 
     def test_toggle_and_status(self):
         self.d.command(["toggle"])

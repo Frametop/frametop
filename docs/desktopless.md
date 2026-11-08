@@ -24,8 +24,16 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 - `off` keeps where each PC window panel is, closes them all (each PC puts its windows back), shows what wasn't hidden before, and docks every floating window (`dock all`). Windows whose screen is still hidden dock onto the first screen that shows.
 - The PC side is the Frametop windows instance (oma7's fork, `hyprland_windows.cpp`). Its window list says which workspace shows, the focus order, whether a window floats, where it sits, and its desktop app. A window that comes back without being dropped on a monitor goes to its old place. A floating one gets its old position and size. A tiled one splits in where its middle was, when its workspace shows.
 
+## Profiles and desktop start
+
+- A profile keeps whether desktopless mode was on when it was saved. With it on, the profile also keeps where each PC app's window panels were (`profiles[NAME].desktopless.places`, by PC and app). The Frame's apps are kept as a profile always keeps them ([profiles.md](profiles.md)).
+- Opening a desktopless profile hides the desktops before it arranges anything, so the screens don't show first. After its Frame apps open, every window comes out. Then each PC app it had that isn't open on its PC starts there (`/open`), as a window panel at its place. Only apps with a desktop file can start that way. A window the profile knows by its class alone comes out only if it's open.
+- Opening a profile saved with the mode off closes the PC window panels (the windows go back), shows the profile's screens, and docks the floating windows.
+- The desktop starts in the mode it stopped in. With the mode on, its window panels connect again, every Frame window floats once ft-floatd is up, and the watcher starts.
+- A PC that disconnects (it went to sleep, or the Frame left) puts its windows back by itself a minute later, each at its old place. When it connects again, the panels take the windows that are still there.
+
 ## Limits
 
 - Only Linux PCs with a Frametop windows instance (`windows=PORT`, [remote-displays.md](remote-displays.md)) give their windows up. A Windows PC's displays stay as they are (DEE-348).
-- PC windows that close while the Frame is away come back new: their places are kept only at `off`.
+- A PC app's place is kept at `off` and when a profile is saved. A panel moved and then closed while the mode is on goes back to the place it had before next time.
 - Each window panel is a video stream of its own, and a hidden display panel still decodes every frame its PC sends (ft-stream shows 10 a second of them). Many at once may be more than the Frame's decoder keeps up with.

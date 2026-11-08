@@ -1913,6 +1913,8 @@ def capture_profile(layout, name):
     for _, _, d in remote_displays(layout):
         if d["id"] in remote:
             remote[d["id"]]["hidden"] = bool(d.get("hidden"))
+    import ft_desktopless
+    ft_desktopless.capture(layout, profile)
     reply = ask_float("windows")
     if reply and reply.startswith("ok "):
         profile["windows"] = json.loads(reply[3:])
@@ -2312,14 +2314,18 @@ def main(argv):
             clear_anchor()
             layout = load_layout()
             name = start_profile(layout)
+            import ft_desktopless
+            wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv else 60
             if not name:
-                return main([argv[0], "apply"] + argv[2:])
+                status = main([argv[0], "apply"] + argv[2:])
+                ft_desktopless.resume(wait=wait)  # desktopless mode on again (docs/desktopless.md)
+                return status
             use_named(layout, name)
             use_hidden(layout, name)
+            ft_desktopless.use_profile(layout, name)
             open_remotes(layout, name)
             save_on_the_way(layout)
             log(f"starting in profile {name!r}")
-            wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv else 60
             with open(LOCK_PATH, "w") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 try:
@@ -2338,6 +2344,7 @@ def main(argv):
                 else:
                     log(f"kwin: {last}")
             open_apps(name, wait=90)  # ft-floatd starts with Plasma
+            ft_desktopless.resume(name, wait=90)  # after its apps: they float too
         elif cmd == "reset":
             # Keep a separate lock through the reset so repeated clicks cannot queue jumps.
             with open(LOCK_PATH + ".reset-delay", "w") as reset_lock:
@@ -2444,8 +2451,10 @@ def main(argv):
                     kwin_follow()
                 elif cmd == "use":
                     layout = load_layout()
+                    import ft_desktopless
                     use_named(layout, argv[2])
                     use_hidden(layout, argv[2])
+                    ft_desktopless.use_profile(layout, argv[2])
                     open_remotes(layout, argv[2])
                     save_layout(layout)
                     log(f"using layout {argv[2]!r}")
@@ -2460,6 +2469,7 @@ def main(argv):
                     else:
                         kwin_follow()
                     open_apps(argv[2])  # floating windows go relative to the screens, wherever they are
+                    ft_desktopless.resume(argv[2], wait=10)
                 else:
                     changes = apply_scales()
                     log("kwin: " + (" ".join(changes) if changes else "unchanged"))

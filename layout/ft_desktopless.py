@@ -224,28 +224,35 @@ def remember_places(layout, sock, eye, heading):
     return places
 
 
-def turn_on(layout):
+def hide_desktops(layout):
+    """Desktopless mode's hidden state into the layout (not saved): on (keeping what was hidden
+    before, to put back at off), and every screen and each Linux PC's display panels hidden.
+    Returns the panel numbers to conceal."""
     s = state(layout)
-    sock = L.screens_socket()
-    eye, heading = L.remote_anchor(sock, layout)
-    hosts = window_hosts(layout)
+    n = L.screen_count(layout)
+    displays = displays_of(layout, window_hosts(layout))
     if not s.get("on"):
-        n = L.screen_count(layout)
-        displays = displays_of(layout, hosts)
         s = {"on": True, "places": s.get("places", {}),
              "before": {"screens": [i for i in range(n) if L.screen_entry(layout, i).get("hidden")],
                         "remotes": [d["id"] for _, d in displays if d.get("hidden")]}}
-        screens = layout.setdefault("screens", [])
-        while len(screens) < n:
-            screens.append({})
-        for i in range(n):
-            screens[i]["hidden"] = True
-        for _, d in displays:
-            d["hidden"] = True
         layout["desktopless"] = s
-        L.save_layout(layout)
-        conceal(sock, list(range(1, n + 1)) + [k for k, _ in displays], True)
         write_seen({})
+    screens = layout.setdefault("screens", [])
+    while len(screens) < n:
+        screens.append({})
+    for i in range(n):
+        screens[i]["hidden"] = True
+    for _, d in displays:
+        d["hidden"] = True
+    return list(range(1, n + 1)) + [k for k, _ in displays]
+
+
+def turn_on(layout):
+    sock = L.screens_socket()
+    eye, heading = L.remote_anchor(sock, layout)
+    numbers = hide_desktops(layout)
+    L.save_layout(layout)
+    conceal(sock, numbers, True)
     extra = []
     reply = L.ask_float("float all", timeout=30.0)
     if reply and reply.startswith("ok"):
@@ -274,12 +281,10 @@ def turn_off(layout):
     hosts = window_hosts(layout)
     try:
         eye, heading = room_anchor(sock, layout) or L.remote_anchor(sock, layout)
-        s["places"] = remember_places(layout, sock, eye, heading) or s.get("places", {})
+        s["places"] = dict(s.get("places", {}), **remember_places(layout, sock, eye, heading))
     except RuntimeError as e:
         L.log(f"desktopless: places not kept: {e}")
-    for host, _ in hosts:
-        for d in [d for d in host.get("displays", []) if d.get("window")]:
-            L.window_close(layout, host, d)
+    close_panels(layout)
     before = s.get("before", {})
     n = L.screen_count(layout)
     screens = layout.setdefault("screens", [])
@@ -304,6 +309,140 @@ def turn_off(layout):
         L.log(f"desktopless: ft-floatd: {reply}")
     write_seen({})
     L.log("desktopless off: the windows are back on their desktops")
+
+
+def close_panels(layout):
+    """Every PC window panel goes, and its window back onto its PC."""
+    for host, _ in window_hosts(layout):
+        for d in [d for d in host.get("displays", []) if d.get("window")]:
+            L.window_close(layout, host, d)
+
+
+# ---------------------------------------------------------------- profiles and desktop start
+
+def capture(layout, profile):
+    """Desktopless mode into a profile (ft-layout save): whether it's on, and where each PC app's
+    window panels are. Its PC apps are those places' keys: opening the profile starts the ones
+    that aren't open."""
+    if not state(layout).get("on"):
+        profile["desktopless"] = {"on": False}
+        return
+    places = {}
+    try:
+        sock = L.screens_socket()
+        eye, heading = room_anchor(sock, layout) or L.remote_anchor(sock, layout)
+        places = remember_places(layout, sock, eye, heading)
+    except RuntimeError as e:
+        L.log(f"desktopless: the PC windows' places weren't saved: {e}")
+    profile["desktopless"] = {"on": True, "places": places}
+
+
+def profile_wants(layout, name):
+    """Whether profile `name` is desktopless: as it was saved, or (saved before desktopless
+    mode) as it is now."""
+    p = layout.get("profiles", {}).get(name, {}).get("desktopless")
+    return bool(p.get("on")) if isinstance(p, dict) else bool(state(layout).get("on"))
+
+
+def use_profile(layout, name):
+    """A profile's desktopless mode into the layout before it's arranged (ft-layout use and
+    start, after use_hidden; the caller saves): on, its PC apps' places and every desktop hidden,
+    so the screens don't show first; off, the PC window panels close and the profile's hidden
+    screens stand. Returns whether it's on."""
+    p = layout.get("profiles", {}).get(name, {}).get("desktopless")
+    want = profile_wants(layout, name)
+    if want:
+        hide_desktops(layout)
+        if isinstance(p, dict) and p.get("places"):
+            layout["desktopless"]["places"] = dict(layout["desktopless"].get("places", {}), **p["places"])
+    elif state(layout).get("on"):
+        stop_watch()
+        close_panels(layout)
+        layout["desktopless"] = {"on": False, "places": state(layout).get("places", {})}
+        write_seen({})
+    return want
+
+
+def wait_float(wait):
+    """Wait up to `wait` seconds for ft-floatd (it starts with Plasma)."""
+    deadline = time.time() + wait
+    while L.ask_float("windows") is None and time.time() < deadline:
+        time.sleep(1)
+
+
+def resume(name=None, wait=0):
+    """After a desktop start or `use` (its apps open): desktopless mode on again, as the layout
+    or the profile says, and the profile's PC apps that aren't open started; off, the floating
+    windows dock."""
+    layout = L.load_layout()
+    if not state(layout).get("on"):
+        if name and isinstance(layout.get("profiles", {}).get(name, {}).get("desktopless"), dict):
+            reply = L.ask_float("dock all", timeout=10.0)
+            if reply is not None and not reply.startswith("ok"):
+                L.log(f"desktopless: ft-floatd: {reply}")
+        return
+    if L.streams_only():
+        start_watch()  # (no Plasma: no Frame windows to float)
+        return
+    wait_float(wait)
+    try:
+        turn_on(layout)
+    except RuntimeError as e:
+        L.log(f"desktopless: {e}")
+        start_watch()
+    if name:
+        launch_missing(L.load_layout(), name)
+
+
+def launch_missing(layout, name):
+    """Profile `name`'s PC apps that aren't open on their PC: started there as window panels at
+    their places (only apps with a desktop file: a window known by its class alone can't be)."""
+    places = layout.get("profiles", {}).get(name, {}).get("desktopless", {}).get("places", {})
+    want = {k: len(v) for k, v in places.items() if k.split("|", 1)[-1].endswith(".desktop")}
+    if not want:
+        return
+    try:
+        sock = L.screens_socket()
+        room = room_anchor(sock, layout) or L.remote_anchor(sock, layout)
+    except RuntimeError as e:
+        L.log(f"desktopless: profile {name!r}'s PC apps weren't started: {e}")
+        return
+    seen = read_seen()
+    for host, port in window_hosts(layout):
+        try:
+            windows = L.window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
+        except RuntimeError:
+            continue  # not on: its apps start with the profile next time
+        have = {}
+        for w in windows:
+            have[app_key(host, w)] = have.get(app_key(host, w), 0) + 1
+        for key, count in want.items():
+            if not key.startswith(host_name(host) + "|"):
+                continue
+            for pose in places[key][have.get(key, 0):count]:
+                if len(L.remote_displays(layout)) >= L.REMOTE_MAX:
+                    L.log(f"desktopless: no panel free for {key}")
+                    return
+                app = key.split("|", 1)[1]
+                size = L.WINDOW_SIZE
+                try:
+                    opened = L.window_api(host, port, "POST", "/api/frametop/windows/open",
+                                          {"app": app, "width": size[0], "height": size[1]})
+                    d = L.window_add(layout, host, port, opened.get("address", ""), app[:-8], size,
+                                     fields={"key": key, "metres": pose.get("metres"),
+                                             **{k: pose[k] for k in ("pos", "face", "roll") if k in pose}})
+                except RuntimeError as e:
+                    L.log(f"desktopless: {key}: {e}")
+                    continue
+                seen.setdefault(host_name(host), set()).add(d["app"][7:])
+                n = next((m for m, _, e in L.remote_displays(layout) if e is d), None)
+                try:
+                    if n is not None:
+                        L.place_remote(sock, n, d, pose, *room)
+                except RuntimeError as e:
+                    L.log(f"desktopless: {d['id']}: {e}")
+                L.log(f"desktopless: started {app} on {host_name(host)} (profile {name!r})")
+    write_seen(seen)
 
 
 def start_watch():

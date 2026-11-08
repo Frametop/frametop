@@ -87,7 +87,7 @@ validate detection, not the new enforcement. Cold boot, suspend/resume and the f
 input/failure matrix still require wearer testing. Unit tests do not prove
 the meaning or completeness of Steam's UI signal.
 
-The personal integration has since been installed with an approved one-time
+The feature was installed with an approved one-time
 desktop/helper restart, leaving SteamVR running. Its first authentication changed
 the live gate from locked to unlocked, and SteamVR reported the desktop screen
 and controls visible afterward. The screen initially appeared missing because its
@@ -100,8 +100,9 @@ No screenshots were needed or published.
 This validates basic visual concealment/restoration and unsaved-work preservation,
 not all input routes, auxiliary panels, lock latency or failure cases. Input
 blocking, observer failure, UI restart, cold boot and the wider suspend/resume
-matrix remain hardware-test gaps. Publication is on hold while follow-up work is
-coordinated; any eventual review PR should remain draft until that matrix is completed.
+matrix remain hardware-test gaps. A review PR should remain draft until that
+matrix is completed. This contribution covers Steam PIN protection only, not a
+new remote-desktop hosting or client implementation.
 
 An early version actively requested another Steam lock after lost proof. During
 the floating-window test, the wearer received repeated prompts; logs showed

@@ -2766,6 +2766,7 @@ void CarryTorn(Screen &s, int index, int gx, int gy) {
         SetAbsolute(s, Mul(p, Translation(u - hu, v - hv, 0)));
     }
     StartDrag(s, Drag::Move, g_press.device);
+    SendPointer("press carries");   // the 3D mouse's cursor keeps its depth: the screen pressed stays put
 }
 
 // Window drag (user, 2026-11-07, windowdrag.h): a press with the modifier held on a floating window's
@@ -2867,7 +2868,10 @@ void PlacePulled() {
         const double hu = (g_pull.fx - 0.5) * s.metres, hv = (0.5 - g_pull.fy) * s.heightMetres();
         SetAbsolute(s, Mul(p, Translation(u - hu, v - hv, 0.05)));   // (just in front of the display)
     }
-    if (held && s.drag == Drag::None) StartDrag(s, Drag::Move, g_pull.device);
+    if (held && s.drag == Drag::None) {
+        StartDrag(s, Drag::Move, g_pull.device);
+        SendPointer("press carries");   // the 3D mouse's cursor keeps its depth: the display pressed stays put
+    }
     std::printf("screen %d: pulled off screen %d%s\n", g_pull.to + 1, g_pull.from + 1, held ? ", carried" : "");
     g_pull = Pull{};
 }

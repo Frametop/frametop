@@ -259,6 +259,18 @@ class Desktopless(unittest.TestCase):
         self.assertEqual((gimp["key"], gimp["pos"], gimp["metres"]), ("oma7|gimp.desktop", [1.0, 0.2, -0.8], 1.5))
         self.assertIn("0x99", self.d.read_seen()["oma7"])   # (the watcher leaves it alone)
 
+    def test_a_windows_pcs_start_menu_apps_start_too(self):
+        place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}
+        self.profile("Work", desktopless={"on": True, "places": {"oma7|Accessories/Paint.lnk": [place]}})
+        layout = self.m.load_layout()
+        self.d.use_profile(layout, "Work")
+        self.m.save_layout(layout)
+        self.d.resume("Work", mode="on")
+        opened = [b["app"] for m, p, b in self.api if p == "/api/frametop/windows/open"]
+        self.assertEqual(opened, ["Accessories/Paint.lnk"])
+        paint = next(d for d in self.panels() if d["app"] == "window:0x99")
+        self.assertEqual((paint["key"], paint["label"]), ("oma7|Accessories/Paint.lnk", "Paint"))
+
     def test_using_a_profile_that_was_not_desktopless_puts_the_windows_back(self):
         self.d.command(["on"])
         self.profile("Home", hidden=[3], desktopless={"on": False})

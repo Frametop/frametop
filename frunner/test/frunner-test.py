@@ -433,13 +433,13 @@ try:
     check("...Frametop's keyboard too, from a controller", "vrkeyboard show" in screens.take(), True)
     check("...with every action listed, in the menu's order", json.loads(ask("rows")[3:]),
           ["Steam menu", "Hide or show the screens", "Spin to the next panel", "Spin to the previous panel",
-           "Put every floating window back", "Hand tracking on or off", "Pause for a VR game", "Let go of every key"])
+           "Put every floating window back", "Desktopless mode on or off", "Hand tracking on or off", "Pause for a VR game", "Let go of every key"])
     type_text("spin")
     check("typing searches as usual", json.loads(ask("rows")[3:]),
           ["Spin to the next panel", "Spin to the previous panel"])
     for _ in range(4):
         press(BACKSPACE)
-    check("...and back to an empty query, the menu again", len(json.loads(ask("rows")[3:])), 8)
+    check("...and back to an empty query, the menu again", len(json.loads(ask("rows")[3:])), 9)
     press(SHIFT, ENTER)
     check("Shift+Enter: its menu", json.loads(ask("rows")[3:]), ["Steam menu", "Do it"])
     press(ESC)
@@ -452,7 +452,7 @@ try:
     check("toggle again closes it", ask("toggle keyboard actions"), "ok closed")
 
     ask("open mouse actions")
-    for _ in range(6):
+    for _ in range(7):
         press(DOWN)
     relay.take()
     press(ENTER)

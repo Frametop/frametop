@@ -132,7 +132,14 @@ check("its own token, no pin of its own: any key", get(c, port=48989), {"scene":
 check("...its token, on its Web UI port", (ports[-1], c.sent[2]), (48990, {"Authorization": "Bearer own456"}))
 write("192.0.2.20-48989.pin", ft_hostapi.spki_pin(DER) + "\n")
 check("...with its own pin: another key is refused", get(Conn(OTHER), port=48989), None)
-check("47989 is the shared token's", ft_hostapi.token_path("192.0.2.20", 47989), os.path.join(tmp, "192.0.2.20.token"))
+check("47989 without a token of its own: the shared one", ft_hostapi.token_path("192.0.2.20", 47989),
+      os.path.join(tmp, "192.0.2.20.token"))
+write("192.0.2.20-47989.token", "win789\n")
+c = Conn(DER)
+check("a Windows PC's windows token on 47989: its own", get(c, port=47989), {"scene": "game"})
+check("...on the shared Web UI port", (ports[-1], c.sent[2]), (47990, {"Authorization": "Bearer win789"}))
+check("...and without a port, still the shared token", ft_hostapi.token_path("192.0.2.20"),
+      os.path.join(tmp, "192.0.2.20.token"))
 
 c = Conn(DER, body=b'{"output": "FT-W1"}')
 got = ft_hostapi.post_json("192.0.2.20", "/api/frametop/windows/open", {"address": "0x1"}, connect=connector(c),

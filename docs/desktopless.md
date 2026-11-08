@@ -41,6 +41,6 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 - Frame windows float only while ft-floatd has spare outputs. Past that, or with ft-floatd not answering, the rest stay on their hidden screens until the mode goes off (the log says so).
 - ft-floatd keeps which windows floated before the mode only while it runs. After a desktop restart in the mode, off docks every floating window.
 
-- Only Linux PCs with a Frametop windows instance (`windows=PORT`, [remote-displays.md](remote-displays.md)) give their windows up. A Windows PC's displays stay as they are (DEE-348).
+- Only PCs with a Frametop windows instance (`windows=PORT`, [remote-displays.md](remote-displays.md)) give their windows up: a Linux PC's second instance, or a Windows PC with the Windows build (`windows=47989`, DEE-348). Another PC's displays stay as they are.
 - A PC app's place is kept at `off` and when a profile is saved. A panel moved and then closed while the mode is on goes back to the place it had before next time.
 - Each window panel is a video stream of its own, and a hidden display panel still decodes every frame its PC sends (ft-stream shows 10 a second of them). Many at once may be more than the Frame's decoder keeps up with.

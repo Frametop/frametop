@@ -156,6 +156,19 @@ class Windows(unittest.TestCase):
         self.assertEqual(opened[0][4], {"app": "org.gnome.Calculator.desktop", "width": 1280, "height": 800})
         self.assertEqual(self.displays()[-1]["app"], "window:0x77")
 
+    def test_launch_takes_a_windows_start_menu_shortcut(self):
+        self.answers["/api/frametop/windows/open"] = (200, {"output": "window:0x14801fc", "address": "0x14801fc", "status": True})
+        self.run_window("launch", "oma7", "Accessories/System Tools/Character Map.lnk")
+        opened = [c for c in self.api if c[3] == "/api/frametop/windows/open"]
+        self.assertEqual(opened[0][4]["app"], "Accessories/System Tools/Character Map.lnk")
+        self.assertEqual((self.displays()[-1]["app"], self.displays()[-1]["label"]), ("window:0x14801fc", "Character Map"))
+
+    def test_launch_refuses_what_is_no_app_id(self):
+        for app in ("x.exe", "C:/Windows/notepad.lnk", "a\nb.desktop"):
+            with self.assertRaisesRegex(RuntimeError, "APP is an app's id"):
+                self.run_window("launch", "oma7", app)
+        self.assertEqual(self.api, [])
+
     def test_launch_failure_says_why(self):
         self.answers["/api/frametop/windows/open"] = (400, {"error": "no app x.desktop"})
         with self.assertRaisesRegex(RuntimeError, "no app x.desktop"):

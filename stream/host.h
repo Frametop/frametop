@@ -27,9 +27,9 @@ constexpr int kGameStreamPort = 47989;  // a host's HTTP port; its Web UI is on 
 
 // ~/.local/share/frametop-stream/ID: one client's certificate, key and unique id.
 std::string KeyDir(const std::string &id);
-// The host's API token: ~/.local/share/frametop-stream/hosts/HOST.token. An instance on a port
-// of its own (a host's Frametop windows, on 48989) may have one of its own, HOST-PORT.token:
-// with `port`, that one when it's there.
+// The host's API token: ~/.local/share/frametop-stream/hosts/HOST.token. A host's Frametop
+// windows (a Linux PC's second instance on 48989, or a Windows PC's own on 47989) may have one
+// of its own, HOST-PORT.token: with `port`, that one when it's there.
 std::string TokenFile(const std::string &host, int port = 0);
 // HOST[:PORT] (Moonlight's form) -> HOST and PORT (0 without one); false if PORT isn't a port.
 bool SplitPort(std::string *host, int *port);

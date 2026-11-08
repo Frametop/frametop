@@ -137,7 +137,7 @@ std::string KeyDir(const std::string &id) {
 }
 
 std::string TokenFile(const std::string &host, int port) {
-    if (port && port != kGameStreamPort) {
+    if (port) {
         const std::string own = KeyDir("hosts") + "/" + host + "-" + std::to_string(port) + ".token";
         if (std::ifstream(own).good()) return own;
     }

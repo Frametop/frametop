@@ -33,7 +33,10 @@ GAMESTREAM_PORT = 47989
 
 
 def token_path(address, port=0):
-    if port and port != GAMESTREAM_PORT:
+    """ADDRESS.token, or with `port` ADDRESS-PORT.token when there is one: an instance's own (a
+    host's Frametop windows: a Linux PC's second instance on 48989, or a Windows PC's only one,
+    on 47989, whose window routes ADDRESS.token may not reach)."""
+    if port:
         own = os.path.join(TOKEN_DIR, f"{address}-{port}.token")
         if os.path.exists(own):
             return own

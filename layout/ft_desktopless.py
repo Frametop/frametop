@@ -4,7 +4,7 @@ windows float (ft-floatd's "float all"), and each PC window streams as a window 
 window). Off again, the windows go back where they were: the Frame's onto their screens, the PCs'
 onto their desktops (the host puts each one back at its old place).
 
-Only PCs with a Frametop windows instance (Linux hosts, "windows=PORT") give their windows up; a
+Only PCs with a Frametop windows instance ("windows=PORT") give their windows up; a
 PC's display panels hide only then. A hidden display panel stays connected: its stream holds the
 PC's keyboard and mouse for the Frame (window streams don't take the input lock).
 
@@ -495,10 +495,11 @@ def resume(name=None, wait=0, mode=None):
 
 def launch_missing(name):
     """Profile `name`'s PC apps that aren't open on their PC: started there as window panels at
-    their places (only apps with a desktop file: a window known by its class alone can't be)."""
+    their places (only apps with a desktop file or a Start menu shortcut: a window known by its class alone
+    can't be)."""
     layout = L.load_layout()
     places = layout.get("profiles", {}).get(name, {}).get("desktopless", {}).get("places", {})
-    want = {k: len(v) for k, v in places.items() if k.split("|", 1)[-1].endswith(".desktop")}
+    want = {k: len(v) for k, v in places.items() if L.WINDOW_APP.fullmatch(k.split("|", 1)[-1])}
     if not want:
         return
     try:
@@ -535,7 +536,7 @@ def start_apps(layout, sock, room, name, places, want, seen):
                 try:
                     opened = L.window_api(host, port, "POST", "/api/frametop/windows/open",
                                           {"app": app, "width": size[0], "height": size[1]})
-                    d = L.window_add(layout, host, port, opened.get("address", ""), app[:-8], size,
+                    d = L.window_add(layout, host, port, opened.get("address", ""), L.window_app_title(app), size,
                                      fields={"key": key, "metres": pose.get("metres"),
                                              **{k: pose[k] for k in ("pos", "face", "roll") if k in pose}})
                 except RuntimeError as e:

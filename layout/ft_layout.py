@@ -1441,6 +1441,14 @@ def remote_command(args):
 
 WINDOW_SIZE = (1280, 800)  # a launched app's first size
 WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
+# A PC app a window launch can start: a Linux desktop file's id, or a Windows Start menu
+# shortcut, its path under the Programs folder ("Accessories/Paint.lnk").
+WINDOW_APP = re.compile(r"[A-Za-z0-9._@+-]+\.desktop|[^\x00-\x1f\\:*?\"<>|]{1,240}\.lnk")
+
+
+def window_app_title(app):
+    """A PC app id's name for its panel: "org.gnome.Calculator", "Character Map"."""
+    return re.sub(r"\.(desktop|lnk)$", "", app.rsplit("/", 1)[-1])
 WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height
 WINDOW_PIXELS_PER_METRE = 1400
 WINDOW_RESIZE_MIN = (320, 240)    # a window panel resized by hand (the host's own floor)
@@ -1750,14 +1758,14 @@ def window_command(args):
                                       min(found.get("height") or WINDOW_SIZE[1], WINDOW_MAX[1])))
             title = found.get("title") or found.get("class") or ""
         else:
-            if not re.fullmatch(r"[A-Za-z0-9._@+-]+\.desktop", args[2]):
-                raise RuntimeError("window launch: APP is a desktop app's id (window apps)")
+            if not WINDOW_APP.fullmatch(args[2]):
+                raise RuntimeError("window launch: APP is an app's id from window apps")
             size = window_size(opts, WINDOW_SIZE)
             window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
             opened = window_api(host, port, "POST", "/api/frametop/windows/open",
                                 {"app": args[2], "width": size[0], "height": size[1]})
             address = opened.get("address", "")
-            title = args[2][:-8]
+            title = window_app_title(args[2])
         d = window_add(layout, host, port, address, title, size)
         print(d["id"])
         return

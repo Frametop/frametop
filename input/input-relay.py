@@ -310,7 +310,7 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
 # record and the ioctl numbers are ft_evdev's (shared with vrpad.py); the codes are here.
 BTN_MISC = 0x100
 KEY_A = 30
-REL_X, REL_Y, REL_WHEEL, REL_MAX = 0x00, 0x01, 0x08, 0x0F
+REL_X, REL_Y, REL_HWHEEL, REL_WHEEL, REL_MAX = 0x00, 0x01, 0x06, 0x08, 0x0F
 SCROLLS = {0x06, REL_WHEEL, 0x0B, 0x0C}  # REL_HWHEEL, REL_WHEEL and their _HI_RES
 BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA = 0x110, 0x111, 0x112, 0x113, 0x114
 BTN_MOUSE, BTN_TASK = 0x110, 0x117  # mouse buttons, the first and the last
@@ -791,7 +791,7 @@ class Pointer:
         self.scroll_direction = 0
         # Scrolls notches on the panel the laser is on and says True, or says False: the joystick
         # then. PointerLease sets it (ft-screens' "keyboard", its fifth word).
-        self.wheel_to = lambda notches: False
+        self.wheel_to = lambda notches, horizontal=False: False
         self.claim_at = None  # when to press the claim button
         self.claim_release = None
         self.system_at = None  # dashboard toggle: when to press the virtual system button
@@ -888,6 +888,10 @@ class Pointer:
             self.dy += value
         elif code == REL_WHEEL and value:
             self.scroll(value, now)
+        elif code == REL_HWHEEL and value:
+            # Horizontal wheel (a tilt wheel or the MX Master's thumb wheel): only to a Frametop
+            # panel, through ft-screens ("hwheel"); SteamVR's joystick scroll has no second axis here.
+            self.wheel_to(value, True)
 
     def action(self, name, value, now, source="mouse"):
         """A mapped button: value 1 press, 0 release, 2 autorepeat (ignored). source: what
@@ -1156,7 +1160,7 @@ class PointerLease:
         self.current = None
         self.holding = False
         # Each Pointer's wheel_to (Pointer.scroll): the relay's, which sends notches to ft-screens.
-        self.wheel_to = lambda notches: False
+        self.wheel_to = lambda notches, horizontal=False: False
 
     def configure(self, on, sensitivity, idle, wake_counts, paused):
         """frametop.conf's pointer settings (pointer_settings), put in place."""
@@ -1397,13 +1401,14 @@ class Relay:
         except OSError:
             pass  # ft-screens not running
 
-    def wheel_to(self, notches):
+    def wheel_to(self, notches, horizontal=False):
         """The 3D mouse's wheel to ft-screens, while its laser is on a panel (Pointer.scroll):
-        every notch, at any speed, where SteamVR's joystick scrolls 20 steps a second at most."""
+        every notch, at any speed, where SteamVR's joystick scrolls 20 steps a second at most.
+        horizontal: the horizontal wheel ("hwheel", notches positive right)."""
         if time.monotonic() >= self.wheel_until:
             return False
         try:
-            self.screens_sock.sendto(f"wheel {notches}".encode(), SCREENS)
+            self.screens_sock.sendto(f"{'hwheel' if horizontal else 'wheel'} {notches}".encode(), SCREENS)
         except OSError:
             return False  # ft-screens not running, or behind: the joystick then
         return True

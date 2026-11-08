@@ -157,6 +157,7 @@ struct server {
     uint32_t typed_ms;  // the last key sent to the desktop: its screen counts as focused
     struct screen *pointer_focus;
     struct ft_relay_buttons relay_buttons;  // the input relay's mouse buttons held on the seat
+    int relay_remote[8];  // ...and those held on a remote screen: its index + 1 (0: none), by BTN_LEFT + n
     struct ft_controller_click controller_click;
     pid_t child;
     // Where typing goes: the screens after a click on one, Steam after a click on another
@@ -906,6 +907,26 @@ static bool relay_can_press(struct server *s) {
 // A mouse button from the input relay (pointer mode passes a mouse's side button through as
 // a key, for Back): to the screen the pointer is on, like a laser's click, wherever typing goes.
 static void relay_button(struct server *s, uint32_t code, bool pressed, char *reply, int size) {
+    // On a remote screen (the 3D mouse's laser on it: ft_vr_mouse_screen() gives only one that
+    // shows, with nothing paused), its stream takes the button, as it takes a laser's click
+    // (ft-stream sends BTN_SIDE and BTN_EXTRA as X1 and X2, Back and Forward). The release goes
+    // to the stream the press went to, wherever the pointer is by then.
+    const int b = (int)code - BTN_LEFT;
+    if (b >= 0 && b < 8) {
+        int remote = -1;
+        if (pressed) {
+            const int screen = ft_vr_mouse_screen();
+            if (screen >= 0 && ft_remote_is(screen) && !s->relay_remote[b]) remote = screen;
+        } else if (s->relay_remote[b]) {
+            remote = s->relay_remote[b] - 1;
+        }
+        if (remote >= 0) {
+            s->relay_remote[b] = pressed ? remote + 1 : 0;
+            struct ft_event e = {.type = FT_BUTTON, .screen = remote, .x = -1, .y = -1, .button = code, .pressed = pressed};
+            ft_remote_event(&e);  // a remote that went meanwhile: nothing to release
+            return (void)snprintf(reply, size, "ok");
+        }
+    }
     if (!ft_relay_button(&s->relay_buttons, code, pressed, relay_can_press(s)))
         return (void)snprintf(reply, size, pressed ? "ok no pointer, or held" : "ok not held");
     wlr_seat_pointer_notify_button(s->seat, now_ms(), code,
@@ -1133,6 +1154,16 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                     // a press just started, before the relay heard (keys_update, every ~100 ms): not lost
                     ft_vr_held_wheel(value, handle_vr_event, s);
                 }
+            }
+            len = sizeof from;
+            continue;
+        } else if (sscanf(buf, "hwheel %d", &value) == 1) {
+            // The 3D mouse's horizontal wheel, from the input relay like "wheel": notches, positive
+            // right. No reply. Only the panel the laser is on; a carry or a press just started drops it.
+            const int screen = ft_vr_mouse_screen();
+            if (value && screen >= 0) {
+                struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dx = value};
+                handle_vr_event(&e, s);
             }
             len = sizeof from;
             continue;

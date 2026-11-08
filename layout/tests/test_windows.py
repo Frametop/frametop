@@ -163,8 +163,21 @@ class Windows(unittest.TestCase):
         self.assertEqual(opened[0][4]["app"], "Accessories/System Tools/Character Map.lnk")
         self.assertEqual((self.displays()[-1]["app"], self.displays()[-1]["label"]), ("window:0x14801fc", "Character Map"))
 
+    def test_launch_takes_a_windows_store_app_named_by_its_window(self):
+        aumid = "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
+        self.answers["/api/frametop/windows/open"] = (200, {"output": "window:0x2a0f3c", "address": "0x2a0f3c",
+                                                            "title": "Calculator", "status": True})
+        self.run_window("launch", "oma7", aumid)
+        opened = [c for c in self.api if c[3] == "/api/frametop/windows/open"]
+        self.assertEqual(opened[0][4]["app"], aumid)
+        self.assertEqual(self.displays()[-1]["label"], "Calculator")
+
+    def test_a_store_app_without_a_title_is_named_by_its_package(self):
+        self.assertEqual(self.m.window_app_title("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), "Microsoft.WindowsCalculator")
+        self.assertEqual(self.m.window_app_title("x.lnk", {"title": "  "}), "x")
+
     def test_launch_refuses_what_is_no_app_id(self):
-        for app in ("x.exe", "C:/Windows/notepad.lnk", "a\nb.desktop"):
+        for app in ("x.exe", "C:/Windows/notepad.lnk", "a\nb.desktop", "Calc_8wekyb3d8bbwe!App;rm", "Calc!App"):
             with self.assertRaisesRegex(RuntimeError, "APP is an app's id"):
                 self.run_window("launch", "oma7", app)
         self.assertEqual(self.api, [])

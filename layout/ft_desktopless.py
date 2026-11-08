@@ -536,7 +536,7 @@ def start_apps(layout, sock, room, name, places, want, seen):
                 try:
                     opened = L.window_api(host, port, "POST", "/api/frametop/windows/open",
                                           {"app": app, "width": size[0], "height": size[1]})
-                    d = L.window_add(layout, host, port, opened.get("address", ""), L.window_app_title(app), size,
+                    d = L.window_add(layout, host, port, opened.get("address", ""), L.window_app_title(app, opened), size,
                                      fields={"key": key, "metres": pose.get("metres"),
                                              **{k: pose[k] for k in ("pos", "face", "roll") if k in pose}})
                 except RuntimeError as e:

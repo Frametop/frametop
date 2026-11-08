@@ -1441,13 +1441,21 @@ def remote_command(args):
 
 WINDOW_SIZE = (1280, 800)  # a launched app's first size
 WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
-# A PC app a window launch can start: a Linux desktop file's id, or a Windows Start menu
-# shortcut, its path under the Programs folder ("Accessories/Paint.lnk").
-WINDOW_APP = re.compile(r"[A-Za-z0-9._@+-]+\.desktop|[^\x00-\x1f\\:*?\"<>|]{1,240}\.lnk")
+# A PC app a window launch can start: a Linux desktop file's id, a Windows Start menu
+# shortcut, its path under the Programs folder ("Accessories/Paint.lnk"), or a Windows Store
+# app's AUMID ("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App").
+WINDOW_APP = re.compile(r"[A-Za-z0-9._@+-]+\.desktop|[^\x00-\x1f\\:*?\"<>|]{1,240}\.lnk"
+                        r"|[A-Za-z0-9.-]{1,200}_[a-z0-9]{13}![A-Za-z0-9._-]{1,100}")
 
 
-def window_app_title(app):
-    """A PC app id's name for its panel: "org.gnome.Calculator", "Character Map"."""
+def window_app_title(app, opened=None):
+    """A PC app's name for its panel: its window's title when the PC gave one (`opened`, the
+    open answer), else from its id: "org.gnome.Calculator", "Character Map",
+    "Microsoft.WindowsCalculator"."""
+    title = (opened or {}).get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    app = re.sub(r"_[a-z0-9]{13}!.*$", "", app)
     return re.sub(r"\.(desktop|lnk)$", "", app.rsplit("/", 1)[-1])
 WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height
 WINDOW_PIXELS_PER_METRE = 1400
@@ -1765,7 +1773,7 @@ def window_command(args):
             opened = window_api(host, port, "POST", "/api/frametop/windows/open",
                                 {"app": args[2], "width": size[0], "height": size[1]})
             address = opened.get("address", "")
-            title = window_app_title(args[2])
+            title = window_app_title(args[2], opened)
         d = window_add(layout, host, port, address, title, size)
         print(d["id"])
         return

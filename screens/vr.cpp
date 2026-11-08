@@ -1726,7 +1726,8 @@ void Stretch(Screen &s, int w, int h) {
 }
 
 constexpr long kStretchAnswerTicks = 120;   // about 1.3 s at 90 Hz for ft-floatd's answer to a resize
-constexpr long kWindowResizeTicks = 90 * 15; // about 15 s for a PC window's stream to come back at its new size
+constexpr long kWindowResizeTicks = 90 * 30; // about 30 s for a PC window's stream to come back at its new size
+                                             // (a host's streams start one at a time; a later picture still fits)
 void RunLayout(const std::vector<std::string> &args);
 
 // A stretch has ended: the window gets its pixels, in one resize. The answer ("float") sets the panel
@@ -1977,7 +1978,10 @@ void ResizeWindowPanel(Screen &s, double hx, double hy, double grabX, double gra
     s.keepX = -sx, s.keepY = -sy;
     if (s.width <= 0 || s.height <= 0 || s.metres <= 0) return;
     if (s.stretchW <= 0) s.mpp = s.metres / s.width;   // its density now (a stretch still waiting keeps its own)
-    const int w = std::clamp(int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)), kWindowMinW, kWindowMaxW) & ~1;
+    // (and kMinWidth to 12 m wide at that density: ft-layout takes no other)
+    const int minW = std::max(kWindowMinW, int(std::ceil(kMinWidth / s.mpp / 2)) * 2);
+    const int maxW = std::max(minW, std::min(kWindowMaxW, int(12.0 / s.mpp) & ~1));
+    const int w = std::clamp(int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)), minW, maxW) & ~1;
     const int h = std::clamp(int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)), kWindowMinH, kWindowMaxH) & ~1;
     if (w == (s.stretchW > 0 ? s.stretchW : s.width) && h == (s.stretchW > 0 ? s.stretchH : s.height)) return;
     Stretch(s, w, h);
@@ -2834,7 +2838,7 @@ void CarryTorn(Screen &s, int index, int gx, int gy) {
         SetAbsolute(s, Mul(p, Translation(u - hu, v - hv, 0)));
     }
     StartDrag(s, Drag::Move, g_press.device);
-    SendPointer("press carries");   // the 3D mouse's cursor keeps its depth: the screen pressed stays put
+    if (s.drag == Drag::Move) SendPointer("press carries");   // the 3D mouse's cursor keeps its depth: the screen pressed stays put
 }
 
 // Window drag (user, 2026-11-07, windowdrag.h): a press with the modifier held on a floating window's
@@ -2937,7 +2941,7 @@ void PlacePulled() {
     }
     if (held && s.drag == Drag::None) {
         StartDrag(s, Drag::Move, g_pull.device);
-        SendPointer("press carries");   // the 3D mouse's cursor keeps its depth: the display pressed stays put
+        if (s.drag == Drag::Move) SendPointer("press carries");   // the 3D mouse's cursor keeps its depth: the display pressed stays put
     }
     std::printf("screen %d: pulled off screen %d%s\n", g_pull.to + 1, g_pull.from + 1, held ? ", carried" : "");
     g_pull = Pull{};
@@ -6651,16 +6655,33 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
         it = g_imports.emplace(key, h).first;
     }
     if (b->width != s.width || b->height != s.height) {
+        const int oldPx = s.width;
+        const double oldW = s.metres, oldH = s.heightMetres();   // (a PC window's panel keeps its corner)
         s.width = b->width, s.height = b->height;
         if (s.floating) {
             ApplyCrop(s);
         } else {
             vr::HmdVector2_t scale = {float(s.width), float(s.height)};
             vr::VROverlay()->SetOverlayMouseScale(s.overlay, &scale);
-            // a PC window's panel resized: its stream is back at the new size, which ends the stretch
-            // (the corner kept); one still being resized stretches the new picture instead
-            if (s.stretchW > 0 && s.drag != Drag::Resize) s.keepUntil = std::max(s.keepUntil, g_tick + 1), Stretch(s, 0, 0);
-            else ApplyTexelAspect(s);
+            // A PC window's panel resized: its stream back at the size asked for ends the stretch (the
+            // corner kept). Another size (an earlier resize's stream) is stretched to the one asked for
+            // instead. Not stretching (one given up on, its picture late), it keeps its density: as wide
+            // as its pixels at the scale it had.
+            if (IsWindowPanel(s) && s.drag != Drag::Resize) {
+                if (s.stretchW > 0 && s.width == s.stretchW && s.height == s.stretchH) {
+                    s.keepUntil = std::max(s.keepUntil, g_tick + 1);
+                    Stretch(s, 0, 0);
+                } else if (s.stretchW <= 0 && oldPx > 0) {
+                    s.metres = std::clamp(oldW * s.width / oldPx, kMinWidth, 12.0);
+                    vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+                    ApplyCurve(s);
+                    KeepCorner(s, oldW, oldH);
+                } else {
+                    ApplyTexelAspect(s);
+                }
+            } else {
+                ApplyTexelAspect(s);
+            }
         }
         PlaceChrome(s);  // the height changed
         std::printf("screen %d: %dx%d\n", index + 1, s.width, s.height);

@@ -1,6 +1,6 @@
 # Steam PIN protection (experimental)
 
-**Opt-in implementation; headset validation incomplete.** The running
+**Experimental, opt-in; basic app-preserving lock/unlock wearer-tested.** The running
 desktop is unchanged until the new components are installed, restarted and
 `STEAM_PIN_LOCK=1` is set in the configuration file. Default is off while this
 internal Steam API integration is experimental. Use the screens backend; the
@@ -76,17 +76,24 @@ uninitialized settings and active/reset prompts do not.
 
 This is an internal Steam UI API, not a supported authentication API. Two real
 PIN cycles were observed continuously: unknown → locked → unlocked. These only
-validate detection, not the new enforcement. Cold boot, suspend/resume and actual
-app-preserving concealment still require wearer testing. Unit tests do not prove
+validate detection, not the new enforcement. Cold boot, suspend/resume and the full
+input/failure matrix still require wearer testing. Unit tests do not prove
 the meaning or completeness of Steam's UI signal.
 
 The personal integration has since been installed with an approved one-time
 desktop/helper restart, leaving SteamVR running. Its first authentication changed
 the live gate from locked to unlocked, and SteamVR reported the desktop screen
-and controls visible afterward. The wearer did not yet see Frametop; positioning
-or dashboard occlusion remains unconfirmed. This is not a completed concealment,
-input-blocking or unsaved-work-preservation test. Publication remains pending
-those checks; no additional capture is required.
+and controls visible afterward. The screen initially appeared missing because its
+saved position was behind the wearer; bringing it in front resolved that without
+restarting anything. In a subsequent real Steam PIN cycle, the wearer confirmed
+Frametop disappeared while locked and returned after unlock. KWrite retained its
+unsaved text, and KWrite, nested KWin and the compositor kept the same processes.
+No screenshots were needed or published.
+
+This validates basic visual concealment/restoration and unsaved-work preservation,
+not all input routes, auxiliary panels, lock latency or failure cases. Input
+blocking, observer failure/restart, UI restart, cold boot and suspend/resume remain
+hardware-test gaps. A review PR should remain draft until that matrix is completed.
 
 ## Intended boundary
 
@@ -99,7 +106,7 @@ user, privileged access, other unrestricted Steam applications or disk access.
 The existing local DevTools endpoint itself permits same-user UI access. Steam's
 PIN is not disk encryption or a Linux login boundary.
 
-## Required before enabling or an upstream PR
+## Required before general use or a ready-for-review PR
 
 1. Validate actual lock/unlock, cancellation, incorrect PIN (entered only in
    Steam), reset, UI restarts, suspend/resume and boot. Confirm no initial false

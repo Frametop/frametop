@@ -19,6 +19,7 @@ enum Verb {
     Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
     SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
+    WindowDrag, Pulled,
     Spin,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
@@ -43,6 +44,7 @@ struct Cmd {
     int k0 = 0;                           // sub
     int on = 0;                           // minimized
     int gx = 0, gy = 0;                   // torn
+    char mod[16] = {}, b1[16] = {}, b2[16] = {}, b3[16] = {};  // windowdrag
     double da = 0, db = 0;                // carryturn
 };
 
@@ -66,7 +68,7 @@ inline Group GroupOf(Verb v) {
     case Cutouts: case Wallpaper:
         return CutoutsGroup;
     case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case CarryToggle:
-    case CarryTake: case CarryTurn: case Carry: case Up:
+    case CarryTake: case CarryTurn: case Carry: case Up: case WindowDrag: case Pulled:
         return FloatGroup;
     case Spin:
         return SpinGroup;
@@ -134,6 +136,8 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "carryturn %lf %lf", &c.da, &c.db) == 2) return CarryTurn;
     if (std::sscanf(cmd, "carry %d", &c.n) == 1) return Carry;
     if (std::strcmp(cmd, "up") == 0) return Up;
+    if (std::sscanf(cmd, "windowdrag %15s %15s %15s %15s", c.mod, c.b1, c.b2, c.b3) == 4) return WindowDrag;
+    if (std::sscanf(cmd, "pulled %d %lf %lf", &c.n, &c.x, &c.y) == 3) return Pulled;
     if (!std::strncmp(cmd, "spin ", 5)) return Spin;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;
     if (std::strcmp(cmd, "debug") == 0) return Debug;

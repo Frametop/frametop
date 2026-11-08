@@ -127,7 +127,19 @@ A hand's pinch doesn't tear: hands have no wheel. Only a real KWin move counts, 
 
 - **Button.** The dock button returns the window to the screen, position, and size it had before it floated. If that screen is hidden now, it goes onto the first screen that shows.
 - **Dragging.** Carry the floating window, by its title bar or its bar, until the point you hold it by is on a shown screen within 10 cm of its surface (`FLOAT_DOCK_DISTANCE`, 0 turns it off): push it there with the wheel, or move the controller or hand forward. The screen lights up, and letting go docks the window there (ft-floatd's `dockat`), the point you held under the laser, at its current size in pixels, shrunk to fit if the screen is smaller and kept on the screen. A carried panel keeps its distance, so moving a floating window in front of a screen never docks it by accident. With a hand, the line runs from your head through the panel.
+- **Pushing.** Pushed into a screen with the wheel while carried, it docks at once, as if let go there. That works with any carry (title bar, bar, window drag, a torn-off window), not with `carry toggle`.
 - Docking disables the output and hides the panel.
+
+## Window drag
+
+Built 2026-11-07 (DEE-345; user: "drag windows by pressing the super key and clicking on them ... without having to actually click the interface"). A modifier held with a mouse button moves or resizes a window from anywhere in it. By default Super with the left button moves and with the right resizes. Frametop Settings' Keyboard page sets the modifier (Super, Alt, or off) and what each of the three buttons does (move, resize, nothing). They're saved in `frametop.conf` (`WINDOW_DRAG_MOD`, `WINDOW_DRAG_LEFT`, `_RIGHT`, `_MIDDLE`) and sent live.
+
+- **On the desktop's screens** KWin does it with its own mouse bindings: `session/window-drag.sh` writes `[MouseBindings]` `CommandAllKey` and `CommandAll1` to `3` into the desktop's kwinrc at every desktop start, and with `--live` asks KWin to read them again. A pull on the wheel during that move tears the window off, as with a title bar.
+- **On a floating window's panel** ft-screens carries the panel (move) or resizes it from the nearest corner (resize), and KWin gets neither the press nor its release, so nothing in the window is clicked (`screens/windowdrag.h`, `ModCarry` in `vr.cpp`).
+- **On a PC window's panel** it's the same, and the window can go back onto one of its PC's displays (docs/remote-displays.md, "PC app windows").
+- A laser's click with a modifier held tells the input relay (`notap`), so letting go of Super afterwards doesn't open the Steam menu: the relay never sees laser clicks.
+
+Super goes to ft-screens with every key from the input relay. A screen's window gets Super+drag only while KWin holds Super, so not while typing goes to a PC's display.
 
 ## Getting at it: the float key and the title bar button
 

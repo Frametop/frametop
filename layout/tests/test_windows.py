@@ -228,6 +228,72 @@ class Windows(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "no Frametop windows instance"):
             self.run_window("list", "oma7")
 
+    # Window drag (DEE-345): a window panel dropped onto one of its PC's displays, a window pulled off one.
+    def test_drop_puts_the_window_onto_that_display(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        numbers = {d["id"]: d["screen"] for d in self.displays()}
+        said = []
+        self.m.log = said.append
+        self.run_window("drop", str(numbers["oma7-window-55aa10"]), str(numbers["oma7-dp-2"]), "0.25", "0.5", "0.5", "0.02")
+        self.assertEqual(self.api[-1][1:], (48989, "POST", "/api/frametop/windows/release",
+                                            {"address": "0x55aa10", "monitor": "DP-2", "x": 0.25, "y": 0.5,
+                                             "grab_x": 0.5, "grab_y": 0.02}))
+        self.assertEqual([d["id"] for d in self.displays()], ["oma7-dp-2"])  # the panel's gone, the display stays
+        self.assertEqual(said, ["dropped oma7-window-55aa10 onto DP-2 at 0.25,0.50"])
+
+    def test_drop_only_onto_its_own_pcs_display(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        layout = self.m.load_layout()
+        layout["hosts"].append({"name": "dody", "address": "192.0.2.40",
+                                "displays": [{"id": "dody-1", "client": "c", "app": "display:{1}", "size": [2560, 1440]}]})
+        self.m.save_layout(layout)
+        layout = self.m.load_layout()
+        numbers = {d["id"]: n for n, _, d in self.m.remote_displays(layout)}
+        calls = len(self.api)
+        with self.assertRaisesRegex(RuntimeError, "isn't one of oma7's displays"):
+            self.run_window("drop", str(numbers["oma7-window-55aa10"]), str(numbers["dody-1"]), "0.5", "0.5", "0.5", "0.5")
+        with self.assertRaisesRegex(RuntimeError, "isn't a window"):
+            self.run_window("drop", str(numbers["oma7-dp-2"]), str(numbers["oma7-dp-2"]), "0.5", "0.5", "0.5", "0.5")
+        with self.assertRaisesRegex(RuntimeError, "from 0 to 1"):
+            self.run_window("drop", str(numbers["oma7-window-55aa10"]), str(numbers["oma7-dp-2"]), "2", "0.5", "0.5", "0.5")
+        self.assertEqual(len(self.api), calls)  # nothing asked of the PC
+        self.assertEqual(len([d for d in self.displays() if d.get("window")]), 1)
+
+    def test_pull_opens_the_window_under_the_point(self):
+        self.answers["/api/frametop/windows/at"] = (200, {"address": "0x55aa20", "class": "gimp", "title": "GIMP",
+                                                          "width": 2000, "height": 1200, "grab": [0.25, 0.75], "status": True})
+        told, m = [], self.m
+
+        class Screens:  # takes "pulled"; starting the stream finds no desktop (the test has none)
+            def ask(self, text, timeout=10.0):
+                told.append(text)
+                if not text.startswith("pulled "):
+                    raise m.NoAnswer("no desktop here")
+                return "ok"
+
+        self.m.screens_socket = Screens
+        self.m.log = lambda *_: None
+        number = 101  # oma7-dp-2, the first remote screen
+        out = self.run_window("pull", str(number), "0.4", "0.6")
+        at = [c for c in self.api if c[3] == "/api/frametop/windows/at"]
+        self.assertEqual(at[0][1:], (48989, "POST", "/api/frametop/windows/at", {"monitor": "DP-2", "x": 0.4, "y": 0.6}))
+        d = self.displays()[-1]
+        self.assertEqual((d["app"], d["size"], d["label"]), ("window:0x55aa20", [1920, 1200], "GIMP"))  # capped
+        self.assertEqual(out.split()[-1], d["id"])
+        self.assertEqual(told[-1], f"pulled {d['screen']} 0.2500 0.7500")
+
+    def test_pull_needs_a_window_there(self):
+        self.answers["/api/frametop/windows/at"] = (400, {"error": "no window there"})
+        with self.assertRaisesRegex(RuntimeError, "no window there"):
+            self.run_window("pull", "101", "0.5", "0.5")
+        self.assertFalse(any(d.get("window") for d in self.displays()))
+
+    def test_pull_is_from_a_display(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        n = next(d["screen"] for d in self.displays() if d.get("window"))
+        with self.assertRaisesRegex(RuntimeError, "isn't a PC's display"):
+            self.run_window("pull", str(n), "0.5", "0.5")
+
     def test_remote_host_sets_the_port(self):
         self.m.remote_command(["host", "oma7", "windows=49989"])
         self.assertEqual(self.m.load_layout()["hosts"][0]["windows"], {"port": 49989})

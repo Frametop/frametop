@@ -2103,6 +2103,11 @@ class Relay:
                 if len(words) > 3 and words[3] in ("0", "1"):
                     self.pause.screens_report(words[3] == "1")
             return
+        if cmd == "notap" and len(words) == 1:
+            # From ft-screens (no reply): a laser clicked with a modifier held (Super+drag, say).
+            # The relay never sees laser clicks, so the modifier's release isn't a tap.
+            self.held.tap = None
+            return
         if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
             self.vr_button(words[1], int(words[2]), now)
             return

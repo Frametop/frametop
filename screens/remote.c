@@ -349,6 +349,16 @@ void ft_remote_shutdown(void) {
 
 bool ft_remote_is(int index) { return find(index) != NULL; }
 
+const char *ft_remote_host(int index) {
+    const struct remote *r = find(index);
+    return r ? r->host : NULL;
+}
+
+const char *ft_remote_app(int index) {
+    const struct remote *r = find(index);
+    return r ? r->app : NULL;
+}
+
 void ft_remote_event(const struct ft_event *e) {
     struct remote *r = find(e->screen);
     if (!r) return;

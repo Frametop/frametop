@@ -39,7 +39,8 @@ int main() {
         {"hold 5 250", Hold}, {"unfloat 5", Unfloat}, {"pose 5 1 0 0 0 0 1 0 1.6 0 0 1 -1", Pose},
         {"sub 5 1 10 20 300 200", Sub}, {"sub 5 1 off", Sub}, {"minimized 5 1", Minimized},
         {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry toggle", CarryToggle}, {"carry take 5", CarryTake},
-        {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up}, {"spin 30", Spin},
+        {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up},
+        {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02", Pulled}, {"spin 30", Spin},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;

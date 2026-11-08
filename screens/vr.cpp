@@ -127,6 +127,7 @@
 #include "posemath.h"
 #include "../conf/ftsock.h"
 #include "vrcmd.h"
+#include "windowdrag.h"
 #include "trackwatch.h"
 #include "universefix.h"
 #include "steampanels.h"
@@ -370,6 +371,10 @@ struct Screen {
     // dockGX, dockGY (its pixels) put at dockX, dockY (the screen's); -1: nowhere.
     int dockOn = -1;
     int dockX = 0, dockY = 0, dockGX = 0, dockGY = 0;
+    // ...a PC window panel carried onto one of its PC's displays: it lands at dockU, dockV of the display
+    // (0 to 1 across and down), held at dockFX, dockFY of the window.
+    double dockU = 0.5, dockV = 0.5, dockFX = 0.5, dockFY = 0.5;
+    int64_t pushedMs = -1;        // the wheel last pushed it away (ms): pushed into a screen, it lands at once (DockPushed)
     // Carried by "carry toggle" (CarryToggle, UpdateToggleCarry): the 3D mouse's ray holds carryGrab (a
     // point on it, panel-local) carryDist from the eye, facing the head, turned by carryTurn. carryMode 1
     // (Ctrl held): it moves in carryPlane's plane; 2 (Alt held): it turns about its centre, at carryAt.
@@ -1744,7 +1749,7 @@ void EndDrag(Screen &s) {
 // Run one of Frametop's tools, `<repo>/<tool> <arg>`, in the background. log: its output goes
 // there, in the host's runtime directory (XDG_RUNTIME_DIR, not the nested desktop's; else /tmp
 // with O_NOFOLLOW: a symlink there must not be followed); null: to ours.
-void RunTool(const char *tool, const char *arg, const char *log) {
+void RunTool(const char *tool, const std::vector<std::string> &args, const char *log) {
     if (g_beside) return;
     char exe[PATH_MAX];
     if (!realpath("/proc/self/exe", exe)) return;
@@ -1760,18 +1765,22 @@ void RunTool(const char *tool, const char *arg, const char *log) {
         posix_spawn_file_actions_addopen(&io, 1, logname.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
         posix_spawn_file_actions_adddup2(&io, 1, 2);
     }
-    std::string a(arg);
-    char *argv[] = {path.data(), a.data(), nullptr};
+    std::vector<std::string> a(args);
+    std::vector<char *> argv{path.data()};
+    for (auto &w : a) argv.push_back(w.data());
+    argv.push_back(nullptr);
     pid_t pid;  // reaped by the compositor's SIGCHLD handler
     // A log that can't be opened (a symlink or a directory in its place) fails the spawn too.
-    const int rc = posix_spawn(&pid, path.c_str(), &io, nullptr, argv, environ);
+    const int rc = posix_spawn(&pid, path.c_str(), &io, nullptr, argv.data(), environ);
     if (rc != 0)
         std::printf("can't run %s (log %s): %s\n", path.c_str(), logname.c_str(), std::strerror(rc));
     posix_spawn_file_actions_destroy(&io);
 }
 
 // `ft-layout <cmd>`, logging to frametop-layout.log. The desktop start truncates that log.
+void RunTool(const char *tool, const char *arg, const char *log) { RunTool(tool, std::vector<std::string>{arg}, log); }
 void RunLayout(const char *cmd) { RunTool("layout/ft-layout", cmd, "frametop-layout.log"); }
+void RunLayout(const std::vector<std::string> &args) { RunTool("layout/ft-layout", args, "frametop-layout.log"); }
 
 // KWin's outputs follow where the screens are, so the pointer and dragged windows cross
 // to the screen you see next to this one: `ft-layout scale` runs once a move has settled.
@@ -1817,6 +1826,15 @@ void FinishDrag(Screen &s, int index) {
     if (resized) FaceAfterResize(s, index);
     Mat p;
     if (!moved) return;
+    if (s.remote && dockOn >= 0) {
+        // a PC window panel onto one of its PC's displays: the PC puts the window there (ft-layout window drop)
+        std::printf("screen %d: let go on screen %d: the window goes onto that display at %.2f,%.2f\n", index + 1, dockOn + 1,
+                    s.dockU, s.dockV);
+        const auto f = [](double v) { char b[16]; std::snprintf(b, sizeof b, "%.4f", v); return std::string(b); };
+        RunLayout({"window", "drop", std::to_string(index + 1), std::to_string(dockOn + 1), f(s.dockU), f(s.dockV), f(s.dockFX),
+                   f(s.dockFY)});
+        return;
+    }
     if (s.floating && dockOn >= 0) {
         std::printf("screen %d: let go on screen %d: docked there at %d,%d\n", index + 1, dockOn + 1, s.dockX, s.dockY);
         SendFloat("dockat " + std::to_string(index + 1) + " " + std::to_string(dockOn + 1) + " " + std::to_string(s.dockX) + " " +
@@ -1941,6 +1959,8 @@ void ResizeScreen(Screen &s, double cu, double cv) {
 }
 
 bool g_ctrl = false, g_alt = false;  // Ctrl, Alt held on a keyboard (ft_vr_key), for a carry
+bool g_meta = false;                 // Super held (ft_vr_key), for window drag
+windowdrag::Config g_windowDrag;     // WINDOW_DRAG_* (windowdrag.h), "windowdrag" live
 
 // Where the 3D mouse points, from the eye: the pointer helper starts its laser on the line from the
 // eye to the cursor, 0.15 m short of the cursor (POINTER_ORIGIN_MARGIN), so the laser's start isn't a
@@ -2172,6 +2192,7 @@ void UpdateDrag(Screen &s, int index) {
 // its centre. The same step a notch whatever is held (DEE-328's audit, 2026-11-01: no carry-only
 // Ctrl and Alt wheel bindings; the wheel pushes and pulls as on a title bar, DEE-246).
 void Push(Screen &s, double notches) {
+    if (notches > 0) s.pushedMs = NowMs();
     Mat d, head;
     if (!DevicePose(s.dragDevice, &d) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
     const double step = 0.08;
@@ -2724,6 +2745,115 @@ void CarryTorn(Screen &s, int index, int gx, int gy) {
     StartDrag(s, Drag::Move, g_press.device);
 }
 
+// Window drag (user, 2026-11-07, windowdrag.h): a press with the modifier held on a floating window's
+// panel or a PC window's panel, anywhere in it, carries it (a button that moves) or resizes it from the
+// nearest corner (one that resizes). KWin or the PC never hears of the press or its release
+// (g_press.torn), so nothing in the window is clicked. A screen's windows are KWin's own (its mouse
+// bindings follow the same setting: session/window-drag.sh); a PC display's, the PC's.
+bool ModCarry(Screen &s, int index, vr::TrackedDeviceIndex_t dev, uint32_t button, double x, double y) {
+    if (s.drag != Drag::None || g_press.buttons || IsHandHolder(dev) || !windowdrag::Held(g_windowDrag, g_meta, g_alt))
+        return false;
+    const windowdrag::Action action = windowdrag::ActionOf(g_windowDrag, button);
+    const char *app = s.remote ? ft_remote_app(index) : nullptr;
+    if (action == windowdrag::Nothing || (!s.floating && !(app && !std::strncmp(app, "window:", 7)))) return false;
+    PressDown(dev, button, index, x, y);
+    g_press.torn = true;
+    if (action == windowdrag::Resize) {
+        const double cx = s.floating ? s.cropX + s.cropW / 2.0 : s.width / 2.0, cy = s.floating ? s.cropY + s.cropH / 2.0 : s.height / 2.0;
+        s.cornerX = x >= cx ? 1 : -1, s.cornerY = y < cy ? 1 : -1;
+        PlaceChrome(s);
+    }
+    StartDrag(s, action == windowdrag::Move ? Drag::Move : Drag::Resize, dev);
+    std::printf("screen %d: window drag: %s by button %u\n", index + 1, action == windowdrag::Move ? "carried" : "resized", button);
+    return true;
+}
+
+// Pulling a window off a PC's display (user, 2026-11-07: "if there's a window that's on a display you do
+// super left click scroll down and it pulls that window off of the display and you could then drag it
+// somewhere else"): the modifier and a button that moves held on a PC display's panel, the wheel pulled.
+// The PC has the release where its pointer is (its own Super+drag, if it was moving the window, ends
+// there), and ft-layout opens the window under that point as a window panel ("window pull"), which
+// answers "pulled" once it's made: the laser carries it on from there (PlacePulled), while the button is
+// still held and within kPullMs. Its release goes nowhere (g_press.torn).
+struct Pull {
+    int from = -1, to = -1;                    // the display's panel, the window's (-1: not yet)
+    vr::TrackedDeviceIndex_t device = kNone;
+    int64_t until = -1;                        // ms
+    double fx = 0.5, fy = 0.5;                 // where the window was held, 0 to 1 of it
+};
+Pull g_pull;
+constexpr int64_t kPullMs = 10000;   // (pairing a stream client can take seconds)
+
+bool PullOff(Screen &s, int index, void (*handle)(const struct ft_event *, void *), void *data) {
+    const char *app = s.remote ? ft_remote_app(index) : nullptr;
+    if (!app || std::strncmp(app, "display:", 8) || g_press.torn || g_press.screen != index || IsHandHolder(g_press.device) ||
+        !windowdrag::Held(g_windowDrag, g_meta, g_alt) || s.width <= 0 || s.height <= 0)
+        return false;
+    bool moves = false;
+    for (uint32_t b : {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE})
+        moves |= (g_press.buttons & ButtonBit(b)) && windowdrag::ActionOf(g_windowDrag, b) == windowdrag::Move;
+    if (!moves) return false;
+    for (uint32_t b = BTN_LEFT; b <= BTN_TASK; ++b) {
+        if (!(g_press.buttons & ButtonBit(b))) continue;
+        ft_event e{};
+        e.type = FT_BUTTON, e.screen = index, e.button = b, e.pressed = false, e.x = g_press.x, e.y = g_press.y;
+        handle(&e, data);
+    }
+    g_press.torn = true;
+    g_pull = {index, -1, g_press.device, NowMs() + kPullMs, 0.5, 0.5};
+    const double u = std::clamp(g_press.x / s.width, 0.0, 1.0), v = std::clamp(g_press.y / s.height, 0.0, 1.0);
+    std::printf("screen %d: pulling the window at %.2f,%.2f off it\n", index + 1, u, v);
+    char a[2][16];
+    std::snprintf(a[0], sizeof a[0], "%.4f", u), std::snprintf(a[1], sizeof a[1], "%.4f", v);
+    RunLayout({"window", "pull", std::to_string(index + 1), a[0], a[1]});
+    return true;
+}
+
+// The pulled window's panel, once it has its first picture: onto the laser in front of the display, held
+// where the window was, and carried while the button's still held.
+void PlacePulled() {
+    if (g_pull.from < 0) return;
+    if (NowMs() > g_pull.until) {
+        if (g_pull.to >= 0) std::printf("screen %d: pulled, but its picture came too late: left where it opened\n", g_pull.to + 1);
+        g_pull = Pull{};
+        return;
+    }
+    if (g_pull.to < 0) return;
+    const auto it = g_screens.find(g_pull.to), from = g_screens.find(g_pull.from);
+    if (it == g_screens.end() || it->second.width <= 0 || it->second.metres <= 0) return;   // (not made, or no picture yet)
+    Screen &s = it->second;
+    const bool held = g_press.torn && g_press.buttons && g_press.device == g_pull.device;
+    Mat p, l;
+    double u, v;
+    if (from != g_screens.end() && ScreenPose(from->second, &p) && LaserPose(g_pull.device, &l) &&
+        RayOnSurface(from->second, p, l, &u, &v)) {
+        const double hu = (g_pull.fx - 0.5) * s.metres, hv = (0.5 - g_pull.fy) * s.heightMetres();
+        SetAbsolute(s, Mul(p, Translation(u - hu, v - hv, 0.05)));   // (just in front of the display)
+    }
+    if (held && s.drag == Drag::None) StartDrag(s, Drag::Move, g_pull.device);
+    std::printf("screen %d: pulled off screen %d%s\n", g_pull.to + 1, g_pull.from + 1, held ? ", carried" : "");
+    g_pull = Pull{};
+}
+
+// A window carried by a laser and pushed (the wheel, away) into a screen it can dock onto lands there at
+// once (user, 2026-11-07: "push the window onto the display if it is going to collide with it"), as if
+// let go: a title bar's press has its release in KWin now, and the button's own release goes nowhere.
+void DockPushed(void (*handle)(const struct ft_event *, void *), void *data) {
+    for (auto &[i, s] : g_screens) {
+        if (s.dockOn < 0 || s.drag != Drag::Move || s.toggleCarry || s.pushedMs < 0 || NowMs() - s.pushedMs > 500) continue;
+        s.pushedMs = -1;
+        if (s.titleCarry) {
+            ft_event e{};
+            e.type = FT_BUTTON, e.screen = i, e.button = BTN_LEFT, e.pressed = false, e.x = s.carryX, e.y = s.carryY;
+            handle(&e, data);
+            s.titleCarry = false;
+        }
+        if (g_press.buttons && g_press.device == s.dragDevice) g_press.torn = true;
+        std::printf("screen %d: pushed into screen %d\n", i + 1, s.dockOn + 1);
+        FinishDrag(s, i);
+    }
+}
+
 // Where a laser meets a panel's surface, in the panel's u (metres along it from the centre,
 // along the arc when curved) and v (up). OpenVR curves a screen into a cylinder toward its
 // front, centred `curve` metres in front of it (see OnSurface).
@@ -2767,7 +2897,7 @@ bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, do
 // surface, carried on, can pass behind or in front of another one, and its moves pulled the
 // host's pointer back, 2026-10-07). The release follows (see panelEvent).
 void UpdateRemoteDrag(void (*handle)(const struct ft_event *, void *), void *data) {
-    if (!g_press.buttons) return;
+    if (!g_press.buttons || g_press.torn) return;   // (a window panel carried by window drag: no PC hears of it)
     const auto origin = g_screens.find(g_press.origin);
     Mat l;
     if (origin == g_screens.end() || !origin->second.remote || !LaserPose(g_press.device, &l)) return;
@@ -4584,7 +4714,9 @@ double HeadDistance(const Mat &p) {
 // in front of (or just behind), lights that screen up (the target glow, full), and docks onto it where
 // it's let go (FinishDrag; ft-floatd's "dockat"). In front of: on the carrying laser past where it holds
 // the window, or for a hand (no laser) on the line from the eyes through the window's centre. Frametop's
-// own screens only (a remote display's host isn't KWin's). 0: off.
+// own screens only (a remote display's host isn't KWin's). A PC window panel (DEE-345) docks the same way
+// onto one of its own PC's displays (windowdrag::CanDropOn; ft-layout window drop). Pushed into one with
+// the wheel, either lands at once (DockPushed). 0: off.
 double g_floatDockDistance = 0.10;
 int g_dockGlow = -1;   // the screen a carried window would dock onto now
 
@@ -4595,7 +4727,10 @@ void UpdateDockAims() {
         const int was = s.dockOn;
         s.dockOn = -1;
         Mat p, l;
-        if (!s.floating || s.drag != Drag::Move || g_floatDockDistance <= 0 || !s.visible || !ScreenPose(s, &p)) continue;
+        const char *app = s.remote ? ft_remote_app(i) : nullptr, *host = s.remote ? ft_remote_host(i) : nullptr;
+        const bool window = app && host && !std::strncmp(app, "window:", 7);
+        if ((!s.floating && !window) || s.drag != Drag::Move || g_floatDockDistance <= 0 || !s.visible || !ScreenPose(s, &p))
+            continue;
         double u = 0, v = 0, held = 0;
         if (LaserPose(s.dragDevice, &l)) {
             if (!RayOnSurface(s, p, l, &u, &v, &held)) continue;
@@ -4613,7 +4748,9 @@ void UpdateDockAims() {
         for (auto &[k, o] : g_screens) {
             Mat q;
             double ou, ov, t;
-            if (k == i || o.floating || o.remote || !o.visible || o.width <= 0 || o.metres <= 0 || !ScreenPose(o, &q) ||
+            const char *oApp = o.remote ? ft_remote_app(k) : nullptr, *oHost = o.remote ? ft_remote_host(k) : nullptr;
+            const bool fits = window ? oApp && oHost && windowdrag::CanDropOn(host, app, oHost, oApp) : !o.floating && !o.remote;
+            if (k == i || !fits || !o.visible || o.width <= 0 || o.metres <= 0 || !ScreenPose(o, &q) ||
                 !RayOnSurface(o, q, l, &ou, &ov, &t) || std::fabs(ou) > o.metres / 2 || std::fabs(ov) > o.heightMetres() / 2)
                 continue;
             if (std::fabs(t - held) <= off) best = k, off = std::fabs(t - held), bu = ou, bv = ov;
@@ -4629,6 +4766,10 @@ void UpdateDockAims() {
         s.dockY = int(std::lround((oH / 2 - bv) * o.height / std::max(1e-6, oH)));
         s.dockGX = int(std::lround(std::clamp((u + s.metres / 2) / std::max(1e-6, s.metres), 0.0, 1.0) * s.cropW));
         s.dockGY = int(std::lround(std::clamp((H / 2 - v) / std::max(1e-6, H), 0.0, 1.0) * s.cropH));
+        s.dockU = std::clamp((bu + o.metres / 2) / o.metres, 0.0, 1.0);
+        s.dockV = std::clamp((oH / 2 - bv) / std::max(1e-6, oH), 0.0, 1.0);
+        s.dockFX = std::clamp((u + s.metres / 2) / std::max(1e-6, s.metres), 0.0, 1.0);
+        s.dockFY = std::clamp((H / 2 - v) / std::max(1e-6, H), 0.0, 1.0);
         g_dockGlow = best;
         if (was != best) std::printf("screen %d: over screen %d, %.0f cm from it: docks there if let go\n", i + 1, best + 1, off * 100);
     }
@@ -5568,6 +5709,10 @@ bool ft_vr_init(void) {
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";
     g_pinMode = levelpin::ModeOf(handcut::Setting("SCREEN_PIN_LEVEL", "0").c_str());   // head pins: 1 level, 2 walking   // the lazy susan brings panels (0: the room turns)
     num("FLOAT_DOCK_DISTANCE", g_floatDockDistance, 0, 1);   // a floating window carried this near a screen docks onto it
+    if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
+                                  handcut::Setting("WINDOW_DRAG_RIGHT", "resize").c_str(),
+                                  handcut::Setting("WINDOW_DRAG_MIDDLE", "none").c_str(), &g_windowDrag))
+        std::printf("window drag: a WINDOW_DRAG_* setting isn't meta|super|alt|off or move|resize|none: the defaults\n");
     num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)...
     g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind frunner's spot
     num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
@@ -6126,7 +6271,7 @@ bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void 
         return true;
     }
     if (s.drag != Drag::None) return false;
-    if (notches < 0 && TearOff(s, it->first, handle, data)) return true;
+    if (notches < 0 && (PullOff(s, it->first, handle, data) || TearOff(s, it->first, handle, data))) return true;
     struct ft_event e = {};
     e.type = FT_SCROLL, e.screen = it->first, e.dy = -notches;
     handle(&e, data);
@@ -6311,6 +6456,8 @@ void ft_vr_key(uint32_t code, int value) {
     if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL) ctrl[code == KEY_RIGHTCTRL] = value != 0, g_ctrl = ctrl[0] || ctrl[1];
     if (code == KEY_LEFTALT || code == KEY_RIGHTALT) alt[code == KEY_RIGHTALT] = value != 0, g_alt = alt[0] || alt[1];
     if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) shift[code == KEY_RIGHTSHIFT] = value != 0, g_shift = shift[0] || shift[1];
+    static bool meta[2];
+    if (code == KEY_LEFTMETA || code == KEY_RIGHTMETA) meta[code == KEY_RIGHTMETA] = value != 0, g_meta = meta[0] || meta[1];
 }
 
 bool ft_vr_carry_key(uint32_t code, int value) {
@@ -6566,6 +6713,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                         g_press.screen >= 0)
                         e.screen = g_press.screen, e.x = g_press.x, e.y = g_press.y;
                     if (e.pressed) {
+                        // A laser clicking with a modifier held: its release isn't a tap (the relay sees no laser clicks)
+                        if (g_meta || g_alt || g_ctrl || g_shift) SendRelay("notap");
+                        if (!sub && ModCarry(s, index, ev.trackedDeviceIndex, e.button, e.x, e.y)) return;
                         PressDown(ev.trackedDeviceIndex, e.button, index, e.x, e.y);
                         // A floating window's title bar: carry the panel, and KWin (which starts
                         // moving the window on the press) sees no motion until the release.
@@ -6589,7 +6739,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                         return;
                     }
                     // a pull on a window KWin moves on its screen tears it off (TearOff)
-                    if (!sub && ev.data.scroll.ydelta < 0 && TearOff(s, index, handle, data)) return;
+                    if (!sub && ev.data.scroll.ydelta < 0 && (PullOff(s, index, handle, data) || TearOff(s, index, handle, data))) return;
                     e.type = FT_SCROLL;
                     e.dx = -ev.data.scroll.xdelta;
                     e.dy = -ev.data.scroll.ydelta;
@@ -6736,6 +6886,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
     PollPill(handle, data);
     UpdateHandInput(handle, data);
+    DockPushed(handle, data);   // (after UpdateHandInput's dock aims)
+    PlacePulled();
     ReleaseStuck(handle, data);
     UpdateRemoteDrag(handle, data);
     RefreshChrome();
@@ -7402,6 +7554,21 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         std::snprintf(reply, size, "ok");
         return;
     }
+    case vrcmd::WindowDrag:
+        // Frametop Settings: "windowdrag MOD LEFT RIGHT MIDDLE" (windowdrag.h)
+        if (!windowdrag::ParseCommand(parsed.mod, parsed.b1, parsed.b2, parsed.b3, &g_windowDrag))
+            return (void)std::snprintf(reply, size, "error windowdrag meta|alt|off move|resize|none move|resize|none move|resize|none");
+        std::printf("window drag: %s\n", cmd + 11);
+        std::snprintf(reply, size, "ok");
+        return;
+    case vrcmd::Pulled:
+        // ft-layout window pull: the window pulled off panel g_pull.from is on panel n, held at x, y of it
+        if (g_pull.from < 0) return (void)std::snprintf(reply, size, "ok no pull waits (let go, or too late)");
+        if (!(parsed.x >= 0 && parsed.x <= 1 && parsed.y >= 0 && parsed.y <= 1) || n < 1)
+            return (void)std::snprintf(reply, size, "error pulled N FX FY (0 to 1)");
+        g_pull.to = n - 1, g_pull.fx = parsed.x, g_pull.fy = parsed.y;
+        std::snprintf(reply, size, "ok");
+        return;
     case vrcmd::Up: {
         if ((g_press.buttons & ButtonBit(BTN_LEFT)) && g_press.device != kNone && !IsHandController(g_press.device) &&
             !IsHandHolder(g_press.device))
@@ -7483,6 +7650,11 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //   minimized <screen> 0|1
 //   carry <screen>            the window's own title bar was pressed (an app that draws its
 //                             own): carry the panel with the pressing laser until the release
+// Window drag (windowdrag.h):
+//   windowdrag <mod> <left> <right> <middle>   Frametop Settings: the modifier (meta|alt|off) and what each
+//                             button does with it held (move|resize|none)
+//   pulled <screen> <fx> <fy>   ft-layout window pull: the window pulled off a PC's display is on panel
+//                             <screen>, held at fx, fy of it (0 to 1): the laser that pulled it carries it on
 // (size <screen> <w> <h> and key <code> <value> are handled in compositor.c.) Screens are
 // numbered from 1 here, like everywhere the user sees them. "screens" and "all" leave out
 // floating windows.

@@ -129,6 +129,12 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout window launch HOST APP [--size WxH]
                                      starts the app (an id from "window apps") as a panel
   ft-layout window close ID          the panel goes and the window goes back on the PC
+  ft-layout window drop N M U V FX FY
+                                     window panel N (a screen number) goes back onto its PC's
+                                     display M, at U, V of the way across and down it, held at
+                                     FX, FY of the window (0 to 1; ft-screens, window drag)
+  ft-layout window pull N U V        the window at U, V of PC display N becomes a panel, and
+                                     ft-screens is told ("pulled"): its laser carries it on
   ft-layout streams start|stop       streams only: the connected remote displays without the
                                      desktop (ft-screens with no KWin or Plasma); stop ends
                                      only that, never a running desktop
@@ -1543,6 +1549,78 @@ def window_prune(layout, host, windows):
         log(f"forgot {d['id']}: its window closed on {host.get('name') or host['address']}")
 
 
+def fractions(words, what):
+    """Numbers from 0 to 1, or RuntimeError naming the command."""
+    try:
+        values = [float(w) for w in words]
+    except ValueError:
+        values = []
+    if len(values) != len(words) or not all(0.0 <= v <= 1.0 for v in values):
+        raise RuntimeError(f"window {what}: the fractions go from 0 to 1, not {' '.join(words)!r}")
+    return values
+
+
+def numbered(layout, word, what):
+    """(host, display) of remote screen number `word`."""
+    if not word.isdecimal():
+        raise RuntimeError(f"window {what}: {word!r} isn't a screen number")
+    found = next(((h, d) for n, h, d in remote_displays(layout) if n == int(word)), None)
+    if found is None:
+        raise RuntimeError(f"window {what}: no remote display or window panel {word}")
+    return found
+
+
+def window_drop(layout, args):
+    """Window drag (DEE-345): a window panel let go on (or pushed into) one of its own PC's
+    displays goes back onto that monitor where it was let go, not where it came from."""
+    host, d = numbered(layout, args[0], "drop")
+    onto_host, onto = numbered(layout, args[1], "drop")
+    u, v, fx, fy = fractions(args[2:6], "drop")
+    if not d.get("window"):
+        raise RuntimeError(f"window drop: {d['id']} isn't a window")
+    if onto_host is not host or not str(onto.get("app", "")).startswith("display:"):
+        raise RuntimeError(f"window drop: {onto['id']} isn't one of {host.get('name') or host['address']}'s displays")
+    monitor = onto["app"][8:]
+    window_forget(layout, host, d)
+    try:
+        window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
+                   {"address": d["app"][7:], "monitor": monitor, "x": u, "y": v, "grab_x": fx, "grab_y": fy})
+        log(f"dropped {d['id']} onto {monitor} at {u:.2f},{v:.2f}")
+    except RuntimeError as e:
+        if "no window output" in str(e):
+            log(f"dropped {d['id']}: the window had already left it")
+        else:
+            log(f"dropped {d['id']}; the PC will put the window back within a minute ({e})")
+            raise
+
+
+def window_pull(layout, args):
+    """Window drag (DEE-345): the window under a point of a PC's display, as a panel; ft-screens
+    hears where it was held, so the laser that pulled it carries it on."""
+    host, d = numbered(layout, args[0], "pull")
+    u, v = fractions(args[1:3], "pull")
+    if not str(d.get("app", "")).startswith("display:"):
+        raise RuntimeError(f"window pull: {d['id']} isn't a PC's display")
+    _, port = window_host(layout, host.get("name"))
+    hit = window_api(host, port, "POST", "/api/frametop/windows/at", {"monitor": d["app"][8:], "x": u, "y": v})
+    address = str(hit.get("address", ""))
+    if not re.fullmatch(r"0x[0-9a-fA-F]{1,16}", address):
+        raise RuntimeError(f"window pull: the PC named no window ({address!r})")
+    window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
+    size = window_size({}, (min(int(hit.get("width") or WINDOW_SIZE[0]), WINDOW_MAX[0]),
+                            min(int(hit.get("height") or WINDOW_SIZE[1]), WINDOW_MAX[1])))
+    panel = window_add(layout, host, port, address, str(hit.get("title") or hit.get("class") or ""), size)
+    grab = hit.get("grab") if isinstance(hit.get("grab"), list) and len(hit["grab"]) == 2 else [0.5, 0.5]
+    fx, fy = (min(max(float(g), 0.0), 1.0) for g in grab)
+    n = next(k for k, _, e in remote_displays(layout) if e is panel)
+    try:
+        screens_socket().ask(f"pulled {n} {fx:.4f} {fy:.4f}")
+    except (NoAnswer, RuntimeError) as e:
+        log(f"pulled {panel['id']}; ft-screens didn't take it ({e}): it opened in front of you")
+    log(f"pulled {address} off {d['app'][8:]} as {panel['id']} (screen {n})")
+    print(panel["id"])
+
+
 def window_command(args):
     """ft-layout window list|apps|open|launch|close (see the usage)."""
     what = args[0] if args else ""
@@ -1611,6 +1689,12 @@ def window_command(args):
         d = window_add(layout, host, port, address, title, size)
         print(d["id"])
         return
+    if what == "drop" and len(args) == 7:
+        window_drop(load_layout(), args[1:])
+        return
+    if what == "pull" and len(args) == 4:
+        window_pull(load_layout(), args[1:])
+        return
     if what == "close" and len(args) == 2:
         layout = load_layout()
         _, host, d = find_display(layout, args[1])
@@ -1619,7 +1703,7 @@ def window_command(args):
         window_close(layout, host, d)
         return
     raise RuntimeError("window list HOST | apps HOST | catalog HOST | open HOST ADDRESS [--size WxH] | "
-                       "launch HOST APP [--size WxH] | close ID")
+                       "launch HOST APP [--size WxH] | close ID | drop N M U V FX FY | pull N U V")
 
 
 def apply(wait=0):

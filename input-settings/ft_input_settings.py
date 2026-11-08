@@ -101,6 +101,16 @@ import catalog as model_catalog  # noqa: E402
 MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
 MODEL_KIND_TAGS = {"stock": "Off the shelf", "valve": "Valve", "classic": "Built in", "custom": "Frametop"}
 SCREENS = "\0ft_screens"
+# Window drag (DEE-345): a modifier held with a mouse button moves or resizes a window from anywhere in
+# it, on KWin's screens (session/window-drag.sh), floating windows and PC window panels (ft-screens,
+# "windowdrag"). frametop.conf's keys, their defaults, and the words each takes.
+WINDOW_DRAG_MODS = {"meta": "Super (Meta)", "alt": "Alt", "off": "Off"}
+WINDOW_DRAG_ACTIONS = {"move": "Move", "resize": "Resize", "none": "Nothing"}
+WINDOW_DRAG = {"mod": ("WINDOW_DRAG_MOD", "meta", WINDOW_DRAG_MODS),
+               "left": ("WINDOW_DRAG_LEFT", "move", WINDOW_DRAG_ACTIONS),
+               "right": ("WINDOW_DRAG_RIGHT", "resize", WINDOW_DRAG_ACTIONS),
+               "middle": ("WINDOW_DRAG_MIDDLE", "none", WINDOW_DRAG_ACTIONS)}
+WINDOW_DRAG_SCRIPT = os.path.join(REPO, "session", "window-drag.sh")
 HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
                "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
                "off": "Off"}
@@ -509,6 +519,7 @@ class Backend(QObject):
     pauseChanged = Signal()
     handsChanged = Signal()
     spinChanged = Signal()  # (its own: handsChanged rebuilds the switches every 5 s, mid-drag too)
+    windowDragChanged = Signal()
     voiceChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
@@ -1286,6 +1297,47 @@ class Backend(QObject):
         # ft-floatd reads it at each float, so it needs no reload
         self._set_rule("carry_on_float", bool(on), "Floated windows: " + (
             "start carried by the 3D mouse" if on else "stay where they float"))
+
+    @Property("QVariantMap", notify=windowDragChanged)
+    def windowDrag(self):
+        """{"mod", "left", "right", "middle"}: frametop.conf's WINDOW_DRAG_* (a word outside its list: the default)."""
+        conf = read_conf()
+        out = {}
+        for which, (key, default, words) in WINDOW_DRAG.items():
+            v = conf.get(key, default).strip().lower()
+            v = "meta" if v == "super" else v
+            out[which] = v if v in words else default
+        return out
+
+    @Property("QVariantList", constant=True)
+    def windowDragMods(self):
+        return [{"value": k, "text": v} for k, v in WINDOW_DRAG_MODS.items()]
+
+    @Property("QVariantList", constant=True)
+    def windowDragActions(self):
+        return [{"value": k, "text": v} for k, v in WINDOW_DRAG_ACTIONS.items()]
+
+    @Slot(str, str)
+    def setWindowDrag(self, which, value):
+        """One of window drag's settings ("mod", "left", "right", "middle"): written to frametop.conf, and
+        now to ft-screens and KWin's mouse bindings (without the desktop running, they read it when it starts)."""
+        if which not in WINDOW_DRAG or value not in WINDOW_DRAG[which][2]:
+            return
+        write_conf_value(WINDOW_DRAG[which][0], value)
+        d = self.windowDrag
+        words = [d["mod"], d["left"], d["right"], d["middle"]]
+        self._send("windowdrag " + " ".join(words), SCREENS)
+        done = host(WINDOW_DRAG_SCRIPT, "--live", *words, timeout=10)
+        self.windowDragChanged.emit()
+        if done.returncode:
+            self.message.emit("Saved, but the desktop's own windows didn't take it: "
+                              + ((done.stderr or done.stdout).strip() or "window-drag.sh failed"), True)
+        elif d["mod"] == "off":
+            self.message.emit("Window drag off", False)
+        else:
+            mod = "Super" if d["mod"] == "meta" else "Alt"
+            said = [f"{b} {WINDOW_DRAG_ACTIONS[d[b]].lower()}s" for b in ("left", "right", "middle") if d[b] != "none"]
+            self.message.emit(f"{mod} + a button in a window: " + (", ".join(said) or "nothing"), False)
 
     @Property(bool, notify=mappingsChanged)
     def pauseAuto(self):

@@ -10,6 +10,10 @@ REMOTE=0           # 1 = serve the desktop's primary screen over VNC on the tail
 FLOAT_SLOTS=16     # screens backend: how many windows can float in VR at once (spare outputs; 0 turns it off; restart the desktop after a change)
 FLOAT_MARGIN=300   # floating windows: pixels around each window on its output, so menus have room past its edges
 FLOAT_DOCK_DISTANCE=0.10   # floating windows: carried this near a screen (m), one lights up and the window docks onto it when let go (0: off)
+WINDOW_DRAG_MOD=meta         # window drag: hold this (meta, alt, or off) and press a button anywhere in a window
+WINDOW_DRAG_LEFT=move        # ...the left button: move, resize, or none (the same for KWin, floating windows and PC windows)
+WINDOW_DRAG_RIGHT=resize
+WINDOW_DRAG_MIDDLE=none
 DASHBOARD_APPS=steamvr # apps from the SteamVR dashboard's Launch a program list: steamvr = SteamVR windows | frametop = Frametop floating windows (SteamVR's when the desktop isn't running, Frametop is paused, or every floating window is in use; applies at once)
 NOTIFY_FORWARD=auto # the desktop's notifications go to the Steam session's notification server (e.g. VR toasts), Plasma's popups off: auto = unless that's SteamOS's steam_notif_daemon | on | off (restart the desktop after a change)
 FIREFOX_TITLEBAR=kwin # Firefox in the desktop: kwin = KWin's title bar, with Frametop's float button | firefox = its own, tabs in the title bar (restart the desktop after a change)

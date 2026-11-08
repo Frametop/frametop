@@ -111,6 +111,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/windowdrag-test.cpp \
+      -o build/tests/windowdrag-test
+    run screens/tests/windowdrag-test.cpp build/tests/windowdrag-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/wallimage-test.cpp \
       -o build/tests/wallimage-test
     run screens/tests/wallimage-test.cpp build/tests/wallimage-test

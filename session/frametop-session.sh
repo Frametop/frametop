@@ -439,6 +439,11 @@ fi
 kwriteconfig6 --file "$kwinrc" --group EdgeBarrier --key EdgeBarrier 0
 kwriteconfig6 --file "$kwinrc" --group EdgeBarrier --key CornerBarrier false
 
+# Window drag: KWin's modifier+button bindings follow WINDOW_DRAG_* (Super+left moves a window
+# from anywhere in it, Super+right resizes it, by default), as ft-screens does on floating
+# windows and PC window panels. A bad setting leaves KWin's own.
+"$here/window-drag.sh" "$kwinrc" || true
+
 # KWin draws through zink on the headset's GPU, which vrcompositor needs, so the blur and
 # background contrast behind panels and menus and the window animations cost frames for
 # little. They're off by default in this desktop. Each is written once, before KWin first

@@ -125,7 +125,9 @@
 // window to another), the lock gives way: while the left button is held on one of ft-screens'
 // panels, the ray is still tested against ft-screens' panels, and the cursor goes onto
 // whichever it meets first. Not while that panel is being carried (its title bar or its bar):
-// then the ray would find what's behind it.
+// then the ray would find what's behind it. Nor once the press carries another panel (ft-screens'
+// "press carries": a window torn off its screen or pulled off a PC's display): the ray would find
+// the carried panel, and the cursor would pull it in toward the eyes.
 //
 // Head follow (experimental, off by default; POINTER_FOLLOW=1, or the relay's "follow toggle"): the cursor
 // is carried by a reference direction, where the head faced when it last settled, and turns
@@ -490,7 +492,8 @@
 // restart or a change to POINTER_FOLLOW), follow carry on [x y z]|off (ft-screens: head-locked, no leash, the cursor kept on x y z, while
 // carry_toggle carries a panel; the setting above comes back after), carry turn on|off (ft-screens: Alt
 // held during that carry: mouse moves go to it as "carryturn <dyaw> <dpitch>", not to the cursor), aimat <x> <y> <z> (ft-screens: the
-// cursor points at that point, standing universe),
+// cursor points at that point, standing universe), press carries (ft-screens: the held press carries
+// a panel it wasn't on; the drag lock holds, see the top),
 // gaze on|off|toggle|? (gaze mode, likewise with POINTER_GAZE; ? only asks, "? headset" adds
 // worn|away to the reply, and "? headset on-at" also "on-at NS": the CLOCK_BOOTTIME time the
 // headset last went back on after it was off, 0 if not since this started, for ft-stream's host
@@ -543,6 +546,7 @@
 
 #include "../../conf/ft_conf.h"
 #include "../../conf/ftsock.h"
+#include "../../conf/vrscene.h"
 #include "../../hands/include/fh_events.h"
 #include "../../hands/include/fh_ray.h"
 #include "../../screens/posemath.h"
@@ -1378,6 +1382,7 @@ struct Pointer {
     Clock::time_point handOkAt{};  // the gestures file last read whole
     // Gaze mode outside games, and its dot (see the top): lastMove/lastHeld/pulseAt.
     bool inGame = false, gazeAwake = false, gameSent = false;
+    bool inLink = false, linkSent = false;  // Steam Link's client is the scene app (DEE-346)
     Clock::time_point inGameAt{}, gazeAwakeAt{}, gameSentAt{};
     Clock::time_point lastMove{}, lastHeld{}, pulseAt{};
     // The left button, as sent to the driver; pressRight: the next press is the right button
@@ -2533,7 +2538,11 @@ void Pointer::GazeAwake() {
     const auto t = Clock::now();
     if (t - inGameAt > std::chrono::milliseconds(500)) {
         inGameAt = t;
-        inGame = vr::VRApplications()->GetCurrentSceneProcessId() != 0;
+        // Steam Link's client counts only while the relay says a PC game runs that Frametop gives
+        // way to (conf/vrscene.h); the relay polls the PC while "vrlink 1" holds.
+        const ftscene::Kind kind = ftscene::Classify();
+        inLink = kind == ftscene::Kind::Link;
+        inGame = ftscene::GivesWay(kind, inLink && ftscene::PcGame());
     }
     // Hand gestures in the last two minutes keep it the same way.
     const bool handsRecent = handsOn && handUsed != Clock::time_point{} && t - handUsed < std::chrono::minutes(2);
@@ -2551,10 +2560,12 @@ void Pointer::GazeAwake() {
     }
     // The relay pauses Frametop for VR games (input/game_pause.py). Repeated, so a relay
     // that restarts learns it, and silence (SteamVR gone) ends the game there.
-    if (inGame != gameSent || t - gameSentAt > std::chrono::seconds(5)) {
+    if (inGame != gameSent || inLink != linkSent || t - gameSentAt > std::chrono::seconds(5)) {
         gameSent = inGame;
+        linkSent = inLink;
         gameSentAt = t;
         SendTo(out, FT_SOCK_RELAY, inGame ? "vrgame 1" : "vrgame 0");
+        SendTo(out, FT_SOCK_RELAY, inLink ? "vrlink 1" : "vrlink 0");
     }
 }
 
@@ -2890,6 +2901,12 @@ void Pointer::ButtonCommand(const char *buf) {
         if (!on) carryAimPending = false;
         carryFollow = on;
         std::printf("head follow for a carry %s\n", on ? "on" : "off");
+    } else if (std::strncmp(buf, "press carries", 13) == 0) {
+        // ft-screens: this press now carries a panel other than the one it was on (a window torn off
+        // its screen, or one pulled off a PC's display), which stays where it is. The lock holds for
+        // the rest of the press: the ray finding the carried panel moved the cursor, the panel with
+        // it, onto it again, nearer each frame, till it was at the eyes and went back (Daenon, 2026-11-07).
+        if (leftHeld && !pressKey.empty()) pressKey.clear(), std::printf("drag lock: the press carries a panel\n");
     } else if (std::strncmp(buf, "carry turn ", 11) == 0) {
         carryTurn = std::strncmp(buf + 11, "on", 2) == 0;
     } else if (double at[3]; std::sscanf(buf, "aimat %lf %lf %lf", &at[0], &at[1], &at[2]) == 3) {

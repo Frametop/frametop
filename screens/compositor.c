@@ -879,6 +879,10 @@ static void release_all_keys(struct server *s, char *reply, int size) {
     if (spot_open(s)) spot_send(s, "keys release");
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
     release_keys(s, "release all keys");
+    // ...and ft-screens' own idea of them (window drag's Super, a carry's Ctrl and Alt): a relay that
+    // restarted with one held never sends its release
+    static const uint32_t mods[] = {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTSHIFT, KEY_RIGHTSHIFT, KEY_LEFTMETA, KEY_RIGHTMETA};
+    for (size_t i = 0; i < sizeof mods / sizeof *mods; ++i) ft_vr_key(mods[i], 0);
     ft_keyboard_release_modifiers(&s->keyboard, now_ms());
     struct wlr_surface *focus = s->seat->keyboard_state.focused_surface;
     for (size_t i = 0; i < sizeof ft_modifier_keys / sizeof *ft_modifier_keys; ++i) {

@@ -381,6 +381,7 @@
        "os_menu",
        "hands_toggle",
        "release_keys",
+       "desktopless_toggle",
        "key",
        "none"
       ],
@@ -440,6 +441,7 @@
        "os_menu",
        "hands_toggle",
        "release_keys",
+       "desktopless_toggle",
        "key",
        "none"
       ],

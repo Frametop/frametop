@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline test of input/rules-migrate.py, the one-time changes to the input relay's rules: a
-key_bindings list of its own gets Meta+Shift+H once and Ctrl+Alt+Shift+Esc once,
+key_bindings list of its own gets Meta+Shift+H once, Ctrl+Alt+Shift+Esc once and Meta+Shift+D once,
 and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
 
   input/test/rules-migrate-test.py
@@ -203,9 +203,10 @@ try:
                                                 json.loads(read(rules))["key_bindings"].get("42+125+35")),
           (True, "screens_toggle"))
 
-    # Ctrl+Alt+Shift+Esc, with every change, as an install runs them.
-    rm.MIGRATIONS = ALL_MIGRATIONS
-    check("both changes run, in order", [name for name, _ in rm.MIGRATIONS], ["screens-toggle-key", "release-keys-key"])
+    # Ctrl+Alt+Shift+Esc, with the changes before it, as an install of its day ran them.
+    check("every change runs, in order", [name for name, _ in ALL_MIGRATIONS],
+          ["screens-toggle-key", "release-keys-key", "desktopless-key"])
+    rm.MIGRATIONS = ALL_MIGRATIONS[:2]
     # A list that got Meta+Shift+H already (an install with the screens-toggle key change): it gets this one, once.
     with_h = {**CUSTOM, "key_bindings": {"42+125+35": "screens_toggle", **CUSTOM["key_bindings"]}}
     rules, state = case("release-after-217", with_h)
@@ -307,6 +308,37 @@ try:
     check("...the note says what to add, and where",
           any("add Ctrl+Alt+Shift+Esc (Release all keys) on its Keyboard page" in line
               for line in out.getvalue().splitlines()), True)
+
+    # Meta+Shift+D (desktopless mode), with every change, as an install runs them now.
+    rm.MIGRATIONS = ALL_MIGRATIONS
+    DESKTOPLESS_LINE = '    "42+125+32": "desktopless_toggle",\n'
+    with_both = {**with_h, "key_bindings": {"29+42+56+1": "release_keys", **with_h["key_bindings"]}}
+    rules, state = case("desktopless-after", with_both)
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump({rm.SCREENS_TOGGLE_KEY: True, rm.RELEASE_KEYS_KEY: True}, f)
+    before = read(rules)
+    reloads()
+    check("after the release-keys change: done", rm.main(rules, state), 0)
+    after = read(rules)
+    check("...Meta+Shift+D added first, the others in their order", list(json.loads(after)["key_bindings"]),
+          ["42+125+32", *with_both["key_bindings"]])
+    check("...every other byte as it was", after.decode().replace(DESKTOPLESS_LINE, "", 1).encode(), before)
+    check("...backed up, marked, the relay told once",
+          (read(rules + ".bak-desktopless-key"), marked(state, rm.DESKTOPLESS_KEY), reloads()), (before, True, 1))
+    with open(rules, "wb") as f:
+        f.write(before)
+    rm.main(rules, state)
+    check("...removed afterwards: not added again", read(rules), before)
+    rules, state = case("desktopless-taken", {**with_both, "key_bindings": {**with_both["key_bindings"],
+                                                                           "42+125+32": "command:notify-send hi"}})
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump({rm.SCREENS_TOGGLE_KEY: True, rm.RELEASE_KEYS_KEY: True}, f)
+    before = read(rules)
+    rm.main(rules, state)
+    check("Meta+Shift+D bound already: unchanged, no backup, marked",
+          (read(rules), read(rules + ".bak-desktopless-key"), marked(state, rm.DESKTOPLESS_KEY)), (before, None, True))
 finally:
     rm.MIGRATIONS = ALL_MIGRATIONS
     relay.close()

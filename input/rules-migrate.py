@@ -17,6 +17,9 @@ user removes afterwards stays removed.
   stuck in KWin ("29+42+56+1": release_keys, a new default). Added the same way, under its own
   name, so a list that got Meta+Shift+H already gets this one too.
 
+  desktopless-key (2026-11-07): Meta+Shift+D turns desktopless mode on or off ("42+125+32":
+  desktopless_toggle, a new default; docs/desktopless.md). Added the same way.
+
   input/rules-migrate.py [RULES [STATE]]
 Python 3 standard library only: it runs on the SteamOS host.
 """
@@ -35,6 +38,8 @@ SCREENS_TOGGLE_KEY = "screens-toggle-key"
 SCREENS_COMBO, SCREENS_ACTION = "42+125+35", "screens_toggle"
 RELEASE_KEYS_KEY = "release-keys-key"
 RELEASE_COMBO, RELEASE_ACTION = "29+42+56+1", "release_keys"
+DESKTOPLESS_KEY = "desktopless-key"
+DESKTOPLESS_COMBO, DESKTOPLESS_ACTION = "42+125+32", "desktopless_toggle"
 
 
 def read_state(path):
@@ -140,7 +145,13 @@ def release_keys_key(path):
                        "let go of every key", "Release all keys")
 
 
-MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key), (RELEASE_KEYS_KEY, release_keys_key))
+def desktopless_key(path):
+    return add_binding(path, DESKTOPLESS_KEY, DESKTOPLESS_COMBO, DESKTOPLESS_ACTION, "Meta+Shift+D",
+                       "turn desktopless mode on or off", "Desktopless mode on/off")
+
+
+MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key), (RELEASE_KEYS_KEY, release_keys_key),
+              (DESKTOPLESS_KEY, desktopless_key))
 
 
 def main(rules=RULES, state_path=STATE):

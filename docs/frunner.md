@@ -6,6 +6,7 @@ Frunner is Frametop's search for apps, profiles, remote displays and Frametop's 
 - **An app that isn't running:** it starts as a floating window, where that app last floated or in front of you.
 - **A profile:** it opens like Open profile in Frametop Settings (`ft-layout open NAME`): its screens, remote displays and apps, as saved. The quick reset only recenters, so this is how a profile comes back whole.
 - **A remote display:** frunner connects it if needed, then spins it to the front.
+- **A PC's app or window:** a computer with a Frametop windows instance (`ft-layout remote host NAME windows=PORT`, [remote displays](remote-displays.md)) lists its desktop apps and open windows, as "App on NAME" and "Window on NAME" (", locked" while its screen is locked: its panels stay black). An app starts on the PC as a panel of its own (`ft-layout window launch`); a window leaves the PC's monitor for one (`window open`), or, already a panel, is spun to. Each open asks every such PC in the background (`ft-layout window catalog`, about 0.25 s), and shows the last answer until the new one comes, so a PC that's off never slows typing. Window panels aren't listed again among the remote displays.
 - **One of your commands** ([commands.md](commands.md)): it runs in the background, and the pill says so.
 - **One of Frametop's own actions:** the input relay does it, as a button bound to it would. See [The OS menu](#the-os-menu).
 
@@ -14,6 +15,7 @@ Use Tab, Shift+Tab, or the arrow keys to move through the results, and Enter or 
 - **For an app:** its own launch options, such as a browser's New Private Window, plus Open new window (even when one is open), Open docked on this screen, and each of its open windows.
 - **For a profile:** Open profile.
 - **For a remote display:** Go to (connecting it first if needed) and Disconnect.
+- **For a PC's window:** Open as a panel, or Go to its panel and Back to the PC (the panel goes, the window goes back where it was).
 - **For a command:** Run, and Stop (every copy still running).
 - **For one of Frametop's actions:** Do it.
 

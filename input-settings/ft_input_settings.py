@@ -101,6 +101,16 @@ import catalog as model_catalog  # noqa: E402
 MODEL_TAGS = {"recommended": "Recommended", "testing": "Testing", "older": "Older"}
 MODEL_KIND_TAGS = {"stock": "Off the shelf", "valve": "Valve", "classic": "Built in", "custom": "Frametop"}
 SCREENS = "\0ft_screens"
+# Window drag (DEE-345): a modifier held with a mouse button moves or resizes a window from anywhere in
+# it, on KWin's screens (session/window-drag.sh), floating windows and PC window panels (ft-screens,
+# "windowdrag"). frametop.conf's keys, their defaults, and the words each takes.
+WINDOW_DRAG_MODS = {"meta": "Super (Meta)", "alt": "Alt", "off": "Off"}
+WINDOW_DRAG_ACTIONS = {"move": "Move", "resize": "Resize", "none": "Nothing"}
+WINDOW_DRAG = {"mod": ("WINDOW_DRAG_MOD", "meta", WINDOW_DRAG_MODS),
+               "left": ("WINDOW_DRAG_LEFT", "move", WINDOW_DRAG_ACTIONS),
+               "right": ("WINDOW_DRAG_RIGHT", "resize", WINDOW_DRAG_ACTIONS),
+               "middle": ("WINDOW_DRAG_MIDDLE", "none", WINDOW_DRAG_ACTIONS)}
+WINDOW_DRAG_SCRIPT = os.path.join(REPO, "session", "window-drag.sh")
 HANDS_MODES = {"frametop": "With Frametop: while the Frametop desktop runs",
                "always": "Always: whenever SteamVR runs, in games and the SteamVR dashboard too",
                "off": "Off"}
@@ -242,6 +252,7 @@ ACTION_LABELS = {
     "os_menu": "OS menu: Frametop's actions in frunner",
     "hands_toggle": "Hand tracking on/off",
     "release_keys": "Release all keys (a stuck modifier)",
+    "desktopless_toggle": "Desktopless mode on/off",
     "key": "Pass through as key",
     "none": "Do nothing",
 }
@@ -272,6 +283,8 @@ CONTROLLER_BUTTONS = {
 DEFAULT_PAUSE_GESTURE = {"buttons": ["left/thumbstick", "right/thumbstick"], "presses": 2}
 PAUSE_DESKTOP_MODES = {"hide": "Hide it and slow it down (windows stay open)",
                        "close": "Close it (windows close; it starts again when you resume)"}
+PC_GAMES_MODES = {"hide": "Pause and hide Frametop, as for games on the Frame",
+                  "visible": "Keep Frametop up over them"}
 PAUSE_REASONS = {"game": "a VR game started", "gesture": "controller gesture", "command": "ft-pause",
                  "settings": "from here"}
 # Dictation's controller buttons are on the Voice page: read from SteamVR's web socket, they stay
@@ -507,6 +520,7 @@ class Backend(QObject):
     pauseChanged = Signal()
     handsChanged = Signal()
     spinChanged = Signal()  # (its own: handsChanged rebuilds the switches every 5 s, mid-drag too)
+    windowDragChanged = Signal()
     voiceChanged = Signal()
     activity = Signal(str)  # device id
     captured = Signal(int, str)  # code, name
@@ -1285,6 +1299,47 @@ class Backend(QObject):
         self._set_rule("carry_on_float", bool(on), "Floated windows: " + (
             "start carried by the 3D mouse" if on else "stay where they float"))
 
+    @Property("QVariantMap", notify=windowDragChanged)
+    def windowDrag(self):
+        """{"mod", "left", "right", "middle"}: frametop.conf's WINDOW_DRAG_* (a word outside its list: the default)."""
+        conf = read_conf()
+        out = {}
+        for which, (key, default, words) in WINDOW_DRAG.items():
+            v = conf.get(key, default).strip().lower()
+            v = "meta" if v == "super" else v
+            out[which] = v if v in words else default
+        return out
+
+    @Property("QVariantList", constant=True)
+    def windowDragMods(self):
+        return [{"value": k, "text": v} for k, v in WINDOW_DRAG_MODS.items()]
+
+    @Property("QVariantList", constant=True)
+    def windowDragActions(self):
+        return [{"value": k, "text": v} for k, v in WINDOW_DRAG_ACTIONS.items()]
+
+    @Slot(str, str)
+    def setWindowDrag(self, which, value):
+        """One of window drag's settings ("mod", "left", "right", "middle"): written to frametop.conf, and
+        now to ft-screens and KWin's mouse bindings (without the desktop running, they read it when it starts)."""
+        if which not in WINDOW_DRAG or value not in WINDOW_DRAG[which][2]:
+            return
+        write_conf_value(WINDOW_DRAG[which][0], value)
+        d = self.windowDrag
+        words = [d["mod"], d["left"], d["right"], d["middle"]]
+        self._send("windowdrag " + " ".join(words), SCREENS)
+        done = host(WINDOW_DRAG_SCRIPT, "--live", *words, timeout=10)
+        self.windowDragChanged.emit()
+        if done.returncode:
+            self.message.emit("Saved, but the desktop's own windows didn't take it: "
+                              + ((done.stderr or done.stdout).strip() or "window-drag.sh failed"), True)
+        elif d["mod"] == "off":
+            self.message.emit("Window drag off", False)
+        else:
+            mod = "Super" if d["mod"] == "meta" else "Alt"
+            said = [f"{b} {WINDOW_DRAG_ACTIONS[d[b]].lower()}s" for b in ("left", "right", "middle") if d[b] != "none"]
+            self.message.emit(f"{mod} + a button in a window: " + (", ".join(said) or "nothing"), False)
+
     @Property(bool, notify=mappingsChanged)
     def pauseAuto(self):
         return read_json(RULES_PATH).get("pause_auto", True) is not False
@@ -1306,6 +1361,21 @@ class Backend(QObject):
     def setPauseDesktop(self, mode):
         if mode in PAUSE_DESKTOP_MODES:
             self._set_rule("pause_desktop", mode, "Paused, the desktop: " + PAUSE_DESKTOP_MODES[mode].split(" (")[0].lower())
+
+    @Property("QVariantList", constant=True)
+    def pcGamesModes(self):
+        return [{"value": k, "text": v} for k, v in PC_GAMES_MODES.items()]
+
+    @Property(str, notify=mappingsChanged)
+    def pcGames(self):
+        """PC games streamed over Steam Link (input/pc_game.py): "hide" (the default) or "visible"."""
+        mode = read_json(RULES_PATH).get("pc_games")
+        return mode if mode in PC_GAMES_MODES else "hide"
+
+    @Slot(str)
+    def setPcGames(self, mode):
+        if mode in PC_GAMES_MODES:
+            self._set_rule("pc_games", mode, "PC games over Steam Link: " + PC_GAMES_MODES[mode].split(",")[0].lower())
 
     @Property(bool, notify=mappingsChanged)
     def pauseSound(self):

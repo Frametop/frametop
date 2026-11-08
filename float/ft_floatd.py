@@ -11,7 +11,10 @@ which window floats on which spare output and panel, and connects three parts:
   - kscreen-doctor, to turn spare outputs on and off and place them in KWin's layout.
 Commands and ft-screens' events arrive as datagrams on @frametop_float (ft-float is the
 command-line side). Replies go to the sender:
-  float [ID|active|pointer]   dock [ID|active|all]   close ID   list   quit   (ft-float)
+  float [ID|active|pointer|all|keep]   dock [ID|active|all|desktopless]   close ID   list   quit
+            (ft-float; "float all": every window on the screens, for desktopless mode -> "ok" and
+            the panels with no remembered place, see float_all; "float keep" as the mode comes
+            on remembers the windows floating already, and "dock desktopless" docks the others)
   launch APP.desktop [action=ACTION] [screen=N]   run ["argv", ...]
             (start an app, or one of its desktop file's actions, and float its first window;
             with screen=N its first window opens docked on screen N instead)
@@ -439,6 +442,7 @@ class Daemon:
         self.margin = args.margin
         self.slots = [Slot(k, args.screens) for k in range(args.slots)]
         self.floats = {}         # window id -> Float
+        self.kept = set()        # desktopless mode: windows that floated before it came on ("float keep")
         self.scaling = False     # scale_soon's idle call is due
         self.windows = {}        # window id -> last info from the script
         self.gone = set()        # ids of windows that closed (KWin's ids aren't reused)
@@ -1117,7 +1121,25 @@ class Daemon:
         if known and known.get("pixels"):
             scale = known.get("scale") or output_scales().get(ev["output"], 1.0)
             ev = dict(ev, frame=dict(ev["frame"], w=known["pixels"][0] / scale, h=known["pixels"][1] / scale))
-        self.float_window(dict(ev, app=app), place=place, mpp=mpp, scale=scale)
+        return self.float_window(dict(ev, app=app), place=place, mpp=mpp, scale=scale)
+
+    def float_all(self):
+        """Desktopless mode (docs/desktopless.md): every app window on the screens floats, where its
+        app last floated, or in front of you. "ok" and the panels (screen numbers) that had no place
+        of their own, for ft-layout to fan out with the PCs' windows."""
+        new = []
+        for wid, ev in list(self.windows.items()):
+            m = re.match(r"WL-(\d+)$", ev.get("output", ""))
+            if wid in self.floats or not m or int(m.group(1)) >= self.screens_n or not listable(ev):
+                continue
+            app = desktop_name(ev.get("app", ""), ev.get("cls", "")) or ev.get("app", "")
+            known = len((self.places.get(app) or {}).get("rel", [])) == 12
+            f = self.float_launched(ev, None)
+            if f is None:
+                break  # every spare is in use (float_window said so)
+            if not known:
+                new.append(f.slot.index)
+        return "ok " + " ".join(map(str, new))
 
     # ------------------------------------------------------------ profiles (docs/profiles.md)
 
@@ -1373,12 +1395,23 @@ class Daemon:
         if cmd in ("float", "dock") and (not rest or rest[0] == "active"):
             self.command(cmd="request-active")
             return "ok"
+        if cmd == "float" and rest == ["all"]:
+            return self.float_all()
         if cmd == "float" and rest == ["pointer"]:
             self.command(cmd="request-pointer")
             return "ok"
         if cmd == "dock" and rest == ["all"]:
             for f in list(self.floats.values()):
                 self.dock(f)
+            return "ok"
+        if cmd == "float" and rest == ["keep"]:
+            self.kept = set(self.floats)  # desktopless mode coming on: these floated already
+            return "ok"
+        if cmd == "dock" and rest == ["desktopless"]:
+            for wid, f in list(self.floats.items()):
+                if wid not in self.kept:
+                    self.dock(f)
+            self.kept = set()
             return "ok"
         if cmd == "front" and len(rest) == 1 and rest[0].isdigit():
             f = self.by_panel(int(rest[0]))

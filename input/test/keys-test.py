@@ -382,6 +382,13 @@ def tests():
     key(A, 1); key(META, 1); key(META, 0)
     check("a key held right through Meta's hold, no repeats: no tap", len(lines(steam_log)), menus + 1)
     key(A, 0)
+    typed()
+    key(META, 1); to_relay("notap"); time.sleep(0.1); key(META, 0)
+    check("a laser click while Meta's held (ft-screens' notap, Super+drag): no tap", len(lines(steam_log)), menus + 1)
+    check("...and the desktop gets F24 before Meta's release (no Plasma launcher)", typed(), ["key 125 1"] + F24 + ["key 125 0"])
+    key(SHIFT, 1); key(META, 1); to_relay("notap"); time.sleep(0.1); key(META, 0); key(SHIFT, 0)
+    check("...not with Shift held there too (a terminal would type it)", typed(),
+          [f"key {SHIFT} 1", "key 125 1", "key 125 0", f"key {SHIFT} 0"])
     for _ in range(3):
         key(META, 1); key(META, 0)
     check("three Meta taps in a row: three Steam menus (a cancelled hold doesn't stop the next)",

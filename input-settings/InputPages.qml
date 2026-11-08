@@ -785,6 +785,38 @@ Item {
                     checked: backend.carryOnFloat
                     onToggled: backend.setCarryOnFloat(checked)
                 }
+                Controls.ComboBox {
+                    id: windowDragMod
+                    Kirigami.FormData.label: "Window drag:"
+                    model: backend.windowDragMods
+                    textRole: "text"
+                    valueRole: "value"
+                    Component.onCompleted: currentIndex = indexOfValue(backend.windowDrag.mod)
+                    onActivated: { backend.setWindowDrag("mod", currentValue); currentIndex = indexOfValue(backend.windowDrag.mod) }
+                }
+                Controls.Label {
+                    text: "Hold it and press a mouse button anywhere in a window to move or resize it, without clicking the window: on the desktop's screens, floating windows and PC windows. Carrying one, push it into a screen with the wheel (or into its PC's display) and it lands there; pull the wheel on a PC's display and the window under the pointer comes off it."
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                }
+                Repeater {
+                    model: [{ which: "left", label: "Left button" }, { which: "right", label: "Right button" },
+                            { which: "middle", label: "Middle button" }]
+                    delegate: Controls.ComboBox {
+                        required property var modelData
+                        Kirigami.FormData.label: modelData.label + ":"
+                        enabled: windowDragMod.currentValue !== "off"
+                        model: backend.windowDragActions
+                        textRole: "text"
+                        valueRole: "value"
+                        Component.onCompleted: currentIndex = indexOfValue(backend.windowDrag[modelData.which])
+                        onActivated: {
+                            backend.setWindowDrag(modelData.which, currentValue)
+                            currentIndex = indexOfValue(backend.windowDrag[modelData.which])
+                        }
+                    }
+                }
 
                 Repeater {
                     model: backend.keyShortcuts
@@ -1375,6 +1407,22 @@ Item {
                         text: "Pause while a VR game runs, and resume when it ends"
                         checked: backend.pauseAuto
                         onToggled: backend.setPauseAuto(checked)
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "PC games over Steam Link:"
+                        model: backend.pcGamesModes
+                        textRole: "text"
+                        valueRole: "value"
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+                        Component.onCompleted: currentIndex = indexOfValue(backend.pcGames)
+                        onActivated: backend.setPcGames(currentValue)
+                    }
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: "Frametop stays up while Steam Link streams the PC's SteamVR Home. It knows a PC game runs "
+                              + "when the PC runs Frametop's Vibepollo and was added in Remote Displays."
                     }
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controller gesture" }

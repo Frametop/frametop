@@ -49,7 +49,8 @@ own actions listed, its OS menu ("toggle <source> actions"; no default), hands_t
 it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
 by default), release_keys = let go of every key held anywhere: what the desktop, a remote
 display and this relay hold, and every modifier in KWin, known to be held or not ("keys
-release" to ft-screens; Ctrl+Alt+Shift+Esc by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
+release" to ft-screens; Ctrl+Alt+Shift+Esc by default), desktopless_toggle = desktopless mode on or off
+(ft-layout desktopless toggle, docs/desktopless.md; Meta+Shift+D by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
 ft-layout, ft-float, ft-steam and ft-voice need no path), keys:CODES = tap that key combination
@@ -222,6 +223,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     only; from this user only), as a button would ({"t": "action"}, or an error)
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
+  vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
+                    every 5 s), so pc_game.py asks the PC whether it runs a game
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
                     hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
   gamepad desktop|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a desktop
@@ -271,6 +274,7 @@ import sys
 import time
 
 import game_pause
+import pc_game
 from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
     EV_KEY,
     EV_REL,
@@ -340,7 +344,7 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "carry_toggle", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "os_menu", "hands_toggle", "release_keys", "key", "none")
+           "frunner", "os_menu", "hands_toggle", "release_keys", "desktopless_toggle", "key", "none")
 # GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
 # file without "key_bindings" gets, are ft_input_actions'.
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
@@ -430,7 +434,8 @@ def known_action(a):
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
-            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "hands_toggle", "release_keys")
+            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "hands_toggle", "release_keys",
+                          "desktopless_toggle")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
@@ -1309,6 +1314,7 @@ class Relay:
         self.desktop_layout = DesktopLayout()
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
+        self.pc_game = pc_game.PcGame(log)
         self.gamepad = vrpad.GamepadMode(log, self.pad_send, lambda: vrpad.VirtualPad(log, self.stored, notify),
                                          lambda on: self.pause.set_pad(on))
         self.load_config()
@@ -1352,6 +1358,7 @@ class Relay:
             rules = read_rules("")   # the defaults (no file there)
             self.pause.configure(rules)
         self.rules = rules
+        self.pc_game.configure(rules)
         self.lease.configure(pointer_on, sensitivity, idle, wake_counts, self.pause.paused)
         self.gamepad.sound_on = self.pause.settings["sound"]
         # Hand interaction: the pointer helper's handoff arbiter needs to know who holds a controller.
@@ -1464,6 +1471,12 @@ class Relay:
         elif action == "release_keys":
             if value == 1:
                 self.release_all_keys()
+        elif action == "desktopless_toggle":
+            if value == 1:
+                # Takes a few seconds (every window moves); its outcome goes to this service's log.
+                subprocess.Popen([FT_LAYOUT, "desktopless", "toggle"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, start_new_session=True)
+                log(action)
         elif action == "hands_toggle":
             if value == 1:
                 # systemctl --no-block, and the pause's sounds if it plays them; the outcome goes
@@ -2098,6 +2111,19 @@ class Relay:
                 if len(words) > 3 and words[3] in ("0", "1"):
                     self.pause.screens_report(words[3] == "1")
             return
+        if cmd == "notap" and len(words) == 1:
+            # From ft-screens (no reply): a laser clicked with a modifier held (Super+drag, say).
+            # The relay never sees laser clicks, so the modifier's release isn't a tap. Nor is it
+            # on the desktop, where KWin may not have had the click either (ft-screens carried the
+            # window): with Meta held there, it gets an F24 press in between, as for a
+            # combination, so letting go of Meta doesn't open Plasma's launcher. Not with another
+            # key it holds (Shift): that already stops it, and a terminal would type F24.
+            self.held.tap = None
+            if self.held.meta - self.held.meta_hidden and not any(
+                    c < BTN_MISC and c not in self.held.meta for c in self.held.desktop):
+                self.to_screens(KEY_F24, 1)
+                self.to_screens(KEY_F24, 0)
+            return
         if cmd == "vrbtn" and len(words) == 3 and words[1] in VR_BUTTONS and words[2] in ("0", "1"):
             self.vr_button(words[1], int(words[2]), now)
             return
@@ -2109,6 +2135,9 @@ class Relay:
             if words[1] == "1":
                 self.gamepad.stop("a VR game started")
             self.pause.game_state(words[1] == "1", now)
+            return
+        if cmd == "vrlink" and len(words) == 2:
+            self.pc_game.link_state(words[1] == "1", now)
             return
         if cmd == "vrdash" and len(words) == 2:
             self.pause.dashboard_state(words[1] == "1")
@@ -2331,6 +2360,7 @@ class Relay:
 
     def run(self):
         """The loop: devices, the control socket and the timers."""
+        self.pc_game.start()
         while True:
             now = time.monotonic()
             pointer = self.lease.current

@@ -290,6 +290,28 @@
   "reply": "error no window all",
   "tear": null
  },
+ "dock desktopless": {
+  "calls": [
+   [
+    "dock",
+    [
+     "<float w2>"
+    ],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "dock desktopless x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window desktopless",
+  "tear": null
+ },
  "dock w1": {
   "calls": [],
   "idle_add": [],
@@ -427,6 +449,33 @@
     }
    ]
   ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok",
+  "tear": null
+ },
+ "float all": {
+  "calls": [
+   [
+    "float_all",
+    [],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok 5",
+  "tear": null
+ },
+ "float all x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window all",
+  "tear": null
+ },
+ "float keep": {
+  "calls": [],
   "idle_add": [],
   "raised": null,
   "reply": "ok",

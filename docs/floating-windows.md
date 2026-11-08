@@ -8,6 +8,8 @@ Any desktop app can float in VR in a panel of its own, like SteamVR's floating w
 - **Move it** by its title bar or the bar under its panel (the wheel pushes and pulls it), **resize it** by its edges or the corner tab, **make it bigger or smaller** at the same pixels by scrolling on the corner tab, and **change its scale** with Meta+scroll over it. Each app's last floating place, size, density, and scale are remembered.
 - Files, text, and images drag between any two floating windows, and between floating windows and the screens.
 
+Desktopless mode floats every window at once and hides the screens ([desktopless.md](desktopless.md)).
+
 How KWin behaves underneath all this, and what the KWin script does about it, is in [design.md](design.md#floating-windows).
 
 ## Not built
@@ -127,7 +129,25 @@ A hand's pinch doesn't tear: hands have no wheel. Only a real KWin move counts, 
 
 - **Button.** The dock button returns the window to the screen, position, and size it had before it floated. If that screen is hidden now, it goes onto the first screen that shows.
 - **Dragging.** Carry the floating window, by its title bar or its bar, until the point you hold it by is on a shown screen within 10 cm of its surface (`FLOAT_DOCK_DISTANCE`, 0 turns it off): push it there with the wheel, or move the controller or hand forward. The screen lights up, and letting go docks the window there (ft-floatd's `dockat`), the point you held under the laser, at its current size in pixels, shrunk to fit if the screen is smaller and kept on the screen. A carried panel keeps its distance, so moving a floating window in front of a screen never docks it by accident. With a hand, the line runs from your head through the panel.
+- **Pushing.** Pushed into a screen with the wheel while carried, it docks at once, as if let go there. That works with any carry (title bar, bar, window drag, a torn-off window), not with `carry toggle`.
 - Docking disables the output and hides the panel.
+
+## Window drag
+
+Built 2026-11-07 (DEE-345; user: "drag windows by pressing the super key and clicking on them ... without having to actually click the interface"). A modifier held with a mouse button moves or resizes a window from anywhere in it. By default Super with the left button moves and with the right resizes. Frametop Settings' Keyboard page sets the modifier (Super, Alt, or off) and what each of the three buttons does (move, resize, nothing). They're saved in `frametop.conf` (`WINDOW_DRAG_MOD`, `WINDOW_DRAG_LEFT`, `_RIGHT`, `_MIDDLE`) and sent live.
+
+- **On the desktop's screens** KWin does it with its own mouse bindings: `session/window-drag.sh` writes `[MouseBindings]` `CommandAllKey` and `CommandAll1` to `3` into the desktop's kwinrc at every desktop start, and with `--live` asks KWin to read them again. A pull on the wheel during that move tears the window off, as with a title bar.
+- **On a floating window's panel** ft-screens carries the panel (move) or resizes it from the nearest corner (resize), and KWin gets neither the press nor its release, so nothing in the window is clicked (`screens/windowdrag.h`, `ModCarry` in `vr.cpp`).
+- **On a PC window's panel** it's the same, and the window can go back onto one of its PC's displays (docs/remote-displays.md, "PC app windows").
+- A laser's click with a modifier held tells the input relay (`notap`), so letting go of Super afterwards doesn't open the Steam menu: the relay never sees laser clicks.
+
+Super goes to ft-screens with every key from the input relay. A screen's window gets Super+drag only while KWin holds Super, so not while typing goes to a PC's display.
+
+The rest of the scroll that tore a window off a screen doesn't pull the new panel on toward you: pulls are ignored until the wheel rests 250 ms, at most 1.5 s after the tear (`HushPulls` in `vr.cpp`). One spin used to bring it 0.3 m from the eyes, onto the hands holding Super at the keyboard, which then poked and pinched it (2026-11-07). A push away isn't held back. A window pulled off a PC's display isn't hushed: the rest of that scroll sets how far off the display it comes, so it can clear the display before you let go instead of docking back onto it.
+
+While a press carries a panel, the wheel pushes or pulls the carried panel wherever the cursor is. The cursor keeps its depth during the carry, so it's often on the screen or display behind the panel, and the wheel used to go to that screen and do nothing.
+
+On a PC's display, Super with a moving button held keeps the wheel from the PC either way: down pulls the window off, up does nothing. A PC may bind Super+wheel itself (oma7's omarchy switches workspaces), which mid-drag would move the window's workspace away. Super+wheel with no button held is still the PC's.
 
 ## Getting at it: the float key and the title bar button
 
@@ -152,7 +172,7 @@ KWin handles the protocols: Wayland, X11 through Xwayland, and the portal's file
 
 - **Crossing panels.** When the laser moves onto another panel mid-drag, ft-screens gives that panel's KWin window pointer focus. KWin puts its cursor at that output's position, and the drop target gets enter and motion events. Floating windows add nothing new here, but they make gaps between panels the normal case.
 - **Gaps (the catcher).** While the laser is between panels, none of Frametop's overlays get its events, and ft-screens clears pointer focus on `FT_LEAVE` even with a button held. A release in empty space would never reach KWin, and the drag or move would stay stuck until the next click. So while a button is held on a Frametop panel and the laser leaves all of them, ft-screens puts an invisible catcher overlay on the laser. A release on the catcher releases in KWin wherever the pointer last was. Dropping in a gap cancels, just as dropping outside any window does. The pointer helper also tells ft-screens when the mouse's left button comes up ("up"), in case the catcher misses it. This also covers window moves and drags on the screens that end off a panel.
-- **The 3D mouse's drag lock.** While the button is held, the drag lock keeps the cursor at its distance and stops hit tests, so a drag onto a nearer panel would pass behind it. So while the button is held, the helper keeps testing the other Frametop panels (not the one pressed on, and not while carrying one) and moves onto a panel the ray meets. Off the edge of the pressed panel, it keeps that panel's plane, so moves and resizes past the edge still work.
+- **The 3D mouse's drag lock.** While the button is held, the drag lock keeps the cursor at its distance and stops hit tests, so a drag onto a nearer panel would pass behind it. So while the button is held, the helper keeps testing the other Frametop panels (not the one pressed on, and not while carrying one) and moves onto a panel the ray meets. A press that comes to carry a panel it wasn't on (a window torn off its screen, or pulled off a PC's display) tells the helper (`press carries`), and the lock holds from then on: the ray kept finding the carried panel, so the cursor pulled it in toward the eyes again and again until it let go (2026-11-07). Off the edge of the pressed panel, it keeps that panel's plane, so moves and resizes past the edge still work.
 - **Drag icon.** KWin 6 draws the drag icon as part of its scene, on the output its pointer is on. In a gap it stays at the source panel's edge.
 - **Flatpak apps.** Dropping files into a sandboxed app goes through the document portal, the same path that the session script's file-picker fix covers ([design.md](design.md#the-desktop-session)).
 

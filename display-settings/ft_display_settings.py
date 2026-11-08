@@ -481,6 +481,16 @@ class Backend(QObject):
     def toggleScreens(self):
         self._ask_screens("toggle")
 
+    # --- desktopless mode (docs/desktopless.md): every app window its own panel ---
+    @Property(bool, notify=changed)
+    def desktopless(self):
+        s = ft_layout.load_layout().get("desktopless")
+        return isinstance(s, dict) and bool(s.get("on"))
+
+    @Slot(bool)
+    def setDesktopless(self, on):
+        self._run("Desktopless mode " + ("on" if on else "off"), "desktopless", "on" if on else "off")
+
     # --- the desktop's notifications in the Steam session (session/ft-notifyfwd) ---
     @Property(str, notify=changed)
     def notifyForward(self):

@@ -66,6 +66,10 @@ bool ft_vr_carry_wheel(int notches);
 // ft_vr_screen_present, and its input arrives as events for its index. *restored: it's back
 // where it was when its stream last stopped in this run (Remote Displays' Disconnect).
 bool ft_vr_remote_create(int index, const char *label, double metres, bool *restored);
+// A remote screen's host ("192.168.1.61" or with ":PORT") and app ("display:DP-2", "window:0x...",
+// "Desktop"), as ft-layout started it (remote.c); NULL for a screen that isn't a remote one.
+const char *ft_remote_host(int index);
+const char *ft_remote_app(int index);
 // A second ft-screens next to the running desktop (--beside): nothing goes to ft-floatd or
 // ft-layout.
 void ft_vr_beside(void);

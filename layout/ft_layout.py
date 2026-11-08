@@ -96,6 +96,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout screen-args              ft-screens' --screen arguments for the session script
   ft-layout remote-view              the primary screen's place in the workspace, for the VNC bridge
   ft-layout toggle                   hide or show all screens (ft-screens)
+  ft-layout desktopless on|off|toggle|status
+                                     desktopless mode (docs/desktopless.md): the screens and the
+                                     Linux PCs' displays hide, each app window is a panel of its own
   ft-layout hide N|all               hide a screen on its own (it stays hidden whatever the
   ft-layout show N|all               visibility mode or the hotkey say), or show it again
   ft-layout hidden                   the screens hidden on their own
@@ -110,13 +113,36 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      as two lines: a Sunshine instance on PORT) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off input=on|off
-                             clipboard=on|off
+                             clipboard=on|off windows=PORT|off
                                      how a host's streams reach it (they start over), whether
                                      the Frame's microphone goes to it, and whether its keyboard
-                                     and mouse come to Frametop (both within 3 s, no restart)
+                                     and mouse come to Frametop (both within 3 s, no restart);
+                                     windows: its Frametop windows instance (ft-layout window)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays)
+  ft-layout window list HOST         a PC's app windows (its Frametop windows instance: the host's
+                                     "windows" port, docs/remote-displays.md)
+  ft-layout window apps HOST         the desktop apps it can start
+  ft-layout window catalog HOST      both, with the windows' panels, as one JSON line (frunner)
+  ft-layout window open HOST ADDRESS [--size WxH]
+                                     that window as a panel of its own in front of you (its own
+                                     output on the PC, WxH: the window's size, at most
+                                     1920x1200, by default)
+  ft-layout window launch HOST APP [--size WxH]
+                                     starts the app (an id from "window apps") as a panel
+  ft-layout window close ID          the panel goes and the window goes back on the PC
+  ft-layout window drop N M U V FX FY
+                                     window panel N (a screen number) goes back onto its PC's
+                                     display M, at U, V of the way across and down it, held at
+                                     FX, FY of the window (0 to 1; ft-screens, window drag)
+  ft-layout window pull N U V [SEQ]  the window at U, V of PC display N becomes a panel, and
+                                     with SEQ (ft-screens' number for the pull) ft-screens is
+                                     told ("pulled N FX FY SEQ"): its laser carries it on
+  ft-layout window resize N WxH METRES
+                                     window panel N's window gets WxH pixels and the panel
+                                     METRES wide: its stream starts over at that size (ft-screens,
+                                     a corner dragged)
   ft-layout streams start|stop       streams only: the connected remote displays without the
                                      desktop (ft-screens with no KWin or Plasma); stop ends
                                      only that, never a running desktop
@@ -159,6 +185,7 @@ sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (JSON files read and written safely)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
+import ft_hostapi  # noqa: E402  (questions to a PC's Vibepollo Web UI API: Frametop windows)
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout_geometry  # noqa: E402  (where the screens go, as pure math)
 from layout_geometry import (  # noqa: E402, F401  (re-exported: ft_floatd and the tests use them here)
@@ -1219,9 +1246,14 @@ def remote_command(args):
                 host["input"] = v == "on"  # its streams look every 3 s
             elif k == "clipboard" and v in ("on", "off"):
                 host["clipboard"] = v == "on"  # its streams look every 3 s
+            elif k == "windows" and (v == "off" or (v.isdigit() and 1024 < int(v) < 65535)):
+                if v == "off":
+                    host.pop("windows", None)  # its window panels stay until closed
+                else:
+                    host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
             else:
                 raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
-                                   "mic=on|off input=on|off clipboard=on|off)")
+                                   "mic=on|off input=on|off clipboard=on|off windows=PORT|off)")
         save_layout(layout)
         if not restart:
             return
@@ -1241,6 +1273,15 @@ def remote_command(args):
     if what in ("connect", "disconnect") and len(args) >= 2:
         layout = load_layout()
         found = [find_display(layout, i) for i in args[1:]]
+        if what == "disconnect":
+            # A window panel has nothing to come back to: its window goes back on the PC now,
+            # so the PC's cursor and the window don't wait a minute on an output nobody sees.
+            for _, host, d in [f for f in found if f[2].get("window")]:
+                window_close(layout, host, d)
+                log(f"disconnected {d['id']}")
+            found = [f for f in found if not f[2].get("window")]
+            if not found:
+                return
         for _, _, d in found:
             if what == "connect":
                 d.pop("off", None)
@@ -1396,6 +1437,350 @@ def remote_command(args):
                        "host NAME route=...|direct=...|mic=...|input=...|clipboard=... | connect ID... | disconnect ID... | remove ID")
 
 
+# ---------------------------------------------------------------- PC app windows (DEE-347, DEE-350)
+
+WINDOW_SIZE = (1280, 800)  # a launched app's first size
+WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
+WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height
+WINDOW_PIXELS_PER_METRE = 1400
+WINDOW_RESIZE_MIN = (320, 240)    # a window panel resized by hand (the host's own floor)
+WINDOW_RESIZE_MAX = (3840, 2160)  # ... at most: the Frame's decoder, next to the other streams
+
+
+def window_host(layout, name):
+    host = next((h for h in layout.get("hosts", []) if h.get("name") == name), None)
+    if host is None:
+        raise RuntimeError(f"no host called {name!r}")
+    port = host.get("windows", {}).get("port") if isinstance(host.get("windows"), dict) else None
+    if not isinstance(port, int):
+        raise RuntimeError(f"{name} has no Frametop windows instance (ft-layout remote host {name} windows=PORT)")
+    return host, port
+
+
+def window_api(host, port, method, path, body=None):
+    """The host's Frametop windows instance: its JSON answer, or RuntimeError with its why."""
+    if method == "GET":
+        status, answer = ft_hostapi.request(host["address"], "GET", path, timeout=5.0, port=port)
+    else:
+        status, answer = ft_hostapi.post_json(host["address"], path, body, timeout=25.0, port=port)
+    if status == 200 and isinstance(answer, dict):
+        return answer
+    why = answer.get("error") if isinstance(answer, dict) else None
+    if not status:
+        why = why or f"no answer (a token in {ft_hostapi.token_path(host['address'], port)}?)"
+    raise RuntimeError(f"{host.get('name') or host['address']}: {why or f'HTTP {status}'}")
+
+
+def window_client(layout, host, port):
+    """A client of the host's window pool not streaming a window now, paired with its windows
+    instance. Each window streams as its own client; the pool keeps the host's client list short."""
+    used = {d.get("client") for d in host.get("displays", []) if d.get("window")}
+    base = f"frametop-{slug(host.get('name') or host['address'])}-win"
+    for k in range(1, REMOTE_MAX + 1):
+        client = f"{base}{k}"
+        if client in used:
+            continue
+        code, out, err = run_stream("pair", f"{host['address']}:{port}", "--id", client, timeout=30)
+        if code:
+            raise RuntimeError(f"pairing {client} with {host['address']}:{port} failed: {(err or out).strip()}")
+        return client
+    raise RuntimeError(f"at most {REMOTE_MAX} windows")
+
+
+def window_size(opts, default):
+    if "--size" not in opts:
+        return stream_size(*default)
+    if not re.fullmatch(r"\d+x\d+", opts["--size"].lower()):
+        raise RuntimeError(f"window: --size is WxH, not {opts['--size']!r}")
+    w, h = (int(v) for v in opts["--size"].lower().split("x"))
+    return stream_size(min(max(w, 320), 7680), min(max(h, 240), 4320))
+
+
+def window_add(layout, host, port, address, title, size, fields=None):
+    """The window's panel, saved and started in front of you (or at fields' pos, face and roll:
+    desktopless mode, which keeps its app's "key" there too)."""
+    for _, h, d in remote_displays(layout):
+        if h is host and d.get("window") and d["app"] == f"window:{address}":
+            if d.pop("off", None):   # (one disconnected: connected again)
+                save_layout(layout)
+            n = next(k for k, _, e in remote_displays(layout) if e is d)
+            try:
+                running = remotes_running(screens_socket())
+            except NoAnswer:
+                running = None   # (no desktop: nothing to start it in)
+            if running is not None and n not in running:
+                start_remotes_now(layout, {d["id"]})   # its stream had stopped: the panel opens again
+            return d  # already a panel
+    if len(remote_displays(layout)) >= REMOTE_MAX:
+        raise RuntimeError(f"at most {REMOTE_MAX} remote displays and windows")
+    ids = {d["id"] for _, _, d in remote_displays(layout)}
+    display_id = base = slug(f"{host.get('name') or host['address']}-window-{address[2:]}")
+    for k in range(2, 100):
+        if display_id not in ids:
+            break
+        display_id = f"{base}-{k}"
+    w, h = size
+    metres = round(max(0.4, w / WINDOW_PIXELS_PER_METRE), 3)
+    d = {"id": display_id, "client": window_client(layout, host, port), "app": f"window:{address}",
+         "label": title[:80] or address, "size": [w, h], "fps": 60, "bitrate": 0, "port": port, "window": True,
+         "metres": metres, "pos": [0.0, -0.1, -WINDOW_DISTANCE]}
+    d.update({k: v for k, v in (fields or {}).items() if v is not None})
+    host.setdefault("displays", []).append(d)
+    remote_displays(layout)
+    save_layout(layout)
+    start_remotes_now(layout, {display_id})
+    return d
+
+
+def window_forget(layout, host, d):
+    """The window panel goes from the desktop and the layout, and from the profiles: a later
+    window with its id starts fresh."""
+    n = next(n for n, h, e in remote_displays(layout) if e is d)
+    try:
+        screens_socket().ask(f"remote {n} stop")
+    except RuntimeError:
+        pass
+    host["displays"].remove(d)
+    for profile in layout.get("profiles", {}).values():
+        profile.get("remote", {}).pop(d["id"], None)
+    save_layout(layout)
+
+
+def window_close(layout, host, d):
+    """The window panel goes, and its window goes back on the host now: the host's minute of
+    grace is for a stream that drops, not for one the Frame ended on purpose."""
+    window_forget(layout, host, d)
+    try:
+        window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
+                   {"address": d["app"][7:]})
+        log(f"closed {d['id']}: the window is back on {host.get('name') or host['address']}")
+    except RuntimeError as e:
+        if "no window output" in str(e):  # closed on the PC, or back after the grace period
+            log(f"closed {d['id']}: the window had already left it")
+        else:
+            log(f"closed {d['id']}; the PC will put the window back within a minute ({e})")
+
+
+def window_prune(layout, host, windows):
+    """Forgets the host's window panels whose window closed there (ft-screens already dropped
+    their panels: the host gives a window a new address each time), and ones disconnected
+    ("off"): a window panel has nothing to come back to (its window went back on the PC), so
+    one left off by an older build kept the window from being opened or pulled again
+    (Daenon, 2026-11-07: Brave wouldn't pull off oma7's display, GrokBot would)."""
+    have = {w.get("address") for w in windows}
+    for d in [d for d in host.get("displays", []) if d.get("window") and (d["app"][7:] not in have or d.get("off"))]:
+        window_forget(layout, host, d)
+        why = "it was disconnected" if d["app"][7:] in have else "its window closed"
+        log(f"forgot {d['id']}: {why} on {host.get('name') or host['address']}")
+
+
+def fractions(words, what):
+    """Numbers from 0 to 1, or RuntimeError naming the command."""
+    try:
+        values = [float(w) for w in words]
+    except ValueError:
+        values = []
+    if len(values) != len(words) or not all(0.0 <= v <= 1.0 for v in values):
+        raise RuntimeError(f"window {what}: the fractions go from 0 to 1, not {' '.join(words)!r}")
+    return values
+
+
+def numbered(layout, word, what):
+    """(host, display) of remote screen number `word`."""
+    if not word.isdecimal():
+        raise RuntimeError(f"window {what}: {word!r} isn't a screen number")
+    found = next(((h, d) for n, h, d in remote_displays(layout) if n == int(word)), None)
+    if found is None:
+        raise RuntimeError(f"window {what}: no remote display or window panel {word}")
+    return found
+
+
+def window_drop(layout, args):
+    """Window drag (DEE-345): a window panel let go on (or pushed into) one of its own PC's
+    displays goes back onto that monitor where it was let go, not where it came from."""
+    host, d = numbered(layout, args[0], "drop")
+    onto_host, onto = numbered(layout, args[1], "drop")
+    u, v, fx, fy = fractions(args[2:6], "drop")
+    if not d.get("window"):
+        raise RuntimeError(f"window drop: {d['id']} isn't a window")
+    if onto_host is not host or not str(onto.get("app", "")).startswith("display:"):
+        raise RuntimeError(f"window drop: {onto['id']} isn't one of {host.get('name') or host['address']}'s displays")
+    monitor = onto["app"][8:]
+    window_forget(layout, host, d)
+    try:
+        window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
+                   {"address": d["app"][7:], "monitor": monitor, "x": u, "y": v, "grab_x": fx, "grab_y": fy})
+        log(f"dropped {d['id']} onto {monitor} at {u:.2f},{v:.2f}")
+    except RuntimeError as e:
+        if "no window output" in str(e):
+            log(f"dropped {d['id']}: the window had already left it")
+        else:
+            log(f"dropped {d['id']}; the PC will put the window back within a minute ({e})")
+            raise
+
+
+def window_resize(layout, args):
+    """A window panel's corner dragged (user, 2026-11-07: "resize and change aspect ratio"): the
+    window on the PC gets that many pixels, and the stream starts over at that size. ft-stream
+    asks for the window at the panel's size on every start, which resizes the host's output."""
+    host, d = numbered(layout, args[0], "resize")
+    if not d.get("window"):
+        raise RuntimeError(f"window resize: {d['id']} isn't a window")
+    if not re.fullmatch(r"[1-9][0-9]{0,4}x[1-9][0-9]{0,4}", args[1].lower()):
+        raise RuntimeError(f"window resize: the size is WxH, not {args[1]!r}")
+    try:
+        metres = float(args[2])
+    except ValueError:
+        metres = math.nan
+    if not (math.isfinite(metres) and 0.15 <= metres <= 12):
+        raise RuntimeError(f"window resize: the width is 0.15 to 12 metres, not {args[2]!r}")
+    w, h = (int(v) for v in args[1].lower().split("x"))
+    w = min(max(w, WINDOW_RESIZE_MIN[0]), WINDOW_RESIZE_MAX[0])
+    h = min(max(h, WINDOW_RESIZE_MIN[1]), WINDOW_RESIZE_MAX[1])
+    d["size"] = list(stream_size(w, h))
+    d["metres"] = round(metres, 4)
+    save_layout(layout)
+    n = int(args[0])
+    log(f"resized {d['id']} to {d['size'][0]}x{d['size'][1]}, {d['metres']} m wide")
+    if d.get("off"):
+        return  # disconnected: its next connection has the size
+    try:
+        start_remote(screens_socket(), n, host, d)   # (ft-screens starts its stream over: the size changed)
+    except RuntimeError as e:
+        log(f"saved; not applied now: {e}")
+
+
+def window_pull(layout, args):
+    """Window drag (DEE-345): the window under a point of a PC's display, as a panel; ft-screens
+    hears where it was held (with SEQ, its number for the pull), so the laser that pulled it
+    carries it on."""
+    seq = None
+    if len(args) == 4:
+        if not re.fullmatch(r"[1-9][0-9]{0,9}", args[3]):
+            raise RuntimeError(f"window pull: SEQ is a number from 1, not {args[3]!r}")
+        seq = int(args[3])
+    host, d = numbered(layout, args[0], "pull")
+    u, v = fractions(args[1:3], "pull")
+    if not str(d.get("app", "")).startswith("display:"):
+        raise RuntimeError(f"window pull: {d['id']} isn't a PC's display")
+    _, port = window_host(layout, host.get("name"))
+    hit = window_api(host, port, "POST", "/api/frametop/windows/at", {"monitor": d["app"][8:], "x": u, "y": v})
+    address = str(hit.get("address", ""))
+    if not re.fullmatch(r"0x[0-9a-fA-F]{1,16}", address):
+        raise RuntimeError(f"window pull: the PC named no window ({address!r})")
+    window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
+
+    def number(value, default, low, high):   # (a PC's odd answer: its default, not a traceback)
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            return default
+        return min(max(x, low), high) if math.isfinite(x) else default
+
+    size = window_size({}, (int(number(hit.get("width") or None, WINDOW_SIZE[0], 1, WINDOW_MAX[0])),
+                            int(number(hit.get("height") or None, WINDOW_SIZE[1], 1, WINDOW_MAX[1]))))
+    panel = window_add(layout, host, port, address, str(hit.get("title") or hit.get("class") or ""), size)
+    grab = hit.get("grab") if isinstance(hit.get("grab"), list) and len(hit["grab"]) == 2 else [0.5, 0.5]
+    fx, fy = (number(g, 0.5, 0.0, 1.0) for g in grab)
+    n = next(k for k, _, e in remote_displays(layout) if e is panel)
+    try:
+        # SEQ: ft-screens' number for this pull, so an answer to an earlier one isn't taken for it
+        if seq is not None:
+            screens_socket().ask(f"pulled {n} {fx:.4f} {fy:.4f} {seq}")
+    except (NoAnswer, RuntimeError) as e:
+        log(f"pulled {panel['id']}; ft-screens didn't take it ({e}): it opened in front of you")
+    log(f"pulled {address} off {d['app'][8:]} as {panel['id']} (screen {n})")
+    print(panel["id"])
+
+
+def window_command(args):
+    """ft-layout window list|apps|open|launch|close (see the usage)."""
+    what = args[0] if args else ""
+    if what in ("list", "apps") and len(args) == 2:
+        layout = load_layout()
+        host, port = window_host(layout, args[1])
+        if what == "apps":
+            for app in window_api(host, port, "GET", "/api/frametop/windows/apps").get("apps", []):
+                print(f"{app.get('id')}  {app.get('name')}")
+            return
+        answer = window_api(host, port, "GET", "/api/frametop/windows")
+        window_prune(layout, host, answer.get("windows", []))
+        panels = {d["app"][7:]: d["id"] for d in host.get("displays", []) if d.get("window")}
+        if answer.get("locked"):
+            print(f"{host['name']} is locked: window panels stay black until it's unlocked")
+        for w in answer.get("windows", []):
+            out = w.get("output") or "-"
+            panel = panels.get(w.get("address"), "-")
+            title = "".join(c if c.isprintable() else " " for c in str(w.get("title", "")))  # a page's title, say
+            print(f"{w.get('address')} {w.get('width')}x{w.get('height')} {out} {panel} {w.get('class')}: {title}")
+        return
+    if what == "catalog" and len(args) == 2:
+        # One JSON line for frunner: the host's apps, and its windows with their panels' ids and screens.
+        layout = load_layout()
+        host, port = window_host(layout, args[1])
+        apps = window_api(host, port, "GET", "/api/frametop/windows/apps").get("apps", [])
+        answer = window_api(host, port, "GET", "/api/frametop/windows")
+        window_prune(layout, host, answer.get("windows", []))
+        panels = {d["app"][7:]: (n, d["id"]) for n, h, d in remote_displays(layout) if h is host and d.get("window")}
+        windows = []
+        for w in answer.get("windows", []):
+            n, panel = panels.get(w.get("address"), (None, None))
+            windows.append({k: w.get(k) for k in ("address", "class", "title", "width", "height", "output")} |
+                           {"panel": panel, "screen": n})
+        print(json.dumps({"host": host.get("name"), "locked": bool(answer.get("locked")),
+                          "apps": [{k: a.get(k) for k in ("id", "name", "icon")} for a in apps], "windows": windows}))
+        return
+    if what in ("open", "launch") and len(args) >= 3:
+        layout = load_layout()
+        host, port = window_host(layout, args[1])
+        rest = args[3:]
+        opts = dict(zip(rest[0::2], rest[1::2]))
+        if set(opts) - {"--size"} or len(rest) % 2:
+            raise RuntimeError(f"window {what}: the option is --size WxH")
+        if what == "open":
+            address = args[2]
+            if not re.fullmatch(r"0x[0-9a-fA-F]{1,16}", address):
+                raise RuntimeError("window open: ADDRESS is a window's address (0x...: window list)")
+            windows = window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
+            window_prune(layout, host, windows)  # frees their clients
+            found = next((w for w in windows if w.get("address") == address), None)
+            if found is None:
+                raise RuntimeError(f"{host.get('name')} has no window {address}")
+            size = window_size(opts, (min(found.get("width") or WINDOW_SIZE[0], WINDOW_MAX[0]),
+                                      min(found.get("height") or WINDOW_SIZE[1], WINDOW_MAX[1])))
+            title = found.get("title") or found.get("class") or ""
+        else:
+            if not re.fullmatch(r"[A-Za-z0-9._@+-]+\.desktop", args[2]):
+                raise RuntimeError("window launch: APP is a desktop app's id (window apps)")
+            size = window_size(opts, WINDOW_SIZE)
+            window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
+            opened = window_api(host, port, "POST", "/api/frametop/windows/open",
+                                {"app": args[2], "width": size[0], "height": size[1]})
+            address = opened.get("address", "")
+            title = args[2][:-8]
+        d = window_add(layout, host, port, address, title, size)
+        print(d["id"])
+        return
+    if what == "drop" and len(args) == 7:
+        window_drop(load_layout(), args[1:])
+        return
+    if what == "pull" and len(args) in (4, 5):
+        window_pull(load_layout(), args[1:])
+        return
+    if what == "resize" and len(args) == 4:
+        window_resize(load_layout(), args[1:])
+        return
+    if what == "close" and len(args) == 2:
+        layout = load_layout()
+        _, host, d = find_display(layout, args[1])
+        if not d.get("window"):
+            raise RuntimeError(f"{args[1]} isn't a window (ft-layout remote remove)")
+        window_close(layout, host, d)
+        return
+    raise RuntimeError("window list HOST | apps HOST | catalog HOST | open HOST ADDRESS [--size WxH] | "
+                       "launch HOST APP [--size WxH] | close ID | drop N M U V FX FY | pull N U V [SEQ] | resize N WxH METRES")
+
+
 def apply(wait=0):
     return apply_screens(wait) if backend() == "screens" else apply_gamescope(wait)
 
@@ -1528,6 +1913,8 @@ def capture_profile(layout, name):
     for _, _, d in remote_displays(layout):
         if d["id"] in remote:
             remote[d["id"]]["hidden"] = bool(d.get("hidden"))
+    import ft_desktopless
+    ft_desktopless.capture(layout, profile)
     reply = ask_float("windows")
     if reply and reply.startswith("ok "):
         profile["windows"] = json.loads(reply[3:])
@@ -1884,6 +2271,9 @@ def main(argv):
             log(screens_socket().ask("toggle"))
         elif cmd in ("hide", "show") and len(argv) == 3:
             set_hidden(argv[2], cmd == "hide")
+        elif cmd == "desktopless":
+            import ft_desktopless   # (its own module: docs/desktopless.md)
+            ft_desktopless.command(argv[2:])
         elif cmd == "hidden":
             layout = load_layout()
             print(" ".join(str(i + 1) for i in range(screen_count(layout)) if screen_entry(layout, i).get("hidden")))
@@ -1924,14 +2314,18 @@ def main(argv):
             clear_anchor()
             layout = load_layout()
             name = start_profile(layout)
+            import ft_desktopless
+            wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv else 60
             if not name:
-                return main([argv[0], "apply"] + argv[2:])
+                status = main([argv[0], "apply"] + argv[2:])
+                ft_desktopless.resume(wait=wait)  # desktopless mode on again (docs/desktopless.md)
+                return status
             use_named(layout, name)
             use_hidden(layout, name)
+            mode = ft_desktopless.use_profile(layout, name)
             open_remotes(layout, name)
             save_on_the_way(layout)
             log(f"starting in profile {name!r}")
-            wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv else 60
             with open(LOCK_PATH, "w") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 try:
@@ -1939,6 +2333,7 @@ def main(argv):
                 except RuntimeError as e:   # (no head pose with the headset off): the scales still go
                     log(f"not arranged now: {e}")
                 if streams_only():
+                    ft_desktopless.resume(name, mode=mode)
                     return 0  # no KWin to scale, no Plasma to open apps in
                 for _ in range(30):  # Plasma may still be starting
                     try:
@@ -1950,6 +2345,7 @@ def main(argv):
                 else:
                     log(f"kwin: {last}")
             open_apps(name, wait=90)  # ft-floatd starts with Plasma
+            ft_desktopless.resume(name, wait=90, mode=mode)  # after its apps: they float too
         elif cmd == "reset":
             # Keep a separate lock through the reset so repeated clicks cannot queue jumps.
             with open(LOCK_PATH + ".reset-delay", "w") as reset_lock:
@@ -1975,6 +2371,8 @@ def main(argv):
                 return main([argv[0], "use", name] if name in layout.get("layouts", {}) else [argv[0], "apply"])
         elif cmd == "remote":
             remote_command(argv[2:])
+        elif cmd == "window":
+            window_command(argv[2:])
         elif cmd == "streams":
             return streams_command(argv[2:])
         elif cmd in ("pin", "unpin") and len(argv) >= 3:
@@ -2054,8 +2452,10 @@ def main(argv):
                     kwin_follow()
                 elif cmd == "use":
                     layout = load_layout()
+                    import ft_desktopless
                     use_named(layout, argv[2])
                     use_hidden(layout, argv[2])
+                    mode = ft_desktopless.use_profile(layout, argv[2])
                     open_remotes(layout, argv[2])
                     save_layout(layout)
                     log(f"using layout {argv[2]!r}")
@@ -2070,6 +2470,7 @@ def main(argv):
                     else:
                         kwin_follow()
                     open_apps(argv[2])  # floating windows go relative to the screens, wherever they are
+                    ft_desktopless.resume(argv[2], wait=10, mode=mode)
                 else:
                     changes = apply_scales()
                     log("kwin: " + (" ".join(changes) if changes else "unchanged"))
@@ -2083,4 +2484,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    sys.modules.setdefault("ft_layout", sys.modules[__name__])  # (ft_desktopless: this module, not a second copy)
     sys.exit(main(sys.argv))

@@ -10,13 +10,15 @@ and the arrow keys move through what's found, and Enter or a click opens it:
     pinned panel doesn't spin: it gets typing where it is, with a word on where that is.
   - an app that isn't: it starts, its first window floating (ft-floatd's launch).
   - a remote display: connected first if it isn't, then spun to.
+  - a PC's app or window (a host with a Frametop windows instance, `ft-layout window`): the app
+    starts there as a panel of its own; the window becomes one, or its panel is spun to.
   - a command: it runs in the background (a transient systemd user unit), with a word on the panel.
   - one of Frametop's own actions (ft_input_actions.MENU_ACTIONS): the input relay does it
     ("action NAME" to @frametop_relay). Opened as the OS menu (the relay's os_menu action),
     an empty query lists them.
 Shift+Enter or a right click opens the item's menu: an app's own actions (a browser's private
 window), Open new window, Open docked on this screen, and its windows; a display's Go to and
-Disconnect. Esc goes back from a menu, and closes the search.
+Disconnect; a PC window's Back to the PC. Esc goes back from a menu, and closes the search.
 
 Runs inside the Frametop desktop's Plasma session (its autostart, like ft-floatd), so it's up
 exactly while the desktop is, and starts apps with the desktop's environment. The pill is
@@ -56,6 +58,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import gi
@@ -77,7 +80,7 @@ import spotsearch  # noqa: E402
 
 PANEL = os.path.join(REPO, "screens", "build", "ft-spotpanel")
 IN_BOX = os.path.join(REPO, "scripts", "in-box")  # runs a program in the container it was built in
-FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
+FT_LAYOUT = os.environ.get("FT_FRUNNER_LAYOUT") or os.path.join(REPO, "layout", "ft-layout")  # (tests: a fake)
 STANDALONE_ACTION = "frametop-standalone"  # Launch as Standalone (float/ft_apps.py): what Enter does anyway
 USAGE_PATH = os.path.expanduser("~/.config/frametop-frunner.json")
 OLD_USAGE_PATH = os.path.expanduser("~/.config/frametop-spotwatch.json")  # read until the first save (its name before 2026-10-20)
@@ -94,6 +97,7 @@ REMOTE_ICON = "video-display"
 COMMAND_ICON = "utilities-terminal"
 ACTION_ICON = "preferences-system"
 WINDOW_ICON = "window"
+PC_ICON = "computer"
 
 
 def log(*args):
@@ -361,6 +365,12 @@ class Frunner:
         self.profiles = []      # spotsearch.Item, kind "profile"; data: {"name", "info"}
         self.remotes = []       # spotsearch.Item, kind "remote"; data: {"n", "id", "host", "label", "off"}
         self.commands = []      # spotsearch.Item, kind "command"; data: {"name", "run"}
+        # A PC's apps and windows (ft-layout window catalog, asked at each open in the background):
+        # kinds "pcapp" (data: {"host", "id", "icon"}) and "pcwindow" (data: the catalog's window and
+        # "host"; "screen" and "panel" when it's a panel already).
+        self.pc = {}            # host name -> its last catalog
+        self.pc_asking = set()  # hosts asked, not answered yet
+        self.pc_items = []
         # Frametop's own actions, kind "action"; data: {"name"}, the input relay's action.
         # No "Frametop" among their words: a search for frame-anything would list them all.
         self.actions = [spotsearch.Item("action", "action:" + name, title, "", keywords, "", {"name": name})
@@ -489,7 +499,8 @@ class Frunner:
         return False
 
     def load_remotes(self):
-        """The layout's remote displays, without hidden ones, and which are running (ft-screens)."""
+        """The layout's remote displays, without hidden ones or PC windows' panels (they're among the
+        PC's windows), and which are running (ft-screens)."""
         try:
             layout = ft_layout.load_layout()
         except (OSError, ValueError) as e:
@@ -497,7 +508,7 @@ class Frunner:
             layout = {}
         out = []
         for n, host, d in ft_layout.remote_displays(layout):
-            if d.get("hidden") or not d.get("id"):
+            if d.get("hidden") or d.get("window") or not d.get("id"):
                 continue
             hname = host.get("name") or host.get("address") or "?"
             label = d.get("label") or d["id"]
@@ -513,6 +524,73 @@ class Frunner:
                 self.running_remotes[int(parts[0])] = parts[2]
         for r in self.remotes:
             r.running = r.data["n"] in self.running_remotes
+
+    def load_pc(self):
+        """Each host with a Frametop windows instance is asked for its apps and windows, in a thread
+        of its own (a PC that's off takes seconds to fail). Until it answers, its last answer is listed."""
+        try:
+            layout = ft_layout.load_layout()
+        except (OSError, ValueError):
+            layout = {}
+        hosts = [h["name"] for h in layout.get("hosts", []) if isinstance(h.get("windows"), dict) and h.get("name")]
+        for gone in set(self.pc) - set(hosts):
+            del self.pc[gone]
+        for name in hosts:
+            if name not in self.pc_asking:
+                self.pc_asking.add(name)
+                threading.Thread(target=self.ask_catalog, args=(name,), daemon=True).start()
+        self.build_pc_items()
+
+    def ask_catalog(self, name):
+        """(Its own thread.) The host's catalog, to got_catalog in the main loop."""
+        answer, why = None, ""
+        try:
+            p = subprocess.run([FT_LAYOUT, "window", "catalog", name], stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=20)
+            lines = p.stdout.strip().splitlines()
+            if p.returncode == 0 and lines:
+                answer = json.loads(lines[-1])  # (lines before it: panels it forgot)
+            else:
+                why = (lines or p.stderr.strip().splitlines() or [f"exit {p.returncode}"])[-1]
+        except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+            why = str(e)
+        GLib.idle_add(self.got_catalog, name, answer if isinstance(answer, dict) else None, why)
+
+    def got_catalog(self, name, answer, why):
+        self.pc_asking.discard(name)
+        if answer is None:
+            log(f"{name}: no apps or windows ({why})")
+            if name in self.pc:
+                self.pc[name] = dict(self.pc[name], windows=[])  # its apps stay; its windows may have gone
+        else:
+            self.pc[name] = answer
+        self.build_pc_items()
+        if self.is_open:
+            self.refilter(keep=True)
+        return False
+
+    def build_pc_items(self):
+        items = []
+        for host, cat in self.pc.items():
+            on = f"on {host}" + (", locked" if cat.get("locked") else "")  # (a locked PC's panels are black)
+            for a in cat.get("apps", []):
+                if isinstance(a, dict) and a.get("id") and a.get("name"):
+                    items.append(spotsearch.Item("pcapp", f"pc:{host}:{a['id']}", clean(a["name"]), f"App {on}",
+                                                 [host], "", {"host": host, "id": a["id"], "icon": a.get("icon") or ""}))
+            for w in cat.get("windows", []):
+                if not isinstance(w, dict) or not w.get("address"):
+                    continue
+                cls = str(w.get("class") or "")
+                items.append(spotsearch.Item("pcwindow", f"pc-window:{host}:{cls}", clean(w.get("title") or cls),
+                                             f"Window {on}", [host, cls], "", dict(w, host=host)))
+        self.pc_items = items
+
+    @staticmethod
+    def pc_icon(item):
+        """The PC's own icon name for it when the desktop's theme has one, else a computer."""
+        names = [item.data.get("icon") or "", item.data.get("id", "").removesuffix(".desktop"),
+                 str(item.data.get("class") or "").lower(), PC_ICON]
+        return Gio.ThemedIcon.new_from_names([n for n in names if n and "/" not in n])
 
     def load_commands(self):
         """Your commands, read again at each open (a small file)."""
@@ -591,6 +669,15 @@ class Frunner:
         if item.kind == "profile":
             return Entry("item", item.title, "Profile · its screens, remote displays and apps",
                          item.data["info"].get_icon(), "Open", run=lambda: self.open_profile(item), item=item)
+        if item.kind == "pcapp":
+            return Entry("item", item.title, item.generic, self.pc_icon(item), "Open",
+                         run=lambda: self.launch_pc(item), item=item)
+        if item.kind == "pcwindow":
+            on = item.data.get("screen")
+            sub = item.generic + (f" · {clean(str(item.data['class']))}" if item.data.get("class") else "") + \
+                (" · a panel" if on else "")
+            return Entry("item", item.title, sub, self.pc_icon(item), "Go to" if on else "Open",
+                         run=lambda: self.go_pc_window(item), item=item)
         if item.kind == "remote":
             state = self.running_remotes.get(item.data["n"])
             return Entry("item", item.title, f"Remote display · {state}" if state else "Remote display · not connected",
@@ -615,8 +702,8 @@ class Frunner:
         if self.actions_menu and not self.query.strip():
             found = list(self.actions)  # the OS menu, in its own order
         else:
-            found = spotsearch.search(self.apps + self.profiles + self.remotes + self.commands + self.actions,
-                                      self.query, self.usage)
+            found = spotsearch.search(self.apps + self.profiles + self.remotes + self.commands + self.actions +
+                                      self.pc_items, self.query, self.usage)
         self.entries = [self.result_entry(it) for it in found]
         self.sel = next((i for i, e in enumerate(self.entries) if e.item is was), 0) if was else 0
         self.top = 0
@@ -635,6 +722,20 @@ class Frunner:
         if item.kind == "profile":
             rows.append(Entry("item", "Open profile", "Its screens, remote displays and apps, as saved",
                               run=lambda: self.open_profile(item)))
+            return rows
+        if item.kind == "pcapp":
+            rows.append(Entry("item", "Open as a panel", item.generic, run=lambda: self.launch_pc(item)))
+            return rows
+        if item.kind == "pcwindow":
+            host = item.data["host"]
+            if item.data.get("screen"):
+                rows.append(Entry("item", "Go to its panel", f"Screen {item.data['screen']}",
+                                  run=lambda: self.go_pc_window(item)))
+                rows.append(Entry("item", f"Back to {host}", "The panel goes, the window goes back",
+                                  run=lambda: self.pc_window_back(item)))
+            else:
+                rows.append(Entry("item", "Open as a panel", f"It leaves {host}'s monitor",
+                                  run=lambda: self.go_pc_window(item)))
             return rows
         if item.kind == "remote":
             state = self.running_remotes.get(item.data["n"])
@@ -727,6 +828,7 @@ class Frunner:
         self.refresh_windows()
         self.load_remotes()
         self.load_commands()
+        self.load_pc()
         self.actions_menu = actions
         self.refilter()
         reply = self.ask(self.args.panel_socket, "show") if not self.args.no_panel else "ok"
@@ -898,6 +1000,45 @@ class Frunner:
         else:
             log(f"remote display {n}: no panel after connecting")
 
+    def launch_pc(self, item):
+        self.close("pc app")
+        self.used(item.key)
+        host = item.data["host"]
+        self.toast(f"Opening {item.title} on {host}")
+        log(f"launching {item.data['id']} on {host}")
+        self.layout_command(["window", "launch", host, item.data["id"]], self.pc_panel_done(item.title), output=True)
+
+    def go_pc_window(self, item):
+        self.close("pc window")
+        self.used(item.key)
+        d = item.data
+        if d.get("screen"):
+            self.bring(d["screen"], item.title)
+            return
+        log(f"opening {d['host']}'s window {d['address']}")
+        self.layout_command(["window", "open", d["host"], d["address"]], self.pc_panel_done(item.title), output=True)
+
+    def pc_window_back(self, item):
+        self.close("pc window back")
+        title = item.title
+        self.layout_command(["window", "close", item.data["panel"]],
+                            lambda ok, _out, why: ok or self.toast(f"{title}: {why or 'not closed'}"), output=True)
+
+    def pc_panel_done(self, title):
+        """After ft-layout window open or launch: spin to the new panel (its id is the last line)."""
+        def done(ok, out, why):
+            if not ok:
+                self.toast(f"{title}: {why or 'not opened'}")
+                return
+            panel = (out.strip().splitlines() or [""])[-1]
+            try:
+                n = ft_layout.find_display(ft_layout.load_layout(), panel)[0]
+            except (RuntimeError, OSError, ValueError) as e:
+                log(f"{title}: {e}")
+                return
+            self.await_remote(n, title)
+        return done
+
     def open_profile(self, item):
         self.close("profile")
         self.used(item.key)
@@ -909,18 +1050,28 @@ class Frunner:
         self.close("disconnect")
         self.layout_command(["remote", "disconnect", item.data["id"]], lambda ok: None)
 
-    def layout_command(self, args, done):
+    def layout_command(self, args, done, output=False):
+        """ft-layout ARGS in the background, then done(ok); with output, done(ok, its output, why
+        it failed: its last line, where ft-layout says "error: ..."). Its few lines fit in the
+        pipe until it exits."""
         try:
-            p = subprocess.Popen([FT_LAYOUT, *args], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 start_new_session=True)
+            p = subprocess.Popen([FT_LAYOUT, *args], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE if output else subprocess.DEVNULL,
+                                 stderr=subprocess.STDOUT if output else None, text=True, start_new_session=True)
         except OSError as e:
             log(f"ft-layout: {e}")
+            if output:
+                done(False, "", str(e))
             return
 
         def exited(_pid, status):
             if status:
                 log(f"ft-layout {' '.join(args)}: exit {status}")
-            done(status == 0)
+            if not output:
+                return done(status == 0)
+            out = p.communicate()[0] or ""
+            last = (out.strip().splitlines() or [""])[-1]
+            done(status == 0, out, "" if status == 0 else last.removeprefix("error: "))
         GLib.child_watch_add(GLib.PRIORITY_DEFAULT, p.pid, exited)
 
     def activate(self):

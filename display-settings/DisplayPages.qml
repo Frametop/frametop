@@ -197,6 +197,33 @@ Item {
             ColumnLayout {
                 spacing: Kirigami.Units.largeSpacing
 
+                // Desktopless mode (docs/desktopless.md): the desktops hide, their apps stay.
+                Kirigami.AbstractCard {
+                    visible: spage.md
+                    Layout.fillWidth: true
+                    contentItem: RowLayout {
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Kirigami.Heading { level: 3; text: "Desktopless mode" }
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                text: "Hides the screens and your Linux PCs' displays, and makes every app window on them a panel of its own: this desktop's and the PCs'. Turned off, each window goes back where it was. Meta+Shift+D does the same."
+                                opacity: 0.7
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                        Controls.Switch {
+                            id: desktoplessSwitch
+                            checked: backend.desktopless
+                            enabled: backend.desktopRunning && !backend.busy
+                            onToggled: {
+                                backend.setDesktopless(checked)
+                                checked = Qt.binding(() => backend.desktopless)
+                            }
+                        }
+                    }
+                }
+
                 // ft-screens: every screen its own resolution and size.
                 Repeater {
                     model: spage.md ? backend.screenList : []

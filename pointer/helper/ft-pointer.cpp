@@ -550,6 +550,7 @@
 #include "deskclass.h"
 #include "devpose.h"
 #include "gazehand.h"
+#include "../common/overlayregion.h"
 #include "handoff.h"
 #include "handsin.h"
 #include "rayowner.h"
@@ -1222,6 +1223,7 @@ struct Pointer {
     ControllerButtons controllerButtons;
     OverlayList overlays;
     std::map<std::string, vr::VROverlayHandle_t> handles;
+    std::map<std::string, overlayregion::Region> hitRegions;
     std::map<std::string, bool> sceneGraph;  // no texture: plane test instead of ComputeOverlayIntersection
     std::map<std::string, bool> visible;  // refreshed every 50 ms
     Clock::time_point lastVisible{};
@@ -2560,7 +2562,7 @@ void Pointer::GazeAwake() {
 
 void Pointer::RelayCommands() {
     // Commands from the relay, one datagram each.
-    char buf[256];
+    char buf[4096];
     ssize_t n;
     while ((n = recvfrom(in, buf, sizeof buf - 1, 0, reinterpret_cast<sockaddr *>(&sender), &(senderLen = sizeof sender))) > 0) {
         buf[n] = 0;
@@ -2747,6 +2749,16 @@ bool Pointer::SettingCommand(const char *buf) {
     }
     if (std::strncmp(buf, "vrstatus", 8) == 0) {
         reply(controllerButtons.Status());
+        return true;
+    }
+    if (std::strncmp(buf, "region ", 7) == 0) {
+        std::string key;
+        overlayregion::Region region;
+        if (overlayregion::Decode(buf, &key, &region) && key.size() >= 7 && key.compare(key.size() - 7, 7, ".resize") == 0) {
+            if (!hitRegions.count(key) && hitRegions.size() >= 64) hitRegions.clear();
+            hitRegions[key] = std::move(region);
+            ++visibleGen;  // invalidate a stationary pointer's cached collision pass
+        }
         return true;
     }
     if (std::strncmp(buf, "overlay ", 8) == 0 && std::strncmp(buf + 8, "frametop.", 9) == 0) {
@@ -4158,6 +4170,12 @@ Hit Pointer::nearest(Vec3 from, Vec3 d) {
         vr::VROverlayIntersectionResults_t r{};
         if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance > 0.05f &&
             r.fDistance < h.along) {
+            // ComputeOverlayIntersection ignores the controller intersection mask.
+            // Fail closed until ft-screens supplies the identical primitive union.
+            if (key.rfind("frametop.", 0) == 0 && key.size() >= 7 && key.compare(key.size() - 7, 7, ".resize") == 0) {
+                const auto region = hitRegions.find(key);
+                if (region == hitRegions.end() || !overlayregion::Contains(region->second, r.vUVs.v[0], r.vUVs.v[1])) continue;
+            }
             h.along = r.fDistance, h.key = key, h.scene = false;
             h.point = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};
             h.normal = {r.vNormal.v[0], r.vNormal.v[1], r.vNormal.v[2]};
@@ -4175,9 +4193,14 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
     t.scene = first.scene;
     Vec3 bestPoint = first.point, bestNormal = first.normal;
     t.onEdge = false;
+    const auto edgeRegion = hitRegions.find(edgeKey);
+    const bool shapedResizeEdge = edgeKey.rfind("frametop.", 0) == 0 && edgeKey.size() >= 7 &&
+        edgeKey.compare(edgeKey.size() - 7, 7, ".resize") == 0 &&
+        (edgeRegion == hitRegions.end() || !overlayregion::FullRectangle(edgeRegion->second));
     if (!dragging && t.best < 1e8 && !t.scene) {
         edgeKey = t.key, edgePoint = bestPoint, edgeNormal = Normalize(bestNormal), edgeLast = bestPoint;
-    } else if (!dragging && t.best >= 1e8 && !edgeKey.empty() && visible.count(edgeKey) &&
+    } else if (!dragging && t.best >= 1e8 && !edgeKey.empty() &&
+               !shapedResizeEdge && visible.count(edgeKey) &&
                visible.at(edgeKey)) {
         // Just off a panel: stay on its plane (see "Panel edges" at the top).
         const double denom = Dot(dir, edgeNormal);

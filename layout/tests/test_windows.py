@@ -193,6 +193,17 @@ class Windows(unittest.TestCase):
             self.run_window("list", "oma7")
         self.assertEqual(len([d for d in self.displays() if d.get("window")]), 1)
 
+    def test_disconnect_sends_the_window_back(self):
+        # Remote Displays' Disconnect (a host's, or the panel's own): no minute's grace on the PC
+        self.run_window("open", "oma7", "0x55aa10")
+        said = []
+        self.m.log = said.append
+        self.m.remote_command(["disconnect", "oma7-dp-2", "oma7-window-55aa10"])
+        self.assertEqual(self.api[-1][2:], ("POST", "/api/frametop/windows/release", {"address": "0x55aa10"}))
+        self.assertEqual([d["id"] for d in self.displays()], ["oma7-dp-2"])
+        self.assertTrue(self.displays()[0]["off"])  # a display keeps its place, switched off
+        self.assertIn("disconnected oma7-window-55aa10", said)
+
     def test_close_forgets_the_panel_in_profiles(self):
         self.run_window("open", "oma7", "0x55aa10")
         layout = self.m.load_layout()

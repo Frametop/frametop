@@ -1259,6 +1259,15 @@ def remote_command(args):
     if what in ("connect", "disconnect") and len(args) >= 2:
         layout = load_layout()
         found = [find_display(layout, i) for i in args[1:]]
+        if what == "disconnect":
+            # A window panel has nothing to come back to: its window goes back on the PC now,
+            # so the PC's cursor and the window don't wait a minute on an output nobody sees.
+            for _, host, d in [f for f in found if f[2].get("window")]:
+                window_close(layout, host, d)
+                log(f"disconnected {d['id']}")
+            found = [f for f in found if not f[2].get("window")]
+            if not found:
+                return
         for _, _, d in found:
             if what == "connect":
                 d.pop("off", None)
@@ -1510,6 +1519,21 @@ def window_forget(layout, host, d):
     save_layout(layout)
 
 
+def window_close(layout, host, d):
+    """The window panel goes, and its window goes back on the host now: the host's minute of
+    grace is for a stream that drops, not for one the Frame ended on purpose."""
+    window_forget(layout, host, d)
+    try:
+        window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
+                   {"address": d["app"][7:]})
+        log(f"closed {d['id']}: the window is back on {host.get('name') or host['address']}")
+    except RuntimeError as e:
+        if "no window output" in str(e):  # closed on the PC, or back after the grace period
+            log(f"closed {d['id']}: the window had already left it")
+        else:
+            log(f"closed {d['id']}; the PC will put the window back within a minute ({e})")
+
+
 def window_prune(layout, host, windows):
     """Forgets the host's window panels whose window closed there (ft-screens already dropped
     their panels: the host gives a window a new address each time)."""
@@ -1592,16 +1616,7 @@ def window_command(args):
         _, host, d = find_display(layout, args[1])
         if not d.get("window"):
             raise RuntimeError(f"{args[1]} isn't a window (ft-layout remote remove)")
-        window_forget(layout, host, d)
-        try:
-            window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
-                       {"address": d["app"][7:]})
-            log(f"closed {d['id']}: the window is back on {host.get('name') or host['address']}")
-        except RuntimeError as e:
-            if "no window output" in str(e):  # closed on the PC, or back after the grace period
-                log(f"closed {d['id']}: the window had already left it")
-            else:
-                log(f"closed {d['id']}; the PC will put the window back within a minute ({e})")
+        window_close(layout, host, d)
         return
     raise RuntimeError("window list HOST | apps HOST | catalog HOST | open HOST ADDRESS [--size WxH] | "
                        "launch HOST APP [--size WxH] | close ID")

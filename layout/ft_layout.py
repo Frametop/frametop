@@ -1491,6 +1491,15 @@ def window_add(layout, host, port, address, title, size):
     """The window's panel, saved and started in front of you."""
     for _, h, d in remote_displays(layout):
         if h is host and d.get("window") and d["app"] == f"window:{address}":
+            if d.pop("off", None):   # (one disconnected: connected again)
+                save_layout(layout)
+            n = next(k for k, _, e in remote_displays(layout) if e is d)
+            try:
+                running = remotes_running(screens_socket())
+            except NoAnswer:
+                running = None   # (no desktop: nothing to start it in)
+            if running is not None and n not in running:
+                start_remotes_now(layout, {d["id"]})   # its stream had stopped: the panel opens again
             return d  # already a panel
     if len(remote_displays(layout)) >= REMOTE_MAX:
         raise RuntimeError(f"at most {REMOTE_MAX} remote displays and windows")
@@ -1543,11 +1552,15 @@ def window_close(layout, host, d):
 
 def window_prune(layout, host, windows):
     """Forgets the host's window panels whose window closed there (ft-screens already dropped
-    their panels: the host gives a window a new address each time)."""
+    their panels: the host gives a window a new address each time), and ones disconnected
+    ("off"): a window panel has nothing to come back to (its window went back on the PC), so
+    one left off by an older build kept the window from being opened or pulled again
+    (Daenon, 2026-11-07: Brave wouldn't pull off oma7's display, GrokBot would)."""
     have = {w.get("address") for w in windows}
-    for d in [d for d in host.get("displays", []) if d.get("window") and d["app"][7:] not in have]:
+    for d in [d for d in host.get("displays", []) if d.get("window") and (d["app"][7:] not in have or d.get("off"))]:
         window_forget(layout, host, d)
-        log(f"forgot {d['id']}: its window closed on {host.get('name') or host['address']}")
+        why = "it was disconnected" if d["app"][7:] in have else "its window closed"
+        log(f"forgot {d['id']}: {why} on {host.get('name') or host['address']}")
 
 
 def fractions(words, what):

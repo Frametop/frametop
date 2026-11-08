@@ -141,6 +141,10 @@ Built 2026-11-07 (DEE-345; user: "drag windows by pressing the super key and cli
 
 Super goes to ft-screens with every key from the input relay. A screen's window gets Super+drag only while KWin holds Super, so not while typing goes to a PC's display.
 
+The rest of the scroll that tore a window off (or pulled one off a PC's display) doesn't pull the new panel on toward you: pulls are ignored until the wheel rests 250 ms, at most 1.5 s after the tear (`HushPulls` in `vr.cpp`). One spin used to bring it 0.3 m from the eyes, onto the hands holding Super at the keyboard, which then poked and pinched it (2026-11-07). A push away isn't held back.
+
+On a PC's display, Super with a moving button held keeps the wheel from the PC either way: down pulls the window off, up does nothing. A PC may bind Super+wheel itself (oma7's omarchy switches workspaces), which mid-drag would move the window's workspace away. Super+wheel with no button held is still the PC's.
+
 ## Getting at it: the float key and the title bar button
 
 Decisions 22 to 25.

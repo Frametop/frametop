@@ -105,6 +105,40 @@ class Windows(unittest.TestCase):
         self.run_window("open", "oma7", "0x55aa10")
         self.assertEqual(len([d for d in self.displays() if d.get("window")]), 1)
 
+    def test_a_disconnected_window_panel_is_forgotten(self):
+        # (Daenon, 2026-11-07: an "off" entry from an older build kept Brave from being pulled again)
+        self.run_window("open", "oma7", "0x55aa10")
+        layout = self.m.load_layout()
+        next(d for d in layout["hosts"][0]["displays"] if d.get("window"))["off"] = True
+        self.m.save_layout(layout)
+        said = []
+        self.m.log = said.append
+        self.run_window("list", "oma7")
+        self.assertFalse(any(d.get("window") for d in self.displays()))
+        self.assertIn("forgot oma7-window-55aa10: it was disconnected on oma7", said)
+
+    def test_open_again_starts_a_stopped_panel(self):
+        self.run_window("open", "oma7", "0x55aa10")
+        started, running = [], {}
+
+        class Screens:
+            def ask(self, text, timeout=10.0):
+                if text == "remotes":
+                    return "ok remotes " + " ".join(f"{n}:x:{s}" for n, s in running.items())
+                raise self_m.NoAnswer("not this one")
+
+        self_m = self.m
+        self.m.screens_socket = Screens
+        self.m.start_remotes_now = lambda layout, only: started.append(set(only))
+        layout = self.m.load_layout()
+        self.m.window_add(layout, layout["hosts"][0], 48989, "0x55aa10", "foot", (800, 600))
+        self.assertEqual(started, [{"oma7-window-55aa10"}])   # not running: started
+        n = next(d["screen"] for d in self.displays() if d.get("window"))
+        running[n] = "live"
+        layout = self.m.load_layout()
+        self.m.window_add(layout, layout["hosts"][0], 48989, "0x55aa10", "foot", (800, 600))
+        self.assertEqual(len(started), 1)   # running: left alone (not placed again)
+
     def test_no_such_window(self):
         with self.assertRaisesRegex(RuntimeError, "no window 0x99"):
             self.run_window("open", "oma7", "0x99")

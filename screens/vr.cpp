@@ -2192,7 +2192,25 @@ void UpdateDrag(Screen &s, int index) {
 // A carry_toggle carry goes along the ray (carryDist), or with Ctrl or Alt held moves its plane or
 // its centre. The same step a notch whatever is held (DEE-328's audit, 2026-11-01: no carry-only
 // Ctrl and Alt wheel bindings; the wheel pushes and pulls as on a title bar, DEE-246).
+// The rest of the scroll that tore a window off or pulled one off a PC's display (TearOff, PullOff)
+// doesn't pull the new panel on in: one spin of a wheel brought it 0.3 m from the eyes, over the hands
+// on the keyboard holding Super, which then poked and pinched it (Daenon, 2026-11-07). Pulls stay
+// hushed until the wheel rests kHushGapMs, at most kHushMaxMs after the tear; pushes away aren't.
+int64_t g_hushUntil = -1, g_hushEnd = -1;
+constexpr int64_t kHushFirstMs = 400, kHushGapMs = 250, kHushMaxMs = 1500;
+void HushPulls() {
+    const int64_t now = NowMs();
+    g_hushUntil = now + kHushFirstMs, g_hushEnd = now + kHushMaxMs;
+}
+bool PullHushed(double notches) {
+    const int64_t now = NowMs();
+    if (notches >= 0 || now >= g_hushUntil) return false;
+    g_hushUntil = std::min(std::max(g_hushUntil, now + kHushGapMs), g_hushEnd);
+    return true;
+}
+
 void Push(Screen &s, double notches) {
+    if (PullHushed(notches)) return;
     if (notches > 0) s.pushedMs = NowMs();
     Mat d, head;
     if (!DevicePose(s.dragDevice, &d) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
@@ -2720,6 +2738,7 @@ bool TearOff(Screen &s, int index, void (*handle)(const struct ft_event *, void 
     handle(&e, data);
     g_press.torn = true;
     g_kwinMove.tornAt = NowMs();
+    HushPulls();
     std::printf("screen %d: window %s torn off at %.0f,%.0f\n", index + 1, g_kwinMove.window.c_str(), g_press.x, g_press.y);
     char x[64];
     std::snprintf(x, sizeof x, " %.0f %.0f", g_press.x, g_press.y);
@@ -2791,7 +2810,9 @@ Pull g_pull;
 int g_pullSeq = 0;
 constexpr int64_t kPullMs = 10000;   // (pairing a stream client can take seconds)
 
-bool PullOff(Screen &s, int index, void (*handle)(const struct ft_event *, void *), void *data) {
+// notches > 0 (a push) in that hold pulls nothing and goes nowhere either: on the PC, Super+wheel
+// may be its own (oma7's omarchy: the next or previous workspace), mid-drag.
+bool PullOff(Screen &s, int index, double notches, void (*handle)(const struct ft_event *, void *), void *data) {
     const char *app = s.remote ? ft_remote_app(index) : nullptr;
     if (!app || std::strncmp(app, "display:", 8) || g_press.torn || g_press.screen != index || IsHandHolder(g_press.device) ||
         !windowdrag::Held(g_windowDrag, g_meta, g_alt) || s.width <= 0 || s.height <= 0)
@@ -2800,6 +2821,7 @@ bool PullOff(Screen &s, int index, void (*handle)(const struct ft_event *, void 
     for (uint32_t b : {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE})
         moves |= (g_press.buttons & ButtonBit(b)) && windowdrag::ActionOf(g_windowDrag, b) == windowdrag::Move;
     if (!moves) return false;
+    if (notches >= 0) return true;
     for (uint32_t b = BTN_LEFT; b <= BTN_TASK; ++b) {
         if (!(g_press.buttons & ButtonBit(b))) continue;
         ft_event e{};
@@ -2807,6 +2829,7 @@ bool PullOff(Screen &s, int index, void (*handle)(const struct ft_event *, void 
         handle(&e, data);
     }
     g_press.torn = true;
+    HushPulls();
     g_pull = {index, -1, g_press.device, NowMs() + kPullMs, 0.5, 0.5, ++g_pullSeq, g_press.serial};
     const double u = std::clamp(g_press.x / s.width, 0.0, 1.0), v = std::clamp(g_press.y / s.height, 0.0, 1.0);
     std::printf("screen %d: pulling the window at %.2f,%.2f off it\n", index + 1, u, v);
@@ -6285,7 +6308,7 @@ bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void 
         return true;
     }
     if (s.drag != Drag::None) return false;
-    if (notches < 0 && (PullOff(s, it->first, handle, data) || TearOff(s, it->first, handle, data))) return true;
+    if (PullOff(s, it->first, notches, handle, data) || (notches < 0 && TearOff(s, it->first, handle, data))) return true;
     struct ft_event e = {};
     e.type = FT_SCROLL, e.screen = it->first, e.dy = -notches;
     handle(&e, data);
@@ -6759,7 +6782,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                         return;
                     }
                     // a pull on a window KWin moves on its screen tears it off (TearOff)
-                    if (!sub && ev.data.scroll.ydelta < 0 && (PullOff(s, index, handle, data) || TearOff(s, index, handle, data))) return;
+                    if (!sub && (PullOff(s, index, ev.data.scroll.ydelta, handle, data) ||
+                                 (ev.data.scroll.ydelta < 0 && TearOff(s, index, handle, data))))
+                        return;
                     e.type = FT_SCROLL;
                     e.dx = -ev.data.scroll.xdelta;
                     e.dy = -ev.data.scroll.ydelta;

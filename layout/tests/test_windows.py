@@ -175,6 +175,7 @@ class Windows(unittest.TestCase):
     def test_a_store_app_without_a_title_is_named_by_its_package(self):
         self.assertEqual(self.m.window_app_title("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), "Microsoft.WindowsCalculator")
         self.assertEqual(self.m.window_app_title("x.lnk", {"title": "  "}), "x")
+        self.assertEqual(self.m.window_app_title("x.lnk", {"title": "a\nb\x1b" + "c" * 100}), "ab" + "c" * 78)
 
     def test_launch_refuses_what_is_no_app_id(self):
         for app in ("x.exe", "C:/Windows/notepad.lnk", "a\nb.desktop", "Calc_8wekyb3d8bbwe!App;rm", "Calc!App"):

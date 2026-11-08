@@ -1453,8 +1453,9 @@ def window_app_title(app, opened=None):
     open answer), else from its id: "org.gnome.Calculator", "Character Map",
     "Microsoft.WindowsCalculator"."""
     title = (opened or {}).get("title")
-    if isinstance(title, str) and title.strip():
-        return title.strip()
+    title = "".join(c for c in title if c.isprintable()).strip()[:80] if isinstance(title, str) else ""
+    if title:
+        return title
     app = re.sub(r"_[a-z0-9]{13}!.*$", "", app)
     return re.sub(r"\.(desktop|lnk)$", "", app.rsplit("/", 1)[-1])
 WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height

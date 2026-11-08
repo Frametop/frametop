@@ -99,8 +99,9 @@ No screenshots were needed or published.
 
 This validates basic visual concealment/restoration and unsaved-work preservation,
 not all input routes, auxiliary panels, lock latency or failure cases. Input
-blocking, observer failure/restart, UI restart, cold boot and suspend/resume remain
-hardware-test gaps. A review PR should remain draft until that matrix is completed.
+blocking, observer failure, UI restart, cold boot and the wider suspend/resume
+matrix remain hardware-test gaps. Publication is on hold while follow-up work is
+coordinated; any eventual review PR should remain draft until that matrix is completed.
 
 An early version actively requested another Steam lock after lost proof. During
 the floating-window test, the wearer received repeated prompts; logs showed
@@ -117,6 +118,14 @@ unknown (including an observation-gap/suspend invalidation), then a real locked
 state and unlocked-after-observed-lock. The original KWrite, KWin, compositor and
 keyboard processes remained alive. This verifies passive recovery through that
 normal sleep/wake cycle, not cold boot, prolonged suspend or all failure cases.
+
+A further passive sleep/wake cycle started with both a floating KWrite window and
+Full Keyboard confirmed visible. Read-only overlay observations showed every
+Frametop panel, including Full Keyboard, hidden while denied; the desktop and
+floating window returned after unlock. The wearer confirmed that result and
+accepted Full Keyboard remaining dismissed rather than reopening automatically.
+Typing after summoning it again is still unverified. These sequential lease and
+overlay queries are not an atomic lock-latency measurement.
 
 ## Intended boundary
 

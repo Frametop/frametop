@@ -17,22 +17,29 @@ def snapshot(**changes):
 
 
 class Watch(unittest.TestCase):
-    def run_watch(self, samples):
+    def run_watch(self, samples, *, pauses=None, query_ms=0):
         samples = iter(samples)
         publications, requests = [], []
+        clock = [1000, 1000]
+        pauses = iter(pauses or [])
         def evaluate(expression):
             if expression == pin_lock.REQUEST_LOCK:
                 requests.append(expression)
                 return True
             value = next(samples)
+            clock[0] += query_ms
+            clock[1] += query_ms
             if isinstance(value, Exception):
                 raise value
             return value
         def sleep(_seconds):
-            return None
+            boot, mono = next(pauses, (150, 150))
+            clock[0] += boot
+            clock[1] += mono
         with tempfile.TemporaryDirectory(prefix="ft-pin-watch-") as folder:
             with (patch.object(pin_lock.ft_pinlock, "STATE", Path(folder) / "state"),
                   patch.object(pin_lock.ft_pinlock, "enabled", return_value=True),
+                  patch.object(pin_lock.ft_pinlock, "clocks", side_effect=lambda: tuple(clock)),
                   patch.object(pin_lock, "publish", side_effect=lambda permit, stamp: publications.append(permit)),
                   patch.object(pin_lock.steamui, "evaluate", side_effect=evaluate),
                   patch.object(pin_lock.signal, "signal"), patch.object(pin_lock.time, "sleep", sleep)):
@@ -58,6 +65,29 @@ class Watch(unittest.TestCase):
                                           snapshot(configured=False, mandatory=True)])
         self.assertEqual(states, [False, False, True, False, False, False])
         self.assertEqual(requests, [])
+
+    def test_scheduling_gap_requires_new_authentication(self):
+        states, requests = self.run_watch(
+            [snapshot(active=True, mandatory=True), snapshot(), snapshot()],
+            pauses=[(150, 150), (800, 800)])
+        self.assertEqual(states, [False, False, True, False, False, False])
+        self.assertEqual(len(requests), 1)
+
+    def test_suspend_discards_unexpired_unlock(self):
+        states, requests = self.run_watch(
+            [snapshot(active=True, mandatory=True), snapshot(), snapshot()],
+            pauses=[(150, 150), (300, 150)])
+        self.assertEqual(states, [False, False, True, False, False, False])
+        self.assertEqual(len(requests), 1)
+
+    def test_slow_response_cannot_establish_unlock_proof(self):
+        states, _ = self.run_watch(
+            [snapshot(active=True, mandatory=True), snapshot()], query_ms=800)
+        self.assertFalse(any(states))
+
+    def test_slow_no_pin_response_cannot_allow_access(self):
+        states, _ = self.run_watch([snapshot(configured=False)], query_ms=800)
+        self.assertFalse(any(states))
 
     def test_atomic_private_publication(self):
         with tempfile.TemporaryDirectory(prefix="ft-pin-publish-") as folder:

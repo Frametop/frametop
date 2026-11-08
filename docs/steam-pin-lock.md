@@ -1,6 +1,6 @@
 # Steam PIN protection (experimental)
 
-**Opt-in implementation; not yet installed or wearer-tested.** The running
+**Opt-in implementation; headset validation incomplete.** The running
 desktop is unchanged until the new components are installed, restarted and
 `STEAM_PIN_LOCK=1` is set in the configuration file. Default is off while this
 internal Steam API integration is experimental. Use the screens backend; the
@@ -55,8 +55,8 @@ of unlock**. A dialog can also be cancellable, or a PIN-reset flow can clear it.
 
 The observer in `steam/pin_lock.py` returns only explicit lock/configuration/reset
 booleans and the UI context's time origin. It never returns the settings object,
-PIN, account name, callback or authentication ticket. It makes no calls to lock,
-unlock, change settings or submit credentials. Run locally on the Frame:
+PIN, account name, callback or authentication ticket. The default diagnostic makes
+no calls to lock, unlock, change settings or submit credentials. Run locally on the Frame:
 
 ```sh
 python3 steam/pin_lock.py --seconds 180
@@ -79,6 +79,14 @@ PIN cycles were observed continuously: unknown → locked → unlocked. These on
 validate detection, not the new enforcement. Cold boot, suspend/resume and actual
 app-preserving concealment still require wearer testing. Unit tests do not prove
 the meaning or completeness of Steam's UI signal.
+
+The personal integration has since been installed with an approved one-time
+desktop/helper restart, leaving SteamVR running. Its first authentication changed
+the live gate from locked to unlocked, and SteamVR reported the desktop screen
+and controls visible afterward. The wearer did not yet see Frametop; positioning
+or dashboard occlusion remains unconfirmed. This is not a completed concealment,
+input-blocking or unsaved-work-preservation test. Publication remains pending
+those checks; no additional capture is required.
 
 ## Intended boundary
 
@@ -123,7 +131,7 @@ PIN is not disk encryption or a Linux login boundary.
 python3 -m unittest discover -s steam/tests -v
 ```
 
-Twenty-six tests cover initial false, mandatory vs cancellable prompts, relocking,
+Thirty tests cover initial false, mandatory vs cancellable prompts, relocking,
 context reload, disconnect, invalid snapshots and booleans, reset/configuration
 changes, inconsistent props and avoiding credential fields in the expression.
 They also exercise the guard loop using fake Steam, atomic/private lease writing,
@@ -131,6 +139,10 @@ missing/bad/stale/dead-publisher leases, unsafe permissions, symlinks and FIFO
 rejection. The C test checks matching expiry/suspend rules and actual private-file
 reads without touching the real lease. All tests are offline and never send keys
 to the production desktop.
+
+The guard-loop tests use deterministic clocks to check scheduling gaps, a suspend
+within the lease interval, slow authentication responses and slow no-PIN responses.
+None may reuse stale evidence to permit access.
 
 Integration tripwires check overlay show-call coverage, that the lock path cannot
 stop applications, release-before-focus-clear ordering and the independent export

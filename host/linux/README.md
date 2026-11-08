@@ -2,7 +2,13 @@
 
 A Linux PC can be a host for Frametop's remote displays with Frametop's build of Vibepollo, from [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo). Vibepollo's Linux version is in beta, and Frametop hasn't been tested on a Linux host yet. If you try it, please report what works and what doesn't, on [GitHub](https://github.com/Frametop/frametop/issues) or in the [Frametop Discord](https://discord.gg/W3X9f7z3Bc).
 
-There's no setup script for Linux. These steps use Vibepollo's own installer with Frametop's package.
+One command does steps 1 and 2 below. In a terminal on the PC:
+
+```bash
+curl -fsSL https://frametop.github.io/frametop/host/linux/get.sh | bash
+```
+
+It downloads Frametop's package and Vibepollo's installer into `~/frametop-host`, checks both against the SHA-256s in the script, runs the installer (it asks for your `sudo` password), and then lists steps 3 to 6. Add `-s -- --download-only` after `bash` to only download and check them. The steps by hand use Vibepollo's own installer with Frametop's package.
 
 ## Requirements
 

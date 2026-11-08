@@ -206,6 +206,9 @@ function Main {
         if (-not $swap) { Say "An older Frametop build of Vibepollo is installed, and the new one isn't available here; keeping it." }
     } else {
         $v = (Get-Item $exe).VersionInfo.ProductVersion
+        if ($v -like "$VibepolloVersion*") {
+            throw "This PC's sunshine.exe is Vibepollo $v, but neither Vibepollo's own nor a Frametop build this setup knows (a build of your own, or a newer kit's), so it's left as it is. To start over, reinstall Vibepollo $VibepolloVersion ($SetupUrl), then run this again."
+        }
         throw "This is Vibepollo $v, and Frametop's build is for $VibepolloVersion. Install Vibepollo $VibepolloVersion ($SetupUrl), then run this again."
     }
 

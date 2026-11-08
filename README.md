@@ -124,6 +124,20 @@ Each computer needs a host kit once:
 | Mac with Apple silicon | Its monitors | Sunshine, one instance per monitor, and Frametop Streams in the menu bar to turn them on and off: [host/macos/README.md](host/macos/README.md) |
 | Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build, not tested yet: [host/linux/README.md](host/linux/README.md) |
 
+On a Windows PC, open PowerShell (Start, type `powershell`, Enter) and run:
+
+```powershell
+irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex
+```
+
+On a Linux PC (Arch Linux or CachyOS, KDE Plasma on Wayland), in a terminal:
+
+```bash
+curl -fsSL https://frametop.github.io/frametop/host/linux/get.sh | bash
+```
+
+Each downloads its kit's setup and runs it, and the setup checks the SHA-256 of everything it installs. On Windows it opens an admin window (confirm the prompt), installs Vibepollo if needed, and asks for the Web UI login the Frame signs in with. On Linux it asks for your `sudo` password, then lists what's left: a restart, the Web UI login and one setting. The kits' READMEs above have the steps by hand and what each one changes.
+
 Then, on the Frame, open Frametop Settings and pick Remote displays (or Remote displays in the Frametop menu), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
 
 With Share the clipboard on a Windows computer's card, text you copy on the desktop can be pasted on the computer once you click one of its displays, and text you copy there can be pasted on the desktop once you click back.

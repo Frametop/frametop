@@ -14,6 +14,16 @@ If Sunshine runs on this PC, uninstall it first: Vibepollo uses the same ports. 
 
 ## Set up
 
+The quickest way: open PowerShell on the PC (Start, type `powershell`, Enter; no admin needed) and run
+
+```powershell
+irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex
+```
+
+It downloads this kit's setup into `%LOCALAPPDATA%\Frametop\host-kit` and runs it, as in step 3 below: an admin window opens and the setup goes on there. Run the same line again for a newer kit. For the options under [Check and remove](#check-and-remove), run `"Setup Frametop host.cmd"` in that folder with them, or pass them to the one line: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1))) -Check`.
+
+Or with the kit's zip:
+
 1. Download `frametop-windows-host-1.zip` from the [`windows-host-1`](https://github.com/Frametop/frametop/releases/tag/windows-host-1) release and extract it. You get a folder named `frametop-windows-host`.
 2. Double-click `Setup Frametop host.cmd` in that folder. Windows may warn that the file came from the internet: choose Run. Then allow the admin prompt.
 3. The setup does the following:

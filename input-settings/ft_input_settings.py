@@ -252,6 +252,7 @@ ACTION_LABELS = {
     "os_menu": "OS menu: Frametop's actions in frunner",
     "hands_toggle": "Hand tracking on/off",
     "release_keys": "Release all keys (a stuck modifier)",
+    "desktopless_toggle": "Desktopless mode on/off",
     "key": "Pass through as key",
     "none": "Do nothing",
 }

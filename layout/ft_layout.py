@@ -96,6 +96,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout screen-args              ft-screens' --screen arguments for the session script
   ft-layout remote-view              the primary screen's place in the workspace, for the VNC bridge
   ft-layout toggle                   hide or show all screens (ft-screens)
+  ft-layout desktopless on|off|toggle|status
+                                     desktopless mode (docs/desktopless.md): the screens and the
+                                     Linux PCs' displays hide, each app window is a panel of its own
   ft-layout hide N|all               hide a screen on its own (it stays hidden whatever the
   ft-layout show N|all               visibility mode or the hotkey say), or show it again
   ft-layout hidden                   the screens hidden on their own
@@ -1493,8 +1496,9 @@ def window_size(opts, default):
     return stream_size(min(max(w, 320), 7680), min(max(h, 240), 4320))
 
 
-def window_add(layout, host, port, address, title, size):
-    """The window's panel, saved and started in front of you."""
+def window_add(layout, host, port, address, title, size, fields=None):
+    """The window's panel, saved and started in front of you (or at fields' pos, face and roll:
+    desktopless mode, which keeps its app's "key" there too)."""
     for _, h, d in remote_displays(layout):
         if h is host and d.get("window") and d["app"] == f"window:{address}":
             if d.pop("off", None):   # (one disconnected: connected again)
@@ -1520,6 +1524,7 @@ def window_add(layout, host, port, address, title, size):
     d = {"id": display_id, "client": window_client(layout, host, port), "app": f"window:{address}",
          "label": title[:80] or address, "size": [w, h], "fps": 60, "bitrate": 0, "port": port, "window": True,
          "metres": metres, "pos": [0.0, -0.1, -WINDOW_DISTANCE]}
+    d.update({k: v for k, v in (fields or {}).items() if v is not None})
     host.setdefault("displays", []).append(d)
     remote_displays(layout)
     save_layout(layout)
@@ -2264,6 +2269,9 @@ def main(argv):
             log(screens_socket().ask("toggle"))
         elif cmd in ("hide", "show") and len(argv) == 3:
             set_hidden(argv[2], cmd == "hide")
+        elif cmd == "desktopless":
+            import ft_desktopless   # (its own module: docs/desktopless.md)
+            ft_desktopless.command(argv[2:])
         elif cmd == "hidden":
             layout = load_layout()
             print(" ".join(str(i + 1) for i in range(screen_count(layout)) if screen_entry(layout, i).get("hidden")))

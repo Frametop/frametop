@@ -8,6 +8,8 @@ Any desktop app can float in VR in a panel of its own, like SteamVR's floating w
 - **Move it** by its title bar or the bar under its panel (the wheel pushes and pulls it), **resize it** by its edges or the corner tab, **make it bigger or smaller** at the same pixels by scrolling on the corner tab, and **change its scale** with Meta+scroll over it. Each app's last floating place, size, density, and scale are remembered.
 - Files, text, and images drag between any two floating windows, and between floating windows and the screens.
 
+Desktopless mode floats every window at once and hides the screens ([desktopless.md](desktopless.md)).
+
 How KWin behaves underneath all this, and what the KWin script does about it, is in [design.md](design.md#floating-windows).
 
 ## Not built

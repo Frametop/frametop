@@ -40,7 +40,7 @@ spec.loader.exec_module(floatd)
 # one's caller reads: launch a (reply, ...) tuple, the rest a reply.
 HANDOFFS = {"launch": ("ok launched", None), "dash_launch": "ok dash", "capture": "ok captured",
             "open_profile": "ok profile", "command": None, "dock": None, "dock_at": None, "scale_soon": None,
-            "redensity": None, "hold": None}
+            "redensity": None, "hold": None, "float_all": "ok 5"}
 
 
 def plain(v):
@@ -103,7 +103,7 @@ CASES = [
     "resize 3 100 100", "resize 4 1000 600", "resize 3 1000", "resize 3 a b", "dock w1", "dock w2", "dock w9",
     "float w1", "float w9", "close w1", "close w9", "float w1 extra",
     "float pointer x", "dock all x", "close", "resize w1", "resize w1 1000 600", "scale", "density", "resize",
-    "float active x", "dock active x", "tear", "dockat", "front 3 4", "profile  ", "dashlaunch  ",
+    "float active x", "dock active x", "float all", "float all x", "tear", "dockat", "front 3 4", "profile  ", "dashlaunch  ",
 ]
 
 

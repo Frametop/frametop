@@ -49,7 +49,8 @@ own actions listed, its OS menu ("toggle <source> actions"; no default), hands_t
 it runs, else start it, until the next desktop or SteamVR start (hands/handsmode.py toggle; Meta+H
 by default), release_keys = let go of every key held anywhere: what the desktop, a remote
 display and this relay hold, and every modifier in KWin, known to be held or not ("keys
-release" to ft-screens; Ctrl+Alt+Shift+Esc by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
+release" to ft-screens; Ctrl+Alt+Shift+Esc by default), desktopless_toggle = desktopless mode on or off
+(ft-layout desktopless toggle, docs/desktopless.md; Meta+Shift+D by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
 ft-layout, ft-float, ft-steam and ft-voice need no path), keys:CODES = tap that key combination
@@ -343,7 +344,7 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "carry_toggle", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "os_menu", "hands_toggle", "release_keys", "key", "none")
+           "frunner", "os_menu", "hands_toggle", "release_keys", "desktopless_toggle", "key", "none")
 # GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
 # file without "key_bindings" gets, are ft_input_actions'.
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
@@ -433,7 +434,8 @@ def known_action(a):
 
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
-            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "hands_toggle", "release_keys")
+            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "hands_toggle", "release_keys",
+                          "desktopless_toggle")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
@@ -1469,6 +1471,12 @@ class Relay:
         elif action == "release_keys":
             if value == 1:
                 self.release_all_keys()
+        elif action == "desktopless_toggle":
+            if value == 1:
+                # Takes a few seconds (every window moves); its outcome goes to this service's log.
+                subprocess.Popen([FT_LAYOUT, "desktopless", "toggle"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, start_new_session=True)
+                log(action)
         elif action == "hands_toggle":
             if value == 1:
                 # systemctl --no-block, and the pause's sounds if it plays them; the outcome goes

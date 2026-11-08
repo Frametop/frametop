@@ -432,6 +432,26 @@
   "reply": "ok",
   "tear": null
  },
+ "float all": {
+  "calls": [
+   [
+    "float_all",
+    [],
+    {}
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok 5",
+  "tear": null
+ },
+ "float all x": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error no window all",
+  "tear": null
+ },
  "float pointer": {
   "calls": [
    [

@@ -34,7 +34,7 @@ VOICE_ACTIONS = ("dictate", "dictate_hold")
 DEFAULT_KEY_BINDINGS = MappingProxyType({"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
                         "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
-                        "29+42+56+1": "release_keys"})
+                        "42+125+32": "desktopless_toggle", "29+42+56+1": "release_keys"})
 
 # With Frametop Voice installed (its unit file), a rules file without "key_bindings" gets these
 # too: a Right Ctrl tap, Right Ctrl alone, so a Left Ctrl tap (crouch in many games) doesn't
@@ -64,6 +64,7 @@ MENU_ACTIONS = (
     ("spin_next", "Spin to the next panel", ("spin", "next", "right", "lazy susan")),
     ("spin_prev", "Spin to the previous panel", ("spin", "previous", "left", "lazy susan")),
     ("dock_all", "Put every floating window back", ("dock", "float", "windows")),
+    ("desktopless_toggle", "Desktopless mode on or off", ("desktopless", "desktop", "windows", "apps", "panels")),
     ("hands_toggle", "Hand tracking on or off", ("hands", "tracking")),
     ("pause_toggle", "Pause for a VR game", ("pause", "game")),
     ("release_keys", "Let go of every key", ("release", "stuck", "keys", "modifier")),

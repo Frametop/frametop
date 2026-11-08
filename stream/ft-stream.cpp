@@ -549,6 +549,12 @@ struct HostInput {
     }
 };
 HostInput g_hostin;
+// --app window:ADDRESS: a Frametop windows instance, which lends no keyboard or mouse. Its stream
+// mustn't take the host's input lock (keyed by address, not port) from the stream of one of the
+// host's displays: a window panel that started first after a desktop restart held it, its
+// instance answered "released: service", and oma7's keyboard and mouse never came to Frametop
+// (Daenon, 2026-11-07).
+bool g_windowApp = false;
 
 // The shared clipboard (stream/clipboard.h, docs/remote-displays.md): with "clipboard": true on
 // its host in the layout (Frametop Remote Displays: Share the clipboard), the desktop's text
@@ -1096,7 +1102,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     g_audio.name = "Remote display: " + g_host;
     g_audio.Claim(g_host, MonoNs());
     g_mic.name = "Remote display microphone: " + g_host;
-    g_hostin.Open(g_host);
+    if (!g_windowApp) g_hostin.Open(g_host);
     g_clip.Open(&client, g_host);
     LiSetFrametopHostInputCallback(HostInputRecord);
     if (LiStartConnection(&client.server.serverInfo, &cfg, &cl, &dr, &ar, nullptr, 0, nullptr, 0) != 0)
@@ -1355,6 +1361,7 @@ int main(int argc, char **argv) {
             }
             std::printf("window %s is on %s\n", app.c_str() + 7, output.c_str());
             app = "display:" + output;
+            g_windowApp = true;
         }
         return Stream(client, app, fd, width, height, fps, bitrate);
     }

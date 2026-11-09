@@ -69,10 +69,10 @@ struct Client {
     bool PairByLogin(WebApi &api, char *pin);  // gs_pair takes a char *
     bool GrantByName(WebApi &api);
     bool Unpair();
-    // The host's clipboard text (Vibepollo's /actions/clipboard): set to *text, or read into it.
-    // The HTTP status, -1 without an answer. pin: the Web UI's public key, if Remote Displays
-    // saved one (HOST.pin): another certificate is refused.
-    long Clipboard(bool set, std::string *text, const std::string &pin);
+    // The host's clipboard text, or PNG image (Vibepollo's /actions/clipboard): set to *data, or
+    // read into it. The HTTP status, -1 without an answer. pin: the Web UI's public key, if
+    // Remote Displays saved one (HOST.pin): another certificate is refused.
+    long Clipboard(bool set, bool image, std::string *data, const std::string &pin);
     // The app id for primary, monitor, display:DEVICE, a number, or an app's name; 0 if none.
     int FindApp(const std::string &want);
     // /launch (or /resume) for appId, keeping the status code: Vibepollo answers 503 while a

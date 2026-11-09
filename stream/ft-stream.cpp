@@ -556,22 +556,23 @@ HostInput g_hostin;
 // (Daenon, 2026-11-07).
 bool g_windowApp = false;
 
-// The shared clipboard (stream/clipboard.h, docs/remote-displays.md): with "clipboard": true on
-// its host in the layout (Frametop Remote Displays: Share the clipboard), the desktop's text
-// goes to the host when typing goes to this panel ("focus", or a key after a blur), and the
-// host's comes back when typing leaves it ("blur"). The desktop's side is ft-clip, next to this
-// program, on the Frametop desktop's own Wayland socket; the host's is Client::Clipboard. Both
-// run on a thread of their own, in order, so the stream never waits for them. Only sizes are
-// logged, never the text.
+// The shared clipboard (stream/clipboard.h, docs/shared-clipboard.md): with "clipboard": true
+// on its host in the layout (Frametop Remote Displays: Share the clipboard), the desktop's text
+// or image goes to the host when typing goes to this panel ("focus", or a key after a blur),
+// and the host's comes back when typing leaves it ("blur"). The desktop's side is ft-clip, next
+// to this program, on the Frametop desktop's own Wayland socket; the host's is
+// Client::Clipboard. Both run on a thread of their own, in order, so the stream never waits for
+// them. Only sizes are logged, never the content.
 struct SharedClipboard {
     Client *client = nullptr;
     std::string host, state, pin, clip, wayland;
     std::atomic<bool> on{false}, gone{false};
+    bool images = true;  // the thread's: false once the host says it takes text only
     bool focused = false;  // the main thread's
     int64_t checkAt = 0;
     std::mutex mu;
     std::condition_variable cv;
-    std::deque<char> ops;  // 's' send the desktop's text, 'b' bring the host's back
+    std::deque<char> ops;  // 's' send the desktop's clipboard, 'b' bring the host's back
     bool quit = false;
     std::set<std::string> said;  // the thread's: each problem is logged once
     std::thread thread;
@@ -647,48 +648,66 @@ struct SharedClipboard {
     void Say(const std::string &why) {
         if (said.insert(why).second) std::printf("clipboard: %s\n", why.c_str());
     }
-    bool Answered(long code, bool set) {
+    bool Answered(long code, bool set, bool image) {
         std::string why;
-        const clipboard::Answer a = clipboard::Classify(code, set, &why);
+        const clipboard::Answer a = clipboard::Classify(code, set, image, &why);
         if (a == clipboard::Answer::Ok) return true;
         Say(why);
         if (a == clipboard::Answer::Gone) gone = true;  // not again from this stream
+        if (a == clipboard::Answer::TextOnly) images = false;  // nor images
         return false;
     }
-    // The desktop's text, "" when it holds none; false when there's no desktop to ask.
-    bool Desktop(std::string *text) {
-        const int st = Run("get", nullptr, text);
-        if (st == 2 || st < 0) return Say("no Frametop desktop to share the clipboard with (ft-clip get: " +
-                                          std::to_string(st) + ")"), false;
-        if (st != 0) text->clear();
+    // The desktop's text, else its PNG image; empty when it holds neither. False when there's
+    // no desktop to ask.
+    bool Desktop(clipboard::Content *c) {
+        *c = {};
+        for (const bool image : {false, true}) {
+            if (image && !images) break;
+            const char *what = image ? "get-image" : "get";
+            const int st = Run(what, nullptr, &c->data);
+            if (st == 2 || st < 0) return Say(std::string("no Frametop desktop to share the clipboard with (ft-clip ") +
+                                              what + ": " + std::to_string(st) + ")"), false;
+            if (st == 0) return c->image = image, true;
+            c->data.clear();
+        }
         return true;
     }
+    static const char *Kind(const clipboard::Content &c) { return c.image ? "image" : "text"; }
     void Send() {
         if (!on) return;  // turned off while it waited
-        std::string text;
-        if (!Desktop(&text) || !clipboard::ShouldPush(text, clipboard::ReadLast(state))) return;
-        std::string body = text;
-        if (!Answered(client->Clipboard(true, &body, pin), true)) return;
-        clipboard::WriteLast(state, clipboard::Hash(text));
-        std::printf("clipboard: sent %zu bytes to %s\n", text.size(), host.c_str());
+        clipboard::Content c;
+        if (!Desktop(&c) || !clipboard::ShouldPush(c, clipboard::ReadLast(state))) return;
+        std::string body = c.data;
+        if (!Answered(client->Clipboard(true, c.image, &body, pin), true, c.image)) return;
+        clipboard::WriteLast(state, clipboard::Hash(c));
+        std::printf("clipboard: sent %zu bytes of %s to %s\n", c.data.size(), Kind(c), host.c_str());
     }
     void Bring() {
         if (!on) return;
-        std::string text, desktop;
-        if (!Answered(client->Clipboard(false, &text, pin), false) || !Desktop(&desktop)) return;
-        if (!clipboard::ShouldPull(text, desktop)) {
-            if (clipboard::Fits(text)) clipboard::WriteLast(state, clipboard::Hash(text));  // the same text
+        // Its text, else (a host that shares images) its image.
+        clipboard::Content h, desktop;
+        if (!Answered(client->Clipboard(false, false, &h.data, pin), false, false)) return;
+        if (h.data.empty() && images) {
+            h.image = true;
+            if (!Answered(client->Clipboard(false, true, &h.data, pin), false, true)) return;
+        }
+        if (!Desktop(&desktop)) return;
+        if (!clipboard::ShouldPull(h, desktop)) {
+            if (clipboard::Fits(h)) clipboard::WriteLast(state, clipboard::Hash(h));  // the same
             return;
         }
-        const std::string lf = clipboard::Normalize(text);
-        const int st = Run("set", &lf, nullptr);
-        if (st != 0) return Say("ft-clip set: " + std::to_string(st));
-        clipboard::WriteLast(state, clipboard::Hash(lf));
-        std::printf("clipboard: brought %zu bytes from %s\n", lf.size(), host.c_str());
+        if (!h.image) h.data = clipboard::Normalize(h.data);
+        const char *what = h.image ? "set-image" : "set";
+        const int st = Run(what, &h.data, nullptr);
+        if (st != 0) return Say(std::string("ft-clip ") + what + ": " + std::to_string(st));
+        clipboard::WriteLast(state, clipboard::Hash(h));
+        std::printf("clipboard: brought %zu bytes of %s from %s\n", h.data.size(), Kind(h), host.c_str());
     }
     // ft-clip WHAT on the desktop's socket, with *in on its stdin, its stdout in *out. Its exit
     // status, -1 if it didn't run or didn't finish in time (it's killed then).
     int Run(const char *what, const std::string *in, std::string *out) {
+        const bool image = std::strstr(what, "image") != nullptr;
+        const size_t max = image ? clipboard::kMaxImage : clipboard::kMaxText;
         int to[2] = {-1, -1}, from[2] = {-1, -1};
         if (pipe2(to, O_CLOEXEC) != 0) return -1;
         if (pipe2(from, O_CLOEXEC) != 0) return close(to[0]), close(to[1]), -1;
@@ -717,7 +736,7 @@ struct SharedClipboard {
             at += size_t(w);
         }
         close(to[1]);
-        const int64_t until = MonoNs() + 3'000'000'000;  // its own wait is 2 s
+        const int64_t until = MonoNs() + (image ? 12'000'000'000 : 3'000'000'000);  // its own wait: 10 s, 2 s
         bool late = false, big = false;
         if (out) {
             char buf[65536];
@@ -731,7 +750,7 @@ struct SharedClipboard {
                 const ssize_t n = read(from[0], buf, sizeof buf);
                 if (n < 0 && errno == EINTR) continue;
                 if (n <= 0) break;
-                if (out->size() + size_t(n) > clipboard::kMaxText) {  // ft-clip says no first; never more
+                if (out->size() + size_t(n) > max) {  // ft-clip says no first; never more
                     big = true;
                     break;
                 }
@@ -748,7 +767,7 @@ struct SharedClipboard {
         }
         kill(pid, SIGKILL);
         waitpid(pid, &st, 0);
-        Say(std::string("ft-clip ") + what + (big ? " gave more than 1 MiB" : " didn't finish in time"));
+        Say(std::string("ft-clip ") + what + (big ? " gave more than it may" : " didn't finish in time"));
         return -1;
     }
 };

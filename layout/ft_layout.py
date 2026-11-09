@@ -46,8 +46,8 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
               "input": false,                     use its own keyboard and mouse in Frametop while
                                                           the headset is worn (needs Frametop's
                                                           Vibepollo on Linux; ft-stream)
-              "clipboard": false,                 share copied text with it both ways (needs
-                                                          Vibepollo on Windows; ft-stream)
+              "clipboard": false,                 share copied text and images with it both
+                                                          ways (needs Vibepollo; ft-stream)
               "displays": [{"id": "desk-pc-oled",         (docs/remote-displays.md), each a panel
                             "client": "frametop-1",       streamed by ft-stream: its paired client,
                             "app": "display:{GUID}",      what it streams (display:DEVICE, monitor:

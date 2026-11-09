@@ -163,7 +163,7 @@ A drag can cross panels, for example a window dragged from one of the host's dis
 
 Keyboard focus follows the last panel clicked. When it's a remote one, `send_key` and `relay_button` send evdev codes to its ft-stream, which maps them to Windows virtual-key codes (moonlight-qt has the table). Sunshine on macOS maps the Windows key to Cmd and Alt to Option. The host draws its own cursor into the video, so it lags the laser by one round trip.
 
-**Won't work across the boundary:** drag and drop, floating windows, and KWin window rules. A remote display is a picture of another machine's monitor. The Moonlight protocol has no clipboard, but Vibepollo has a request for its text, which the shared clipboard uses (Windows only): [shared-clipboard.md](shared-clipboard.md).
+**Won't work across the boundary:** drag and drop, floating windows, and KWin window rules. A remote display is a picture of another machine's monitor. The Moonlight protocol has no clipboard, but Vibepollo has a request for it, which the shared clipboard uses for text and PNG images: [shared-clipboard.md](shared-clipboard.md).
 
 ## Host side
 

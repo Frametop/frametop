@@ -501,20 +501,20 @@ Item {
                                                        + "for now, with Frametop's build of Vibepollo."
                                 Controls.ToolTip.visible: hovered
                             }
-                            // Copied text both ways, at the moments typing changes sides. Only
-                            // Vibepollo has the request (on Windows), so Sunshine hosts don't
-                            // get the switch.
+                            // Copied text and images both ways, at the moments typing changes
+                            // sides. Only Vibepollo has the request, so Sunshine hosts don't get
+                            // the switch.
                             Controls.Switch {
                                 visible: !hostCard.sunshine
                                 text: "Share the clipboard"
                                 checked: hostCard.modelData.clipboard
                                 onToggled: backend.setClipboard(hostCard.modelData.name, checked)
-                                Controls.ToolTip.text: "Text you copy on the desktop can be pasted on this computer once "
-                                                       + "you click one of its displays, and text you copy there can be "
-                                                       + "pasted on the desktop once you click back. Text only. Windows "
-                                                       + "only for now, with Vibepollo. Displays added before this "
-                                                       + "switch need Clipboard allowed for their client in Vibepollo's "
-                                                       + "Web UI (Clients), or adding again."
+                                Controls.ToolTip.text: "Text or an image you copy on the desktop can be pasted on this "
+                                                       + "computer once you click one of its displays, and what you copy "
+                                                       + "there can be pasted on the desktop once you click back. Needs "
+                                                       + "Vibepollo (images and Linux: Frametop's build). Displays added "
+                                                       + "before this switch need Clipboard allowed for their client in "
+                                                       + "Vibepollo's Web UI (Clients), or adding again."
                                 Controls.ToolTip.visible: hovered
                             }
                             Controls.Label {

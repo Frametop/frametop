@@ -95,10 +95,14 @@ size_t Append(char *data, size_t size, size_t n, void *out) {
 }
 
 // As Append, refusing more than the shared clipboard takes (curl then fails the request).
+struct ClipboardBody {
+    std::string data;
+    size_t max;
+};
 size_t AppendClipboard(char *data, size_t size, size_t n, void *out) {
-    auto *text = static_cast<std::string *>(out);
-    if (text->size() + size * n > clipboard::kMaxText) return 0;
-    text->append(data, size * n);
+    auto *body = static_cast<ClipboardBody *>(out);
+    if (body->data.size() + size * n > body->max) return 0;
+    body->data.append(data, size * n);
     return size * n;
 }
 
@@ -401,17 +405,17 @@ bool Client::Unpair() {
 // it only from a client that streams. Its certificate is the Web UI's, so the Web UI's pin
 // holds here too, and is required: the text never goes to a host it can't check. A
 // connection of its own each time, closed after (see DropConnection). The status, or
-// clipboard::kNoAnswer, kTooBig (the host's text is over kMaxText), kNoPin.
-long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
+// clipboard::kNoAnswer, kTooBig (the host's is over kMaxText, or kMaxImage), kNoPin.
+long Client::Clipboard(bool set, bool image, std::string *data, const std::string &pin) {
     if (pin.empty()) return clipboard::kNoPin;
     CURL *c = curl_easy_init();
     if (!c) return clipboard::kNoAnswer;
     std::random_device rd;
     char url[4096];
-    std::snprintf(url, sizeof url, "https://%s:%u/actions/clipboard?type=text&uniqueid=%s&uuid=%08x-0000-4000-8000-%012x",
-                  server.serverInfo.address, server.httpsPort, uniqueId.c_str(), rd(), rd());
+    std::snprintf(url, sizeof url, "https://%s:%u/actions/clipboard?type=%s&uniqueid=%s&uuid=%08x-0000-4000-8000-%012x",
+                  server.serverInfo.address, server.httpsPort, image ? "image" : "text", uniqueId.c_str(), rd(), rd());
     const std::string cert = dir + "/client.pem", key = dir + "/key.pem";
-    std::string got;
+    ClipboardBody got{{}, image ? clipboard::kMaxImage : clipboard::kMaxText};
     curl_slist *headers = nullptr;
     curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_SSLCERTTYPE, "PEM");
@@ -422,15 +426,16 @@ long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(c, CURLOPT_PINNEDPUBLICKEY, pin.c_str());
     curl_easy_setopt(c, CURLOPT_FORBID_REUSE, 1L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, image ? 20L : 5L);  // 32 MiB at a slow Wi-Fi's pace
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, AppendClipboard);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &got);
     if (set) {
-        headers = curl_slist_append(headers, "Content-Type: text/plain; charset=utf-8");
+        headers = curl_slist_append(headers, image ? "Content-Type: image/png" : "Content-Type: text/plain; charset=utf-8");
+        headers = curl_slist_append(headers, "Expect:");  // no 100-continue wait before a big body
         curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(c, CURLOPT_POST, 1L);
-        curl_easy_setopt(c, CURLOPT_POSTFIELDS, text->data());
-        curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, curl_off_t(text->size()));
+        curl_easy_setopt(c, CURLOPT_POSTFIELDS, data->data());
+        curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, curl_off_t(data->size()));
     }
     long code = clipboard::kNoAnswer;
     const CURLcode r = curl_easy_perform(c);
@@ -438,7 +443,7 @@ long Client::Clipboard(bool set, std::string *text, const std::string &pin) {
     else if (r == CURLE_WRITE_ERROR) code = clipboard::kTooBig;  // AppendClipboard's cap
     curl_slist_free_all(headers);
     curl_easy_cleanup(c);
-    if (!set && code == 200) *text = std::move(got);
+    if (!set && code == 200) *data = std::move(got.data);
     return code;
 }
 

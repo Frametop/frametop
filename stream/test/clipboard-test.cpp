@@ -16,6 +16,9 @@ static int g_failed = 0;
 
 using namespace clipboard;
 
+static Content T(const std::string &text) { return {false, text}; }
+static Content I(const std::string &png) { return {true, png}; }
+
 int main() {
     // Line ends: Windows' CRLF and the desktop's LF are the same text.
     CHECK(Normalize("a\r\nb\r\n") == "a\nb\n");
@@ -26,47 +29,72 @@ int main() {
     CHECK(Hash("") != 0);
 
     // Typing goes to the host: the desktop's text goes only when it changed since the last sync.
-    CHECK(ShouldPush("hello", 0));
-    CHECK(!ShouldPush("hello", Hash("hello")));
-    CHECK(!ShouldPush("hello\r\n", Hash("hello\n")));
-    CHECK(ShouldPush("hello again", Hash("hello")));
-    CHECK(!ShouldPush("", 0));  // nothing that is text on the desktop
-    CHECK(!ShouldPush(std::string(kMaxText + 1, 'x'), 0));
-    CHECK(ShouldPush(std::string(kMaxText, 'x'), 0));
+    CHECK(ShouldPush(T("hello"), 0));
+    CHECK(!ShouldPush(T("hello"), Hash("hello")));
+    CHECK(!ShouldPush(T("hello\r\n"), Hash("hello\n")));
+    CHECK(ShouldPush(T("hello again"), Hash("hello")));
+    CHECK(!ShouldPush(T(""), 0));  // nothing on the desktop
+    CHECK(!ShouldPush(T(std::string(kMaxText + 1, 'x')), 0));
+    CHECK(ShouldPush(T(std::string(kMaxText, 'x')), 0));
 
     // Typing leaves the host: its text comes over when it differs.
-    CHECK(ShouldPull("from the pc", "from the frame"));
-    CHECK(!ShouldPull("same\r\n", "same\n"));
-    CHECK(!ShouldPull("", "frame text"));  // an image on the host: the desktop keeps its text
-    CHECK(ShouldPull("pc", ""));
-    CHECK(!ShouldPull(std::string(kMaxText + 1, 'x'), ""));
+    CHECK(ShouldPull(T("from the pc"), T("from the frame")));
+    CHECK(!ShouldPull(T("same\r\n"), T("same\n")));
+    CHECK(!ShouldPull(T(""), T("frame text")));  // a file on the host: the desktop keeps its text
+    CHECK(ShouldPull(T("pc"), T("")));
+    CHECK(!ShouldPull(T(std::string(kMaxText + 1, 'x')), T("")));
 
-    // The sequence that mustn't lose an image copied on the host: the desktop's unchanged text
-    // isn't sent back over it.
+    // Images: PNG only, up to kMaxImage, and never the same hash as text of the same bytes.
+    const std::string png = std::string("\x89PNG\r\n\x1a\n", 8) + "IHDR...";
+    CHECK(IsPng(png) && !IsPng(png.substr(0, 8)) && !IsPng("GIF89a....."));
+    CHECK(Fits(I(png)) && !Fits(I("GIF89a.....")) && !Fits(I("")));
+    CHECK(Fits(I(png + std::string(kMaxImage - png.size(), 'x'))));
+    CHECK(!Fits(I(png + std::string(kMaxImage - png.size() + 1, 'x'))));
+    CHECK(Hash(I(png)) != Hash(T(png)) && Hash(I(png)) != 0);
+    CHECK(Hash(T("a\r\nb")) == Hash("a\nb"));  // text hashes as before images
+    CHECK(Hash(I(png + "\r\n")) != Hash(I(png + "\n")));  // an image's bytes are its own
+    CHECK(ShouldPush(I(png), Hash("text")));
+    CHECK(!ShouldPush(I(png), Hash(I(png))));
+    CHECK(ShouldPull(I(png), T("frame text")));  // an image copied on the host comes over
+    CHECK(ShouldPull(I(png), I(png + "2")));
+    CHECK(!ShouldPull(I(png), I(png)));
+    CHECK(ShouldPull(T("pc"), I(png)));
+    CHECK(!ShouldPull(I("not a png"), T("")));
+
+    // The sequence that mustn't lose what was copied on the host: the desktop's unchanged text
+    // isn't sent back over it, whether it came over (an image) or not (a file).
     {
         uint64_t last = 0;
-        CHECK(ShouldPush("frame", last));
+        CHECK(ShouldPush(T("frame"), last));
         last = Hash("frame");  // sent
-        const std::string host = "";  // then an image was copied there
-        CHECK(!ShouldPull(host, "frame"));
-        CHECK(!ShouldPush("frame", last));  // back on the host: the image stays
-        CHECK(ShouldPush("new frame text", last));  // until something new is copied on the desktop
+        CHECK(!ShouldPull(T(""), T("frame")));  // then a file was copied there
+        CHECK(!ShouldPush(T("frame"), last));  // back on the host: the file stays
+        CHECK(ShouldPull(I(png), T("frame")));  // then an image, which comes over
+        last = Hash(I(png));
+        CHECK(!ShouldPush(I(png), last));  // and isn't sent back
+        CHECK(ShouldPush(T("new frame text"), last));  // until something new is copied on the desktop
     }
 
     // The host's answers.
     std::string why;
-    CHECK(Classify(200, true, &why) == Answer::Ok);
-    CHECK(Classify(401, false, &why) == Answer::Gone && why.find("Web UI") != std::string::npos);
-    CHECK(Classify(404, false, &why) == Answer::Gone);
-    CHECK(Classify(400, true, &why) == Answer::Gone);
-    CHECK(Classify(403, true, &why) == Answer::Retry);
+    CHECK(Classify(200, true, false, &why) == Answer::Ok);
+    CHECK(Classify(401, false, false, &why) == Answer::Gone && why.find("Web UI") != std::string::npos);
+    CHECK(Classify(404, false, false, &why) == Answer::Gone);
+    CHECK(Classify(400, true, false, &why) == Answer::Gone);
+    // A host from before images: text still shared.
+    CHECK(Classify(400, false, true, &why) == Answer::TextOnly && why.find("text only") != std::string::npos);
+    CHECK(Classify(400, true, true, &why) == Answer::TextOnly);
+    CHECK(Classify(403, true, false, &why) == Answer::Retry);
     // A Windows host's clipboard held open by another app for a moment: next time it works.
-    CHECK(Classify(500, true, &why) == Answer::Retry && why.find("another app") != std::string::npos);
-    CHECK(Classify(500, false, &why) == Answer::Retry);
-    CHECK(Classify(kNoAnswer, false, &why) == Answer::Retry && why == "no answer from the host");
-    CHECK(Classify(kTooBig, false, &why) == Answer::Retry && why.find("1 MiB") != std::string::npos);
-    CHECK(Classify(kNoPin, true, &why) == Answer::Gone && why.find("certificate") != std::string::npos);
-    CHECK(Classify(502, false, &why) == Answer::Retry && why == "the host answered 502");
+    CHECK(Classify(500, true, false, &why) == Answer::Retry && why.find("another app") != std::string::npos);
+    CHECK(Classify(500, true, true, &why) == Answer::Retry && why.find("image") != std::string::npos);
+    CHECK(Classify(500, false, false, &why) == Answer::Retry);
+    CHECK(Classify(413, true, true, &why) == Answer::Retry);
+    CHECK(Classify(kNoAnswer, false, false, &why) == Answer::Retry && why == "no answer from the host");
+    CHECK(Classify(kTooBig, false, false, &why) == Answer::Retry && why.find("1 MiB") != std::string::npos);
+    CHECK(Classify(kTooBig, false, true, &why) == Answer::Retry && why.find("32 MiB") != std::string::npos);
+    CHECK(Classify(kNoPin, true, false, &why) == Answer::Gone && why.find("certificate") != std::string::npos);
+    CHECK(Classify(502, false, false, &why) == Answer::Retry && why == "the host answered 502");
 
     // The state file.
     char dir[] = "/tmp/clipboard-test-XXXXXX";

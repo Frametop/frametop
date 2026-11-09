@@ -1,6 +1,7 @@
 // ft-clip (stream/ft-clip.c) against a compositor of its own: a wlroots seat with
 // wlr-data-control, as KWin gives it, in this process. Runs build/tests/ft-clip (built with
-// FT_CLIP_MAX=262144, above a pipe's 64 KiB) for each case while dispatching the compositor's clients.
+// FT_CLIP_MAX and FT_CLIP_MAX_IMAGE 262144, above a pipe's 64 KiB) for each case while
+// dispatching the compositor's clients.
 //   ft-clip-test PATH-TO-FT-CLIP
 #define _GNU_SOURCE
 #define WLR_USE_UNSTABLE
@@ -114,18 +115,29 @@ static int run(const char *what, const char *in, size_t len, char **out, size_t 
     return status;
 }
 
-static void expect_get(const char *want, size_t want_len, int want_status, const char *what) {
+static void expect_out(const char *mode, const char *want, size_t want_len, int want_status, const char *what) {
     char *out = NULL;
     size_t n = 0;
-    const int st = run("get", "", 0, &out, &n);
-    CHECK(st == want_status, "%s: get exited %d, not %d", what, st, want_status);
+    const int st = run(mode, "", 0, &out, &n);
+    CHECK(st == want_status, "%s: %s exited %d, not %d", what, mode, st, want_status);
     if (want) CHECK(n == want_len && memcmp(out, want, n) == 0, "%s: got %zu bytes, not the %zu copied", what, n, want_len);
     free(out);
 }
+static void expect_get(const char *want, size_t want_len, int want_status, const char *what) {
+    expect_out("get", want, want_len, want_status, what);
+}
 
-// A selection the compositor sets itself with no text type: an image someone copied.
+// A selection the compositor sets itself with no text type: an image someone copied, which
+// hands over nothing (an empty image/png), or (png_send) a PNG's first bytes.
+static const char kPng[] = "\x89PNG\r\n\x1a\n and the rest of a picture";
 static void image_send(struct wlr_data_source *s, const char *type, int32_t fd) { (void)s, (void)type, close(fd); }
+static void png_send(struct wlr_data_source *s, const char *type, int32_t fd) {
+    (void)s, (void)type;
+    if (write(fd, kPng, sizeof kPng - 1) != (ssize_t)(sizeof kPng - 1)) perror("png_send");
+    close(fd);
+}
 static void image_destroy(struct wlr_data_source *s) { (void)s; }
+static const struct wlr_data_source_impl png_impl = {.send = png_send, .destroy = image_destroy};
 static const struct wlr_data_source_impl image_impl = {.send = image_send, .destroy = image_destroy};
 // A password a password manager copied: real text, which ft-clip mustn't take.
 static void secret_send(struct wlr_data_source *s, const char *type, int32_t fd) {
@@ -196,6 +208,33 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 100 && clients() > 0; ++i) pump(20);
     CHECK(clients() == 0, "the text's child ended when an image was copied, %d clients", clients());
     expect_get(NULL, 0, 1, "an image only");
+    expect_out("get-image", NULL, 0, 1, "an image/png that hands over nothing");
+
+    struct wlr_data_source png;
+    wlr_data_source_init(&png, &png_impl);
+    type = wl_array_add(&png.mime_types, sizeof *type);
+    *type = strdup("image/png");
+    wlr_seat_set_selection(g_seat, &png, wl_display_next_serial(g_display));
+    pump(20);
+    expect_out("get-image", kPng, sizeof kPng - 1, 0, "a PNG an app copied");
+    expect_get(NULL, 0, 1, "a PNG is no text");
+
+    // Images the other way: a PNG only, up to FT_CLIP_MAX_IMAGE (262144 in the test build).
+    CHECK(run("set-image", "GIF89a.....", 11, NULL, NULL) == 1, "set-image refuses what is no PNG");
+    char *picture = malloc(too_big);
+    memcpy(picture, kPng, sizeof kPng - 1);
+    for (size_t i = sizeof kPng - 1; i < too_big; ++i) picture[i] = (char)(i * 7);
+    CHECK(run("set-image", picture, big, NULL, NULL) == 0, "set-image 200000 bytes");
+    pump(50);
+    expect_out("get-image", picture, big, 0, "its own PNG back");
+    expect_get(NULL, 0, 1, "its PNG offers no text");
+    CHECK(run("set-image", picture, too_big, NULL, NULL) == 1, "300000 bytes is too big an image");
+    expect_out("get-image", picture, big, 0, "a refused image changes nothing");
+    CHECK(run("set", second, sizeof second - 1, NULL, NULL) == 0, "text after an image");
+    for (int i = 0; i < 100 && clients() > 1; ++i) pump(20);
+    CHECK(clients() == 1, "the image's child ended when text was copied, %d clients", clients());
+    expect_out("get-image", NULL, 0, 1, "text is no image");
+    free(picture);
 
     // A password manager's copy: text, with the hint that clipboard managers leave it alone.
     struct wlr_data_source secret;

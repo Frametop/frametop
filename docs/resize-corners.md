@@ -2,7 +2,7 @@
 
 ### Defaults and original mode
 
-The default is **SteamOS-like**, with **only bottom-right always shown**, preview off, **27% opacity**, **4.7 cm arms**, **5.1 mm thickness**, **3.1 cm requested gap**, and **2.4 cm hover padding**. Roundness remains 100%, screen exclusion 0.5 cm, and approach radius 20 cm. Existing saved choices take precedence.
+The default is **Soft glow (original behavior)**. The new styles are opt-in for now: on a narrow or far panel their target can reach the buttons in the bar row below it. Choosing **SteamOS-like** starts with **only bottom-right always shown**, preview off, **27% opacity**, **4.7 cm arms**, **5.1 mm thickness**, **3.1 cm requested gap**, and **2.4 cm hover padding**. Roundness remains 100%, screen exclusion 0.5 cm, and approach radius 20 cm. Existing saved choices take precedence.
 
 **Soft glow (original behavior)** is a true legacy mode: the unchanged soft-glow renderer and original distance-based proximity fade, a square hit area sized at 1.8 times the current button size just outside the selected corner, the original automatic corner selection, and the original near-hand tab behavior. It does **not** use the new opacity/colors, gap, shape padding, screen exclusion, roundness, animated growth, target preview or always-visible corner choices. Those controls are disabled without erasing their saved values, so switching back restores your preferences. The legacy square/proximity is intentionally not the new shaped hit region.
 

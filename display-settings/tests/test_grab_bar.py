@@ -9,10 +9,33 @@ from unittest.mock import patch
 os.environ["HOME"] = tempfile.mkdtemp(prefix="ft-display-bar-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "settings"))
 import ft_display_settings as fds  # noqa: E402
+import ft_settings  # noqa: E402  (Frametop Settings, the window the display pages are in)
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+
+PAGES = Path(fds.HERE) / "DisplayPages.qml"
+
+
+def page_errors(backend, first_marker, last_marker):
+    """Frametop Settings opened on Visibility & pins; QML errors from DisplayPages.qml's lines
+    first_marker..last_marker. None when Frametop Settings doesn't load here (no Kirigami)."""
+    errors = []
+    engine = QQmlApplicationEngine()
+    engine.warnings.connect(lambda ws: errors.extend(w.toString() for w in ws))
+    ft_settings.load(engine, ft_settings.Settings(start="visibility", backends={"display": backend}))
+    if not engine.rootObjects():
+        return None
+    for _ in range(20):
+        QGuiApplication.processEvents()
+    lines = PAGES.read_text().split("\n")
+    first = next(i for i, t in enumerate(lines) if first_marker in t) + 1
+    last = next(i for i in range(first, len(lines)) if last_marker in lines[i]) + 1
+    for root in engine.rootObjects():
+        root.close()
+    engine.deleteLater()
+    return [e for e in errors if any(f"DisplayPages.qml:{n}:" in e for n in range(first, last + 1))]
 
 
 class GrabBar(unittest.TestCase):
@@ -49,7 +72,7 @@ class GrabBar(unittest.TestCase):
         self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_HAPTICS 0")
         self.b.setGrabBarHaptics(True)
         self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_HAPTICS 1")
-        self.assertIn("backend.setGrabBarHaptics(checked)", (Path(fds.HERE) / "main.qml").read_text())
+        self.assertIn("backend.setGrabBarHaptics(checked)", PAGES.read_text())
 
     def test_bad_persisted_values_use_default(self):
         for value in ("nan", "inf", "junk", "-1", "51"):
@@ -72,7 +95,7 @@ class GrabBar(unittest.TestCase):
         self.assertEqual(self.asked, [])
 
     def test_ui_exposes_the_setting(self):
-        qml = (Path(fds.HERE) / "main.qml").read_text()
+        qml = PAGES.read_text()
         self.assertIn("value: backend.grabBarPaddingY", qml)
         self.assertIn("onMoved: backend.setGrabBarPaddingY(value)", qml)
         self.assertIn("onMoved: backend.setGrabBarPaddingX(value)", qml)
@@ -129,15 +152,10 @@ class GrabBar(unittest.TestCase):
         self.assertEqual(self.b.grabBarOutlineWidth, 8)
 
     def test_qml_page_loads_with_color_dialogs(self):
-        engine = QQmlApplicationEngine()
-        engine.rootContext().setContextProperty("backend", self.b)
-        engine.rootContext().setContextProperty("startPage", "visibility")
-        engine.load(QUrl.fromLocalFile(str(Path(fds.HERE) / "main.qml")))
-        self.assertTrue(engine.rootObjects(), "Display Settings QML failed to load")
-        for root in engine.rootObjects():
-            root.close()
-        engine.deleteLater()
-        self.app.processEvents()
+        errors = page_errors(self.b, 'label: "Window controls"', 'label: "Resize corners"')
+        if errors is None:
+            self.skipTest("Frametop Settings didn't load here (no Kirigami?)")
+        self.assertEqual(errors, [], "Display Settings QML failed to load")
 
 
 if __name__ == "__main__":

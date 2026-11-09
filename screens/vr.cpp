@@ -5411,6 +5411,9 @@ struct ResizeVisual {
     uint64_t version = 0;
     uint64_t targetVersion = 0;
     std::string key;
+    float sentWidth = -1, sentCurve = -1, sentAlpha = -1;   // what the outline has, so a still one costs nothing
+    Mat sentPose{};
+    bool posed = false;
 };
 std::map<std::pair<int, int>, ResizeVisual> g_resizeVisuals;
 unsigned g_resizeVisualId = 0;
@@ -5494,11 +5497,16 @@ void UpdateResizeVisuals() {
             overlaytex::Set(v.outline, t->second.data(), 256, 256);
             v.key = key, v.version = g_resizeVersion;
         }
-        vr::VROverlay()->SetOverlayWidthInMeters(v.outline, float(wm));
-        vr::VROverlay()->SetOverlayCurvature(v.outline, s.curve > 0 ? float(std::clamp(wm / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
+        const float width = float(wm), curve = s.curve > 0 ? float(std::clamp(wm / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f;
+        const float alpha = float(v.alpha * g_resizeCorner.opacity);
+        if (width != v.sentWidth) vr::VROverlay()->SetOverlayWidthInMeters(v.outline, width), v.sentWidth = width;
+        if (curve != v.sentCurve) vr::VROverlay()->SetOverlayCurvature(v.outline, curve), v.sentCurve = curve;
         const Mat m = Mul(pose, OnSurface(s, sx * s.metres / 2, sy * s.heightMetres() / 2, 0.003));
-        vr::VROverlay()->SetOverlayTransformAbsolute(v.outline, vr::TrackingUniverseStanding, &m);
-        vr::VROverlay()->SetOverlayAlpha(v.outline, float(v.alpha * g_resizeCorner.opacity));
+        if (!v.posed || std::memcmp(&m, &v.sentPose, sizeof m) != 0) {
+            vr::VROverlay()->SetOverlayTransformAbsolute(v.outline, vr::TrackingUniverseStanding, &m);
+            v.sentPose = m, v.posed = true;
+        }
+        if (alpha != v.sentAlpha) vr::VROverlay()->SetOverlayAlpha(v.outline, alpha), v.sentAlpha = alpha;
         if (!v.shown) vr::VROverlay()->ShowOverlay(v.outline), v.shown = true;
         if (g_resizeCorner.preview && make(v.target, ".target")) {
             if (v.targetVersion != g_resizeVersion) {
@@ -6075,8 +6083,9 @@ bool ft_vr_init(void) {
         if (!value.empty() && !barhit::Color(value.c_str(), entry.second))
             std::fprintf(stderr, "frametop.conf: %s must be #RRGGBB; using the default\n", entry.first);
     }
-    auto resizeStyle = handcut::Setting("RESIZE_CORNER_STYLE", "native");
-    if (resizeStyle != "glow" && resizeStyle != "sharp" && resizeStyle != "native") resizeStyle = "native";
+    // glow by default: the sharp/native target can reach the bar row's buttons on a narrow or far panel
+    auto resizeStyle = handcut::Setting("RESIZE_CORNER_STYLE", "glow");
+    if (resizeStyle != "glow" && resizeStyle != "sharp" && resizeStyle != "native") resizeStyle = "glow";
     g_resizeCorner.sharp = resizeStyle != "glow";
     g_resizeCorner.native = resizeStyle == "native";
     num("RESIZE_CORNER_OPACITY", g_resizeCorner.opacity, 0, 1);

@@ -24,7 +24,7 @@ GRAB_BAR_PREVIEW_OPACITY=0.12    # fill opacity, 0..1 (also follows the bar's fa
 GRAB_BAR_OUTLINE_COLOR='#99ddff' # outline, #RRGGBB
 GRAB_BAR_OUTLINE_OPACITY=0.7     # outline opacity, 0..1
 GRAB_BAR_OUTLINE_WIDTH=1         # outline thickness, 0..8 pixels at the original pill's resolution; 0 hides it
-RESIZE_CORNER_STYLE=native      # native (SteamOS-like, default) | sharp custom outline | glow (original appearance AND hover behavior)
+RESIZE_CORNER_STYLE=glow        # glow (original appearance AND hover behavior, default) | native (SteamOS-like) | sharp custom outline
 # The other resize tuning keys apply to sharp/native only; glow ignores them, except HAPTICS below.
 RESIZE_CORNER_COLOR='#f6f9ff'    # indicator color, #RRGGBB
 RESIZE_CORNER_OPACITY=0.27       # 0..1; 0 hides feedback, not the resize target; ignored in original mode

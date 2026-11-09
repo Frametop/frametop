@@ -725,8 +725,8 @@ class Backend(QObject):
 
     @Property(str, notify=changed)
     def resizeCornerStyle(self):
-        value = ft_layout.read_conf().get("RESIZE_CORNER_STYLE", "native")
-        return value if value in ("sharp", "glow", "native") else "native"
+        value = ft_layout.read_conf().get("RESIZE_CORNER_STYLE", "glow")
+        return value if value in ("sharp", "glow", "native") else "glow"
 
     @Slot(str)
     def setResizeCornerStyle(self, style):

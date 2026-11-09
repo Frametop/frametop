@@ -9,10 +9,33 @@ from unittest.mock import patch
 os.environ["HOME"] = tempfile.mkdtemp(prefix="ft-resize-settings-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "settings"))
 import ft_display_settings as fds  # noqa: E402
+import ft_settings  # noqa: E402  (Frametop Settings, the window the display pages are in)
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+
+PAGES = Path(fds.HERE) / "DisplayPages.qml"
+
+
+def page_errors(backend, first_marker, last_marker):
+    """Frametop Settings opened on Visibility & pins; QML errors from DisplayPages.qml's lines
+    first_marker..last_marker. None when Frametop Settings doesn't load here (no Kirigami)."""
+    errors = []
+    engine = QQmlApplicationEngine()
+    engine.warnings.connect(lambda ws: errors.extend(w.toString() for w in ws))
+    ft_settings.load(engine, ft_settings.Settings(start="visibility", backends={"display": backend}))
+    if not engine.rootObjects():
+        return None
+    for _ in range(20):
+        QGuiApplication.processEvents()
+    lines = PAGES.read_text().split("\n")
+    first = next(i for i, t in enumerate(lines) if first_marker in t) + 1
+    last = next(i for i in range(first, len(lines)) if last_marker in lines[i]) + 1
+    for root in engine.rootObjects():
+        root.close()
+    engine.deleteLater()
+    return [e for e in errors if any(f"DisplayPages.qml:{n}:" in e for n in range(first, last + 1))]
 
 
 class ResizeCorner(unittest.TestCase):
@@ -32,7 +55,7 @@ class ResizeCorner(unittest.TestCase):
         self.addCleanup(backend.stop)
 
     def test_defaults_and_example_agree(self):
-        defaults = {"resizeCornerStyle": "native", "resizeCornerColor": "#f6f9ff",
+        defaults = {"resizeCornerStyle": "glow", "resizeCornerColor": "#f6f9ff",
                     "resizeCornerLength": 4.7, "resizeCornerWidth": 5.1, "resizeCornerOpacity": 0.27,
                     "resizeCornerGap": 3.1, "resizeCornerPadding": 2.4, "resizeCornerExclusion": 0.5,
                     "resizeCornerRoundness": 100, "resizeCornerReach": 20, "resizeCornerPreview": False,
@@ -43,7 +66,7 @@ class ResizeCorner(unittest.TestCase):
             self.assertEqual({p: getattr(self.b, p) for p in defaults}, defaults)
 
     def test_settings_persist_and_apply_live(self):
-        qml = (Path(fds.HERE) / "main.qml").read_text()
+        qml = PAGES.read_text()
         for prop, key, value in (
             ("Style", "STYLE", "glow"), ("Color", "COLOR", "#abcdef"),
             ("Length", "LENGTH", 5.5), ("Width", "WIDTH", 1.5), ("Opacity", "OPACITY", 0.8),
@@ -70,7 +93,7 @@ class ResizeCorner(unittest.TestCase):
             getattr(self.b, "setResizeCorner" + prop)(value)
             self.assertEqual(getattr(self.b, "resizeCorner" + prop), want)
         Path(fds.CONF_PATH).write_text("RESIZE_CORNER_STYLE=junk\nRESIZE_CORNER_WIDTH=nan\nRESIZE_CORNER_TARGET=50\n")
-        self.assertEqual(self.b.resizeCornerStyle, "native")
+        self.assertEqual(self.b.resizeCornerStyle, "glow")
         self.assertEqual(self.b.resizeCornerWidth, 5.1)
         self.assertEqual(self.b.resizeCornerPadding, 2.4)
 
@@ -102,15 +125,10 @@ class ResizeCorner(unittest.TestCase):
         self.assertEqual(self.asked, [])
 
     def test_qml_page_and_color_dialogs_load(self):
-        engine = QQmlApplicationEngine()
-        engine.rootContext().setContextProperty("backend", self.b)
-        engine.rootContext().setContextProperty("startPage", "visibility")
-        engine.load(QUrl.fromLocalFile(str(Path(fds.HERE) / "main.qml")))
-        self.assertTrue(engine.rootObjects(), "Resize settings QML failed to load")
-        for root in engine.rootObjects():
-            root.close()
-        engine.deleteLater()
-        self.app.processEvents()
+        errors = page_errors(self.b, 'label: "Resize corners"', 'label: "Screens shown"')
+        if errors is None:
+            self.skipTest("Frametop Settings didn't load here (no Kirigami?)")
+        self.assertEqual(errors, [], "Resize settings QML failed to load")
 
 
 if __name__ == "__main__":

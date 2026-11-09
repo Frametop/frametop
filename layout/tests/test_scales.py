@@ -86,6 +86,12 @@ class Scales(unittest.TestCase):
         self.assertEqual(len(calls), 11)  # initial query plus ten convergence queries
         self.assertEqual(sleep.call_count, 9)
 
+    def test_timed_out_poll_sends_no_stale_scale(self):
+        _, events, _, _ = self.apply(updates=False)
+        # Only the layout's scale: KWin's old one would put that back on a KWin 6.6.
+        self.assertEqual([e for e in events if isinstance(e, str) and e.startswith("scale 1")], ["scale 1 2"])
+        self.assertIn("scale 2 1", events)
+
     def test_gamescope_does_not_notify_host_or_poll(self):
         _, events, calls, sleep = self.apply(backend="gamescope")
         self.assertFalse(any(isinstance(e, str) and e.startswith("scale ") for e in events))

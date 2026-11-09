@@ -124,6 +124,7 @@
 #include "label.h"
 #include "roomview.h"
 #include "levelpin.h"
+#include "barhit.h"
 #include "posemath.h"
 #include "../conf/ftsock.h"
 #include "vrcmd.h"
@@ -344,6 +345,10 @@ struct Screen {
     vr::TrackedDeviceIndex_t pinTarget = kNone;  // moving: rides on this controller when let go
     vr::TrackedDeviceIndex_t onWrist = kNone;    // moving: the laser is in this controller's ring
     bool barLit = false;
+    uint64_t barPaintedVersion = 0;
+    bool barPaintedLit = false;
+    barhit::Raster barPaintedRaster{};
+    hoverhaptics::Gate barBuzz;
     bool pinLit = false;          // the pin button shows it pinned to the head (LightPin)
     const void *key = nullptr;    // the client buffer on it now, and its dmabuf (for cutouts)
     ft_dmabuf buf{};
@@ -561,6 +566,10 @@ InGames g_inGames = InGames::Hide;       // during a VR game, the always mode ac
 
 // ---------------------------------------------------------------- chrome (bar, button, handle)
 
+double g_barPaddingY = barhit::kDefaultPaddingCm, g_barPaddingX = barhit::kDefaultPaddingCm;
+barhit::Style g_barPreview;
+uint64_t g_barVersion = 1;
+
 // The controls look like SteamVR's own: a light translucent pill for the bar, dark
 // translucent discs with white glyphs for the buttons (the overlay alpha, kChromeIdle,
 // dims them further until a laser is on them).
@@ -580,6 +589,25 @@ std::vector<uint8_t> PillTexture(int w, int h, uint8_t red, uint8_t green, uint8
 const std::vector<uint8_t> &BarTexture(bool lit) {
     static const auto normal = PillTexture(256, 24, 235, 235, 235, 210), glow = PillTexture(256, 24, 90, 170, 255, 240);
     return lit ? glow : normal;
+}
+
+const barhit::Image &BarImage(const barhit::Raster &raster, bool lit) {
+    static std::map<std::pair<barhit::Raster, bool>, barhit::Image> images;
+    static uint64_t version = 0;
+    if (version != g_barVersion) images.clear(), version = g_barVersion;
+    const auto key = std::make_pair(raster, lit);
+    auto found = images.find(key);
+    if (found != images.end()) return found->second;
+    if (images.size() >= 8) images.erase(images.begin());
+    return images.emplace(key, barhit::Render(raster, g_barPreview, BarTexture(lit))).first->second;
+}
+
+void PaintBar(Screen &s) {
+    const auto raster = barhit::Pixels(s.chrome, g_barPaddingX, g_barPaddingY);
+    if (s.barPaintedVersion == g_barVersion && s.barPaintedLit == s.barLit && s.barPaintedRaster == raster) return;
+    const auto &im = BarImage(raster, s.barLit);
+    if (overlaytex::Set(s.bar, im.pixels.data(), im.width, im.height) == vr::VROverlayError_None)
+        s.barPaintedVersion = g_barVersion, s.barPaintedLit = s.barLit, s.barPaintedRaster = raster;
 }
 
 // Paint a control: dark translucent inside `inside(u, v)`, white where `glyph(u, v)`, a
@@ -722,8 +750,7 @@ vr::VROverlayHandle_t MakeChrome(const char *key, const char *name, const std::v
 void LightBar(Screen &s, bool lit) {
     if (s.barLit == lit) return;
     s.barLit = lit;
-    const auto &px = BarTexture(lit);
-    overlaytex::Set(s.bar, px.data(), 256, 24);
+    PaintBar(s);
 }
 
 // The pin button blue while the screen rides on the head (or is carried, to be pinned there again).
@@ -911,7 +938,7 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 // off the edge of the displays so it's easier to trigger"), all of it outside the corner. The laser's
 // corner glow is as wide (UpdateHandGuides).
 double HandleSize(const Screen &s) { return s.grip * 1.8; }
-double BarY(const Screen &s) { return -(s.heightMetres() / 2 + s.chrome * 0.06 + std::max(s.chrome * 12 / 256, s.grip / 2)); }
+double BarY(const Screen &s) { return -(s.heightMetres() / 2 + barhit::Below(s.chrome, s.grip, g_barPaddingY)); }
 Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 
 // Put the bar, the curve button, and the corner tab under the screen (same parent: the
@@ -924,7 +951,8 @@ Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 // "farther apart so it's harder to accidentally click"; was 6% of the bar's width, about a third of a
 // button). It grows with them as a hand comes (ChromeSize).
 void ControlUV(const Screen &s, double u[8], double v[8]) {
-    const double h = s.heightMetres(), bar = s.chrome, button = s.grip, gap = std::max(bar * 0.06, button);
+    const double h = s.heightMetres(), bar = barhit::Width(s.chrome, g_barPaddingX), button = s.grip;
+    const double gap = std::max(s.chrome * 0.06, button);
     const double uu[8] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
                           // The handle's inner corner is the screen's corner it's at (bottom right:
                           // its top left corner on the screen's bottom right corner).
@@ -971,7 +999,13 @@ void PlaceChrome(Screen &s) {
     ChromeSize(s);
     const double bar = s.chrome, button = s.grip;
     const auto offsets = ControlOffsets(s);
-    vr::VROverlay()->SetOverlayWidthInMeters(s.bar, float(bar));
+    const double targetWidth = barhit::Width(bar, g_barPaddingX);
+    vr::VROverlay()->SetOverlayWidthInMeters(s.bar, float(targetWidth));
+    // A padded texture preserves the visible pill's size. The mouse scale describes the
+    // same rectangle for SteamVR's controller lasers and the 3D mouse's intersections.
+    const vr::HmdVector2_t barScale = {{float(targetWidth * 1000), float(barhit::Height(bar, g_barPaddingY) * 1000)}};
+    vr::VROverlay()->SetOverlayMouseScale(s.bar, &barScale);
+    PaintBar(s);
     vr::VROverlay()->SetOverlayWidthInMeters(s.curveButton, float(button));
     vr::VROverlay()->SetOverlayWidthInMeters(s.rollButton, float(button));
     vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(HandleSize(s)));
@@ -984,7 +1018,7 @@ void PlaceChrome(Screen &s) {
         LightPin(s);
     }
     // Curved, the bar bends with the screen's bottom edge.
-    vr::VROverlay()->SetOverlayCurvature(s.bar, s.curve > 0 ? float(std::min(1.0, bar / (2 * M_PI * s.curve))) : 0.f);
+    vr::VROverlay()->SetOverlayCurvature(s.bar, s.curve > 0 ? float(std::min(1.0, targetWidth / (2 * M_PI * s.curve))) : 0.f);
     const std::pair<vr::VROverlayHandle_t, Mat> parts[] = {
         {s.bar, offsets[0]},        {s.curveButton, offsets[1]}, {s.rollButton, offsets[2]},
         {s.handle, offsets[3]},     {s.dockButton, offsets[4]},  {s.closeButton, offsets[5]},
@@ -1218,7 +1252,8 @@ void ApplyAlpha(const Screen &s) {
         if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
         // the resize handle brightens as an aim comes to its corner (UpdateCorner)
         const float idle = k == 3 ? kChromeIdle + (1 - kChromeIdle) * std::clamp(s.cornerGlow, 0.f, 1.f) : kChromeIdle;
-        vr::VROverlay()->SetOverlayAlpha(controls[k], s.alpha * s.controls * (active[k] ? 1.f : idle));
+        const float fade = k == 0 && g_barPreview.enabled && g_barPreview.always ? 1.f : s.controls;
+        vr::VROverlay()->SetOverlayAlpha(controls[k], s.alpha * fade * (active[k] ? 1.f : idle));
     }
 }
 
@@ -1442,13 +1477,14 @@ void UpdateControls() {
     g_laserCorner = g_laserCornerNext, g_laserCornerNext = {};   // (last tick's: UpdateCorner fills the next)
     for (auto &[i, s] : g_screens) {
         Mat p;
+        if (!s.visible) s.barBuzz.Leave();
         if (s.visible && ScreenPose(s, &p)) {
             // Points along the bar and at each button and the tab; a laser passing within
             // `reach` of one of them is close.
             std::vector<Mat> spots;
             const auto offsets = ControlOffsets(s);
             for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5})
-                spots.push_back(Mul(p, Mul(offsets[0], Translation(f * s.chrome, 0, 0))));
+                spots.push_back(Mul(p, OnSurface(s, f * barhit::Width(s.chrome, g_barPaddingX), BarY(s), 0.003)));
             const auto controls = s.Controls();
             for (int k = 1; k < 8; ++k)
                 if (controls[k] != vr::k_ulOverlayHandleInvalid) spots.push_back(Mul(p, offsets[k]));
@@ -3066,8 +3102,11 @@ void UpdateAim() {
         }
         const double m = s.grip * (g_tick < s.aimUntil ? 2.0 : 0.25), h = s.heightMetres();
         // The panel and its controls: the bar row under it, the resize tab off its corner.
-        const double halfW = std::max(s.metres / 2 + HandleSize(s), s.chrome / 2 + s.chrome * 0.12 + s.grip * 2) + m;
-        const double top = h / 2 + HandleSize(s) + m, bottom = std::min(BarY(s) - s.grip, -(h / 2 + HandleSize(s))) - m;
+        const double gap = std::max(s.chrome * 0.06, s.grip);
+        const double halfW = std::max(s.metres / 2 + HandleSize(s), barhit::Width(s.chrome, g_barPaddingX) / 2 + gap * 2 + s.grip * 2) + m;
+        const double top = h / 2 + HandleSize(s) + m;
+        const double bottom = std::min(BarY(s) - std::max(s.grip, barhit::Height(s.chrome, g_barPaddingY) / 2),
+                                       -(h / 2 + HandleSize(s))) - m;
         for (const Mat &l : lasers) {
             double u, v;
             if (!RayOnSurface(s, p, l, &u, &v)) continue;
@@ -5825,6 +5864,20 @@ bool ft_vr_init(void) {
                                   handcut::Setting("WINDOW_DRAG_RIGHT", "resize").c_str(),
                                   handcut::Setting("WINDOW_DRAG_MIDDLE", "none").c_str(), &g_windowDrag))
         std::printf("window drag: a WINDOW_DRAG_* setting isn't meta|super|alt|off or move|resize|none: the defaults\n");
+    num("GRAB_BAR_PADDING_X", g_barPaddingX, 0, barhit::kMaxPaddingCm);
+    num("GRAB_BAR_PADDING_Y", g_barPaddingY, 0, barhit::kMaxPaddingCm);
+    g_barPreview.enabled = handcut::Setting("GRAB_BAR_PREVIEW", "0") == "1";
+    g_barPreview.always = handcut::Setting("GRAB_BAR_PREVIEW_ALWAYS", "0") == "1";
+    g_barPreview.haptics = handcut::Setting("GRAB_BAR_HAPTICS", "1") == "1";
+    num("GRAB_BAR_PREVIEW_OPACITY", g_barPreview.opacity, 0, 1);
+    num("GRAB_BAR_OUTLINE_OPACITY", g_barPreview.outlineOpacity, 0, 1);
+    num("GRAB_BAR_OUTLINE_WIDTH", g_barPreview.outlineWidth, 0, 8);
+    for (auto entry : {std::pair{"GRAB_BAR_PREVIEW_COLOR", &g_barPreview.color},
+                       std::pair{"GRAB_BAR_OUTLINE_COLOR", &g_barPreview.outlineColor}}) {
+        const auto value = handcut::Setting(entry.first, "");
+        if (!value.empty() && !barhit::Color(value.c_str(), entry.second))
+            std::fprintf(stderr, "frametop.conf: %s must be #RRGGBB; using the default\n", entry.first);
+    }
     num("SCREEN_SPIN_DISTANCE", g_frontReading, 0.4, 3);   // the front slot's reading distance (m)...
     g_frontReading = std::max(g_frontReading, spotreserve::kDistance + spotreserve::kFrontGap);   // ...behind frunner's spot
     num("SCREEN_SPIN_PPD", g_frontRead.ppd, 8, 80);          // ...as big as its pixels at this many per degree need
@@ -6444,7 +6497,9 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
         if (o != vr::k_ulOverlayHandleInvalid) AnnounceOverlay(key);
         return o;
     };
-    s.bar = chrome("bar", "move", BarTexture(false), 256, 24);
+    const auto &barImage = BarImage(barhit::Pixels(s.chrome, g_barPaddingX, g_barPaddingY), false);
+    s.bar = chrome("bar", "move", barImage.pixels, barImage.width, barImage.height);
+    s.barPaintedVersion = 0;
     vr::VROverlay()->SetOverlayFlag(s.bar, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
     s.curveButton = chrome("curve", "curve", curve, 64, 64);
     s.rollButton = chrome("roll", "roll", roll, 64, 64);
@@ -6915,6 +6970,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         };
         // The bar: move (and push/pull with the wheel while moving).
         while (vr::VROverlay()->PollNextOverlayEvent(s.bar, &ev, sizeof ev)) {
+            if (ev.eventType == vr::VREvent_FocusLeave) s.barBuzz.Leave(int(ev.trackedDeviceIndex));
+            if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_MouseButtonDown) {
+                if (s.barBuzz.Enter(int(ev.trackedDeviceIndex), IsHandController(ev.trackedDeviceIndex), g_barPreview.haptics) && s.drag == Drag::None)
+                    vr::VRSystem()->TriggerHapticPulse(ev.trackedDeviceIndex, 0, 1500);
+            }
             hover(0);
             if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
                 continue;
@@ -7401,6 +7461,33 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     int &rr = parsed.rr;
     switch (verb) {
     case vrcmd::HandSetting: {
+        if (!std::strncmp(key, "GRAB_BAR_", 9)) {
+            const std::string name = key;
+            bool valid = false;
+            double value;
+            if (name == "GRAB_BAR_PREVIEW_COLOR") valid = barhit::Color(word, &g_barPreview.color);
+            else if (name == "GRAB_BAR_OUTLINE_COLOR") valid = barhit::Color(word, &g_barPreview.outlineColor);
+            else if (ft_conf_number(word, &value)) {
+                double *setting = nullptr, lo = 0, hi = 1;
+                if (name == "GRAB_BAR_PADDING_Y") setting = &g_barPaddingY, hi = barhit::kMaxPaddingCm;
+                else if (name == "GRAB_BAR_PADDING_X") setting = &g_barPaddingX, hi = barhit::kMaxPaddingCm;
+                else if (name == "GRAB_BAR_PREVIEW_OPACITY") setting = &g_barPreview.opacity;
+                else if (name == "GRAB_BAR_OUTLINE_OPACITY") setting = &g_barPreview.outlineOpacity;
+                else if (name == "GRAB_BAR_OUTLINE_WIDTH") setting = &g_barPreview.outlineWidth, hi = 8;
+                if (setting && value >= lo && value <= hi) *setting = value, valid = true;
+                else if ((value == 0 || value == 1) && name == "GRAB_BAR_PREVIEW") g_barPreview.enabled = value != 0, valid = true;
+                else if ((value == 0 || value == 1) && name == "GRAB_BAR_PREVIEW_ALWAYS") g_barPreview.always = value != 0, valid = true;
+                else if ((value == 0 || value == 1) && name == "GRAB_BAR_HAPTICS") g_barPreview.haptics = value != 0, valid = true;
+            }
+            if (!valid) return (void)std::snprintf(reply, size, "error invalid drag-bar setting");
+            ++g_barVersion;
+            for (auto &[i, s] : g_screens) {
+                PlaceChrome(s);
+                ApplyAlpha(s);
+            }
+            std::snprintf(reply, size, "ok %s %s", key, word);
+            return;
+        }
         if (!std::strcmp(key, "SCREEN_PIN_LEVEL") && (!std::strcmp(word, "2") || !std::strcmp(word, "walk"))) {
             // the third head pin mode (Walk): 0 and 1 go the usual way below
             SetPinMode(levelpin::Walk);

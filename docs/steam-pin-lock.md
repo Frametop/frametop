@@ -150,8 +150,9 @@ recovery checks; the earlier tests do not establish its cold-boot safety.
 The fresh-state revision was loaded with a guard-only restart while Steam was
 already unlocked. It immediately reported unlocked/steam-unlocked and readbacks
 showed the desktop and floating windows visible, without a new Steam lock cycle
-or PIN prompt. The compositor, KWin and keyboard retained their processes. This
-checks warm observer startup, not the unverified cold-boot ordering above.
+or PIN prompt. The wearer confirmed it looked correct. The compositor, KWin and
+keyboard retained their processes. This checks warm observer startup, not the
+unverified cold-boot ordering above.
 
 ## Intended boundary
 

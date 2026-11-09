@@ -114,6 +114,7 @@
 // and "target" places the point as if the headset were at the room's origin.
 // Runs in the dev container (hands/rec/build.sh builds it into hands/rec/build).
 #include <openvr.h>
+#include "../../../conf/ft_pinlock.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../../conf/ftsock.h"
@@ -1496,6 +1497,19 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "ft-handpanel running: @%s, %.2f m%s\n", sockName.c_str(), distance, noVr ? ", no VR" : "");
 
     while (!g_stop) {
+        if (ov && !ft_pin_allowed()) {
+            std::lock_guard<std::mutex> lk(g_vr);
+            ov->HideOverlay(h);
+            ov->HideOverlay(th);
+            shown = targetShown = false;
+            dirty = targetDirty = true;
+            for (auto &w : wins) {
+                ov->HideOverlay(w.oh);
+                ov->HideOverlay(w.gh);
+                w.shown = w.ghostShown = false;
+                w.dirty = w.ghostDirty = true;
+            }
+        }
         pollfd pfd{sock, POLLIN, 0};
         int wait = 50;
         if (p.demo && visible && !p.paused)  // up to the demo's next frame
@@ -1795,7 +1809,8 @@ int main(int argc, char **argv) {
                 std::fprintf(stderr, "ft-handpanel: %s: %s\n", p.demo->path.c_str(), stbi_failure_reason()), p.demo.reset(), dirty = true;
             else frameNow = !dirty && p.demoW > 0;
         }
-        const bool panelNow = visible && dirty, targetNow = targetDirty;
+        const bool permit = noVr || ft_pin_allowed();
+        const bool panelNow = permit && visible && dirty, targetNow = permit && targetDirty;
         if (panelNow) {
             Draw(p);
             if (ov) {
@@ -1804,7 +1819,7 @@ int main(int argc, char **argv) {
                 if (!shown) ov->ShowOverlay(h), shown = true;
             }
             dirty = false;
-        } else if (frameNow) {
+        } else if (frameNow && permit) {
             DrawDemo(p.pic, *p.demo, p.demoX, p.demoY, p.demoW, p.demoH);
             const Area area{p.demoX, p.demoY, p.demoW, p.demoH};
             if (ov && shown) buffers.Present(ov, h, p.pic, &area);
@@ -1823,7 +1838,7 @@ int main(int argc, char **argv) {
         // The windows and their ghosts that changed. A picture of a new size gets buffers of its size.
         for (int k = 0; k < kWinMax; ++k) {
             Win &w = wins[k];
-            if (w.on && w.dirty) {
+            if (permit && w.on && w.dirty) {
                 DrawWin(w);
                 if (ov) {
                     if (winBuffers[k].w != w.pic.w || winBuffers[k].h != w.pic.h) {  // (a failed Make keeps the size: SetOverlayRaw then)
@@ -1838,7 +1853,7 @@ int main(int argc, char **argv) {
                 if (noVr && !dumpDir.empty()) Dump(w.pic, dumpDir + "/win-" + w.id + ".pam");
                 w.dirty = false;
             }
-            if (w.on && w.ghostOn && w.ghostDirty) {
+            if (permit && w.on && w.ghostOn && w.ghostDirty) {
                 DrawGhost(w);
                 if (ov) {
                     if (ghostBuffers[k].w != w.ghostPic.w || ghostBuffers[k].h != w.ghostPic.h) {  // (a failed Make keeps the size: SetOverlayRaw then)

@@ -2168,12 +2168,15 @@ def send_layout_scales(layout, count):
 
 def send_scales(outs):
     """KWin's scale for each screen, as it is now, to ft-screens: KWin's nested backend
-    doesn't undo its scale on pointer input, so ft-screens does (panel pixels / scale)."""
+    doesn't undo its scale on pointer input, so ft-screens does (panel pixels / scale).
+    None in outs skips that screen."""
     if backend() != "screens":
         return
     try:
         sock = screens_socket()
         for i, o in enumerate(outs):
+            if o is None:
+                continue
             reply = sock.ask(f"scale {i + 1} {float(o.get('scale', 1)):g}")
             if not reply.startswith("ok"):
                 log(f"screen {i + 1}: scale: {reply}")
@@ -2211,7 +2214,7 @@ def apply_scales():
     outs = outputs(env)
     for i, o in enumerate(outs):
         s = screen_scale(layout, i)
-        if not o.get("enabled", True):
+        if not o.get("enabled", True) and backend() == "screens":   # (outputs() leaves the spares out there)
             args.append(f"output.{o['id']}.enable")
         if abs((o.get("scale") or 1.0) - s) > 0.01:
             args.append(f"output.{o['id']}.scale.{s:g}")
@@ -2234,7 +2237,10 @@ def apply_scales():
                 break
             time.sleep(0.05)
             outs = outputs(env)
-    send_scales(outs)
+    # A screen KWin hasn't reported its new scale for yet gets none: on a KWin that takes its
+    # scale from ft-screens (6.6), the old one would put that back. The next follow sends it.
+    send_scales([None if i < count and abs((o.get("scale") or 1.0) - screen_scale(layout, i)) > 0.01 else o
+                 for i, o in enumerate(outs)])
     # A configure may still be pending. Use target scales for positions even then.
     sizes = []
     for i, o in enumerate(outs):

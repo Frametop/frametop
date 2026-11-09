@@ -32,11 +32,14 @@ A few wlroots details worth knowing: `wlr_shm_create` wants DRM format codes, no
 
 KWin 6.6 takes nested output scale from the host's `wp_fractional_scale_v1.preferred_scale`,
 then applies it when an `xdg_toplevel.configure` resizes the output. `kscreen-doctor` alone
-cannot change that scale. ft-screens advertises `wp_fractional_scale_manager_v1` and sends
-preferred scale before logical dimensions, at startup and when scale changes. Screen
-resolutions stay in pixels; configure dimensions divide them by the scale rounded to 120ths.
-They also keep the resulting pixel dimensions divisible by the whole buffer scale KWin 6.2
-requires. ft-floatd sends spares' logical dimensions itself, after enabling and scaling them.
+cannot change that scale. ft-screens advertises `wp_fractional_scale_manager_v1` and, once KWin has made a
+`wp_fractional_scale_v1` object, sends preferred scale before logical dimensions, at startup
+and when scale changes. Screen resolutions stay in pixels; configure dimensions divide them by
+the scale rounded to 120ths. They also keep the resulting pixel dimensions divisible by the
+whole buffer scale KWin 6.2 requires. KWin 6.2.5 makes no such object: it keeps the first
+configure's pixels and the scale `kscreen-doctor` sets, and would make any later configure
+that size times its scale, so there ft-screens configures a screen in pixels and never again
+for a scale change, as before. ft-floatd sends spares' logical dimensions itself, after enabling and scaling them.
 ft-layout waits briefly for KWin's reported scale, and uses target scales for positioning
 while configure events are pending.
 

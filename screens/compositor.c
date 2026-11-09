@@ -115,6 +115,7 @@ struct screen {
     unsigned commits;             // buffers committed, and the last one's size ("toplevels")
     uint64_t present_seq;         // wp_presentation sequence, one per toplevel commit
     int buffer_width, buffer_height;
+    bool logical;                 // its last configure was in logical units (kwin_fractional)
     struct wlr_xdg_toplevel_decoration_v1 *decoration;  // answered on the first commit
     struct wl_listener commit, destroy, decoration_destroy, set_title;
     // Its frame rate (see tick): when its last frame callback went (ms), and what its recent
@@ -352,30 +353,51 @@ static void drop_pending(struct screen *sc) {
     sc->pending = NULL;
 }
 
+static enum wl_iterator_result find_fractional(struct wl_resource *r, void *found) {
+    if (strcmp(wl_resource_get_class(r), "wp_fractional_scale_v1") != 0) return WL_ITERATOR_CONTINUE;
+    *(bool *)found = true;
+    return WL_ITERATOR_STOP;
+}
+
+// KWin 6.6 takes a nested output's scale from wp_fractional_scale_v1 (preferred_scale) and makes
+// the output its configure size times that scale, so a screen's configure size is its pixels over
+// its scale there. KWin 6.2 makes no wp_fractional_scale_v1 object: it keeps the pixels of the
+// first configure and the scale kscreen-doctor sets, and makes any later configure that size
+// times its scale, so its screens are configured in pixels, once, as before.
+static bool kwin_fractional(struct screen *sc) {
+    bool found = false;
+    wl_client_for_each_resource(wl_resource_get_client(sc->toplevel->base->resource), find_fractional, &found);
+    return found;
+}
+
+// A configured screen's size to KWin: its pixels, or (kwin_fractional) its logical size after
+// its preferred scale.
 static void configure_screen(struct screen *sc) {
     struct server *s = sc->server;
-    double scale = s->scale[sc->index];
-    wlr_fractional_scale_v1_notify_scale(sc->toplevel->base->surface, scale);
-    if (sc->index < s->n_config && sc->toplevel->base->initialized) {
-        struct config *c = &s->config[sc->index];
-        int lw = ft_screen_toplevel_dim(c->width, scale);
-        int lh = ft_screen_toplevel_dim(c->height, scale);
-        wlr_xdg_toplevel_set_size(sc->toplevel, lw, lh);
-    }
+    const double scale = s->scale[sc->index];
+    struct wlr_xdg_surface *xdg = sc->toplevel->base;
+    wlr_fractional_scale_v1_notify_scale(xdg->surface, scale);
+    // a size wants an initialized surface, or its first commit (screen_commit)
+    if (sc->index >= s->n_config || !(xdg->initialized || xdg->initial_commit)) return;
+    const struct config *c = &s->config[sc->index];
+    sc->logical = kwin_fractional(sc);
+    if (sc->logical)
+        wlr_xdg_toplevel_set_size(sc->toplevel, ft_screen_toplevel_dim(c->width, scale),
+                                  ft_screen_toplevel_dim(c->height, scale));
+    else
+        wlr_xdg_toplevel_set_size(sc->toplevel, c->width, c->height);
 }
 
 static void screen_commit(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, commit);
     struct wlr_xdg_surface *xdg = sc->toplevel->base;
     if (xdg->initial_commit) {
-        // Preferred scale must precede the logical size: KWin 6.6 resizes from both.
-        double scale = sc->server->scale[sc->index];
-        wlr_fractional_scale_v1_notify_scale(xdg->surface, scale);
+        // First commit: tell KWin the size of this screen, after its preferred scale (KWin 6.6
+        // resizes from both: configure_screen). A spare is 640 x 480 until ft-floatd sizes it.
         if (sc->index < sc->server->n_config) {
-            struct config *c = &sc->server->config[sc->index];
-            wlr_xdg_toplevel_set_size(sc->toplevel, ft_screen_toplevel_dim(c->width, scale),
-                                     ft_screen_toplevel_dim(c->height, scale));
+            configure_screen(sc);
         } else {
+            wlr_fractional_scale_v1_notify_scale(xdg->surface, sc->server->scale[sc->index]);
             wlr_xdg_toplevel_set_size(sc->toplevel, 640, 480);
         }
         wlr_xdg_toplevel_set_activated(sc->toplevel, true);
@@ -1160,10 +1182,13 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                 double prev = s->scale[index - 1];
                 s->scale[index - 1] = scale;
                 ft_vr_screen_scale(index - 1, scale);
-                if (s->screens[index - 1]) {
-                    wlr_fractional_scale_v1_notify_scale(s->screens[index - 1]->toplevel->base->surface, scale);
-                    if (index - 1 < s->n_config && fabs(scale - prev) > 1e-4)
-                        configure_screen(s->screens[index - 1]);
+                struct screen *sc = s->screens[index - 1];
+                if (sc) {
+                    // KWin 6.6 applies a new preferred scale at the next configure. KWin 6.2 would
+                    // make a configure after a scale change that many times bigger: none there.
+                    wlr_fractional_scale_v1_notify_scale(sc->toplevel->base->surface, scale);
+                    if (index - 1 < s->n_config && kwin_fractional(sc) && (fabs(scale - prev) > 1e-4 || !sc->logical))
+                        configure_screen(sc);
                 }
                 snprintf(reply, sizeof reply, "ok");
             }

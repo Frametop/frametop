@@ -2242,7 +2242,8 @@ def apply_scales():
             continue
         w, h = mode_size(o)
         s = screen_scale(layout, i)
-        sizes.append((round(w / s), round(h / s)) if w and h else logical_size(o))
+        # (rounded up, as KWin does: logical_size)
+        sizes.append((math.ceil(w / s - 1e-6), math.ceil(h / s - 1e-6)) if w and h else logical_size(o))
     if len(sizes) == len(outs) and outs:
         columns = arrangement(len(outs))
         if not columns or sorted(i for c in columns for i in c) != list(range(len(outs))):

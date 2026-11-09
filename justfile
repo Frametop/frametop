@@ -49,6 +49,7 @@ test-c:
         local name=$1 log=build/tests/last.log; shift
         if "$@" >"$log" 2>&1; then echo "$name: ok"; else echo "$name: FAILED"; cat "$log"; status=1; fi
     }
+    run screens/tests/screen-scale-test.c scripts/test-screen-scale.sh
     gcc -std=c11 -Wall -Wextra -Werror -I. screens/tests/controller-click-test.c \
       -lm -o build/tests/controller-click-test
     run screens/tests/controller-click-test.c build/tests/controller-click-test

@@ -217,8 +217,13 @@ public:
     // Writes into `mem` instead of the gestures file (ft-handreplay --publish-dump).
     void use(fh_gestures_t *mem, const Pinch &pinch, const Grip &grip);
     void write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns, const Pinch *middle = nullptr);
+    // Ends, as lost, a gesture another producer left down (it had the file through run_dir/held
+    // or the testbench's marker, and let go or died mid-gesture), as use() does for a crashed
+    // tracker. Without it, write() would carry its counters on with that gesture still down.
+    void end_left_down();
 
 private:
+    void end_down();   // (inside a write) every gesture the file has down ends, as lost
     void stamp();   // magic, version, size and producer
     fh_gestures_t *out_ = nullptr;
     uint64_t seq_ = 0;

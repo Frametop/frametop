@@ -939,6 +939,8 @@ int main(int argc, char **argv) {
                 } else {
                     unlink(hands_want_file.c_str());
                     next_ns = 0;
+                    // a gesture the producer that had the file left down is over (it let go or died)
+                    if (gestures_on) gestures.end_left_down();
                 }
             }
         }

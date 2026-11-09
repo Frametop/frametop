@@ -385,6 +385,15 @@ void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &g
     // a gesture the last tracker left down (it crashed) is over: count its end, as lost
     __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
+    end_down();
+    __atomic_store_n(&out_->seq, 2 * seq_, __ATOMIC_RELEASE);
+    out_->begin_m = float(pinch.params().begin_m);
+    out_->end_m = float(pinch.params().end_m);
+    out_->grip_begin = float(grip.params().begin);
+    out_->grip_end = float(grip.params().end);
+}
+
+void GesturePublisher::end_down() {
     for (fh_pinch_t *slots : {out_->pinch, out_->grip, out_->pinch2})
         for (int s = 0; s < 2; ++s) {
             fh_pinch_t &o = slots[s];
@@ -393,11 +402,14 @@ void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &g
             o.end_ns = mono_ns();
             o.flags = (o.flags & ~FH_PINCH_DOWN) | FH_PINCH_LOST;
         }
+}
+
+void GesturePublisher::end_left_down() {
+    seq_ = std::max(seq_, out_->seq / 2);   // past the other producer's publishes
+    __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    end_down();
     __atomic_store_n(&out_->seq, 2 * seq_, __ATOMIC_RELEASE);
-    out_->begin_m = float(pinch.params().begin_m);
-    out_->end_m = float(pinch.params().end_m);
-    out_->grip_begin = float(grip.params().begin);
-    out_->grip_end = float(grip.params().end);
 }
 
 void GesturePublisher::stamp() {

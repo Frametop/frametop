@@ -38,11 +38,11 @@ int main() {
     CHECK(ShouldPush(T(std::string(kMaxText, 'x')), 0));
 
     // Typing leaves the host: its text comes over when it differs.
-    CHECK(ShouldPull(T("from the pc"), T("from the frame")));
-    CHECK(!ShouldPull(T("same\r\n"), T("same\n")));
-    CHECK(!ShouldPull(T(""), T("frame text")));  // a file on the host: the desktop keeps its text
-    CHECK(ShouldPull(T("pc"), T("")));
-    CHECK(!ShouldPull(T(std::string(kMaxText + 1, 'x')), T("")));
+    CHECK(ShouldPull(T("from the pc"), T("from the frame"), 0));
+    CHECK(!ShouldPull(T("same\r\n"), T("same\n"), 0));
+    CHECK(!ShouldPull(T(""), T("frame text"), 0));  // a file on the host: the desktop keeps its text
+    CHECK(ShouldPull(T("pc"), T(""), 0));
+    CHECK(!ShouldPull(T(std::string(kMaxText + 1, 'x')), T(""), 0));
 
     // Images: PNG only, up to kMaxImage, and never the same hash as text of the same bytes.
     const std::string png = std::string("\x89PNG\r\n\x1a\n", 8) + "IHDR...";
@@ -55,11 +55,17 @@ int main() {
     CHECK(Hash(I(png + "\r\n")) != Hash(I(png + "\n")));  // an image's bytes are its own
     CHECK(ShouldPush(I(png), Hash("text")));
     CHECK(!ShouldPush(I(png), Hash(I(png))));
-    CHECK(ShouldPull(I(png), T("frame text")));  // an image copied on the host comes over
-    CHECK(ShouldPull(I(png), I(png + "2")));
-    CHECK(!ShouldPull(I(png), I(png)));
-    CHECK(ShouldPull(T("pc"), I(png)));
-    CHECK(!ShouldPull(I("not a png"), T("")));
+    CHECK(ShouldPull(I(png), T("frame text"), 0));  // an image copied on the host comes over
+    CHECK(ShouldPull(I(png), I(png + "2"), 0));
+    CHECK(!ShouldPull(I(png), I(png), 0));
+    CHECK(ShouldPull(T("pc"), I(png), 0));
+    CHECK(!ShouldPull(I("not a png"), T(""), 0));
+
+    // The host unchanged since the last sync: the desktop keeps what it has, newer or not.
+    CHECK(!ShouldPull(T("old"), T(""), Hash("old")));  // something the host couldn't take
+    CHECK(!ShouldPull(T("old"), I(png), Hash("old")));  // an image a text-only host refused
+    CHECK(!ShouldPull(I(png), T("new"), Hash(I(png))));  // copied on the desktop while typing was on the host
+    CHECK(ShouldPull(T("changed"), T("new"), Hash("old")));
 
     // The sequence that mustn't lose what was copied on the host: the desktop's unchanged text
     // isn't sent back over it, whether it came over (an image) or not (a file).
@@ -67,9 +73,9 @@ int main() {
         uint64_t last = 0;
         CHECK(ShouldPush(T("frame"), last));
         last = Hash("frame");  // sent
-        CHECK(!ShouldPull(T(""), T("frame")));  // then a file was copied there
+        CHECK(!ShouldPull(T(""), T("frame"), last));  // then a file was copied there
         CHECK(!ShouldPush(T("frame"), last));  // back on the host: the file stays
-        CHECK(ShouldPull(I(png), T("frame")));  // then an image, which comes over
+        CHECK(ShouldPull(I(png), T("frame"), last));  // then an image, which comes over
         last = Hash(I(png));
         CHECK(!ShouldPush(I(png), last));  // and isn't sent back
         CHECK(ShouldPush(T("new frame text"), last));  // until something new is copied on the desktop

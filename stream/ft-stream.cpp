@@ -573,7 +573,7 @@ struct SharedClipboard {
     std::mutex mu;
     std::condition_variable cv;
     std::deque<char> ops;  // 's' send the desktop's clipboard, 'b' bring the host's back
-    bool quit = false;
+    std::atomic<bool> quit{false};  // set under mu, read by a sync under way too
     std::set<std::string> said;  // the thread's: each problem is logged once
     std::thread thread;
 
@@ -603,7 +603,7 @@ struct SharedClipboard {
             quit = true;
         }
         cv.notify_one();
-        thread.join();  // its requests time out within seconds; the exit watchdog covers the rest
+        thread.join();  // a sync under way stops within 0.1 s (quit)
     }
     // The main loop, every pass: the switch, read again every 3 s.
     void Tick(int64_t now) {
@@ -649,6 +649,7 @@ struct SharedClipboard {
         if (said.insert(why).second) std::printf("clipboard: %s\n", why.c_str());
     }
     bool Answered(long code, bool set, bool image) {
+        if (quit) return false;  // the stream ends: nothing to say about a request it cut short
         std::string why;
         const clipboard::Answer a = clipboard::Classify(code, set, image, &why);
         if (a == clipboard::Answer::Ok) return true;
@@ -678,7 +679,7 @@ struct SharedClipboard {
         clipboard::Content c;
         if (!Desktop(&c) || !clipboard::ShouldPush(c, clipboard::ReadLast(state))) return;
         std::string body = c.data;
-        if (!Answered(client->Clipboard(true, c.image, &body, pin), true, c.image)) return;
+        if (!Answered(client->Clipboard(true, c.image, &body, pin, &quit), true, c.image)) return;
         clipboard::WriteLast(state, clipboard::Hash(c));
         std::printf("clipboard: sent %zu bytes of %s to %s\n", c.data.size(), Kind(c), host.c_str());
     }
@@ -686,13 +687,13 @@ struct SharedClipboard {
         if (!on) return;
         // Its text, else (a host that shares images) its image.
         clipboard::Content h, desktop;
-        if (!Answered(client->Clipboard(false, false, &h.data, pin), false, false)) return;
+        if (!Answered(client->Clipboard(false, false, &h.data, pin, &quit), false, false)) return;
         if (h.data.empty() && images) {
             h.image = true;
-            if (!Answered(client->Clipboard(false, true, &h.data, pin), false, true)) return;
+            if (!Answered(client->Clipboard(false, true, &h.data, pin, &quit), false, true)) return;
         }
         if (!Desktop(&desktop)) return;
-        if (!clipboard::ShouldPull(h, desktop)) {
+        if (!clipboard::ShouldPull(h, desktop, clipboard::ReadLast(state))) {
             if (clipboard::Fits(h)) clipboard::WriteLast(state, clipboard::Hash(h));  // the same
             return;
         }
@@ -742,8 +743,14 @@ struct SharedClipboard {
             char buf[65536];
             for (;;) {
                 const int64_t left = (until - MonoNs()) / 1'000'000;
+                if (left <= 0 || quit) {
+                    late = true;
+                    break;
+                }
                 pollfd p{from[0], POLLIN, 0};
-                if (left <= 0 || poll(&p, 1, int(left)) <= 0) {
+                const int polled = poll(&p, 1, int(std::min<int64_t>(left, 100)));  // quit within 0.1 s
+                if (polled == 0 || (polled < 0 && errno == EINTR)) continue;
+                if (polled < 0) {
                     late = true;
                     break;
                 }
@@ -762,12 +769,12 @@ struct SharedClipboard {
         while (!late && !big) {
             const pid_t w = waitpid(pid, &st, WNOHANG);
             if (w == pid) return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
-            if (w < 0 || MonoNs() >= until) break;
+            if (w < 0 || MonoNs() >= until || quit) break;
             usleep(10'000);
         }
         kill(pid, SIGKILL);
         waitpid(pid, &st, 0);
-        Say(std::string("ft-clip ") + what + (big ? " gave more than it may" : " didn't finish in time"));
+        if (!quit) Say(std::string("ft-clip ") + what + (big ? " gave more than it may" : " didn't finish in time"));
         return -1;
     }
 };

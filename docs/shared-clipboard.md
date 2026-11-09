@@ -22,7 +22,7 @@ On the Frame, the syncs happen at the two moments typing changes sides, as ft-sc
 | When | ft-screens says | ft-stream does |
 |---|---|---|
 | A click on the display, or a spin that brings it to the front | `focus` (on every click; it acts once until a `blur`) | Sends the desktop's clipboard to the computer, if it changed since the last sync |
-| A click on the desktop, another display, frunner opening, or Release all keys | `blur` | Brings the computer's to the desktop, if it differs from the desktop's |
+| A click on the desktop, another display, frunner opening, or Release all keys | `blur` | Brings the computer's to the desktop, if it changed since the last sync and differs from the desktop's |
 
 A key pressed on the display after a `blur` counts as a `focus` too: typing can come back to a display without a click.
 
@@ -36,7 +36,7 @@ A key pressed on the display after a `blur` counts as a `focus` too: typing can 
 
 ### Not losing what can't come over
 
-The computer can hold something that can't come over: files, an image too big, or any image on a text-only host. Vibepollo reads that as nothing, and the desktop keeps what it has. Coming back to the computer must not then replace that with the desktop's older clipboard. So each computer has a small state file, `$XDG_RUNTIME_DIR/frametop-clipboard-ID` (0600, shared by its displays' ft-streams): a hash of what was shared at the last sync (an image's hash differs from any text's). The desktop's goes to the computer only when it changed since then.
+The computer can hold something that can't come over: files, an image too big, or any image on a text-only host. Vibepollo reads that as nothing, and the desktop keeps what it has. Coming back to the computer must not then replace that with the desktop's older clipboard. So each computer has a small state file, `$XDG_RUNTIME_DIR/frametop-clipboard-ID` (0600, shared by its displays' ft-streams): a hash of what was shared at the last sync (an image's hash differs from any text's). The desktop's goes to the computer only when it changed since then, and the computer's comes to the desktop only when it changed since then: an image the desktop holds that a text-only computer couldn't take, or something copied on the desktop while a display had typing, isn't replaced by the computer's older text.
 
 The file holds a hash, never the content, and ft-stream logs only sizes.
 

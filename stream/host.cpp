@@ -406,7 +406,7 @@ bool Client::Unpair() {
 // holds here too, and is required: the text never goes to a host it can't check. A
 // connection of its own each time, closed after (see DropConnection). The status, or
 // clipboard::kNoAnswer, kTooBig (the host's is over kMaxText, or kMaxImage), kNoPin.
-long Client::Clipboard(bool set, bool image, std::string *data, const std::string &pin) {
+long Client::Clipboard(bool set, bool image, std::string *data, const std::string &pin, const std::atomic<bool> *stop) {
     if (pin.empty()) return clipboard::kNoPin;
     CURL *c = curl_easy_init();
     if (!c) return clipboard::kNoAnswer;
@@ -429,6 +429,13 @@ long Client::Clipboard(bool set, bool image, std::string *data, const std::strin
     curl_easy_setopt(c, CURLOPT_TIMEOUT, image ? 20L : 5L);  // 32 MiB at a slow Wi-Fi's pace
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, AppendClipboard);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &got);
+    if (stop) {
+        curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, +[](void *s, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+            return static_cast<const std::atomic<bool> *>(s)->load() ? 1 : 0;  // curl aborts the transfer
+        });
+        curl_easy_setopt(c, CURLOPT_XFERINFODATA, const_cast<std::atomic<bool> *>(stop));
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+    }
     if (set) {
         headers = curl_slist_append(headers, image ? "Content-Type: image/png" : "Content-Type: text/plain; charset=utf-8");
         headers = curl_slist_append(headers, "Expect:");  // no 100-continue wait before a big body

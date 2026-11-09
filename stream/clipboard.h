@@ -73,10 +73,14 @@ inline bool Same(const Content &a, const Content &b) {
 // Typing went to the host: send the desktop's content if it changed since the last sync.
 inline bool ShouldPush(const Content &desktop, uint64_t last) { return Fits(desktop) && Hash(desktop) != last; }
 
-// Typing left the host: bring its content to the desktop if the two differ. Empty: nothing
-// that can come over was copied there (a file, or an image a text-only host keeps), and the
-// desktop keeps what it has.
-inline bool ShouldPull(const Content &host, const Content &desktop) { return Fits(host) && !Same(host, desktop); }
+// Typing left the host: bring its content to the desktop if the two differ and the host's
+// changed since the last sync. Empty: nothing that can come over was copied there (a file, or
+// an image a text-only host keeps), and the desktop keeps what it has. Unchanged: the desktop
+// may hold something newer, or something the host couldn't take (an image on a text-only
+// host), which the host's older content mustn't replace.
+inline bool ShouldPull(const Content &host, const Content &desktop, uint64_t last) {
+    return Fits(host) && Hash(host) != last && !Same(host, desktop);
+}
 
 // What a host's answer to /actions/clipboard means. Ok, or why this stream stops asking (Gone),
 // stops asking for images (TextOnly), or just this time (Retry). Vibepollo answers 401 to a

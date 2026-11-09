@@ -1105,7 +1105,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
         // show/resume commands cannot clear the separate OpenVR security gate.
         if (s->vr && !ft_pin_allowed() &&
             (!strncmp(buf, "input ", 6) || !strncmp(buf, "key ", 4) || !strncmp(buf, "pad ", 4) ||
-             !strncmp(buf, "wheel ", 6) || !strncmp(buf, "vrkeyboard ", 11) || !strcmp(buf, "frunner on"))) {
+             !strncmp(buf, "wheel ", 6) || !strncmp(buf, "hwheel ", 7) || !strncmp(buf, "vrkeyboard ", 11) || !strcmp(buf, "frunner on"))) {
             const char *locked = "error Steam PIN locked";
             if (len > offsetof(struct sockaddr_un, sun_path))
                 sendto(fd, locked, strlen(locked), MSG_DONTWAIT, (struct sockaddr *)&from, len);

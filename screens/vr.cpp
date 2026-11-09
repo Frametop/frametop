@@ -5476,8 +5476,8 @@ void UpdateResizeVisuals() {
         v.hover = resizecorner::Animate(v.hover, ready, dt);
         v.alpha = want > v.alpha ? std::min(want, v.alpha + dt / 0.08) : std::max(want, v.alpha - dt / 0.18);
         if (!visible || v.alpha < 0.01) {
-            if (v.shown) vr::VROverlay()->HideOverlay(v.outline), v.shown = false;
-            if (v.targetShown) vr::VROverlay()->HideOverlay(v.target), v.targetShown = false;
+            if (v.shown) PinHide(v.outline), v.shown = false;
+            if (v.targetShown) PinHide(v.target), v.targetShown = false;
             if (!visible) v.alpha = v.hover = 0;
             continue;
         }
@@ -5512,7 +5512,7 @@ void UpdateResizeVisuals() {
         const Mat m = Mul(pose, OnSurface(s, sx * s.metres / 2, sy * s.heightMetres() / 2, 0.003));
         vr::VROverlay()->SetOverlayTransformAbsolute(v.outline, vr::TrackingUniverseStanding, &m);
         vr::VROverlay()->SetOverlayAlpha(v.outline, float(v.alpha * g_resizeCorner.opacity));
-        if (!v.shown) vr::VROverlay()->ShowOverlay(v.outline), v.shown = true;
+        if (!v.shown) PinShow(v.outline), v.shown = true;
         if (g_resizeCorner.preview && make(v.target, ".target")) {
             if (v.targetVersion != g_resizeVersion) {
                 const auto px = resizecorner::TargetTexture(256, ResizeRegion(sx, sy));
@@ -5525,8 +5525,8 @@ void UpdateResizeVisuals() {
             vr::VROverlay()->SetOverlayWidthInMeters(v.target, float(side));
             vr::VROverlay()->SetOverlayCurvature(v.target, s.curve > 0 ? float(std::clamp(side / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
             vr::VROverlay()->SetOverlayAlpha(v.target, float(v.alpha));
-            if (!v.targetShown) vr::VROverlay()->ShowOverlay(v.target), v.targetShown = true;
-        } else if (v.targetShown) vr::VROverlay()->HideOverlay(v.target), v.targetShown = false;
+            if (!v.targetShown) PinShow(v.target), v.targetShown = true;
+        } else if (v.targetShown) PinHide(v.target), v.targetShown = false;
     }
 }
 

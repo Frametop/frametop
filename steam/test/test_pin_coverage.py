@@ -16,6 +16,17 @@ class Coverage(unittest.TestCase):
         self.assertIn("denied || wasDenied", source)
         self.assertIn("PollNextOverlayEvent(it->first", source)
 
+    def test_compositor_rejects_input_commands_while_locked(self):
+        source = (ROOT / "screens/compositor.c").read_text()
+        gate = source.split("if (s->vr && !ft_pin_allowed() &&", 1)[1].split("{", 1)[0]
+        for command in ('"input "', '"key "', '"pad "', '"wheel "', '"hwheel "', '"vrkeyboard "', '"frunner on"'):
+            self.assertIn(command, gate)
+
+    def test_relay_commits_no_text_past_the_gate(self):
+        source = (ROOT / "input/input-relay.py").read_text()
+        body = source.split("    def commit_text(", 1)[1].split("\n    def ", 1)[0]
+        self.assertLess(body.index("ft_pinlock.allowed()"), body.index("sendto("))
+
     def test_lock_path_cannot_stop_apps(self):
         source = (ROOT / "screens/vr.cpp").read_text()
         body = source.split("void ft_vr_poll(", 1)[1].split("    RefreshPoses();", 1)[0]

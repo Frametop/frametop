@@ -1745,6 +1745,8 @@ class Relay:
         """Send text to ft-textinput, which commits it to the focused text field. False if it
         didn't go. If ft-textinput is gone, there's no text field to send to until it says again;
         if it's only behind (its queue full), the next character tries again."""
+        if not ft_pinlock.allowed():
+            return False  # Steam PIN locked: ft-textinput commits past ft-screens' gate
         try:
             self.control.sendto(f"commit {text}".encode(), self.text_input)
             return True

@@ -379,12 +379,8 @@ void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &g
     out_ = mem;
     // keep the counters a previous tracker left, so a reader doesn't see them jump back
     const bool ours = !std::memcmp(out_->magic, FH_GESTURES_MAGIC, 8) && out_->version == FH_GESTURES_VERSION;
-    if (!ours) {
-        std::memset(out_, 0, sizeof *out_);
-        std::memcpy(out_->magic, FH_GESTURES_MAGIC, 8);
-        out_->version = FH_GESTURES_VERSION;
-        out_->size = sizeof(fh_gestures_t);
-    }
+    if (!ours) std::memset(out_, 0, sizeof *out_);
+    stamp();
     seq_ = out_->seq / 2 + 1;
     // a gesture the last tracker left down (it crashed) is over: count its end, as lost
     __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
@@ -404,9 +400,19 @@ void GesturePublisher::use(fh_gestures_t *mem, const Pinch &pinch, const Grip &g
     out_->grip_end = float(grip.params().end);
 }
 
+void GesturePublisher::stamp() {
+    std::memcpy(out_->magic, FH_GESTURES_MAGIC, 8);
+    out_->version = FH_GESTURES_VERSION;
+    out_->size = sizeof(fh_gestures_t);
+    std::memset(out_->producer, 0, sizeof out_->producer);
+    std::strncpy(out_->producer, "ft-hands", sizeof out_->producer - 1);
+}
+
 void GesturePublisher::write(const Pinch &pinch, const Grip &grip, uint64_t capture_ns, const Pinch *middle) {
+    seq_ = std::max(seq_, out_->seq / 2);   // past another producer's publishes (run_dir/held)
     __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
+    stamp();   // again after another producer's turn (run_dir/held)
     static const fh_pinch_t none{};
     for (int g = 0; g < 3; ++g)
         for (int s = 0; s < 2; ++s) {

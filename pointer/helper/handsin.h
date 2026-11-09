@@ -41,7 +41,7 @@ public:
     bool Read(fh_gestures_t &out) {
         if (!file_.Read(&out, sizeof out, offsetof(fh_gestures_t, seq))) return false;
         if (out.version < 2) std::memset(out.grip, 0, sizeof out.grip);
-        if (out.version < 3 || file_.Size() < sizeof out) std::memset(out.pinch2, 0, sizeof out.pinch2);
+        if (out.version < 3 || file_.Size() < offsetof(fh_gestures_t, producer)) std::memset(out.pinch2, 0, sizeof out.pinch2);
         opens = file_.opens;
         return true;
     }

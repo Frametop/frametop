@@ -438,6 +438,25 @@ class Builds(Release):
         self.assertNotIn('hands', fi.load_state(self.tree)['built'])
         self.assertNotIn('hands', self.builds)
 
+    def test_camd_docs_dont_hold_hands_back(self):
+        self.commit({'hands/camd/fhring.md': 'ring spec\n', 'hands/camd/LICENSE.x': 'l\n',
+                     'hands/track/main.cpp': 'track2\n', 'hands/include/fh_hands.h': 'api2\n'})
+        self.outputs = {'hands/build/ft-hands': b'hands2', 'hands/build/ft-camd': b'camd1-other-path',
+                        'screens/build/ft-screens': b's2'}
+        self.assertEqual(self.install(dry=True), 0)
+        self.assertEqual(self.install(), 0)
+        self.assertEqual((self.tree / 'hands/build/ft-hands').read_bytes(), b'hands2')
+        self.assertEqual((self.tree / 'screens/build/ft-screens').read_bytes(), b's2')   # its readers too
+        self.assertEqual((self.tree / 'hands/build/ft-camd').read_bytes(), b'camd1')     # caps kept
+        self.assertNotIn('hands/build/ft-camd', fi.load_state(self.tree)['steps'])
+
+    def test_camd_header_change_holds_hands_back(self):
+        self.commit({'hands/camd/fhring.h': 'ring2\n', 'hands/camd/fhring.md': 'ring spec\n'})
+        self.assertEqual(self.install(dry=True), 3)
+        self.assertEqual(self.install(), 3)
+        self.assertNotIn('hands', self.builds)
+        self.assertIn('hands/build/ft-camd', fi.load_state(self.tree)['steps'])
+
     def test_rerun_after_an_interrupt_keeps_steps_and_restarts(self):
         self.commit({'input/frametop-relay.service': '[Service]\n', 'input/zz.py': 'new\n'})
         real = fi.Live.put

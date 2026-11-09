@@ -440,6 +440,9 @@ def check_kwin_host_protocols():
         return
     names = host_protocol_names(blob)
     required = [KWIN_HOST_PROTOCOLS[n] for n in names if n in KWIN_HOST_PROTOCOLS]
+    # KWin binds this for nested scaling without a missing-protocol warning.
+    if b"wp_fractional_scale_manager_v1" in blob and "wp_fractional_scale_manager_v1" not in required:
+        required.append("wp_fractional_scale_manager_v1")
     unknown = [n for n in names if n not in KWIN_HOST_PROTOCOLS and n not in KWIN_HOST_OPTIONAL]
     if unknown:
         report("warn", "KWin host protocols",
@@ -457,11 +460,11 @@ def check_kwin_host_protocols():
     missing = [iface for iface in required if not binary_has_token(built, iface)]
     if missing:
         report("FAIL", "KWin host protocols",
-               "this KWin exits unless the host compositor offers " + ", ".join(missing)
+               "this KWin needs the host compositor to offer " + ", ".join(missing)
                + "; rebuild ft-screens (screens/build.sh)")
     elif required:
         report("ok", "KWin host protocols",
-               f"ft-screens offers the {len(required)} {os.path.basename(src)} requires to start")
+               f"ft-screens offers the {len(required)} {os.path.basename(src)} requires for nested outputs")
     elif not unknown:
         report("warn", "KWin host protocols",
                f"{os.path.basename(src)} has the warning text but no known interface names")

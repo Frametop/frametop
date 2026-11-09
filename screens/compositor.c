@@ -15,7 +15,7 @@
 //     buffers are in pixels, so a panel position in pixels is divided by the screen's KWin
 //     scale first ("scale <screen> <s>", from ft-layout).
 //
-// Usage: ft-screens [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES]...
+// Usage: ft-screens [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES[xSCALE]]...
 //                   [--spares N] [--rates F,V,H] [-- COMMAND ARGS...]
 //   --socket    Wayland socket name in $XDG_RUNTIME_DIR (default ft-screens-0)
 //   --control   the control socket's abstract name (default ft_screens)
@@ -37,6 +37,7 @@
 
 #include <drm_fourcc.h>
 #include <linux/input-event-codes.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +61,7 @@
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_output.h>
@@ -76,6 +78,7 @@
 #include <wayland-protocols/presentation-time-enum.h>
 
 #include "vr.h"
+#include "screen-scale.h"
 #include "controller-click.h"
 #include "remote.h"
 #include "logfile.h"
@@ -112,6 +115,7 @@ struct screen {
     unsigned commits;             // buffers committed, and the last one's size ("toplevels")
     uint64_t present_seq;         // wp_presentation sequence, one per toplevel commit
     int buffer_width, buffer_height;
+    bool logical;                 // its last configure was in logical units (kwin_fractional)
     struct wlr_xdg_toplevel_decoration_v1 *decoration;  // answered on the first commit
     struct wl_listener commit, destroy, decoration_destroy, set_title;
     // Its frame rate (see tick): when its last frame callback went (ms), and what its recent
@@ -157,6 +161,7 @@ struct server {
     uint32_t typed_ms;  // the last key sent to the desktop: its screen counts as focused
     struct screen *pointer_focus;
     struct ft_relay_buttons relay_buttons;  // the input relay's mouse buttons held on the seat
+    int relay_remote[8];  // ...and those held on a remote screen: its index + 1 (0: none), by BTN_LEFT + n
     struct ft_controller_click controller_click;
     pid_t child;
     // Where typing goes: the screens after a click on one, Steam after a click on another
@@ -348,14 +353,53 @@ static void drop_pending(struct screen *sc) {
     sc->pending = NULL;
 }
 
+static enum wl_iterator_result find_fractional(struct wl_resource *r, void *found) {
+    if (strcmp(wl_resource_get_class(r), "wp_fractional_scale_v1") != 0) return WL_ITERATOR_CONTINUE;
+    *(bool *)found = true;
+    return WL_ITERATOR_STOP;
+}
+
+// KWin 6.6 takes a nested output's scale from wp_fractional_scale_v1 (preferred_scale) and makes
+// the output its configure size times that scale, so a screen's configure size is its pixels over
+// its scale there. KWin 6.2 makes no wp_fractional_scale_v1 object: it keeps the pixels of the
+// first configure and the scale kscreen-doctor sets, and makes any later configure that size
+// times its scale, so its screens are configured in pixels, once, as before.
+static bool kwin_fractional(struct screen *sc) {
+    bool found = false;
+    wl_client_for_each_resource(wl_resource_get_client(sc->toplevel->base->resource), find_fractional, &found);
+    return found;
+}
+
+// A configured screen's size to KWin: its pixels, or (kwin_fractional) its logical size after
+// its preferred scale.
+static void configure_screen(struct screen *sc) {
+    struct server *s = sc->server;
+    const double scale = s->scale[sc->index];
+    struct wlr_xdg_surface *xdg = sc->toplevel->base;
+    wlr_fractional_scale_v1_notify_scale(xdg->surface, scale);
+    // a size wants an initialized surface, or its first commit (screen_commit)
+    if (sc->index >= s->n_config || !(xdg->initialized || xdg->initial_commit)) return;
+    const struct config *c = &s->config[sc->index];
+    sc->logical = kwin_fractional(sc);
+    if (sc->logical)
+        wlr_xdg_toplevel_set_size(sc->toplevel, ft_screen_toplevel_dim(c->width, scale),
+                                  ft_screen_toplevel_dim(c->height, scale));
+    else
+        wlr_xdg_toplevel_set_size(sc->toplevel, c->width, c->height);
+}
+
 static void screen_commit(struct wl_listener *l, void *data) {
     struct screen *sc = wl_container_of(l, sc, commit);
     struct wlr_xdg_surface *xdg = sc->toplevel->base;
     if (xdg->initial_commit) {
-        // First commit: tell KWin the size of this screen.
-        const struct config spare = {640, 480, 0.5};  // until ft-floatd sizes it
-        const struct config *c = sc->index < sc->server->n_config ? &sc->server->config[sc->index] : &spare;
-        wlr_xdg_toplevel_set_size(sc->toplevel, c->width, c->height);
+        // First commit: tell KWin the size of this screen, after its preferred scale (KWin 6.6
+        // resizes from both: configure_screen). A spare is 640 x 480 until ft-floatd sizes it.
+        if (sc->index < sc->server->n_config) {
+            configure_screen(sc);
+        } else {
+            wlr_fractional_scale_v1_notify_scale(xdg->surface, sc->server->scale[sc->index]);
+            wlr_xdg_toplevel_set_size(sc->toplevel, 640, 480);
+        }
         wlr_xdg_toplevel_set_activated(sc->toplevel, true);
         if (sc->decoration)
             wlr_xdg_toplevel_decoration_v1_set_mode(sc->decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
@@ -911,6 +955,26 @@ static bool relay_can_press(struct server *s) {
 // A mouse button from the input relay (pointer mode passes a mouse's side button through as
 // a key, for Back): to the screen the pointer is on, like a laser's click, wherever typing goes.
 static void relay_button(struct server *s, uint32_t code, bool pressed, char *reply, int size) {
+    // On a remote screen (the 3D mouse's laser on it: ft_vr_mouse_screen() gives only one that
+    // shows, with nothing paused), its stream takes the button, as it takes a laser's click
+    // (ft-stream sends BTN_SIDE and BTN_EXTRA as X1 and X2, Back and Forward). The release goes
+    // to the stream the press went to, wherever the pointer is by then.
+    const int b = (int)code - BTN_LEFT;
+    if (b >= 0 && b < 8) {
+        int remote = -1;
+        if (pressed) {
+            const int screen = ft_vr_mouse_screen();
+            if (screen >= 0 && ft_remote_is(screen) && !s->relay_remote[b]) remote = screen;
+        } else if (s->relay_remote[b]) {
+            remote = s->relay_remote[b] - 1;
+        }
+        if (remote >= 0) {
+            s->relay_remote[b] = pressed ? remote + 1 : 0;
+            struct ft_event e = {.type = FT_BUTTON, .screen = remote, .x = -1, .y = -1, .button = code, .pressed = pressed};
+            ft_remote_event(&e);  // a remote that went meanwhile: nothing to release
+            return (void)snprintf(reply, size, "ok");
+        }
+    }
     if (!ft_relay_button(&s->relay_buttons, code, pressed, relay_can_press(s)))
         return (void)snprintf(reply, size, pressed ? "ok no pointer, or held" : "ok not held");
     wlr_seat_pointer_notify_button(s->seat, now_ms(), code,
@@ -1094,19 +1158,20 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                 snprintf(reply, sizeof reply, "error threshold or held controller button");
             else { s->controller_click.threshold = scale; snprintf(reply, sizeof reply, "ok"); }
         } else if (sscanf(buf, "size %d %d %d", &index, &w, &h) == 3) {
-            // A new resolution for a screen, live: KWin resizes the screen to match. (KWin makes
-            // it this size times its scale; ft-floatd sends spares' sizes divided by theirs.)
+            // Screen resolutions are pixels; ft-floatd sends spares' logical dimensions.
             const int min_w = index - 1 < s->n_config ? 320 : 64, min_h = index - 1 < s->n_config ? 200 : 64;
             if (index < 1 || index > MAX_SCREENS || !s->screens[index - 1] || w < min_w || h < min_h || w > 16384 ||
                 h > 16384) {
                 snprintf(reply, sizeof reply, "error bad screen or size");
             } else {
-                // A screen's size is even: KWin's nested backend gives a scaled screen a whole
-                // buffer scale (1.5 -> 2), and a buffer that isn't a multiple of it is a protocol
-                // error that disconnects KWin. (ft-floatd rounds spares' sizes for their scale.)
-                if (index - 1 < s->n_config) w += w & 1, h += h & 1;
-                if (index - 1 < s->n_config) s->config[index - 1].width = w, s->config[index - 1].height = h;
-                wlr_xdg_toplevel_set_size(s->screens[index - 1]->toplevel, w, h);
+                if (index - 1 < s->n_config) {
+                    w += w & 1, h += h & 1;
+                    s->config[index - 1].width = w, s->config[index - 1].height = h;
+                    configure_screen(s->screens[index - 1]);
+                } else {
+                    // ft-floatd already sends logical dimensions for spares.
+                    wlr_xdg_toplevel_set_size(s->screens[index - 1]->toplevel, w, h);
+                }
                 snprintf(reply, sizeof reply, "ok");
             }
         } else if (sscanf(buf, "scale %d %lf", &index, &scale) == 2) {
@@ -1114,8 +1179,17 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                 snprintf(reply, sizeof reply, "error bad screen or scale");
             } else {
                 if (s->scale[index - 1] != scale) wlr_log(WLR_INFO, "screen %d: KWin scale %g", index, scale);
+                double prev = s->scale[index - 1];
                 s->scale[index - 1] = scale;
                 ft_vr_screen_scale(index - 1, scale);
+                struct screen *sc = s->screens[index - 1];
+                if (sc) {
+                    // KWin 6.6 applies a new preferred scale at the next configure. KWin 6.2 would
+                    // make a configure after a scale change that many times bigger: none there.
+                    wlr_fractional_scale_v1_notify_scale(sc->toplevel->base->surface, scale);
+                    if (index - 1 < s->n_config && kwin_fractional(sc) && (fabs(scale - prev) > 1e-4 || !sc->logical))
+                        configure_screen(sc);
+                }
                 snprintf(reply, sizeof reply, "ok");
             }
         } else if (strncmp(buf, "pad ", 4) == 0) {
@@ -1138,6 +1212,16 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                     // a press just started, before the relay heard (keys_update, every ~100 ms): not lost
                     ft_vr_held_wheel(value, handle_vr_event, s);
                 }
+            }
+            len = sizeof from;
+            continue;
+        } else if (sscanf(buf, "hwheel %d", &value) == 1) {
+            // The 3D mouse's horizontal wheel, from the input relay like "wheel": notches, positive
+            // right. No reply. Only the panel the laser is on; a carry or a press just started drops it.
+            const int screen = ft_vr_mouse_screen();
+            if (value && screen >= 0) {
+                struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dx = value};
+                handle_vr_event(&e, s);
             }
             len = sizeof from;
             continue;
@@ -1377,18 +1461,22 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--screen") == 0 && i + 1 < argc && s.n_config < MAX_SCREENS) {
             struct config *c = &s.config[s.n_config];
             c->metres = 0;
-            if (sscanf(argv[++i], "%dx%d@%lf", &c->width, &c->height, &c->metres) < 2) {
+            double scale = 1.0;
+            int n = sscanf(argv[++i], "%dx%d@%lfx%lf", &c->width, &c->height, &c->metres, &scale);
+            if (n < 2 || c->width <= 0 || c->height <= 0) {
                 fprintf(stderr, "bad --screen %s (want WxH@METRES)\n", argv[i]);
                 return 2;
             }
+            c->width += c->width & 1, c->height += c->height & 1;
             if (c->metres <= 0) c->metres = 1.5 * c->width / 1920.0;
+            if (n == 4 && scale >= 0.25 && scale <= 8.0) s.scale[s.n_config] = scale;
             ++s.n_config;
         } else if (strcmp(argv[i], "--") == 0) {
             command = &argv[i + 1];
             break;
         } else {
             fprintf(stderr,
-                    "usage: %s [--log FILE] [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES]... "
+                    "usage: %s [--log FILE] [--socket NAME] [--control NAME] [--no-vr] [--beside] [--screen WxH@METRES[xSCALE]]... "
                     "[--spares N] [--rates F,V,H] [-- COMMAND ARGS...]\n",
                     argv[0]);
             return 2;
@@ -1422,14 +1510,15 @@ int main(int argc, char **argv) {
     wlr_subcompositor_create(s.display);
     // KWin 6.6's nested backend exits unless the host offers these. The names are the
     // Wayland interfaces; scripts/update-check.py looks for them in this binary.
-    if (!wlr_single_pixel_buffer_manager_v1_create(s.display) || !wlr_viewporter_create(s.display) ||
+    if (!wlr_fractional_scale_manager_v1_create(s.display, 1) ||
+        !wlr_single_pixel_buffer_manager_v1_create(s.display) || !wlr_viewporter_create(s.display) ||
         !wlr_pointer_constraints_v1_create(s.display) || !wlr_presentation_create(s.display, NULL, 2)) {
-        wlr_log(WLR_ERROR, "can't offer wp_single_pixel_buffer_manager_v1, wp_viewporter, "
+        wlr_log(WLR_ERROR, "can't offer wp_fractional_scale_manager_v1, wp_single_pixel_buffer_manager_v1, wp_viewporter, "
                            "zwp_pointer_constraints_v1, or wp_presentation");
         return 1;
     }
     wlr_log(WLR_INFO, "host protocols: wl_compositor wl_subcompositor xdg_wm_base wl_shm wl_seat "
-                      "zwp_linux_dmabuf_v1 wp_single_pixel_buffer_manager_v1 wp_viewporter "
+                      "zwp_linux_dmabuf_v1 wp_fractional_scale_manager_v1 wp_single_pixel_buffer_manager_v1 wp_viewporter "
                       "zwp_pointer_constraints_v1 wp_presentation");
     const uint32_t shm_formats[] = {DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888};  // wlroots wants DRM codes
     wlr_shm_create(s.display, 1, shm_formats, 2);

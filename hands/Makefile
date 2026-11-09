@@ -18,8 +18,8 @@ LDLIBS    = $(NCNN)/lib/libncnn.a -ljsoncpp -fopenmp -lpthread
 LDFLAGS  ?=
 
 CAMD  = camd/camd.c camd/tp.c camd/xrcams.c
-TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp
-HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h ../conf/ft_conf.h
+TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp track/calibfile.cpp
+HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h include/fh_calib.h ../conf/ft_conf.h
 
 all: build/ft-camd build/ft-hands
 tools: build/ft-handreplay build/ft-ringplay
@@ -52,11 +52,16 @@ build/flagbuf-test: tests/flagbuf_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/flagbuf_test.cpp $(TRACK) $(LDLIBS)
 
-check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test
+check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/calibfile-test
 	build/sides-test
 	build/skeleton-test
 	build/pinch-test
 	build/flagbuf-test
+	build/calibfile-test
+
+build/calibfile-test: tests/calibfile_test.cpp track/calibfile.cpp track/calibfile.h track/calib.h include/fh_calib.h include/fh_shm.hpp
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ tests/calibfile_test.cpp track/calibfile.cpp
 
 build/ft-ringplay: track/ringplay.cpp track/record.h camd/fhring.h
 	@mkdir -p build

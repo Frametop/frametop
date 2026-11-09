@@ -287,6 +287,28 @@ void TestFistGuard() {
     CHECK(old.begins == 1, "guard off: the fist pinches (%d)", old.begins);
 }
 
+// Another producer had the gestures file (run_dir/held) and let go with a pinch down: once
+// ft-hands writes again, nothing is down, and the counters never go back.
+void TestHandoverLeftDown() {
+    static fh_gestures_t file;
+    const Pinch pinch{Params()};
+    const Grip grip{};
+    GesturePublisher pub;
+    pub.use(&file, pinch, grip);
+    pub.write(pinch, grip, 1000);
+    // the other producer's turn: a pinch on the right hand began and didn't end
+    file.seq += 2;
+    file.pinch[1].begins += 1;
+    file.pinch[1].flags |= FH_PINCH_DOWN;
+    const uint32_t begins = file.pinch[1].begins;
+    pub.end_left_down();
+    CHECK(file.pinch[1].ends == begins && (file.pinch[1].flags & FH_PINCH_LOST), "the pinch left down ends, as lost");
+    pub.write(pinch, grip, 2000);
+    CHECK(file.pinch[1].begins == begins && file.pinch[1].ends == begins,
+          "after a write: nothing down, counters kept (%u, %u)", file.pinch[1].begins, file.pinch[1].ends);
+    CHECK(file.seq % 2 == 0, "the sequence lock is even after the writes (%llu)", (unsigned long long)file.seq);
+}
+
 }  // namespace
 
 int main() {
@@ -296,6 +318,7 @@ int main() {
     TestDip();
     TestFistGuard();
     TestDefaults();
+    TestHandoverLeftDown();
     if (failures) {
         std::printf("%d failures\n", failures);
         return 1;

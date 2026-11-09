@@ -122,21 +122,27 @@ std::string run_dir() {
 bool Publisher::open(std::string &err) {
     const std::string path = run_dir() + "/hands";
     const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
-    if (fd < 0 || ftruncate(fd, sizeof(fh_hands_v2_t)) < 0) return err = path + ": " + std::strerror(errno), false;
-    void *m = mmap(nullptr, sizeof(fh_hands_v2_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (fd < 0 || ftruncate(fd, sizeof(fh_hands_v3_t)) < 0) return err = path + ": " + std::strerror(errno), false;
+    void *m = mmap(nullptr, sizeof(fh_hands_v3_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (m == MAP_FAILED) return err = path + ": can't map it", false;
-    use(static_cast<fh_hands_v2_t *>(m));
+    use(static_cast<fh_hands_v3_t *>(m));
     return true;
 }
 
-void Publisher::use(fh_hands_v2_t *mem) {
+void Publisher::use(fh_hands_v3_t *mem) {
     file_ = mem;
     out_ = &file_->v1;
     std::memset(file_, 0, sizeof *file_);
+    stamp();
+}
+
+void Publisher::stamp() {
     std::memcpy(out_->magic, FH_HANDS_MAGIC, 8);
     out_->version = FH_HANDS_VERSION;
-    out_->size = sizeof(fh_hands_v2_t);
+    out_->size = sizeof(fh_hands_v3_t);
+    std::memset(file_->src.producer, 0, sizeof file_->src.producer);
+    std::strncpy(file_->src.producer, "ft-hands", sizeof file_->src.producer - 1);
 }
 
 static_assert(sizeof(fh_hand_fit_t::angles) / sizeof(float) == skel::kAngles, "fh_hand_fit_t angles");
@@ -177,8 +183,10 @@ void Publisher::write(const std::vector<const Hand *> &in, uint64_t capture_ns) 
     std::vector<const Hand *> hands = in;
     std::sort(hands.begin(), hands.end(), [](const Hand *a, const Hand *b) { return a->frames > b->frames; });
     if (hands.size() > FH_HANDS_MAX_HANDS) hands.resize(FH_HANDS_MAX_HANDS);
+    seq_ = std::max(seq_, out_->seq / 2);   // past another producer's publishes (run_dir/held)
     __atomic_store_n(&out_->seq, 2 * ++seq_ - 1, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
+    stamp();
     uint32_t nc = 0;
     for (size_t k = 0; k < FH_HANDS_MAX_HANDS; ++k) {
         fh_hand_t &o = out_->hands[k];

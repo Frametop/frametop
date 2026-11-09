@@ -49,6 +49,7 @@ test-c:
         local name=$1 log=build/tests/last.log; shift
         if "$@" >"$log" 2>&1; then echo "$name: ok"; else echo "$name: FAILED"; cat "$log"; status=1; fi
     }
+    run screens/tests/screen-scale-test.c scripts/test-screen-scale.sh
     g++ -std=c++17 -Wall -Wextra -Werror screens/tests/barhit-test.cpp -o build/tests/barhit-test
     run screens/tests/barhit-test.cpp build/tests/barhit-test
     g++ -std=c++17 -Wall -Wextra -Werror screens/tests/resizecorner-test.cpp -o build/tests/resizecorner-test
@@ -152,6 +153,9 @@ test-c:
     run hands/tests/skeleton_test.cpp build/tests/skeleton-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror hands/tests/shm_test.cpp -o build/tests/shm-test
     run hands/tests/shm_test.cpp build/tests/shm-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-unused-parameter hands/tests/calibfile_test.cpp hands/track/calibfile.cpp \
+      -o build/tests/calibfile-test
+    run hands/tests/calibfile_test.cpp build/tests/calibfile-test
     gcc -std=gnu11 -Wall -Wextra -Werror hands/tests/xrcams_test.c -o build/tests/xrcams-test
     run hands/tests/xrcams_test.c build/tests/xrcams-test
     # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled

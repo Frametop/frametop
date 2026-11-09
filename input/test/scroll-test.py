@@ -135,5 +135,17 @@ p.wheel_to = lambda n: False  # off the panels again
 p.motion(relay.REL_WHEEL, 1, 11.0)
 check("off the panels, the joystick again", scrolls(p), ["scroll 0 1"])
 
+# ---------------------------------------------------------------- the horizontal wheel
+p = pointer()
+taken = []
+p.wheel_to = lambda n, horizontal=False: taken.append((n, horizontal)) or True
+for v in (1, 1, -1):
+    p.motion(relay.REL_HWHEEL, v, 10.0)
+check("on a panel, the horizontal wheel goes to ft-screens as such", taken, [(1, True), (1, True), (-1, True)])
+check("and never moves the joystick", scrolls(p), [])
+p.wheel_to = lambda n, horizontal=False: False  # off the panels
+p.motion(relay.REL_HWHEEL, 1, 11.0)
+check("off the panels, the horizontal wheel does nothing", scrolls(p), [])
+
 print("FAILED: " + ", ".join(failures) if failures else "all passed")
 sys.exit(1 if failures else 0)

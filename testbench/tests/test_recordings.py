@@ -167,6 +167,18 @@ def hands_set(t_ns, pinch_right, seq=2):
     return bytes(hands) + bytes(gestures) + struct.pack('<q', t_ns)
 
 
+def later_version(one_set):
+    """The same set as a later ft-hands dumps it: hands v3 (4832 bytes), gestures v4 (512),
+    each with a producer at the end the testbench doesn't write."""
+    hands = bytearray(one_set[:fakes.HANDS_SIZE]) + bytearray(4832 - fakes.HANDS_SIZE)
+    gestures = bytearray(one_set[fakes.HANDS_SIZE:-8]) + bytearray(512 - fakes.GESTURES_SIZE)
+    struct.pack_into('<II', hands, 8, 3, 4832)
+    struct.pack_into('16s', hands, fakes.HANDS_SIZE, b'other-tracker')
+    struct.pack_into('<II', gestures, 8, 4, 512)
+    struct.pack_into('16s', gestures, fakes.GESTURES_SIZE, b'other-tracker')
+    return bytes(hands) + bytes(gestures) + one_set[-8:]
+
+
 class HandsReplayTests(Base):
     def dump(self, sets):
         path = self.dir / 'hands.fhdump'
@@ -222,12 +234,40 @@ class HandsReplayTests(Base):
         self.assertFalse(player.active())
         self.assertEqual(self.gestures()[1][2] - self.gestures()[1][3], 0)
 
+    def test_a_dump_of_later_versions_plays_as_the_testbench_versions(self):
+        base = 9_000_000_000_000
+        sets = [later_version(hands_set(base, (1, 0))), later_version(hands_set(base + 100_000_000, (1, 1)))]
+        path = self.dir / 'later.fhdump'
+        path.write_bytes(fakes.DUMP_MAGIC + struct.pack('<II', 4832, 512) + b''.join(sets))
+        player = self.player()
+        self.assertTrue(player.command(f'replay-hands {path} once')['ok'])
+        seen, pinches = None, []
+        end = time.monotonic() + 2
+        while player.active() and time.monotonic() < end:
+            player.tick(time.monotonic())
+            if (self.dir / 'hands/hands').exists():
+                hands = (self.dir / 'hands/hands').read_bytes()
+                if seen is None and struct.unpack_from('<I', hands, 64)[0] == 7:
+                    seen = hands, (self.dir / 'hands/gestures').read_bytes()
+                g = self.gestures()[1][2:]
+                if not pinches or pinches[-1] != g:
+                    pinches.append(g)
+            time.sleep(0.002)
+        self.assertFalse(player.active())
+        self.assertIsNotNone(seen)
+        hands, gestures = seen
+        self.assertEqual(struct.unpack_from('<II', hands, 8), (2, fakes.HANDS_SIZE))
+        self.assertEqual(struct.unpack_from('<II', gestures, 8), (3, fakes.GESTURES_SIZE))
+        self.assertNotIn(b'other-tracker', hands + gestures)
+        self.assertEqual(pinches, [(1, 0), (1, 1)])
+
     def test_bad_dumps_are_refused(self):
         base = 1_000_000_000
         good = hands_set(base, (0, 0))
         cases = {
             'wrong magic': b'FHDUMP01' + struct.pack('<II', fakes.HANDS_SIZE, fakes.GESTURES_SIZE) + good,
             'wrong sizes': fakes.DUMP_MAGIC + struct.pack('<II', 4000, fakes.GESTURES_SIZE) + good,
+            'too big': fakes.DUMP_MAGIC + struct.pack('<II', 1 << 20, fakes.GESTURES_SIZE) + good,
             'cut off': fakes.DUMP_MAGIC + struct.pack('<II', fakes.HANDS_SIZE, fakes.GESTURES_SIZE) + good[:-1],
             'no sets': fakes.DUMP_MAGIC + struct.pack('<II', fakes.HANDS_SIZE, fakes.GESTURES_SIZE),
             'backwards': fakes.DUMP_MAGIC + struct.pack('<II', fakes.HANDS_SIZE, fakes.GESTURES_SIZE)

@@ -159,13 +159,19 @@ STEAMVR_STATE = """(() => {
     if (m && +m[1] > 0) { app = +m[1]; break; }
   }
   let ours = false;
-  const top = f.m_entryAtTopOfStack && f.m_entryAtTopOfStack.m_unPanelSGID;
+  const entry = f.m_entryAtTopOfStack;
+  const top = entry && entry.m_unPanelSGID;
+  let key = '-';
   for (const o of window.OverlayStore.m_mapAllOverlays.values())
-    if (top && o.unStandalonePanelSGID == top) ours = /^(frametop\\.|org\\.framekeyboard\\.)/.test(o.sOverlayKey || '')
-      && !/^frametop\\.(probe\\.)?gamepad$/.test(o.sOverlayKey || '');
+    if (top && o.unStandalonePanelSGID == top) {
+      ours = /^(frametop\\.|org\\.framekeyboard\\.)/.test(o.sOverlayKey || '')
+        && !/^frametop\\.(probe\\.)?gamepad$/.test(o.sOverlayKey || '');
+      // One token: a key with a space in it would fail the reply's check and drop the Gamepad update too.
+      if (entry.m_bPanelVisible && entry.m_bCanTakeKeyboardFocus && /^\\S+$/.test(o.sOverlayKey || '')) key = o.sOverlayKey;
+    }
   const pad = f.m_eSystemPanelInteractionMode == 2 && !ours;
   const mine = pad && pid && f.m_unPIDForVRInput == pid && !f.m_unSteamInputAppID;
-  return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0);
+  return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0) + ' ' + key;
 })()""" % GAMEPAD_KEY
 # The gamepad pill's click: frametop.gamepad's page takes SteamVR's input focus, and the dashboard
 # closes, which puts SteamVR's controllers in Gamepad mode for it (SteamVR's own pill does the same
@@ -181,10 +187,34 @@ GAMEPAD_PUSH = """(() => {
 DASHPATCH = "\0ft_dashpatch"
 
 
+class NativeFocus:
+    """Bridge changes in SteamVR's clicked focus, not laser hover, to ft-screens.
+
+    Only gamescope's native app windows are handled here. Frametop's panels already
+    report their own clicks, and Full Keyboard must keep the previous typing target.
+    Do not renew a native click every second: stale focus must not undo a later desktop
+    click or Frunner's keyboard lease. A failed send is retried on the next sample.
+    """
+
+    def __init__(self):
+        self.last = None
+
+    def update(self, key, out):
+        if key == self.last:
+            return
+        if re.fullmatch(r"gamescope\.[A-Za-z0-9_-]+\.window\.\d+", key):
+            try:
+                out.sendto(f"click {key}".encode(), SCREENS)
+            except OSError:
+                return
+        self.last = key
+
+
 def watch_steamvr():
     """Tells ft-screens SteamVR's Gamepad mode and theater game: on change and every second."""
     out = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     ws, rid, last, sent = None, 0, None, 0.0
+    focus = NativeFocus()
     while True:
         time.sleep(0.2)
         try:
@@ -210,8 +240,10 @@ def watch_steamvr():
                     pass
             ws = None
             continue
-        if not isinstance(value, str) or not re.fullmatch(r"[01] \d+ [01]", value):
+        if not isinstance(value, str) or not re.fullmatch(r"[01] \d+ [01] \S+", value):
             continue
+        value, key = value.rsplit(" ", 1)
+        focus.update(key, out)
         now = time.monotonic()
         if value != last or now - sent >= 1:
             if value != last:

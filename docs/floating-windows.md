@@ -1,5 +1,19 @@
 # Floating windows
 
+Any desktop app can float in VR in a panel of its own, like SteamVR's floating windows, while it stays part of the Frametop desktop. Drag and drop, the clipboard, and focus keep working between floating windows and the screens.
+
+- **Float a window** with "Float in VR" in its window menu (Alt+F3), the float button left of Close in its title bar, or the float key (Meta+Shift+F by default). Start an app floating with "Launch as Standalone" in its right-click menu in the Application Launcher or the taskbar, with `ft-float launch` or `ft-float run`, or from a profile ([profiles.md](profiles.md)).
+- **Tear it off** its screen: move it by its title bar and pull the wheel (scroll toward you). It floats and stays on the laser.
+- **Put it back** with the dock button under its panel, the title bar button, the float key, or "Back to Desktop" in the window menu. It returns to the screen, position, and size it came from. Or carry it onto a screen until the screen lights up, and let go: it docks there. The `dock_all` action docks every floating window.
+- **Move it** by its title bar or the bar under its panel (the wheel pushes and pulls it), **resize it** by its edges or the corner tab, **make it bigger or smaller** at the same pixels by scrolling on the corner tab, and **change its scale** with Meta+scroll over it. Each app's last floating place, size, density, and scale are remembered.
+- Files, text, and images drag between any two floating windows, and between floating windows and the screens.
+
+Desktopless mode floats every window at once and hides the screens ([desktopless.md](desktopless.md)).
+
+How KWin behaves underneath all this, and what the KWin script does about it, is in [design.md](design.md#floating-windows).
+
+## Drag bars and resize corners
+
 **Hover haptics (move bar, controller lasers only)** gives one short buzz on entering the actual move-bar target, only to the physical controller whose laser enters. It defaults on (`GRAB_BAR_HAPTICS=1`) and is independent of the drag-zone preview; mouse/gaze/near-hand hover never buzzes a controller.
 
 The drag bar below a screen or floating window can have a larger laser target. In **Frametop Display Settings → Visibility & pins → Window controls**, set **Vertical padding** and **Horizontal padding** independently in centimetres, from 0 to 50 cm per side (default: 2 cm). For example, 2 cm horizontal padding adds 2 cm on the left and right: the target is 4 cm wider than the visible pill. Zero padding gives the original target. These apply immediately to controller lasers and the 3D mouse, and are saved as `GRAB_BAR_PADDING_Y` and `GRAB_BAR_PADDING_X` in `~/.config/frametop.conf`. Padding stays the same physical size as the visible pill auto-sizes with distance and window width; there is no multiplier mode. The row moves down and neighboring buttons move sideways as needed so the target cannot cover window content or those buttons. Near-hand grab margins remain separate.
@@ -14,17 +28,7 @@ The draggable zone in VR (cropped headset capture, with the wearer's approval):
 
 ![A translucent orange drag zone and thin outline around the visible bar](images/drag-zone-vr.png)
 
-Any desktop app can float in VR in a panel of its own, like SteamVR's floating windows, while it stays part of the Frametop desktop. Drag and drop, the clipboard, and focus keep working between floating windows and the screens.
-
-- **Float a window** with "Float in VR" in its window menu (Alt+F3), the float button left of Close in its title bar, or the float key (Meta+Shift+F by default). Start an app floating with "Launch as Standalone" in its right-click menu in the Application Launcher or the taskbar, with `ft-float launch` or `ft-float run`, or from a profile ([profiles.md](profiles.md)).
-- **Tear it off** its screen: move it by its title bar and pull the wheel (scroll toward you). It floats and stays on the laser.
-- **Put it back** with the dock button under its panel, the title bar button, the float key, or "Back to Desktop" in the window menu. It returns to the screen, position, and size it came from. Or carry it onto a screen until the screen lights up, and let go: it docks there. The `dock_all` action docks every floating window.
-- **Move it** by its title bar or the bar under its panel (the wheel pushes and pulls it), **resize it** by its edges or the corner tab, **make it bigger or smaller** at the same pixels by scrolling on the corner tab, and **change its scale** with Meta+scroll over it. Each app's last floating place, size, density, and scale are remembered.
-- Files, text, and images drag between any two floating windows, and between floating windows and the screens.
-
-Desktopless mode floats every window at once and hides the screens ([desktopless.md](desktopless.md)).
-
-How KWin behaves underneath all this, and what the KWin script does about it, is in [design.md](design.md#floating-windows).
+Resize controls have configurable outline styles, shaped hover targets, previews, persistent corners and controller-only hover haptics. See [Resize corners](resize-corners.md) for settings and headset screenshots; the original soft-glow behavior remains available.
 
 ## Not built
 

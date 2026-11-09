@@ -707,6 +707,139 @@ class Backend(QObject):
     def setGrabBarOutlineWidth(self, width):
         self._setBarNumber("GRAB_BAR_OUTLINE_WIDTH", width, 1.0, 0.0, 8.0)
 
+    # Resize corners take their numbers and live settings the same way as the drag bars.
+    _resizeNumber = _barNumber
+    _setResize = _setBar
+
+    def _setResizeNumber(self, key, value, default, lo, hi):
+        value = max(lo, min(hi, value)) if math.isfinite(value) else default
+        self._setResize(key, f"{value:g}")
+
+    def _resizeColor(self, key, default):
+        value = ft_layout.read_conf().get(key, default)
+        return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else default
+
+    def _setResizeColor(self, key, value):
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+            self._setResize(key, value.lower())
+
+    @Property(str, notify=changed)
+    def resizeCornerStyle(self):
+        value = ft_layout.read_conf().get("RESIZE_CORNER_STYLE", "native")
+        return value if value in ("sharp", "glow", "native") else "native"
+
+    @Slot(str)
+    def setResizeCornerStyle(self, style):
+        if style in ("sharp", "glow", "native"):
+            self._setResize("RESIZE_CORNER_STYLE", style)
+
+    @Property(str, notify=changed)
+    def resizeCornerColor(self):
+        return self._resizeColor("RESIZE_CORNER_COLOR", "#f6f9ff")
+
+    @Slot(str)
+    def setResizeCornerColor(self, color):
+        self._setResizeColor("RESIZE_CORNER_COLOR", color)
+
+    @Property(float, notify=changed)
+    def resizeCornerOpacity(self):
+        return self._resizeNumber("RESIZE_CORNER_OPACITY", 0.27, 0, 1)
+
+    @Slot(float)
+    def setResizeCornerOpacity(self, opacity):
+        self._setResizeNumber("RESIZE_CORNER_OPACITY", opacity, 0.27, 0, 1)
+
+    @Property(float, notify=changed)
+    def resizeCornerLength(self):
+        return self._resizeNumber("RESIZE_CORNER_LENGTH", 4.7, 1, 10)
+
+    @Slot(float)
+    def setResizeCornerLength(self, cm):
+        self._setResizeNumber("RESIZE_CORNER_LENGTH", cm, 4.7, 1, 10)
+
+    @Property(float, notify=changed)
+    def resizeCornerWidth(self):
+        return self._resizeNumber("RESIZE_CORNER_WIDTH", 5.1, 0.5, 6)
+
+    @Slot(float)
+    def setResizeCornerWidth(self, mm):
+        self._setResizeNumber("RESIZE_CORNER_WIDTH", mm, 5.1, 0.5, 6)
+
+    @Property(str, notify=changed)
+    def resizeCornerHoverColor(self):
+        return self._resizeColor("RESIZE_CORNER_HOVER_COLOR", "#66ddff")
+
+    @Slot(str)
+    def setResizeCornerHoverColor(self, color):
+        self._setResizeColor("RESIZE_CORNER_HOVER_COLOR", color)
+
+    @Property(float, notify=changed)
+    def resizeCornerGap(self):
+        return self._resizeNumber("RESIZE_CORNER_GAP", 3.1, 0, 10)
+
+    @Slot(float)
+    def setResizeCornerGap(self, cm):
+        self._setResizeNumber("RESIZE_CORNER_GAP", cm, 3.1, 0, 10)
+
+    @Property(float, notify=changed)
+    def resizeCornerPadding(self):
+        return self._resizeNumber("RESIZE_CORNER_PADDING", 2.4, 0.1, 10)
+
+    @Slot(float)
+    def setResizeCornerPadding(self, cm):
+        self._setResizeNumber("RESIZE_CORNER_PADDING", cm, 2.4, 0.1, 10)
+
+    @Property(float, notify=changed)
+    def resizeCornerExclusion(self):
+        return self._resizeNumber("RESIZE_CORNER_EXCLUSION", 0.5, 0, 5)
+
+    @Slot(float)
+    def setResizeCornerExclusion(self, cm):
+        self._setResizeNumber("RESIZE_CORNER_EXCLUSION", cm, 0.5, 0, 5)
+
+    @Property(float, notify=changed)
+    def resizeCornerReach(self):
+        return self._resizeNumber("RESIZE_CORNER_REACH", 20, 1, 50)
+
+    @Slot(float)
+    def setResizeCornerReach(self, cm):
+        self._setResizeNumber("RESIZE_CORNER_REACH", cm, 20, 1, 50)
+
+    @Property(float, notify=changed)
+    def resizeCornerRoundness(self):
+        return self._resizeNumber("RESIZE_CORNER_ROUNDNESS", 100, 0, 100)
+
+    @Slot(float)
+    def setResizeCornerRoundness(self, percent):
+        self._setResizeNumber("RESIZE_CORNER_ROUNDNESS", percent, 100, 0, 100)
+
+    @Property(bool, notify=changed)
+    def resizeCornerPreview(self):
+        return ft_layout.read_conf().get("RESIZE_CORNER_PREVIEW", "0") == "1"
+
+    @Slot(bool)
+    def setResizeCornerPreview(self, on):
+        self._setResize("RESIZE_CORNER_PREVIEW", "1" if on else "0")
+
+    @Property(bool, notify=changed)
+    def resizeCornerHaptics(self):
+        return ft_layout.read_conf().get("RESIZE_CORNER_HAPTICS", "1") == "1"
+
+    @Slot(bool)
+    def setResizeCornerHaptics(self, on):
+        self._setResize("RESIZE_CORNER_HAPTICS", "1" if on else "0")
+
+    @Property("QVariantList", notify=changed)
+    def resizeCornerAlways(self):
+        conf = ft_layout.read_conf()
+        return [conf.get(f"RESIZE_CORNER_ALWAYS_{corner}", "1" if corner == "BR" else "0") == "1"
+                for corner in ("TL", "TR", "BL", "BR")]
+
+    @Slot(int, bool)
+    def setResizeCornerAlways(self, index, on):
+        if 0 <= index < 4:
+            self._setResize(f"RESIZE_CORNER_ALWAYS_{('TL', 'TR', 'BL', 'BR')[index]}", "1" if on else "0")
+
     # --- head pin modes (SCREEN_PIN_LEVEL; ft-screens takes it live, "handsetting") ---
     # 0 rides on the headset, 1 follows turning and walking but stays level, 2 (Walk) follows
     # walking only: no turning, looking up or down, or crouching.

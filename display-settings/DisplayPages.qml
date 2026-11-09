@@ -4,6 +4,7 @@
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Dialogs
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -1199,6 +1200,197 @@ Item {
                               + "when needed to keep them outside the target. The preview follows the bars' normal fade, "
                               + "unless kept visible. Settings apply immediately and are saved. Outline pixels are relative "
                               + "to the original 256×24 pill texture; 0 hides the outline."
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Resize corners" }
+                    Controls.CheckBox {
+                        text: "Preview resize hover targets"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        checked: backend.resizeCornerPreview
+                        onToggled: backend.setResizeCornerPreview(checked)
+                    }
+                    Repeater {
+                        model: 4
+                        delegate: Controls.CheckBox {
+                            required property int index
+                            enabled: backend.resizeCornerStyle !== "glow"
+                            text: "Always show " + ["top-left", "top-right", "bottom-left", "bottom-right"][index] + " corner"
+                            checked: backend.resizeCornerAlways[index]
+                            onToggled: {
+                                backend.setResizeCornerAlways(index, checked)
+                                checked = Qt.binding(() => backend.resizeCornerAlways[index])
+                            }
+                        }
+                    }
+                    Controls.ComboBox {
+                        Kirigami.FormData.label: "Indicator style:"
+                        model: ["Sharp outline", "Soft glow (original behavior)", "SteamOS-like (gray → white)"]
+                        currentIndex: backend.resizeCornerStyle === "native" ? 2 : backend.resizeCornerStyle === "glow" ? 1 : 0
+                        onActivated: backend.setResizeCornerStyle(["sharp", "glow", "native"][currentIndex])
+                    }
+                    Controls.CheckBox {
+                        text: "Hover haptics (controller lasers only)"
+                        checked: backend.resizeCornerHaptics
+                        onToggled: backend.setResizeCornerHaptics(checked)
+                    }
+                    Controls.Label {
+                        visible: backend.resizeCornerStyle === "glow"
+                        text: "Original soft glow restores the original appearance, proximity fade and square resize hit area. "
+                              + "The new geometry, colors, opacity, preview, always-visible corners and exclusion rules are not used. "
+                              + "Your settings remain saved for the other styles. Optional hover haptics still apply."
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Indicator color:"
+                        enabled: backend.resizeCornerStyle === "sharp"
+                        Rectangle {
+                            color: backend.resizeCornerColor
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+                            Layout.preferredHeight: Kirigami.Units.gridUnit
+                            border.color: Kirigami.Theme.textColor
+                        }
+                        Controls.Button { text: "Choose…"; onClicked: resizeCornerColorDialog.open() }
+                        ColorDialog {
+                            id: resizeCornerColorDialog
+                            title: "Resize corner color"
+                            selectedColor: backend.resizeCornerColor
+                            onAccepted: backend.setResizeCornerColor(selectedColor.toString())
+                        }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Indicator opacity:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerOpacity
+                            from: 0; to: 1; stepSize: 0.01
+                            value: backend.resizeCornerOpacity
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerOpacity(value)
+                        }
+                        Controls.Label { text: Math.round(resizeCornerOpacity.value * 100) + "%" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Outline arm length:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerLength
+                            from: 1; to: 10; stepSize: 0.1
+                            value: backend.resizeCornerLength
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerLength(value)
+                        }
+                        Controls.Label { text: resizeCornerLength.value.toFixed(1) + " cm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Outline thickness:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerWidth
+                            from: 0.5; to: 6; stepSize: 0.1
+                            value: backend.resizeCornerWidth
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerWidth(value)
+                        }
+                        Controls.Label { text: resizeCornerWidth.value.toFixed(1) + " mm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Gap from window:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerGap
+                            from: 0; to: 10; stepSize: 0.1
+                            value: backend.resizeCornerGap
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerGap(value)
+                        }
+                        Controls.Label { text: resizeCornerGap.value.toFixed(1) + " cm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Corner roundness:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerRoundness
+                            from: 0; to: 100; stepSize: 1
+                            value: backend.resizeCornerRoundness
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerRoundness(value)
+                        }
+                        Controls.Label { text: Math.round(resizeCornerRoundness.value) + "%" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Hover padding around outline:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerPadding
+                            from: 0.1; to: 10; stepSize: 0.1
+                            value: backend.resizeCornerPadding
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerPadding(value)
+                        }
+                        Controls.Label { text: resizeCornerPadding.value.toFixed(1) + " cm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Screen exclusion margin:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerExclusion
+                            from: 0; to: 5; stepSize: 0.1
+                            value: backend.resizeCornerExclusion
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerExclusion(value)
+                        }
+                        Controls.Label { text: resizeCornerExclusion.value.toFixed(1) + " cm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Approach preview radius:"
+                        enabled: backend.resizeCornerStyle !== "glow"
+                        Controls.Slider {
+                            id: resizeCornerReach
+                            from: 1; to: 50; stepSize: 0.5
+                            value: backend.resizeCornerReach
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setResizeCornerReach(value)
+                        }
+                        Controls.Label { text: resizeCornerReach.value.toFixed(1) + " cm" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Ready-to-drag color:"
+                        enabled: backend.resizeCornerStyle === "sharp"
+                        Rectangle {
+                            color: backend.resizeCornerHoverColor
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+                            Layout.preferredHeight: Kirigami.Units.gridUnit
+                            border.color: Kirigami.Theme.textColor
+                        }
+                        Controls.Button { text: "Choose…"; onClicked: resizeCornerHoverColorDialog.open() }
+                        ColorDialog {
+                            id: resizeCornerHoverColorDialog
+                            title: "Ready-to-drag corner color"
+                            selectedColor: backend.resizeCornerHoverColor
+                            onAccepted: backend.setResizeCornerHoverColor(selectedColor.toString())
+                        }
+                    }
+                    Controls.Label {
+                        visible: backend.resizeCornerStyle !== "glow"
+                        text: "A crisp, rounded corner outside the panel, or the original soft glow. "
+                              + "The indicator follows whichever of the four corners you approach. "
+                              + "The laser target follows the outline with padding, never a square. The window and its exclusion margin "
+                              + "cannot resize. The outline moves outward as needed to keep its whole padded target clear of that margin. "
+                              + "The approach radius only controls when feedback starts appearing. "
+                              + "On the actual target, the outline changes color, thickens and becomes fully bright: ready to drag. "
+                              + "SteamOS-like uses gray then almost-white feedback, with 12% longer arms, 20% thicker lines "
+                              + "and 3 mm extra gap on hover, without overwriting your custom colors. "
+                              + "Roundness runs from a square bend to a full round bend. "
+                              + "Hover growth/shrink and color changes animate over 180 ms inside a stable target. The preview draws the shaped target, "
+                              + "not the approach radius. Always-show choices keep any combination of corners visible on visible panels; "
+                              + "they do not bypass hiding, minimizing or pausing, or disable automatic feedback at other corners. "
+                              + "Laser target size also applies to the 3D mouse; "
+                              + "near-hand reach is unchanged. Native SteamVR window controls are unchanged."
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26

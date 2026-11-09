@@ -7073,7 +7073,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     const bool denied = !ft_pin_allowed();
     if (denied || wasDenied) {
         vr::VREvent_t ev;
-        for (auto it = g_pinOverlays.begin(); it != g_pinOverlays.end();) {
+        // Only as it locks and on the first unlocked tick: in between nothing here shows an
+        // overlay (PinShow hides while denied), and hidden ones get no laser events.
+        for (auto it = g_pinOverlays.begin(); denied != wasDenied && it != g_pinOverlays.end();) {
             char key[256];
             vr::EVROverlayError error;
             vr::VROverlay()->GetOverlayKey(it->first, key, sizeof key, &error);

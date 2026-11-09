@@ -50,8 +50,10 @@ import sherpa_onnx
 
 ROOT = Path(__file__).resolve().parent
 sys.path[:0] = [str(ROOT), str(ROOT.parent / "input"),  # its modules, vrws (SteamVR's web socket),
-                str(ROOT.parent / "commands")]  # and your Frametop commands ("run NAME")
+                str(ROOT.parent / "commands"),  # your Frametop commands ("run NAME"),
+                str(ROOT.parent / "conf")]  # and the Steam PIN gate (docs/steam-pin-lock.md)
 import ft_commands
+import ft_pinlock
 import voice_commands
 import voice_settings
 import vrws
@@ -1004,6 +1006,9 @@ class Voice:
     # --- wake word
 
     def on_wake(self, keyword):
+        if not ft_pinlock.allowed():
+            log.info("wake word: %s, ignored: Steam PIN locked", keyword)
+            return
         log.info("wake word: %s", keyword)
         self.chime("wake")
         self.broadcast("wake", keyword=keyword)
@@ -1048,6 +1053,9 @@ class Voice:
         # The capture can hold only the wake phrase's end ("Hey, Computer."): the spotter fires
         # late, and a pause after it (waiting for the chime) ends the capture before the command.
         # Then listen once more.
+        if not ft_pinlock.allowed():  # locked while it listened
+            log.info("command ignored: Steam PIN locked")
+            return
         text, had_wake = voice_commands.strip_wake(text, self.wake_phrases)
         if had_wake and not text.strip(" .!?,") and not again and self.command is None and self.recording is None:
             log.info("wake: only the wake phrase heard, listening again")

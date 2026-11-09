@@ -168,7 +168,7 @@ PIN is not disk encryption or a Linux login boundary.
 ## Offline checks
 
 ```sh
-python3 -m unittest discover -s steam/tests -v
+python3 -m unittest discover -s steam/test -p "test_pin_*.py" -v
 ```
 
 Thirty-five tests cover initial false, mandatory vs cancellable prompts, relocking,

@@ -6,7 +6,9 @@
 # re-serves the desktop over VNC. Started by frametop-session.sh when REMOTE=1.
 set -eu
 here=$(dirname "$(readlink -f "$0")")
-if python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import ft_pinlock; sys.exit(0 if ft_pinlock.enabled() else 1)' "$here/../conf"; then
+# 3: protection off. Anything else, an error included, counts as on.
+pin=0; python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import ft_pinlock; sys.exit(3 if not ft_pinlock.enabled() else 0)' "$here/../conf" || pin=$?
+if [ "$pin" -ne 3 ]; then
   echo 'Remote capture is unavailable with Steam PIN protection enabled' >&2
   exit 3
 fi

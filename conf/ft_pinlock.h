@@ -31,7 +31,7 @@ static inline bool ft_pin_fresh(int64_t boot, int64_t mono, int64_t now_boot, in
 static inline bool ft_pin_enabled(void) {
     static int enabled = -1;
     if (enabled < 0) {
-        char value[16];
+        char value[64];   /* (a longer value would read as unset: off, where the session says on) */
         enabled = ft_conf_setting("STEAM_PIN_LOCK", value, sizeof value) && strcmp(value, "0");
     }
     return enabled != 0;
@@ -55,10 +55,18 @@ static inline bool ft_pin_read(const char *path) {
     return ft_pin_fresh(boot, mono, ft_pin_ms(CLOCK_BOOTTIME), ft_pin_ms(CLOCK_MONOTONIC));
 }
 
+/* Read at most once per 10 ms in each program: ft-screens asks per screen and per event,
+ * many times a tick. (10 ms on top of the 750 ms lease.) */
 static inline bool ft_pin_allowed(void) {
     if (!ft_pin_enabled()) return true;
+    static int64_t read_ms = -1;
+    static bool allowed = false;
+    const int64_t now = ft_pin_ms(CLOCK_MONOTONIC);
+    if (read_ms >= 0 && now >= read_ms && now - read_ms < 10) return allowed;
     char path[128];
     snprintf(path, sizeof path, "/run/user/%u/frametop-pin-state", (unsigned)getuid());
-    return ft_pin_read(path);
+    allowed = ft_pin_read(path);
+    read_ms = now;
+    return allowed;
 }
 #endif

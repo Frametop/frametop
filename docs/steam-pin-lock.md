@@ -147,6 +147,12 @@ The extra lock-cycle requirement after restarting that older guard prompted the
 current fresh-state recovery change. That change needs its own live startup and
 recovery checks; the earlier tests do not establish its cold-boot safety.
 
+The fresh-state revision was loaded with a guard-only restart while Steam was
+already unlocked. It immediately reported unlocked/steam-unlocked and readbacks
+showed the desktop and floating windows visible, without a new Steam lock cycle
+or PIN prompt. The compositor, KWin and keyboard retained their processes. This
+checks warm observer startup, not the unverified cold-boot ordering above.
+
 ## Intended boundary
 
 The goal is to prevent a person using a PIN-locked headset from viewing or

@@ -2769,6 +2769,8 @@ bool Pointer::SettingCommand(const char *buf) {
             if (!hitRegions.count(key) && hitRegions.size() >= 64) hitRegions.clear();
             hitRegions[key] = std::move(region);
             ++visibleGen;  // invalidate a stationary pointer's cached collision pass
+        } else {
+            std::fprintf(stderr, "region: not a resize region, ignored (%zu bytes)\n", std::strlen(buf));
         }
         return true;
     }

@@ -22,6 +22,11 @@
 # while FreeRDP runs, and every 5 seconds otherwise. The log only wakes this script up;
 # what it says doesn't matter.
 set -eu
+here=$(dirname "$(readlink -f "$0")")
+if python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import ft_pinlock; sys.exit(0 if ft_pinlock.enabled() else 1)' "$here/../conf"; then
+  echo 'Remote serving is unavailable with Steam PIN protection enabled' >&2
+  exit 3
+fi
 
 here=$(dirname "$(readlink -f "$0")")
 vnc_port=${VNC_PORT:-5900}

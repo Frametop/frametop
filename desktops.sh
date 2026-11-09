@@ -63,12 +63,15 @@ fi
 echo \"installed ~/$override\"; grep ^Exec= ~/$override; echo; cat ~/.config/frametop.conf"
     # Start with SteamVR: always enabled, and it does nothing unless AUTOSTART=1 (session/autostart.sh).
     install_unit "$session_src/$autostart_unit"
+    install_unit "$session_src/frametop-pin-lock.service"
+    "$frame" --host "$(enable_units --quiet frametop-pin-lock.service)"
     "$frame" --host "$(enable_units --quiet $autostart_unit)" ;;
   uninstall)
     # Also what the session puts in place at each start: Launch as Standalone's app copies and
     # the title bar decoration (float/ft_apps.py, decoration/).
     "$frame" --host "rm -f ~/$override ~/$native_copy
 systemctl --user disable $autostart_unit 2>/dev/null; rm -f ~/.config/systemd/user/$autostart_unit; systemctl --user daemon-reload
+systemctl --user disable --now frametop-pin-lock.service 2>/dev/null; rm -f ~/.config/systemd/user/frametop-pin-lock.service; systemctl --user daemon-reload
 rm -rf ~/.local/share/frametop/apps ~/.local/share/kwin/decorations/kwin4_decoration_qml_frametop
 rmdir ~/.local/share/frametop 2>/dev/null; echo 'removed; the launcher uses the stock desktop again'" ;;
   screens)

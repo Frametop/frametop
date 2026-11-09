@@ -26,7 +26,7 @@ test-python:
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
         'tour/test/*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'steam/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
-        'scripts/tests/test_app_imports.py' \
+        'scripts/tests/test_app_imports.py' 'steam/tests/*.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'scripts/tests/test_install_keyboard.py' 'docs/tests/*.py' || status=1
     pytest -q session/tests || status=1
@@ -55,6 +55,8 @@ test-c:
     run screens/tests/resizecorner-test.cpp build/tests/resizecorner-test
     g++ -std=c++17 -Wall -Wextra -Werror pointer/tests/overlayregion-test.cpp -o build/tests/overlayregion-test
     run pointer/tests/overlayregion-test.cpp build/tests/overlayregion-test
+    gcc -std=c11 -Wall -Wextra -Werror screens/tests/pinlock-test.c -lm -o build/tests/pinlock-test
+    run screens/tests/pinlock-test.c build/tests/pinlock-test
     gcc -std=c11 -Wall -Wextra -Werror -I. screens/tests/controller-click-test.c \
       -lm -o build/tests/controller-click-test
     run screens/tests/controller-click-test.c build/tests/controller-click-test

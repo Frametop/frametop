@@ -40,6 +40,7 @@ done
 conf=$HOME/.config/frametop.conf
 BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=16 FLOAT_MARGIN=300
 NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin
+STEAM_PIN_LOCK=0
 # The file is shell, sourced, but only when every line is in its grammar (docs/config.md). A line
 # outside it (a value with a space or $(...) in it, "KEY = value") is one bash runs as a command:
 # with set -e that stopped the desktop here (exit 127), or ran whatever it named. Then
@@ -65,6 +66,21 @@ phys_width=${FT_PHYS_WIDTH:-$PHYS_WIDTH}
 remote=${FT_REMOTE:-$REMOTE}
 streams_only=${FT_STREAMS_ONLY:-0}
 notify_forward=${FT_NOTIFY_FORWARD:-$NOTIFY_FORWARD}
+export FT_STEAM_PIN_LOCK=${FT_STEAM_PIN_LOCK:-$STEAM_PIN_LOCK}
+if [ "$FT_STEAM_PIN_LOCK" != 0 ]; then
+  # Do not stop apps on lock. Independent capture/notification channels are
+  # unavailable in protected mode rather than pretending hidden panels secure them.
+  remote=0
+  notify_forward=off
+  if [ "$backend" != screens ]; then
+    echo 'Steam PIN protection requires the screens backend' >&2
+    exit 1
+  fi
+  if [ "${1:-}" != --inner ]; then
+    XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus \
+      systemctl --user start frametop-pin-lock.service || exit 1
+  fi
+fi
 # Floating windows (screens backend): KWin gets this many spare outputs after the screens,
 # and ft-floatd floats a window on each (docs/floating-windows.md). Changing it takes a
 # desktop restart.
@@ -120,6 +136,7 @@ if [ "${1:-}" != --inner ]; then
   # from a profile's launcher entry, or the default profile), which also opens its apps, or
   # else in the saved layout (skipped when auto-arrange is off). docs/profiles.md.
   # The log starts fresh here; ft-screens appends its later ft-layout runs to it.
+  # Layout/profile state can initialize behind the independent security gate.
   setsid "$here/../layout/ft-layout" start --wait 90 > "$XDG_RUNTIME_DIR/frametop-layout.log" 2>&1 < /dev/null &
 
   if [ "$backend" = gamescope ]; then

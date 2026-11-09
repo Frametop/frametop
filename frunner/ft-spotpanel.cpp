@@ -38,6 +38,7 @@
 // the picture: frunner/tools/render.py). Runs in the container (screens/build.sh
 // builds it into screens/build).
 #include <openvr.h>
+#include "../conf/ft_pinlock.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../conf/ftsock.h"
@@ -502,6 +503,11 @@ int main(int argc, char **argv) {
 
     std::vector<char> buf(65536);
     while (!g_stop) {
+        if (!ft_pin_allowed()) {
+            ov->HideOverlay(h);
+            shown = false;
+            dirty = true;
+        }
         sockaddr_un from{};
         socklen_t fromLen = sizeof from;
         ssize_t n;
@@ -542,7 +548,7 @@ int main(int argc, char **argv) {
                 g_stop = true;
             }
         while (ov->PollNextOverlayEvent(h, &ev, sizeof ev)) {
-            if (!visible) continue;
+            if (!visible || !ft_pin_allowed()) continue;
             const double x = ev.data.mouse.x, y = kH - ev.data.mouse.y;  // OpenVR's mouse origin is bottom left
             switch (ev.eventType) {
                 case vr::VREvent_MouseMove: {
@@ -573,7 +579,7 @@ int main(int argc, char **argv) {
                     break;
             }
         }
-        if (visible && dirty) {
+        if (visible && dirty && ft_pin_allowed()) {
             Draw(canvas, state);
             buffers.Present(ov, h, canvas);
             if (!shown) ov->ShowOverlay(h), shown = true;

@@ -9,6 +9,11 @@
 #include "framekeyboard/vr_runtime.hpp"
 #include "framekeyboard/vr_texture.hpp"
 #include "openvr.h"
+#if __has_include("../../conf/ft_pinlock.h")
+#include "../../conf/ft_pinlock.h"
+#else
+static bool ft_pin_allowed() { return true; }
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -653,6 +658,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
             .set_interaction = [&](bool active) { app.set_interaction_active(active); },
             .show_overlay =
                 [&](double now) {
+                    if (!ft_pin_allowed()) return;
                     app.paint(now);
                     panel.submit(app.renderer, app.view());
                     check(vr_overlay()->ShowOverlay(panel.handle()), "Show keyboard");
@@ -687,7 +693,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
     }
     // The dashboard, or with Frametop its desktop too (FrametopVr::surface).
     auto surface = [&] {
-        return hooks.surface(vr_overlay()->IsDashboardVisible(), replacement.state().open);
+        return ft_pin_allowed() && hooks.surface(vr_overlay()->IsDashboardVisible(), replacement.state().open);
     };
     auto dismiss_panel = [&] {
         if (app.take_dismissal()) {
@@ -709,7 +715,7 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
         const auto native = replacement.state();
         app.set_replacement_available(native.available, replacement.unavailable_reason());
         app.set_native_session(native.open);
-        const bool replace = app.replace_native_keyboard();
+        const bool replace = app.replace_native_keyboard() && ft_pin_allowed();
         const bool relaunch = hooks.begin_frame(instance.poll_recenter(), lifecycle.visible());
         lifecycle.begin_frame({.replacement_enabled = replace,
                                .native = native,

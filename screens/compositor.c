@@ -78,6 +78,7 @@
 #include "vr.h"
 #include "controller-click.h"
 #include "remote.h"
+#include "../conf/ft_pinlock.h"
 #include "logfile.h"
 #include "relay-buttons.h"
 #include "held-keys.h"
@@ -181,6 +182,7 @@ struct server {
     bool fullkb_auto;       // ...opened for a focused text field
     bool vr;               // connected to SteamVR (not --no-vr)
     bool beside;           // a second instance next to the desktop (--beside): remote screens only
+    bool pin_denied;
 };
 
 static uint32_t now_ms(void) {
@@ -544,6 +546,7 @@ static void set_key_remote(struct server *s, int index) {
 }
 
 static void handle_vr_event(const struct ft_event *e, void *data) {
+    if (e->type != FT_QUIT && !ft_pin_allowed()) return;
     struct server *s = data;
     if (e->type == FT_QUIT) {
         wl_display_terminate(s->display);
@@ -757,8 +760,26 @@ static void schedule(struct server *s) {
 }
 
 // Each tick: SteamVR events, and frame callbacks for screens that committed and are due.
+static void release_all_keys(struct server *s, char *reply, int size);
 static int tick(int fd, uint32_t mask, void *data) {
     struct server *s = data;
+    const bool denied = s->vr && !ft_pin_allowed();
+    if (denied && !s->pin_denied) {
+        char reply[256];
+        release_all_keys(s, reply, sizeof reply);
+        release_relay_buttons(s, "Steam PIN locked");
+        release_seat_buttons(s, "Steam PIN locked");
+        s->controller_click.held = s->controller_click.dragging = false;
+        s->controller_click.buttons = 0;
+        spot_dismiss(s, "Steam PIN locked");
+        relay_send(s, "kbpanel hide");
+        s->keys_clicked = s->keys_desktop = false;
+        wlr_seat_pointer_notify_clear_focus(s->seat);
+        s->pointer_focus = NULL;
+        wlr_seat_keyboard_notify_clear_focus(s->seat);
+        keys_update(s);
+    }
+    s->pin_denied = denied;
     uint64_t expirations;
     const ssize_t got = read(fd, &expirations, sizeof expirations);  // clears it; how many doesn't matter
     (void)got;
@@ -953,6 +974,7 @@ static void release_seat_buttons(struct server *s, const char *why) {
 // Steam would otherwise modify every key typed after it). Mouse buttons go where the
 // pointer is instead (relay_button), and codes that are neither go nowhere.
 static void handle_key(struct server *s, uint32_t code, int value, char *reply, int size) {
+    if (s->vr && !ft_pin_allowed()) return (void)snprintf(reply, size, "error Steam PIN locked");
     ft_vr_key(code, value);
     if (value == 2) return (void)snprintf(reply, size, "ok repeat ignored");  // KWin repeats itself
     if (ft_vr_carry_key(code, value)) return (void)snprintf(reply, size, "ok the carry's");
@@ -1079,11 +1101,25 @@ static int control_readable(int fd, uint32_t mask, void *data) {
     ssize_t n;
     while ((n = recvfrom(fd, buf, sizeof buf - 1, MSG_DONTWAIT, (struct sockaddr *)&from, &len)) > 0) {
         buf[n] = 0;
+        // Drop input, not the running session's layout/float metadata. Ordinary
+        // show/resume commands cannot clear the separate OpenVR security gate.
+        if (s->vr && !ft_pin_allowed() &&
+            (!strncmp(buf, "input ", 6) || !strncmp(buf, "key ", 4) || !strncmp(buf, "pad ", 4) ||
+             !strncmp(buf, "wheel ", 6) || !strncmp(buf, "vrkeyboard ", 11) || !strcmp(buf, "frunner on"))) {
+            const char *locked = "error Steam PIN locked";
+            if (len > offsetof(struct sockaddr_un, sun_path))
+                sendto(fd, locked, strlen(locked), MSG_DONTWAIT, (struct sockaddr *)&from, len);
+            len = sizeof from;
+            continue;
+        }
         unsigned code;
         int value, index, w, h;
         double scale;
         char tail;
-        if (strcmp(buf, "controller-click?") == 0) {
+        if (strcmp(buf, "pinlock?") == 0) {
+            snprintf(reply, sizeof reply, "ok %s", !s->vr || !ft_pin_enabled() ? "disabled" :
+                     ft_pin_allowed() ? "unlocked" : "locked");
+        } else if (strcmp(buf, "controller-click?") == 0) {
             snprintf(reply, sizeof reply,
                 "{\"supported\":true,\"threshold\":%.3f,\"held\":%s,\"dragging\":%s,\"suppressedMotions\":%lu,\"clicks\":%lu,\"drags\":%lu}",
                 s->controller_click.threshold, s->controller_click.held ? "true" : "false",

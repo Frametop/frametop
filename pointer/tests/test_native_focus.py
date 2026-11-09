@@ -40,6 +40,11 @@ class NativeFocusTests(unittest.TestCase):
             self.focus.update("gamescope.gamescope-0.window.70", self.out)
         self.assertEqual(self.out.sendto.call_count, 2)
 
+    def test_state_reply_sends_a_key_only_when_it_is_one_token(self):
+        # The watcher drops a reply that fails its check, the Gamepad mode with it.
+        self.assertIn("/^\\S+$/.test(o.sOverlayKey || '')) key = o.sOverlayKey", dashpatch.STEAMVR_STATE)
+        self.assertIn("let key = '-'", dashpatch.STEAMVR_STATE)
+
     def test_watcher_keeps_mode_protocol_and_sends_native_focus_change(self):
         ws = Mock()
         states = ["0 0 0 frametop.float.1", "0 0 0 gamescope.gamescope-0.window.70",

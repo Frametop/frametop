@@ -166,7 +166,8 @@ STEAMVR_STATE = """(() => {
     if (top && o.unStandalonePanelSGID == top) {
       ours = /^(frametop\\.|org\\.framekeyboard\\.)/.test(o.sOverlayKey || '')
         && !/^frametop\\.(probe\\.)?gamepad$/.test(o.sOverlayKey || '');
-      if (entry.m_bPanelVisible && entry.m_bCanTakeKeyboardFocus) key = o.sOverlayKey || '-';
+      // One token: a key with a space in it would fail the reply's check and drop the Gamepad update too.
+      if (entry.m_bPanelVisible && entry.m_bCanTakeKeyboardFocus && /^\\S+$/.test(o.sOverlayKey || '')) key = o.sOverlayKey;
     }
   const pad = f.m_eSystemPanelInteractionMode == 2 && !ours;
   const mine = pad && pid && f.m_unPIDForVRInput == pid && !f.m_unSteamInputAppID;

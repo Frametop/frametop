@@ -6972,7 +6972,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         while (vr::VROverlay()->PollNextOverlayEvent(s.bar, &ev, sizeof ev)) {
             if (ev.eventType == vr::VREvent_FocusLeave) s.barBuzz.Leave(int(ev.trackedDeviceIndex));
             if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_MouseButtonDown) {
-                if (s.barBuzz.Enter(int(ev.trackedDeviceIndex), IsHandController(ev.trackedDeviceIndex), g_barPreview.haptics) && s.drag == Drag::None)
+                // (the same controller moving on: no pulse, and no device queries per mouse move)
+                if (int(ev.trackedDeviceIndex) != s.barBuzz.device &&
+                    s.barBuzz.Enter(int(ev.trackedDeviceIndex), IsHandController(ev.trackedDeviceIndex), g_barPreview.haptics) && s.drag == Drag::None)
                     vr::VRSystem()->TriggerHapticPulse(ev.trackedDeviceIndex, 0, 1500);
             }
             hover(0);

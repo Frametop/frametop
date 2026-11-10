@@ -70,7 +70,7 @@ OPENVR = 'scripts/openvr.sh'
 STB = 'scripts/stb.sh'           # the pinned stb headers
 MODELDEPS = 'scripts/modeldeps.sh'   # the pinned libraries ft-model-import reads models with
 MODELFILE = 'avatar/modelfile.cpp'   # the model file's reader, built into ft-handview too
-AVATARS = ('avatar/bodyfile.cpp', 'avatar/pose', 'avatar/view')   # ft-avatars, built beside ft-handview: it wears its hands
+AVATARS = ('avatar/bodyfile.cpp', 'avatar/pose', 'avatar/view', 'avatar/face')   # ft-avatars, built beside ft-handview: it wears its hands
 HANDS_API = 'hands/include'   # ft-hands' event and gesture structs, which its readers include
 COMPONENTS = {
     'screens': ((HANDS_API, 'frunner/ft-spotpanel.cpp', 'frunner/reserve.h', MODELFILE, *AVATARS, OPENVR, STB),

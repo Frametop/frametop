@@ -9,11 +9,12 @@ How you look in Frametop: the hands ft-handview draws for you today, and the ava
 | `modelbytes.h` | Reading and writing the file's numbers, for both |
 | `vec.h` | A point in three dimensions, for the importer and the solver |
 | `pose/` | The pose solver (`bodypose.h`): a body's 55 bones from the wearer's head and hands. Sums only, no tracking, GPU or SteamVR code |
+| `face/` | An avatar's face while it is worn: when its eyes blink and how its mouth moves with a voice (`face.h`, sums only), the microphone it hears you by (`micear.h`), and the two together for the avatar you wear yourself (`ownface.h`). Built into `ft-avatars` |
 | `view/` | `ft-avatars`: bodies drawn with GLES 2, in pictures and in the mirror that shows you the avatar you wear. It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws and shows its mirror the way ft-handview shows them (`screens/vroutput.h`) |
 | `import/` | `ft-model-import`: a VRM, glTF, GLB or FBX model into a `.ftmodel` (`build.sh` builds it into `avatar/build/`) |
 | `ftmodel.py` | The same file read in Python, for the tests and the Settings page |
 | `hand_models.py`, `avatar_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove, and your avatars: which one you wear, and the mirror |
-| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, a tracked wearer), both in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb and the mirror), `test_appearance.py` (the page's backend) |
+| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, a tracked wearer) and `face-test.cpp` (the blinks, and the mouth on made-up voices), all in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb and the mirror), `test_appearance.py` (the page's backend) |
 
 ## The model file
 
@@ -66,11 +67,12 @@ The same solver poses your own body and the people you share a room with. It ref
 ## Drawing a body
 
 ```
-screens/build/ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S]
+screens/build/ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice]
 screens/build/ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...
 screens/build/ft-avatars --mirror-snapshot OUT.png MODEL [the same]
 screens/build/ft-avatars --thumb OUT.png MODEL [--size PX]
 screens/build/ft-avatars --poses
+screens/build/ft-avatars --hear SECONDS
 ```
 
 `ft-avatars` draws a model file's body on the GPU (`view/bodygpu.cpp`): the mesh is skinned in the vertex shader by the pose's 55 matrices, the face shapes move the vertices before that (`view/bodymesh.cpp`), and each part is drawn with its material's look: lit, in two tones for a cartoon material, or in its own colours; solid, cut out or see-through.
@@ -85,15 +87,25 @@ With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses th
 - **The glass** (`view/mirror.h`) shows the room turned over through its plane, as a window onto that room: each eye's view is drawn through the glass's rectangle from where that eye really is. The two views go side by side into one overlay (`VROverlayFlags_SideBySide_Parallel`), so what is in the mirror has depth behind the glass and moves as your head does. Nothing on your side of the glass is drawn twice: the near plane is the glass.
 - **Drawing** (`view/mirrorview.cpp`, `view/live.cpp`): 45 times a second, half the displays' rate, into buffers SteamVR reads with no copy (`screens/vroutput.h`, three of them: the one shown, the one before it, the one being drawn), and only while the glass is within 80 degrees of where your head looks. It sorts under Frametop's panels, so a panel in front of the glass covers it.
 
-It runs while the mirror is wanted and no longer: the Appearance page starts it and tells it to quit, and it also ends with SteamVR. Commands, one datagram each on `@ft_avatars`: `state` (the last status line: whether it is shown, draws a second, the CPU a draw takes), `model PATH` (another model file's body from now on), `place` (the glass stands in front of you again) and `quit`. A model file that can't be worn ends it before anything starts.
+It runs while the mirror is wanted and no longer: the Appearance page starts it and tells it to quit, and it also ends with SteamVR. Commands, one datagram each on `@ft_avatars`: `state` (the last status line: whether it is shown, draws a second, the CPU a draw takes, whether the microphone is heard), `model PATH` (another model file's body from now on), `place` (the glass stands in front of you again) and `quit`. A model file that can't be worn ends it before anything starts.
 
-Cost, 2026-11-10, a 528 by 960 picture an eye, the headset off the head (SteamVR gives a head pose about half the time then, so it drew 21 times a second, not 45): 0.55-0.68 ms of CPU a draw, a buffer up about 11 ms after its draw, 2.0-2.5% of one core in all. In the headset it is still to be measured (`HEADSET-TESTS.md`).
+Cost, 2026-11-10, a 528 by 960 picture an eye, the headset off the head (SteamVR gives a head pose about half the time then, so it drew 21 times a second, not 45): 0.55-0.69 ms of CPU a draw, a buffer up about 11 ms after its draw, 2.4-3.1% of one core in all with the microphone heard. In the headset it is still to be measured (`HEADSET-TESTS.md`).
 
 ```
 echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_avatars,bind=
 ```
 
 The avatar you wear is `AVATAR_MODEL` in `~/.config/frametop.conf`: the name of one of your models that has a body, or nothing. The Appearance page lists them with their pictures (`ft-avatars --thumb`, kept in `~/.cache/frametop/avatar-thumbs` until the model's file changes). Wearing one also picks its hands (`HANDS_VIEW_MODEL`), which you can change again; a model you import that turns out to be a whole avatar is worn at once; removing the one you wear takes the mirror away. Nobody else sees your avatar until shared rooms exist (M3).
+
+## The face
+
+An avatar with face shapes in its file (VRM's mouth shapes aa, ih, ou, ee, oh and its blinks) has a face that moves while you wear it.
+
+- **The eyes** blink every two to six and a half seconds, now and then twice (`face::Blink`). It is a timer, not your own eyelids: gaze stays off unless you turn it on, and that is M4.
+- **The mouth** moves with your voice (`face::Mouth`). How loud you are over the room's own noise opens it: the noise is taken to be the quietest the microphone has been in the last three seconds, so a fan doesn't move the mouth and a murmur opens it a little. Where the sound's energy lies picks the shape: three bands (around 350, 850 and 2300 Hz) are compared, a high band that keeps up with the middle one is a spread mouth (ih, ee), a strong middle band is a wide one (aa), and a strong low band a round one (oh, ou). That is rough on purpose: a mouth that moves with speech, not one to read lips from.
+- **The microphone** (`micear.h`) is the session's default source, which on the Frame runs through echo cancelling, recorded mono at 16 kHz in a thread of its own while the mirror is up (it shows in the mixer as "Avatar mouth"). What it hears is boiled down to the mouth's five weights as it comes and then forgotten: nothing is written down or sent. `--no-voice` starts the mirror without it, and with no microphone the mouth stays shut and the eyes still blink.
+
+`ft-avatars --hear SECONDS` prints what the mouth makes of the microphone four times a second (how loud, the room's noise, the five weights), to check a microphone or the tuning. In a shared room (M3) the sender works its mouth out the same way and sends the five weights with its pose; blinks are made where they are drawn.
 
 ## Other people's code
 

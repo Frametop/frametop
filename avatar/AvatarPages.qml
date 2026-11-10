@@ -239,7 +239,8 @@ Item {
                     text: backend.avatar === ""
                           ? "Pick an avatar to see yourself in the mirror."
                           : "The mirror stands on the floor in front of where you look when you turn it on, and "
-                            + "stays until you turn it off here. Turn it off and on to move it."
+                            + "stays until you turn it off here. Turn it off and on to move it. While it is up it "
+                            + "listens to your microphone to move the avatar's mouth: nothing is recorded or sent."
                 }
 
                 Kirigami.FormLayout {

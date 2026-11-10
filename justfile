@@ -98,6 +98,8 @@ test-c:
       avatar/view/bodymesh.cpp avatar/view/handfit.cpp avatar/view/demo.cpp avatar/pose/bodypose.cpp avatar/bodyfile.cpp avatar/modelfile.cpp \
       screens/handskin.cpp screens/handmodels.cpp screens/handmesh.cpp screens/handcut.cpp build/tests/handasset.cpp -o build/tests/bodyview-test
     run avatar/tests/bodyview-test.cpp build/tests/bodyview-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/face-test.cpp -o build/tests/face-test
+    run avatar/tests/face-test.cpp build/tests/face-test
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"

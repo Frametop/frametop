@@ -3,6 +3,7 @@
 
 #include "../../conf/ftsock.h"
 #include "../bodyfile.h"
+#include "../face/ownface.h"
 #include "../pose/bodypose.h"
 #include "bodygpu.h"
 #include "gpuctx.h"
@@ -171,6 +172,10 @@ int Mirror(const Ask &ask) {
         std::printf("ft-avatars: the mirror, %s, %dx%d an eye\n", worn.name.c_str(), w, h);
     }
 
+    static_assert(face::kWeights == bodymesh::kShapes, "a face's weights go by Shape::Id");
+    ownface::Face face;
+    float shapes[face::kWeights] = {};
+    if (status == 0 && ask.voice) face.Listen("Avatar mouth");
     handcut::Hands hands;
     mirror::Glass glass;
     bool placed = false;
@@ -224,10 +229,13 @@ int Mirror(const Ask &ask) {
             static const std::vector<handcut::Hand> kNone;
             const std::vector<handcut::Hand> &tracked = hands.Update(head, now) ? hands.shown() : kNone;
             bodypose::Pose pose;
-            const bodypose::Input in = worn.tracked->See(head, eyes, tracked, lastDraw ? double(now - lastDraw) / 1e9 : 0);
+            const double since = lastDraw ? double(now - lastDraw) / 1e9 : 0;
+            const bodypose::Input in = worn.tracked->See(head, eyes, tracked, since);
+            face.After(since, worn.avatar.has(bodyfile::Shape::kBlink), shapes);
             if (worn.solver->Solve(in, pose) && (mirror::InSight(glass, (eye[0] + eye[1]) * 0.5, ahead, kInSight) || !screen.visible)) {
                 const auto t0 = std::chrono::steady_clock::now();
                 worn.solver->Matrices(pose, bones);
+                worn.avatar.Shape(shapes);
                 vroutput::Buffer &into = screen.Next();
                 mirrorview::Draw(painter, &worn.avatar, bones, glass, eye, w, h);
                 vroutput::Fence(maker, into);
@@ -240,8 +248,9 @@ int Mirror(const Ask &ask) {
         if (now - lastStatus >= int64_t((ask.status > 0 ? ask.status : 2) * 1e9)) {
             const double dt = double(now - lastStatus) / 1e9, cpu1 = CpuSeconds();
             char line[256];
-            std::snprintf(line, sizeof line, "mirror %s, %s; %.1f draws/s, CPU %.2f ms a draw, up after %.1f ms; CPU %.1f%%", screen.visible ? "shown" : "not shown yet",
-                          worn.name.c_str(), draws / dt, draws ? drawMs / draws : 0.0, shows ? upMs / shows : 0.0, 100 * (cpu1 - cpu0) / dt);
+            std::snprintf(line, sizeof line, "mirror %s, %s; %.1f draws/s, CPU %.2f ms a draw, up after %.1f ms; CPU %.1f%%; microphone %s", screen.visible ? "shown" : "not shown yet",
+                          worn.name.c_str(), draws / dt, draws ? drawMs / draws : 0.0, shows ? upMs / shows : 0.0, 100 * (cpu1 - cpu0) / dt,
+                          !ask.voice ? "not asked for" : face.hearing() ? "heard" : "not heard");
             statusLine = line;
             if (ask.status > 0) std::printf("%s\n", line);
             draws = shows = 0, drawMs = upMs = 0, lastStatus = now, cpu0 = cpu1;

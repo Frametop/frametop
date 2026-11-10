@@ -1,6 +1,7 @@
 // ft-avatars: Frametop's avatar bodies, drawn. With a headset on it is the mirror that shows you
 // the body you wear (live.h). With none it makes pictures of one (picture.h): a sheet to check
 // an import by eye, the picture Settings shows for it, and what the mirror would show.
+#include "../face/ownface.h"
 #include "demo.h"
 #include "live.h"
 #include "picture.h"
@@ -13,11 +14,12 @@ namespace {
 
 int Usage() {
     std::fprintf(stderr,
-                 "usage: ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S]\n"
+                 "usage: ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice]\n"
                  "       ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...\n"
                  "       ft-avatars --mirror-snapshot OUT.png MODEL [the same]\n"
                  "       ft-avatars --thumb OUT.png MODEL [--size PX]\n"
                  "       ft-avatars --poses\n"
+                 "       ft-avatars --hear SECONDS\n"
                  "poses: rest %s\n"
                  "shapes: aa ih ou ee oh blink blinkLeft blinkRight\n",
                  demo::kNames);
@@ -42,6 +44,10 @@ int Mirror(int argc, char **argv) {
     live::Ask ask;
     ask.model = argv[2];
     for (int i = 3; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--no-voice")) {
+            ask.voice = false;
+            continue;
+        }
         if (i + 1 >= argc) return Usage();
         if (!std::strcmp(argv[i], "--height")) ask.height = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--seconds")) ask.seconds = std::atof(argv[++i]);
@@ -56,6 +62,7 @@ int Mirror(int argc, char **argv) {
 int main(int argc, char **argv) {
     if (argc == 2 && !std::strcmp(argv[1], "--poses")) return std::printf("rest %s\n", demo::kNames), 0;
     if (argc >= 3 && !std::strcmp(argv[1], "--mirror")) return Mirror(argc, argv);
+    if (argc == 3 && !std::strcmp(argv[1], "--hear")) return std::atof(argv[2]) > 0 ? ownface::Hear(std::atof(argv[2])) : Usage();
     if (argc < 4) return Usage();
     const bool thumb = !std::strcmp(argv[1], "--thumb"), glass = !std::strcmp(argv[1], "--mirror-snapshot");
     if (!thumb && !glass && std::strcmp(argv[1], "--snapshot")) return Usage();

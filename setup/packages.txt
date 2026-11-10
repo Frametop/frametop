@@ -47,3 +47,6 @@ dev: libX11-devel  # its test probes (FULL_KEYBOARD_TESTS=1 keyboard/build.sh)
 both: openssl-devel libcurl-devel expat-devel libuuid-devel json-devel opus-devel pulseaudio-libs-devel
 # diagnostics and remote UI testing
 dev: wayland-utils xorg-x11-server-Xvfb ImageMagick xdotool
+# Frametop Together (together/): msquic links the OpenSSL above (3.5 or later, for its QUIC
+# API). Its link tests add delay and loss to a private loopback with tc's netem
+dev: iproute-tc

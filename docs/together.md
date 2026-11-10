@@ -16,7 +16,7 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
 | How many | Up to 4 people, as a full mesh: everyone can share panels with everyone |
 | Where they are | Remote. Lining up two headsets in one physical room (a two-point controller touch) is later work |
 | Network | Tailscale is required. No server of ours. A peer whose path runs through a DERP relay gets a warning and a lower quality |
-| Transport | QUIC, with msquic: reliable streams for state, grants and files, datagrams for video, poses and voice |
+| Transport | QUIC, with msquic: reliable streams for state, grants and files, a stream for each video frame, datagrams for poses and voice (spike T3) |
 | Joining | The owner starts a room and gets an invite (the Frame's tailnet name and a one-time code). A guest opens it, and the owner accepts in the headset, seeing the guest's Tailscale login. A saved friends list skips the code next time |
 | The join prompt | Says once that anyone in the room can see, hear and record what is shared. Nothing enforces or marks recording |
 | Whose room | The owner's layout is the room. The others join at spots the owner offers, and their shared panels arrive as a group near them |
@@ -80,7 +80,7 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
 - **Showing a streamed panel.** A remote display is a child process that decodes into a ring of three RGBA buffers and tells ft-screens "frame I" over a socket pair (`screens/remote.c`). The panel has every screen control and follows the attention rules. A peer's panel is the same kind of panel with another program behind it.
 - **A panel's pixels.** Every screen and floating window reaches ft-screens as a DMA-BUF from KWin, and a remote display as one of ft-stream's ring buffers. ft-screens can copy any of them on the GPU.
 - **The encoder.** `/dev/video-enc0` is Qualcomm's iris encoder: H.264 and HEVC from 128 to 8192 pixels a side, with RGBA (`AB24`), NV12 or UBWC as its input, a bitrate that can change while it runs, and a control that forces a keyframe. vr-recorder drives it with the raw V4L2 stateful API at about 3% of a core for 1080p30. Encoding on the CPU made the headset stutter, so it is never used.
-- **The decoder.** 16 sessions and about one 8K60 stream's worth of macroblocks, shared with remote displays and Steam Link ([remote-displays.md](remote-displays.md)).
+- **The decoder.** 16 sessions and about one 8K60 stream's worth of macroblocks, shared with remote displays and Steam Link ([remote-displays.md](remote-displays.md)). The encoder draws on the same 16 sessions and the same load budget (spike T1).
 - **Drawn hands.** ft-handview draws each tracked hand on a square overlay placed at the hand, one half per eye, from a skinned model ([hands/rendered-hands.md](../hands/rendered-hands.md)). An avatar is the same trick at a person's size.
 - **Leases for input.** [host-input.md](host-input.md) hands a keyboard and mouse over with a lease the other side has to keep renewing. A control grant works the same way.
 
@@ -103,9 +103,9 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
  ┌──────▼──────────────────────┐      QUIC over         ┌──────────┴───────────────┐
  │ ft-together                 │◄────  Tailscale  ─────►│ ft-together              │
  │ room state, peers, grants,  │  streams: state,       │                          │
- │ voice, the links            │  grants, avatar files  │                          │
- └──────┬───────────┬──────────┘  datagrams: video,     └──────────────────────────┘
-        │ poses     │ voice       poses, voice
+ │ voice, the links            │  grants, avatar files, │                          │
+ └──────┬───────────┬──────────┘  video frames          └──────────────────────────┘
+        │ poses     │ voice       datagrams: poses, voice
  ┌──────▼──────┐ ┌──▼────────┐
  │ ft-avatars  │ │ PipeWire  │
  │ peers'      │ │ mic in,   │
@@ -130,9 +130,12 @@ One QUIC connection per pair of peers, opened by the one whose Tailscale address
 
 - **A control stream** (reliable, ordered): hello with the protocol version, the invite's code, the room's state (people, their colours and spots, each shared panel's id, size, pose and curve), grants, away, and leave.
 - **File streams** (reliable): an avatar's model file, when its owner allows.
-- **Datagrams**: video packets (a panel id, a frame number, a fragment), poses (head, hands as joints, and the pointer on a panel, about 30 times a second), and voice (Opus, 20 ms).
+- **A stream for each video frame** (one way): a panel id, a frame number, and the encoded picture. QUIC sends a lost packet again, so one lost packet costs that frame a round trip, not the picture. The sender gives a frame up (resets its stream) when it hasn't all been acknowledged 150 ms after it was sent, and the next frame it sends for that panel is a keyframe.
+- **Datagrams**: poses (head, hands as joints, and the pointer on a panel, about 30 times a second) and voice (Opus, 20 ms). Each fits one datagram, at most 1187 bytes, and a late one is worth nothing.
 
-Video rides in datagrams because a late frame is worth nothing. A lost fragment loses its frame; the viewer asks for a keyframe, as Moonlight's clients do. A viewer tells the sender how much it sees of each panel (focused, in view, hidden), and the sender stops sending a panel nobody watches. msquic's congestion control says how much each link carries, and the encoder's bitrate follows the slowest link that is watching.
+Video was going to ride in datagrams too, as Moonlight's does. Spike T3 changed that: a frame is about eleven datagrams, so with one packet in a hundred lost, one frame in ten arrived broken and would have needed a keyframe. A stream for each frame delivered every frame on the same link. Moonlight gets there with error-correcting packets; QUIC's own retransmission needs no code of ours.
+
+A viewer tells the sender how much it sees of each panel (focused, in view, hidden), and the sender stops sending a panel nobody watches. The links use BBR congestion control, with msquic's send buffering off so the sender knows when a frame was acknowledged. Nothing saves a sender that sends more than a link carries: frames arrive late and are given up. So each panel's bitrate follows the slowest link that is watching it, from msquic's estimate of that link and from how many frames it had to give up.
 
 ### Trust
 
@@ -159,10 +162,10 @@ Everything a peer sends is untrusted input, including after the owner accepted t
 
 | | Question | Result |
 |---|---|---|
-| T1 | How many encoder sessions run at once, and at what load, next to SteamVR | Open |
-| T2 | Does the encoder take a GBM buffer as a DMA-BUF, with no copy | Open |
-| T3 | Does msquic build for the Frame's container, and what do its datagrams carry over Tailscale's 1280-byte MTU | Open |
-| T4 | Heat and CPU with three 1080p panels encoding | Open |
+| T1 | How many encoder sessions run at once, and at what load, next to SteamVR | **Passed.** 13 encoder sessions opened while three remote displays held decoder sessions: 16 in all, one pool for both. The load budget is shared too: three 4K30 or one 4K60 session opened next to those three displays, two 4K60 did not (`REQBUFS` fails with `ENOMEM`). Three sessions, the Frame's cap, run at any size up to 4K30. A picture takes 6 to 13 ms from queueing to its encoded unit. The bitrate and the keyframe controls work on a running session |
+| T2 | Does the encoder take a GBM buffer as a DMA-BUF, with no copy | **Passed.** A linear `ABGR8888` GBM buffer has the encoder's own layout (stride 4 x width), and the encoder takes it with `V4L2_MEMORY_DMABUF`. Decoded on the CPU, the colours come back right as BT.709 full range; the stream itself says limited range and no matrix, so the receiving end converts as 709 full range and doesn't read the stream's flags |
+| T3 | Does msquic build for the Frame's container, and what do its datagrams carry over Tailscale's 1280-byte MTU | **Passed, and it changed the design.** msquic 2.6.3 builds in seconds as a shared library on the container's OpenSSL 3.5 (the host's is older, so Together's programs run in the container like the rest). On a link with a 1280-byte MTU a datagram carries 1187 bytes from the first packet and 1219 once the path is probed. With 20 ms each way and 1% loss, three 3 Mbit panels as datagrams lost one frame in ten (CUBIC also queued them for seconds); as a stream for each frame with BBR, 723 of 723 frames arrived, in 28 ms on average and 184 ms at worst. Seven 2 Mbit panels: 1686 of 1687. Past what the link carries, frames are late whatever carries them |
+| T4 | Heat and CPU with three 1080p panels encoding | **Passed on the bench.** Three 3440x1440 sessions at 30 fps for a minute each way: 9% of one core for a desktop-like picture, with the codec's thermal zone flat at 45 to 50 C. To do: the same during real use in the headset, measured passively |
 | T5 | Your own body when looking down: does a head-following stereo overlay hold still | Open (M2) |
 | T6 | Two pointers taking turns on KWin's one seat: focus, held keys and drags | Open (M4) |
 

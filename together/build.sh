@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Build Frametop Together's programs (docs/together.md) in the dev container on the Frame. For
+# now that is only the spikes, with --spikes:
+#   together/build/ft-enctest   spikes T1, T2 and T4 (spike/ft-enctest.cpp on media/irisenc.cpp):
+#                               the hardware encoder under several sessions
+#   together/build/ft-quictest  spike T3 (spike/ft-quictest.cpp): video as QUIC datagrams
+# The links are msquic (MIT) at a pinned commit, built here as a shared library on the
+# container's OpenSSL (3.5 or later, which has the QUIC API msquic needs) and loaded from the
+# program's own folder.
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+"$root/scripts/sync.sh" >/dev/null
+spikes=0
+[ "${1:-}" = --spikes ] && spikes=1
+exec "$root/scripts/frame.sh" -C together "spikes=$spikes"'; set -e; mkdir -p build
+flags="-std=c++17 -O2 -Wall -Wextra -Wno-missing-field-initializers"
+[ $spikes = 1 ] || exit 0
+mq=16ca4d8d785d34fb22285e7c652e477ac16475a5  # v2.6.3
+src=build/msquic
+if [ ! -f $src/.ft-$mq ]; then
+  rm -rf $src build/msquic-out
+  # Only this revision is a build input, not its history or its submodules (OpenSSL comes
+  # from the container).
+  git init -q $src
+  git -C $src fetch -q --depth 1 https://github.com/microsoft/msquic.git $mq
+  git -C $src checkout -q --detach FETCH_HEAD
+  touch $src/.ft-$mq
+fi
+if [ ! -f build/libmsquic.so.2 ]; then
+  cmake -S $src -B build/msquic-out -G Ninja -DCMAKE_BUILD_TYPE=Release -DQUIC_BUILD_SHARED=ON \
+    -DQUIC_TLS_LIB=openssl -DQUIC_USE_EXTERNAL_OPENSSL=ON -DQUIC_BUILD_TOOLS=OFF -DQUIC_BUILD_TEST=OFF \
+    -DQUIC_BUILD_PERF=OFF -DQUIC_ENABLE_LOGGING=OFF -DQUIC_EMBED_GIT_HASH=OFF >/dev/null
+  ninja -C build/msquic-out >/dev/null
+  cp build/msquic-out/bin/Release/libmsquic.so.2 build/libmsquic.so.2
+  strip --strip-unneeded build/libmsquic.so.2
+fi
+quic="-I$src/src/inc build/libmsquic.so.2 -Wl,-rpath,\$ORIGIN"
+g++ $flags $(pkg-config --cflags gbm) -o build/ft-enctest spike/ft-enctest.cpp media/irisenc.cpp \
+  $(pkg-config --libs gbm) -lpthread
+g++ $flags -o build/ft-quictest spike/ft-quictest.cpp net/selfcert.cpp $quic \
+  $(pkg-config --libs openssl) -lpthread
+strip --strip-unneeded build/ft-enctest build/ft-quictest
+echo "built build/ft-enctest build/ft-quictest"'

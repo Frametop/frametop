@@ -88,6 +88,9 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/modelfile-test.cpp avatar/modelfile.cpp \
       -o build/tests/modelfile-test
     run avatar/tests/modelfile-test.cpp build/tests/modelfile-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/bodyfile-test.cpp avatar/bodyfile.cpp avatar/modelfile.cpp \
+      -o build/tests/bodyfile-test
+    run avatar/tests/bodyfile-test.cpp build/tests/bodyfile-test
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"

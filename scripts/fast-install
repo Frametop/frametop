@@ -86,7 +86,7 @@ COMPONENTS = {
     'voice': ((), ('bin/whisper-server',)),
     'hands': ((), ('ft-hands', 'ft-camd')),
     'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),
-    'avatar': ((MODELDEPS,), ('ft-model-import',)),
+    'avatar': ((MODELDEPS, STB), ('ft-model-import',)),
 }
 WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',

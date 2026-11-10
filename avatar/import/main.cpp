@@ -14,18 +14,23 @@
 //                FBX can't say; a VRM's licence does, and this can't override it)
 //   --check      read and convert, write nothing
 //
-// For now it takes the model's hands (docs/together.md: the body is next). A model with one
-// hand gets the other mirrored. Nothing is guessed: a skeleton whose hand bones can't be told
-// (handbones.h) is refused, with what is missing.
+// It takes the model's hands, which become the hands ft-handview draws for you, and, when the
+// model is a whole person, its body, which is how the people you share a room with see you
+// (docs/together.md). A model with one hand gets the other mirrored. Nothing is guessed: a
+// skeleton whose bones can't be told (handbones.h, bodybones.h) is refused, with what is
+// missing; a model whose hands can be told but whose body can't is a hand model, and the
+// other way round an avatar with the hands Frametop comes with.
 //
 // Prints what it did, a fact a line ("key value": Settings reads them), and exits 0; or
 // "error WHY" and exits 1. "share" is yes, no (a glTF or FBX without --may-share) or licence
-// (the VRM's licence forbids it).
+// (the VRM's licence forbids it). "body" is the avatar's body as written, "nobody" why the
+// model has none.
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <sys/stat.h>
 
+#include "bodypart.h"
 #include "handpart.h"
 
 namespace {
@@ -105,17 +110,26 @@ int main(int argc, char **argv) {
 
     modelfile::Model model;
     HandReport report[2];
+    HandBones handBones[2];
+    const HandBones *foundHands[2] = {nullptr, nullptr};
     std::string why[2];
     for (int side = 0; side < 2; ++side) {
-        HandBones bones;
-        model.hasHand[side] = FindHand(scene, side ? Side::Right : Side::Left, bones, why[side]) &&
-                              CutHand(scene, bones, model.hands[side], report[side], why[side]);
+        if (FindHand(scene, side ? Side::Right : Side::Left, handBones[side], why[side])) foundHands[side] = &handBones[side];
+        model.hasHand[side] = foundHands[side] && CutHand(scene, handBones[side], model.hands[side], report[side], why[side]);
     }
-    if (!model.hasHand[0] && !model.hasHand[1]) {
+    bodyfile::Body body;
+    BodyBones bodyBones;
+    BodyReport bodyReport;
+    std::string noBody;
+    const bool hasBody = FindBody(scene, foundHands, bodyBones, noBody) && CutBody(scene, bodyBones, body, bodyReport, noBody);
+    if (!model.hasHand[0] && !model.hasHand[1] && !hasBody) {
         // a file of one hand whose bones don't say which: the option does, or the file's name
         HandBones bones;
         std::string unsaid;
-        if (!FindHand(scene, Side::Unsaid, bones, unsaid)) return Fail("no hands were found: " + NoHands(why, unsaid));
+        if (!FindHand(scene, Side::Unsaid, bones, unsaid)) {
+            if (!scene.humanoid.empty()) std::printf("nobody %s\n", noBody.c_str());
+            return Fail("no hands were found: " + NoHands(why, unsaid));
+        }
         Side side = said;
         for (const std::string &w : Words(stem)) {
             if (side != Side::Unsaid) break;
@@ -129,7 +143,7 @@ int main(int argc, char **argv) {
     }
     bool mirrored[2] = {false, false};
     for (int side = 0; side < 2; ++side)
-        if (!model.hasHand[side]) {
+        if (!model.hasHand[side] && model.hasHand[1 - side]) {
             model.hands[side] = Mirrored(model.hands[1 - side]);
             model.hasHand[side] = mirrored[side] = true;
             report[side] = report[1 - side];
@@ -146,7 +160,7 @@ int main(int argc, char **argv) {
     const std::string path = to + "/" + name + ".ftmodel";
     if (!check) {
         if (!MakeFolder(to)) return Fail(to + ": " + std::strerror(errno));
-        if (!modelfile::WriteFile(path, model, err)) return Fail(err);
+        if (!modelfile::WriteFile(path, model, err, hasBody ? bodyfile::Write(body) : std::vector<modelfile::Extra>())) return Fail(err);
     }
     std::printf("ok %s\n", name.c_str());
     if (!check) std::printf("file %s\n", path.c_str());
@@ -155,11 +169,31 @@ int main(int argc, char **argv) {
     if (!model.info.licence.empty()) std::printf("licence %s\n", model.info.licence.c_str());
     std::printf("share %s\n", share);
     for (int side = 0; side < 2; ++side) {
+        if (!model.hasHand[side]) {
+            std::printf("no%s %s\n", side ? "right" : "left", why[side].c_str());
+            continue;
+        }
         std::printf("%s %d triangles", side ? "right" : "left", report[side].tris);
         if (report[side].tris != report[side].sourceTris) std::printf(", reduced from %d", report[side].sourceTris);
         if (report[side].scale != 1) std::printf(", scaled %.3g times", report[side].scale);
         if (mirrored[side]) std::printf(", mirrored from the %s", side ? "left" : "right");
         std::printf("\n");
+    }
+    if (hasBody) {
+        std::printf("body %d triangles", bodyReport.tris);
+        if (bodyReport.tris != bodyReport.sourceTris) std::printf(", reduced from %d", bodyReport.sourceTris);
+        std::printf(", %d vertices, %.2f m to the eyes\n", bodyReport.verts, double(body.eyes[1]));
+        std::printf("look %zu materials, %zu pictures (%.1f MB)", body.materials.size(), body.textures.size(), double(bodyReport.textureBytes) / (1 << 20));
+        if (scene.unreadImages) std::printf(", %d couldn't be read", scene.unreadImages);
+        std::printf("\n");
+        if (!body.shapes.empty()) {
+            static const char *const kShape[] = {"", "aa", "ih", "ou", "ee", "oh", "blink", "blinkLeft", "blinkRight"};
+            std::printf("shapes");
+            for (const bodyfile::Shape &shape : body.shapes) std::printf(" %s", kShape[shape.id]);
+            std::printf("\n");
+        }
+    } else {
+        std::printf("nobody %s\n", noBody.c_str());
     }
     return 0;
 }

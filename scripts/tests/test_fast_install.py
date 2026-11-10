@@ -79,7 +79,7 @@ class Paths(unittest.TestCase):
         openvr = rebuilt('scripts/openvr.sh')
         self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)
         self.assertFalse({'voice', 'hands', 'gaze/tracker'} & openvr)
-        self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec'})
+        self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec', 'avatar'})
         self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown'})   # its include line
         self.assertEqual(rebuilt('avatar/modelfile.cpp'), {'avatar', 'screens'})   # built into ft-handview too
         self.assertEqual(rebuilt('avatar/import/main.cpp'), {'avatar'})

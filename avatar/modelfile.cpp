@@ -1,6 +1,8 @@
 // See modelfile.h.
 #include "modelfile.h"
 
+#include "modelbytes.h"
+
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -14,55 +16,9 @@ constexpr uint32_t kVersion = 1;
 constexpr int kMaxChunks = 64;
 constexpr float kMaxBind = 0.32f;   // a joint's furthest from the origin, metres: what positions reach
 
-uint32_t Tag(const char *s) { return uint32_t(uint8_t(s[0])) | uint32_t(uint8_t(s[1])) << 8 | uint32_t(uint8_t(s[2])) << 16 | uint32_t(uint8_t(s[3])) << 24; }
-
-// Reads forward through a span, never past its end: a read that would is refused and `ok`
-// stays false from then on.
-struct In {
-    const uint8_t *p;
-    size_t left;
-    bool ok = true;
-    bool Take(void *out, size_t n) {
-        if (!ok || n > left) return ok = false;
-        if (n) std::memcpy(out, p, n);
-        p += n;
-        left -= n;
-        return true;
-    }
-    uint8_t U8() { uint8_t v = 0; Take(&v, 1); return v; }
-    uint16_t U16() { uint8_t b[2] = {}; Take(b, 2); return uint16_t(b[0] | b[1] << 8); }
-    uint32_t U32() { uint8_t b[4] = {}; Take(b, 4); return uint32_t(b[0]) | uint32_t(b[1]) << 8 | uint32_t(b[2]) << 16 | uint32_t(b[3]) << 24; }
-    float F32() { const uint32_t u = U32(); float f; std::memcpy(&f, &u, 4); return f; }
-    template <typename T> bool Array(std::vector<T> &out, size_t count) {   // of one-byte or LE two-byte items
-        const size_t bytes = count * sizeof(T), padded = (bytes + 3) & ~size_t(3);
-        if (!ok || padded > left) return ok = false;
-        out.resize(count);
-        for (size_t i = 0; i < count; ++i) {
-            if (sizeof(T) == 1) out[i] = T(p[i]);
-            else out[i] = T(uint16_t(p[2 * i] | p[2 * i + 1] << 8));
-        }
-        p += padded;
-        left -= padded;
-        return true;
-    }
-};
-
-struct Out {
-    std::vector<uint8_t> b;
-    void U8(uint8_t v) { b.push_back(v); }
-    void U16(uint16_t v) { b.push_back(uint8_t(v)); b.push_back(uint8_t(v >> 8)); }
-    void U32(uint32_t v) { for (int k = 0; k < 4; ++k) b.push_back(uint8_t(v >> (8 * k))); }
-    void F32(float f) { uint32_t u; std::memcpy(&u, &f, 4); U32(u); }
-    void Pad() { while (b.size() % 4) b.push_back(0); }
-    template <typename T> void Array(const std::vector<T> &v) {
-        for (const T x : v) {
-            if (sizeof(T) == 1) U8(uint8_t(x));
-            else U16(uint16_t(x));
-        }
-        Pad();
-    }
-    void Bytes(const std::string &s) { b.insert(b.end(), s.begin(), s.end()); }
-};
+using modelbytes::In;
+using modelbytes::Out;
+using modelbytes::Tag;
 
 // Text a file may carry: UTF-8 is not checked, but nothing a terminal or a label would act on.
 bool PlainText(const std::string &s) {
@@ -179,8 +135,8 @@ std::string Folder() {
     return base + "/frametop/avatars";
 }
 
-bool Read(const uint8_t *data, size_t size, Model &out, std::string &err) {
-    out = Model();
+bool Chunks(const uint8_t *data, size_t size, std::vector<Chunk> &out, std::string &err) {
+    out.clear();
     if (size > kMaxFileBytes) return err = "the file is too large", false;
     In in = {data, size};
     char magic[4] = {};
@@ -188,39 +144,54 @@ bool Read(const uint8_t *data, size_t size, Model &out, std::string &err) {
     const uint32_t version = in.U32();
     if (!in.ok || std::memcmp(magic, "FTMD", 4) != 0) return err = "not a Frametop model", false;
     if (version != kVersion) return err = "a Frametop model of a version this Frametop doesn't read", false;
-    bool info = false;
-    for (int chunks = 0; in.left > 0; ++chunks) {
-        if (chunks >= kMaxChunks) return err = "too many chunks", false;
+    while (in.left > 0) {
+        if (out.size() >= size_t(kMaxChunks)) return err = "too many chunks", false;
         const uint32_t tag = in.U32(), len = in.U32();
         const size_t padded = (size_t(len) + 3) & ~size_t(3);
         if (!in.ok || padded > in.left) return err = "a chunk runs past the file's end", false;
-        const In body = {in.p, len};
+        out.push_back({tag, in.p, len});
         in.p += padded;
         in.left -= padded;
-        if (tag == Tag("INFO")) {
-            if (info) return err = "two INFO chunks", false;
-            info = true;
-            if (!ReadInfo(body, out.info, err)) return false;
-        } else if (tag == Tag("HAND")) {
-            if (!ReadHand(body, out, err)) return false;
-        }
     }
-    if (!out.hasHand[0] && !out.hasHand[1]) return err = "the model has nothing this Frametop draws", false;
     return true;
 }
 
-bool ReadFile(const std::string &path, Model &out, std::string &err) {
+bool Read(const uint8_t *data, size_t size, Model &out, std::string &err) {
+    out = Model();
+    std::vector<Chunk> chunks;
+    if (!Chunks(data, size, chunks, err)) return false;
+    bool info = false;
+    for (const Chunk &c : chunks) {
+        const In body = {c.data, c.size};
+        if (c.tag == Tag("INFO")) {
+            if (info) return err = "two INFO chunks", false;
+            info = true;
+            if (!ReadInfo(body, out.info, err)) return false;
+        } else if (c.tag == Tag("HAND")) {
+            if (!ReadHand(body, out, err)) return false;
+        }
+    }
+    return true;
+}
+
+bool ReadBytes(const std::string &path, std::vector<uint8_t> &data, std::string &err) {
+    data.clear();
     FILE *f = std::fopen(path.c_str(), "rb");
     if (!f) return err = path + ": " + std::strerror(errno), false;
-    std::vector<uint8_t> data;
     uint8_t buf[65536];
     size_t n;
     while ((n = std::fread(buf, 1, sizeof buf, f)) > 0 && data.size() <= kMaxFileBytes) data.insert(data.end(), buf, buf + n);
     std::fclose(f);
-    return Read(data.data(), data.size(), out, err);
+    if (data.size() > kMaxFileBytes) return err = "the file is too large", false;
+    return true;
 }
 
-std::vector<uint8_t> Write(const Model &m) {
+bool ReadFile(const std::string &path, Model &out, std::string &err) {
+    std::vector<uint8_t> data;
+    return ReadBytes(path, data, err) && Read(data.data(), data.size(), out, err);
+}
+
+std::vector<uint8_t> Write(const Model &m, const std::vector<Extra> &more) {
     Out o;
     o.Bytes("FTMD");
     o.U32(kVersion);
@@ -263,11 +234,18 @@ std::vector<uint8_t> Write(const Model &m) {
         b.Array(h.idx);
         chunk("HAND", b);
     }
+    for (const Extra &e : more) {
+        o.Bytes(std::string(e.tag, 4));
+        o.U32(uint32_t(e.bytes.size()));
+        o.b.insert(o.b.end(), e.bytes.begin(), e.bytes.end());
+        o.Pad();
+    }
     return o.b;
 }
 
-bool WriteFile(const std::string &path, const Model &m, std::string &err) {
-    const std::vector<uint8_t> data = Write(m);
+bool WriteFile(const std::string &path, const Model &m, std::string &err, const std::vector<Extra> &more) {
+    const std::vector<uint8_t> data = Write(m, more);
+    if (data.size() > kMaxFileBytes) return err = "the model is too large for a file", false;
     const std::string tmp = path + ".part";
     FILE *f = std::fopen(tmp.c_str(), "wb");
     if (!f) return err = tmp + ": " + std::strerror(errno), false;

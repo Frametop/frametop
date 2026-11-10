@@ -142,8 +142,10 @@ int main() {
     {
         modelfile::Model none = model();
         none.hasHand[0] = none.hasHand[1] = false;
-        std::string why;
-        check("no hands at all", !reads(modelfile::Write(none), &why) && why.find("nothing") != std::string::npos);
+        const std::vector<uint8_t> b = modelfile::Write(none);
+        modelfile::Model r;
+        std::string err;
+        check("a model without hands reads as one without", modelfile::Read(b.data(), b.size(), r, err) && !r.hasHand[0] && !r.hasHand[1] && r.info.name == none.info.name);
     }
     {
         std::string why;
@@ -188,14 +190,16 @@ int main() {
     // every truncation is refused, and none reads past its end (run under the address sanitizer)
     {
         int read = 0;
-        const size_t ends[] = {chunk(bytes, 1), chunk(bytes, 2)};   // whole files with fewer chunks
+        const size_t ends[] = {8, chunk(bytes, 1), chunk(bytes, 2)};   // whole files with fewer chunks
         for (size_t n = 0; n < bytes.size(); ++n) {
             const std::vector<uint8_t> cut(bytes.begin(), bytes.begin() + long(n));
-            if (reads(cut) && n != ends[1]) ++read;
+            if (reads(cut) && n != ends[0] && n != ends[1] && n != ends[2]) ++read;
         }
-        check("every cut-off file is refused (but the one that ends after a whole hand)", read == 0);
-        check("and that one has its left hand only", reads(std::vector<uint8_t>(bytes.begin(), bytes.begin() + long(ends[1]))) &&
-                                                         !reads(std::vector<uint8_t>(bytes.begin(), bytes.begin() + long(ends[0]))));
+        check("every cut-off file is refused (but the ones that end after a whole chunk)", read == 0);
+        modelfile::Model r;
+        std::string err;
+        check("the one that ends after a hand has its left hand only", modelfile::Read(bytes.data(), ends[2], r, err) && r.hasHand[0] && !r.hasHand[1]);
+        check("and the one that ends before the hands has none", modelfile::Read(bytes.data(), ends[1], r, err) && !r.hasHand[0] && !r.hasHand[1]);
     }
     // every byte changed: read or refused, and whatever reads keeps the rules
     {

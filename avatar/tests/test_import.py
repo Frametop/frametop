@@ -3,77 +3,32 @@
 GLBs: the hand's bones are found whatever the rig calls them, the joints land where they are,
 only the hand and its cuff are kept, a hand of another size is scaled, a dense one reduced, a
 VRM's licence is kept, and what can't be told is refused with the reason. Damaged files end in
-an error, never a crash.
+an error, never a crash. (A whole avatar's body: test_import_body.py.)
 
 It runs the built program (avatar/build.sh), and is skipped where that isn't built.
 Run: python3 avatar/tests/test_import.py"""
 import copy
 import json
 import math
-import os
 import random
 import struct
-import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent))
 import fixtures  # noqa: E402
-import ftmodel  # noqa: E402
+from importcase import FUZZ, ImportCase  # noqa: E402
 
-# FT_MODEL_IMPORT: another build of the program to test (one with sanitizers, say)
-TOOL = Path(os.environ.get('FT_MODEL_IMPORT') or REPO / 'avatar/build/ft-model-import')
-FUZZ = int(os.environ.get('FT_MODEL_IMPORT_FUZZ') or 120)   # damaged copies tried of each file
-SOURCES = [*(REPO / 'avatar/import').glob('*'), REPO / 'avatar/modelfile.cpp', REPO / 'avatar/modelfile.h']
-HANDS = REPO / 'screens/assets/hands'
+HANDS = HERE.parents[1] / 'screens/assets/hands'
 
 
 def dist(a, b):
     return math.dist(a, b)
 
 
-class ImportTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        if not TOOL.exists():
-            raise unittest.SkipTest('avatar/build/ft-model-import is not built (avatar/build.sh)')
-        if any(src.stat().st_mtime > TOOL.stat().st_mtime for src in SOURCES):
-            raise unittest.SkipTest('avatar/build/ft-model-import is older than its sources (avatar/build.sh)')
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.dir = Path(cls.tmp.name)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def source(self, name, data):
-        path = self.dir / name
-        path.write_bytes(data if isinstance(data, bytes) else data.encode())
-        return path
-
-    def run_tool(self, path, *args):
-        """(exit status, {key: value} of what it printed)."""
-        done = subprocess.run([str(TOOL), str(path), '--to', str(self.dir / 'out'), *args],
-                              capture_output=True, text=True, timeout=120)
-        said = dict(line.split(' ', 1) for line in done.stdout.splitlines() if ' ' in line)
-        return done.returncode, said
-
-    def imported(self, name, data, *args):
-        status, said = self.run_tool(self.source(name, data), *args)
-        self.assertEqual(status, 0, said)
-        return ftmodel.read(said['file']), said
-
-    def refused(self, name, data, *args):
-        status, said = self.run_tool(self.source(name, data), *args)
-        self.assertEqual(status, 1, said)
-        self.assertIn('error', said)
-        return said['error']
-
+class ImportTest(ImportCase):
     def check_joints(self, model, rig, scale=1.0, tip=0.0015):
         """Each joint is where the rig has it (from the wrist), the tips within `tip`."""
         for side, joints in rig.joints.items():

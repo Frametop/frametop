@@ -18,11 +18,7 @@ const char *const kVrmPart[3] = {"Proximal", "Intermediate", "Distal"};
 
 const std::vector<std::string> kHandWords = {"hand", "wrist"}, kLeftWords = {"l", "left"}, kRightWords = {"r", "right"};
 
-bool Has(const std::vector<std::string> &words, const std::vector<std::string> &any) {
-    for (const std::string &w : words)
-        if (std::find(any.begin(), any.end(), w) != any.end()) return true;
-    return false;
-}
+bool Has(const std::vector<std::string> &words, const std::vector<std::string> &any) { return HasWord(words, any); }
 
 // The finger a name is for (0 thumb .. 4 little), -1 for none, -2 for more than one.
 int FingerOf(const std::vector<std::string> &words) {
@@ -32,30 +28,8 @@ int FingerOf(const std::vector<std::string> &words) {
     return found;
 }
 
-struct Rig {
-    const Scene &s;
-    std::vector<std::vector<std::string>> words;   // each node's name's
-    std::vector<int> depth;
-    std::vector<bool> skinned;                     // some vertex is moved by the node
-
-    explicit Rig(const Scene &scene) : s(scene), words(scene.nodes.size()), depth(scene.nodes.size(), 0), skinned(scene.nodes.size(), false) {
-        for (size_t i = 0; i < s.nodes.size(); ++i) {
-            words[i] = Words(s.nodes[i].name);
-            int d = 0;
-            for (int p = s.nodes[i].parent; p >= 0 && d < int(s.nodes.size()); p = s.nodes[size_t(p)].parent) ++d;
-            depth[i] = d;
-        }
-        for (const Vertex &v : s.verts)
-            for (int k = 0; k < kInfluences; ++k)
-                if (v.node[k] >= 0 && v.weight[k] > 0) skinned[size_t(v.node[k])] = true;
-    }
-
-    bool Under(int node, int ancestor) const {
-        int steps = 0;
-        for (int p = s.nodes[size_t(node)].parent; p >= 0 && steps <= int(s.nodes.size()); p = s.nodes[size_t(p)].parent, ++steps)
-            if (p == ancestor) return true;
-        return false;
-    }
+struct Rig : RigNodes {
+    using RigNodes::RigNodes;
 
     // Whether the nodes, sorted by depth, are one line of descent.
     bool OneLine(const std::vector<int> &chain) const {

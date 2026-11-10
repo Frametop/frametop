@@ -4,8 +4,9 @@
 // parsed. It trusts nothing: every count, size, index and number is checked before use, and a
 // file that fails any check is refused whole.
 //
-// For now a file holds hands: each a skinned mesh on WebXR's 25 hand joints, in the layout
-// ft-handview draws (screens/handasset.h). Avatars' bodies come as more chunks.
+// A file holds hands, each a skinned mesh on WebXR's 25 hand joints in the layout ft-handview
+// draws (screens/handasset.h), and for an avatar its body, in chunks of its own (bodyfile.h).
+// This reader takes the hands and skips the rest.
 //
 // The file, little-endian: "FTMD", a version (u32, 1), then chunks to the end: a four-letter tag,
 // its payload's size (u32), the payload, and zeros to the next multiple of four.
@@ -63,9 +64,21 @@ struct Model {
 // which one it broke.
 bool Valid(const Hand &h, std::string &why);
 
-// False with `err` when the bytes aren't a model this reader takes.
+// False with `err` when the bytes aren't a model this reader takes. A model may have no hands
+// (hasHand): an avatar whose hands couldn't be cut out.
 bool Read(const uint8_t *data, size_t size, Model &out, std::string &err);
 bool ReadFile(const std::string &path, Model &out, std::string &err);
+
+// The file's chunks, for the readers of what isn't here (bodyfile.h): the header and every
+// chunk's bounds are checked, a payload isn't. They point into `data`.
+struct Chunk {
+    uint32_t tag;
+    const uint8_t *data;
+    size_t size;
+};
+bool Chunks(const uint8_t *data, size_t size, std::vector<Chunk> &out, std::string &err);
+// A file's bytes, kMaxFileBytes at most.
+bool ReadBytes(const std::string &path, std::vector<uint8_t> &data, std::string &err);
 
 // Whether a model's file may have the name: lower-case letters, digits, "-" and "_", 1 to
 // kMaxName of them.
@@ -81,9 +94,14 @@ std::string Folder();
 // characters). Write does this to a model's name, licence, author and format.
 std::string Plain(const std::string &text);
 
-// The file's bytes. The model must be valid (Valid on each hand it has).
-std::vector<uint8_t> Write(const Model &m);
+// The file's bytes. The model must be valid (Valid on each hand it has). `more`: chunks written
+// after the hands, as they are (bodyfile.h makes an avatar's).
+struct Extra {
+    char tag[4];
+    std::vector<uint8_t> bytes;
+};
+std::vector<uint8_t> Write(const Model &m, const std::vector<Extra> &more = {});
 // Written beside `path` and renamed over it, so a reader never sees half a file.
-bool WriteFile(const std::string &path, const Model &m, std::string &err);
+bool WriteFile(const std::string &path, const Model &m, std::string &err, const std::vector<Extra> &more = {});
 
 }  // namespace modelfile

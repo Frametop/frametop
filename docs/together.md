@@ -58,7 +58,7 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
 |---|---|
 | Formats | VRM and glTF, and FBX from an avatar's source files. Never from VRChat's cache or servers |
 | An FBX skeleton | Matched by the usual Unity humanoid bone names. One that can't be matched is refused, with the missing bones named |
-| Size | Import reduces an avatar to about 20,000 triangles, merges its materials, caps its textures at 2K, and maps its shaders to a toon or a lit shader. A preview shows before and after |
+| Size | Import reduces an avatar to about 20,000 triangles, merges its materials, caps its textures at 2K a side and 16 MB in all, and maps its shaders to a toon or a lit shader. A preview shows before and after |
 | The body | Upper body from three points (the head and two hands). Legs are hidden or stand still |
 | The face | The mouth moves with the voice, and the eyes blink. Hair and cloth stay rigid |
 | What the others see | Your avatar, if its licence allows sending it (a VRM's licence fields) or you confirm you may share it (glTF, FBX). They keep it in memory for the session only. Otherwise they see an abstract head and hands in your colour |
@@ -122,7 +122,7 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
 
 **ft-avatars draws people.** It loads avatars in Frametop's own model format, poses them from the poses ft-together hands it, and draws each on a stereo overlay placed at that person, as ft-handview does for a hand.
 
-**Models have one format on disk.** `ft-model-import` reads VRM, glTF and FBX and writes Frametop's own file: a skinned mesh, a skeleton with its humanoid mapping, the mouth and blink shapes, and textures. Reducing happens there. ft-handview and ft-avatars read only that format. What a peer sends is that file too, so the code that reads a stranger's avatar is one small, strict loader, not three format parsers. The file, the importer and their limits are in [avatar/README.md](../avatar/README.md). Since M1 the file holds hands; M2 adds the body as more chunks, which an older reader skips.
+**Models have one format on disk.** `ft-model-import` reads VRM, glTF and FBX and writes Frametop's own file: a skinned mesh, a skeleton with its humanoid mapping, the mouth and blink shapes, and textures. Reducing happens there. ft-handview and ft-avatars read only that format. What a peer sends is that file too, so the code that reads a stranger's avatar is one small, strict loader, not three format parsers. The file, the importer and their limits are in [avatar/README.md](../avatar/README.md). Since M1 the file holds hands, and since M2 the body: more chunks, which the hands' reader skips.
 
 ### The protocol
 
@@ -153,7 +153,7 @@ Everything a peer sends is untrusted input, including after the owner accepted t
 |---|---|---|
 | M0 | Spikes: the encoder's limits, a DMA-BUF into the encoder, msquic on the Frame, heat | The numbers below |
 | M1 | Hand models: models loaded from files at run time, the picker in Frametop Settings, import of your own hands. **Built** (2026-11-10): the model file, `ft-model-import` for hands, ft-handview reading your folder, the Appearance page | Offline tests, snapshots of each model, the picker driven on the headset (to do: `HEADSET-TESTS.md`) |
-| M2 | Avatars: the importer and its limits, upper-body IK, the mouth and blinks, the mirror panel, the body spike | Offline tests on sample avatars, snapshots, the mirror on the headset |
+| M2 | Avatars: the importer and its limits, upper-body IK, the mouth and blinks, the mirror panel, the body spike. **Being built**: the body in the model file and `ft-model-import` for whole avatars are done (2026-11-10) | Offline tests on sample avatars, snapshots, the mirror on the headset |
 | M3 | The session core: joining, the room's state, a shared panel on a peer's Frame, voice, the abstract avatar, away | A fake peer joining the live Frame, and its panel measured |
 | M4 | Pointers, grants, moving panels and yourself | A fake peer asking for control and clicking |
 | M5 | The budget, and the PC sender in the Vibepollo fork | Fake peers past the budget; a PC panel on a fake peer |

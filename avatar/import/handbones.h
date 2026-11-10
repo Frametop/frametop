@@ -14,7 +14,7 @@
 
 #include <string>
 
-#include "scene.h"
+#include "rig.h"
 
 namespace importer {
 
@@ -29,10 +29,5 @@ enum class Side { Left, Right, Unsaid };
 // The hand of that side. For a file of one hand whose names don't say which (WebXR's), pass
 // Side::Unsaid: the nodes then need no side in their names. False with `why`.
 bool FindHand(const Scene &s, Side side, HandBones &out, std::string &why);
-
-// A name's words, lower case: split at anything that isn't a letter or digit, where a capital
-// follows a small letter, and between letters and digits ("mixamorig:LeftHandIndex1" ->
-// mixamorig left hand index 1).
-std::vector<std::string> Words(const std::string &name);
 
 }  // namespace importer

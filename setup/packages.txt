@@ -50,3 +50,6 @@ dev: wayland-utils xorg-x11-server-Xvfb ImageMagick xdotool
 # Frametop Together (together/): msquic links the OpenSSL above (3.5 or later, for its QUIC
 # API). Its link tests add delay and loss to a private loopback with tc's netem
 dev: iproute-tc
+# The model file reader's test (avatar/tests) runs under the address and undefined-behaviour
+# sanitizers: it is the one place a stranger's model is parsed
+dev: libasan libubsan

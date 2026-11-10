@@ -14,6 +14,7 @@ AREAS = {
     "display": ("display-settings", "ft_display_settings", "DisplayPages.qml"),
     "remote": ("remote-displays", "ft_remote_displays", "RemoteDisplayPages.qml"),
     "access": ("remote", "remote_access", "RemoteAccessPages.qml"),
+    "avatar": ("avatar", "ft_avatar_settings", "AvatarPages.qml"),
 }
 # The sidebar, in its order: (section name, area, group, title, icon, search words).
 SECTIONS = [
@@ -40,6 +41,8 @@ SECTIONS = [
      "eye tracking calibrate calibration look mouse"),
     ("hands", "input", "Eyes, hands & voice", "Hands", "transform-browse",
      "hand tracking pinch model touch typing cutout"),
+    ("appearance", "avatar", "Eyes, hands & voice", "Appearance", "preferences-desktop-theme-global",
+     "hand model look skin glove robot ghost solid avatar import vrm gltf glb fbx room view"),
     ("voice", "input", "Eyes, hands & voice", "Voice", "audio-input-microphone",
      "dictation speech wake word microphone"),
     ("games", "input", "System", "Game optimization", "applications-games",

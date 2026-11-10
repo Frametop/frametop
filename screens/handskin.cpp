@@ -1,7 +1,7 @@
 // Rendered hands from a 3D model, the CPU side (see handskin.h).
 #include "handskin.h"
 
-#include "handasset.h"
+#include "handmodels.h"
 
 #include <algorithm>
 #include <cmath>
@@ -78,17 +78,9 @@ void Frames(const V J[kJoints], const Frame &palm, Frame out[kJoints]) {
     }
 }
 
-const handasset::Hand &Model(int model, bool right) {
-    return handasset::kModel[model >= 0 && model < handasset::kModels ? model : 0].hands[right];
-}
+const handasset::Hand &Model(int model, bool right) { return handmodels::Hand(model, right); }
 
 }  // namespace
-
-int FindModel(const char *name) {
-    for (int k = 0; k < handasset::kModels; ++k)
-        if (!std::strcmp(handasset::kModel[k].name, name)) return k;
-    return -1;
-}
 
 bool Pose(int model, const handcut::Hand &h, Bones &out) {
     V B[kJoints], J[kJoints];
@@ -139,7 +131,7 @@ bool Pose(int model, const handcut::Hand &h, Bones &out) {
     for (int i = 0; i < 3; ++i) out.wrist[i] = h.p[0][i];
     out.fwd[0] = float(tp.d.x), out.fwd[1] = float(tp.d.y), out.fwd[2] = float(tp.d.z);
     out.scale = float(s);
-    out.model = model >= 0 && model < handasset::kModels ? model : 0;
+    out.model = model >= 0 && model < handmodels::Count() ? model : 0;
     return true;
 }
 

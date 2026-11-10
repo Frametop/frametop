@@ -1,11 +1,13 @@
 // Offline tests for ft-handview's CPU side: Room View's detector (roomview.h) against a fake
 // shared state, the rendered hand's mesh and square (handmesh.cpp), the hand model's posing
-// (handskin.cpp), the robot hand's (handrobot.cpp), and the drawn hand between and past the
-// tracking's frames (handhold.h). No OpenVR, GPU or headset.
+// (handskin.cpp) for the bundled models and a person's own (handmodels.cpp), the robot hand's
+// (handrobot.cpp), and the drawn hand between and past the tracking's frames (handhold.h). No
+// OpenVR, GPU or headset.
 //
 // Build and run: the justfile's test-c.
 #include "../handmesh.h"
-#include "../handasset.h"
+#include "../../avatar/modelfile.h"
+#include "../handmodels.h"
 #include "../handhold.h"
 #include "../handrobot.h"
 #include "../handskin.h"
@@ -220,8 +222,13 @@ double Angle(const handskin::Bones &b, int j) {
 void TestModels() {
     // the default first (HANDS_VIEW_MODEL=asset), each found by its name, nothing else
     CHECK(handasset::kModels >= 2 && !std::strcmp(handasset::kModel[0].name, "asset"));
-    for (int k = 0; k < handasset::kModels; ++k) CHECK(handskin::FindModel(handasset::kModel[k].name) == k);
-    CHECK(handskin::FindModel("capsules") == -1 && handskin::FindModel("") == -1);
+    for (int k = 0; k < handasset::kModels; ++k) {
+        CHECK(handmodels::Find(handasset::kModel[k].name) == k && handmodels::Generation(k) == 0);
+        CHECK(&handmodels::Hand(k, true) == &handasset::kModel[k].hands[1] && !std::strcmp(handmodels::Name(k), handasset::kModel[k].name));
+    }
+    CHECK(handmodels::Find("capsules") == -1 && handmodels::Find("") == -1);
+    // a number that isn't a model's stands for the default
+    CHECK(&handmodels::Hand(-1, false) == &handasset::kModel[0].hands[0] && &handmodels::Hand(1000, false) == &handasset::kModel[0].hands[0]);
     for (int model = 0; model < handasset::kModels; ++model)
         for (bool right : {false, true}) {
             const handasset::Hand &a = handasset::kModel[model].hands[right];
@@ -330,7 +337,7 @@ void TestSkin(int model) {
         }
         // a vertex of the index fingertip went with it (most of its weight on the last bones: MRTK2's
         // share some with the one before); one of the little finger's stayed
-        const handasset::Hand &a = handasset::kModel[model].hands[right];
+        const handasset::Hand &a = handmodels::Hand(model, right);
         int tipV = -1, littleV = -1;
         for (int i = 0; i < a.verts; ++i) {   // its weight on the index's last bones, or all on the little finger's
             int index = 0, little = 0;
@@ -665,6 +672,92 @@ void TestHold() {
     CHECK(!s.Update(nullptr, frame, t + 4010 * ms, k));
 }
 
+// A bundled model as a model file's.
+modelfile::Model AsFile(int model) {
+    modelfile::Model m;
+    m.info.name = handasset::kModel[model].name;
+    for (int side = 0; side < 2; ++side) {
+        const handasset::Hand &a = handasset::kModel[model].hands[side];
+        modelfile::Hand &h = m.hands[side];
+        m.hasHand[side] = true;
+        h.pos.assign(a.pos, a.pos + a.verts * 3), h.nrm.assign(a.nrm, a.nrm + a.verts * 3);
+        h.joints.assign(a.joints, a.joints + a.verts * 4), h.weights.assign(a.weights, a.weights + a.verts * 4);
+        h.idx.assign(a.idx, a.idx + a.tris * 3);
+        std::memcpy(h.bind, a.bind, sizeof h.bind);
+    }
+    return m;
+}
+
+// A person's own models (handmodels.h), from a folder of model files: the ones that may be drawn
+// get numbers after the bundled ones and keep them, and a changed file replaces its model.
+void TestOwnModels() {
+    const std::string dir = "build/tests/avatars-" + std::to_string(getpid());
+    mkdir("build", 0755), mkdir("build/tests", 0755);
+    CHECK(mkdir(dir.c_str(), 0755) == 0);
+    std::string err, log;
+    CHECK(handmodels::Scan(dir + "/none", log) == 0 && handmodels::Scan(dir, log) == 0 && log.empty());
+    CHECK(handmodels::Count() == handasset::kModels);
+    const int babylon = handmodels::Find("babylon"), godot = handmodels::Find("godot");
+    CHECK(babylon > 0 && godot > 0);
+    modelfile::Model one = AsFile(babylon);
+    one.hasHand[0] = false;
+    const std::vector<uint8_t> good = modelfile::Write(AsFile(babylon));
+    std::vector<uint8_t> bad = good;
+    bad[bad.size() - 2] = 0xff;   // a triangle's corner far past the vertices
+    const auto put = [&](const char *file, const std::vector<uint8_t> &bytes) {
+        FILE *f = std::fopen((dir + "/" + file).c_str(), "wb");
+        CHECK(f && std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size());
+        if (f) std::fclose(f);
+    };
+    put("my-hands.ftmodel", good);
+    put("broken.ftmodel", bad);
+    put("one-hand.ftmodel", modelfile::Write(one));
+    put("robot.ftmodel", good);            // names the program has already
+    put("asset.ftmodel", good);
+    put("Bad Name.ftmodel", good);
+    put("notes.txt", good);                // not a model file by its name
+    CHECK(handmodels::Scan(dir, log) == 1);
+    CHECK(handmodels::Count() == handasset::kModels + 1);
+    const int own = handmodels::Find("my-hands");
+    CHECK(own == handasset::kModels && handmodels::Generation(own) == 1 && !std::strcmp(handmodels::Name(own), "my-hands"));
+    CHECK(handmodels::Find("broken") == -1 && handmodels::Find("one-hand") == -1 && handmodels::Find("notes") == -1);
+    CHECK(handmodels::Find("robot") == -1 && handmodels::Find("asset") == 0);
+    for (const char *why : {"broken.ftmodel: a triangle", "one-hand.ftmodel: it doesn't have both hands", "robot.ftmodel: not a name",
+                            "asset.ftmodel: not a name", "Bad Name.ftmodel: not a name"})
+        if (log.find(why) == std::string::npos) ++g_fail, std::printf("handview_test.cpp: FAILED: no \"%s\" in: %s\n", why, log.c_str());
+    CHECK(!handmodels::NameOk("") && !handmodels::NameOk("capsules") && !handmodels::NameOk("../x") && !handmodels::NameOk(std::string(32, 'a')) &&
+          handmodels::NameOk(std::string(31, 'a')) && handmodels::NameOk("my_hands-2"));
+    // it is posed as the model it was written from
+    for (bool right : {false, true}) {
+        const handcut::Hand h = handskin::BindHand(godot, right);
+        handskin::Bones a, b;
+        CHECK(handskin::Pose(babylon, h, a) && handskin::Pose(own, h, b) && b.model == own);
+        CHECK(!std::memcmp(a.m, b.m, sizeof a.m) && handskin::Vertices(own, right) == handskin::Vertices(babylon, right));
+    }
+    TestSkin(own);
+    // nothing changed: nothing read again, nothing said again
+    log.clear();
+    CHECK(handmodels::Scan(dir, log) == 0 && log.empty() && handmodels::Generation(own) == 1);
+    // the file changed: the same number, the new model, a new generation
+    put("my-hands.ftmodel", modelfile::Write(AsFile(godot)));
+    CHECK(handmodels::Scan(dir, log) == 1 && handmodels::Find("my-hands") == own && handmodels::Generation(own) == 2);
+    CHECK(handskin::Vertices(own, true) == handskin::Vertices(godot, true) && handmodels::Count() == handasset::kModels + 1);
+    // changed into something the format refuses, or gone: the model stays as it was
+    put("my-hands.ftmodel", bad);
+    CHECK(handmodels::Scan(dir, log) == 0 && handmodels::Generation(own) == 2 && handskin::Vertices(own, true) == handskin::Vertices(godot, true));
+    for (const char *file : {"my-hands", "broken", "one-hand", "robot", "asset", "Bad Name"}) unlink((dir + "/" + file + ".ftmodel").c_str());
+    unlink((dir + "/notes.txt").c_str());
+    CHECK(rmdir(dir.c_str()) == 0);
+    CHECK(handmodels::Scan(dir, log) == 0 && handmodels::Find("my-hands") == own);
+    // the folder: FT_AVATARS_DIR, else the data home's
+    setenv("FT_AVATARS_DIR", "/somewhere", 1);
+    CHECK(handmodels::Folder() == "/somewhere");
+    unsetenv("FT_AVATARS_DIR"), setenv("XDG_DATA_HOME", "/data", 1);
+    CHECK(handmodels::Folder() == "/data/frametop/avatars");
+    unsetenv("XDG_DATA_HOME"), setenv("HOME", "/home/me", 1);
+    CHECK(handmodels::Folder() == "/home/me/.local/share/frametop/avatars");
+}
+
 int main() {
     TestRoomView();
     TestHold();
@@ -676,6 +769,7 @@ int main() {
         TestSkin(model);
         if (g_fail > before) std::printf("  (model %s)\n", handasset::kModel[model].name);
     }
+    TestOwnModels();
     std::printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

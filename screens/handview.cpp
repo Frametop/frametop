@@ -1,7 +1,7 @@
 // ft-handview: your hands, drawn. In a VR game, SteamVR Home, the dashboard, Frametop's panels
 // over the void, and (HANDS_VIEW_ROOMVIEW=1, the default) with Room View on too, it draws each
 // tracked hand over everything: a 3D hand model posed by the tracked skeleton (handskin.h; which
-// model, HANDS_VIEW_MODEL: handasset.h's), in one of two looks (HANDS_VIEW_STYLE): ghost, light and
+// model, HANDS_VIEW_MODEL: handmodels.h's), in one of two looks (HANDS_VIEW_STYLE): ghost, light and
 // see-through, glowing toward its edges like the Quest's, or solid, a matte light hand lit from
 // above with a soft rim light. With Room View on, ft-screens also cuts a hole for each hand in the
 // panels (handcut.h), and the drawn hand floats over the real one. HANDS_VIEW_MODEL=robot draws a
@@ -10,6 +10,8 @@
 //
 //   ft-handview [--status S] [--res PX] [--demo] [--seconds S]
 //   ft-handview --snapshot FILE.png [--res PX] [--seconds S]
+//   ft-handview --thumb FILE.png [--res PX]
+//   ft-handview --models
 //
 //   --status S   every S seconds a line to the log: Room View, each hand, renders and their cost
 //   --res PX     each eye's half of a hand's buffer, PX square (default 320)
@@ -19,6 +21,10 @@
 //                of both hands offscreen, each eye's half, into a PNG (left hands over dark, right
 //                over light), then draws both hands 30 times a second for S seconds (default 5) and
 //                prints the CPU it took, per draw and of one core, and the wait for the GPU after
+//   --thumb      no SteamVR: the model's right hand, open, its back to you, PX square over nothing
+//                (a PNG with alpha): the model's picture in Settings
+//   --models     the models there are, a line each: its name, a tab, bundled|own|built (own: from
+//                your avatars folder, handmodels.h; built: drawn from the skeleton in code)
 //
 // The hands come from ft-hands' shared files, as ft-screens reads them (handcut::Hands, in the
 // standing universe, moved ahead to when the frame is on the displays). A hand holding a
@@ -37,14 +43,17 @@
 //
 // Room View: roomview.h. HANDS_ROOMVIEW=auto|on|off in ~/.config/frametop.conf forces it.
 // Settings (~/.config/frametop.conf): HANDS_VIEW_MODEL asset|babylon|mrtk3|godot|mrtk2|robot|capsules
-// (screens/assets/hands/README.md), HANDS_VIEW_STYLE ghost|solid,
+// (screens/assets/hands/README.md) or one of your own (handmodels.h: a model ft-model-import put in
+// your avatars folder, by its file's name), HANDS_VIEW_STYLE ghost|solid,
 // HANDS_VIEW_ROOMVIEW 1|0 (draw with Room View on too), HANDS_VIEW_SMOOTH 1|0 and HANDS_VIEW_HOLD S
 // (handhold.h: each frame blended in, a lost hand held still S seconds (3), a misread jump held off).
 // Commands (datagrams on @ft_handview, replies to the sender):
 //   hands <L> <R> <allowed>   the pointer helper's word: each side hand|controller|off
 //   roomview auto|on|off      force Room View's state (auto: detect it) -> "ok <on|off> (<why>)"
 //   model <name>|robot|capsules  the hand model, style ghost|solid its look, inroom 1|0 drawing with
-//                             Room View on (live, until a restart) -> "ok"
+//                             Room View on (live, until a restart) -> "ok". model reads your
+//                             avatars folder again first, so a model just imported is there
+//   models                    reads the folder again -> "ok <every model's name, | between>"
 //   state                     -> "ok <the status line>"
 //   flash                     both drawn hands pulse cyan for half a second: a flag was taken
 //                             (`ft-handsctl flag`, hands/README.md) -> "ok <hands shown>"
@@ -58,7 +67,7 @@
 #include "handhold.h"
 #include "handmesh.h"
 #include "handskin.h"
-#include "handasset.h"
+#include "handmodels.h"
 #include "handrobot.h"
 #include "rendernode.h"
 #include "roomview.h"
@@ -474,7 +483,13 @@ private:
     EGLContext ctx_ = EGL_NO_CONTEXT;
     std::vector<uint64_t> mods_;
     GLuint body_ = 0, skin_ = 0, robot_ = 0, robotRim_ = 0, robotVbo_ = 0, robotIbo_ = 0, cap_ = 0, rim_ = 0, scratchTex_ = 0, scratchDepth_ = 0, scratch_ = 0, vbo_ = 0, ibo_ = 0, quad_ = 0;
-    GLuint modelVbo_[handasset::kModels][2] = {}, modelIbo_[handasset::kModels][2] = {};   // the models' hands, uploaded once
+    // A model's hands on the GPU, uploaded when first drawn and again when its data changes.
+    struct ModelBuf {
+        GLuint vbo[2] = {}, ibo[2] = {};
+        unsigned generation = ~0u;
+    };
+    const ModelBuf &Uploaded(int model);
+    std::vector<ModelBuf> models_;
 };
 
 bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
@@ -516,21 +531,6 @@ bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
     glGenBuffers(1, &quad_);
     glBindBuffer(GL_ARRAY_BUFFER, quad_);
     glBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STATIC_DRAW);
-    // the model: positions, normals, joints, weights one after another, and the triangles
-    glGenBuffers(2 * handasset::kModels, &modelVbo_[0][0]);
-    glGenBuffers(2 * handasset::kModels, &modelIbo_[0][0]);
-    for (int k = 0; k < 2 * handasset::kModels; ++k) {
-        const int model = k / 2, side = k % 2;
-        const handasset::Hand &a = handasset::kModel[model].hands[side];
-        const size_t n = size_t(a.verts), sizes[4] = {n * 6, n * 3, n * 4, n * 4};
-        glBindBuffer(GL_ARRAY_BUFFER, modelVbo_[model][side]);
-        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(sizes[0] + sizes[1] + sizes[2] + sizes[3]), nullptr, GL_STATIC_DRAW);
-        const void *parts[4] = {a.pos, a.nrm, a.joints, a.weights};
-        size_t at = 0;
-        for (int k = 0; k < 4; ++k) glBufferSubData(GL_ARRAY_BUFFER, GLintptr(at), GLsizeiptr(sizes[k]), parts[k]), at += sizes[k];
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIbo_[model][side]);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(a.tris * 3 * sizeof(uint16_t)), a.idx, GL_STATIC_DRAW);
-    }
     // the robot: its vertices as they are (handrobot::Vertex), one mesh for both hands
     const handrobot::Mesh &r = handrobot::Model();
     glGenBuffers(1, &robotVbo_);
@@ -663,6 +663,27 @@ void Gpu::Draw(Output &o, const handmesh::Mesh &m, const handmesh::Quad &q, cons
     Rim(o, q, st);
 }
 
+// The model's buffers: positions, normals, joints, weights one after another, and the triangles.
+const Gpu::ModelBuf &Gpu::Uploaded(int model) {
+    if (size_t(model) >= models_.size()) models_.resize(size_t(model) + 1);
+    ModelBuf &b = models_[size_t(model)];
+    if (b.generation == handmodels::Generation(model)) return b;
+    if (!b.vbo[0]) glGenBuffers(2, b.vbo), glGenBuffers(2, b.ibo);
+    for (int side = 0; side < 2; ++side) {
+        const handasset::Hand &a = handmodels::Hand(model, side);
+        const size_t n = size_t(a.verts), sizes[4] = {n * 6, n * 3, n * 4, n * 4};
+        glBindBuffer(GL_ARRAY_BUFFER, b.vbo[side]);
+        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(sizes[0] + sizes[1] + sizes[2] + sizes[3]), nullptr, GL_STATIC_DRAW);
+        const void *parts[4] = {a.pos, a.nrm, a.joints, a.weights};
+        size_t at = 0;
+        for (int k = 0; k < 4; ++k) glBufferSubData(GL_ARRAY_BUFFER, GLintptr(at), GLsizeiptr(sizes[k]), parts[k]), at += sizes[k];
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, b.ibo[side]);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(a.tris * 3 * sizeof(uint16_t)), a.idx, GL_STATIC_DRAW);
+    }
+    b.generation = handmodels::Generation(model);
+    return b;
+}
+
 void Gpu::DrawModel(Output &o, bool right, const handskin::Bones &bones, const handmesh::Quad &q, const double eyes[2][3],
                     const float tips[15], const Cut &cut, const Style &st) {
     Body(skin_, tips);
@@ -674,10 +695,11 @@ void Gpu::DrawModel(Output &o, bool right, const handskin::Bones &bones, const h
     glUniform1f(glGetUniformLocation(skin_, "posStep"), handasset::kPosStep);
     glUniform3fv(glGetUniformLocation(skin_, "wrist"), 1, bones.wrist);
     glUniform3fv(glGetUniformLocation(skin_, "fwd"), 1, bones.fwd);
-    const handasset::Hand &a = handasset::kModel[bones.model].hands[right];
+    const handasset::Hand &a = handmodels::Hand(bones.model, right);
     const size_t n = size_t(a.verts);
-    glBindBuffer(GL_ARRAY_BUFFER, modelVbo_[bones.model][right]);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIbo_[bones.model][right]);
+    const ModelBuf &buf = Uploaded(bones.model);
+    glBindBuffer(GL_ARRAY_BUFFER, buf.vbo[right]);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf.ibo[right]);
     for (int k = 0; k < 4; ++k) glEnableVertexAttribArray(k);
     glVertexAttribPointer(0, 3, GL_SHORT, GL_FALSE, 0, nullptr);
     glVertexAttribPointer(1, 3, GL_BYTE, GL_TRUE, 0, reinterpret_cast<void *>(n * 6));
@@ -885,17 +907,24 @@ handcut::Hand DemoHand(const Mat &head, bool right, double t) {
 }
 
 // The settings that pick how a hand is drawn (HANDS_VIEW_*), and the live commands' changes.
-constexpr int kCapsules = -1, kRobot = -2;   // Look::model's that aren't handasset's
+constexpr int kCapsules = -1, kRobot = -2;   // Look::model's that aren't handmodels'
 
 struct Look {
-    int model = 0;              // the 3D model (handasset::kModel's), or kCapsules, kRobot
+    int model = 0;              // the 3D model (handmodels'), or kCapsules, kRobot
     const Style *style = &kStyles[0];
     bool inRoom = true;         // draw with Room View on too
 };
 
-// A model's name (HANDS_VIEW_MODEL, the model command): one of handasset's, robot or capsules.
+// The person's own models, read again (handmodels::Scan): what it refused goes to the log.
+void ScanModels() {
+    std::string log;
+    handmodels::Scan(handmodels::Folder(), log);
+    if (!log.empty()) std::fprintf(stderr, "handview: %s\n", log.c_str());
+}
+
+// A model's name (HANDS_VIEW_MODEL, the model command): one of handmodels', robot or capsules.
 bool ParseModel(const char *name, int &model) {
-    const int k = !std::strcmp(name, "capsules") ? kCapsules : !std::strcmp(name, "robot") ? kRobot : handskin::FindModel(name);
+    const int k = !std::strcmp(name, "capsules") ? kCapsules : !std::strcmp(name, "robot") ? kRobot : handmodels::Find(name);
     if (k == -1 && std::strcmp(name, "capsules")) return false;
     model = k;
     return true;
@@ -903,14 +932,15 @@ bool ParseModel(const char *name, int &model) {
 
 std::string ModelNames() {
     std::string s;
-    for (const handasset::Model &m : handasset::kModel) s += std::string(m.name) + "|";
+    for (int k = 0; k < handmodels::Count(); ++k) s += std::string(handmodels::Name(k)) + "|";
     return s + "robot|capsules";
 }
 
-const char *ModelName(int model) { return model == kRobot ? "robot" : model < 0 ? "capsules" : handasset::kModel[model].name; }
+const char *ModelName(int model) { return model == kRobot ? "robot" : model < 0 ? "capsules" : handmodels::Name(model); }
 
 Look ReadLook(std::string &log) {
     Look k;
+    ScanModels();
     const std::string m = handcut::Setting("HANDS_VIEW_MODEL", "asset"), st = handcut::Setting("HANDS_VIEW_STYLE", "ghost"),
                       r = handcut::Setting("HANDS_VIEW_ROOMVIEW", "1");
     if (!ParseModel(m.c_str(), k.model)) log += "HANDS_VIEW_MODEL=" + m + " (ignored: " + ModelNames() + ") ";
@@ -1102,13 +1132,46 @@ int Snapshot(const char *path, int res, double seconds, const Look &look) {
     return 0;
 }
 
+// --thumb: one hand of the model drawn offscreen into a PNG, as the left eye sees it.
+int Thumbnail(const char *path, int res, const Look &look) {
+    Gpu gpu;
+    if (!gpu.Init({}, res)) return 1;
+    Output out;
+    if (!gpu.MakeOutput(out, false)) return std::fprintf(stderr, "thumb: no offscreen buffer\n"), 1;
+    const double eyes[2][3] = {{-0.032, 0, 0}, {0.032, 0, 0}}, head[3] = {0, 0, 0};
+    const double at[3] = {0, -0.10, -0.40}, palm[3] = {0, -0.3, -1}, up[3] = {0, 1, -0.3};
+    handcut::Hand h;
+    handmesh::Quad q;
+    handmesh::Mesh mesh;
+    handskin::Bones bones;
+    handrobot::Bones robot;
+    if (!handskin::DemoPose("open", true, at, palm, up, 0, h) || !Prepare(look, h, head, eyes, mesh, bones, robot, q))
+        return std::fprintf(stderr, "thumb: the hand can't be drawn\n"), 1;
+    Render(gpu, out, look, h, mesh, bones, robot, q, eyes);
+    glFinish();
+    std::vector<uint8_t> px, img(size_t(res) * res * 4);
+    gpu.Read(out, px);
+    for (int y = 0; y < res; ++y) std::memcpy(&img[size_t(y) * res * 4], &px[size_t(y) * 2 * res * 4], size_t(res) * 4);
+    gpu.FreeOutput(out);
+    gpu.Done();
+    if (!stbi_write_png(path, res, res, 4, img.data(), res * 4)) return std::fprintf(stderr, "thumb: can't write %s\n", path), 1;
+    return 0;
+}
+
+// --models: every model's name and where it comes from.
+int ListModels() {
+    for (int k = 0; k < handmodels::Count(); ++k) std::printf("%s\t%s\n", handmodels::Name(k), handmodels::Generation(k) ? "own" : "bundled");
+    std::printf("robot\tbuilt\ncapsules\tbuilt\n");
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
     double statusS = 0, seconds = 0;
     int res = 320;
-    bool demo = false;
-    const char *snapshot = nullptr;
+    bool demo = false, models = false;
+    const char *snapshot = nullptr, *thumb = nullptr;
     for (int i = 1; i < argc; ++i) {
         const bool more = i + 1 < argc;
         if (!std::strcmp(argv[i], "--status") && more) statusS = std::atof(argv[++i]);
@@ -1116,8 +1179,12 @@ int main(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--seconds") && more) seconds = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--demo")) demo = true;
         else if (!std::strcmp(argv[i], "--snapshot") && more) snapshot = argv[++i];
+        else if (!std::strcmp(argv[i], "--thumb") && more) thumb = argv[++i];
+        else if (!std::strcmp(argv[i], "--models")) models = true;
         else return std::fprintf(stderr, "usage: ft-handview [--status S] [--res PX] [--demo] [--seconds S]\n"
-                                         "       ft-handview --snapshot FILE.png [--res PX] [--seconds S]\n"), 2;
+                                         "       ft-handview --snapshot FILE.png [--res PX] [--seconds S]\n"
+                                         "       ft-handview --thumb FILE.png [--res PX]\n"
+                                         "       ft-handview --models\n"), 2;
     }
     signal(SIGINT, Stop);
     signal(SIGTERM, Stop);
@@ -1125,7 +1192,9 @@ int main(int argc, char **argv) {
     std::string lookLog;
     Look look = ReadLook(lookLog);
     if (!lookLog.empty()) std::fprintf(stderr, "%s\n", lookLog.c_str());
+    if (models) return ListModels();
     if (snapshot) return Snapshot(snapshot, res, seconds > 0 ? seconds : 5, look);
+    if (thumb) return Thumbnail(thumb, res, look);
 
     const int sock = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     {
@@ -1214,7 +1283,7 @@ int main(int argc, char **argv) {
         while ((n = recvfrom(sock, buf, sizeof buf - 1, 0, reinterpret_cast<sockaddr *>(&from), &fromLen)) > 0) {
             buf[n] = 0;
             while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == ' ')) buf[--n] = 0;
-            char l[16], r[16], word[16];
+            char l[16], r[16], word[16], name[handmodels::kMaxName + 1];
             int allowed;
             std::string reply;
             if (std::sscanf(buf, "hands %15s %15s %d", l, r, &allowed) == 3) {
@@ -1227,8 +1296,11 @@ int main(int argc, char **argv) {
                     room.Update(now, scene, constructRoomView);
                     reply = std::string("ok ") + (room.on() ? "on" : "off") + " (" + room.why() + ")";
                 }
-            } else if (std::sscanf(buf, "model %15s", word) == 1 && ParseModel(word, look.model)) {
+            } else if (std::sscanf(buf, "model %31s", name) == 1 && (ScanModels(), ParseModel(name, look.model))) {
                 reply = "ok";
+            } else if (!std::strcmp(buf, "models")) {
+                ScanModels();
+                reply = "ok " + ModelNames();
             } else if (const Style *st = std::sscanf(buf, "style %15s", word) == 1 ? FindStyle(word) : nullptr) {
                 look.style = st, reply = "ok";
             } else if (std::sscanf(buf, "inroom %15s", word) == 1 && (!std::strcmp(word, "1") || !std::strcmp(word, "0"))) {
@@ -1250,7 +1322,7 @@ int main(int argc, char **argv) {
                         for (int c = 0; c < 4; ++c) len += std::snprintf(line + len, sizeof line - len, " %.5f", p.m.m[r][c]);
                     reply += line;
                 }
-            } else reply = "error hands <L> <R> <allowed>|roomview auto|on|off|model " + ModelNames() + "|style ghost|solid|inroom 1|0|state|flash|poses <S>";
+            } else reply = "error hands <L> <R> <allowed>|roomview auto|on|off|models|model " + ModelNames() + "|style ghost|solid|inroom 1|0|state|flash|poses <S>";
             if (reply == "ok")
                 for (Side &s : sides) s.lastFrame = ~uint64_t(0);   // a new look shows at once
             if (!reply.empty() && fromLen > offsetof(sockaddr_un, sun_path))

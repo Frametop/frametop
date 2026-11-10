@@ -121,6 +121,10 @@ RUN hands/build.sh \
 # (hands/rec/session.py) runs it from.
 RUN hands/rec/build.sh \
  && test -x hands/rec/build/ft-handpanel
+# The model importer (VRM, glTF and FBX into Frametop's own model file): it stays in
+# avatar/build/, where Settings runs it from.
+RUN avatar/build.sh \
+ && test -x avatar/build/ft-model-import
 
 # A release installs from this image (pack/install-release.sh): it copies
 # /src/frametop, built, to the Frame for its host side (services, the driver,

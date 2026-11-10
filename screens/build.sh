@@ -13,6 +13,7 @@
 # ft-handview --snapshot writes PNGs with stb_image_write (the same).
 # ft-handview's hand models are compiled in once: tools/hand-asset.py makes build/handasset.cpp from
 # screens/assets/hands each build (handasset.h, which declares it, is in the tree);
+# a person's own are read at run time (handmodels.cpp, with avatar/modelfile.cpp's reader);
 # its robot hand is built in code (handrobot.cpp).
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -38,6 +39,8 @@ $cxx -c -o build/steampanels.o steampanels.cpp
 $cxx -c -o build/handtest.o handtest.cpp
 $cxx -c -o build/handmesh.o handmesh.cpp
 $cxx -c -o build/handskin.o handskin.cpp
+$cxx -c -o build/handmodels.o handmodels.cpp
+$cxx -c -o build/modelfile.o ../avatar/modelfile.cpp
 python3 -I tools/hand-asset.py --cpp build/handasset.cpp >/dev/null
 $cxx -I. -c -o build/handasset.o build/handasset.cpp
 $cxx -c -o build/handrobot.o handrobot.cpp
@@ -46,7 +49,7 @@ vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
-g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
+g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 $cxx -o build/ft-spotpanel ../frunner/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
 strip --strip-unneeded build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel
 echo "built build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel"'

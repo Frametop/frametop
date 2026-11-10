@@ -426,6 +426,8 @@ def pages(f, keys):
                           "which eye tracker", "settings:gaze"],
                  ["Hands", "When hand tracking runs, the hand model, the three ways to use your hands, and every "
                            "gesture on or off", "settings:hands"],
+                 ["Appearance", "The hands Frametop draws for you: pick a model, or import your own from a VRM, "
+                                "glTF or FBX file", "settings:appearance"],
                  ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
                            "commands", "settings:voice"],
                  "System",

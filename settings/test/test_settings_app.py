@@ -40,6 +40,8 @@ def patched_backend(area):
     mod = __import__(module)
     if hasattr(mod, "host_command"):
         mod.host_command = fake_host_command
+    if hasattr(mod, "tool_command"):  # Frametop's own programs (ft-handview, ft-model-import)
+        mod.tool_command = fake_host_command
     if hasattr(mod, "host"):  # input-settings' own runner
         mod.host = lambda *cmd, timeout=20: (HOST_CMDS.append(cmd), _Done())[1]
     b = mod.Backend()
@@ -121,7 +123,7 @@ class App(unittest.TestCase):
         self.assertIsNotNone(search)
         self.assertEqual(sections.property("count"), len(ft_settings.SECTIONS))
         for text, expect in (("vnc", ["remote-access"]), ("moonlight", ["remote-displays"]),
-                             ("EYE calibrate", ["gaze"]), ("zzz", [])):
+                             ("EYE calibrate", ["gaze"]), ("vrm", ["appearance"]), ("zzz", [])):
             with self.subTest(text=text):
                 search.setProperty("text", text)
                 w.spin(0.05)

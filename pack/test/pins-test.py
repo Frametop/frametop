@@ -2,7 +2,7 @@
 """Offline checks of the build's pinned downloads:
 
 - every download in a build file (build.sh, deps.sh, Makefile, Containerfile, CMakeLists.txt,
-  scripts/openvr.sh, scripts/stb.sh, install.sh, testbench/install.sh) is checked by a sha256 or
+  scripts/openvr.sh, scripts/stb.sh, scripts/modeldeps.sh, install.sh, testbench/install.sh) is checked by a sha256 or
   fetched by a full commit, and pip installs require hashes, apart from the dev container's
   venvs listed below;
 - scripts/stb.sh keeps a matching download, refuses one that doesn't match and a header it has
@@ -26,7 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PRUNE = {'.git', '.worktrees', 'build', '.venv', 'node_modules', '__pycache__', 'third_party'}
 BUILD_NAMES = {'build.sh', 'deps.sh', 'Makefile', 'Containerfile', 'CMakeLists.txt'}
-EXTRA = ['scripts/openvr.sh', 'scripts/stb.sh', 'install.sh', 'testbench/install.sh']   # (no testbench/ in the image)
+EXTRA = ['scripts/openvr.sh', 'scripts/stb.sh', 'scripts/modeldeps.sh', 'install.sh', 'testbench/install.sh']   # (no testbench/ in the image)
 # pip installs without hashes, on purpose: the dev container's venvs, from exact == pins. The
 # image and releases install the same versions from uv.lock, with its hashes. (Still open:
 # hashing these needs every platform's wheel, the 7i's too.)

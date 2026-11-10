@@ -25,7 +25,7 @@ test-python:
         'layout/countdown/tests/test_*.py' 'models/test/*.py' 'commands/test/*.py' 'input-settings/test/*.py' \
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
-        'tour/test/*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'steam/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
+        'tour/test/*.py' 'avatar/tests/test_*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'steam/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
         'scripts/tests/test_app_imports.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'scripts/tests/test_install_keyboard.py' 'docs/tests/*.py' || status=1
@@ -81,9 +81,13 @@ test-c:
     run screens/tests/handshape-test.cpp build/tests/handshape-test
     python3 -I screens/tools/hand-asset.py --cpp build/tests/handasset.cpp >/dev/null
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror -Iscreens screens/tests/handview_test.cpp \
-      screens/handmesh.cpp screens/handskin.cpp build/tests/handasset.cpp screens/handrobot.cpp screens/handcut.cpp -o build/tests/handview-test
+      screens/handmesh.cpp screens/handskin.cpp screens/handmodels.cpp avatar/modelfile.cpp build/tests/handasset.cpp \
+      screens/handrobot.cpp screens/handcut.cpp -o build/tests/handview-test
     run screens/tests/handview_test.cpp build/tests/handview-test
     run "screens/tools/hand-asset.py --check" python3 -I screens/tools/hand-asset.py --check
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/modelfile-test.cpp avatar/modelfile.cpp \
+      -o build/tests/modelfile-test
+    run avatar/tests/modelfile-test.cpp build/tests/modelfile-test
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"

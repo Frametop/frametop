@@ -81,6 +81,11 @@ class Paths(unittest.TestCase):
         self.assertFalse({'voice', 'hands', 'gaze/tracker'} & openvr)
         self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec'})
         self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown'})   # its include line
+        self.assertEqual(rebuilt('avatar/modelfile.cpp'), {'avatar', 'screens'})   # built into ft-handview too
+        self.assertEqual(rebuilt('avatar/import/main.cpp'), {'avatar'})
+        self.assertEqual(rebuilt('avatar/ftmodel.py'), set())
+        self.assertEqual(rebuilt('avatar/tests/test_import.py'), set())
+        self.assertEqual(rebuilt('scripts/modeldeps.sh'), {'avatar'})
 
     def test_included_headers_are_build_inputs(self):
         # DEE-329: a header another component's sources include, found from the include lines.

@@ -18,10 +18,10 @@ Every Frametop setting is in one app, Frametop Settings (`settings/`), in the Pl
 
 - Screens: Screens, Layout & profiles, Visibility & pins (not with the gamescope backend), and Remote displays.
 - Input: Devices, Buttons, Controllers, Keyboard, Commands, Pointer, Ignored panels, and Bluetooth.
-- Eyes, hands & voice: Gaze, Hands, and Voice.
+- Eyes, hands & voice: Gaze, Hands, Appearance, and Voice.
 - System: Game optimization, Power, and Remote access.
 
-Below the sections are Controls guide and Frametop Tour. The sidebar always shows, so the window is at least 34 grid units wide. `settings/sections.py` lists the sections; `settings/ft-settings SECTION` (or `FT_SETTINGS_PAGE=SECTION`) opens the app on one, as the Tour's buttons do. The pages come from four areas, each with its own backend and pages file, which load the first time one of their sections opens, so a section that's never opened costs nothing:
+Below the sections are Controls guide and Frametop Tour. The sidebar always shows, so the window is at least 34 grid units wide. `settings/sections.py` lists the sections; `settings/ft-settings SECTION` (or `FT_SETTINGS_PAGE=SECTION`) opens the app on one, as the Tour's buttons do. The pages come from five areas, each with its own backend and pages file, which load the first time one of their sections opens, so a section that's never opened costs nothing:
 
 | Area | Sections | Backend and pages |
 | --- | --- | --- |
@@ -29,6 +29,7 @@ Below the sections are Controls guide and Frametop Tour. The sidebar always show
 | Display | Screens, Layout & profiles, Visibility & pins, Power | `display-settings/ft_display_settings.py`, `display-settings/DisplayPages.qml` |
 | Remote displays | Remote displays | `remote-displays/ft_remote_displays.py`, `remote-displays/RemoteDisplayPages.qml` |
 | Remote access | Remote access | `remote/remote_access.py`, `remote/RemoteAccessPages.qml` |
+| Avatar | Appearance | `avatar/ft_avatar_settings.py`, `avatar/AvatarPages.qml` |
 
 `settings/install.sh` (run by `install.sh`) installs its menu entry, and removes the entries of the four apps it replaced: Frametop Input Settings, Frametop Display Settings, Frametop Remote Displays and Frametop Remote Access. Its launcher hands podman the real `XDG_RUNTIME_DIR` and user bus and gives the app the session's Wayland socket, because the desktop session runs on a private D-Bus and podman fails on it. Profiles leave Frametop Settings out, as they left Display Settings out: profiles are saved from it, so it would open itself again. A profile saved before with one of the old apps open skips it.
 

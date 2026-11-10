@@ -1,7 +1,7 @@
 // Rendered hands from a 3D model, the CPU side (ft-handview, handview.cpp): the skinning matrices
-// that pose a model's hand (handasset.h: WebXR Input Profiles' generic-hand and the others in
-// screens/assets/hands, each mapped onto WebXR's 25 joints) like a tracked hand (handcut::Hand:
-// 21 joints in MediaPipe's order), and demo hands to try it on.
+// that pose a model's hand (handmodels.h: WebXR Input Profiles' generic-hand and the others in
+// screens/assets/hands, and a person's own, each mapped onto WebXR's 25 joints) like a tracked
+// hand (handcut::Hand: 21 joints in MediaPipe's order), and demo hands to try it on.
 //
 // Each of the model's joints gets a frame, the same way in its bind pose and on the tracked hand:
 // its bone's direction (toward the next joint along the finger; a tip takes its last bone's), and
@@ -29,11 +29,8 @@ constexpr int kJoints = 25;   // WebXR's: wrist, thumb (4), then 5 for each fing
 // The model's joint for each of MediaPipe's 21 (the metacarpals, 5 10 15 20, have none).
 constexpr int kFromMediaPipe[21] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19, 21, 22, 23, 24};
 
-// The model by its name (HANDS_VIEW_MODEL: handasset::kModel's), or -1.
-int FindModel(const char *name);
-
 struct Bones {
-    int model = 0;          // handasset::kModel's
+    int model = 0;          // handmodels'
     float m[kJoints][12];   // row-major 3x4: model (bind pose) -> room
     float wrist[3];         // the tracked wrist, and the direction from it along the hand
     float fwd[3];

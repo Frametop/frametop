@@ -122,7 +122,7 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
 
 **ft-avatars draws people.** It loads avatars in Frametop's own model format, poses them from the poses ft-together hands it, and draws each on a stereo overlay placed at that person, as ft-handview does for a hand.
 
-**Models have one format on disk.** `ft-model-import` reads VRM, glTF and FBX and writes Frametop's own file: a skinned mesh, a skeleton with its humanoid mapping, the mouth and blink shapes, and textures. Reducing happens there. ft-handview and ft-avatars read only that format. What a peer sends is that file too, so the code that reads a stranger's avatar is one small, strict loader, not three format parsers.
+**Models have one format on disk.** `ft-model-import` reads VRM, glTF and FBX and writes Frametop's own file: a skinned mesh, a skeleton with its humanoid mapping, the mouth and blink shapes, and textures. Reducing happens there. ft-handview and ft-avatars read only that format. What a peer sends is that file too, so the code that reads a stranger's avatar is one small, strict loader, not three format parsers. The file, the importer and their limits are in [avatar/README.md](../avatar/README.md). Since M1 the file holds hands; M2 adds the body as more chunks, which an older reader skips.
 
 ### The protocol
 
@@ -152,7 +152,7 @@ Everything a peer sends is untrusted input, including after the owner accepted t
 | | What | Proved by |
 |---|---|---|
 | M0 | Spikes: the encoder's limits, a DMA-BUF into the encoder, msquic on the Frame, heat | The numbers below |
-| M1 | Hand models: models loaded from files at run time, the picker in Frametop Settings, import of your own hands | Offline tests, snapshots of each model, the picker driven on the headset |
+| M1 | Hand models: models loaded from files at run time, the picker in Frametop Settings, import of your own hands. **Built** (2026-11-10): the model file, `ft-model-import` for hands, ft-handview reading your folder, the Appearance page | Offline tests, snapshots of each model, the picker driven on the headset (to do: `HEADSET-TESTS.md`) |
 | M2 | Avatars: the importer and its limits, upper-body IK, the mouth and blinks, the mirror panel, the body spike | Offline tests on sample avatars, snapshots, the mirror on the headset |
 | M3 | The session core: joining, the room's state, a shared panel on a peer's Frame, voice, the abstract avatar, away | A fake peer joining the live Frame, and its panel measured |
 | M4 | Pointers, grants, moving panels and yourself | A fake peer asking for control and clicking |
@@ -173,4 +173,5 @@ Everything a peer sends is untrusted input, including after the owner accepted t
 
 - How a second Frame's owner sets up Tailscale sharing with the least steps, and what the invite looks like when the two are on different tailnets.
 - Whether a PC on the tailnet can be reached directly by every peer, or only by its own Frame.
+- A model's "may be sent" mark is set at import. Settings imports without it and should ask the first time a model would be sent (M3), which needs a way to set the mark in a file already imported; a VRM's own licence still decides.
 - Sound from a shared remote display: it already plays on the sharer's Frame, so the opt-in desktop sound would carry it.

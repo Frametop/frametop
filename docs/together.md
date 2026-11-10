@@ -1,0 +1,173 @@
+# Frametop Together: shared rooms, avatars and hand models (design notes)
+
+Status: in design and being built on the branch `dee-193-together` (2026-11-10). Nothing here ships yet. The decisions come from an interview with Daenon on 2026-11-10; the spikes' results are filled in as they are measured.
+
+Frametop Together lets up to four people with a Steam Frame share one room. One person starts a room. The others join over Tailscale, see that person's screens where they are, walk among them, point at them and, when allowed, use them. Everyone can bring panels of their own. Each person shows as an avatar, and can import one from VRM, glTF or FBX files. The same model code lets you pick the hand model Frametop draws, or import your own.
+
+The request began as "is there a collaborative mode for multiple Frame sharing a workspace?", for helping a friend get started: "literal (even though virtual) hand holding."
+
+## Decisions (2026-11-10)
+
+### The session
+
+| Question | Decision |
+|---|---|
+| Who can join | Frames running Frametop. A browser guest and a flat PC viewer are later work |
+| How many | Up to 4 people, as a full mesh: everyone can share panels with everyone |
+| Where they are | Remote. Lining up two headsets in one physical room (a two-point controller touch) is later work |
+| Network | Tailscale is required. No server of ours. A peer whose path runs through a DERP relay gets a warning and a lower quality |
+| Transport | QUIC, with msquic: reliable streams for state, grants and files, datagrams for video, poses and voice |
+| Joining | The owner starts a room and gets an invite (the Frame's tailnet name and a one-time code). A guest opens it, and the owner accepts in the headset, seeing the guest's Tailscale login. A saved friends list skips the code next time |
+| The join prompt | Says once that anyone in the room can see, hear and record what is shared. Nothing enforces or marks recording |
+| Whose room | The owner's layout is the room. The others join at spots the owner offers, and their shared panels arrive as a group near them |
+| The owner leaves | The room ends for everyone, and each person's panels go back to their own layout |
+| Away | A person who starts a VR game or takes the headset off is away: their avatar dims, their shared panels stop and keep the last picture, and the control they granted is taken back. Voice stays on during a game and mutes with the headset off. They come back on their own |
+| Versions | Peers on another protocol version are refused with a message to update |
+| Name | Frametop Together. An optional part in the installer, which needs Tailscale |
+
+### Panels
+
+| Question | Decision |
+|---|---|
+| What can be shared | Screens, floating windows and remote displays. Nothing is shared until you share it, panel by panel, and a shared panel shows a border |
+| How many | Up to 3 panels encoded on the Frame per person (fewer if the encoder spike says so), and up to 4 more from a split compute PC |
+| Remote displays | Re-encoded on your Frame, so a guest never reaches your PC. A Mac's displays count toward the Frame's 3 |
+| Split compute | A PC with the Frametop windows role sends its own windows and displays straight to the peers from the Vibepollo fork. It only sends: peers get no Moonlight access to it |
+| Encoding | One encode per panel, the same for every viewer |
+| Quality | Each panel's rate follows the slowest viewer that is watching it. The owner picks the cap: Low (about 1 Mbit/s per panel, 15 fps), Balanced (about 3, 30 fps) or High (about 8, 60 fps) |
+| Loading and unloading | By attention: full rate when focused, a reduced rate in view, and out of view a panel stops receiving after about 3 s and keeps its last picture. When the decoder's budget runs out, your own remote displays and PC windows keep their place, and the peers' panels you look at least become stills first |
+| Sound | Voice is built in and comes from each avatar's head. Your desktop's sound goes to the others only if you turn that on; the room's voices are kept out of it |
+| Locked | Sharing stops while the Steam PIN lock is on |
+
+### Control and moving
+
+| Question | Decision |
+|---|---|
+| A guest's pointer | Always shown, in the guest's colour. Guests point by default |
+| Control | Granted panel by panel. A panel that drives one of your PCs asks a second time. A grant covers clicking, typing and moving that panel |
+| Two people on one panel | One at a time: the last to act holds it, and it frees after about 1.5 s without input. KWin has one seat |
+| Moving panels | A panel's owner and the room's owner can always move it. Others need a grant |
+| The clipboard | Never crosses to another person |
+| Moving yourself | Walk. Pull yourself through the room by grabbing the air with both grips, or a key and the mouse. Jump to a person or a panel from a list. No thumbstick movement |
+| Pulling a panel you can't move | Flies you to a reading spot in front of it. The panel stays where it is, and nobody gets a private copy |
+| Gaze | Not shared unless you turn it on. Then only a smoothed direction leaves the Frame, for the avatar's eyes and a faint mark on the panel you look at. Never eye images |
+
+### Avatars and hands
+
+| Question | Decision |
+|---|---|
+| Formats | VRM and glTF, and FBX from an avatar's source files. Never from VRChat's cache or servers |
+| An FBX skeleton | Matched by the usual Unity humanoid bone names. One that can't be matched is refused, with the missing bones named |
+| Size | Import reduces an avatar to about 20,000 triangles, merges its materials, caps its textures at 2K, and maps its shaders to a toon or a lit shader. A preview shows before and after |
+| The body | Upper body from three points (the head and two hands). Legs are hidden or stand still |
+| The face | The mouth moves with the voice, and the eyes blink. Hair and cloth stay rigid |
+| What the others see | Your avatar, if its licence allows sending it (a VRM's licence fields) or you confirm you may share it (glTF, FBX). They keep it in memory for the session only. Otherwise they see an abstract head and hands in your colour |
+| What you see of yourself | Your avatar's hands, and your body when you look down if the spike shows it holds still. If it slides when the head turns, the body view stays an experimental switch. A mirror panel shows the whole avatar |
+| Hand models | Frametop Settings gets a picker for the bundled hand models, and you can import hands from a glTF, VRM or FBX file. An avatar's hands become yours |
+| Real hands | With Room View on, your real hands still show through the panels as cutouts. "Always show model hands" draws the model over them too |
+
+### How it is built
+
+| Question | Decision |
+|---|---|
+| Order | M0 spikes, M1 hand models, M2 avatars, M3 the session core, M4 pointers, grants and moving, M5 the budget and the PC sender |
+| Branch | One long-lived branch in one worktree, merged into `experimental` once, at the end |
+| Testing | New testbench tools and a fake peer, `ft-peer-sim`, which is the real session code running without a headset. Testers with Frames before a release |
+| Tickets | DEE-193 is the parent. DEE-362 to DEE-369 are the milestones, the hand model request and the test tools |
+
+## What exists already
+
+- **Showing a streamed panel.** A remote display is a child process that decodes into a ring of three RGBA buffers and tells ft-screens "frame I" over a socket pair (`screens/remote.c`). The panel has every screen control and follows the attention rules. A peer's panel is the same kind of panel with another program behind it.
+- **A panel's pixels.** Every screen and floating window reaches ft-screens as a DMA-BUF from KWin, and a remote display as one of ft-stream's ring buffers. ft-screens can copy any of them on the GPU.
+- **The encoder.** `/dev/video-enc0` is Qualcomm's iris encoder: H.264 and HEVC from 128 to 8192 pixels a side, with RGBA (`AB24`), NV12 or UBWC as its input, a bitrate that can change while it runs, and a control that forces a keyframe. vr-recorder drives it with the raw V4L2 stateful API at about 3% of a core for 1080p30. Encoding on the CPU made the headset stutter, so it is never used.
+- **The decoder.** 16 sessions and about one 8K60 stream's worth of macroblocks, shared with remote displays and Steam Link ([remote-displays.md](remote-displays.md)).
+- **Drawn hands.** ft-handview draws each tracked hand on a square overlay placed at the hand, one half per eye, from a skinned model ([hands/rendered-hands.md](../hands/rendered-hands.md)). An avatar is the same trick at a person's size.
+- **Leases for input.** [host-input.md](host-input.md) hands a keyboard and mouse over with a lease the other side has to keep renewing. A control grant works the same way.
+
+## Architecture
+
+```
+            your Frame                                         a peer's Frame
+ ┌─────────────────────────────┐                        ┌──────────────────────────┐
+ │ ft-screens                  │                        │ ft-screens               │
+ │   share tap: a shared       │                        │   remote screen: a peer's│
+ │   panel's frames, scaled,   │                        │   panel, with every      │
+ │   into a ring of buffers    │                        │   screen control         │
+ └──────┬──────────────────────┘                        └──────────▲───────────────┘
+        │ dmabufs, "frame I"                                       │ ring of RGBA, "frame I"
+ ┌──────▼──────────┐                                    ┌──────────┴───────┐
+ │ ft-sharepanel   │ one per shared panel               │ ft-peerpanel     │ one per panel shown
+ │ iris encoder    │                                    │ iris decoder     │
+ └──────┬──────────┘                                    └──────────▲───────┘
+        │ HEVC access units                                        │ HEVC access units
+ ┌──────▼──────────────────────┐      QUIC over         ┌──────────┴───────────────┐
+ │ ft-together                 │◄────  Tailscale  ─────►│ ft-together              │
+ │ room state, peers, grants,  │  streams: state,       │                          │
+ │ voice, the links            │  grants, avatar files  │                          │
+ └──────┬───────────┬──────────┘  datagrams: video,     └──────────────────────────┘
+        │ poses     │ voice       poses, voice
+ ┌──────▼──────┐ ┌──▼────────┐
+ │ ft-avatars  │ │ PipeWire  │
+ │ peers'      │ │ mic in,   │
+ │ avatars,    │ │ one stream│
+ │ your body   │ │ per peer  │
+ └─────────────┘ └───────────┘
+```
+
+**ft-together is the session.** It owns the links to the peers, the room's state and its rules, and nothing else: no GPU, no V4L2, no SteamVR. That keeps it small enough to test without a headset, lets the fake peer be the same program, and lets the PC sender in the Vibepollo fork speak the same protocol without any of the Frame's code. It is MIT like the rest of Frametop.
+
+**Media ends are separate programs.** `ft-sharepanel` encodes one shared panel and `ft-peerpanel` decodes one panel of a peer's. Each talks to ft-together over a local socket in encoded access units, and to ft-screens in DMA-BUFs. A stalled encoder or a decoder reset can't freeze the session or the screens, and each program has one job.
+
+**ft-screens changes little.** It gains a share tap: for a shared panel, a GPU pass copies each new frame into a ring of buffers at the stream's size, at most at the stream's rate, and hands the ring to that panel's `ft-sharepanel`. It is the reverse of a remote screen. A peer's panel is a remote screen whose program is `ft-peerpanel` instead of ft-stream.
+
+**ft-avatars draws people.** It loads avatars in Frametop's own model format, poses them from the poses ft-together hands it, and draws each on a stereo overlay placed at that person, as ft-handview does for a hand.
+
+**Models have one format on disk.** `ft-model-import` reads VRM, glTF and FBX and writes Frametop's own file: a skinned mesh, a skeleton with its humanoid mapping, the mouth and blink shapes, and textures. Reducing happens there. ft-handview and ft-avatars read only that format. What a peer sends is that file too, so the code that reads a stranger's avatar is one small, strict loader, not three format parsers.
+
+### The protocol
+
+One QUIC connection per pair of peers, opened by the one whose Tailscale address is lower. Each side checks the other's address with tailscaled before anything else.
+
+- **A control stream** (reliable, ordered): hello with the protocol version, the invite's code, the room's state (people, their colours and spots, each shared panel's id, size, pose and curve), grants, away, and leave.
+- **File streams** (reliable): an avatar's model file, when its owner allows.
+- **Datagrams**: video packets (a panel id, a frame number, a fragment), poses (head, hands as joints, and the pointer on a panel, about 30 times a second), and voice (Opus, 20 ms).
+
+Video rides in datagrams because a late frame is worth nothing. A lost fragment loses its frame; the viewer asks for a keyframe, as Moonlight's clients do. A viewer tells the sender how much it sees of each panel (focused, in view, hidden), and the sender stops sending a panel nobody watches. msquic's congestion control says how much each link carries, and the encoder's bitrate follows the slowest link that is watching.
+
+### Trust
+
+Everything a peer sends is untrusted input, including after the owner accepted them.
+
+- A peer is who tailscaled says they are. The invite's code only proves they were invited; it is used once and expires.
+- A panel is sent only if its owner shared it, and input is taken only for a panel with a grant that hasn't lapsed. Both are checked where they are enforced: in the sharer's ft-together, not in the viewer's.
+- A grant is a lease, renewed while its owner stays present and taken back when they go away, lock the Frame or end it.
+- A peer's poses, sizes and counts are bounded before use. A peer's avatar file is read by the strict loader, with limits on every count and size, and never by the importers.
+- Gaze, camera images and the clipboard never leave the Frame. Hand joints do.
+
+## Milestones
+
+| | What | Proved by |
+|---|---|---|
+| M0 | Spikes: the encoder's limits, a DMA-BUF into the encoder, msquic on the Frame, heat | The numbers below |
+| M1 | Hand models: models loaded from files at run time, the picker in Frametop Settings, import of your own hands | Offline tests, snapshots of each model, the picker driven on the headset |
+| M2 | Avatars: the importer and its limits, upper-body IK, the mouth and blinks, the mirror panel, the body spike | Offline tests on sample avatars, snapshots, the mirror on the headset |
+| M3 | The session core: joining, the room's state, a shared panel on a peer's Frame, voice, the abstract avatar, away | A fake peer joining the live Frame, and its panel measured |
+| M4 | Pointers, grants, moving panels and yourself | A fake peer asking for control and clicking |
+| M5 | The budget, and the PC sender in the Vibepollo fork | Fake peers past the budget; a PC panel on a fake peer |
+
+## Spikes
+
+| | Question | Result |
+|---|---|---|
+| T1 | How many encoder sessions run at once, and at what load, next to SteamVR | Open |
+| T2 | Does the encoder take a GBM buffer as a DMA-BUF, with no copy | Open |
+| T3 | Does msquic build for the Frame's container, and what do its datagrams carry over Tailscale's 1280-byte MTU | Open |
+| T4 | Heat and CPU with three 1080p panels encoding | Open |
+| T5 | Your own body when looking down: does a head-following stereo overlay hold still | Open (M2) |
+| T6 | Two pointers taking turns on KWin's one seat: focus, held keys and drags | Open (M4) |
+
+## Open questions
+
+- How a second Frame's owner sets up Tailscale sharing with the least steps, and what the invite looks like when the two are on different tailnets.
+- Whether a PC on the tailnet can be reached directly by every peer, or only by its own Frame.
+- Sound from a shared remote display: it already plays on the sharer's Frame, so the opt-in desktop sound would carry it.

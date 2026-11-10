@@ -4,7 +4,8 @@ FBX with a humanoid skeleton), and the mirror that shows you the one you wear.
 
 ft-avatars draws both: each avatar's picture (`--thumb`), kept in the cache folder until its
 file changes, and the mirror (`--mirror`), which runs while the mirror is wanted and listens on
-@ft_avatars.
+@ft_avatars. The same program draws your own body below you when you look down (`--below`, or
+`below on` to a standing mirror): an experiment, only while the mirror stands.
 """
 import os
 
@@ -41,9 +42,15 @@ def listed(models_folder):
     return out
 
 
-def mirror_command(models_folder, name):
-    """The program that stands the mirror in the room with this avatar in it."""
-    return [AVATARS, "--mirror", path(models_folder, name)]
+def mirror_command(models_folder, name, below=False):
+    """The program that stands the mirror in the room with this avatar in it, and (`below`) draws
+    your own body below you when you look down."""
+    return [AVATARS, "--mirror", path(models_folder, name)] + (["--below"] if below else [])
+
+
+def shows_below(state):
+    """Whether a standing mirror's answer to `state` says it draws your body below you."""
+    return "body below " in state and "body below off" not in state
 
 
 def thumb_command(models_folder, name, out):

@@ -6,6 +6,7 @@
 #include "live.h"
 #include "picture.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -14,9 +15,10 @@ namespace {
 
 int Usage() {
     std::fprintf(stderr,
-                 "usage: ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice]\n"
+                 "usage: ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice] [--below] [--below-from DEGREES]\n"
                  "       ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...\n"
                  "       ft-avatars --mirror-snapshot OUT.png MODEL [the same]\n"
+                 "       ft-avatars --below-snapshot OUT.png MODEL [the same]\n"
                  "       ft-avatars --thumb OUT.png MODEL [--size PX]\n"
                  "       ft-avatars --poses\n"
                  "       ft-avatars --hear SECONDS\n"
@@ -48,10 +50,15 @@ int Mirror(int argc, char **argv) {
             ask.voice = false;
             continue;
         }
+        if (!std::strcmp(argv[i], "--below")) {
+            ask.below = true;
+            continue;
+        }
         if (i + 1 >= argc) return Usage();
         if (!std::strcmp(argv[i], "--height")) ask.height = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--seconds")) ask.seconds = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--status")) ask.status = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--below-from")) ask.belowFrom = std::min(std::max(std::atof(argv[++i]), -90.0), 90.0) * 3.14159265358979323846 / 180;
         else return Usage();
     }
     return live::Mirror(ask);
@@ -64,8 +71,8 @@ int main(int argc, char **argv) {
     if (argc >= 3 && !std::strcmp(argv[1], "--mirror")) return Mirror(argc, argv);
     if (argc == 3 && !std::strcmp(argv[1], "--hear")) return std::atof(argv[2]) > 0 ? ownface::Hear(std::atof(argv[2])) : Usage();
     if (argc < 4) return Usage();
-    const bool thumb = !std::strcmp(argv[1], "--thumb"), glass = !std::strcmp(argv[1], "--mirror-snapshot");
-    if (!thumb && !glass && std::strcmp(argv[1], "--snapshot")) return Usage();
+    const bool thumb = !std::strcmp(argv[1], "--thumb"), glass = !std::strcmp(argv[1], "--mirror-snapshot"), below = !std::strcmp(argv[1], "--below-snapshot");
+    if (!thumb && !glass && !below && std::strcmp(argv[1], "--snapshot")) return Usage();
     picture::Ask ask;
     ask.out = argv[2], ask.model = argv[3];
     if (thumb) ask.size = 256, ask.pose = "stand";
@@ -77,5 +84,5 @@ int main(int argc, char **argv) {
         else if (!thumb && !std::strcmp(argv[i], "--shape") && more && Shape(argv[i + 1], ask.shapes)) ++i;
         else return Usage();
     }
-    return thumb ? picture::Thumb(ask) : glass ? picture::Glass(ask) : picture::Sheet(ask);
+    return thumb ? picture::Thumb(ask) : glass ? picture::Glass(ask) : below ? picture::Below(ask) : picture::Sheet(ask);
 }

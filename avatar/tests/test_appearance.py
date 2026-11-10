@@ -113,6 +113,10 @@ class Logic(unittest.TestCase):
             self.assertEqual(avatar_models.listed(tmp), [{"name": "fox", "title": "Fox", "detail": "by Someone, VRM", "own": True},
                                                          {"name": "owl", "title": "owl", "detail": "by Someone, VRM", "own": True}])
             self.assertEqual(avatar_models.mirror_command(tmp, "fox"), [avatar_models.AVATARS, "--mirror", os.path.join(tmp, "fox.ftmodel")])
+            self.assertEqual(avatar_models.mirror_command(tmp, "fox", below=True)[-1], "--below")
+        state = "ok mirror shown, in sight; 45.0 draws/s; microphone heard; body below %s, 0.0 draws/s"
+        self.assertEqual([avatar_models.shows_below(state % s) for s in ("off", "shown", "not in sight")], [False, True, True])
+        self.assertFalse(avatar_models.shows_below("") or avatar_models.shows_below("ok mirror shown"))
 
 
 class Page(unittest.TestCase):
@@ -306,10 +310,38 @@ class Page(unittest.TestCase):
         self.assertEqual(len(self.said), 1)
 
     def test_a_mirror_already_standing_shows_as_on(self):
-        self.b._scanned(([], True))
-        self.assertTrue(self.b.mirror)
+        self.b._scanned(([], True, True))
+        self.assertEqual((self.b.mirror, self.b.below), (True, True))   # ...with what it draws below you
         self.b.setMirror(False)
         self.assertEqual((self.told, self.b.mirror), (["quit"], False))
+
+    def test_your_body_below_is_drawn_by_the_mirror(self):
+        self.avatar("fox", "Fox")
+        self.b.refresh()
+        self.settle()
+        self.b.wear("fox")
+        self.b.setBelow(True)   # no mirror yet: kept for the one that comes
+        self.b.setBelow(True)
+        self.assertEqual((self.b.below, self.told, self.started), (True, [], []))
+        self.b.setMirror(True)
+        self.assertEqual(self.ran[-1], (avatar_models.AVATARS, "--mirror", str(self.folder / "fox.ftmodel"), "--below"))
+        self.b.setBelow(False)   # a standing mirror is told
+        self.b.setBelow(True)
+        self.assertEqual((self.told, self.b.below), (["below off", "below on"], True))
+        self.b.refresh()   # nobody answers on the socket here: no mirror, and what was asked for stays
+        self.settle()
+        self.assertEqual((self.b.mirror, self.b.below), (False, True))
+
+    def test_a_mirror_told_before_it_listened_is_told_again(self):
+        self.b._scanned(([], True, False))
+        self.b._below = True   # as a switch flipped while the mirror was coming up leaves it
+        state = "ok mirror shown; microphone heard; body below %s, 0.0 draws/s"
+        self.b._ipc.ask = lambda socket, text, answered=None, wait=0: answered(state % "off")
+        self.b._mirror_up()
+        self.assertEqual((self.told, self.b.mirror, self.said), (["below on"], True, []))
+        self.b._ipc.ask = lambda socket, text, answered=None, wait=0: answered(state % "not in sight")
+        self.b._mirror_up()
+        self.assertEqual(self.told, ["below on"])
 
     def test_an_imported_avatar_is_worn(self):
         source = Path(self.tmp.name) / "Fox.vrm"

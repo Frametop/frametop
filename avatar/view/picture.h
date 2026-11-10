@@ -2,7 +2,8 @@
 // (demo.h) and drawn offscreen into a PNG. A sheet shows it from four sides, to check an
 // import by eye; a thumb is the one square picture Settings shows for it; a glass is what the
 // mirror (mirror.h) shows the wearer standing in front of it, both eyes' views side by side as
-// SteamVR gets them.
+// SteamVR gets them; and a below is what the wearer is shown of their own body under them
+// (below.h), the same way, clear where no body is.
 #pragma once
 
 #include "bodymesh.h"
@@ -23,5 +24,6 @@ struct Ask {
 int Sheet(const Ask &ask);
 int Thumb(const Ask &ask);
 int Glass(const Ask &ask);
+int Below(const Ask &ask);
 
 }  // namespace picture

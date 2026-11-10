@@ -52,7 +52,7 @@ $cxx -c -o build/handview.o handview.cpp
 $cxx -c -o build/bodyfile.o ../avatar/bodyfile.cpp
 $cxx -c -o build/bodypose.o ../avatar/pose/bodypose.cpp
 avatars=""
-for f in bodymesh handfit demo bodygpu mirrorview picture live main; do
+for f in bodymesh handfit demo bodygpu mirrorview belowview sheet picture live main; do
   $cxx -Wextra -I. -c -o build/avatars-$f.o ../avatar/view/$f.cpp
   avatars="$avatars build/avatars-$f.o"
 done

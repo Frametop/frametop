@@ -2,6 +2,8 @@
 #include "picture.h"
 
 #include "../pose/bodypose.h"
+#include "below.h"
+#include "belowview.h"
 #include "bodygpu.h"
 #include "demo.h"
 #include "gpuctx.h"
@@ -228,6 +230,44 @@ int Glass(const Ask &ask) {
         if (stbi_write_png(ask.out.c_str(), 2 * w, h, 3, img.data(), 2 * w * 3)) {
             status = 0;
             std::printf("wrote %s: %s, %s, in the mirror, %dx%d an eye\n", ask.out.c_str(), file.model.info.name.c_str(), ask.pose.c_str(), w, h);
+        } else {
+            std::fprintf(stderr, "avatars: can't write %s\n", ask.out.c_str());
+        }
+    }
+    avatar.Free(), painter.Done(), canvas.Close();
+    return status;
+}
+
+int Below(const Ask &ask) {
+    Loaded file;
+    if (!file.Read(ask.model)) return 1;
+    float bones[kRoles][12];
+    Wearer wearer;
+    if (!Posed(file.body, ask, bones, &wearer)) return 1;
+    const mirror::Glass under = below::Under(wearer.now.eyes);
+    const Vec apart = wearer.now.head * Vec{1, 0, 0} * (kEyesApart / 2);
+    const Vec eyes[2] = {wearer.now.eyes - apart, wearer.now.eyes + apart};
+    const bool handDrawn[2] = {wearer.now.hand[0].tracked, wearer.now.hand[1].tracked};
+    below::Fold(file.body.at, handDrawn, bones);
+    const int side = std::min(std::max(ask.size, 64), 1024);
+    Canvas canvas;
+    bodygpu::Painter painter;
+    bodygpu::Avatar avatar;
+    int status = 1;
+    if (canvas.Open(2 * side * kFine, side * kFine) && painter.Init("avatars")) {
+        avatar.Upload(painter, file.body);
+        avatar.Shape(ask.shapes);
+        belowview::Draw(painter, avatar, bones, under, eyes, side * kFine);
+        const std::vector<float> px = canvas.Read(true);
+        std::vector<uint8_t> img(size_t(2 * side) * side * 4);
+        for (size_t i = 0; i < size_t(2 * side) * side; ++i) {
+            const float a = px[i * 4 + 3];
+            for (int c = 0; c < 3; ++c) img[i * 4 + c] = uint8_t(std::lround(std::min(1.0f, a > 0 ? px[i * 4 + c] / a : 0) * 255));
+            img[i * 4 + 3] = uint8_t(std::lround(a * 255));
+        }
+        if (stbi_write_png(ask.out.c_str(), 2 * side, side, 4, img.data(), 2 * side * 4)) {
+            status = 0;
+            std::printf("wrote %s: %s, %s, the body below, %dx%d an eye\n", ask.out.c_str(), file.model.info.name.c_str(), ask.pose.c_str(), side, side);
         } else {
             std::fprintf(stderr, "avatars: can't write %s\n", ask.out.c_str());
         }

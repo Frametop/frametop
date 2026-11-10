@@ -52,6 +52,7 @@ class Backend(QObject):
         self._avatar_cache = avatar_cache or AVATAR_CACHE
         self._avatars = []    # your models that are whole avatars, as avatar_models.listed() found them
         self._mirror = False  # the mirror stands in the room
+        self._below = False   # ...and your own body is drawn below you (until Settings closes: an experiment)
         self._wear = ""       # a model just imported: worn once it's found to be an avatar
         self._listed = list(hand_models.FALLBACK)   # (name, kind), as ft-handview last listed them
         self._busy = ""       # what is being imported, for the page
@@ -275,11 +276,13 @@ class Backend(QObject):
     def _scan(self, client):
         """On the worker's thread (the models' files are read): your avatars, and whether the
         mirror stands."""
-        answer = client.ask(avatar_models.SOCKET, "state", 0.3)
-        return avatar_models.listed(self._folder), bool(answer and answer.startswith("ok"))
+        answer = client.ask(avatar_models.SOCKET, "state", 0.3) or ""
+        return avatar_models.listed(self._folder), answer.startswith("ok"), avatar_models.shows_below(answer)
 
     def _scanned(self, found):
-        self._avatars, self._mirror = found
+        self._avatars, self._mirror, below = found
+        if self._mirror:   # else what was asked for stays, for the next mirror
+            self._below = below
         for item in self._avatars:
             name = item["name"]
             path = hand_models.thumb_path(self._avatar_cache, name, "own", self._folder)
@@ -313,6 +316,10 @@ class Backend(QObject):
     def mirror(self):
         return self._mirror
 
+    @Property(bool, notify=changed)
+    def below(self):
+        return self._below
+
     @Property(bool, constant=True)
     def canMirror(self):
         return os.path.exists(avatar_models.AVATARS)
@@ -337,12 +344,23 @@ class Backend(QObject):
             return
         if not on:
             self._tell_mirror("quit")
-        elif not start_detached(tool_command(*avatar_models.mirror_command(self._folder, self.avatar))):
+        elif not start_detached(tool_command(*avatar_models.mirror_command(self._folder, self.avatar, self._below))):
             self.message.emit("Couldn't start the mirror", True)
             return
         else:
             QTimer.singleShot(MIRROR_UP_MS, self, self._mirror_up)
         self._mirror = on
+        self.changed.emit()
+
+    @Slot(bool)
+    def setBelow(self, on):
+        """Draw your own body below you when you look down, or don't. The mirror's program draws
+        it, so it shows while the mirror stands."""
+        if on == self._below:
+            return
+        self._below = on
+        if self._mirror:
+            self._tell_mirror("below on" if on else "below off")
         self.changed.emit()
 
     def _mirror_up(self):
@@ -352,4 +370,6 @@ class Backend(QObject):
                 self._mirror = False
                 self.message.emit("The mirror didn't come up. Is SteamVR running?", True)
                 self.changed.emit()
+            elif self._mirror and avatar_models.shows_below(answer) != self._below:   # asked for before it listened
+                self._tell_mirror("below on" if self._below else "below off")
         self._ipc.ask(avatar_models.SOCKET, "state", answered, 0.3)

@@ -242,6 +242,29 @@ Item {
                             + "stays until you turn it off here. Turn it off and on to move it. While it is up it "
                             + "listens to your microphone to move the avatar's mouth: nothing is recorded or sent."
                 }
+                Controls.Switch {
+                    id: belowSwitch
+                    objectName: "belowSwitch"
+                    text: "Show my body when I look down (experimental)"
+                    visible: backend.avatars.length > 0
+                    enabled: backend.canMirror && backend.avatar !== ""
+                    checked: backend.below
+                    onToggled: backend.setBelow(checked)
+                    Connections {
+                        target: backend
+                        function onChanged() { belowSwitch.checked = backend.below }
+                    }
+                }
+                Controls.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    visible: backend.avatars.length > 0 && backend.avatar !== ""
+                    text: "Your avatar's body, without its head, under your own while the mirror is up. It is a "
+                          + "trial: it can trail a little when you walk or lean, and a panel far behind it can show "
+                          + "through it."
+                }
 
                 Kirigami.FormLayout {
                     Layout.fillWidth: true

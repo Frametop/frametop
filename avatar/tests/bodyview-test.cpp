@@ -1,7 +1,9 @@
 // The CPU side of ft-avatars (avatar/view): a body's mesh for the vertex buffers and its face
 // shapes (bodymesh.h), a tracked hand as the pose solver takes it (handfit.h), the demo wearers
 // (demo.h), the views (viewmath.h), the mirror's glass and what each eye sees in it (mirror.h),
-// and a tracked wearer (wearer.h). No GPU, OpenVR or headset.
+// the square your own body is drawn on below you (below.h), and a tracked wearer (wearer.h).
+// No GPU, OpenVR or headset.
+#include "../view/below.h"
 #include "../view/bodymesh.h"
 #include "../view/demo.h"
 #include "../view/handfit.h"
@@ -254,6 +256,72 @@ static void mirrors() {
     check("the light is on the side of a body that faces the glass, from above", std::fabs(light.norm() - 1) < 1e-9 && light.dot(g.out) < -0.3 && light.y > 0.5);
 }
 
+static void belows() {
+    using viewmath::Project;
+    const Vec eyes = {0.3, 1.6, -0.2};
+    const mirror::Glass g = below::Under(eyes);
+    const double half = below::kSide / 2;
+    bool ok = (g.centre - Vec{0.3, 1.6 - below::kUnder, -0.2}).norm() < 1e-9 && (g.out - Vec{0, 1, 0}).norm() < 1e-9 && (g.right.cross(g.up) - g.out).norm() < 1e-9;
+    check("the square lies level under the eyes, facing up, in the room's own directions", ok && (g.right - Vec{1, 0, 0}).norm() < 1e-9 && g.width == below::kSide && g.height == below::kSide);
+
+    viewmath::Mat4 left, right;
+    const Vec leftEye = eyes - Vec{0.032, 0, 0}, rightEye = eyes + Vec{0.032, 0, 0};
+    ok = below::EyeView(g, leftEye, left) && below::EyeView(g, rightEye, right);
+    // ahead (-z) is the picture's top, which goes in the buffer's first row: clip space's bottom
+    const Vec aheadRight = g.centre + Vec{half, 0, -half}, behindLeft = g.centre + Vec{-half, 0, half};
+    for (const viewmath::Mat4 *m : {&left, &right}) {
+        const Vec a = Project(*m, aheadRight), b = Project(*m, behindLeft);
+        ok = ok && std::fabs(a.x - 1) < 1e-4 && std::fabs(a.y + 1) < 1e-4 && std::fabs(b.x + 1) < 1e-4 && std::fabs(b.y - 1) < 1e-4 && a.z > -1 && a.z < 1;
+    }
+    check("the square fills each eye's view, what is ahead of you at its top", ok);
+    // a chest above the square, feet under it: each is on the line from the eye through it
+    const Vec chest = {0.3, 1.35, -0.3}, feet = {0.35, 0.02, -0.25};
+    ok = true;
+    for (const Vec &p : {chest, feet}) {
+        const Vec onIt = leftEye + (p - leftEye) * ((g.centre.y - leftEye.y) / (p.y - leftEye.y)), seen = Project(left, p);
+        ok = ok && std::fabs(seen.x - (onIt.x - g.centre.x) / half) < 1e-4 && std::fabs(seen.y - (onIt.z - g.centre.z) / half) < 1e-4;
+    }
+    check("what is above the square or under it is drawn where the eye sees it through it", ok);
+    const double chestApart = Project(left, chest).x - Project(right, chest).x, feetApart = Project(left, feet).x - Project(right, feet).x;
+    check("...so it has its own depth: nearer than the square crosses the eyes, further parts them", chestApart > 0.01 && feetApart < -0.01);
+    ok = Project(left, chest).z < Project(left, feet).z && Project(left, feet).z < 1;
+    ok = ok && Project(left, leftEye - Vec{0, below::kNear / 2, 0}).z < -1 && Project(left, leftEye - Vec{0, below::kDeep + 1, 0}).z > 1;
+    check("nearer is nearer, and nothing right at the eye or far under the floor is drawn", ok);
+    check("an eye under the square sees nothing through it", !below::EyeView(g, g.centre - Vec{0, 0.2, 0}, left));
+
+    ok = !below::LooksDown({0, 0, -1}) && !below::LooksDown({0, 1, 0}) && !below::LooksDown({0, 0, 0}) && below::LooksDown({0, -1, 0});
+    ok = ok && below::LooksDown(Turn::About({1, 0, 0}, -0.3) * Vec{0, 0, -1}) && !below::LooksDown(Turn::About({1, 0, 0}, -0.1) * Vec{0, 0, -1});
+    ok = ok && below::LooksDown({0, 0, -1}, -0.1) && below::LooksDown({0, 1, 0}, -1.5707963267948966) && !below::LooksDown({0, -0.5, -1}, 0.6);
+    check("the body is drawn for a head that looks down, not one that looks level or up", ok && std::fabs(below::Light().norm() - 1) < 1e-9 && below::Light().y > 0.5);
+
+    // every bone carried the same way: turned about y and moved
+    const Body b = person();
+    const Turn turn = Turn::About({0, 1, 0}, 0.5);
+    const Vec moved = {1, 2, 3}, axes[3] = {turn * Vec{1, 0, 0}, turn * Vec{0, 1, 0}, turn * Vec{0, 0, 1}};
+    float bones[kRoles][12];
+    for (int r = 0; r < kRoles; ++r)
+        for (int row = 0; row < 3; ++row) {
+            const double m[4] = {row == 0 ? axes[0].x : row == 1 ? axes[0].y : axes[0].z, row == 0 ? axes[1].x : row == 1 ? axes[1].y : axes[1].z,
+                                 row == 0 ? axes[2].x : row == 1 ? axes[2].y : axes[2].z, row == 0 ? moved.x : row == 1 ? moved.y : moved.z};
+            for (int c = 0; c < 4; ++c) bones[r][row * 4 + c] = float(m[c]);
+        }
+    const auto carried = [&](int role, const Vec &p) {
+        const float *m = bones[role];
+        return Vec{m[0] * p.x + m[1] * p.y + m[2] * p.z + m[3], m[4] * p.x + m[5] * p.y + m[6] * p.z + m[7], m[8] * p.x + m[9] * p.y + m[10] * p.z + m[11]};
+    };
+    const auto rest = [&](int role) { return Vec{b.at[role][0], b.at[role][1], b.at[role][2]}; };
+    const Vec any = {0.4, 1.9, -0.6}, asIs = carried(kChest, any), head = carried(kHead, rest(kHead)), wrist = carried(kRightHand, rest(kRightHand));
+    const bool rightDrawn[2] = {false, true};
+    below::Fold(b.at, rightDrawn, bones);
+    ok = true;
+    for (int role : {kHead, kLeftEye, kRightEye, kJaw}) ok = ok && (carried(role, any) - head).norm() < 1e-5;
+    check("the head, which your eyes are inside, is folded away to the top of the neck", ok && (carried(kNeck, any) - asIs).norm() < 1e-6);
+    ok = (carried(kRightHand, any) - wrist).norm() < 1e-5;
+    for (int f = 0; f < 15; ++f) ok = ok && (carried(kRightFingers + f, any) - wrist).norm() < 1e-5 && (carried(kLeftFingers + f, any) - asIs).norm() < 1e-6;
+    check("a hand that is drawn for you already is folded to its wrist, the other hand and the arms are left", ok && (carried(kLeftHand, any) - asIs).norm() < 1e-6 &&
+                                                                                                             (carried(kRightLowerArm, any) - asIs).norm() < 1e-6);
+}
+
 static void wearers() {
     const Body b = person();
     const handfit::Fit fit(b);
@@ -289,6 +357,7 @@ int main() {
     demos();
     views();
     mirrors();
+    belows();
     wearers();
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed != 0;

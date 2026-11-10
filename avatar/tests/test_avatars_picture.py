@@ -2,8 +2,9 @@
 """ft-avatars (avatar/view) on a made-up whole person, from the file to the pixels: the importer
 writes the person's model file, ft-avatars poses it as a made-up wearer and draws it on the GPU,
 and the picture has the person in it, in every view, moved by the pose and by the face shapes.
-The mirror's picture has them as each eye sees them in the glass. What it can't draw (no file, a
-hand model, a pose that isn't one) ends in an error.
+The mirror's picture has them as each eye sees them in the glass, and the picture of the body
+below has it as its own wearer sees it looking down. What it can't draw (no file, a hand model, a
+pose that isn't one) ends in an error.
 
 It runs the built programs (avatar/build.sh, screens/build.sh) and is skipped where they aren't
 built or there is no GPU to draw on.
@@ -191,7 +192,30 @@ class AvatarsPictureTest(ImportCase):
         self.assertEqual(rest[:3], (2 * 132, 240, 3))
         self.assertNotEqual(set(rest[3][100]), set(rest[3][3]))   # someone is in it
 
+    def test_the_body_below_is_the_wearer_seen_from_their_own_eyes(self):
+        width, height, channels, rows = self.draw('--below-snapshot', '--pose', 'stand', '--size', '320')
+        self.assertEqual((width, height, channels), (2 * 320, 320, 4))   # the square under the wearer, to each eye
+        middles = []
+        for half in range(2):
+            x0 = half * 320
+            for x, y in ((x0, 0), (x0 + 319, 0), (x0, 319), (x0 + 319, 319), (x0 + 160, 2)):
+                self.assertEqual(rows[y][x * 4 + 3], 0, (x, y))   # clear where no body is
+            there = [(x - x0, y) for y in range(320) for x in range(x0, x0 + 320) if rows[y][x * 4 + 3] > 128]
+            self.assertGreater(len(there), 300, half)
+            self.assertLess(len(there), 0.5 * 320 * 320, half)
+            middle = (sum(x for x, _ in there) / len(there), sum(y for _, y in there) / len(there))
+            # your body is under you: about the middle of the square
+            self.assertLess(abs(middle[0] - 160), 50, half), self.assertLess(abs(middle[1] - 160), 70, half)
+            middles.append(middle)
+        # most of what a standing wearer sees of themselves is nearer than the square, so it crosses their eyes
+        self.assertGreater(middles[0][0] - middles[1][0], 2)
+        typing = self.draw('--below-snapshot', '--pose', 'type', '--size', '320')
+        ahead = [y for y in range(320) for x in range(320) if typing[3][y][x * 4 + 3] > 128]
+        self.assertLess(min(ahead), min(y for _, y in there) - 10)   # arms held out ahead are drawn toward the top
+
     def test_what_it_cannot_draw_ends_in_an_error(self):
+        self.assertIn('no pose called fly', self.draw('--below-snapshot', '--pose', 'fly', status=1))
+        self.assertIn('no body', self.draw('--below-snapshot', model=self.hands, status=1))
         self.assertIn('no pose called fly', self.draw('--snapshot', '--pose', 'fly', status=1))
         self.assertIn('no body', self.draw('--snapshot', model=self.hands, status=1))
         self.assertIn('no pose called fly', self.draw('--mirror-snapshot', '--pose', 'fly', status=1))

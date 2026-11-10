@@ -10,11 +10,11 @@ How you look in Frametop: the hands ft-handview draws for you today, and the ava
 | `vec.h` | A point in three dimensions, for the importer and the solver |
 | `pose/` | The pose solver (`bodypose.h`): a body's 55 bones from the wearer's head and hands. Sums only, no tracking, GPU or SteamVR code |
 | `face/` | An avatar's face while it is worn: when its eyes blink and how its mouth moves with a voice (`face.h`, sums only), the microphone it hears you by (`micear.h`), and the two together for the avatar you wear yourself (`ownface.h`). Built into `ft-avatars` |
-| `view/` | `ft-avatars`: bodies drawn with GLES 2, in pictures and in the mirror that shows you the avatar you wear. It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws and shows its mirror the way ft-handview shows them (`screens/vroutput.h`) |
+| `view/` | `ft-avatars`: bodies drawn with GLES 2, in pictures, in the mirror that shows you the avatar you wear, and below you when you look down (an experiment). It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws and shows its mirror the way ft-handview shows them (`screens/vroutput.h`) |
 | `import/` | `ft-model-import`: a VRM, glTF, GLB or FBX model into a `.ftmodel` (`build.sh` builds it into `avatar/build/`) |
 | `ftmodel.py` | The same file read in Python, for the tests and the Settings page |
 | `hand_models.py`, `avatar_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove, and your avatars: which one you wear, and the mirror |
-| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, a tracked wearer) and `face-test.cpp` (the blinks, and the mouth on made-up voices), all in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb and the mirror), `test_appearance.py` (the page's backend) |
+| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, the square your own body is drawn on, a tracked wearer) and `face-test.cpp` (the blinks, and the mouth on made-up voices), all in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb, the mirror and the body below), `test_appearance.py` (the page's backend) |
 
 ## The model file
 
@@ -67,9 +67,10 @@ The same solver poses your own body and the people you share a room with. It ref
 ## Drawing a body
 
 ```
-screens/build/ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice]
+screens/build/ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice] [--below] [--below-from DEGREES]
 screens/build/ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...
 screens/build/ft-avatars --mirror-snapshot OUT.png MODEL [the same]
+screens/build/ft-avatars --below-snapshot OUT.png MODEL [the same]
 screens/build/ft-avatars --thumb OUT.png MODEL [--size PX]
 screens/build/ft-avatars --poses
 screens/build/ft-avatars --hear SECONDS
@@ -77,7 +78,7 @@ screens/build/ft-avatars --hear SECONDS
 
 `ft-avatars` draws a model file's body on the GPU (`view/bodygpu.cpp`): the mesh is skinned in the vertex shader by the pose's 55 matrices, the face shapes move the vertices before that (`view/bodymesh.cpp`), and each part is drawn with its material's look: lit, in two tones for a cartoon material, or in its own colours; solid, cut out or see-through.
 
-With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. `--mirror-snapshot` writes what the mirror would show that wearer, both eyes' views side by side. The people in a shared room come next.
+With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. `--mirror-snapshot` writes what the mirror would show that wearer, both eyes' views side by side, and `--below-snapshot` what that wearer would see of their own body looking down. The people in a shared room come next.
 
 ## The mirror
 
@@ -87,7 +88,7 @@ With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses th
 - **The glass** (`view/mirror.h`) shows the room turned over through its plane, as a window onto that room: each eye's view is drawn through the glass's rectangle from where that eye really is. The two views go side by side into one overlay (`VROverlayFlags_SideBySide_Parallel`), so what is in the mirror has depth behind the glass and moves as your head does. Nothing on your side of the glass is drawn twice: the near plane is the glass.
 - **Drawing** (`view/mirrorview.cpp`, `view/live.cpp`): 45 times a second, half the displays' rate, into buffers SteamVR reads with no copy (`screens/vroutput.h`, three of them: the one shown, the one before it, the one being drawn), and only while the glass is within 80 degrees of where your head looks. It sorts under Frametop's panels, so a panel in front of the glass covers it.
 
-It runs while the mirror is wanted and no longer: the Appearance page starts it and tells it to quit, and it also ends with SteamVR. Commands, one datagram each on `@ft_avatars`: `state` (the last status line: whether it is shown, draws a second, the CPU a draw takes, whether the microphone is heard), `model PATH` (another model file's body from now on), `place` (the glass stands in front of you again) and `quit`. A model file that can't be worn ends it before anything starts.
+It runs while the mirror is wanted and no longer: the Appearance page starts it and tells it to quit, and it also ends with SteamVR. Commands, one datagram each on `@ft_avatars`: `state` (the last status line: whether it is shown, draws a second, the CPU a draw takes, whether the microphone is heard, the body below), `model PATH` (another model file's body from now on), `place` (the glass stands in front of you again), `below on` and `below off` (your own body below you, next section) and `quit`. A model file that can't be worn ends it before anything starts.
 
 Cost, 2026-11-10, a 528 by 960 picture an eye, the headset off the head (SteamVR gives a head pose about half the time then, so it drew 21 times a second, not 45): 0.55-0.69 ms of CPU a draw, a buffer up about 11 ms after its draw, 2.4-3.1% of one core in all with the microphone heard. In the headset it is still to be measured (`HEADSET-TESTS.md`).
 
@@ -96,6 +97,18 @@ echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_avatars,bind=
 ```
 
 The avatar you wear is `AVATAR_MODEL` in `~/.config/frametop.conf`: the name of one of your models that has a body, or nothing. The Appearance page lists them with their pictures (`ft-avatars --thumb`, kept in `~/.cache/frametop/avatar-thumbs` until the model's file changes). Wearing one also picks its hands (`HANDS_VIEW_MODEL`), which you can change again; a model you import that turns out to be a whole avatar is worn at once; removing the one you wear takes the mirror away. Nobody else sees your avatar until shared rooms exist (M3).
+
+## Your own body
+
+`--below`, or `below on` to a standing mirror, also draws the avatar's body where your own is, so you see it when you look down. It is an experiment (spike T5 in [docs/together.md](../docs/together.md)): the Appearance page has it as a switch marked experimental, off each time Settings starts, and it runs only while the mirror does.
+
+An overlay is a flat picture, and a body isn't. So the picture is drawn the way the mirror's is (`view/below.h`): a level square, 1.6 m a side, lies half a metre under your eyes, and each eye gets the body as it sees it through that square as a window, the two side by side. Seen from where it was drawn for, every part of the body is then in its true place at its true depth, above the square or under it.
+
+- **It is fixed in the room, not to your head.** SteamVR places a room-fixed overlay afresh every frame from the newest head pose, so turning your head can't make the body slide, however late the picture is. What does trail is moving your head: the square is put under your eyes again at each draw (45 a second), and between draws the picture is the one for where your eyes were. That is the question the spike asks in the headset.
+- **The head is folded away** (`below::Fold`): your eyes are inside it. Its vertices, and those of a hand the hand tracker is showing (ft-handview draws your hands, with the same model), collapse to the neck and the wrist.
+- **It is drawn only while you look down** more than 12 degrees (`--below-from DEGREES` to try another angle; -90 draws it always), and its buffers are made the first time it is wanted (`view/sheet.cpp` is the overlay and its three buffers, the same for the mirror).
+
+What the trial can't do, by its making: it sorts under every panel and the mirror, so a panel far behind your arm still draws over the arm where they overlap; what is more than 58 degrees from straight down (hands held out far ahead) is cut at the square's edge; and each eye's picture is 1024 pixels a side, about twice the mirror's pixels, whose cost in the headset is still to be measured.
 
 ## The face
 

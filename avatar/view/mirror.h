@@ -49,19 +49,20 @@ inline void Pose(const Glass &g, float out[3][4]) {
     out[0][3] = float(g.centre.x), out[1][3] = float(g.centre.y), out[2][3] = float(g.centre.z);
 }
 
-// What an eye at `eye` sees in the glass: the room -> clip space, the glass filling the
-// viewport with its top in the first row (as SteamVR reads a buffer), depth from the glass's
-// plane to kDeep behind it, so nothing on the eye's side of the glass is drawn. The view turns
-// the room over twice (the mirror, and the top going first), so what it shows winds the way
-// the room does. False when the eye sees nothing in it (kTooNear).
-inline bool EyeView(const Glass &g, const Vec &eye, viewmath::Mat4 &clip) {
+// The room seen from `eye` through the glass's rectangle, as through a window: the room -> clip
+// space, the rectangle filling the viewport with its top in the first row (as SteamVR reads a
+// buffer), depth from `nearM` to `farM` metres from the eye, measured square to the glass. What
+// is drawn may be on either side of the glass. The top going first turns the picture over: what
+// it shows winds the other way from the room (bodygpu::View::mirrored). False when the eye is
+// at the glass's plane or behind it (kTooNear).
+inline bool Window(const Glass &g, const Vec &eye, double nearM, double farM, viewmath::Mat4 &clip) {
     const Vec e = eye - g.centre;
     const double ex = e.dot(g.right), ey = e.dot(g.up), ez = e.dot(g.out);
-    if (!(ez > kTooNear)) return false;
+    if (!(ez > kTooNear) || !(nearM > 0 && farM > nearM)) return false;
     // A point at (x, y, z) in the glass's frame, seen from the eye, V = point - eye, meets the
     // glass at (ez Vx - ex Vz, ez Vy - ey Vz) / -Vz: the clip's x and y over its w, with the
-    // half sizes divided out. Its z runs from the plane (-Vz = ez) to kDeep behind it.
-    const double hw = g.width / 2, hh = g.height / 2, nearM = ez, farM = ez + kDeep;
+    // half sizes divided out. Its z runs from -Vz = nearM to farM.
+    const double hw = g.width / 2, hh = g.height / 2;
     const double A = (farM + nearM) / (farM - nearM), B = -2 * farM * nearM / (farM - nearM);
     const double K[4][4] = {{ez / hw, 0, -ex / hw, 0}, {0, -ez / hh, ey / hh, 0}, {0, 0, -A, B}, {0, 0, -1, 0}};
     // the room -> the glass's frame, the eye taken off: rows right, up, out; then K
@@ -72,13 +73,24 @@ inline bool EyeView(const Glass &g, const Vec &eye, viewmath::Mat4 &clip) {
         L[r][3] = -axes[r]->dot(eye);
     }
     L[3][3] = 1;
-    viewmath::Mat4 window;
     for (int r = 0; r < 4; ++r)
         for (int c = 0; c < 4; ++c) {
             double s = 0;
             for (int k = 0; k < 4; ++k) s += K[r][k] * L[k][c];
-            window.m[c * 4 + r] = float(s);
+            clip.m[c * 4 + r] = float(s);
         }
+    return true;
+}
+
+// What an eye at `eye` sees in the glass, a mirror: the room turned over through the glass's
+// plane, seen through the glass as a window, from the glass's plane to kDeep behind it, so
+// nothing on the eye's side of the glass is drawn. The view turns the room over twice (the
+// mirror, and the top going first), so what it shows winds the way the room does. False when
+// the eye sees nothing in it (kTooNear).
+inline bool EyeView(const Glass &g, const Vec &eye, viewmath::Mat4 &clip) {
+    const double ez = (eye - g.centre).dot(g.out);
+    viewmath::Mat4 window;
+    if (!(ez > kTooNear) || !Window(g, eye, ez, ez + kDeep, window)) return false;
     clip = viewmath::Mul(window, viewmath::Mirror(g.centre, g.out));
     return true;
 }

@@ -1,10 +1,13 @@
 // The CPU side of ft-avatars (avatar/view): a body's mesh for the vertex buffers and its face
 // shapes (bodymesh.h), a tracked hand as the pose solver takes it (handfit.h), the demo wearers
-// (demo.h) and the views (viewmath.h). No GPU, OpenVR or headset.
+// (demo.h), the views (viewmath.h), the mirror's glass and what each eye sees in it (mirror.h),
+// and a tracked wearer (wearer.h). No GPU, OpenVR or headset.
 #include "../view/bodymesh.h"
 #include "../view/demo.h"
 #include "../view/handfit.h"
+#include "../view/mirror.h"
 #include "../view/viewmath.h"
+#include "../view/wearer.h"
 #include "person.h"
 
 #include <cstdio>
@@ -210,11 +213,83 @@ static void views() {
     check("...and a mirror of a mirror is the room", same);
 }
 
+static void mirrors() {
+    using viewmath::Project;
+    // someone at (0.5, 1.6, 2) on a floor 0.1 up, looking down and to their left
+    const Vec eyes = {0.5, 1.6, 2}, level = Vec{-1, 0, -1}.unit(), up = {0, 1, 0};
+    const mirror::Glass g = mirror::Stand(eyes, Vec{-1, -0.4, -1}.unit(), 0.1);
+    const double hw = g.width / 2, hh = g.height / 2;
+    bool ok = (g.centre - (Vec{0.5, 0.1 + hh, 2} + level * mirror::kAway)).norm() < 1e-9 && (g.out + level).norm() < 1e-9 && (g.up - up).norm() < 1e-9;
+    // its right is its wearer's right
+    check("a glass stands on the floor ahead of its wearer, facing them", ok && (g.right - level.cross(up)).norm() < 1e-9 && (g.right.cross(g.up) - g.out).norm() < 1e-9);
+    check("...ahead of someone looking straight up is -z", (mirror::Stand(eyes, up, 0).out - Vec{0, 0, 1}).norm() < 1e-9);
+    float pose[3][4];
+    mirror::Pose(g, pose);
+    ok = pose[0][3] == float(g.centre.x) && pose[1][3] == float(g.centre.y) && pose[2][3] == float(g.centre.z) && pose[1][1] == 1;
+    check("its place as an overlay's is told: right, up and out, and where", ok && pose[0][0] == float(g.right.x) && pose[2][0] == float(g.right.z) && pose[0][2] == float(g.out.x));
+    check("an eye's picture is shaped as the glass is, and even", mirror::EyeWidth(g, 960) == 528 && mirror::EyeWidth(g, 481) % 2 == 0);
+
+    viewmath::Mat4 clip;
+    ok = mirror::EyeView(g, eyes, clip);
+    // the top goes in the buffer's first row, which is clip space's bottom
+    const Vec topRight = Project(clip, g.centre + g.right * hw + g.up * hh), bottomLeft = Project(clip, g.centre - g.right * hw - g.up * hh);
+    check("the glass fills an eye's view, its top first, at the nearest that is drawn", ok && (topRight - Vec{1, -1, -1}).norm() < 1e-4 && (bottomLeft - Vec{-1, 1, -1}).norm() < 1e-4);
+    const Vec e = eyes - g.centre, self = Project(clip, eyes);
+    check("an eye sees itself straight across", std::fabs(self.x - e.dot(g.right) / hw) < 1e-4 && std::fabs(self.y + e.dot(g.up) / hh) < 1e-4 && self.z > -1 && self.z < 1);
+    // what is beside the eye is as far behind the glass as the eye is before it: half way across
+    const Vec beside = Project(clip, eyes + g.right * 0.3), above = Project(clip, eyes + g.up * 0.2), behind = Project(clip, eyes + g.out);
+    ok = std::fabs((beside.x - self.x) * hw - 0.15) < 1e-4 && std::fabs(beside.y - self.y) < 1e-4 && std::fabs((above.y - self.y) * hh + 0.1) < 1e-4;
+    check("your right is on the right, up is up, and what is further from the glass is deeper in it", ok && behind.z > self.z && behind.z < 1);
+    check("what is behind the glass isn't in it", Project(clip, g.centre - g.out * 0.5).z < -1);
+    viewmath::Mat4 left, right;
+    ok = mirror::EyeView(g, eyes - g.right * 0.032, left) && mirror::EyeView(g, eyes + g.right * 0.032, right);
+    check("each eye sees what is in it on its own side: it has depth", ok && std::fabs((Project(right, eyes).x - Project(left, eyes).x) * hw - 0.032) < 1e-4);
+    check("an eye at the glass or behind it sees nothing in it", !mirror::EyeView(g, g.centre + g.out * 0.01, clip) && !mirror::EyeView(g, g.centre - g.out, clip));
+
+    const double within = 80 * bodypose::kPi / 180;
+    ok = mirror::InSight(g, eyes, level, within) && mirror::InSight(g, eyes, Vec{-1, -5, -1}.unit(), within) && !mirror::InSight(g, eyes, level * -1, within);
+    ok = ok && mirror::InSight(g, eyes, bodypose::Turn::About(up, 1.3) * level, within) && !mirror::InSight(g, eyes, bodypose::Turn::About(up, 1.5) * level, within);
+    check("a glass is in sight of a head that looks its way, level", ok && mirror::InSight(g, g.centre + g.out * 0.1, level * -1, within) && mirror::InSight(g, eyes, up, within));
+    const Vec light = mirror::Light(g);
+    check("the light is on the side of a body that faces the glass, from above", std::fabs(light.norm() - 1) < 1e-9 && light.dot(g.out) < -0.3 && light.y > 0.5);
+}
+
+static void wearers() {
+    const Body b = person();
+    const handfit::Fit fit(b);
+    wearer::Tracked seen(b);
+    handcut::Mat head = {{{1, 0, 0, 0.2f}, {0, 1, 0, 1.5f}, {0, 0, 1, -0.3f}}};
+    const double eyes[2][3] = {{0.168, 1.5, -0.3}, {0.232, 1.5, -0.3}};
+    bodypose::Input in = seen.See(head, eyes, {}, 0);
+    bool ok = in.head.AngleTo(Turn{}) < 1e-6 && (in.eyes - Vec{0.2, 1.5, -0.3}).norm() < 1e-9 && !in.hand[0].tracked && !in.hand[1].tracked && in.dt == 0;
+    check("an upright head facing -z is no turn, the eyes between its two", ok && (wearer::Tracked::Ahead(head) - Vec{0, 0, -1}).norm() < 1e-9);
+    const double stood = in.eyeHeight;
+
+    const Turn turn = Turn::About({0, 1, 0}, 0.7) * Turn::About({1, 0, 0}, -0.3);
+    const Vec axes[3] = {turn * Vec{1, 0, 0}, turn * Vec{0, 1, 0}, turn * Vec{0, 0, 1}};
+    for (int c = 0; c < 3; ++c) head.m[0][c] = float(axes[c].x), head.m[1][c] = float(axes[c].y), head.m[2][c] = float(axes[c].z);
+    const handcut::Hand hand = moved(fit.rest(true), Turn::About({0, 0, 1}, 0.4), {0.45, 1.2, -0.5});
+    in = seen.See(head, eyes, {hand}, 1.0 / 90);
+    ok = in.head.AngleTo(turn) < 1e-5 && (wearer::Tracked::Ahead(head) - turn * Vec{0, 0, -1}).norm() < 1e-6 && in.dt > 0;
+    check("a turned head and a tracked hand are the wearer's", ok && in.hand[1].tracked && !in.hand[0].tracked && (in.hand[1].wrist - Vec{0.45, 1.2, -0.5}).norm() < 1e-6);
+
+    // they stand up straight for a few seconds, then crouch
+    double tall[2][3] = {{0.168, 1.7, -0.3}, {0.232, 1.7, -0.3}};
+    for (int i = 0; i < 450; ++i) in = seen.See(head, tall, {}, 1.0 / 90);
+    ok = in.eyeHeight > 1.69 && in.eyeHeight <= 1.7 && in.eyeHeight > stood;
+    tall[0][1] = tall[1][1] = 1.0;
+    const double before = in.eyeHeight;
+    for (int i = 0; i < 90; ++i) in = seen.See(head, tall, {}, 1.0 / 90);
+    check("how tall they stand is learned from the highest their eyes have been", ok && in.eyeHeight == before && in.eyes.y == 1.0);
+}
+
 int main() {
     mesh();
     hands();
     demos();
     views();
+    mirrors();
+    wearers();
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed != 0;
 }

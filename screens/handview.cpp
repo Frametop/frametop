@@ -71,14 +71,13 @@
 #include "handrobot.h"
 #include "rendernode.h"
 #include "roomview.h"
+#include "vroutput.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
-#include <drm_fourcc.h>
 #include <fcntl.h>
-#include <gbm.h>
 #include <signal.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -119,8 +118,6 @@ double CpuSeconds() {
 }
 
 // ------------------------------------------------------------------------------------ GPU
-
-gpuctx::Procs egl;  // looked up by Gpu::Init
 
 // The body: how squarely the surface faces the eye (the second pass's fresnel), the fade toward
 // the forearm, the light from above, and how near a fingertip, into the scratch buffer. Only the
@@ -387,13 +384,9 @@ unsigned Program(const char *vs, const char *fs, std::initializer_list<const cha
     return p;
 }
 
-// One buffer SteamVR shows: a GBM buffer object, drawn to through an EGL image.
-struct Output {
-    gbm_bo *bo = nullptr;
-    EGLImageKHR image = EGL_NO_IMAGE_KHR;
-    GLuint rb = 0, fbo = 0, tex = 0;   // tex: an offscreen one's (--snapshot)
-    vr::SharedTextureHandle_t handle = 0;
-    EGLSyncKHR fence = EGL_NO_SYNC_KHR;
+// One buffer SteamVR shows (vroutput.h), or an offscreen one to read back (--snapshot).
+struct Output : vroutput::Buffer {
+    GLuint tex = 0;        // an offscreen one's
     handmesh::Quad quad;   // what it was drawn for
 };
 
@@ -478,10 +471,8 @@ private:
     void Cap(const handmesh::Quad &q, const double eyes[2][3], const Cut &cut);
     void Rim(Output &o, const handmesh::Quad &q, const Style &st, bool robot = false);
     int eye_ = 0;
-    gbm_device *gbm_ = nullptr;
-    EGLDisplay dpy_ = EGL_NO_DISPLAY;
+    vroutput::Maker maker_;   // the device, the display and SteamVR's layouts
     EGLContext ctx_ = EGL_NO_CONTEXT;
-    std::vector<uint64_t> mods_;
     GLuint body_ = 0, skin_ = 0, robot_ = 0, robotRim_ = 0, robotVbo_ = 0, robotIbo_ = 0, cap_ = 0, rim_ = 0, scratchTex_ = 0, scratchDepth_ = 0, scratch_ = 0, vbo_ = 0, ibo_ = 0, quad_ = 0;
     // A model's hands on the GPU, uploaded when first drawn and again when its data changes.
     struct ModelBuf {
@@ -494,12 +485,11 @@ private:
 
 bool Gpu::Init(const std::vector<uint64_t> &modifiers, int eyePx) {
     eye_ = eyePx;
-    for (uint64_t m : modifiers)
-        if (m != DRM_FORMAT_MOD_INVALID) mods_.push_back(m);
-    gbm_ = rendernode::Acquire("handview");
-    if (!gbm_) return false;
-    egl = gpuctx::Load();
-    if (!gpuctx::Open("handview", gbm_, egl, gpuctx::kDestroyImage, &dpy_, &ctx_)) return false;
+    maker_.who = "handview", maker_.modifiers = modifiers;
+    maker_.gbm = rendernode::Acquire("handview");
+    if (!maker_.gbm) return false;
+    maker_.egl = gpuctx::Load();
+    if (!gpuctx::Open("handview", maker_.gbm, maker_.egl, gpuctx::kDestroyImage, &maker_.dpy, &ctx_)) return false;
     body_ = Program(kBodyVs, kBodyFs, {"pos", "nrm", "back"});
     skin_ = Program(kSkinVs, kBodyFs, {"pos", "nrm", "joints", "weights"});
     cap_ = Program(kCapVs, kCapFs, {"pos"});
@@ -553,65 +543,12 @@ bool Gpu::MakeOutput(Output &o, bool vr) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, o.tex, 0);
         return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     }
-    o.bo = mods_.empty() ? gbm_bo_create(gbm_, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR)
-                         : gbm_bo_create_with_modifiers2(gbm_, w, h, GBM_FORMAT_ABGR8888, mods_.data(), unsigned(mods_.size()),
-                                                         GBM_BO_USE_RENDERING);
-    if (!o.bo) return std::fprintf(stderr, "handview: can't allocate a %dx%d buffer\n", w, h), false;
-    const int planes = gbm_bo_get_plane_count(o.bo);
-    const uint64_t mod = mods_.empty() ? DRM_FORMAT_MOD_LINEAR : gbm_bo_get_modifier(o.bo);
-    int fds[4] = {-1, -1, -1, -1};
-    vr::DmabufAttributes_t a{};
-    a.unWidth = uint32_t(w), a.unHeight = uint32_t(h);
-    a.unDepth = a.unMipLevels = a.unArrayLayers = a.unSampleCount = 1;
-    a.unFormat = DRM_FORMAT_ABGR8888, a.ulModifier = mod, a.unPlaneCount = uint32_t(planes);
-    EGLint at[64];
-    int n = 0;
-    at[n++] = EGL_WIDTH, at[n++] = w, at[n++] = EGL_HEIGHT, at[n++] = h;
-    at[n++] = EGL_LINUX_DRM_FOURCC_EXT, at[n++] = DRM_FORMAT_ABGR8888;
-    static const EGLint kFd[4] = {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE1_FD_EXT, EGL_DMA_BUF_PLANE2_FD_EXT,
-                                  EGL_DMA_BUF_PLANE3_FD_EXT};
-    static const EGLint kOff[4] = {EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT,
-                                   EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT};
-    static const EGLint kPitch[4] = {EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT,
-                                     EGL_DMA_BUF_PLANE2_PITCH_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT};
-    static const EGLint kLo[4] = {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
-                                  EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT};
-    static const EGLint kHi[4] = {EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT,
-                                  EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT};
-    for (int i = 0; i < planes && i < 4; ++i) {
-        fds[i] = gbm_bo_get_fd_for_plane(o.bo, i);
-        const uint32_t off = gbm_bo_get_offset(o.bo, i), stride = gbm_bo_get_stride_for_plane(o.bo, i);
-        a.plane[i].unOffset = off, a.plane[i].unStride = stride, a.plane[i].nFd = fds[i];
-        at[n++] = kFd[i], at[n++] = fds[i], at[n++] = kOff[i], at[n++] = EGLint(off), at[n++] = kPitch[i], at[n++] = EGLint(stride);
-        at[n++] = kLo[i], at[n++] = EGLint(mod & 0xffffffff), at[n++] = kHi[i], at[n++] = EGLint(mod >> 32);
-    }
-    at[n++] = EGL_NONE;
-    o.image = egl.createImage(dpy_, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, at);
-    if (!vr::VRIPCResourceManager()->ImportDmabuf(vr::VRApplication_Overlay, &a, &o.handle)) o.handle = 0;
-    for (int fd : fds)
-        if (fd >= 0) close(fd);   // the EGL image and SteamVR hold their own references
-    if (o.image == EGL_NO_IMAGE_KHR || !o.handle)
-        return std::fprintf(stderr, "handview: the buffer can't be %s\n", o.handle ? "drawn to" : "imported by SteamVR"),
-               FreeOutput(o), false;
-    glGenRenderbuffers(1, &o.rb);
-    glBindRenderbuffer(GL_RENDERBUFFER, o.rb);
-    egl.imageTargetRenderbuffer(GL_RENDERBUFFER, o.image);
-    glGenFramebuffers(1, &o.fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, o.rb);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        return std::fprintf(stderr, "handview: output framebuffer incomplete\n"), FreeOutput(o), false;
-    return true;
+    return vroutput::Make(maker_, w, h, o);
 }
 
 void Gpu::FreeOutput(Output &o) {
-    if (o.handle) vr::VRIPCResourceManager()->UnrefResource(o.handle);
-    if (o.fence != EGL_NO_SYNC_KHR) egl.destroySync(dpy_, o.fence);
-    if (o.fbo) glDeleteFramebuffers(1, &o.fbo);
-    if (o.rb) glDeleteRenderbuffers(1, &o.rb);
     if (o.tex) glDeleteTextures(1, &o.tex);
-    if (o.image != EGL_NO_IMAGE_KHR) egl.destroyImage(dpy_, o.image);
-    if (o.bo) gbm_bo_destroy(o.bo);
+    vroutput::Free(maker_, o);
     o = Output{};
 }
 
@@ -807,9 +744,7 @@ void Gpu::Rim(Output &o, const handmesh::Quad &q, const Style &st, bool robot) {
         glUniform4f(glGetUniformLocation(prog, "box"), e * 0.5f + half, 0.5f / eye_, e * 0.5f + 0.5f - half, 1 - 0.5f / eye_);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
-    if (o.fence != EGL_NO_SYNC_KHR) egl.destroySync(dpy_, o.fence);
-    o.fence = egl.createSync(dpy_, EGL_SYNC_FENCE_KHR, nullptr);
-    glFlush();
+    vroutput::Fence(maker_, o);
     o.quad = q;
 }
 
@@ -819,17 +754,11 @@ void Gpu::Read(Output &o, std::vector<uint8_t> &rgba) {
     glReadPixels(0, 0, 2 * eye_, eye_, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 }
 
-bool Gpu::Passed(Output &o) {
-    if (o.fence == EGL_NO_SYNC_KHR) return true;
-    if (egl.clientWaitSync(dpy_, o.fence, 0, 0) == EGL_TIMEOUT_EXPIRED_KHR) return false;
-    egl.destroySync(dpy_, o.fence);
-    o.fence = EGL_NO_SYNC_KHR;
-    return true;
-}
+bool Gpu::Passed(Output &o) { return vroutput::Passed(maker_, o); }
 
 void Gpu::Done() {
-    gpuctx::Close(dpy_, ctx_);
-    if (gbm_) rendernode::Release();
+    gpuctx::Close(maker_.dpy, ctx_);
+    if (maker_.gbm) rendernode::Release();
 }
 
 // ------------------------------------------------------------------------------- the hands
@@ -1207,11 +1136,8 @@ int main(int argc, char **argv) {
     vr::VR_Init(&err, vr::VRApplication_Overlay);
     if (err != vr::VRInitError_None) return std::fprintf(stderr, "openvr: %s\n", vr::VR_GetVRInitErrorAsEnglishDescription(err)), 1;
     if (!vr::VRIPCResourceManager()) return std::fprintf(stderr, "openvr: no IVRIPCResourceManagerClient\n"), 1;
-    uint64_t mods[64];
-    uint32_t nmods = 64;
-    if (!vr::VRIPCResourceManager()->GetDmabufModifiers(vr::VRApplication_Overlay, DRM_FORMAT_ABGR8888, &nmods, mods)) nmods = 0;
     Gpu gpu;
-    if (!gpu.Init(std::vector<uint64_t>(mods, mods + nmods), res)) return 1;
+    if (!gpu.Init(vroutput::Modifiers(), res)) return 1;
 
     Side sides[2] = {{"left"}, {"right"}};
     for (Side &s : sides) {

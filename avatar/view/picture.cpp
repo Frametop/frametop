@@ -6,6 +6,8 @@
 #include "demo.h"
 #include "gpuctx.h"
 #include "handfit.h"
+#include "mirror.h"
+#include "mirrorview.h"
 #include "rendernode.h"
 #include "viewmath.h"
 
@@ -25,6 +27,7 @@ using namespace bodyfile;
 namespace {
 
 constexpr int kFine = 2;   // drawn this many times the size each way, then averaged down
+constexpr double kEyesApart = 0.064;   // the demo wearer's, metres
 
 // The offscreen context and what is drawn into: colour to read back, and depth.
 struct Canvas {
@@ -58,7 +61,8 @@ struct Canvas {
         return true;
     }
     // What was drawn, averaged down by kFine: colour times alpha, and alpha, the top row first.
-    std::vector<float> Read() {
+    // `topFirst`: it was drawn with its top in the buffer's first row (as SteamVR reads one), not GL's way up.
+    std::vector<float> Read(bool topFirst = false) {
         std::vector<uint8_t> px(size_t(w) * h * 4);
         glFinish();
         glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
@@ -69,7 +73,10 @@ struct Canvas {
                 for (int c = 0; c < 4; ++c) {
                     int sum = 0;
                     for (int dy = 0; dy < kFine; ++dy)
-                        for (int dx = 0; dx < kFine; ++dx) sum += px[(size_t(h - 1 - (y * kFine + dy)) * w + x * kFine + dx) * 4 + c];
+                        for (int dx = 0; dx < kFine; ++dx) {
+                            const int row = y * kFine + dy;
+                            sum += px[(size_t(topFirst ? row : h - 1 - row) * w + x * kFine + dx) * 4 + c];
+                        }
                     out[(size_t(y) * ow + x) * 4 + c] = float(sum) / float(kFine * kFine * 255);
                 }
         return out;
@@ -83,24 +90,36 @@ struct Canvas {
     }
 };
 
+// The demo wearer when the pose began, and at the moment drawn.
+struct Wearer {
+    bodypose::Input began, now;
+};
+
 // The body's matrices `at` seconds into the pose, the wearer's moves solved 90 times a second
-// up to then (what trails the head, trails it).
-bool Posed(const Body &body, const Ask &ask, float bones[kRoles][12]) {
+// up to then (what trails the head, trails it). At rest nobody wears it: the wearer given is
+// one standing where it does.
+bool Posed(const Body &body, const Ask &ask, float bones[kRoles][12], Wearer *wearer = nullptr) {
     bodypose::Solver solver(body);
     bodypose::Pose pose;
+    const handfit::Fit fit(body);
+    Wearer w;
     if (ask.pose == "rest") {
         for (int r = 0; r < kRoles; ++r) pose.at[r] = {body.at[r][0], body.at[r][1], body.at[r][2]};
-        return solver.Matrices(pose, bones), true;
+        demo::Pose("stand", 0, body, fit, w.began);
+        w.now = w.began;
+    } else {
+        const double step = 1.0 / 90, until = std::min(std::max(ask.at, 0.0), 30.0);
+        for (double t = 0;; t += step) {
+            bodypose::Input &in = w.now;
+            in = bodypose::Input{};
+            if (!demo::Pose(ask.pose.c_str(), std::min(t, until), body, fit, in)) return std::fprintf(stderr, "avatars: no pose called %s (rest %s)\n", ask.pose.c_str(), demo::kNames), false;
+            in.dt = t > 0 ? step : 0;
+            if (t == 0) w.began = in;
+            if (!solver.Solve(in, pose)) return std::fprintf(stderr, "avatars: the pose can't be solved\n"), false;
+            if (t >= until) break;
+        }
     }
-    const handfit::Fit fit(body);
-    const double step = 1.0 / 90, until = std::min(std::max(ask.at, 0.0), 30.0);
-    for (double t = 0;; t += step) {
-        bodypose::Input in;
-        if (!demo::Pose(ask.pose.c_str(), std::min(t, until), body, fit, in)) return std::fprintf(stderr, "avatars: no pose called %s (rest %s)\n", ask.pose.c_str(), demo::kNames), false;
-        in.dt = t > 0 ? step : 0;
-        if (!solver.Solve(in, pose)) return std::fprintf(stderr, "avatars: the pose can't be solved\n"), false;
-        if (t >= until) break;
-    }
+    if (wearer) *wearer = w;
     return solver.Matrices(pose, bones), true;
 }
 
@@ -182,5 +201,39 @@ int Draw(const Ask &ask, bool thumb) {
 
 int Sheet(const Ask &ask) { return Draw(ask, false); }
 int Thumb(const Ask &ask) { return Draw(ask, true); }
+
+int Glass(const Ask &ask) {
+    Loaded file;
+    if (!file.Read(ask.model)) return 1;
+    float bones[kRoles][12];
+    Wearer wearer;
+    if (!Posed(file.body, ask, bones, &wearer)) return 1;
+    // the glass stands where the wearer looked when the pose began, as the mirror does when it starts
+    const mirror::Glass glass = mirror::Stand(wearer.began.eyes, wearer.began.head * Vec{0, 0, -1}, wearer.began.floor);
+    const Vec side = wearer.now.head * Vec{1, 0, 0} * (kEyesApart / 2);
+    const Vec eyes[2] = {wearer.now.eyes - side, wearer.now.eyes + side};
+    const int h = std::min(std::max(ask.size, 64), 1024), w = mirror::EyeWidth(glass, h);
+    Canvas canvas;
+    bodygpu::Painter painter;
+    bodygpu::Avatar avatar;
+    int status = 1;
+    if (canvas.Open(2 * w * kFine, h * kFine) && painter.Init("avatars")) {
+        avatar.Upload(painter, file.body);
+        avatar.Shape(ask.shapes);
+        mirrorview::Draw(painter, &avatar, bones, glass, eyes, w * kFine, h * kFine);
+        const std::vector<float> px = canvas.Read(true);
+        std::vector<uint8_t> img(size_t(2 * w) * h * 3);
+        for (size_t i = 0; i < size_t(2 * w) * h; ++i)
+            for (int c = 0; c < 3; ++c) img[i * 3 + c] = uint8_t(std::lround(std::min(1.0f, px[i * 4 + c]) * 255));
+        if (stbi_write_png(ask.out.c_str(), 2 * w, h, 3, img.data(), 2 * w * 3)) {
+            status = 0;
+            std::printf("wrote %s: %s, %s, in the mirror, %dx%d an eye\n", ask.out.c_str(), file.model.info.name.c_str(), ask.pose.c_str(), w, h);
+        } else {
+            std::fprintf(stderr, "avatars: can't write %s\n", ask.out.c_str());
+        }
+    }
+    avatar.Free(), painter.Done(), canvas.Close();
+    return status;
+}
 
 }  // namespace picture

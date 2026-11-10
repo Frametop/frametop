@@ -28,6 +28,7 @@
 #define FT_SOCK_GAZEPANEL "ft_gazepanel"       /* the gaze checks' panel (gaze/panel/) */
 #define FT_SOCK_HANDVIEW "ft_handview"         /* ft-handview (screens/handview.cpp) */
 #define FT_SOCK_HANDPANEL "ft_handpanel"       /* the hand recorder's panel (hands/rec/panel/) */
+#define FT_SOCK_AVATARS "ft_avatars"           /* ft-avatars' mirror (avatar/view/live.cpp) */
 #define FT_SOCK_FRUNNER "ft_frunner"           /* frunner (frunner/) */
 #define FT_SOCK_SPOTPANEL "ft_spotpanel"       /* frunner's panel (frunner/ft-spotpanel.cpp) */
 #define FT_SOCK_DASHPATCH "ft_dashpatch"       /* ft-dashpatch (pointer/dashpatch/) */

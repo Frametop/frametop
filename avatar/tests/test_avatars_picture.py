@@ -2,7 +2,8 @@
 """ft-avatars (avatar/view) on a made-up whole person, from the file to the pixels: the importer
 writes the person's model file, ft-avatars poses it as a made-up wearer and draws it on the GPU,
 and the picture has the person in it, in every view, moved by the pose and by the face shapes.
-What it can't draw (no file, a hand model, a pose that isn't one) ends in an error.
+The mirror's picture has them as each eye sees them in the glass. What it can't draw (no file, a
+hand model, a pose that isn't one) ends in an error.
 
 It runs the built programs (avatar/build.sh, screens/build.sh) and is skipped where they aren't
 built or there is no GPU to draw on.
@@ -23,6 +24,16 @@ from importcase import REPO, ImportCase  # noqa: E402
 TOOL = REPO / 'screens/build/ft-avatars'
 SOURCES = [*(REPO / 'avatar/view').glob('*'), *(REPO / 'avatar/pose').glob('*'), *(REPO / 'avatar').glob('bodyfile.*'), REPO / 'avatar/vec.h']
 GREY = 82   # what a sheet is drawn over
+GLASS, FRAME = (23, 26, 31), (140, 148, 158)   # the mirror's glass with nothing in it, and its edge
+
+
+def lopsided(there):
+    """How many more of a standing figure's pixels by its head are left of its feet than right of them."""
+    top, bottom = min(y for _, y in there), max(y for _, y in there)
+    feet = [x for x, y in there if y > bottom - 6]
+    middle = sum(feet) / len(feet)
+    by_head = [x for x, y in there if y < top + 0.2 * (bottom - top)]
+    return sum(x < middle for x in by_head) - sum(x > middle for x in by_head)
 
 
 def read_png(path):
@@ -119,14 +130,6 @@ class AvatarsPictureTest(ImportCase):
         def span(there):
             return max(x for x, _ in there) - min(x for x, _ in there)
 
-        def lopsided(there):
-            """How many more of the pixels by the head are left of the feet than right of them."""
-            top, bottom = min(y for _, y in there), max(y for _, y in there)
-            feet = [x for x, y in there if y > bottom - 6]
-            middle = sum(feet) / len(feet)
-            by_head = [x for x, y in there if y < top + 0.2 * (bottom - top)]
-            return sum(x < middle for x in by_head) - sum(x > middle for x in by_head)
-
         self.assertLess(span(stand), 0.6 * span(rest))   # the arms hang
         self.assertLess(abs(lopsided(stand)), 12)
         # the waving hand is the right one, which a view from in front has on its left, by the head
@@ -149,9 +152,59 @@ class AvatarsPictureTest(ImportCase):
         self.assertGreater(solid, 150)
         self.assertLess(solid, 0.5 * width * height)
 
+    def test_the_mirror_shows_each_eye_the_wearer(self):
+        picture = self.draw('--mirror-snapshot', '--pose', 'wave', '--size', '480')
+        width, height, channels, rows = picture
+        each = width // 2
+        self.assertEqual((width, height, channels), (2 * 264, 480, 3))   # a glass 1.1 m by 2 m, to each eye
+
+        def near(x, y, colour):
+            return all(abs(rows[y][x * 3 + c] - colour[c]) <= 2 for c in range(3))
+
+        figures = []
+        for half in range(2):
+            x0 = half * each
+            for x, y in ((x0, 0), (x0 + each - 1, 0), (x0, height - 1), (x0 + each - 1, height - 1), (x0 + each // 2, 1)):
+                self.assertTrue(near(x, y, FRAME), (x, y))
+            for x, y in ((x0 + 8, 8), (x0 + each - 9, height - 9)):
+                self.assertTrue(near(x, y, GLASS), (x, y))
+            there = {(x - x0, y) for y in range(8, height - 8) for x in range(x0 + 8, x0 + each - 8) if not near(x, y, GLASS)}
+            self.assertGreater(len(there), 300, half)
+            ys = [y for _, y in there]
+            # a mirror shows you at half your size, your eyes level with your eyes
+            self.assertGreater(max(ys) - min(ys), 0.3 * height, half)
+            self.assertLess(max(ys) - min(ys), 0.5 * height, half)   # the hand is up over the head
+            self.assertGreater(min(ys), 0.1 * height), self.assertLess(max(ys), 0.8 * height)
+            # the waving hand is the right one, and in a mirror your right is on the right
+            self.assertLess(lopsided(there), -25, half)
+            figures.append(there)
+
+        def feet(there):
+            low = [x for x, y in there if y > max(y for _, y in there) - 6]
+            return sum(low) / len(low)
+
+        # the wearer is as far behind the glass as before it: the left eye sees them 32 mm left of where the right eye does
+        apart = (feet(figures[1]) - feet(figures[0])) * 1.1 / each
+        self.assertAlmostEqual(apart, 0.032, delta=0.012)
+
+        rest = self.draw('--mirror-snapshot', '--pose', 'rest', '--size', '240')
+        self.assertEqual(rest[:3], (2 * 132, 240, 3))
+        self.assertNotEqual(set(rest[3][100]), set(rest[3][3]))   # someone is in it
+
     def test_what_it_cannot_draw_ends_in_an_error(self):
         self.assertIn('no pose called fly', self.draw('--snapshot', '--pose', 'fly', status=1))
         self.assertIn('no body', self.draw('--snapshot', model=self.hands, status=1))
+        self.assertIn('no pose called fly', self.draw('--mirror-snapshot', '--pose', 'fly', status=1))
+        self.assertIn('no body', self.draw('--mirror-snapshot', model=self.hands, status=1))
+        # the mirror itself reads its model before it starts anything
+        for model, why in ((self.hands, 'no body'), (str(self.dir / 'nothing.ftmodel'), 'avatars:')):
+            done = subprocess.run([str(TOOL), '--mirror', model], capture_output=True, text=True, timeout=30)
+            self.assertEqual(done.returncode, 1, done.stderr)
+            self.assertIn(why, done.stderr)
+        for args in (['--mirror'], ['--mirror', self.model, '--height'], ['--mirror', self.model, '--walk', '1']):
+            done = subprocess.run([str(TOOL), *args], capture_output=True, text=True, timeout=30)
+            self.assertEqual(done.returncode, 2, done.stderr)
+            self.assertIn('usage:', done.stderr)
         self.assertIn('avatars:', self.draw('--snapshot', model=str(self.dir / 'nothing.ftmodel'), status=1))
         damaged = self.dir / 'damaged.ftmodel'
         damaged.write_bytes(Path(self.model).read_bytes()[:-40])

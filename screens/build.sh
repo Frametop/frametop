@@ -4,7 +4,8 @@
 # ft-handview, which draws the hands when Room View is off (handview.cpp), and
 # ft-spotpanel, frunner's search panel (frunner/ft-spotpanel.cpp; ft-frunner runs it), and
 # ft-avatars, which draws avatar bodies (avatar/view, posed by avatar/pose): it is built here
-# because it wears the hands ft-handview draws (handskin.cpp, handcut.cpp).
+# because it wears the hands ft-handview draws (handskin.cpp, handcut.cpp) and shows its mirror
+# the way ft-handview shows them (vroutput.cpp).
 # compositor.c is the wlroots side (C; wlroots headers aren't C++), vr.cpp the OpenVR side,
 # remote.c the remote screens (their streams are ft-stream's, stream/build.sh).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
@@ -46,11 +47,12 @@ $cxx -c -o build/modelfile.o ../avatar/modelfile.cpp
 python3 -I tools/hand-asset.py --cpp build/handasset.cpp >/dev/null
 $cxx -I. -c -o build/handasset.o build/handasset.cpp
 $cxx -c -o build/handrobot.o handrobot.cpp
+$cxx -c -o build/vroutput.o vroutput.cpp
 $cxx -c -o build/handview.o handview.cpp
 $cxx -c -o build/bodyfile.o ../avatar/bodyfile.cpp
 $cxx -c -o build/bodypose.o ../avatar/pose/bodypose.cpp
 avatars=""
-for f in bodymesh handfit demo bodygpu picture main; do
+for f in bodymesh handfit demo bodygpu mirrorview picture live main; do
   $cxx -Wextra -I. -c -o build/avatars-$f.o ../avatar/view/$f.cpp
   avatars="$avatars build/avatars-$f.o"
 done
@@ -58,8 +60,8 @@ vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
-g++ -o build/ft-handview build/handview.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
+g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 $cxx -o build/ft-spotpanel ../frunner/ft-spotpanel.cpp $(pkg-config --libs gbm libdrm) $OPENVR_LIBS -lpthread
-g++ -o build/ft-avatars $avatars build/bodypose.o build/bodyfile.o build/modelfile.o build/handskin.o build/handmodels.o build/handasset.o build/handmesh.o build/handcut.o build/rendernode.o $vrlibs
+g++ -o build/ft-avatars $avatars build/bodypose.o build/bodyfile.o build/modelfile.o build/handskin.o build/handmodels.o build/handasset.o build/handmesh.o build/handcut.o build/handrender.o build/rendernode.o build/vroutput.o $vrlibs
 strip --strip-unneeded build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel build/ft-avatars
 echo "built build/ft-screens build/ft-handtest build/ft-handview build/ft-spotpanel build/ft-avatars"'

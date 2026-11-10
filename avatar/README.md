@@ -9,11 +9,11 @@ How you look in Frametop: the hands ft-handview draws for you today, and the ava
 | `modelbytes.h` | Reading and writing the file's numbers, for both |
 | `vec.h` | A point in three dimensions, for the importer and the solver |
 | `pose/` | The pose solver (`bodypose.h`): a body's 55 bones from the wearer's head and hands. Sums only, no tracking, GPU or SteamVR code |
-| `view/` | `ft-avatars`: bodies drawn with GLES 2. It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws |
+| `view/` | `ft-avatars`: bodies drawn with GLES 2, in pictures and in the mirror that shows you the avatar you wear. It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws and shows its mirror the way ft-handview shows them (`screens/vroutput.h`) |
 | `import/` | `ft-model-import`: a VRM, glTF, GLB or FBX model into a `.ftmodel` (`build.sh` builds it into `avatar/build/`) |
 | `ftmodel.py` | The same file read in Python, for the tests and the Settings page |
-| `hand_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove |
-| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views), both in `just test-c`, `test_appearance.py` (the page's backend) |
+| `hand_models.py`, `avatar_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove, and your avatars: which one you wear, and the mirror |
+| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, a tracked wearer), both in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb and the mirror), `test_appearance.py` (the page's backend) |
 
 ## The model file
 
@@ -66,14 +66,34 @@ The same solver poses your own body and the people you share a room with. It ref
 ## Drawing a body
 
 ```
+screens/build/ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S]
 screens/build/ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...
+screens/build/ft-avatars --mirror-snapshot OUT.png MODEL [the same]
 screens/build/ft-avatars --thumb OUT.png MODEL [--size PX]
 screens/build/ft-avatars --poses
 ```
 
 `ft-avatars` draws a model file's body on the GPU (`view/bodygpu.cpp`): the mesh is skinned in the vertex shader by the pose's 55 matrices, the face shapes move the vertices before that (`view/bodymesh.cpp`), and each part is drawn with its material's look: lit, in two tones for a cartoon material, or in its own colours; solid, cut out or see-through.
 
-For now it makes pictures with no headset on (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. The mirror panel and the people in a shared room come next.
+With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. `--mirror-snapshot` writes what the mirror would show that wearer, both eyes' views side by side. The people in a shared room come next.
+
+## The mirror
+
+`ft-avatars --mirror MODEL` stands a sheet of glass in the room, 1.1 m wide and 2 m tall, on the floor 1.4 m ahead of where you look when it starts, and shows you the avatar in it. It is how you see the body you wear: posed from your head and your tracked hands by the same solver that will pose you for other people.
+
+- **The wearer** (`view/wearer.h`) is your headset's pose, the two eyes' places, and the hands the hand tracker shows (ft-hands' shared files, read as ft-handview reads them). How tall you stand is learned from the highest your eyes have been, so the body's legs are the right length once you have stood up straight.
+- **The glass** (`view/mirror.h`) shows the room turned over through its plane, as a window onto that room: each eye's view is drawn through the glass's rectangle from where that eye really is. The two views go side by side into one overlay (`VROverlayFlags_SideBySide_Parallel`), so what is in the mirror has depth behind the glass and moves as your head does. Nothing on your side of the glass is drawn twice: the near plane is the glass.
+- **Drawing** (`view/mirrorview.cpp`, `view/live.cpp`): 45 times a second, half the displays' rate, into buffers SteamVR reads with no copy (`screens/vroutput.h`, three of them: the one shown, the one before it, the one being drawn), and only while the glass is within 80 degrees of where your head looks. It sorts under Frametop's panels, so a panel in front of the glass covers it.
+
+It runs while the mirror is wanted and no longer: the Appearance page starts it and tells it to quit, and it also ends with SteamVR. Commands, one datagram each on `@ft_avatars`: `state` (the last status line: whether it is shown, draws a second, the CPU a draw takes), `model PATH` (another model file's body from now on), `place` (the glass stands in front of you again) and `quit`. A model file that can't be worn ends it before anything starts.
+
+Cost, 2026-11-10, a 528 by 960 picture an eye, the headset off the head (SteamVR gives a head pose about half the time then, so it drew 21 times a second, not 45): 0.55-0.68 ms of CPU a draw, a buffer up about 11 ms after its draw, 2.0-2.5% of one core in all. In the headset it is still to be measured (`HEADSET-TESTS.md`).
+
+```
+echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_avatars,bind=
+```
+
+The avatar you wear is `AVATAR_MODEL` in `~/.config/frametop.conf`: the name of one of your models that has a body, or nothing. The Appearance page lists them with their pictures (`ft-avatars --thumb`, kept in `~/.cache/frametop/avatar-thumbs` until the model's file changes). Wearing one also picks its hands (`HANDS_VIEW_MODEL`), which you can change again; a model you import that turns out to be a whole avatar is worn at once; removing the one you wear takes the mirror away. Nobody else sees your avatar until shared rooms exist (M3).
 
 ## Other people's code
 

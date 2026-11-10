@@ -1,0 +1,30 @@
+// ft-avatars with a headset on: the mirror. A sheet of glass stands on the floor in front of
+// you (mirror.h) and shows your avatar's body, posed from your head and your tracked hands
+// (wearer.h, the pose solver), to each eye (mirrorview.h), as an overlay SteamVR shows in the
+// room. It runs while the mirror is wanted and no longer: Settings starts it and tells it to
+// quit.
+//
+// Commands, one datagram each on @ft_avatars, answered to the asker:
+//   state         -> "ok " and the last status line
+//   model PATH    -> another model file's body from now on: "ok", or "error" and why (the body
+//                    worn stays)
+//   place         -> the glass stands in front of you again, where you look now: "ok"
+//   quit          -> "ok", and it ends
+#pragma once
+
+#include <string>
+
+namespace live {
+
+struct Ask {
+    std::string model;     // a model file with a body
+    int height = 960;      // each eye's picture of the glass, pixels tall
+    double seconds = 0;    // end after this long (0: when told to)
+    double status = 0;     // a status line on stdout this often, seconds (0: none)
+};
+
+// Runs until `quit`, SteamVR quitting, a signal, or `seconds`. The program's exit status, with a
+// line on stderr when it isn't 0.
+int Mirror(const Ask &ask);
+
+}  // namespace live

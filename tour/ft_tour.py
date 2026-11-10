@@ -427,7 +427,8 @@ def pages(f, keys):
                  ["Hands", "When hand tracking runs, the hand model, the three ways to use your hands, and every "
                            "gesture on or off", "settings:hands"],
                  ["Appearance", "The hands Frametop draws for you: pick a model, or import your own from a VRM, "
-                                "glTF or FBX file", "settings:appearance"],
+                                "glTF or FBX file. A whole avatar you import can be worn, and a mirror shows "
+                                "you in it", "settings:appearance"],
                  ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
                            "commands", "settings:voice"],
                  "System",

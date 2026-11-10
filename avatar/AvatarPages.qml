@@ -1,5 +1,6 @@
-// Frametop Settings' Appearance page: the hand model your hands are drawn with, its look, and
-// importing a model of your own (settings/main.qml loads this file the first time it opens).
+// Frametop Settings' Appearance page: the hand model your hands are drawn with, its look,
+// importing a model of your own, and the avatar you wear and its mirror (settings/main.qml loads
+// this file the first time it opens).
 // Backend: ft_avatar_settings.py ("backend", made then: settings/ft_settings.py).
 import QtQuick
 import QtQuick.Controls as Controls
@@ -52,6 +53,74 @@ Item {
         ]
     }
 
+    function askRemove(model) {
+        removeDialog.name = model.name
+        removeDialog.label = model.title
+        removeDialog.open()
+    }
+
+    // A model's card: its picture, its name and where it came from. One of yours can be removed.
+    component ModelCard: Controls.ItemDelegate {
+        id: card
+        required property var modelData
+        signal removeAsked()
+        width: Kirigami.Units.gridUnit * 8
+        height: Kirigami.Units.gridUnit * 9
+        highlighted: modelData.current
+        Accessible.name: modelData.title
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Image {
+                    anchors.fill: parent
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    source: card.modelData.thumb
+                    visible: card.modelData.thumb !== ""
+                }
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: Kirigami.Units.iconSizes.large
+                    height: width
+                    source: "transform-browse"
+                    opacity: 0.4
+                    visible: card.modelData.thumb === ""
+                }
+                Controls.ToolButton {
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    visible: card.modelData.own
+                    icon.name: "edit-delete"
+                    display: Controls.AbstractButton.IconOnly
+                    text: "Remove " + card.modelData.title
+                    Controls.ToolTip.text: text
+                    Controls.ToolTip.visible: hovered
+                    onClicked: card.removeAsked()
+                }
+            }
+            Controls.Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+                text: card.modelData.title
+                font.bold: card.modelData.current
+            }
+            Controls.Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+                text: card.modelData.detail
+                visible: text !== ""
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+            }
+        }
+    }
+
     Component {
         id: appearancePage
         Kirigami.ScrollablePage {
@@ -80,70 +149,10 @@ Item {
                     Repeater {
                         objectName: "handModels"
                         model: backend.models
-                        delegate: Controls.ItemDelegate {
-                            id: card
-                            required property var modelData
+                        delegate: ModelCard {
                             objectName: "handModel-" + modelData.name
-                            width: Kirigami.Units.gridUnit * 8
-                            height: Kirigami.Units.gridUnit * 9
-                            highlighted: modelData.current
                             onClicked: backend.choose(modelData.name)
-                            Accessible.name: modelData.title
-                            contentItem: ColumnLayout {
-                                spacing: Kirigami.Units.smallSpacing
-                                Item {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Image {
-                                        anchors.fill: parent
-                                        fillMode: Image.PreserveAspectFit
-                                        asynchronous: true
-                                        source: card.modelData.thumb
-                                        visible: card.modelData.thumb !== ""
-                                    }
-                                    Kirigami.Icon {
-                                        anchors.centerIn: parent
-                                        width: Kirigami.Units.iconSizes.large
-                                        height: width
-                                        source: "transform-browse"
-                                        opacity: 0.4
-                                        visible: card.modelData.thumb === ""
-                                    }
-                                    Controls.ToolButton {
-                                        anchors.top: parent.top
-                                        anchors.right: parent.right
-                                        visible: card.modelData.own
-                                        icon.name: "edit-delete"
-                                        display: Controls.AbstractButton.IconOnly
-                                        text: "Remove " + card.modelData.title
-                                        Controls.ToolTip.text: text
-                                        Controls.ToolTip.visible: hovered
-                                        onClicked: {
-                                            removeDialog.name = card.modelData.name
-                                            removeDialog.label = card.modelData.title
-                                            removeDialog.open()
-                                        }
-                                    }
-                                }
-                                Controls.Label {
-                                    Layout.fillWidth: true
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
-                                    textFormat: Text.PlainText
-                                    text: card.modelData.title
-                                    font.bold: card.modelData.current
-                                }
-                                Controls.Label {
-                                    Layout.fillWidth: true
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
-                                    textFormat: Text.PlainText
-                                    text: card.modelData.detail
-                                    visible: text !== ""
-                                    opacity: 0.7
-                                    font: Kirigami.Theme.smallFont
-                                }
-                            }
+                            onRemoveAsked: root.askRemove(modelData)
                         }
                     }
                 }
@@ -177,6 +186,60 @@ Item {
                     text: "Takes a VRM avatar, or a glTF, GLB or FBX model with a hand skeleton: its hands become "
                           + "yours. A model with more detail than a hand needs is reduced, and one whose hand bones "
                           + "can't be told is refused with the reason. Your models are kept in " + backend.folder + "."
+                }
+
+                Kirigami.Heading {
+                    level: 3
+                    text: "Avatar"
+                }
+                Controls.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: backend.avatars.length > 0
+                          ? "The body you wear. Its hands become yours, and the mirror shows all of it, moving as you do."
+                          : "None yet. Import a model that is a whole person (a VRM avatar, or a glTF or FBX with a "
+                            + "humanoid skeleton) to wear its body, not only its hands."
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+                    visible: backend.avatars.length > 0
+
+                    Repeater {
+                        objectName: "avatars"
+                        model: backend.avatars
+                        delegate: ModelCard {
+                            objectName: "avatar-" + modelData.name
+                            onClicked: backend.wear(modelData.name)
+                            onRemoveAsked: root.askRemove(modelData)
+                        }
+                    }
+                }
+                Controls.Switch {
+                    id: mirrorSwitch
+                    objectName: "mirrorSwitch"
+                    text: "Show a mirror"
+                    visible: backend.avatars.length > 0
+                    enabled: backend.canMirror && backend.avatar !== ""
+                    checked: backend.mirror
+                    onToggled: backend.setMirror(checked)
+                    // a toggle ends the binding above, and the mirror can go on its own (it didn't come up)
+                    Connections {
+                        target: backend
+                        function onChanged() { mirrorSwitch.checked = backend.mirror }
+                    }
+                }
+                Controls.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    visible: backend.avatars.length > 0
+                    text: backend.avatar === ""
+                          ? "Pick an avatar to see yourself in the mirror."
+                          : "The mirror stands on the floor in front of where you look when you turn it on, and "
+                            + "stays until you turn it off here. Turn it off and on to move it."
                 }
 
                 Kirigami.FormLayout {

@@ -42,7 +42,7 @@ SECTIONS = [
     ("hands", "input", "Eyes, hands & voice", "Hands", "transform-browse",
      "hand tracking pinch model touch typing cutout"),
     ("appearance", "avatar", "Eyes, hands & voice", "Appearance", "preferences-desktop-theme-global",
-     "hand model look skin glove robot ghost solid avatar import vrm gltf glb fbx room view"),
+     "hand model look skin glove robot ghost solid avatar body wear mirror import vrm gltf glb fbx room view"),
     ("voice", "input", "Eyes, hands & voice", "Voice", "audio-input-microphone",
      "dictation speech wake word microphone"),
     ("games", "input", "System", "Game optimization", "applications-games",

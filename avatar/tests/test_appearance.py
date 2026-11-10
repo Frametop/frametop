@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Frametop Settings' Appearance page (avatar/ft_avatar_settings.py, hand_models.py), offline: the
-models ft-handview lists are shown with their pictures, a choice is saved and sent, an import
-runs the importer under a name that isn't taken and switches to the model, and a model of yours
-can be removed. ft-handview and ft-model-import are a made-up program here (FAKE below), the
-settings file and the folders are temp ones, and nothing is sent to the real ft-handview.
+"""Frametop Settings' Appearance page (avatar/ft_avatar_settings.py, hand_models.py,
+avatar_models.py), offline: the models ft-handview lists are shown with their pictures, a choice
+is saved and sent, an import runs the importer under a name that isn't taken and switches to the
+model, and a model of yours can be removed; your models that are whole avatars can be worn, and
+the mirror started with the one you wear and told when it changes. ft-handview, ft-model-import
+and ft-avatars are a made-up program here (FAKE below), the settings file and the folders are
+temp ones, and nothing is sent to the real ft-handview or the real mirror, or started.
 
   python3 avatar/tests/test_appearance.py
 """
 import os
+import struct
 import sys
 import tempfile
 import textwrap
@@ -19,6 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+import avatar_models  # noqa: E402
 import fixtures  # noqa: E402
 import hand_models  # noqa: E402
 
@@ -29,7 +33,7 @@ except ImportError as e:  # (a PC without PySide6)
     print(f"no PySide6 here: {e}")
     sys.exit(77)
 
-# Plays both programs: `--models` lists the bundled models and the folder's files, `--thumb F`
+# Plays the programs: `--models` lists the bundled models and the folder's files, `--thumb F`
 # writes a file, and anything else is an import that writes NAME.ftmodel (or refuses "bad" files).
 FAKE = textwrap.dedent('''\
     import os, sys
@@ -42,7 +46,7 @@ FAKE = textwrap.dedent('''\
                 print(f[:-8] + "\\town")
         print("robot\\tbuilt\\ncapsules\\tbuilt")
     elif "--thumb" in args:
-        open(args[args.index("--thumb") + 1], "wb").write(b"png " + os.environ["FT_HANDS_VIEW_MODEL"].encode())
+        open(args[args.index("--thumb") + 1], "wb").write(b"png " + os.environ.get("FT_HANDS_VIEW_MODEL", "an avatar").encode())
     else:
         source, name, to = args[0], args[args.index("--name") + 1], args[args.index("--to") + 1]
         if "bad" in os.path.basename(source):
@@ -53,6 +57,16 @@ FAKE = textwrap.dedent('''\
         print("ok " + name + "\\nfile " + os.path.join(to, name + ".ftmodel") + "\\nname My Avatar\\nshare no")
         print("left 100 triangles\\nright 100 triangles, mirrored from the left")
 ''')
+
+
+def model_file(title, body=True):
+    """A model file's bytes as far as a list of models reads them: what it says of itself, and
+    whether it has a body."""
+    def chunk(tag, data):
+        return tag + struct.pack("<I", len(data)) + data + b"\0" * (-len(data) % 4)
+
+    info = b"".join(struct.pack("<BH", key, len(text)) + text for key, text in ((1, title.encode()), (3, b"Someone"), (4, b"vrm")))
+    return b"FTMD" + struct.pack("<I", 1) + chunk(b"INFO", info) + (chunk(b"BODY", bytes(40)) if body else b"")
 
 
 class Logic(unittest.TestCase):
@@ -90,6 +104,16 @@ class Logic(unittest.TestCase):
             self.assertEqual(hand_models.describe("gone", "own", tmp)["title"], "gone")   # no file: its name
             self.assertTrue(hand_models.describe("gone", "own", tmp)["own"])
 
+    def test_avatars_are_the_models_with_a_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(avatar_models.listed(os.path.join(tmp, "nothere")), [])
+            for name, data in (("fox", model_file("Fox")), ("glove", model_file("Glove", body=False)), ("junk", b"x"), ("owl", model_file(""))):
+                Path(tmp, name + ".ftmodel").write_bytes(data)
+            Path(tmp, "notes.txt").write_text("x")
+            self.assertEqual(avatar_models.listed(tmp), [{"name": "fox", "title": "Fox", "detail": "by Someone, VRM", "own": True},
+                                                         {"name": "owl", "title": "owl", "detail": "by Someone, VRM", "own": True}])
+            self.assertEqual(avatar_models.mirror_command(tmp, "fox"), [avatar_models.AVATARS, "--mirror", os.path.join(tmp, "fox.ftmodel")])
+
 
 class Page(unittest.TestCase):
     def setUp(self):
@@ -104,18 +128,34 @@ class Page(unittest.TestCase):
         old = ft_avatar_settings.tool_command
         ft_avatar_settings.tool_command = lambda *cmd: (self.ran.append(cmd), [sys.executable, str(fake), *cmd[1:]])[1]
         self.addCleanup(setattr, ft_avatar_settings, "tool_command", old)
-        self.b = ft_avatar_settings.Backend(conf=str(self.conf), folder=str(self.folder), cache=str(self.cache))
-        self.sent, self.said = [], []
+        self.started = []   # what would go on after Settings closes: not started here
+        for module, name, stand_in in ((ft_avatar_settings, "start_detached", lambda argv: (self.started.append(argv), self.starts)[1]),
+                                       (ft_avatar_settings, "MIRROR_UP_MS", 3600 * 1000),   # the tests ask when they want to
+                                       (avatar_models, "SOCKET", "ft_avatars_test_%d" % os.getpid())):   # nobody listens there
+            self.addCleanup(setattr, module, name, getattr(module, name))
+            setattr(module, name, stand_in)
+        self.starts = True
+        self.b = ft_avatar_settings.Backend(conf=str(self.conf), folder=str(self.folder), cache=str(self.cache), avatar_cache=str(tmp / "avatar-thumbs"))
+        self.sent, self.said, self.told = [], [], []
         self.b._send = self.sent.append
+        self.b._tell_mirror = self.told.append
         self.b.message.connect(lambda text, error: self.said.append((text, error)))
 
     def settle(self, seconds=5):
-        end = time.monotonic() + seconds
-        while (self.b._running is not None or self.b._jobs) and time.monotonic() < end:
+        """Until the programs have run and the folder has been read (which may queue pictures to draw)."""
+        end, quiet = time.monotonic() + seconds, 0
+        while quiet < 3 and time.monotonic() < end:
             self.app.processEvents()
+            quiet = 0 if self.b._running is not None or self.b._jobs or self.b._ipc.pending() else quiet + 1
             time.sleep(0.01)
         self.app.processEvents()
         self.assertIsNone(self.b._running)
+        self.assertEqual(self.b._ipc.pending(), 0)
+
+    def avatar(self, name, title):
+        self.folder.mkdir(exist_ok=True)
+        (self.folder / (name + ".ftmodel")).write_bytes(model_file(title))
+        return str(self.folder / (name + ".ftmodel"))
 
     def names(self):
         return [m["name"] for m in self.b.models]
@@ -201,6 +241,100 @@ class Page(unittest.TestCase):
         self.assertEqual(self.names(), ["asset", "babylon", "robot", "capsules"])
         self.assertEqual((self.b.model, self.sent[-1]), ("asset", "model asset"))
         self.assertEqual([f for f in os.listdir(self.cache) if f.startswith("glove-")], [])
+
+    def test_your_avatars_and_their_pictures(self):
+        self.assertEqual((self.b.avatars, self.b.avatar, self.b.mirror), ([], "", False))
+        fox = self.avatar("fox", "Fox")
+        (self.folder / "glove.ftmodel").write_bytes(model_file("Glove", body=False))
+        self.b.refresh()
+        self.settle()
+        self.assertEqual([(a["name"], a["title"], a["current"]) for a in self.b.avatars], [("fox", "Fox", False)])
+        self.assertTrue(self.b.avatars[0]["thumb"].startswith("file://"))
+        drawn = [c for c in self.ran if c[0] == avatar_models.AVATARS]
+        self.assertEqual([(c[1], c[3:]) for c in drawn], [("--thumb", (fox, "--size", "256"))])
+        self.b.refresh()   # its picture is kept
+        self.settle()
+        self.assertEqual(len([c for c in self.ran if c[0] == avatar_models.AVATARS]), 1)
+        self.assertFalse(self.b.mirror)   # nobody answered on the mirror's socket
+
+    def test_wearing_an_avatar_and_the_mirror(self):
+        self.avatar("fox", "Fox")
+        owl = self.avatar("owl", "Owl")
+        self.b.refresh()
+        self.settle()
+        self.b.setMirror(True)   # nobody to show yet
+        self.assertEqual((self.started, self.b.mirror), ([], False))
+        self.b.wear("fox")
+        self.b.wear("nobody")
+        self.assertEqual((self.b.avatar, self.told), ("fox", []))
+        self.assertIn("AVATAR_MODEL=fox", self.conf.read_text())
+        self.assertEqual((self.b.model, self.sent), ("fox", ["model fox"]))   # its hands are yours
+        self.assertEqual([a["name"] for a in self.b.avatars if a["current"]], ["fox"])
+        self.b.setMirror(True)
+        self.b.setMirror(True)
+        self.assertEqual(len(self.started), 1)
+        self.assertEqual(self.ran[-1], (avatar_models.AVATARS, "--mirror", str(self.folder / "fox.ftmodel")))
+        self.assertTrue(self.b.mirror)
+        self.b.wear("owl")   # the mirror is told
+        self.assertEqual(self.told, ["model " + owl])
+        self.b.choose("robot")   # other hands on the same body
+        self.assertEqual((self.b.avatar, self.b.model), ("owl", "robot"))
+        self.b.setMirror(False)
+        self.assertEqual((self.told[-1], self.b.mirror, len(self.started)), ("quit", False, 1))
+
+    def test_a_mirror_that_does_not_start_says_so(self):
+        self.avatar("fox", "Fox")
+        self.b.refresh()
+        self.settle()
+        self.b.wear("fox")
+        self.starts = False
+        self.b.setMirror(True)
+        self.assertEqual((self.b.mirror, self.said), (False, [("Couldn't start the mirror", True)]))
+
+    def test_a_mirror_that_does_not_come_up_says_so(self):
+        self.avatar("fox", "Fox")
+        self.b.refresh()
+        self.settle()
+        self.b.wear("fox")
+        self.b.setMirror(True)
+        self.assertEqual((self.b.mirror, self.said), (True, []))
+        self.b._mirror_up()   # nobody answers on its socket
+        self.settle()
+        self.assertEqual((self.b.mirror, self.said), (False, [("The mirror didn't come up. Is SteamVR running?", True)]))
+        self.b._mirror_up()   # ...and it is only said once
+        self.settle()
+        self.assertEqual(len(self.said), 1)
+
+    def test_a_mirror_already_standing_shows_as_on(self):
+        self.b._scanned(([], True))
+        self.assertTrue(self.b.mirror)
+        self.b.setMirror(False)
+        self.assertEqual((self.told, self.b.mirror), (["quit"], False))
+
+    def test_an_imported_avatar_is_worn(self):
+        source = Path(self.tmp.name) / "Fox.vrm"
+        source.write_bytes(model_file("Fox"))
+        self.b.importFile(str(source), False)
+        self.settle()
+        self.assertEqual((self.b.avatar, self.b.model), ("fox", "fox"))
+        glove = Path(self.tmp.name) / "glove.glb"   # hands alone: the avatar stays
+        glove.write_bytes(model_file("Glove", body=False))
+        self.b.importFile(str(glove), False)
+        self.settle()
+        self.assertEqual((self.b.avatar, self.b.model), ("fox", "glove"))
+
+    def test_removing_the_avatar_you_wear(self):
+        self.avatar("fox", "Fox")
+        self.b.refresh()
+        self.settle()
+        self.b.wear("fox")
+        self.b.setMirror(True)
+        self.b.remove("fox")
+        self.settle()
+        self.assertEqual((self.b.avatars, self.b.avatar, self.b.mirror, self.told), ([], "", False, ["quit"]))
+        self.assertEqual((self.b.model, self.sent[-1]), ("asset", "model asset"))
+        self.assertFalse((self.folder / "fox.ftmodel").exists())
+        self.assertNotIn("AVATAR_MODEL=fox", self.conf.read_text())
 
 
 if __name__ == "__main__":

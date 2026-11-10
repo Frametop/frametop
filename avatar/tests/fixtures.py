@@ -40,6 +40,7 @@ class Rig:
         self.uv = {}         # a vertex's number -> (u, v), where it isn't (0, 0)
         self.shapes = {}     # a face shape's name -> {vertex: (dx, dy, dz)}
         self.expressions = {}    # VRM 1.0's preset name -> the shape's name
+        self.constraints = {}    # a node -> (VRM 1.0's constraint: 'aim', 'rotation' or 'roll', its source node, its weight)
 
     def node(self, name, parent, at):
         self.nodes.append((name, parent, tuple(at)))
@@ -229,6 +230,11 @@ def glb(rig, vrm=None, meta=None, normals=True):
                 {'name': 'm%d' % i, 'shader': 'VRM/MToon' if m.get('toon') else 'VRM/UnlitTexture'} for i, m in enumerate(rig.materials)]
     elif vrm == 1:
         doc['extensionsUsed'] = ['VRMC_vrm']
+        for node, (kind, source, weight) in rig.constraints.items():
+            axis = {'aim': {'aimAxis': 'PositiveX'}, 'roll': {'rollAxis': 'X'}}.get(kind, {})
+            nodes[node]['extensions'] = {'VRMC_node_constraint': {
+                'specVersion': '1.0', 'constraint': {kind: {'source': source, 'weight': weight, **axis}}}}
+            doc['extensionsUsed'] = ['VRMC_vrm', 'VRMC_node_constraint']
         doc['extensions'] = {'VRMC_vrm': {'specVersion': '1.0', 'meta': meta, 'humanoid': {
             'humanBones': {name: {'node': node} for name, node in rig.humanoid.items()}}}}
         if rig.expressions:

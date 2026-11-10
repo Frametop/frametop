@@ -146,6 +146,43 @@ class BodyImportTest(ImportCase):
                 self.assertEqual(sorted(model.hands), ['left', 'right'])   # the avatar's hands are the wearer's
                 self.assertNotIn('mirrored', said['left'] + said['right'])
 
+    def test_a_bone_that_turns_with_one_it_does_not_hang_from(self):
+        """VRM 1.0's constraints: a sleeve's bone hangs from the chest and aims along the arm, so
+        the sleeve is the upper arm's. A bone that copies a turn from somewhere else can't be a
+        bone of the body's (they turn about their own places): it stays with what it hangs from."""
+        rig = bodyfixtures.person('opaque')
+        chest, upper, fore = (rig.humanoid[name] for name in ('chest', 'leftUpperArm', 'leftLowerArm'))
+        shoulder, elbow = rig.nodes[upper][2], rig.nodes[fore][2]
+
+        def helper(name, at, kind, source, weight=1.0):
+            node = rig.node(name, chest, at)
+            rig.constraints[node] = (kind, source, weight)
+            corner = (0.1 * len(rig.constraints), 1.9, 0.4)   # a block of its own, away from the rest of the person
+            rig.block(name, [(node, 1.0)], corner, tuple(c + 0.02 for c in corner))
+            return node
+
+        sleeve = helper('sleeve', shoulder, 'aim', fore)
+        cuff = rig.node('cuff', sleeve, tuple((a + b) / 2 for a, b in zip(shoulder, elbow)))   # what hangs from it goes with it
+        rig.block('cuff', [(cuff, 1.0)], (0.0, 1.9, 0.4), (0.02, 1.92, 0.42))
+        helper('copy', shoulder, 'rotation', upper)
+        helper('faint', shoulder, 'rotation', upper, 0.2)
+        helper('roll', shoulder, 'roll', upper)
+        helper('robot', (0.0, 1.9, 0.2), 'rotation', upper)
+        helper('aside', (0.0, 1.9, 0.2), 'aim', fore)
+        helper('lost', shoulder, 'aim', 10 ** 6)
+        rig.built = [v[0] for v in rig.verts]
+        body, _, _ = self.body_of('sleeves.vrm', fixtures.glb(rig, vrm=1, meta={'name': 'x'}))
+        self.check_bones(body, rig)
+        self.check_mesh(body, rig)
+        for block, role in (('sleeve', 'leftUpperArm'), ('cuff', 'leftUpperArm'), ('copy', 'leftUpperArm'), ('faint', 'chest'),
+                            ('roll', 'chest'), ('robot', 'chest'), ('aside', 'chest'), ('lost', 'chest')):
+            for i in self.at(body, rig, block):
+                self.assertEqual([(ftmodel.ROLES[j], w) for j, w in zip(body.joints[i], body.weights[i]) if w], [(role, 255)], block)
+        # the same file as a VRM 0.x, which has no constraints: every helper is the chest's
+        body, _, _ = self.body_of('sleeves0.vrm', fixtures.glb(rig, vrm=0, meta={'title': 'x'}))
+        for i in self.at(body, rig, 'sleeve'):
+            self.assertEqual([ftmodel.ROLES[j] for j, w in zip(body.joints[i], body.weights[i]) if w], ['chest'])
+
     def test_a_skeleton_told_by_its_names(self):
         for scheme in ('unity', 'mixamo', 'blender', 'unreal'):
             for extra in ({}, {'upper_chest': True}, {'shoulders': False, 'toes': False, 'eyes': False}):

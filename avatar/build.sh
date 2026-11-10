@@ -18,7 +18,7 @@ cxx="g++ -std=c++17 -O2 -Wall -Wextra -Wno-missing-field-initializers"
 [ build/ufbx.o -nt build/deps/ufbx.c ] || gcc -std=c11 -O2 -w -c -o build/ufbx.o build/deps/ufbx.c
 [ build/simplifier.o -nt build/deps/simplifier.cpp ] || g++ -std=c++17 -O2 -w -c -o build/simplifier.o build/deps/simplifier.cpp
 [ build/allocator.o -nt build/deps/allocator.cpp ] || g++ -std=c++17 -O2 -w -c -o build/allocator.o build/deps/allocator.cpp
-[ build/image.o -nt import/image.cpp ] && [ build/image.o -nt build/deps/stb_image.h ] && [ build/image.o -nt import/scene.h ] ||
+[ build/image.o -nt import/image.cpp ] && [ build/image.o -nt build/deps/stb_image.h ] && [ build/image.o -nt import/scene.h ] && [ build/image.o -nt vec.h ] ||
   $cxx -w -isystem build/deps -c -o build/image.o import/image.cpp
 $cxx -Wno-unused-function -isystem build/deps $(pkg-config --cflags jsoncpp) -c -o build/gltfscene.o import/gltfscene.cpp
 $cxx -isystem build/deps $(pkg-config --cflags jsoncpp) -c -o build/gltfvrm.o import/gltfvrm.cpp

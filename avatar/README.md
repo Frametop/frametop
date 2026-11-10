@@ -1,16 +1,19 @@
 # Avatars and hand models
 
-How you look in Frametop: the hands ft-handview draws for you today, and the avatar other people will see in a shared room ([docs/together.md](../docs/together.md), "Avatars and hands"). This folder has the model file, the importer that writes it, and Frametop Settings' Appearance page.
+How you look in Frametop: the hands ft-handview draws for you today, and the avatar other people will see in a shared room ([docs/together.md](../docs/together.md), "Avatars and hands"). This folder has the model file, the importer that writes it, the solver that poses a body from a headset's wearer, the program that draws bodies, and Frametop Settings' Appearance page.
 
 | File | What |
 |---|---|
 | `modelfile.h`, `modelfile.cpp` | Frametop's own model file (`.ftmodel`): the format, a strict reader and a writer for its hands. No GPU, SteamVR or network code |
 | `bodyfile.h`, `bodyfile.cpp` | The same for an avatar's body in that file: its skeleton, mesh, materials, pictures and face shapes |
 | `modelbytes.h` | Reading and writing the file's numbers, for both |
+| `vec.h` | A point in three dimensions, for the importer and the solver |
+| `pose/` | The pose solver (`bodypose.h`): a body's 55 bones from the wearer's head and hands. Sums only, no tracking, GPU or SteamVR code |
+| `view/` | `ft-avatars`: bodies drawn with GLES 2. It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws |
 | `import/` | `ft-model-import`: a VRM, glTF, GLB or FBX model into a `.ftmodel` (`build.sh` builds it into `avatar/build/`) |
 | `ftmodel.py` | The same file read in Python, for the tests and the Settings page |
 | `hand_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove |
-| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `test_appearance.py` (the page's backend) |
+| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views), both in `just test-c`, `test_appearance.py` (the page's backend) |
 
 ## The model file
 
@@ -38,7 +41,7 @@ It reads a VRM (0.x or 1.0), glTF or GLB with cgltf, or an FBX with ufbx, in the
 
 **Finding the body's bones** (`import/bodybones.cpp`). A VRM's humanoid names them. Otherwise they are found by name and by where they hang: the hips, the head under them, the spine as the bones between the two, an arm as the bones above each hand, a leg as the bones above each foot. The fingers are the ones the hand was found with. A body needs hips, a spine, a head, and both arms and legs down to the hands and feet. One that lacks any of them is not imported as a body, and the bones that are missing are named.
 
-**Cutting the body** (`import/bodypart.cpp`). Every mesh the skeleton moves is kept. A bone that isn't a humanoid's (hair, a skirt, a twist bone) gives its weight to the humanoid bone it hangs from, so hair and cloth move with the head and the hips and stay rigid. The body is turned so that its right is +x, moved so that its hips are over the origin, and stood on the floor: the lowest point of what the feet move, so a stand or a long dress doesn't lift it. A body with more than 20,000 triangles is reduced to that with meshoptimizer. The reduction keeps the seams between materials and between places in a picture, and leaves alone every vertex a face shape moves.
+**Cutting the body** (`import/bodypart.cpp`). Every mesh the skeleton moves is kept. A bone that isn't a humanoid's (hair, a skirt, a twist bone) gives its weight to the humanoid bone it hangs from, so hair and cloth move with the head and the hips and stay rigid. VRM 1.0's constraints are read for the one case that matters to how a body looks: a helper bone that hangs beside a limb and aims along it (VRoid's sleeves and shorts hang from these) belongs to the limb's bone, when it sits where that bone does. A bone that copies a turn from somewhere else (a robot arm on a backpack that mirrors the wearer's) can't be a bone of the body, whose bones each turn about their own place, so it stays rigid on what it hangs from. The body is turned so that its right is +x, moved so that its hips are over the origin, and stood on the floor: the lowest point of what the feet move, so a stand or a long dress doesn't lift it. A body with more than 20,000 triangles is reduced to that with meshoptimizer. The reduction keeps the seams between materials and between places in a picture, and leaves alone every vertex a face shape moves.
 
 **Its look** (`import/bodylook.cpp`, `gltflook.cpp`, `fbxlook.cpp`). Of a material, the importer takes the base colour, its picture, how it is see-through, whether it has two sides and whether it is unlit; a VRM's MToon materials are marked as cartoon shaded. Materials that come out the same become one, and the parts are ordered so that what is see-through is drawn last. PNG and JPEG pictures are decoded with stb_image, made no larger than 2048 pixels a side, and then the largest are halved until all of them fit in 16 MB. A picture that can't be read leaves its material its colour, and the import says how many couldn't. An FBX says less: its colour or its picture, and a picture with see-through pixels makes its material cut out along them. A body with more than 32 materials or 24 pictures is not imported as a body.
 
@@ -47,6 +50,30 @@ It reads a VRM (0.x or 1.0), glTF or GLB with cgltf, or an FBX with ufbx, in the
 **Licences.** A VRM says whether it may be redistributed (0.x `licenseName`, 1.0 `allowRedistribution`), and the importer writes that into the file; `--may-share` can't override it. A glTF or FBX can't say, so it is marked as not to be sent unless `--may-share` is given. Nothing is sent to anyone yet. When shared rooms send avatars, a file marked that way stays on your Frame and the others see the stock avatar; Settings imports without the mark and will ask the first time a model would be sent.
 
 **Untrusted files.** The file you import is a download. The readers cap the file's size, the nodes, vertices, triangles, materials and pictures, and check every index and number. The only other files they open are ones in the model's own folder: a glTF's buffer, and a picture the model names. A name with a folder in it has the folder dropped (an FBX holds the path on the machine that wrote it), and a glTF's picture named with a folder, `..`, a scheme or an escape is not opened. The pictures read are capped too: 64 of them, each halved to 2048 pixels a side as it is read, and to 512 once the ones read take 96 MB. `test_import.py` and `test_import_body.py` feed it truncated and randomly damaged files and glTFs whose numbers lie. Before bodies were read, the same ran under the sanitizers on 9,000 damaged files and 6,000 glTFs with changed structure; with bodies, on 2,400 damaged files and 2,400 glTFs with changed numbers (2026-11-10). Nothing was found.
+
+## Posing a body
+
+A headset knows where its wearer's head is and, while they are tracked, the hands. `pose/bodypose.cpp` makes up the rest (the design decision is upper-body IK, [docs/together.md](../docs/together.md)):
+
+- **The head** is where the wearer's eyes put it. The body is scaled so that its eyes stand as high as the wearer's do (`Stature`: the highest the head has stayed, and never less than a short adult's, so someone who has only sat gets a body that sits).
+- **The trunk** hangs from the head. It turns after the head once the head has turned 15 degrees from it, never lags more than 75, and takes about a third of a second to follow. When the head comes down while looking down, the spine leans; when it comes down level, the knees bend.
+- **An arm** reaches a tracked wrist with two bones, the elbow down and out (or where the tracker says it is). The forearm takes half of the hand's twist. An arm whose hand isn't tracked hangs, and it moves between the two over about a tenth of a second.
+- **The legs** stand under the hips. The lower the hips, the further forward the feet, so a seated wearer's body sits.
+- **The fingers** take the tracked hand's turns (`view/handfit.cpp` fits the tracker's hand to the body's own finger bones).
+
+The same solver poses your own body and the people you share a room with. It refuses input that isn't numbers and never produces any: `bodypose-test.cpp` runs it on thousands of random inputs under the sanitizers.
+
+## Drawing a body
+
+```
+screens/build/ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...
+screens/build/ft-avatars --thumb OUT.png MODEL [--size PX]
+screens/build/ft-avatars --poses
+```
+
+`ft-avatars` draws a model file's body on the GPU (`view/bodygpu.cpp`): the mesh is skinned in the vertex shader by the pose's 55 matrices, the face shapes move the vertices before that (`view/bodymesh.cpp`), and each part is drawn with its material's look: lit, in two tones for a cartoon material, or in its own colours; solid, cut out or see-through.
+
+For now it makes pictures with no headset on (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. The mirror panel and the people in a shared room come next.
 
 ## Other people's code
 

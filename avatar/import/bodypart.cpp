@@ -38,18 +38,27 @@ struct Raw {
     std::string moves;   // the shapes that move it: an id, then three i16, each
 };
 
-// Each node's role: its own, or the one it hangs from; the hips' for a node above them.
+// Each node's role: its own, or the one it hangs from; the hips' for a node above them. A node
+// that turns with a bone it doesn't hang from (Node::follows) has that bone's role when it sits
+// where the bone does: a body's bone turns about its own place, so a node that copies a turn
+// from somewhere else (a robot arm on a backpack that moves as the wearer's does) stays with
+// what it hangs from.
 std::vector<int> RoleOfNodes(const Scene &s, const BodyBones &b) {
+    constexpr double kSamePlace = 0.01;   // metres
     std::vector<int> own(s.nodes.size(), -1), of(s.nodes.size(), kHips);
     for (int r = 0; r < kRoles; ++r)
         if (b.node[r] >= 0) own[size_t(b.node[r])] = r;
     for (size_t i = 0; i < s.nodes.size(); ++i) {
         int steps = 0;
-        for (int n = int(i); n >= 0 && steps <= int(s.nodes.size()); n = s.nodes[size_t(n)].parent, ++steps)
-            if (own[size_t(n)] >= 0) {
-                of[i] = own[size_t(n)];
+        for (int n = int(i); n >= 0 && steps <= int(s.nodes.size()); n = s.nodes[size_t(n)].parent, ++steps) {
+            const int f = s.nodes[size_t(n)].follows;
+            const bool led = own[size_t(n)] < 0 && f >= 0 && f < int(s.nodes.size()) && own[size_t(f)] >= 0 &&
+                             (s.nodes[size_t(n)].at - s.nodes[size_t(f)].at).norm() < kSamePlace;
+            if (own[size_t(n)] >= 0 || led) {
+                of[i] = led ? own[size_t(f)] : own[size_t(n)];
                 break;
             }
+        }
     }
     return of;
 }

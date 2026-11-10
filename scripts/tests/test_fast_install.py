@@ -83,6 +83,8 @@ class Paths(unittest.TestCase):
         self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown'})   # its include line
         self.assertEqual(rebuilt('avatar/modelfile.cpp'), {'avatar', 'screens'})   # built into ft-handview too
         self.assertEqual(rebuilt('avatar/import/main.cpp'), {'avatar'})
+        for path in ('avatar/bodyfile.cpp', 'avatar/pose/bodypose.cpp', 'avatar/view/bodygpu.cpp'):   # ft-avatars is built with ft-handview
+            self.assertEqual(rebuilt(path), {'avatar', 'screens'})
         self.assertEqual(rebuilt('avatar/ftmodel.py'), set())
         self.assertEqual(rebuilt('avatar/tests/test_import.py'), set())
         self.assertEqual(rebuilt('scripts/modeldeps.sh'), {'avatar'})

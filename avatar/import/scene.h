@@ -12,27 +12,19 @@
 #include <vector>
 
 #include "../modelfile.h"
+#include "../vec.h"
 
 namespace importer {
 
-struct Vec {
-    double x = 0, y = 0, z = 0;
-    Vec operator+(const Vec &o) const { return {x + o.x, y + o.y, z + o.z}; }
-    Vec operator-(const Vec &o) const { return {x - o.x, y - o.y, z - o.z}; }
-    Vec operator*(double k) const { return {x * k, y * k, z * k}; }
-    double dot(const Vec &o) const { return x * o.x + y * o.y + z * o.z; }
-    double norm() const { return std::sqrt(dot(*this)); }
-    Vec unit() const {
-        const double n = norm();
-        return n > 1e-12 ? *this * (1 / n) : Vec{};
-    }
-    bool finite() const { return std::isfinite(x) && std::isfinite(y) && std::isfinite(z); }
-};
+using avatar::Vec;
 
 struct Node {
     std::string name;
     int parent = -1;   // another node (in no promised order: a walk up is capped), or -1
     Vec at;            // in the rest pose
+    // A bone it turns with though it doesn't hang from it (a VRM's constraint: a sleeve's bone
+    // that aims along the arm from beside it), or -1.
+    int follows = -1;
 };
 
 constexpr int kInfluences = 8;   // a vertex's joints, at most: the heaviest are kept

@@ -123,6 +123,23 @@ void ReadToon(const Json::Value &root, bool v0, const cgltf_data *d, Scene &out)
     }
 }
 
+// VRM 1.0's node constraints, as the bone a node turns with (Node::follows). A node that aims
+// at a bone turns as the bone before it does (an arm's helper aims at the elbow); one that
+// copies most of a bone's turn turns as that bone. One that only rolls with a bone stays with
+// what it hangs from.
+void ReadConstraints(const cgltf_data *d, Scene &out) {
+    for (cgltf_size i = 0; i < d->nodes_count && i < out.nodes.size(); ++i)
+        for (cgltf_size k = 0; k < d->nodes[i].extensions_count; ++k) {
+            const cgltf_extension &e = d->nodes[i].extensions[k];
+            Json::Value root;
+            if (std::strcmp(e.name, "VRMC_node_constraint") || !Parse(e.data, root) || !root["constraint"].isObject()) continue;
+            const Json::Value &aim = root["constraint"]["aim"], &copy = root["constraint"]["rotation"];
+            const auto source = [&](const Json::Value &c) { return c.isObject() && c["source"].isUInt() && c["source"].asUInt() < out.nodes.size() ? int(c["source"].asUInt()) : -1; };
+            if (source(aim) >= 0) out.nodes[i].follows = out.nodes[size_t(source(aim))].parent;
+            else if (source(copy) >= 0 && (!copy["weight"].isNumeric() || copy["weight"].asDouble() >= 0.5)) out.nodes[i].follows = source(copy);
+        }
+}
+
 }  // namespace
 
 bool ReadVrm(const cgltf_data *d, Scene &out, std::vector<MorphBind> &binds) {
@@ -135,6 +152,7 @@ bool ReadVrm(const cgltf_data *d, Scene &out, std::vector<MorphBind> &binds) {
         ReadMeta(root["meta"], v0, out);
         ReadExpressions(root, v0, d, binds);
         ReadToon(root, v0, d, out);
+        if (v1) ReadConstraints(d, out);
         return true;
     }
     return false;

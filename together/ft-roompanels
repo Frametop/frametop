@@ -1,0 +1,86 @@
+#!/usr/bin/python3
+"""ft-roompanels: the panels of a Together room on this Frame (docs/together.md, "What a guest
+sees"). While ft-together says this Frame is in a room, it keeps the others' shared panels
+standing here as panels of ft-screens' (each fed by an ft-peerpanel), and this Frame's shared
+screens in the room where they stand here (each read by an ft-sharepanel). The rules are in
+roompanels/keeper.py; this is the loop and the socket around them.
+
+Questions, one datagram each on @ft_roompanels:
+
+  share N      screen N of this desktop goes into the room -> "ok K" (your panel K)
+  unshare N    and is taken back
+  state        -> "ok " and {"room", "floor", "shares", "panels"} as JSON
+
+  --socket NAME     its own socket's name (ft_roompanels)
+  --together NAME   ft-together's (ft_together)
+  --screens NAME    ft-screens' (ft_screens)
+"""
+
+import select
+import signal
+import socket
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "conf"))
+sys.path.insert(0, str(HERE))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+from roompanels.keeper import Keeper  # noqa: E402
+
+IN_ROOM, IDLE = 0.25, 1.0   # seconds between looks
+
+
+def answer(keeper, text):
+    words = text.split()
+    if words == ["state"]:
+        return "ok " + keeper.state()
+    if len(words) == 2 and words[0] in ("share", "unshare") and words[1].isdigit() and len(words[1]) < 4:
+        return (keeper.share if words[0] == "share" else keeper.unshare)(int(words[1]))
+    return "error share N | unshare N | state"
+
+
+def main():
+    names = {"--socket": "ft_roompanels", "--together": "ft_together", "--screens": "ft_screens"}
+    words = sys.argv[1:]
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
+    if words:
+        sys.exit(__doc__.strip())
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    try:
+        sock.bind(ftipc.address(names["--socket"]))
+    except OSError:
+        sys.exit("ft-roompanels is running already")
+    sock.setblocking(False)
+    together, screens = ftipc.Client(timeout=0.5), ftipc.Client(timeout=0.5)
+    keeper = Keeper(lambda text: together.ask(names["--together"], text), lambda text: screens.ask(names["--screens"], text), time.monotonic)
+
+    def ended(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, ended)
+    signal.signal(signal.SIGINT, ended)
+    was = None
+    try:
+        while True:
+            keeper.tick()
+            if keeper.in_room != was:
+                was = keeper.in_room
+                print("in a room" if was else "in no room", flush=True)
+            until = time.monotonic() + (IN_ROOM if keeper.in_room else IDLE)
+            while (left := until - time.monotonic()) > 0:
+                if not select.select([sock], [], [], left)[0]:
+                    break
+                try:
+                    data, who = sock.recvfrom(256)
+                    sock.sendto(answer(keeper, data.decode("utf-8", "replace")).encode(), who)
+                except OSError:
+                    pass   # an asker that went before its answer
+    finally:
+        keeper.end()
+
+
+if __name__ == "__main__":
+    main()

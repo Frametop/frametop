@@ -8,7 +8,9 @@
 # because it wears the hands ft-handview draws (handskin.cpp, handcut.cpp) and shows its mirror
 # the way ft-handview shows them (vroutput.cpp).
 # compositor.c is the wlroots side (C; wlroots headers aren't C++), vr.cpp the OpenVR side,
-# remote.c the remote screens (their streams are ft-stream's, stream/build.sh).
+# remote.c the remote screens (their streams are ft-stream's, stream/build.sh), share.c the
+# screens shared with a Together room (their encoders are ft-sharepanel's, together/build.sh),
+# child.c how both run their programs.
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
 # shipped with SteamVR on the Frame predates, so the build uses the public header from
 # Valve's openvr repo (pinned in scripts/openvr.sh).
@@ -29,6 +31,8 @@ stb_fetch build/include stb_truetype.h stb_image_write.h
 cc="gcc -std=c11 -O2 -Wall -Wno-unused-parameter $(pkg-config --cflags wlroots-0.20 wayland-server xkbcommon libdrm pixman-1)"
 $cc -c -o build/compositor.o compositor.c
 $cc -c -o build/remote.o remote.c
+$cc -c -o build/share.o share.c
+$cc -c -o build/child.o child.c
 cxx="g++ -std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags egl glesv2 gbm libdrm)"
 $cxx -c -o build/vr.o vr.cpp
 $cxx -c -o build/label.o label.cpp
@@ -66,7 +70,7 @@ for f in micear ownface; do   # the face of the avatar you wear: its mouth from 
   avatars="$avatars build/avatars-$f.o"
 done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1) $vrlibs
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs

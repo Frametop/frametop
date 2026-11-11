@@ -81,6 +81,7 @@
 #include "screen-scale.h"
 #include "controller-click.h"
 #include "remote.h"
+#include "share.h"
 #include "../conf/ft_pinlock.h"
 #include "logfile.h"
 #include "relay-buttons.h"
@@ -247,6 +248,7 @@ static void spot_dismiss(struct server *s, const char *why) {
 static void buffer_destroyed(struct wl_listener *l, void *data) {
     struct tracked_buffer *t = wl_container_of(l, t, destroy);
     ft_vr_forget(t->buffer);
+    ft_share_forget(t->buffer);
     wl_list_remove(&t->destroy.link);
     wl_list_remove(&t->link);
     free(t);
@@ -448,19 +450,36 @@ static void screen_commit(struct wl_listener *l, void *data) {
     present(sc, buffer);
 }
 
+// A buffer's DMA-BUF, as vr.h and share.h take it (its fds stay the buffer's).
+static bool describe(void *buffer, struct ft_dmabuf *b) {
+    struct wlr_dmabuf_attributes a;
+    if (!wlr_buffer_get_dmabuf(buffer, &a)) return false;
+    *b = (struct ft_dmabuf){.width = a.width, .height = a.height, .format = a.format, .modifier = a.modifier,
+                            .n_planes = a.n_planes};
+    for (int i = 0; i < a.n_planes && i < 4; ++i) {
+        b->offset[i] = a.offset[i];
+        b->stride[i] = a.stride[i];
+        b->fd[i] = a.fd[i];
+    }
+    return true;
+}
+
+// The share tap's (share.h) look at the buffers: what is on a desktop screen's panel. Not a
+// spare output's: a floating window's picture is a part of its buffer.
+static void *shared_buffer(void *data, int index) {
+    const struct server *s = data;
+    return index >= 0 && index < s->n_config && s->screens[index] ? s->screens[index]->held : NULL;
+}
+static void keep_buffer(void *buffer) { wlr_buffer_lock(buffer); }
+static void release_buffer(void *buffer) { wlr_buffer_unlock(buffer); }
+static const struct ft_share_buffers share_buffers = {shared_buffer, describe, keep_buffer, release_buffer};
+
 // Put a buffer (locked once, for us to let go of) on the screen's panel.
 static void present(struct screen *sc, struct wlr_buffer *buffer) {
-    struct wlr_dmabuf_attributes a;
-    if (!wlr_buffer_get_dmabuf(buffer, &a)) {
+    struct ft_dmabuf b;
+    if (!describe(buffer, &b)) {
         wlr_buffer_unlock(buffer);
         return;
-    }
-    struct ft_dmabuf b = {.width = a.width, .height = a.height, .format = a.format, .modifier = a.modifier,
-                          .n_planes = a.n_planes};
-    for (int i = 0; i < a.n_planes && i < 4; ++i) {
-        b.offset[i] = a.offset[i];
-        b.stride[i] = a.stride[i];
-        b.fd[i] = a.fd[i];
     }
     track_buffer(sc->server, buffer);
     if (!ft_vr_screen_present(sc->index, buffer, &b)) {
@@ -474,6 +493,7 @@ static void present(struct screen *sc, struct wlr_buffer *buffer) {
     if (sc->held) wlr_buffer_unlock(sc->held);
     sc->held = buffer;
     wlr_buffer_unlock(buffer);
+    ft_share_presented(sc->index);
 }
 
 static void keyboard_enter(struct server *s, struct wlr_surface *surface);
@@ -756,10 +776,12 @@ static void keys_update(struct server *s) {
 // full where you look (ft_vr_screen_attention) and for a video, lower for the rest of what
 // you see, and about once a second for what you don't (hidden, behind you, paused for a VR
 // game). A screen nothing changes on costs nothing at any rate: KWin commits only when
-// something on it moved. A remote viewer ("watch") sees every screen at full rate.
+// something on it moved. A remote viewer ("watch") sees every screen at full rate, and a
+// screen someone in a Together room watches (share.h) is drawn as one in view at the least.
 static uint32_t frame_interval(struct server *s, struct screen *sc, uint32_t t) {
     if ((int32_t)(s->watch_until - t) > 0) return 0;
     enum ft_attention a = ft_vr_screen_attention(sc->index);
+    if (a == FT_HIDDEN && ft_share_wanted(sc->index)) a = FT_IN_VIEW;
     if (a == FT_IN_VIEW && (int32_t)(sc->video_until - t) > 0) a = FT_FOCUSED;
     if (a != FT_FOCUSED && t - s->typed_ms < 1500 &&
         s->seat->keyboard_state.focused_surface == sc->toplevel->base->surface)
@@ -837,6 +859,7 @@ static int tick(int fd, uint32_t mask, void *data) {
     }
     ft_vr_poll(handle_vr_event, s);
     ft_remote_tick();
+    ft_share_tick();
     if (s->relay_buttons.held && !relay_can_press(s))
         release_relay_buttons(s, ft_vr_paused() ? "paused" : "its screen hid");
     if (++s->ticks % 9 == 0) keys_update(s);
@@ -870,7 +893,7 @@ static int child_exited(int sig, void *data) {
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
-        if (ft_remote_child(pid, status)) {
+        if (ft_remote_child(pid, status) || ft_share_child(pid, status)) {
             continue;
         } else if (pid == s->child) {
             wlr_log(WLR_INFO, "session exited");
@@ -1371,7 +1394,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                      "%s fullkb=%s typing=%s focused_screen=%d pointer_screen=%d", vr,
                      !fullkb(s) ? "off" : s->fullkb_open ? (s->fullkb_auto ? "open-auto" : "open") : "closed",
                      typing_target(s), focused_screen(s) + 1, s->pointer_focus ? s->pointer_focus->index + 1 : 0);
-        } else if (!ft_remote_command(buf, reply, sizeof reply)) {
+        } else if (!ft_remote_command(buf, reply, sizeof reply) && !ft_share_command(buf, reply, sizeof reply)) {
             ft_vr_command(buf, reply, sizeof reply);
         }
         if (len > offsetof(struct sockaddr_un, sun_path))
@@ -1539,6 +1562,7 @@ int main(int argc, char **argv) {
     s.display = wl_display_create();
     s.loop = wl_display_get_event_loop(s.display);
     ft_remote_init(s.loop, s.vr);
+    ft_share_init(s.loop, &share_buffers, &s);
     wl_list_init(&s.buffers);
     struct wlr_compositor *comp = wlr_compositor_create(s.display, 6, NULL);
     s.new_surface.notify = surface_watch_new;
@@ -1629,6 +1653,7 @@ int main(int argc, char **argv) {
     // remote panel's texture that was already gone (SIGBUS, 2026-10-07).
     ft_vr_shutdown();
     ft_remote_shutdown();
+    ft_share_shutdown();
     if (s.child > 0) kill(s.child, SIGTERM);
     wl_display_destroy_clients(s.display);
     // wlroots asserts that nothing still listens to its globals when they go.

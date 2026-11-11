@@ -25,7 +25,7 @@ test-python:
         'layout/countdown/tests/test_*.py' 'models/test/*.py' 'commands/test/*.py' 'input-settings/test/*.py' \
         'input/test/*.py' 'hands/tests/test_*.py' 'hands/rec/tests/*.py' 'recorder/tests/*.py' 'gaze/test/*.py' \
         'gaze/rec/tests/*.py' 'gaze/bench/tests/test_*.py' 'pack/test/*.py' 'voice/test/*.py' 'frunner/test/*.py' \
-        'tour/test/*.py' 'avatar/tests/test_*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'steam/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
+        'tour/test/*.py' 'avatar/tests/test_*.py' 'together/tests/test_*.py' 'menu/test/*.py' 'settings/test/*.py' 'remote/test/*.py' 'steam/test/*.py' 'float/test/*.py' 'display-settings/tests/*.py' 'pointer/tests/*.py' \
         'scripts/tests/test_app_imports.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'scripts/tests/test_install_keyboard.py' 'docs/tests/*.py' || status=1
@@ -71,9 +71,14 @@ test-c:
       $(pkg-config --cflags --libs wlroots-0.20 xkbcommon wayland-server) -o build/tests/held-keys-wlr-test
     run screens/tests/held-keys-wlr-test.c build/tests/held-keys-wlr-test
     gcc -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -DFT_REMOTE_QUIT_MS=600 -Iscreens \
-      screens/tests/remote-test.c screens/remote.c $(pkg-config --cflags --libs wlroots-0.20 wayland-server) \
+      screens/tests/remote-test.c screens/remote.c screens/child.c $(pkg-config --cflags --libs wlroots-0.20 wayland-server) \
       -o build/tests/remote-test
     run screens/tests/remote-test.c build/tests/remote-test
+    # the share tap (a screen's pictures to an ft-sharepanel, for a Together room), the test being that program too
+    gcc -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -DFT_SHARE_STUCK_MS=500 -Iscreens \
+      screens/tests/share-test.c screens/share.c screens/child.c $(pkg-config --cflags --libs wlroots-0.20 wayland-server) \
+      -o build/tests/share-test
+    run screens/tests/share-test.c build/tests/share-test
     g++ -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter -Werror screens/tests/handinput_test.cpp \
       screens/handcut.cpp screens/handinput.cpp screens/palmmenu.cpp screens/grabthat.cpp screens/steampanels.cpp -o build/tests/handinput-test
     run screens/tests/handinput_test.cpp build/tests/handinput-test
@@ -144,8 +149,11 @@ test-c:
           together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
           together/flow/video.cpp together/local/watchers.cpp together/local/media.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
+        # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
+        # video through the hardware encoder and decoder, is run by hand: together/README.md.)
+        run together/tests/roompanels-test.py python3 together/tests/roompanels-test.py build/tests/ft-together
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

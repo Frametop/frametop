@@ -5,6 +5,8 @@
 // "blur" it's told (the shared clipboard's moments). With the app window:0x1 the host has no
 // such window, with window:0x2 it's full: either way it says why and ends. window:0x3 goes live
 // and ends 100 ms later (its window closed on the host). It connects to nothing.
+// And it is the ft-peerpanel remote.c starts for a panel of a Together room ($FT_PEERPANEL):
+// the same, with "room" (or the room's socket it was given) for its host.
 // Built by `just test-c` (justfile): remote.c with -DFT_REMOTE_QUIT_MS=600, so the SIGKILL comes soon.
 #define _GNU_SOURCE
 #include <limits.h>
@@ -47,8 +49,7 @@ static void note(const char *what, int pid, const char *host, const char *app) {
 static volatile sig_atomic_t g_term;
 static void on_term(int s) { (void)s, g_term = 1; }
 
-static int fake_stream(char **argv) {
-    const char *host = argv[2], *app = argv[8];
+static int fake_stream(const char *host, const char *app) {
     note("start", getpid(), host, app);
     if (!strncmp(app, "window:", 7)) {  // as ft-stream does when the host's open fails
         const char *why = !strcmp(app, "window:0x1") ? "state lost 404 no window 0x1" : "state lost 503 at most 4 windows";
@@ -290,6 +291,55 @@ static bool window_closed(void) {
     return true;
 }
 
+// A panel of a Together room: ft-peerpanel is told its panel, and the room's socket when that
+// isn't the usual one. It waits for an old program of its own screen, and for nothing else:
+// not another room panel's, not a host's queue.
+static bool room_panels(void) {
+    char reply[256] = "";
+    cmd("remote 116 peer 9 1280x720 1.5 Screen 2");
+    start(101, "192.0.2.7", "hang", 60);
+    run(300);
+    EXPECT(ft_remote_is(115) && ft_remote_command("remotes", reply, sizeof reply) &&
+           !strcmp(reply, "ok 2 116:peer-9:live:1280x720 101:frame:live:1920x1080"));
+    cmd("remote 116 peer 9 1280x720 1.5 Screen 2");   // the same again: nothing starts over
+    cmd("remote 101 stop");                           // it hangs on its way out, for FT_REMOTE_QUIT_MS
+    cmd("remote 116 stop");
+    setenv("FT_TOGETHER_SOCKET", "ft_together_test", 1);
+    cmd("remote 115 peer 10 1920x804 2.0");
+    cmd("remote 116 peer 9 1920x1080 1.5 Screen 2");
+    run(1200);
+    read_log();
+    EXPECT(g_nprocs == 4);
+    const struct proc *first = NULL, *other = NULL, *again = NULL;
+    for (int i = 0; i < g_nprocs; ++i) {
+        const struct proc *q = &g_procs[i];
+        if (!strcmp(q->app, "peer:9") && !strcmp(q->host, "room")) first = q;
+        if (!strcmp(q->app, "peer:10") && !strcmp(q->host, "ft_together_test")) other = q;
+        if (!strcmp(q->app, "peer:9") && !strcmp(q->host, "ft_together_test")) again = q;
+    }
+    EXPECT(first && other && again);
+    EXPECT(first->term && first->gone && !first->killed);
+    EXPECT(other->start < first->gone);    // another panel doesn't wait for it
+    EXPECT(again->start >= first->gone);   // its own screen's next program does
+    EXPECT(ft_remote_command("remotes", reply, sizeof reply) && !strcmp(reply, "ok 2 115:peer-10:live:1920x804 116:peer-9:live:1920x1080"));
+    return true;
+}
+
+// What isn't a room's panel is refused, and an app can't be said to be one.
+static bool room_panel_refused(void) {
+    const char *bad[] = {"remote 116 peer x 1280x720 1.5", "remote 116 peer 9 1280x720", "remote 116 peer -1 1280x720 1.5",
+                         "remote 116 peer 256 1280x720 1.5", "remote 116 peer 9 32x720 1.5", "remote 116 peer 9 1280x720 0.01",
+                         "remote 117 peer 9 1280x720 1.5", "remote 116 start frame 192.0.2.7 peer:9 1920x1080 60 0 1.0"};
+    for (size_t i = 0; i < sizeof bad / sizeof *bad; ++i) {
+        char reply[256] = "";
+        EXPECT(ft_remote_command(bad[i], reply, sizeof reply) && !strncmp(reply, "error", 5));
+    }
+    run(200);
+    read_log();
+    EXPECT(g_nprocs == 0 && !ft_remote_is(115));
+    return true;
+}
+
 // A window panel's stream that ended: tried again after 0.2 s, not 2 s (the host's 404 then
 // takes the panel). A display's waits the usual 2 s.
 static bool window_retry(void) {
@@ -303,7 +353,13 @@ static bool window_retry(void) {
 int main(int argc, char **argv) {
     if (argc > 8 && !strcmp(argv[1], "stream")) {
         snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
-        return fake_stream(argv);
+        return fake_stream(argv[2], argv[8]);
+    }
+    if (argc > 4 && !strcmp(argv[1], "--panel") && !strcmp(argv[3], "--fd") && !strcmp(argv[4], "3")) {
+        char app[64];
+        snprintf(app, sizeof app, "peer:%s", argv[2]);
+        snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
+        return fake_stream(argc == 7 && !strcmp(argv[5], "--socket") ? argv[6] : argc == 5 ? "room" : "odd", app);
     }
     char dir[] = "/tmp/remote-test-XXXXXX", self[PATH_MAX];
     if (!mkdtemp(dir)) return perror("mkdtemp"), 2;
@@ -311,12 +367,15 @@ int main(int argc, char **argv) {
     if (n <= 0) return perror("readlink"), 2;
     self[n] = 0;
     setenv("FT_STREAM", self, 1);
+    setenv("FT_PEERPANEL", self, 1);
+    unsetenv("FT_TOGETHER_SOCKET");
     setenv("XDG_RUNTIME_DIR", dir, 1);  // ft-stream's logs
     snprintf(g_log, sizeof g_log, "%s/events.log", dir);
     const struct { const char *name; scenario s; } all[] = {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
-        {"window closed", window_closed}, {"window retry", window_retry},
+        {"window closed", window_closed}, {"window retry", window_retry}, {"room panels", room_panels},
+        {"room panel refused", room_panel_refused},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

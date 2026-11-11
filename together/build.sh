@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Build Frametop Together's programs (docs/together.md, together/README.md) in the dev container
 # on the Frame:
-#   together/build/ft-together  this Frame's end of a session: the links and the session's rules
+#   together/build/ft-together    this Frame's end of a session: the links and the session's rules
+#   together/build/ft-sharepanel  encodes one screen this Frame shares, for ft-together to send
+#                                 (ft-screens runs it: screens/share.c)
+#   together/build/ft-peerpanel   decodes one panel someone else shares, for ft-screens to show
+#                                 (ft-screens runs it: screens/remote.c); its decoder is the
+#                                 remote displays' (stream/iris.h), whose header wants OpenVR's
+# ft-roompanels, which keeps the two in step with the room, is a script (together/ft-roompanels).
 # and with --spikes, the programs that measured what the design stands on:
 #   together/build/ft-enctest   spikes T1, T2 and T4 (spike/ft-enctest.cpp on media/irisenc.cpp):
 #                               the hardware encoder under several sessions
@@ -39,11 +45,17 @@ quic="-I$src/src/inc build/libmsquic.so.2 -Wl,-rpath,\$ORIGIN"
 g++ $flags -o build/ft-together ft-together.cpp net/quiclinks.cpp net/quicframes.cpp net/lookup.cpp net/tailnet.cpp \
   net/selfcert.cpp session/session.cpp session/wearer.cpp session/commands.cpp proto/messages.cpp flow/video.cpp \
   local/watchers.cpp local/media.cpp $quic $(pkg-config --libs openssl) -lpthread
-strip --strip-unneeded build/ft-together
-[ $spikes = 1 ] || { echo "built build/ft-together"; exit 0; }
+gpu="gbm libdrm egl glesv2"
+g++ $flags $(pkg-config --cflags $gpu) -o build/ft-sharepanel ft-sharepanel.cpp media/irisenc.cpp media/pictures.cpp \
+  media/blit.cpp media/panelenc.cpp media/screenfeed.cpp $(pkg-config --libs $gpu) -lpthread
+. ../scripts/openvr.sh
+g++ $flags -Wno-unused-function -Wno-unused-parameter $OPENVR_CFLAGS $(pkg-config --cflags $gpu) -o build/ft-peerpanel \
+  ft-peerpanel.cpp $(pkg-config --libs $gpu) $OPENVR_LIBS -lpthread
+strip --strip-unneeded build/ft-together build/ft-sharepanel build/ft-peerpanel
+[ $spikes = 1 ] || { echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel"; exit 0; }
 g++ $flags $(pkg-config --cflags gbm) -o build/ft-enctest spike/ft-enctest.cpp media/irisenc.cpp \
   $(pkg-config --libs gbm) -lpthread
 g++ $flags -o build/ft-quictest spike/ft-quictest.cpp net/selfcert.cpp $quic \
   $(pkg-config --libs openssl) -lpthread
 strip --strip-unneeded build/ft-enctest build/ft-quictest
-echo "built build/ft-together build/ft-enctest build/ft-quictest"'
+echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-enctest build/ft-quictest"'

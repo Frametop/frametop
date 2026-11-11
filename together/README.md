@@ -2,7 +2,7 @@
 
 Shared rooms: up to four people in one owner's room, each on their own Frame, over Tailscale. The design, its decisions and the milestones are in [docs/together.md](../docs/together.md). This file says what is in this folder and what goes over a link.
 
-Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, `ft-together`, which opens a room, lets people in and keeps the room's people linked, and poses: each person's head and hands go to the others, and `ft-avatars --room` ([avatar/README.md](../avatar/README.md)) draws them as abstract avatars. Shared panels are being built: the room's list of them, the video's path through `ft-together` from the program that encodes a panel to the programs that show it, and its rules are done; the programs that encode and decode are next. Voice is not built yet.
+Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, `ft-together`, which opens a room, lets people in and keeps the room's people linked, and poses: each person's head and hands go to the others, and `ft-avatars --room` ([avatar/README.md](../avatar/README.md)) draws them as abstract avatars. Shared panels: the room's list of them, the video's path through `ft-together` from the program that encodes a panel to the programs that show it, and its rules are done and tested. The programs at each end (`ft-sharepanel`, `ft-peerpanel`, ft-screens' share tap and peer screens, `ft-roompanels`) are written and tested without video; the video through the hardware encoder and decoder has not run yet ("A shared panel on a Frame" below says why). Voice is not built yet.
 
 ## What is where
 
@@ -16,11 +16,15 @@ Built so far: the spikes (M0), and from M3 the session's wire format and rules, 
 | `net/` | The real network: the links on msquic (`quiclinks.h`; `quiclinks.cpp` has the connections, the control stream and the datagrams, `quicframes.cpp` the streams that carry a picture each), with the self-signed certificate QUIC wants (`selfcert.h`), which address a name stands for (`lookup.h`), and who is at an address by tailscaled's word (`tailnet.h`, with the small JSON reader for its answers, `json.h`) | `session/`, msquic, OpenSSL |
 | `ft-together.cpp` | The program: one loop over the links and the local sockets | `session/`, `flow/`, `net/`, `local/` |
 | `ft-room` | Asks a running ft-together one question from a shell: `together/ft-room state`, `together/ft-room open`, `together/ft-room --socket NAME invite` | `conf/ftipc.py` |
-| `media/` | The iris hardware encoder (`irisenc.h`) | V4L2 |
+| `media/` | The iris hardware encoder (`irisenc.h`), and what `ft-sharepanel` is made of: the encoder's input buffers (`pictures.h`), the GPU pass that draws a screen's picture into one (`blit.h`), the encoder for one panel (`panelenc.h`), and where pictures come from (`feed.h`): a screen of ft-screens' (`screenfeed.h`) or a test picture (`patternfeed.h`, `testpattern.h`). `words.h` reads the lines the programs trade with ft-screens | V4L2, GBM, EGL |
+| `ft-sharepanel.cpp` | Encodes one screen this Frame shares | `media/`, `local/mediaclient.h` |
+| `ft-peerpanel.cpp` | Decodes one panel someone else shares, into a remote screen of ft-screens' | `stream/iris.h` (the remote displays' decoder), `local/mediaclient.h` |
+| `roompanels/` | ft-roompanels' rules: the sums between this Frame's floor and the room (`placing.py`) and what it keeps true (`keeper.py`) | Python's standard library |
+| `ft-roompanels` | The program around them: its loop and its socket | `roompanels/`, `conf/ftipc.py` |
 | `spike/` | The M0 spikes, `ft-enctest` and `ft-quictest` | `media/`, `net/` |
 | `tests/` | The tests below | |
 
-`together/build.sh` builds `build/ft-together` and msquic (pinned by commit) in the dev container, and with `--spikes` the spikes too.
+`together/build.sh` builds `build/ft-together`, `build/ft-sharepanel`, `build/ft-peerpanel` and msquic (pinned by commit) in the dev container, and with `--spikes` the spikes too.
 
 ## ft-together
 
@@ -140,6 +144,29 @@ A viewer takes a picture only from the link of the panel's owner, for a panel th
 
 The bitrate of a panel starts at 2 Mbit/s. Two pictures given up within a second bring it down to 70%, not below 300 kbit/s; five seconds of sending with none given up bring it up by 15%, to the owner's cap (3 Mbit/s until the cap can be picked).
 
+## A shared panel on a Frame
+
+Four programs make a shared panel, each with one job. None of them is started by Frametop yet (Settings will); until then they are run by hand.
+
+```
+ft-sharepanel --panel K --size WxH [--fps F] [--socket NAME] (--fd N | --pattern)
+ft-peerpanel  --panel ID [--socket NAME] (--fd N | --probe [--frames N] [--seconds S])
+ft-roompanels [--socket NAME] [--together NAME] [--screens NAME]
+```
+
+**The sharer's side.** ft-screens runs one `ft-sharepanel` per shared screen (`share <N> start <slot> <W>x<H> <fps>` on `@ft_screens`; `share <N> stop`; `shares` lists them). The screen's buffers go to it as DMA-BUFs, each described once, and then `frame <id>` whenever one holds a new picture; ft-screens keeps that buffer as it is until the program says `done`, sends one picture at a time and at most the stream's rate of them, and ends a program that keeps a picture for two seconds (`together/media/screenfeed.h` has the words). `ft-sharepanel` scales the picture to the stream's size on the GPU, encodes it, and hands it to ft-together's media socket. While nobody watches the panel it asks for no pictures, and after a few seconds closes its encoder. A screen someone watches is drawn at the rate of a screen in view even when its owner looks away. Only the desktop's own screens can be shared so far: a floating window's picture is a part of its buffer, and a remote display's is another program's.
+
+**The viewer's side.** A panel of someone else's is a remote screen of ft-screens' (`remote <N> peer <panel> <W>x<H> <metres> [label]`), whose program is `ft-peerpanel` in place of ft-stream. It takes the panel's pictures from ft-together, decodes them with the hardware decoder into a ring of three RGBA buffers as a remote display's are, and tells ft-together how much of the panel its viewer sees and when its decoder needs a keyframe. Pointer and key input on such a panel goes nowhere yet (M4).
+
+**ft-roompanels** keeps both in step with the room, four times a second while this Frame is in one:
+
+- The floor. Where this Frame's own floor lies in the room is ft-together's to remember (`floor`). If nobody has said, ft-roompanels lays it from where the head is (ft-screens' `head`) and your spot, with the same sums `ft-avatars --room` uses, so whichever asks first, the answer is the same. With no head pose for five seconds (the headset off) it lays the floor's middle on the spot.
+- The others' panels. Each gets a remote screen, counted down from the last one (116) so ft-layout's remote displays, which count up from 101, keep their numbers. It is put where the room has it when it is made and whenever the room moves it; between those it stays where its viewer leaves it. A panel that left the room, or whose video changed size, goes. A peer's name for a panel is cut down to plain characters before it goes into a command.
+- Your panels. `share N` on `@ft_roompanels` puts screen N of this desktop into the room (three at most), `unshare N` takes it back, `state` says what is shared and shown as JSON. The video is the screen made to fit 1920x1200, 30 pictures a second. Where the screen stands here is read from ft-screens and told to the room whenever it changes, so moving your screen moves it for everyone.
+- Leaving the room, or ft-roompanels ending, takes the room's panels away and stops every share. One that starts finds and clears what an earlier one left.
+
+What isn't there yet: a viewer can move their own copy of someone's panel until the room next moves it (who may move what is M4); the video's size is fixed when a screen is shared; with more than about eight remote displays the numbers would meet; Display Settings lists a peer's panel as a remote screen.
+
 ## The pose datagram
 
 One datagram per person, about 30 times a second, at most 215 bytes: a `u8` kind (1), a `u16` count that tells a newer one from an older, the eyes' place, the head's turn, the eye height when standing, a flag nibble per hand, five mouth shapes, then for each tracked hand the wrist, its turn, fifteen finger bone turns when its fingers are tracked, and the elbow if the sender knows it. Places are in the room's coordinates. These are the inputs of the body solver ([avatar/README.md](../avatar/README.md)), not its result: every Frame runs the same solver on them.
@@ -150,7 +177,7 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 
 ## Tests
 
-`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test and the loopback test need msquic, which `together/build.sh` builds; without it they are SKIPPED.
+`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test, the loopback test and ft-roompanels' test between two `ft-together` need msquic, which `together/build.sh` builds; without it they are SKIPPED. `tests/roomkit.py` is what the Python tests share: one `ft-together` on the loopback and the questions to it, a program on its media socket, a program whose lines are read as they come.
 
 | Test | What it covers |
 |---|---|
@@ -163,3 +190,8 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 | `tests/local-test.cpp` | The pose gate (what passes, an older pose, a flood, a link forgotten), ft-together's own count, the watchers (four at most, forgotten after five seconds, what each is sent), the floor (the first said stands, lifted on leaving), and the media socket's messages however the socket cuts them up |
 | `tests/links-test.cpp` | Real links between ends in one program, on loopback: bytes in order both ways, datagrams, closing, calls that may not be made or that nobody answers, a call to another address of this machine, the limits on what a far end can make an end hold, and taking an end down with links up. Pictures: whole either way, the longest, a burst, untaken ones bounded, and on a network that stops carrying, each given up after 150 ms and told, never arriving late |
 | `tests/loopback-test.py` | Four `ft-together --loopback` programs: a room opened, a wrong code, a declined ask, noise on the port, two guests let in and linked to each other, away, a guest whose program is killed, leaving and coming back, a second program on the same socket, and the owner's program ending. Poses: one handed to a program reaches the watchers of the others' programs with whose it is and that program's own count, from the owner and from a guest, and nothing reaches a program nobody watches, a pose's own sender, or anyone after leaving; each program keeps its own floor. Panels: shared by the owner and by a guest, in everyone's room, gone with their owner. Video: test programs on the media sockets stand in for an encoder and two viewers' programs, and pictures cross real links in order and byte for byte, up to a megabyte; a second viewer waits for its keyframe; nobody watching is told to the encoder; and programs that say what they may not, say nothing, or don't take their pictures are let go |
+| `tests/test_roompanels.py` | ft-roompanels' rules without either program (`just test-python`): the floor's sums there and back, a guest across the room seeing a panel's back; the keeper against stand-ins that answer as ft-together and ft-screens do: the floor laid from the head or without one, a peer's panel made, placed once, moved with the room, gone with it, made again at another video size, remote displays left alone, hostile names, what an earlier run left; a screen shared, moved, taken back, three at most; leaving and ending; ft-together silent for a moment |
+| `tests/roompanels-test.py` | `ft-roompanels` itself between two real `ft-together --loopback`, each with a stand-in ft-screens on a socket (`tests/fakescreens.py`): each floor laid, a screen shared by the owner and one by the guest standing at the other's where the room says (each side's pose taken back to the room through its own floor), moved, taken back, gone when its owner leaves, and nothing left behind when ft-roompanels ends |
+| `screens/tests/share-test.c` | ft-screens' share tap with made-up buffers, the test being the `ft-sharepanel` it starts: the commands, each buffer described once, one picture out at a time and the newest next, the rate, a program that keeps a picture or dies, pictures only while watched |
+| `screens/tests/remote-test.c` | With the remote displays' cases: a room's panel is given its id and the room's socket, waits for an old program of its own screen and for no host's queue, and what isn't one is refused |
+| `tests/panels-test.py` | **Run by hand, not by `just test`, and not at all for now** (docs/together.md, "Open questions": the Frame reset during its first run). The real video: `ft-sharepanel --pattern` to `ft-peerpanel --probe` through two `ft-together`, checking every picture's size, number and colours, the encoder closing when nobody watches, a viewer coming back, the sharer starting again, and several sizes. It needs the Frame's encoder and decoder |

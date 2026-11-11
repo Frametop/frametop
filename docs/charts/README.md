@@ -14,8 +14,9 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | ft-screens' screens and panels and when they show, visibility modes, conceal, ft-layout and profiles, floating windows, the dashboard, remote access over VNC | G2 Desktop and panels | `G2-desktop.mmd`, `G2-desktop.tla` |
 | The testbench, its input proxy and fake trackers, the verify skills and their lease, the fake-worn guard, the Hand and Eye Recorders and their upload, report.sh, doctor.sh, the logs, the tour | G8 Verify, data and diagnostics | `G8-verify.mmd`, `G8-verify.tla`, `G8-verify-Guard.tla` |
 | The dev box and builds, `ft dev build`, `pack/Containerfile`, CI, `framedrop/build.sh` and the zip, FrameDrop, `get.sh`, `install-release.sh`, `install.sh`, `fast-install`, the models, `uninstall.sh` | G7 Build and release | `G7-release.mmd`, `G7-release.tla` |
+| Frametop Together: its units, a room and who is in it, the links between its people, away, voices and mouths, shared panels, the avatars people have on | G9 Frametop Together | `G9-together.mmd`, `G9-together.tla` |
 
-All eight groups are charted.
+All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `6e78c20` (2026-11-11).
 
 ## Files
 
@@ -391,6 +392,37 @@ Design choices in these fixes (Daenon can override each):
 - W4: a reinstall over fast-installed files is refused rather than copied again. Copying again would quietly drop the fast-installed commits, and a fresh copy loses ft-camd's file capabilities and the tree's own models until `install.sh` sets them again.
 - W5: documentation and an exit message only (see above).
 
+## G9 Frametop Together
+
+Covers the five Together units and their switch, the session's modes on one Frame, a link at the owner's end and a guest's links to the owner and to the other guests, away, the voice and the mouth it moves, a screen shared with the room and someone's panel shown here, the avatar someone has on and the one you send. [docs/together.md](../together.md) has the decisions, and [together/README.md](../../together/README.md) the rules the chart's arrows name.
+
+Model: `G9-together.tla` (module `G9Together`): who is in a room, by the owner's count and by each guest's, and the links between them. One owner and two guests. A link has two ends that each hear of its loss in their own time, and messages on a link keep their order. The wearers and the network may do anything at any time, within a config's counts. Configs: `Room` (the code: three calls to the owner, one link the network breaks), `Full` (a room with one place for a guest, four calls), `Reopen` (the owner opens a second room after the first), `Live` (a smaller room under fairness: left alone, it settles), `PreFix` (the code before `6e78c20`).
+
+Not modelled: tailscaled's answers (everyone here is on the tailnet), versions, the limit on wrong codes and on strangers, away, panels, avatars, voice, and time. A wait that runs out can do so whenever nothing is on its way on that link. The parts of the chart outside the session and its links are drawn from the code and its tests alone.
+
+The rules: nobody is in a room the owner didn't let them into (InByAcceptOnly), a headset is in the room once (OnceInRoom), a place has one person (OneEachSeat), nobody has two links to one person (OneLinkEach), a guest holds a link to another only if the room lists them there (PeerIsListed), the owner's member links are the room's people (MemberIsListed), a guest's copy of the room is the owner's, now or earlier (CopyIsOwners), and once nothing is on its way everyone agrees who is in the room and each two of them have one whole link (Settled). Settles is the liveness rule: the room gets quiet again and again.
+
+Results at `6e78c20`:
+
+| Config | Rule | Result |
+| --- | --- | --- |
+| Room | All nine | Hold (719,774 states) |
+| Full | All nine | Hold (1,126,402 states) |
+| Reopen | All nine | Hold (266,158 states) |
+| Live | Settles | Holds (14,237 states) |
+| PreFix | OnceInRoom | Breaks, 10 steps (T1) |
+| PreFix | The other eight | Hold (2,011,092 states) |
+
+Fixed bugs:
+
+| Id | Ticket | Rule | What happened | Fix |
+| --- | --- | --- | --- | --- |
+| T1 | DEE-365 | OnceInRoom | The owner hears that a link was lost up to ten seconds after the guest does. A guest who asked again in that time and was let in was listed twice, as was one whose two asks were both accepted: two figures for one person and a place nobody could have, until the old link's end was heard. Found by the model before anyone met it | Fixed in `6e78c20`. `Answer` closes the old link of a headset the room lists already and takes its old place out before it gives a place, and `Asked` doesn't count a headset's own listing against it. `together/tests/rejoin-test.cpp` runs both cases |
+
+The model's shortest path to T1: `Open -> Invite -> Join -> GuestLeave -> Join -> DeliverO -> Invite -> Answer -> DeliverO -> Answer`. PreFix holds Settled all the same: the double listing went once the old link's end was heard.
+
+The encoder and decoder path of a shared panel has not run on the Frame's hardware (the chart's red legend box): the first run of its test coincided with a hard reset of the Frame on 2026-11-10, and it waits for the maintainer's word.
+
 ## Running a check
 
 The checks need TLC 1.7.4 and Java. They look for TLC at `~/.cache/frametop-formal/tla2tools-1.7.4.jar` (the verify skills' `scripts/check` put it there), or at `TLA2TOOLS` for every group but G1. Java comes from `JAVA`, then `PATH`. G1 asks mise for `java@temurin-25`.
@@ -405,7 +437,7 @@ frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G4-
 frame-job --local -- nice -n 19 env JAVA=$J PATH=$(dirname $J):$PATH python3 G1-lifecycle-check.py PauseHide
 ```
 
-G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G8 takes `Verify`, `Guard`, `Verify:Overrides`, `Guard:LiveNoF` and so on, and reads the guard model from the verify-fake-worn-guard skill. G6 takes `Exit`, `Live` or `PreFix`. G1 and G7 take config names, such as `Rollback`.
+G3 takes `Keys`, `Laser`, `Keys:Host` and so on. G5 takes `Hands:FreshBoot` and so on. G2 takes `Desktop:HeadOff` and so on. G8 takes `Verify`, `Guard`, `Verify:Overrides`, `Guard:LiveNoF` and so on, and reads the guard model from the verify-fake-worn-guard skill. G6 takes `Exit`, `Live` or `PreFix`. G9 takes `Room`, `Full`, `Reopen`, `Live` or `PreFix`, checks a config's rules in one run, and takes about half an hour on the Frame for all five (`Room`, `Reopen` and `Live` together about nine minutes). G1 and G7 take config names, such as `Rollback`.
 
 Each script writes TLC's full output, with every counterexample trace, to `GROUP-traces/` next to the models. Those folders are ignored by git. A rule that breaks prints its shortest path, and the chart's red badges follow that path.
 

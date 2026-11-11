@@ -1,0 +1,234 @@
+---
+title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, avatars (6e78c20, branch dee-193-together)"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    direction LR
+    lg0: Off, idle, or nothing held
+    lg1: Live: in a room, a link whole, open, shown
+    lg2: Between: calling, asking, waiting, on its way
+    lg3: Ended or held back by a rule, or a wait that ran out
+    lg4: Fixed T1 (6e78c20): a headset let in again while the owner still held its old link was in the room twice. TLC took 10 steps to it (PreFix, rule OnceInRoom)
+    lg5: G9Together.tla: the nine rules hold in Room (719,774 states), Full (1,126,402) and Reopen (266,158), and a room always settles (Live, 14,237)
+    lg6: Not run on the Frame's hardware yet: the encoder and decoder path of a shared panel (the hard reset of 2026-11-10)
+    lg7: Everything a link brings is untrusted, also after its sender was let in: a link that says what it may not is closed
+    lg8: Another group: arrows into it are what G9 reads or drives there
+  }
+  class lg0 teal
+  class lg1 blue
+  class lg2 yellow
+  class lg3 orange
+  class lg4 fixed
+  class lg5 fixed
+  class lg6 bugLegend
+  class lg7 legendNote
+  class lg8 xgroup
+  state "Together on this Frame (together/run.sh, frametop-together.service, the four frametop-room-* units PartOf it)" as un {
+    u0: Not installed: the installer's optional part
+    [*] --> u0
+    u1: Installed, off: no unit runs, nothing listens
+    u2: On: ft-together waits for Tailscale, looks every 3 s
+    u3: On: takes calls on the tailnet address (port 47193), the room programs beside it
+  }
+  state "The session on one Frame (session.h Mode, G9Together.tla)" as se {
+    m0: Idle: no room
+    [*] --> m0
+    m1: Hosting: its room is the room
+    m2: Calling a room's owner with a code
+    m3: Joined: holds the room as its owner last told it
+  }
+  state "A link at the owner's end (session.cpp Link::State)" as lo {
+    o0: Stranger: 10 s to say Hello, 8 at once
+    [*] --> o0
+    o1: Asking: the code was good, a card on the Together page, 120 s
+    o2: Member: a person of the room
+    o3: Refused or closed: told why, the link ends
+  }
+  state "A guest's links (session.cpp OnHello, Knocked, Mesh, OnRoom)" as lg {
+    c0: Called the owner: Hello sent, 10 s
+    [*] --> c0
+    c1: The owner's Hello came: waits for the answer, 130 s
+    c2: Member: the link to the room's owner
+    p0: Called another guest: the lower address calls, 10 s
+    p1: Member: a link to another guest, for poses, voice, panels, avatars
+    w0: Stranger: another guest calls
+    w1: Waiting: their Hello came, the room doesn't list them yet, 10 s
+    p2: Closed: the room no longer lists them there, or the wait ran out. Called again 3 s on
+  }
+  state "Away (ft-roomaway teller.py, session SetAway)" as aw {
+    a0: Here: worn, not paused
+    [*] --> a0
+    a1: In a game: Frametop paused. The voice stays, shared screens stand still
+    a2: Headset off: the microphone closed, nothing played
+  }
+  state "Your voice and mouth (ft-roomvoice sender.cpp, mouthsay.h, local/mouth.h)" as vo {
+    v0: Microphone closed: no room, muted, or the headset off
+    [*] --> v0
+    v1: Open: Opus each 20 ms to every member link, the mouth's five shapes to ft-together
+    v2: Mouth in each pose sent, held 0.5 s after it was last told
+    v3: Failed to open: tried again
+  }
+  state "A screen of yours in the room (ft-roompanels keeper.py, screens/share.c, ft-sharepanel)" as sh {
+    x0: Not shared
+    [*] --> x0
+    x1: In the room, nobody watches: no pictures asked for, the encoder closed
+    x2: Watched: encoded once for everyone, a stream a picture
+    x3: A viewer waits for a keyframe: asked of the encoder, twice a second at most
+  }
+  state "Someone's panel here (keeper.py _others, remote.c peer, ft-peerpanel, flow/video.h)" as pe {
+    y0: In the room, no screen for it here yet
+    [*] --> y0
+    y1: A remote screen (116 down), ft-peerpanel waits for a keyframe
+    y2: In step: pictures in order, decoded, shown where the room has it
+    y3: Lost its place: held pictures, nothing passed for 0.3 s
+  }
+  state "The avatar someone has on (flow/looks.h, local/wardrobe.h, avatar/room/sentbody.h)" as lk {
+    k0: None listed: the abstract figure
+    [*] --> k0
+    k1: Listed: the room has its file's size and SHA-256, no file here
+    k2: Asked for on the link to its wearer: awaited, to that size
+    k3: Kept: the size and the hash are the room's (runtime folder, 4 at most, never parsed here)
+    k4: Drawn: the strict reader took it, a body, marked as one to pass on
+    k5: Refused, said once: the abstract figure stays
+  }
+  state "Your avatar for the others (wardrobe.cpp Wear, roomavatar.py, ft-model-import --allow-share)" as wr {
+    z0: None on (AVATAR_MODEL empty): the others see the abstract figure
+    [*] --> z0
+    z1: On, not marked: it stays on this headset, the Together page asks
+    z2: On and marked: the room lists it (an owner's at once, a guest's told every 2 s until it does)
+    z3: Its file goes to who asked: 3 at once, then one in 30 s a link
+  }
+  state "Other groups" as og {
+    g1: G1 Lifecycle and presence
+    g2: G2 Desktop and panels
+    g5: G5 Hands
+    g6: G6 Remote displays
+  }
+  un --> se: ft-together holds the session
+  se --> lo: an owner's links
+  se --> lg: a guest's links
+  aw --> vo: away off closes the microphone
+  se --> sh: only in a room
+  se --> lk: the room lists what each has on
+  u0 --> u1: the installer's Together part, or together/run.sh install
+  u1 --> u2: the Settings switch, or run.sh on: enable --now
+  u2 --> u3: tailscaled says who this Frame is (Start, net/tailnet.cpp)
+  u3 --> u1: the switch off: SIGTERM leaves the room first, the four units stop with it
+  u3 --> u2: it ends otherwise: Restart=on-failure, 3 s
+  m0 --> m1: open (Open): you stand on the owner's spot
+  m0 --> m2: join HOST PORT CODE (Join)
+  m2 --> m3: Welcome: your place and the room
+  m2 --> m0: Refuse, no answer in time, the link down, or leave
+  m3 --> m0: leave, the owner's Leave, the link to the owner lost, or taken out of the room
+  m1 --> m0: leave: Leave to every member, the room ends for everyone
+  m1 --> o0: someone calls
+  o0 --> o1: Hello with a code that works once, for ten minutes (Asked, invites.h)
+  o0 --> o3: no room open, the room full, a bad code, another version, or 10 s
+  o1 --> o2: accept (Answer): a place, Room to the others, Welcome to them
+  o1 --> o3: decline, or 120 s with no answer
+  o2 --> o3: their Leave, the link down, or a word they may not say: Remove, Room to the others
+  o2 --> o3: (fixed T1 6e78c20) the same headset is let in again: its old link closed and its old place out first
+  m2 --> c0: Call
+  c0 --> c1: the owner's Hello: the code was good
+  c1 --> c2: Welcome
+  c2 --> p0: Mesh: each guest the room lists with a higher address and no link yet
+  p0 --> p1: their Hello, of this room
+  p0 --> p2: Refuse, another room, or 10 s
+  w0 --> w1: Hello of this room (OnHello)
+  w0 --> p2: not in a room, or another room: Refuse
+  w1 --> p1: Knocked: the room lists someone at that address who has no link yet
+  w1 --> p2: 10 s
+  p1 --> p2: Room no longer lists them there (OnRoom), their Leave, or the link down
+  p2 --> p0: Tick: Mesh again, 3 s after the last call
+  c2 --> m0: Room without your place, Leave, or the link down: End
+  a0 --> a1: the relay says paused (pause ?), asked each second in a room
+  a1 --> a0: not paused
+  a0 --> a2: the pointer helper says not worn (gaze ? headset)
+  a1 --> a2: not worn: the headset off wins over a game
+  a2 --> a0: worn again
+  a0 --> g1: G1: the worn answer and the pause are read there
+  v0 --> v1: in a room, unmuted, not away off
+  v1 --> v0: mute, the room left, or away off: the mouth is told shut once
+  v0 --> v3: the microphone can't be opened
+  v3 --> v0: the next try
+  v1 --> v2: 0x83 and five weights as they change
+  v2 --> v1: told again within 0.5 s
+  v2 --> v0: not told for 0.5 s: the poses carry a shut mouth
+  v2 --> g5: G5: the hands in the same pose come from hand tracking
+  x0 --> x1: share N: Share to the room (a guest's goes through the owner), ft-screens share N start
+  x1 --> x2: a Watch from a member who has it in view
+  x2 --> x3: someone begins, lost their place, or a picture to them was given up
+  x3 --> x2: the keyframe puts everyone in step
+  x2 --> x1: nobody watches any more
+  x1 --> x0: unshare N, the room left, or ft-roompanels ends
+  x2 --> x0: unshare N, the room left, or ft-roompanels ends
+  x2 --> g2: G2: ft-screens hands the screen's buffers over, and draws it while watched
+  y0 --> y1: keeper: remote N peer ID
+  y1 --> y2: a keyframe from the owner's link
+  y2 --> y3: pictures overtook one another and the gap didn't fill
+  y3 --> y1: Watch says the decoder needs a keyframe
+  y2 --> y0: the panel left the room or changed size, or the room was left
+  y1 --> g6: G6: a peer's panel is a remote screen, numbered down from 116
+  k0 --> k1: Room: their Look
+  k1 --> k2: Want (looks.cpp), 6 Looks and Wants at once and 1 a second a link
+  k2 --> k3: the stream's bytes are that size and hash, from the one who has it on
+  k2 --> k1: it didn't come: asked again after 30 s and its time at 64 KB a second
+  k3 --> k4: ft-avatars --room: looks each second, sentbody reads the file
+  k3 --> k5: not a whole avatar, no body, or not marked
+  k4 --> k0: they take it off, leave, or the room ends: the file goes
+  k5 --> k0: they take it off, leave, or the room ends
+  z0 --> z1: an avatar from a glTF or FBX, or a VRM whose licence forbids passing it on
+  z0 --> z2: a VRM whose licence allows it, or a model imported with --may-share
+  z1 --> z2: Let them have it, and yes: ft-model-import --allow-share (never for a VRM that forbids it)
+  z2 --> z3: a Want for exactly that file from someone in the room
+  z3 --> z2: sent
+  z2 --> z0: another avatar or none on (wear, every 2 s from ft-avatars --room)
+  class u0 teal
+  class u1 teal
+  class u2 yellow
+  class u3 blue
+  class m0 teal
+  class m1 blue
+  class m2 yellow
+  class m3 blue
+  class o0 yellow
+  class o1 yellow
+  class o2 blue
+  class o3 orange
+  class c0 yellow
+  class c1 yellow
+  class c2 blue
+  class p0 yellow
+  class p1 blue
+  class w0 yellow
+  class w1 yellow
+  class p2 orange
+  class a0 blue
+  class a1 orange
+  class a2 teal
+  class v0 teal
+  class v1 blue
+  class v2 blue
+  class v3 orange
+  class x0 teal
+  class x1 yellow
+  class x2 blue
+  class x3 yellow
+  class y0 teal
+  class y1 yellow
+  class y2 blue
+  class y3 orange
+  class k0 teal
+  class k1 yellow
+  class k2 yellow
+  class k3 yellow
+  class k4 blue
+  class k5 orange
+  class z0 teal
+  class z1 orange
+  class z2 blue
+  class z3 blue
+  class g1 xgroup
+  class g2 xgroup
+  class g5 xgroup
+  class g6 xgroup

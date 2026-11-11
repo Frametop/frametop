@@ -151,7 +151,7 @@ One QUIC connection for every two people, with one stream for the control messag
 5. The owner sees the guest's name and their Tailscale login, and accepts or declines. An ask nobody answers ends after two minutes.
 6. An accepted guest gets the room: its people, their addresses and their spots. The guest's spot is beside the owner, 0.9 m apart: the first to the owner's right, the second to their left, the third further right.
 
-A headset is in a room once. The owner hears that a link was lost up to ten seconds after the guest does, and a guest can ask again within that time. A headset the room still lists, by its address and port, takes no second place: when it is let in again, the owner closes its old link, takes its old place out of the room, and gives it a place as it does anyone. It also asks for the place it has, so it is not told that a room it fills is full.
+A headset is in a room once. The owner hears that a link was lost up to ten seconds after the guest does, and a guest can ask again within that time. A headset the room still lists, by its address and port, takes no second place: when it is let in again, the owner closes its old link, takes its old place out of the room, and gives it a place as it does anyone. It also asks for the place it has, so it is not told that a room it fills is full. The room's rules are checked by a model: [docs/charts](../docs/charts/README.md), group G9.
 
 The owner's copy of the room is the room. Guests hold the last one the owner sent, and take a newer one only from the owner's link, only for the same room. The owner leaving, or a guest losing the link to the owner, ends the room for that guest.
 

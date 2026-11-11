@@ -1,0 +1,145 @@
+// A Frametop Together session, its rules (docs/together.md): opening a room, inviting, asking
+// to come in and being let in or not, who is in the room, and the links between its people.
+// The owner's copy of the room is the room; a guest holds the last one the owner sent, and
+// links up with the other guests it lists (the one with the lower address calls).
+//
+// Everything a link brings is untrusted input, also after its sender was let in: the messages
+// are bounded by their readers (proto/messages.h), and here every message is checked against
+// who sent it and what they may say. A link that says anything else is dropped.
+//
+// The rules only. The network, the tailnet, the clock and the dice are handed in, so two of
+// these can be run against each other in a test, and ft-together and the fake peer are the same
+// code on different links. commands.h puts it behind a line of text.
+#pragma once
+
+#include "../proto/messages.h"
+#include "../room/invites.h"
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace session {
+
+// Who tailscaled says is at an address.
+struct Who {
+    std::string login, name;
+};
+
+// The links to other people's Frames, as the session uses them (net/ has msquic's).
+class Links {
+public:
+    virtual ~Links() = default;
+    // Calls someone: the new link's number (never negative), or -1. Up or Down follows.
+    virtual int Call(const std::string &host, uint16_t port) = 0;
+    // A message on the link's control stream: they arrive in the order they were sent.
+    virtual void Send(int link, const std::vector<uint8_t> &message) = 0;
+    // Ends a link once what was sent on it has gone. Nothing more comes from it, Down neither.
+    virtual void Close(int link) = 0;
+};
+
+// The tailnet (net/ asks tailscaled).
+class Tailnet {
+public:
+    virtual ~Tailnet() = default;
+    virtual bool Self(Who &who, std::string &address) = 0;           // false: Tailscale isn't up
+    virtual bool WhoIs(const std::string &address, Who &who) = 0;    // false: nobody the tailnet knows
+    virtual bool MayCall(const std::string &address) = 0;            // an address on the tailnet
+};
+
+struct Config {
+    std::string name;              // what the others call this person
+    uint16_t port = 0;             // where this end listens
+    std::function<uint64_t()> dice;
+};
+
+enum class Mode { kIdle, kHosting, kCalling, kJoined };
+
+// Someone with a good invite, waiting for the owner's answer.
+struct Ask {
+    int id;
+    std::string name, login, address;   // the name is what they call themselves; the login is Tailscale's
+};
+
+class Session {
+public:
+    static constexpr double kHelloWaitS = 10;   // a link gets this long to say who it is, and a call to be let in or asked about
+    static constexpr double kAskWaitS = 120;    // ...and the owner this long to answer an ask
+    static constexpr double kMeshRetryS = 3;    // between calls to a guest that didn't answer
+    static constexpr size_t kMostStrangers = 8; // links that haven't said who they are, at once
+
+    Session(Links &links, Tailnet &tailnet, Config config);
+
+    // From the links. `address` is the far end's, as the network saw it.
+    void Up(int link, const std::string &address, double now);
+    void Bytes(int link, const uint8_t *data, size_t n, double now);
+    void Down(int link, double now);
+    // Now and then (a second apart is enough): what was waiting too long ends.
+    void Tick(double now);
+
+    // What this Frame's wearer does. Each answers with nothing, or with why not.
+    std::string Open(const proto::Spot &spot);               // a room, with you its owner standing there
+    std::string Invite(double now, std::string &code);       // a one-time code for your room
+    // Calls a room's owner. How it went shows in mode() and note().
+    std::string Join(const std::string &host, uint16_t port, const std::string &code, double now);
+    std::string Answer(int ask, bool accept);                // one of asks()
+    std::string SetAway(uint8_t away);                       // proto::kAwayGame, kAwayOff, or 0 for back
+    std::string Leave();                                     // its owner leaving ends the room for everyone
+
+    Mode mode() const { return mode_; }
+    int me() const { return me_; }
+    const proto::Room &room() const { return room_; }
+    const std::string &note() const { return note_; }        // the last thing worth telling the wearer
+    std::vector<Ask> asks() const;                           // who waits for the owner's answer
+    size_t codes() const { return invites_.waiting(); }      // invites nobody used yet
+    // The person a link belongs to once they are in the room with us, or -1.
+    int PersonOn(int link) const;
+    // The links to the room's people, for what goes to everyone (poses, voice).
+    std::vector<int> MemberLinks() const;
+    // Whether one of the room's people is this Frame's wearer, or someone it has a link to.
+    bool Linked(int person) const { return person == me_ || PersonOn(LinkOf(person)) == person; }
+
+private:
+    struct Link {
+        enum State { kStranger, kAsking, kMember, kCalledOwner, kCalledPeer };
+        State state = kStranger;
+        std::string address;
+        proto::Parser parser;
+        double since = 0;
+        bool helloed = false;   // their Hello came
+        proto::Hello hello;
+        Who who;
+        int person = -1;        // kMember, kCalledPeer
+        int ask = 0;            // kAsking
+    };
+
+    void Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, double now);
+    void OnHello(int link, Link &l, const std::vector<uint8_t> &body, double now);
+    void Asked(int link, Link &l, double now);
+    bool Knocked(int link, Link &l);
+    void OnRoom(const proto::Room &room, double now);
+    void Mesh(double now);
+    void Changed();
+    void Remove(int person);
+    void Refuse(int link, proto::Why why, const std::string &text);
+    void Drop(int link);
+    void End(const std::string &note);
+    proto::Hello MyHello(const std::string &code) const;
+    int LinkOf(int person) const;
+
+    Links &links_;
+    Tailnet &tailnet_;
+    Config config_;
+    Mode mode_ = Mode::kIdle;
+    int me_ = -1;
+    proto::Room room_;
+    room::Invites invites_;
+    std::map<int, Link> link_;
+    std::string code_, note_;   // the invite a call carries; the last thing worth telling
+    int nextAsk_ = 0;
+    double meshTried_[proto::kPeople] = {};
+};
+
+}  // namespace session

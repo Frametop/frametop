@@ -126,7 +126,7 @@ The request began as "is there a collaborative mode for multiple Frame sharing a
 
 ### The protocol
 
-One QUIC connection per pair of peers, opened by the one whose Tailscale address is lower. Each side checks the other's address with tailscaled before anything else.
+One QUIC connection per pair of peers. A guest opens the one to the room's owner when they join; of two guests, the one whose Tailscale address is lower opens theirs. Each side checks the other's address with tailscaled before anything else. The messages, who may send each, and the steps of joining are in [together/README.md](../together/README.md).
 
 - **A control stream** (reliable, ordered): hello with the protocol version, the invite's code, the room's state (people, their colours and spots, each shared panel's id, size, pose and curve), grants, away, and leave.
 - **File streams** (reliable): an avatar's model file, when its owner allows.
@@ -154,7 +154,7 @@ Everything a peer sends is untrusted input, including after the owner accepted t
 | M0 | Spikes: the encoder's limits, a DMA-BUF into the encoder, msquic on the Frame, heat | The numbers below |
 | M1 | Hand models: models loaded from files at run time, the picker in Frametop Settings, import of your own hands. **Built** (2026-11-10): the model file, `ft-model-import` for hands, ft-handview reading your folder, the Appearance page | Offline tests, snapshots of each model, the picker driven on the headset (to do: `HEADSET-TESTS.md`) |
 | M2 | Avatars: the importer and its limits, upper-body IK, the mouth and blinks, the mirror panel, the body spike. **Being built**: the body in the model file, `ft-model-import` for whole avatars, the pose solver, `ft-avatars`' pictures of a posed body, wearing an avatar in the Appearance page, the mirror that shows it to you, its face (the mouth from your voice, blinks) and the body spike's experimental switch are done (2026-11-10); what is left is the headset tests | Offline tests on sample avatars, snapshots, the mirror on the headset |
-| M3 | The session core: joining, the room's state, a shared panel on a peer's Frame, voice, the abstract avatar, away | A fake peer joining the live Frame, and its panel measured |
+| M3 | The session core: joining, the room's state, a shared panel on a peer's Frame, voice, the abstract avatar, away. **Being built**: the wire format (`together/proto`), the room's rules (`together/room`) and the session's (`together/session`) are done with their tests (2026-11-10); the links, `ft-together`, poses, panels and voice are next | A fake peer joining the live Frame, and its panel measured |
 | M4 | Pointers, grants, moving panels and yourself | A fake peer asking for control and clicking |
 | M5 | The budget, and the PC sender in the Vibepollo fork | Fake peers past the budget; a PC panel on a fake peer |
 

@@ -100,6 +100,15 @@ test-c:
     run avatar/tests/bodyview-test.cpp build/tests/bodyview-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/face-test.cpp -o build/tests/face-test
     run avatar/tests/face-test.cpp build/tests/face-test
+    # Frametop Together: what a peer sends is read here first, so its readers and rules run under the sanitizers
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/proto-test.cpp together/proto/messages.cpp \
+      -o build/tests/together-proto-test
+    run together/tests/proto-test.cpp build/tests/together-proto-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/room-test.cpp -o build/tests/together-room-test
+    run together/tests/room-test.cpp build/tests/together-room-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/session-test.cpp together/session/session.cpp \
+      together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-session-test
+    run together/tests/session-test.cpp build/tests/together-session-test
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"

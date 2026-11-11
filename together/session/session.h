@@ -2,7 +2,8 @@
 // to come in and being let in or not, who is in the room, the panels they share, and the links
 // between its people. The owner's copy of the room is the room; a guest holds the last one the
 // owner sent, and links up with the other guests it lists (the one with the lower address
-// calls). A guest's panel is in the room once the owner has put it there on the guest's word.
+// calls). A guest's panel is in the room once the owner has put it there on the guest's word,
+// and so is the avatar a guest has on.
 //
 // Everything a link brings is untrusted input, also after its sender was let in: the messages
 // are bounded by their readers (proto/messages.h), and here every message is checked against
@@ -58,6 +59,8 @@ struct Config {
     std::function<uint64_t()> dice;
     // Someone in the room says what they have of a panel of ours (flow/video.h sends by it).
     std::function<void(int link, const proto::Watch &watch, double now)> watched;
+    // Someone in the room asks for the file of an avatar (flow/looks.h sends ours, if it is that).
+    std::function<void(int link, const proto::Want &want, double now)> wanted;
 };
 
 enum class Mode { kIdle, kHosting, kCalling, kJoined };
@@ -76,6 +79,9 @@ public:
     static constexpr size_t kMostStrangers = 8; // links that haven't said who they are, at once
     // What one link may say about panels (shared, moved, taken back, watched): a second, at once.
     static constexpr double kPanelWordsASecond = 40, kPanelWordsAtOnce = 40;
+    // ...and about avatars (what they have on, a file asked for). A guest says what it has on
+    // every kLookEveryS at most, until the room has it.
+    static constexpr double kLookWordsASecond = 1, kLookWordsAtOnce = 6, kLookEveryS = 2;
 
     Session(Links &links, Tailnet &tailnet, Config config);
 
@@ -96,6 +102,11 @@ public:
     // next room has it from the start, so nobody is there for a moment who isn't.
     std::string SetAway(uint8_t away);
     std::string Leave();                                     // its owner leaving ends the room for everyone
+    // The avatar the wearer has on, for the others to ask for (none: they see the abstract
+    // figure). Like away it is the wearer's own, in a room or not.
+    std::string Wear(const proto::Look &look, double now);
+    // Asks someone in the room for the file of the avatar they have on.
+    std::string Want(int person, const proto::Look &look);
     // Shares the wearer's panel `number` (0 to room::kFramePanels - 1) with the room, or says
     // where and how large it is now. The panel's id is set here; a guest's is in room() once
     // the owner has taken it.
@@ -107,6 +118,7 @@ public:
     Mode mode() const { return mode_; }
     int me() const { return me_; }
     uint8_t away() const { return away_; }                   // as the wearer was last said to be
+    const proto::Look &look() const { return look_; }        // what the wearer was last said to have on
     const proto::Room &room() const { return room_; }
     const std::string &note() const { return note_; }        // the last thing worth telling the wearer
     std::vector<Ask> asks() const;                           // who waits for the owner's answer
@@ -115,8 +127,10 @@ public:
     int PersonOn(int link) const;
     // The links to the room's people, for what goes to everyone (poses, voice).
     std::vector<int> MemberLinks() const;
+    // The link to one of the room's people once they are in the room with us, or -1.
+    int LinkTo(int person) const { return PersonOn(LinkOf(person)) == person ? LinkOf(person) : -1; }
     // Whether one of the room's people is this Frame's wearer, or someone it has a link to.
-    bool Linked(int person) const { return person == me_ || PersonOn(LinkOf(person)) == person; }
+    bool Linked(int person) const { return person == me_ || LinkTo(person) >= 0; }
 
 private:
     struct Link {
@@ -131,6 +145,7 @@ private:
         int person = -1;        // kMember, kCalledPeer
         int ask = 0;            // kAsking
         room::Allowance panelWords{kPanelWordsASecond, kPanelWordsAtOnce};
+        room::Allowance lookWords{kLookWordsASecond, kLookWordsAtOnce};
     };
 
     void Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, double now);
@@ -139,6 +154,7 @@ private:
     bool Knocked(int link, Link &l);
     void OnRoom(const proto::Room &room, double now);
     void Mesh(double now);
+    void SayLook(double now);
     void Changed();
     void Remove(int person);
     void Refuse(int link, proto::Why why, const std::string &text);
@@ -153,6 +169,8 @@ private:
     Mode mode_ = Mode::kIdle;
     int me_ = -1;
     uint8_t away_ = 0;
+    proto::Look look_;
+    double lookSaid_ = -1e9;   // when a guest last told the owner what it has on
     proto::Room room_;
     room::Invites invites_;
     std::map<int, Link> link_;

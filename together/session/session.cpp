@@ -107,7 +107,7 @@ void Session::End(const std::string &note) {
     for (const auto &[id, l] : link_) links_.Close(id);
     link_.clear();
     invites_.Clear();
-    mode_ = Mode::kIdle, me_ = -1, room_ = proto::Room{}, code_.clear(), asked_.clear();
+    mode_ = Mode::kIdle, me_ = -1, room_ = proto::Room{}, code_.clear(), asked_.clear(), lookSaid_ = -1e9;
     for (double &t : meshTried_) t = -1e9;
     note_ = note;
 }
@@ -151,6 +151,7 @@ void Session::Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, 
             a.away = away_;
             links_.Send(link, proto::Pack(a));
         }
+        SayLook(now);   // and what they have on
         return Mesh(now);
     }
     case proto::kRoom: {
@@ -185,6 +186,19 @@ void Session::Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, 
         if (l.state != Link::kMember || !proto::Read(body, w) || !l.panelWords.Spend(now)) return Drop(link);
         if (w.panel / proto::kPanelNumbers != me_) return Drop(link);
         if (room_.panel(w.panel) && config_.watched) config_.watched(link, w, now);
+        return;
+    }
+    case proto::kLook: {   // what a guest has on
+        proto::Look look;
+        if (mode_ != Mode::kHosting || l.state != Link::kMember || !proto::Read(body, look) || !l.lookWords.Spend(now)) return Drop(link);
+        for (proto::Person &p : room_.people)
+            if (p.id == l.person && !proto::SameLook(p.look, look)) p.look = look, Changed();
+        return;
+    }
+    case proto::kWant: {   // the file of an avatar: whether it is ours to send is flow/looks.h's to say
+        proto::Want w;
+        if (l.state != Link::kMember || !proto::Read(body, w) || !l.lookWords.Spend(now)) return Drop(link);
+        if (config_.wanted) config_.wanted(link, w, now);
         return;
     }
     case proto::kLeave:
@@ -302,6 +316,7 @@ void Session::Tick(double now) {
         Drop(id);
     }
     Mesh(now);
+    SayLook(now);
 }
 
 }  // namespace session

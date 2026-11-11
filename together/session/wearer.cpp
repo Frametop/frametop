@@ -18,7 +18,7 @@ std::string Session::Open(const proto::Spot &spot) {
     Who who;
     proto::Person p;
     if (!tailnet_.Self(who, p.address)) return "Tailscale isn't running on this headset";
-    p.spot = spot, p.away = away_;
+    p.spot = spot, p.away = away_, p.look = look_;
     p.name = config_.name.empty() ? who.name : config_.name, p.login = who.login, p.port = config_.port;
     room_ = proto::Room{};
     for (size_t i = 0; i < proto::kRoomId; i += 8) {
@@ -78,6 +78,33 @@ std::string Session::SetAway(uint8_t away) {
         a.away = away;
         links_.Send(LinkOf(room_.owner), proto::Pack(a));
     }
+    return "";
+}
+
+std::string Session::Wear(const proto::Look &look, double now) {
+    if (look.size > proto::kMostLook) return "that avatar is too large to send";
+    look_ = look.none() ? proto::Look{} : look;
+    SayLook(now);
+    return "";
+}
+
+// The room hears what the wearer has on. An owner's is in the room at once. A guest's goes to
+// the owner, and again from Tick until the owner's room has it.
+void Session::SayLook(double now) {
+    if (mode_ == Mode::kHosting) {
+        if (!proto::SameLook(room_.people[0].look, look_)) room_.people[0].look = look_, Changed();
+    } else if (mode_ == Mode::kJoined && !proto::SameLook(room_.person(me_)->look, look_) && now - lookSaid_ >= kLookEveryS) {
+        lookSaid_ = now;
+        links_.Send(LinkOf(room_.owner), proto::Pack(look_));
+    }
+}
+
+std::string Session::Want(int person, const proto::Look &look) {
+    const int link = person == me_ ? -1 : LinkTo(person);
+    if (link < 0) return "no link to them yet";
+    proto::Want w;
+    std::memcpy(w.hash, look.hash, proto::kLookHash);
+    links_.Send(link, proto::Pack(w));
     return "";
 }
 

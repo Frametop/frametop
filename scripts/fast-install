@@ -69,7 +69,7 @@ IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.t
 OPENVR = 'scripts/openvr.sh'
 STB = 'scripts/stb.sh'           # the pinned stb headers
 MODELDEPS = 'scripts/modeldeps.sh'   # the pinned libraries ft-model-import reads models with
-MODELFILE = 'avatar/modelfile.cpp'   # the model file's reader, built into ft-handview too
+MODELFILE = 'avatar/modelfile.cpp'   # the model file's reader, built into ft-handview and ft-together too
 # ft-avatars, built beside ft-handview: it wears its hands, and draws a shared room's people
 AVATARS = ('avatar/bodyfile.cpp', 'avatar/pose', 'avatar/view', 'avatar/face', 'avatar/room', 'avatar/abstract')
 ROOM_CLIENT = ('avatar/room/client.cpp', 'avatar/room/people.cpp')   # a room's people as ft-together tells them, built into ft-roomvoice too
@@ -91,7 +91,7 @@ COMPONENTS = {
     'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),
     'avatar': ((MODELDEPS, STB), ('ft-model-import',)),
     # msquic is fetched at the commit together/build.sh pins, and stays built in the stage
-    'together': ((*ROOM_CLIENT, OPENVR), ('ft-together', 'ft-sharepanel', 'ft-peerpanel', 'ft-roomvoice', 'libmsquic.so.2')),
+    'together': ((*ROOM_CLIENT, MODELFILE, OPENVR), ('ft-together', 'ft-sharepanel', 'ft-peerpanel', 'ft-roomvoice', 'libmsquic.so.2')),
 }
 WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',

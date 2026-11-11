@@ -41,13 +41,13 @@ def free_port():
 class End:
     """One ft-together and the questions to it."""
 
-    def __init__(self, program, name, port=None, sock=None):
+    def __init__(self, program, name, port=None, sock=None, env=None):
         self.name = name
         self.port = port or free_port()
         self.sock = sock or "ft_together_test_%d_%s" % (os.getpid(), name)
         self.client = ftipc.Client(timeout=2.0)
         self.proc = subprocess.Popen([program, "--loopback", "--name", name, "--port", str(self.port), "--socket", self.sock],
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 
     def ask(self, text):
         return self.client.ask(self.sock, text) or "none (%s)" % self.client.why
@@ -236,6 +236,16 @@ class Tool:
             self.wait(5)
             return -99
         return status
+
+
+def model(name, may_be_sent, filler=b""):
+    """A model's file (avatar/modelfile.h) with nothing to draw in it: what it is called, whether
+    its owner lets peers have it, and `filler` in a chunk no reader knows."""
+    def chunk(tag, body):
+        return tag + struct.pack("<I", len(body)) + body + bytes(-len(body) % 4)
+
+    info = b"".join(struct.pack("<BH", key, len(text)) + text for key, text in ((1, name.encode()), (2, b"CC0"), (5, bytes([may_be_sent]))))
+    return b"FTMD" + struct.pack("<I", 1) + chunk(b"INFO", info) + chunk(b"JUNK", filler)
 
 
 def names(state):

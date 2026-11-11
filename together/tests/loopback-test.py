@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 """ft-together for real, several of it on this machine's loopback: a room opened, people let
-in and kept out, the guests' own links, poses passed between them, each one's floor, the panels
-they share and the video of one from the program that encodes it to the programs that show it,
-leaving, a program that dies, and the owner's end.
+in and kept out, the guests' own links, poses passed between them, each one's floor, the avatars
+they have on and the files of those, the panels they share and the video of one from the program
+that encodes it to the programs that show it, leaving, a program that dies, and the owner's end.
 
     together/tests/loopback-test.py PATH-TO-ft-together
 
 Each ft-together runs with --loopback (no Tailscale: 127.0.0.1 is the tailnet, and everyone on
-it is someone), a port of its own and a local socket of its own. The rules themselves are
+it is someone), a port of its own, a local socket of its own, and folders of its own for the
+wearer's avatars and for the session's files. The rules themselves are
 tested without a network in session-test.cpp; this is what only real links show.
 """
 import json
 import os
+import shutil
 import signal
 import socket
+import stat
 import struct
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import roomkit  # noqa: E402  (ft-together on the loopback, the questions to it, the tally)
-from roomkit import End, Program, Watcher, check, free_port, let_in, linked, names, pose, voice  # noqa: E402
+from roomkit import End, Program, Watcher, check, free_port, let_in, linked, model, names, pose, voice  # noqa: E402
 
 ftipc = roomkit.ftipc
 
@@ -44,11 +48,65 @@ def crosses(source, sinks, units, tries=4):
     return False
 
 
-def main(program):
+class Home:
+    """One Frame's folders: its wearer's avatars, and where the session's files are kept."""
+
+    def __init__(self, root, name):
+        self.avatars, self.run = os.path.join(root, name, "avatars"), os.path.join(root, name, "run")
+        os.makedirs(self.avatars)
+        os.makedirs(self.run, mode=0o700)
+        self.env = dict(os.environ, FT_AVATARS_DIR=self.avatars, XDG_RUNTIME_DIR=self.run)
+
+    def put(self, name, may_be_sent, filler=b""):
+        """A model in the wearer's folder; its bytes."""
+        data = model(name, may_be_sent, filler)
+        with open(os.path.join(self.avatars, name + ".ftmodel"), "wb") as f:
+            f.write(data)
+        return data
+
+    def kept(self):
+        """The files kept for the session: {path: bytes}."""
+        found = {}
+        for folder, _, files in os.walk(self.run):
+            for name in files:
+                try:
+                    with open(os.path.join(folder, name), "rb") as f:
+                        found[os.path.join(folder, name)] = f.read()
+                except OSError:
+                    pass   # (gone between the listing and the read)
+        return found
+
+
+def looks(end):
+    reply = end.ask("looks")
+    return json.loads(reply[3:]) if reply.startswith("ok {") else {"wear": reply, "sent": False, "why": "", "people": []}
+
+
+def files(end):
+    """Whose avatars `end` knows of, and where the file of each is: {person: path, "" until it came}."""
+    return {p["id"]: p["file"] for p in looks(end)["people"]}
+
+
+def comes(end, home, who, data, seconds=15.0):
+    """Whether `end` comes to have the file of the avatar `who` has on: `data`, in a folder and a
+    file that only this user reads."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        path = files(end).get(who)
+        if path and home.kept().get(path) == data:
+            return stat.S_IMODE(os.stat(path).st_mode) == 0o600 and stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode) == 0o700
+        time.sleep(0.1)
+    return False
+
+
+def main(program, root):
     ends = []
+    home = {}
 
     def start(name, **kw):
-        e = End(program, name, **kw)
+        if name not in home:
+            home[name] = Home(root, name)
+        e = End(program, name, env=home[name].env, **kw)
         ends.append(e)
         return e
 
@@ -147,6 +205,28 @@ def main(program):
         ok = ok and ben.ask("away back") == "ok" and all(e.until(lambda s: [p["away"] for p in s["people"] if p["name"] == "ben"] == [0]) for e in (ada, ben, cy))
         check("being away is told to everyone, and being back", ok)
 
+        # the avatars they have on: the room hears which, and the file goes to whoever asks its wearer
+        fox, wolf = home["ada"].put("fox", 1, os.urandom(300000)), home["ada"].put("wolf", 1, os.urandom(2 << 20))
+        home["ada"].put("secret", 0, os.urandom(1000))
+        owl = home["cy"].put("owl", 1, os.urandom(40000))
+        check("nobody has an avatar on, and nothing is kept", all(looks(e) == {"wear": "", "sent": False, "why": "", "people": []} for e in (ada, ben, cy)) and
+              all(home[n].kept() == {} for n in ("ada", "ben", "cy")))
+        ok = ada.ask("wear fox") == "ok" and looks(ada)["wear"] == "fox" and looks(ada)["sent"] is True
+        check("the owner puts one on that the others may have: its file comes to both guests, whole, where only they can read it",
+              ok and comes(ben, home["ben"], ids["ada"], fox) and comes(cy, home["cy"], ids["ada"], fox) and home["ada"].kept() == {})
+        ok = cy.ask("wear owl") == "ok" and comes(ada, home["ada"], ids["cy"], owl) and comes(ben, home["ben"], ids["cy"], owl)
+        check("a guest's goes to the owner and to the other guest, each from its wearer", ok and len(home["ben"].kept()) == 2 and len(home["cy"].kept()) == 1)
+        ok = ada.ask("wear secret").startswith("error that avatar isn't marked") and looks(ada)["wear"] == "secret" and looks(ada)["sent"] is False
+        ok = ok and ben.until(lambda s: list(files(ben)) == [ids["cy"]] and list(home["ben"].kept().values()) == [owl], 10)
+        check("one that isn't marked as one the others may have is worn in private: the room hears of none, and the file it had goes", ok)
+        ok = ada.ask("wear wolf") == "ok" and comes(ben, home["ben"], ids["ada"], wolf, 30) and comes(cy, home["cy"], ids["ada"], wolf, 30)
+        check("another, of two megabytes, crosses whole", ok)
+        check("no avatar of that name, or a name that would lead out of the folder, is none",
+              ben.ask("wear nobody").startswith("error there is no avatar") and ben.ask("wear ../../ada/avatars/fox").startswith("error there is no avatar") and looks(ben)["wear"] == "")
+        ok = cy.ask("wear") == "ok" and ada.until(lambda s: files(ada) == {} and home["ada"].kept() == {}, 10)
+        ok = ok and ben.until(lambda s: list(files(ben)) == [ids["ada"]] and list(home["ben"].kept().values()) == [wolf], 10)
+        check("taken off, it is nobody's: the files of it go", ok)
+
         # the panels people share
         screen = "1920 1080 0 1.5 -2 1 0 0 0 2 0"
         ok = ada.ask("share 0 %s Screen 1" % screen) == "ok"
@@ -224,12 +304,14 @@ def main(program):
         # leaving, and coming back
         ok = ben.ask("leave") == "ok" and ben.state()["mode"] == "idle" and ada.until(lambda s: names(s) == ["ada"], 3)
         check("a guest who leaves is out at once, and their panel with them", ok and ada.state()["panels"] == [])
+        check("...and the files they were sent are gone", ben.until(lambda s: home["ben"].kept() == {} and files(ben) == {}, 5))
         sees.send(pose(-1.0))
         check("...and their pose goes nowhere, and their floor is lifted", mine.poses(0.3) == [] and sees.ask("floor").startswith("error you aren't in a room"))
         dee = start("dee")
         check("the room goes on: ben comes back, and someone new", let_in(ada, ben) and let_in(ada, dee) and
               all(e.until(lambda s: names(s) == ["ada", "ben", "dee"] and linked(s)) for e in (ada, ben, dee)))
         ids = {p["name"]: p["id"] for p in ada.state()["people"]}
+        check("someone who comes in later gets the file of an avatar that was on before", comes(ben, home["ben"], ids["ada"], wolf, 30) and comes(dee, home["dee"], ids["ada"], wolf, 30))
         ok = mine.ask("watch") == "ok"   # (a watcher is forgotten when it hasn't asked for a while)
         sees.send(pose(2.0))
         check("back in the room, ben's poses are passed on again, and the floor is laid afresh",
@@ -238,9 +320,11 @@ def main(program):
             w.close()
 
         # a second program
-        twin = start("twin", sock=ada.sock)
+        twin = End(program, "twin", sock=ben.sock, env=home["ben"].env)
+        ends.append(twin)
         status, out = twin.end(signal.SIGCONT)
-        check("a second ft-together on the same socket doesn't start", status == 1 and "already running" in out)
+        check("a second ft-together on the same socket doesn't start, and leaves the first one's files alone",
+              status == 1 and "already running" in out and list(home["ben"].kept().values()) == [wolf])
         twin = start("twin", port=ben.port)
         status, out = twin.end(signal.SIGCONT)
         check("...nor one on a port that is taken", status == 1 and "taken" in out)
@@ -253,6 +337,7 @@ def main(program):
         for e in (ben, dee):
             status, out = e.end()
             check("%s ends cleanly" % e.name, status == 0)
+        check("nothing of anyone's avatar is left behind by a program that ended", all(os.listdir(home[n].run) == [] for n in ("ada", "ben", "dee", "twin")))
     finally:
         for e in ends:
             status, out = e.end(signal.SIGKILL)
@@ -263,5 +348,9 @@ def main(program):
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit("usage: loopback-test.py PATH-TO-ft-together")
-    main(sys.argv[1])
+    scratch = tempfile.mkdtemp(prefix="ft-loopback-")
+    try:
+        main(sys.argv[1], scratch)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     roomkit.finish()

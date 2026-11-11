@@ -1,10 +1,10 @@
 // The links between Frames, on QUIC (msquic): session::Links for real. One connection per link,
-// with one stream for the control messages, opened by the caller, datagrams beside it, and a
-// one-way stream for each picture of a shared panel.
+// with one stream for the control messages, opened by the caller, datagrams beside it, a
+// one-way stream for each picture of a shared panel, and one for a file that was asked for.
 //
 // msquic calls back on threads of its own. Nothing of that reaches the session: what happens on
 // a link is put in a queue, and the program's one loop takes it out (fd, Next) and tells the
-// session. Call, Send, Close, Datagram and Frame are for that same loop.
+// session. Call, Send, Close, Datagram, Frame, File and AwaitFile are for that same loop.
 //
 // QUIC wants a certificate from whoever listens. Ours is made at start and names nobody, and
 // callers don't check it: who a peer is comes from Tailscale, which already encrypts the path
@@ -13,6 +13,7 @@
 
 #include "../session/session.h"
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -23,12 +24,12 @@ namespace net {
 constexpr size_t kMostDatagram = 1187;   // what a QUIC datagram carries over Tailscale (spike T3)
 
 struct Event {
-    enum Kind { kUp, kBytes, kDown, kDatagram, kFrame, kFrameLost };
+    enum Kind { kUp, kBytes, kDown, kDatagram, kFrame, kFrameLost, kFile };
     Kind kind = kDown;
     int link = -1;
     std::string address;          // kUp: the far end's, as a number
     // kBytes: the control stream's next bytes; kDatagram: one datagram; kFrame: all that one of
-    // the far end's Frame()s sent
+    // the far end's Frame()s sent; kFile: the file that was awaited, as far as it came
     std::vector<uint8_t> bytes;
     uint32_t tag = 0;             // kFrameLost: the tag of a Frame() that was given up
 };
@@ -70,6 +71,15 @@ public:
     // (proto/framewire.h), or too many are on their way already.
     bool Frame(int link, std::vector<uint8_t> bytes, uint32_t tag);
     bool Sending();             // a picture is on its way out and not yet acknowledged or given up
+    // A file to a link's far end, on a stream of its own, behind everything else the link
+    // carries. It is taken there only if that end awaits one. False when it can't be sent: the
+    // link isn't up, there is no file or one longer than may be sent (proto::kMostLook), or one
+    // is on its way on this link already.
+    bool File(int link, std::shared_ptr<const std::vector<uint8_t>> bytes);
+    // From now on the link's far end may send one file of `bytes` at most, which comes whole
+    // as kFile (0: none is taken). A file nobody awaits is refused as it starts, and so is one
+    // that goes on past what was awaited.
+    void AwaitFile(int link, size_t bytes);
 
     struct Impl;
 

@@ -1,5 +1,6 @@
 // The links between Frames, on msquic (quiclinks.h): the connections, the control stream and
-// the datagrams. The streams that carry a picture each are quicframes.cpp's.
+// the datagrams. The streams that carry a picture each are quicframes.cpp's, the ones that carry
+// a file quicfiles.cpp's.
 #include "quicimpl.h"
 
 #include "lookup.h"
@@ -46,6 +47,10 @@ QUIC_BUFFER *Copy(const std::vector<uint8_t> &bytes) {
 }
 
 QUIC_STATUS QUIC_API Nothing(HQUIC, void *, QUIC_CONNECTION_EVENT *) { return QUIC_STATUS_SUCCESS; }
+
+// What an event's bytes count against while the loop hasn't taken it: the link's pictures, or
+// the rest. A file counts against neither: the loop asked for it, one at a time.
+size_t *Queued(Conn &c, Event::Kind kind) { return kind == Event::kFile ? nullptr : kind == Event::kFrame ? &c.framesQueued : &c.queued; }
 
 }  // namespace
 
@@ -95,7 +100,7 @@ HQUIC QuicLinks::Impl::Configure(const QUIC_CREDENTIAL_CONFIG &cred, uint16_t pe
 void QuicLinks::Impl::Post(Conn &c, Event e) {
     if (c.closed || stopping) return;
     e.link = c.id;
-    (e.kind == Event::kFrame ? c.framesQueued : c.queued) += e.bytes.size() + kEventCost;
+    if (size_t *queued = Queued(c, e.kind)) *queued += e.bytes.size() + kEventCost;
     queue.push_back(std::move(e));
     const uint64_t one = 1;
     const ssize_t woke = write(wake, &one, sizeof one);
@@ -165,7 +170,7 @@ QUIC_STATUS QUIC_API QuicLinks::Impl::OnConnection(HQUIC conn, void *context, QU
     }
     case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED: {
         const HQUIC stream = ev->PEER_STREAM_STARTED.Stream;
-        if (ev->PEER_STREAM_STARTED.Flags & QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL) {   // a picture
+        if (ev->PEER_STREAM_STARTED.Flags & QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL) {   // a picture, or a file
             TakeFrameStream(impl, c, stream);
             break;
         }
@@ -311,10 +316,8 @@ bool QuicLinks::Next(Event &event) {
     }
     event = std::move(impl.queue.front());
     impl.queue.pop_front();
-    if (Conn *c = impl.Find(event.link)) {
-        size_t &queued = event.kind == Event::kFrame ? c->framesQueued : c->queued;
-        queued -= std::min(queued, event.bytes.size() + kEventCost);
-    }
+    Conn *c = impl.Find(event.link);
+    if (size_t *queued = c ? Queued(*c, event.kind) : nullptr) *queued -= std::min(*queued, event.bytes.size() + kEventCost);
     return true;
 }
 

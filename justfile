@@ -131,6 +131,15 @@ test-c:
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
       -o build/tests/together-video-test
     run together/tests/video-test.cpp build/tests/together-video-test
+    # the avatars people have on: who is asked for a file and whose is kept, and the files on this Frame
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/looks-test.cpp together/flow/looks.cpp \
+      together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
+      $(pkg-config --libs libcrypto) -o build/tests/together-looks-test
+    run together/tests/looks-test.cpp build/tests/together-looks-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/wardrobe-test.cpp together/local/wardrobe.cpp \
+      together/flow/looks.cpp together/session/session.cpp together/session/wearer.cpp together/proto/messages.cpp avatar/modelfile.cpp \
+      $(pkg-config --libs libcrypto) -o build/tests/together-wardrobe-test
+    run together/tests/wardrobe-test.cpp build/tests/together-wardrobe-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/tailnet-test.cpp together/net/tailnet.cpp \
       together/net/lookup.cpp -o build/tests/together-tailnet-test
     run together/tests/tailnet-test.cpp build/tests/together-tailnet-test
@@ -145,13 +154,14 @@ test-c:
     if [ -f together/build/libmsquic.so.2 ]; then
         quic="-Itogether/build/msquic/src/inc together/build/libmsquic.so.2 -Wl,-rpath,$PWD/together/build $(pkg-config --libs openssl) -lpthread"
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/links-test.cpp together/net/quiclinks.cpp \
-          together/net/quicframes.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
+          together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
           -o build/tests/together-links-test $quic
         run together/tests/links-test.cpp build/tests/together-links-test
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
-          together/net/quicframes.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
+          together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
           together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
-          together/flow/video.cpp together/local/watchers.cpp together/local/media.cpp -o build/tests/ft-together $quic
+          together/flow/video.cpp together/flow/looks.cpp together/local/watchers.cpp together/local/media.cpp together/local/wardrobe.cpp \
+          avatar/modelfile.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
         # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
         # video through the hardware encoder and decoder, is run by hand: together/README.md.)

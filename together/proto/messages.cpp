@@ -14,6 +14,22 @@ std::vector<uint8_t> Framed(uint16_t kind, const wire::Out &body) {
     return out.b;
 }
 
+void Put(wire::Out &out, const Look &m) {
+    out.Bytes(m.hash, kLookHash);
+    out.U32(m.size);
+}
+
+// No look is all zeros: there is one way to say it.
+bool Take(wire::In &in, Look &m) {
+    in.Take(m.hash, kLookHash);
+    m.size = in.U32();
+    if (!in.ok || m.size > kMostLook) return false;
+    if (m.size) return true;
+    for (uint8_t b : m.hash)
+        if (b) return false;
+    return true;
+}
+
 void Put(wire::Out &out, const Room &m) {
     out.Bytes(m.room, kRoomId);
     out.U32(m.turn);
@@ -26,6 +42,7 @@ void Put(wire::Out &out, const Room &m) {
         out.U8(p.away);
         for (float v : p.spot.at) out.F32(v);
         out.F32(p.spot.yaw);
+        Put(out, p.look);
     }
     out.U8(uint8_t(m.panels.size()));
     for (const Panel &p : m.panels) panelwire::Put(out, p);
@@ -46,6 +63,7 @@ bool Take(wire::In &in, Room &m) {
         p.away = in.U8();
         for (float &v : p.spot.at) v = in.F32(-kFar, kFar);
         p.spot.yaw = in.F32(-7, 7);
+        if (!Take(in, p.look)) return false;
         if (!in.ok || p.id >= kPeople || taken[p.id] || (p.away & ~(kAwayGame | kAwayOff))) return false;
         taken[p.id] = true;
     }
@@ -116,6 +134,18 @@ std::vector<uint8_t> Pack(const Watch &m) {
     return Framed(kWatch, out);
 }
 
+std::vector<uint8_t> Pack(const Look &m) {
+    wire::Out out;
+    Put(out, m);
+    return Framed(kLook, out);
+}
+
+std::vector<uint8_t> Pack(const Want &m) {
+    wire::Out out;
+    out.Bytes(m.hash, kLookHash);
+    return Framed(kWant, out);
+}
+
 std::vector<uint8_t> PackLeave() { return Framed(kLeave, wire::Out{}); }
 
 bool Read(const std::vector<uint8_t> &body, Hello &m) {
@@ -174,6 +204,18 @@ bool Read(const std::vector<uint8_t> &body, Watch &m) {
     const uint8_t fresh = in.U8();
     m.fresh = fresh == 1;
     return in.done() && m.panel < kPeople * kPanelNumbers && m.level <= kFocused && fresh <= 1;
+}
+
+bool Read(const std::vector<uint8_t> &body, Look &m) {
+    wire::In in(body.data(), body.size());
+    m = Look{};
+    return Take(in, m) && in.done();
+}
+
+bool Read(const std::vector<uint8_t> &body, Want &m) {
+    wire::In in(body.data(), body.size());
+    in.Take(m.hash, kLookHash);
+    return in.done();
 }
 
 bool Parser::Feed(const uint8_t *data, size_t n) {

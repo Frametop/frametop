@@ -1,6 +1,7 @@
 // What is behind QuicLinks (quiclinks.h): a link's connection, and the state msquic's threads
 // and the program's loop share. For net/'s own sources only: quiclinks.cpp has the connections,
-// the control stream and the datagrams, quicframes.cpp the streams that carry a picture each.
+// the control stream and the datagrams, quicframes.cpp the streams that carry a picture each,
+// quicfiles.cpp the ones that carry a file.
 #pragma once
 
 #include "quiclinks.h"
@@ -40,6 +41,9 @@ struct Conn {
     uint16_t maxDatagram = 0;
     std::vector<FrameOut *> framesOut;   // pictures sent, until their streams have shut down
     size_t framesIn = 0;                 // bytes of the pictures on their way in
+    size_t fileAwaited = 0;              // the most bytes of a file the loop awaits from the far end (0: none)
+    bool fileIn = false;                 // one is on its way in
+    int filesOut = 0;                    // ...and so many out
 };
 
 struct QuicLinks::Impl {
@@ -74,5 +78,8 @@ void TakeFrameStream(QuicLinks::Impl &impl, Conn &c, HQUIC stream);
 void GiveUpLateFrames(QuicLinks::Impl &impl, Clock::time_point now);
 // The link is gone and `c` with it: what its pictures' streams say after this is nothing of its.
 void ForgetFrames(Conn &c);
+// quicfiles.cpp, with the lock held. A one-way stream's first bytes (`ev`, its RECEIVE) say that
+// a file comes on it: it is taken if the loop awaits one, and refused if not.
+void TakeFileStream(QuicLinks::Impl &impl, Conn &c, HQUIC stream, QUIC_STREAM_EVENT *ev);
 
 }  // namespace net

@@ -7,11 +7,15 @@
 //   floor [X Z YAW]  -> where this Frame's own floor lies in the room (local/floor.h)
 //   media            -> which shared panels have a program here, and how their video goes
 //   here             -> where the others call this Frame: its address, port and name
+//   wear [NAME]      -> the avatar the wearer has on, by its model's name: the others may have
+//                       its file if it is one that may be sent (local/wardrobe.h)
+//   looks            -> what of that the others see, and where the files of their avatars are
 //
 // A datagram there that is a pose or a voice (local/datagrams.h) is the wearer's own: it goes
 // to everyone in the room, and theirs come back to whoever watches or listens. The shared panels' video comes from and
 // goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
-// between the Frames on the links, a stream a picture (flow/video.h).
+// between the Frames on the links, a stream a picture (flow/video.h). An avatar's file goes to
+// whoever in the room asks its wearer for it, on a stream too (flow/looks.h).
 //
 //   ft-together [--port N] [--name NAME] [--socket NAME] [--loopback]
 //
@@ -27,11 +31,13 @@
 //
 // One loop, one thread of ours: the links queue what msquic's threads see (net/quiclinks.h).
 #include "../conf/ftsock.h"
+#include "flow/looks.h"
 #include "flow/video.h"
 #include "local/floor.h"
 #include "local/media.h"
 #include "local/posegate.h"
 #include "local/voicegate.h"
+#include "local/wardrobe.h"
 #include "local/watchers.h"
 #include "net/quiclinks.h"
 #include "net/tailnet.h"
@@ -101,20 +107,23 @@ bool Read(int argc, char **argv, Args &args) {
     return true;
 }
 
-// The links, as the video sends its pictures on them.
-struct PictureWires : flow::Wires {
+// The links, as the video sends its pictures on them and the avatars their files.
+struct StreamWires : flow::Wires, flow::FileWires {
     net::QuicLinks &links;
-    explicit PictureWires(net::QuicLinks &l) : links(l) {}
+    explicit StreamWires(net::QuicLinks &l) : links(l) {}
     bool Frame(int link, std::vector<uint8_t> bytes, uint32_t tag) override { return links.Frame(link, std::move(bytes), tag); }
+    void Await(int link, size_t bytes) override { links.AwaitFile(link, bytes); }
+    bool File(int link, const flow::FileBytes &file) override { return links.File(link, file); }
 };
 
-// This Frame's end, once the tailnet says who we are: the links, the session on them, and the
-// shared panels' video between the links and this Frame's programs.
+// This Frame's end, once the tailnet says who we are: the links, the session on them, the
+// shared panels' video between the links and this Frame's programs, and the avatars' files.
 struct End {
     std::unique_ptr<net::QuicLinks> links;
     std::unique_ptr<session::Session> session;
-    std::unique_ptr<PictureWires> wires;
+    std::unique_ptr<StreamWires> wires;
     std::unique_ptr<flow::Video> video;
+    std::unique_ptr<flow::Looks> looks;
     std::string here;   // where the others call this Frame: "ADDRESS PORT NAME"
     bool inRoom() const { return session && (session->mode() == session::Mode::kHosting || session->mode() == session::Mode::kJoined); }
 };
@@ -128,10 +137,12 @@ struct Local {
     local::Watchers listeners{local::kVoiceToListener};
     local::Floor floor;
     local::Media media;
+    local::Wardrobe wardrobe;
+    explicit Local(const std::string &name) : wardrobe(name) {}
 };
 
 // False with nothing in `err` while Tailscale isn't up, and with the reason when it can't work.
-bool Start(const Args &args, session::Tailnet &tailnet, End &end, flow::Programs &programs, std::string &err) {
+bool Start(const Args &args, session::Tailnet &tailnet, End &end, Local &local, std::string &err) {
     session::Who who;
     net::QuicLinks::Config links;
     if (!tailnet.Self(who, links.listen)) return false;
@@ -142,9 +153,11 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, flow::Programs
     session::Config config;
     config.name = args.name.empty() ? who.name : args.name, config.port = args.port, config.dice = Dice;
     config.watched = [&end](int link, const proto::Watch &watch, double now) { end.video->Watch(link, watch, now); };
+    config.wanted = [&end](int link, const proto::Want &want, double now) { end.looks->Wanted(link, want, now); };
     end.session = std::make_unique<session::Session>(*end.links, tailnet, config);
-    end.wires = std::make_unique<PictureWires>(*end.links);
-    end.video = std::make_unique<flow::Video>(*end.session, *end.wires, programs);
+    end.wires = std::make_unique<StreamWires>(*end.links);
+    end.video = std::make_unique<flow::Video>(*end.session, *end.wires, local.media);
+    end.looks = std::make_unique<flow::Looks>(*end.session, *end.wires, local.wardrobe);
     end.here = links.listen + " " + std::to_string(args.port) + " " + config.name;
     std::printf("ft-together: %s (%s) at %s port %d\n", config.name.c_str(), who.login.c_str(), links.listen.c_str(), int(args.port));
     return true;
@@ -164,7 +177,7 @@ void Datagram(int sock, const End &end, Local &local, const net::Event &e, doubl
     }
 }
 
-// What a link saw. A picture goes to the video's rules.
+// What a link saw. A picture goes to the video's rules, a file to the avatars'.
 void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     session::Session &session = *end.session;
     switch (e.kind) {
@@ -174,10 +187,12 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
         session.Down(e.link, now);
         local.gate.Forget(e.link);
         local.voices.Forget(e.link);
+        end.looks->Down(e.link);
         break;
     case net::Event::kDatagram: Datagram(sock, end, local, e, now); break;
     case net::Event::kFrame: end.video->Frame(e.link, e.bytes.data(), e.bytes.size(), now); break;
     case net::Event::kFrameLost: end.video->Lost(e.link, e.tag, now); break;
+    case net::Event::kFile: end.looks->File(e.link, e.bytes, now); break;
     }
 }
 
@@ -207,6 +222,15 @@ void MyVoice(End &end, const uint8_t *data, size_t n) {
     for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
 }
 
+// The avatar the wearer has on, from the program that draws them. The room hears of it only if
+// it is one the others may have.
+std::string Wear(End &end, Local &local, const std::string &name, double now) {
+    proto::Look look;
+    const std::string whyNot = local.wardrobe.Wear(name, look);
+    end.session->Wear(look, now);
+    return whyNot.empty() ? "ok" : "error " + whyNot;
+}
+
 // One datagram from the local socket seen to, if one waits: a question answered, or a pose or
 // a voice sent on.
 bool Answer(int sock, End &end, Local &local, double now) {
@@ -226,6 +250,8 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = local.floor.Ask(asked, end.inRoom());
     else if (asked == "media") reply = "ok " + MediaState(end, local);
     else if (asked == "here") reply = "ok " + end.here;
+    else if (asked == "wear" || asked.rfind("wear ", 0) == 0) reply = Wear(end, local, asked.size() > 5 ? asked.substr(5) : "", now);
+    else if (asked == "looks") reply = "ok " + local.wardrobe.State(end.session->room(), end.session->me());
     else reply = session::Command(*end.session, asked, now);
     if (!end.inRoom()) local.floor.Lift();   // the room was left: the next one's floor is its own
     // an asker that doesn't wait for its answer doesn't hold up the loop
@@ -255,7 +281,7 @@ int main(int argc, char **argv) {
     else tailnet = std::make_unique<net::Tailscale>();
 
     End end;
-    Local local;
+    Local local(args.socket);   // (after the socket was bound: no other ft-together has this name's folder)
     if (!local.media.Listen(args.socket + "_media"))
         return std::fprintf(stderr, "ft-together: listen @%s_media: %s\n", args.socket.c_str(), std::strerror(errno)), 1;
     std::vector<pollfd> fds;
@@ -267,7 +293,7 @@ int main(int argc, char **argv) {
         if (!end.session && now - tried >= kRetryS) {
             tried = now;
             std::string err;
-            if (!Start(args, *tailnet, end, local.media, err)) {
+            if (!Start(args, *tailnet, end, local, err)) {
                 if (!err.empty()) return std::fprintf(stderr, "ft-together: %s\n", err.c_str()), 1;
                 if (!waiting) std::printf("ft-together: waiting for Tailscale\n");
                 waiting = true;
@@ -293,6 +319,7 @@ int main(int argc, char **argv) {
         if (end.session && now - ticked >= 1) {
             ticked = now;
             end.session->Tick(now);
+            end.looks->Tick(now);
         }
         if (end.session && end.session->note() != note) {
             note = end.session->note();

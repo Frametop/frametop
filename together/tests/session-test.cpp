@@ -1,8 +1,8 @@
 // A Frametop Together session's rules and its commands (together/session), several sessions run against
 // each other on a network made in the test (fakenet.h).
 // Invites, asking and being let in or not, a full room, the guests' own links, leaving, a lost
-// owner, another version, the panels people share and who watches them, and people who say what
-// they may not. No sockets, no clock.
+// owner, another version, the panels people share and who watches them, the avatars they have
+// on, and people who say what they may not. No sockets, no clock.
 #include "../room/panels.h"
 #include "fakenet.h"
 
@@ -394,6 +394,93 @@ static void panels() {
 
 // Noise on every kind of link: nothing crashes (the sanitizers watch), and the owner's room
 // only ever holds the people it let in.
+static proto::Look look(uint8_t seed, uint32_t size) {
+    proto::Look l;
+    l.size = size;
+    for (size_t k = 0; k < proto::kLookHash; ++k) l.hash[k] = uint8_t(seed + k);
+    return l;
+}
+
+// The avatars people have on: the room says whose is which, and a file is asked of its wearer.
+static void looks() {
+    Net net;
+    Frame a(net, "100.64.0.1", 47193, "Ann"), b(net, "100.64.0.2", 47193, "Bo"), c(net, "100.64.0.3", 47193, "Cy");
+    const proto::Look fox = look(1, 3u << 20), owl = look(90, 5000), cat = look(170, 70000);
+    const auto has = [](Frame &f, int person, const proto::Look &l) { return f.s->room().person(person) && proto::SameLook(f.s->room().person(person)->look, l); };
+    bool ok = a.s->Wear(fox, net.now).empty() && b.s->Wear(owl, net.now).empty() && idle(a) && proto::SameLook(a.s->look(), fox);
+    ok = ok && a.ask("open") == "ok" && has(a, 0, fox) && join(a, b) && has(a, 0, fox) && has(b, 0, fox) && has(a, 1, owl) && has(b, 1, owl);
+    check("what someone had on before a room is in it from the start: an owner's, and a guest's", ok);
+    net.wait(session::Session::kLookEveryS + 1);
+    ok = join(a, c) && has(c, 0, fox) && has(c, 1, owl) && has(c, 2, proto::Look{}) && c.s->MemberLinks().size() == 2;
+    check("someone with no avatar to send has none in the room, and sees the others'", ok);
+    net.now += 10;
+    ok = c.s->Wear(cat, net.now).empty();
+    net.pump();
+    ok = ok && has(a, 2, cat) && has(b, 2, cat) && has(c, 2, cat) && a.s->Wear(owl, net.now).empty();
+    net.pump();
+    check("a change reaches everyone: a guest's through the owner, an owner's at once", ok && has(b, 0, owl) && has(c, 0, owl));
+    const uint32_t turn = a.s->room().turn;
+    ok = c.s->Wear(cat, net.now).empty() && a.s->Wear(owl, net.now).empty();
+    net.wait(5);
+    check("...and what didn't change isn't said again", ok && a.s->room().turn == turn);
+    ok = b.s->Wear(proto::Look{}, net.now + 1).empty();
+    net.pump();
+    proto::Look big = fox;
+    big.size = proto::kMostLook + 1;
+    check("an avatar taken off is off for everyone, and one too large to send isn't put on", ok && has(a, 1, proto::Look{}) && has(c, 1, proto::Look{}) && !b.s->Wear(big, net.now).empty() && b.s->look().none());
+
+    // a guest's word that the owner's room doesn't have yet is said again, not flooded
+    net.now += 10;
+    net.tamper = [](Net::Event &e) {
+        proto::Parser parser;
+        uint16_t kind = 0;
+        std::vector<uint8_t> body;
+        if (e.what == Net::Event::kBytes && parser.Feed(e.bytes.data(), e.bytes.size()) && parser.Next(kind, body) && kind == proto::kLook) e.bytes.clear();
+    };
+    ok = b.s->Wear(fox, net.now).empty();
+    net.pump();
+    ok = ok && has(a, 1, proto::Look{});
+    net.tamper = nullptr;
+    net.wait(session::Session::kLookEveryS + 1);
+    check("a guest whose word got lost says it again until the room has it", ok && has(a, 1, fox) && has(c, 1, fox));
+    for (int i = 0; i < 40; ++i) b.s->Wear(i % 2 ? owl : cat, net.now), net.pump();
+    net.wait(session::Session::kLookEveryS + 1);
+    check("someone who changes avatars all the time stays in the room: their own end holds the words back", b.s->mode() == session::Mode::kJoined && has(a, 1, owl) && a.s->room().people.size() == 3);
+
+    // asking for a file
+    ok = b.s->Want(0, owl).empty() && c.s->Want(1, owl).empty() && a.s->Want(2, cat).empty();
+    net.pump();
+    ok = ok && a.wants.size() == 1 && a.s->PersonOn(a.wants[0].first) == 1 && !std::memcmp(a.wants[0].second.hash, owl.hash, proto::kLookHash);
+    ok = ok && b.wants.size() == 1 && b.s->PersonOn(b.wants[0].first) == 2 && c.wants.size() == 1 && c.s->PersonOn(c.wants[0].first) == 0;
+    check("a file is asked of the one who has it on, on the link to them: guest to owner, guest to guest, owner to guest", ok);
+    Frame d(net, "100.64.0.4", 47193, "Di");
+    check("...not of oneself, of nobody, or by someone in no room", !b.s->Want(1, owl).empty() && !b.s->Want(3, owl).empty() && !d.s->Want(0, owl).empty() && !d.s->Want(-1, owl).empty());
+
+    // what may not be said
+    for (int link : b.s->MemberLinks())
+        if (b.s->PersonOn(link) == 2) b.Send(link, proto::Pack(fox));   // to another guest: only the owner keeps the room
+    net.pump();
+    ok = c.s->mode() == session::Mode::kJoined && b.s->mode() == session::Mode::kJoined && has(c, 1, owl);
+    net.wait(session::Session::kMeshRetryS + 1);
+    check("a guest who tells another guest what it has on loses that link, not the room", ok && b.s->MemberLinks().size() == 2);
+    net.now += 60;
+    size_t before = a.wants.size();
+    for (int i = 0; i < 20; ++i)
+        for (int link : b.s->MemberLinks())
+            if (b.s->PersonOn(link) == 0) b.Send(link, proto::Pack(proto::Want{}));
+    net.pump();
+    ok = a.wants.size() - before == size_t(session::Session::kLookWordsAtOnce) && a.s->room().people.size() == 2 && !a.s->room().person(1);
+    check("a flood of words about avatars: a few are heard, then its sender is out of the room", ok && idle(b));
+    Net::End s = net.stranger(a, "100.64.0.66");
+    net.say(s, proto::Pack(fox));
+    before = a.wants.size();
+    Net::End s2 = net.stranger(a, "100.64.0.66");
+    net.say(s2, proto::Pack(proto::Want{}));
+    check("a stranger's words about avatars are a stranger's: dropped, unheard", net.shut.count(s.link) && net.shut.count(s2.link) && a.wants.size() == before);
+    ok = a.ask("leave") == "ok" && idle(c) && proto::SameLook(c.s->look(), cat) && c.ask("open") == "ok" && has(c, 0, cat);
+    check("after a room, the next one has what its wearer still has on", ok);
+}
+
 static void noise() {
     bool ok = true;
     for (int round = 0; round < 300; ++round) {
@@ -445,6 +532,7 @@ int main() {
     strangers();
     knocks();
     panels();
+    looks();
     noise();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;

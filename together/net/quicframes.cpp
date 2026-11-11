@@ -6,9 +6,13 @@
 // What comes in is bounded: so many streams at once (kMostFrameStreams, which msquic holds the
 // far end to), so many bytes a stream and on their way in on a link in all. A stream past that
 // is refused, which its sender sees as a picture given up.
+//
+// Every one-way stream the far end opens starts here. One whose first byte says it carries a
+// file is handed to quicfiles.cpp.
 #include "quicimpl.h"
 
 #include "../proto/framewire.h"
+#include "../proto/messages.h"
 
 #include <algorithm>
 
@@ -87,7 +91,16 @@ QUIC_STATUS QUIC_API OnFrameIn(HQUIC stream, void *context, QUIC_STREAM_EVENT *e
     case QUIC_STREAM_EVENT_RECEIVE: {
         if (f.refused) break;
         size_t more = 0;
-        for (uint32_t i = 0; i < ev->RECEIVE.BufferCount; ++i) more += ev->RECEIVE.Buffers[i].Length;
+        const uint8_t *first = nullptr;
+        for (uint32_t i = 0; i < ev->RECEIVE.BufferCount; ++i) {
+            if (!first && ev->RECEIVE.Buffers[i].Length) first = ev->RECEIVE.Buffers[i].Buffer;
+            more += ev->RECEIVE.Buffers[i].Length;
+        }
+        if (f.bytes.empty() && first && *first == proto::kLookStream) {   // not a picture: a file
+            TakeFileStream(impl, c, stream, ev);
+            delete &f;
+            return QUIC_STATUS_SUCCESS;
+        }
         if (c.closed || f.bytes.size() + more > kMostStream || c.framesIn + more > kMostFramesIn) {
             f.refused = true;
             forget();

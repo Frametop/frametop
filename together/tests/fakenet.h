@@ -25,6 +25,8 @@ struct Frame : session::Links, session::Tailnet {
     std::vector<std::string> called;   // every host it called
     std::vector<std::pair<int, proto::Watch>> watches;   // what the room's people said they have of its panels, and on which link
     std::function<void(int link, const proto::Watch &watch, double now)> onWatch;   // ...told here too, when set
+    std::vector<std::pair<int, proto::Want>> wants;      // the avatars' files its people asked it for, and on which link
+    std::function<void(int link, const proto::Want &want, double now)> onWant;
 
     Frame(Net &n, const std::string &address, uint16_t port, const std::string &name);
     int Call(const std::string &host, uint16_t port) override;
@@ -133,6 +135,10 @@ inline Frame::Frame(Net &n, const std::string &at, uint16_t p, const std::string
     c.watched = [this](int link, const proto::Watch &w, double now) {
         watches.push_back({link, w});
         if (onWatch) onWatch(link, w, now);
+    };
+    c.wanted = [this](int link, const proto::Want &w, double now) {
+        wants.push_back({link, w});
+        if (onWant) onWant(link, w, now);
     };
     s = std::make_unique<session::Session>(*this, *this, c);
     net.frames.push_back(this);

@@ -31,6 +31,10 @@ static proto::Room room3() {
         p.id = uint8_t(i == 2 ? 3 : i), p.name = names[i], p.login = std::string("user") + char('a' + i) + "@example.com";
         p.address = "100.64.0." + std::to_string(i + 1), p.port = uint16_t(47193 + i), p.away = uint8_t(i == 1 ? proto::kAwayGame : 0);
         p.spot.at[0] = 0.9f * float(i), p.spot.at[2] = -0.25f, p.spot.yaw = 0.5f;
+        if (i == 1) {   // the one who has an avatar on that the others may have
+            p.look.size = 3u << 20;
+            for (size_t k = 0; k < proto::kLookHash; ++k) p.look.hash[k] = uint8_t(200 - k);
+        }
         r.people.push_back(p);
     }
     for (int i = 0; i < 2; ++i) {   // the owner's first panel, and the second of the guest in place 3
@@ -56,7 +60,7 @@ static bool same(const proto::Room &a, const proto::Room &b) {
     for (size_t i = 0; ok && i < a.people.size(); ++i) {
         const proto::Person &p = a.people[i], &q = b.people[i];
         ok = p.id == q.id && p.name == q.name && p.login == q.login && p.address == q.address && p.port == q.port && p.away == q.away &&
-             !std::memcmp(p.spot.at, q.spot.at, sizeof p.spot.at) && p.spot.yaw == q.spot.yaw;
+             !std::memcmp(p.spot.at, q.spot.at, sizeof p.spot.at) && p.spot.yaw == q.spot.yaw && proto::SameLook(p.look, q.look);
     }
     ok = ok && a.panels.size() == b.panels.size();
     for (size_t i = 0; ok && i < a.panels.size(); ++i) ok = same(a.panels[i], b.panels[i]);
@@ -132,6 +136,8 @@ static void messages() {
     refused("...with someone standing a mile away", [](proto::Room &x) { x.people[1].spot.at[0] = 1609; });
     refused("...or nowhere", [](proto::Room &x) { x.people[1].spot.yaw = std::numeric_limits<float>::quiet_NaN(); });
     refused("...or at infinity", [](proto::Room &x) { x.people[2].spot.at[1] = -std::numeric_limits<float>::infinity(); });
+    refused("...with an avatar larger than one may be", [](proto::Room &x) { x.people[1].look.size = proto::kMostLook + 1; });
+    refused("...or an avatar of no size that still has a hash", [](proto::Room &x) { x.people[1].look.size = 0; });
     // text is cleaned on the way out, so a name that isn't text has to be written by hand
     std::vector<uint8_t> raw = body(proto::Pack(r));
     const size_t name = proto::kRoomId + 4 + 1 + 1 + 1 + 1;   // the first person's name, after its length
@@ -271,6 +277,41 @@ static void panels() {
     check("noise and damaged panels are refused or read as a panel within every bound", ok && read > 0);
 }
 
+static void looks() {
+    proto::Look l, l2;
+    l.size = proto::kMostLook;
+    for (size_t k = 0; k < proto::kLookHash; ++k) l.hash[k] = uint8_t(k * 5 + 3);
+    bool ok = proto::Read(body(proto::Pack(l)), l2) && proto::SameLook(l, l2) && !l2.none();
+    check("what someone has on comes back, the largest one too, and no avatar is no avatar", ok && proto::Read(body(proto::Pack(proto::Look{})), l2) && l2.none());
+    l.size += 1;
+    ok = !proto::Read(body(proto::Pack(l)), l2);
+    l.size = 0;
+    check("an avatar larger than one may be is refused, and one of no size with a hash", ok && !proto::Read(body(proto::Pack(l)), l2));
+    proto::Want w, w2;
+    std::memcpy(w.hash, l.hash, proto::kLookHash);
+    check("a want comes back", proto::Read(body(proto::Pack(w)), w2) && !std::memcmp(w.hash, w2.hash, proto::kLookHash));
+    l.size = 9;
+    const std::vector<uint8_t> whole[2] = {body(proto::Pack(l)), body(proto::Pack(w))};
+    ok = true;
+    for (int which = 0; which < 2; ++which) {
+        const auto reads = [&](const std::vector<uint8_t> &m) { return which == 0 ? proto::Read(m, l2) : proto::Read(m, w2); };
+        ok = ok && reads(whole[which]);
+        for (size_t n = 0; n < whole[which].size(); ++n) ok = ok && !reads(std::vector<uint8_t>(whole[which].begin(), whole[which].begin() + long(n)));
+        std::vector<uint8_t> more = whole[which];
+        more.push_back(0);
+        ok = ok && !reads(more);
+    }
+    check("each cut short anywhere, or with more after it, is refused", ok);
+    ok = true;
+    for (int i = 0; i < 100000; ++i) {
+        std::vector<uint8_t> noise(proto::kLookHash + 4);
+        for (uint8_t &b : noise) b = uint8_t(roll());
+        if (i % 2) noise[proto::kLookHash + 3] = 0;   // a size that could be one
+        if (proto::Read(noise, l2)) ok = ok && l2.size > 0 && l2.size <= proto::kMostLook;
+    }
+    check("noise is refused or read as an avatar within the limit", ok);
+}
+
 static void parser() {
     const proto::Room r = room3();
     proto::Hello h;
@@ -392,6 +433,7 @@ int main() {
     texts();
     messages();
     panels();
+    looks();
     parser();
     poses();
     std::printf("%s\n", failed ? "FAILED" : "all ok");

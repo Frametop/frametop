@@ -25,7 +25,7 @@ constexpr size_t kMostName = 48, kMostLogin = 96, kMostAddress = 45, kMostCode =
 constexpr float kFar = 100;        // metres from the room's middle: nothing is further
 static_assert(kPanelFar == kFar, "a panel is no further than a person");
 
-enum Kind : uint16_t { kHello = 1, kWelcome = 2, kRefuse = 3, kRoom = 4, kAway = 5, kLeave = 6, kPanel = 7, kUnpanel = 8, kWatch = 9 };
+enum Kind : uint16_t { kHello = 1, kWelcome = 2, kRefuse = 3, kRoom = 4, kAway = 5, kLeave = 6, kPanel = 7, kUnpanel = 8, kWatch = 9, kLook = 10, kWant = 11 };
 
 // Why someone isn't let in. The numbers and Refuse's layout stay as they are in every version,
 // so that a peer on another one can still be told to update.
@@ -38,6 +38,20 @@ struct Spot {
     float at[3] = {0, 0, 0};
     float yaw = 0;
 };
+
+// The avatar someone has on, as the others may ask them for it: its model file's size and
+// SHA-256. No size is no avatar to send, and they are drawn as the abstract figure. The file
+// itself goes on a one-way stream of its own, whose first byte is kLookStream (framewire.h has a
+// picture's), to whoever asked its wearer with a Want.
+constexpr size_t kLookHash = 32;
+constexpr uint32_t kMostLook = 24u << 20;   // a model file's bytes: a larger one isn't sent, asked for or taken
+constexpr uint8_t kLookStream = 3;
+struct Look {
+    uint8_t hash[kLookHash] = {};
+    uint32_t size = 0;
+    bool none() const { return size == 0; }
+};
+inline bool SameLook(const Look &a, const Look &b) { return a.size == b.size && !std::memcmp(a.hash, b.hash, kLookHash); }
 
 // The first message each way. A caller with an invite sends its code; one who is in the room
 // already (two guests linking up) names the room.
@@ -54,6 +68,7 @@ struct Person {
     uint16_t port = 0;
     uint8_t away = 0;
     Spot spot;
+    Look look;
 };
 
 // The room as its owner has it. `turn` counts its changes: a guest keeps the newest. The panels
@@ -97,6 +112,12 @@ struct Unpanel {
     uint8_t panel = 0;
 };
 
+// A look's file is asked of the one who has it on, on the link to them: the Look is a guest's
+// word to the room's owner on what they have on (the owner's next Room has it).
+struct Want {
+    uint8_t hash[kLookHash] = {};
+};
+
 // What a viewer has of a panel, to the Frame that sends it: whether they look at it, and
 // whether their decoder needs a keyframe to go on.
 constexpr uint8_t kHidden = 0, kInView = 1, kFocused = 2;
@@ -115,11 +136,13 @@ std::vector<uint8_t> Pack(const Away &m);
 std::vector<uint8_t> Pack(const Panel &m);
 std::vector<uint8_t> Pack(const Unpanel &m);
 std::vector<uint8_t> Pack(const Watch &m);
+std::vector<uint8_t> Pack(const Look &m);
+std::vector<uint8_t> Pack(const Want &m);
 std::vector<uint8_t> PackLeave();
 
 // A message's body read. False when it isn't one: too short or too long, a count or a number
 // out of bounds, text that isn't text, two people in one place, a panel of someone who isn't
-// in the room. A Hello of another version reads as far as its version and is true: the rest of
+// in the room, a look larger than one may be or a hash with no size. A Hello of another version reads as far as its version and is true: the rest of
 // it is not ours to understand.
 bool Read(const std::vector<uint8_t> &body, Hello &m);
 bool Read(const std::vector<uint8_t> &body, Welcome &m);
@@ -129,6 +152,8 @@ bool Read(const std::vector<uint8_t> &body, Away &m);
 bool Read(const std::vector<uint8_t> &body, Panel &m);
 bool Read(const std::vector<uint8_t> &body, Unpanel &m);
 bool Read(const std::vector<uint8_t> &body, Watch &m);
+bool Read(const std::vector<uint8_t> &body, Look &m);
+bool Read(const std::vector<uint8_t> &body, Want &m);
 
 // A control stream's bytes cut back into messages.
 class Parser {

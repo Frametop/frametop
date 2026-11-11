@@ -10,6 +10,8 @@ Questions, one datagram each on @ft_roompanels:
   share N      screen N of this desktop goes into the room -> "ok K" (your panel K)
   unshare N    and is taken back
   state        -> "ok " and {"room", "floor", "shares", "panels"} as JSON
+  panels       -> "ok COUNT ID:SCREEN:WxH ...": the screen here that shows each of the room's
+                  panels, and its picture's shape (ft-roompoints asks)
 
   --socket NAME     its own socket's name (ft_roompanels)
   --together NAME   ft-together's (ft_together)
@@ -36,9 +38,11 @@ def answer(keeper, text):
     words = text.split()
     if words == ["state"]:
         return "ok " + keeper.state()
+    if words == ["panels"]:
+        return keeper.panels()
     if len(words) == 2 and words[0] in ("share", "unshare") and words[1].isdigit() and len(words[1]) < 4:
         return (keeper.share if words[0] == "share" else keeper.unshare)(int(words[1]))
-    return "error share N | unshare N | state"
+    return "error share N | unshare N | state | panels"
 
 
 def main():

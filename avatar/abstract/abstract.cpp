@@ -14,8 +14,6 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
-// Told apart at a glance, and by someone who doesn't see red from green.
-const float kColour[kColours][3] = {{0.16f, 0.66f, 0.72f}, {0.94f, 0.58f, 0.20f}, {0.60f, 0.47f, 0.90f}, {0.90f, 0.40f, 0.56f}};
 const float kVisor[3] = {0.07f, 0.08f, 0.10f};
 
 // The skeleton: bodyfile's rules (feet on y = 0, facing -z, the right hand at +x).
@@ -101,8 +99,6 @@ void Hand(bodyfile::Body &b, bool right) {
 }
 
 }  // namespace
-
-const float *Colour(int place) { return kColour[((place % kColours) + kColours) % kColours]; }
 
 bodyfile::Body Body(int place) {
     bodyfile::Body b;

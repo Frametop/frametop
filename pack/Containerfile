@@ -125,13 +125,13 @@ RUN hands/rec/build.sh \
 # avatar/build/, where Settings runs it from.
 RUN avatar/build.sh \
  && test -x avatar/build/ft-model-import
-# Frametop Together: this Frame's end of a shared room, the two panel programs and the
-# room's voices, with msquic beside them (built from the commit together/build.sh pins). They
+# Frametop Together: this Frame's end of a shared room, the two panel programs, the room's
+# voices and the others' pointers, with msquic beside them (built from the commit together/build.sh pins). They
 # stay in together/build/, where their units and ft-screens run them from; msquic's source and
 # its build go.
 RUN together/build.sh \
  && test -x together/build/ft-together && test -x together/build/ft-sharepanel \
- && test -x together/build/ft-peerpanel && test -x together/build/ft-roomvoice \
+ && test -x together/build/ft-peerpanel && test -x together/build/ft-roomvoice && test -x together/build/ft-roompoints \
  && test -f together/build/libmsquic.so.2 \
  && rm -rf together/build/msquic together/build/msquic-out
 

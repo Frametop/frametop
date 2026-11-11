@@ -345,6 +345,84 @@ class Mine(KeeperCase):
                          (True, [{"screen": 2, "panel": 0, "told": True}], [{"id": 2, "screen": 116, "placed": True}]))
 
 
+class Panels(KeeperCase):
+    """What ft-roompoints asks: the screen here that shows each of the room's panels."""
+
+    def setUp(self):
+        super().setUp()
+        self.together.floor = (0.0, -4.0, math.pi)
+        self.ticks(1)
+
+    def test_with_nothing_shared_there_are_none(self):
+        self.assertEqual(self.keeper.panels(), "ok 0")
+
+    def test_someone_elses_is_the_remote_screen_it_stands_on_with_its_videos_shape(self):
+        self.together.panel(2, size=(1408, 792))
+        self.together.panel(19, size=(640, 1136))
+        self.ticks()
+        self.assertEqual(self.keeper.panels(), "ok 2 2:116:1408x792 19:115:640x1136")
+
+    def test_one_that_is_not_placed_yet_is_not_told(self):
+        self.together.panel(2)
+        taken = Screens.__call__
+        self.screens.__class__ = type("NoPose", (Screens,), {"__call__": lambda s, text: "error busy" if text.startswith("pose") else taken(s, text)})
+        self.ticks()
+        self.assertEqual((sorted(self.screens.remotes), self.keeper.panels()), ([116], "ok 0"))
+        self.screens.__class__ = Screens
+        self.ticks()
+        self.assertEqual(self.keeper.panels(), "ok 1 2:116:1280x720")
+
+    def test_a_screen_of_mine_is_the_screen_itself_as_large_as_the_desktop_has_it(self):
+        self.assertEqual((self.keeper.share(2), self.keeper.share(1)), ("ok 0", "ok 1"))
+        self.assertEqual(self.keeper.panels(), "ok 0")   # the room doesn't have them yet
+        self.ticks()
+        self.assertEqual(self.together.panels[9]["size"], [1920, 800])   # the video's size, not the screen's
+        self.assertEqual(self.keeper.panels(), "ok 2 8:2:1920x1080 9:1:3440x1440")
+
+    def test_one_ft_together_did_not_take_is_not_told(self):
+        self.together.there = False
+        self.keeper.share(1)
+        self.ticks(2)
+        self.assertEqual(self.keeper.panels(), "ok 0")
+
+    def test_what_an_earlier_one_shared_under_the_same_number_is_not_mine_until_the_room_has_it_from_me(self):
+        self.together.panel(8, size=(1280, 720))
+        del self.screens.at[1]   # where the screen stands isn't known, so the room isn't told of it
+        self.keeper.share(1)
+        self.ticks()
+        self.assertEqual((self.keeper.told, self.keeper.panels()), ({}, "ok 0"))
+
+    def test_mine_and_theirs_together(self):
+        self.together.panel(2)
+        self.keeper.share(1)
+        self.ticks()
+        self.assertEqual(self.keeper.panels(), "ok 2 8:1:3440x1440 2:116:1280x720")
+
+    def test_taken_back_it_is_gone_at_once(self):
+        self.keeper.share(1)
+        self.keeper.share(2)
+        self.ticks()
+        self.keeper.unshare(1)
+        self.assertEqual(self.keeper.panels(), "ok 1 9:2:1920x1080")
+        self.ticks()
+        self.assertEqual(self.keeper.panels(), "ok 1 9:2:1920x1080")
+
+    def test_a_panel_that_left_the_room_is_gone(self):
+        self.together.panel(2)
+        self.ticks()
+        del self.together.panels[2]
+        self.ticks()
+        self.assertEqual(self.keeper.panels(), "ok 0")
+
+    def test_out_of_the_room_there_are_none(self):
+        self.together.panel(2)
+        self.keeper.share(1)
+        self.ticks()
+        self.together.mode, self.together.panels = "idle", {}
+        self.ticks()
+        self.assertEqual(self.keeper.panels(), "ok 0")
+
+
 class Leaving(KeeperCase):
     def setUp(self):
         super().setUp()

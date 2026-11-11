@@ -176,6 +176,9 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/local-test.cpp together/local/watchers.cpp \
       together/local/inputs.cpp -o build/tests/together-local-test
     run together/tests/local-test.cpp build/tests/together-local-test
+    # where the others point: which word stands, which panel here shows the room's, where on it, and the mark's picture
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/points-test.cpp -o build/tests/together-points-test
+    run together/tests/points-test.cpp build/tests/together-points-test
     # the room's voices: the jitter buffer, where a voice is heard from, the Opus codec and the mix
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/voice-test.cpp together/voice/codec.cpp \
       together/voice/voices.cpp -lopus -o build/tests/together-voice-test
@@ -204,11 +207,23 @@ test-c:
         run together/tests/roomcontrol-test.py python3 together/tests/roomcontrol-test.py build/tests/ft-together
         # ft-roominput next to one of them, with stand-ins for ft-roompanels and ft-screens
         run together/tests/roominput-test.py python3 together/tests/roominput-test.py build/tests/ft-together
+        # ft-roompoints at one of three of them, with a stand-in for ft-roompanels. It draws through
+        # SteamVR, so it wants OpenVR's header (together/build.sh fetches it) and library to build;
+        # with --probe it draws nothing.
+        openvr=${OPENVR_LIB:-/opt/steamvr/bin/linuxarm64}
+        if [ -f together/build/include/openvr.h ] && [ -f "$openvr/libopenvr_api.so" ]; then
+            g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -isystem together/build/include together/ft-roompoints.cpp \
+              together/points/asker.cpp together/points/dots.cpp -L"$openvr" -lopenvr_api -Wl,-rpath,"/opt/steamvr/bin/linuxarm64:$openvr" \
+              -o build/tests/ft-roompoints
+            run together/tests/roompoints-test.py python3 together/tests/roompoints-test.py build/tests/ft-together build/tests/ft-roompoints
+        else
+            echo "together/tests/roompoints-test.py: SKIPPED: no together/build/include/openvr.h or no libopenvr_api.so in $openvr"
+        fi
         # ft-peerpanel's hand without its decoder, from one of them to the other's desktop
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
         run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

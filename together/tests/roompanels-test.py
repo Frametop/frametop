@@ -111,6 +111,9 @@ def main():
         check("ben shares his screen 2", ben.ask("share 2") == "ok 0")
         check("ada's ft-screens has a panel for it", ada.until(lambda s: s.remotes.get(116) == ["peer-8", "1920x1080"] and "curve" in s.panels[116]))
         check("standing where ben's screen stands", stands(ada, 116, ben, 2))
+        check("each ft-roompanels says which screen here shows each of the room's panels, its own as large as the desktop has it",
+              ada.end.until(lambda s: ada.ask("panels") == "ok 2 0:1:3440x1440 8:116:1920x1080")
+              and ben.end.until(lambda s: ben.ask("panels") == "ok 2 8:2:1920x1080 0:116:1920x800"))
 
         with ada.lock:
             ada.screens.at[1] = (0.8, 1.2, -1.5)

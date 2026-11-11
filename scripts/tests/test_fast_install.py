@@ -163,6 +163,9 @@ class Paths(unittest.TestCase):
                                           roots), {'together', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-input.service', ['python3', '/r/0.1/together/ft-roominput'],
                                           roots), {'together', 'conf'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-points.service',
+                                          ['/r/0.1/scripts/in-box', '/r/0.1/together/build/ft-roompoints'],
+                                          roots), {'together'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-people.service',
                                           ['/r/0.1/scripts/in-box', '/r/0.1/screens/build/ft-avatars', '--room'],
                                           roots), {'screens'})

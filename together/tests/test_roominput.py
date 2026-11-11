@@ -37,7 +37,7 @@ class Reading(unittest.TestCase):
     def test_which_screen_a_panel_is(self):
         self.assertEqual(giver.shared(panels([(2, 0, True), (1, 1, True), (3, 2, False)])), {0: 2, 1: 1})   # one the room doesn't have yet is none
         self.assertEqual(giver.shared(panels([])), {})
-        for other in (None, "", "ok", "error share N | unshare N | state", "ok {", "ok []", 'ok {"shares": 1}', 'ok {"shares": [1]}',
+        for other in (None, "", "ok", "error share N | unshare N | state | panels", "ok {", "ok []", 'ok {"shares": 1}', 'ok {"shares": [1]}',
                       'ok {"shares": [{"screen": 1}]}', 'ok {"shares": [{"screen": "x", "panel": 0, "told": true}]}', 'ok {"shares": [{"screen": 1, "panel": 0}]}'):
             self.assertEqual(giver.shared(other), {}, other)
         self.assertEqual(giver.shared('ok {"shares": [{"screen": 1, "panel": 0, "told": 1}]}'), {}, "told is true or it isn't")

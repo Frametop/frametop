@@ -8,13 +8,9 @@
 #pragma once
 
 #include "../bodyfile.h"
+#include "colour.h"
 
 namespace abstract {
-
-constexpr int kColours = 4;   // one for each place in a room
-
-// The colour of place `place` (any number: they go round), red, green and blue, 0 to 1.
-const float *Colour(int place);
 
 // The body, in the colour of `place`. It is valid (bodyfile::Valid).
 bodyfile::Body Body(int place);

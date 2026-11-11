@@ -9,6 +9,8 @@
 #                                 remote displays' (stream/iris.h), whose header wants OpenVR's
 #   together/build/ft-roomvoice  the room's voices: sends the wearer's to the others and plays
 #                                 theirs, each from where their head is (Opus, PulseAudio)
+#   together/build/ft-roompoints  draws where the others point, on the panels they point at
+#                                 (SteamVR overlays)
 # ft-roompanels, which keeps the two panel programs in step with the room, is a script
 # (together/ft-roompanels).
 # and with --spikes, the programs that measured what the design stands on:
@@ -58,11 +60,12 @@ g++ $flags -Wno-unused-function -Wno-unused-parameter $OPENVR_CFLAGS $(pkg-confi
 g++ $flags $(pkg-config --cflags opus libpulse-simple) -o build/ft-roomvoice ft-roomvoice.cpp voice/codec.cpp voice/voices.cpp \
   voice/sender.cpp voice/player.cpp voice/headask.cpp voice/pulse.cpp ../avatar/room/client.cpp ../avatar/room/people.cpp \
   $(pkg-config --libs opus libpulse-simple) -lpthread
-strip --strip-unneeded build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice
-[ $spikes = 1 ] || { echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice"; exit 0; }
+g++ $flags $OPENVR_CFLAGS -o build/ft-roompoints ft-roompoints.cpp points/asker.cpp points/dots.cpp $OPENVR_LIBS
+strip --strip-unneeded build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints
+[ $spikes = 1 ] || { echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints"; exit 0; }
 g++ $flags $(pkg-config --cflags gbm) -o build/ft-enctest spike/ft-enctest.cpp media/irisenc.cpp \
   $(pkg-config --libs gbm) -lpthread
 g++ $flags -o build/ft-quictest spike/ft-quictest.cpp net/selfcert.cpp $quic \
   $(pkg-config --libs openssl) -lpthread
 strip --strip-unneeded build/ft-enctest build/ft-quictest
-echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-enctest build/ft-quictest"'
+echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints build/ft-enctest build/ft-quictest"'

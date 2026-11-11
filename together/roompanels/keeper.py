@@ -89,6 +89,7 @@ class Keeper:
         self.wishes = {}     # screen number -> slot: what this Frame's person shares
         self.told = {}       # slot -> the "share" the room has from us
         self.shown = {}      # a peer's panel id -> [its remote screen, the room's panel as placed]
+        self.mine = {}       # the room's id of a panel of ours -> (its screen, the screen's (width, height))
         self.in_room = False
         self.floor = None
         self.tidy = False    # nothing of an earlier room is left in ft-screens
@@ -118,6 +119,7 @@ class Keeper:
             return f"error screen {number} isn't shared"
         slot = self.wishes.pop(number)
         self.told.pop(slot, None)
+        self.mine = {ident: m for ident, m in self.mine.items() if m[0] != number}
         self.together(f"unshare {slot}")
         self.screens(f"share {number} stop")
         return "ok"
@@ -127,6 +129,15 @@ class Keeper:
             "room": self.in_room, "floor": self.floor,
             "shares": [{"screen": n, "panel": k, "told": k in self.told} for n, k in sorted(self.wishes.items())],
             "panels": [{"id": i, "screen": s[0], "placed": s[1] is not None} for i, s in sorted(self.shown.items())]})
+
+    def panels(self):
+        """What ft-roompoints asks, to draw where the others point: "ok COUNT ID:SCREEN:WxH ...",
+        the screen here that shows each of the room's panels, and its picture's shape. This
+        Frame's own shared screens are as large as the desktop has them (the panel here is the
+        screen, not its video); the others' panels are the remote screens they stand on."""
+        entries = [f"{ident}:{number}:{size[0]}x{size[1]}" for ident, (number, size) in sorted(self.mine.items())]
+        entries += [f"{ident}:{s[0]}:{s[1]['size'][0]}x{s[1]['size'][1]}" for ident, s in sorted(self.shown.items()) if s[1] is not None]
+        return " ".join(["ok", str(len(entries))] + entries)
 
     # ---- every tick ----
 
@@ -167,7 +178,7 @@ class Keeper:
         """Out of the room: its panels go, and nothing is shared. Also what a start finds left
         of an earlier ft-roompanels' room."""
         self.in_room, self.floor, self._floorless = False, None, None
-        self.wishes.clear(), self.told.clear(), self.shown.clear()
+        self.wishes.clear(), self.told.clear(), self.shown.clear(), self.mine.clear()
         if self.tidy:
             return
         remotes, shares = self._remotes(), self._shares()
@@ -284,6 +295,8 @@ class Keeper:
                     self.told[slot] = words
             if slot in self.told and shares.get(number) != (slot, f"{size[0]}x{size[1]}"):
                 self.screens(f"share {number} start {slot} {size[0]}x{size[1]} {FPS}")
+        ids = {p["number"]: p["id"] for p in room.get("panels", []) if p["owner"] == room.get("me")}
+        self.mine = {ids[slot]: (number, sizes[number]) for number, slot in self.wishes.items() if slot in self.told and slot in ids}
 
     # ---- ft-screens' lists ----
 

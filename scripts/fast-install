@@ -91,7 +91,7 @@ COMPONENTS = {
     'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),
     'avatar': ((MODELDEPS, STB), ('ft-model-import',)),
     # msquic is fetched at the commit together/build.sh pins, and stays built in the stage
-    'together': ((*ROOM_CLIENT, MODELFILE, OPENVR), ('ft-together', 'ft-sharepanel', 'ft-peerpanel', 'ft-roomvoice', 'libmsquic.so.2')),
+    'together': ((*ROOM_CLIENT, MODELFILE, OPENVR), ('ft-together', 'ft-sharepanel', 'ft-peerpanel', 'ft-roomvoice', 'ft-roompoints', 'libmsquic.so.2')),
 }
 WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',

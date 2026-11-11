@@ -5,7 +5,8 @@
 // over once; then "frame I" says buffer I holds a new picture. It goes to the panel through
 // ft_vr_screen_present, like a KWin buffer, and the buffer shown before it goes back
 // ("release"). The panel's pointer input, the keys typed while it has the keyboard, and how
-// much of it you see ("attention") go the other way; the protocol is in ft-stream.cpp.
+// much of it you see ("attention") go the other way; the protocol is in ft-stream.cpp. A
+// room's panel also hears "leave" when the pointer has left it (pointer_on, below).
 //
 // Commands (on @ft_screens, from ft-layout):
 //   remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]
@@ -332,9 +333,29 @@ const char *ft_remote_app(int index) {
     return r ? r->app : NULL;
 }
 
+// The remote screen the pointer is on (its index), -1 none. A room's panel hears when the
+// pointer has left it ("leave"), because the others in the room see where it points
+// (together/local/panelhand.h). SteamVR's own word for that doesn't always come (a 3D mouse or
+// a gaze that moves on says none), so the pointer turning up anywhere else counts too.
+static int g_pointer_on = -1;
+
+static void pointer_on(int index) {
+    if (g_pointer_on == index) return;
+    struct remote *was = find(g_pointer_on);
+    if (was && is_peer(was)) say(was, "leave");
+    g_pointer_on = index;
+}
+
+void ft_remote_pointer_away(void) { pointer_on(-1); }
+
 void ft_remote_event(const struct ft_event *e) {
     struct remote *r = find(e->screen);
     if (!r) return;
+    if (e->type == FT_LEAVE) {
+        if (g_pointer_on == r->index) pointer_on(-1);
+        return;
+    }
+    if (e->type == FT_MOTION || e->type == FT_BUTTON || e->type == FT_SCROLL) pointer_on(r->index);
     const int w = r->have_ring ? r->ring[0].width : r->width, h = r->have_ring ? r->ring[0].height : r->height;
     switch (e->type) {
         case FT_MOTION:

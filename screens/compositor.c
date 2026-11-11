@@ -705,6 +705,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         return;
     }
     if (e->screen < 0 || e->screen >= MAX_SCREENS || !s->screens[e->screen]) return;
+    if (e->type == FT_MOTION || e->type == FT_BUTTON || e->type == FT_SCROLL) ft_remote_pointer_away();
     struct ft_event filtered = *e;
     if (e->screen < s->n_config &&
         !ft_controller_click_filter(&s->controller_click, &filtered, s->scale[e->screen])) return;

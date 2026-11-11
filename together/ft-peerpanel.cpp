@@ -6,14 +6,18 @@
 // ft-stream (screens/remote.c), with a SOCK_SEQPACKET socket as --fd, and speaks the same words:
 //
 //   from ft-screens: "modifiers M ..." first (what SteamVR imports), then "release I",
-//                    "attention hidden|view|focused", "quit"; a remote display's input words
-//                    (move, button, key ...) are taken and dropped: nothing goes to a peer's
-//                    panel yet
+//                    "attention hidden|view|focused", "quit", and a remote display's input
+//                    words (move, button, scroll, key, blur) and "leave": the wearer's hand
+//                    on the panel
 //   to ft-screens:   "state connecting|live|lost ...", "buffers W H FORMAT MODIFIER OFFSET
 //                    STRIDE" with the ring's three fds, "frame I"
 //
 // How much of the panel its viewer sees goes on to ft-together, so that a panel nobody looks at
 // isn't sent, and so does word that the decoder lost its place and needs a keyframe.
+//
+// The wearer's hand on the panel goes to ft-together's local socket: where they point, for
+// everyone in the room to see, and what they click and type, for the panel's owner, who takes
+// it only from someone the panel was given to (local/panelhand.h).
 //
 //   ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--frames N] [--seconds S])
 //
@@ -21,6 +25,7 @@
 // back as ft-sharepanel --pattern's test picture (media/testpattern.h) and a line printed:
 // "picture <count> <W>x<H> number <n> light <v> dark <v> grey <v>". It ends when ft-together or
 // ft-screens goes; ft-screens starts it again.
+#include "local/handsend.h"
 #include "local/mediaclient.h"
 #include "media/testpattern.h"
 #include "media/words.h"
@@ -114,6 +119,9 @@ int Run(const Args &args) {
     conv.toSteamVR = false;
     conv.range = EGL_YUV_FULL_RANGE_EXT;   // what the Frame's encoder makes of RGBA (docs/together.md, T2)
     Incoming in{together};
+    local::PanelHand hand{uint8_t(args.panel)};
+    local::HandSender toRoom(args.socket);
+    local::PanelHand::Out said;
     if (args.probe) {
         in.level = 2;
     } else {
@@ -146,7 +154,8 @@ int Run(const Args &args) {
     int code = 0;
     while (!g_stop) {
         pollfd p[3] = {{dec.fd, short(POLLIN | POLLPRI | (in.units.empty() ? 0 : POLLOUT)), 0}, together.Poll(), {screens.fd, POLLIN, 0}};
-        if (poll(p, 3, 100) > 0 && (p[0].revents & POLLERR)) usleep(1000);
+        const double due = hand.Wait(MonoNs() / 1e9);   // a move that waits to go, or a resting pointer to say again
+        if (poll(p, 3, due < 0 || due > 0.1 ? 100 : int(due * 1000) + 1) > 0 && (p[0].revents & POLLERR)) usleep(1000);
 
         if (!together.Read()) {
             std::printf("ft-together went\n");
@@ -172,8 +181,12 @@ int Run(const Args &args) {
                 if (level != in.level) in.level = level, in.Tell(false);
             } else if (msg == "quit") {
                 g_stop = 1;
+            } else {
+                hand.Word(msg, MonoNs() / 1e9, said);
             }
         }
+        hand.Tick(MonoNs() / 1e9, said);
+        toRoom.Send(said);
         if (!open) break;   // ft-screens closed its end
 
         if (dec.Events()) {
@@ -184,6 +197,7 @@ int Run(const Args &args) {
                           (unsigned long long)conv.out[0].modifier, conv.out[0].offset, conv.out[0].stride);
             if (!screens.Say(b, fds, 3)) break;
             for (bool &o : owned) o = false;
+            hand.Size(int(conv.width), int(conv.height));   // what ft-screens counts the pointer's place in
         }
         dec.Reclaim();
         while (!in.units.empty() && dec.Feed(in.units.front().data(), in.units.front().size(), seq)) in.units.pop_front(), ++seq, in.stuckSince = -1;
@@ -240,6 +254,8 @@ int Run(const Args &args) {
         }
         if ((args.frames > 0 && total >= args.frames) || (until && now >= until)) break;
     }
+    hand.End(MonoNs() / 1e9, said);
+    toRoom.Send(said);
     screens.Say(code ? "state lost ft-together went" : "state lost");
     dec.Close();
     return code;

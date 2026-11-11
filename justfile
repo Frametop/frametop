@@ -148,6 +148,11 @@ test-c:
     # control of shared panels: the rules by themselves, then several Frames' sessions against each other
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/controlrules-test.cpp -o build/tests/together-controlrules-test
     run together/tests/controlrules-test.cpp build/tests/together-controlrules-test
+    # the wearer's hand on someone else's panel: ft-screens' words into what ft-together takes
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/panelhand-test.cpp -o build/tests/together-panelhand-test
+    run together/tests/panelhand-test.cpp build/tests/together-panelhand-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handsend-test.cpp -o build/tests/together-handsend-test
+    run together/tests/handsend-test.cpp build/tests/together-handsend-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/control-test.cpp together/flow/control.cpp \
       together/local/controlask.cpp together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp \
       together/proto/messages.cpp -o build/tests/together-control-test
@@ -195,8 +200,11 @@ test-c:
         run together/tests/roomcontrol-test.py python3 together/tests/roomcontrol-test.py build/tests/ft-together
         # ft-roominput next to one of them, with stand-ins for ft-roompanels and ft-screens
         run together/tests/roominput-test.py python3 together/tests/roominput-test.py build/tests/ft-together
+        # ft-peerpanel's hand without its decoder, from one of them to the other's desktop
+        g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
+        run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

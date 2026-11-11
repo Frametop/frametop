@@ -22,6 +22,8 @@ void ft_remote_shutdown(void);
 bool ft_remote_is(int index);
 // Pointer input on a remote screen's panel.
 void ft_remote_event(const struct ft_event *e);
+// The pointer is on a screen that isn't a remote one: a room's panel it was on is told it left.
+void ft_remote_pointer_away(void);
 // A key (linux KEY_* code) for remote screen `index`.
 void ft_remote_key(int index, uint32_t code, bool pressed);
 // Typing went to remote screen `index` (a click or a spin to it): the shared clipboard sends the

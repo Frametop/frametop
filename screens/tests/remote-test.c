@@ -2,7 +2,8 @@
 // operation at a time. The real remote.c runs with SteamVR stubbed; this program is also the
 // ft-stream it starts ($FT_STREAM): it says it's live, and asked to end it takes 300 ms to go
 // (Disconnect Monitor), or with the app "hang" it ignores SIGTERM. It notes the "focus" and
-// "blur" it's told (the shared clipboard's moments). With the app window:0x1 the host has no
+// "blur" it's told (the shared clipboard's moments), and each "move" and "leave" (the pointer
+// coming onto its panel and going). With the app window:0x1 the host has no
 // such window, with window:0x2 it's full: either way it says why and ends. window:0x3 goes live
 // and ends 100 ms later (its window closed on the host). It connects to nothing.
 // And it is the ft-peerpanel remote.c starts for a panel of a Together room ($FT_PEERPANEL):
@@ -77,7 +78,8 @@ static int fake_stream(const char *host, const char *app) {
             continue;
         }
         m[n] = 0;
-        if (!strcmp(m, "focus") || !strcmp(m, "blur")) note(m, getpid(), host, app);
+        if (!strcmp(m, "focus") || !strcmp(m, "blur") || !strcmp(m, "leave")) note(m, getpid(), host, app);
+        else if (!strncmp(m, "move ", 5)) note("move", getpid(), host, app);
     }
     note("term", getpid(), host, app);
     usleep(300000);  // its Disconnect Monitor
@@ -125,7 +127,7 @@ struct proc {
     char host[64], app[64];
     long start, term, gone;  // 0: not yet
     bool killed;
-    char said[32];  // f: focus, b: blur, in order
+    char said[32];  // f: focus, b: blur, m: move, l: leave, in order
 };
 static struct proc g_procs[16];
 static int g_nprocs;
@@ -150,7 +152,8 @@ static void read_log(void) {
             snprintf(p->host, sizeof p->host, "%s", host), snprintf(p->app, sizeof p->app, "%s", app);
         } else if (p && !strcmp(what, "term")) p->term = t;
         else if (p && (!strcmp(what, "reaped") || !strcmp(what, "killed"))) p->gone = t, p->killed = what[0] == 'k';
-        else if (p && (!strcmp(what, "focus") || !strcmp(what, "blur")) && strlen(p->said) < sizeof p->said - 1)
+        else if (p && (!strcmp(what, "focus") || !strcmp(what, "blur") || !strcmp(what, "move") || !strcmp(what, "leave")) &&
+                 strlen(p->said) < sizeof p->said - 1)
             p->said[strlen(p->said)] = what[0];
     }
     if (f) fclose(f);
@@ -340,6 +343,54 @@ static bool room_panel_refused(void) {
     return true;
 }
 
+// The pointer leaving a room's panel is told to its program, once: by the leave itself, by the
+// pointer turning up on another remote screen, and by its turning up on a screen of the
+// desktop's. A remote display's stream is told of no leave.
+static bool pointer_leaves(void) {
+    cmd("remote 116 peer 9 1280x720 1.5");
+    cmd("remote 115 peer 10 1280x720 1.5");
+    start(101, "192.0.2.7", "display:X", 60);
+    run(300);
+    struct ft_event e = {.type = FT_MOTION, .screen = 115, .x = 5, .y = 5};
+    ft_remote_event(&e);  // onto panel 9
+    e.type = FT_LEAVE;
+    ft_remote_event(&e);  // and off it
+    ft_remote_event(&e);  // (said twice: told once)
+    e.type = FT_MOTION;
+    ft_remote_event(&e);  // onto it again
+    e.screen = 114;
+    ft_remote_event(&e);  // onto panel 10: 9 hears it left
+    e.type = FT_LEAVE, e.screen = 115;
+    ft_remote_event(&e);  // a late leave from 9: nothing, the pointer is on 10
+    e.type = FT_MOTION, e.screen = 114;
+    ft_remote_event(&e);  // ...where it still is
+    e.type = FT_SCROLL, e.screen = 100, e.dy = 1;
+    ft_remote_event(&e);  // onto the remote display: 10 hears it left
+    e.type = FT_LEAVE;
+    ft_remote_event(&e);  // off the remote display: its stream isn't told
+    e.type = FT_MOTION, e.screen = 114;
+    ft_remote_event(&e);  // back onto panel 10
+    e.type = FT_BUTTON, e.screen = 115, e.button = 0x110, e.pressed = true;
+    ft_remote_event(&e);  // a click on 9 (a move, then the button): 10 hears it left
+    ft_remote_pointer_away();  // onto a screen of the desktop's
+    ft_remote_pointer_away();
+    run(300);
+    read_log();
+    EXPECT(g_nprocs == 3);
+    const struct proc *nine = NULL, *ten = NULL, *display = NULL;
+    for (int i = 0; i < g_nprocs; ++i) {
+        const struct proc *q = &g_procs[i];
+        if (!strcmp(q->app, "peer:9")) nine = q;
+        if (!strcmp(q->app, "peer:10")) ten = q;
+        if (!strcmp(q->app, "display:X")) display = q;
+    }
+    EXPECT(nine && ten && display);
+    EXPECT(!strcmp(nine->said, "mlmlml"));
+    EXPECT(!strcmp(ten->said, "mmlml"));
+    EXPECT(!strcmp(display->said, ""));
+    return true;
+}
+
 // A window panel's stream that ended: tried again after 0.2 s, not 2 s (the host's 404 then
 // takes the panel). A display's waits the usual 2 s.
 static bool window_retry(void) {
@@ -375,7 +426,7 @@ int main(int argc, char **argv) {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
         {"window closed", window_closed}, {"window retry", window_retry}, {"room panels", room_panels},
-        {"room panel refused", room_panel_refused},
+        {"room panel refused", room_panel_refused}, {"pointer leaves", pointer_leaves},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

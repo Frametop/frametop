@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """ft-avatars' side of a shared room (avatar/room), from a pose to the pixels: someone is told
 over the wire, fitted to the body of their place and drawn on their sheet to each eye, in their
-place's colour, facing the way they face. And the room's modes say what they can't do: a pose
-that isn't one, options that aren't theirs, and a pretended person with no ft-together to talk to
-stays out of any room.
+place's colour, facing the way they face. Someone who sent their avatar is drawn in it, if its
+file says they may pass it on; any other file is refused. And the room's modes say what they
+can't do: a pose that isn't one, options that aren't theirs, and a pretended person with no
+ft-together to talk to stays out of any room.
 
 It runs the built program (screens/build.sh) and is skipped where it isn't built; the pictures
-are skipped where there is no GPU to draw on. Nothing here starts SteamVR or opens a link.
+are skipped where there is no GPU to draw on, and the sent avatars where the importer isn't
+built (avatar/build.sh). Nothing here starts SteamVR or opens a link.
 Run: python3 avatar/tests/test_room_picture.py"""
 import os
 import subprocess
@@ -17,7 +19,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import bodyfixtures  # noqa: E402
+import fixtures  # noqa: E402
 from avatarsprogram import TOOL, built  # noqa: E402
+from importcase import TOOL as IMPORTER  # noqa: E402
+from importcase import ImportCase  # noqa: E402
 from pngread import read_png  # noqa: E402
 
 # which of red, green and blue a place's colour has most of, and least (avatar/abstract)
@@ -124,13 +130,76 @@ class RoomPictureTest(unittest.TestCase):
         self.assertIn("can't write", done.stderr)
 
 
+class SentAvatarTest(ImportCase):
+    """Someone in the avatar they sent: a file as ft-together keeps it for the room."""
+
+    @classmethod
+    def setUpClass(cls):
+        built(gpu=True)
+        super().setUpClass()
+        person = cls.dir / 'person.glb'
+        person.write_bytes(fixtures.glb(bodyfixtures.person('unity', extras=False)))
+        hands = cls.dir / 'hands.glb'
+        hands.write_bytes(fixtures.glb(fixtures.make()))
+        cls.given, cls.kept, cls.hands = (cls.model(source, name, *more) for source, name, more in (
+            (person, 'given', ['--may-share']), (person, 'kept', []), (hands, 'hands', ['--may-share'])))
+
+    @classmethod
+    def model(cls, source, name, *more):
+        done = subprocess.run([str(IMPORTER), str(source), '--to', str(cls.dir / 'out'), '--name', name, *more], capture_output=True, text=True, timeout=120)
+        said = dict(line.split(' ', 1) for line in done.stdout.splitlines() if ' ' in line)
+        assert done.returncode == 0 and said['share'] == ('yes' if more else 'no'), (done.stdout, done.stderr)
+        return said['file']
+
+    def draw(self, *args):
+        out = self.dir / 'sent.png'
+        done = run('--room-snapshot', str(out), '--size', '192', '--pose', 'stand', *args)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return read_png(out), done.stdout
+
+    def refused(self, model, why):
+        out = self.dir / 'refused.png'
+        done = run('--room-snapshot', str(out), '--model', str(model))
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("isn't drawn", done.stderr)
+        self.assertIn(why, done.stderr)
+        self.assertFalse(out.exists())
+
+    def test_someone_is_drawn_in_the_avatar_they_sent(self):
+        abstract, said = self.draw()
+        self.assertIn('in the abstract body', said)
+        sent, said = self.draw('--model', self.given)
+        self.assertIn('in the avatar they sent', said)
+        self.assertNotEqual(sent[3], abstract[3])
+        for half, there in enumerate(RoomPictureTest.halves(sent)):
+            self.assertGreater(len(there), 300, half)
+            xs, ys = [x for x, _, _ in there], [y for _, y, _ in there]
+            self.assertGreater(min(xs), 0), self.assertLess(max(xs), 191)   # all of them is on their sheet
+            self.assertGreater(min(ys), 0), self.assertLess(max(ys), 191)
+            self.assertGreater(max(ys) - min(ys), 1.5 * (max(xs) - min(xs)), half)   # a person standing, from head to foot
+        self.assertEqual(sent[3], self.draw('--model', self.given, '--place', '2')[0][3])   # their own colours, not their place's
+        self.assertNotEqual(sent[3], self.draw('--model', self.given, '--round', '90')[0][3])
+
+    def test_a_file_that_was_not_theirs_to_send_is_not_drawn(self):
+        self.refused(self.kept, "isn't marked")
+
+    def test_what_is_not_an_avatar_is_not_drawn(self):
+        self.refused(self.hands, 'no body')
+        self.refused(self.dir / 'none.ftmodel', 'none.ftmodel')
+        whole = Path(self.given).read_bytes()
+        for name, data in (('cut', whole[:len(whole) // 2]), ('junk', b'FTMD' + bytes(range(256)) * 8), ('empty', b''), ('long', whole + b'more')):
+            path = self.dir / f'{name}.ftmodel'
+            path.write_bytes(data)
+            self.refused(path, '')
+
+
 class RoomModesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         built(gpu=False)
 
     def test_options_that_are_not_theirs_are_a_usage_error(self):
-        for args in (['--room', '--size'], ['--room', '--height', '400'], ['--room', 'now'], ['--room-snapshot'], ['--room-snapshot', 'x.png', '--place'],
+        for args in (['--room', '--size'], ['--room', '--height', '400'], ['--room', 'now'], ['--room-snapshot'], ['--room-snapshot', 'x.png', '--place'], ['--room-snapshot', 'x.png', '--model'],
                      ['--room-snapshot', 'x.png', '--walked', '0,0,0'], ['--pretend'], ['--pretend', 'wave', '--walked'], ['--pretend', 'wave', '--walked', '1,2'],
                      ['--pretend', 'wave', '--walked', '1,2,3,4'], ['--pretend', 'wave', '--walked', '99,0,0'], ['--pretend', 'wave', '--walked', '0,0,400'],
                      ['--pretend', 'wave', '--walked', 'nan,0,0'], ['--pretend', 'wave', '--size', '64']):

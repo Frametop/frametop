@@ -6,6 +6,7 @@
 #include "../view/demo.h"
 #include "../view/windowview.h"
 #include "figure.h"
+#include "sentbody.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -25,7 +26,10 @@ constexpr Floor kTheirs{0.6, -0.4, 0.5}, kMine{-1.0, 2.0, -0.8};
 }  // namespace
 
 int Person(const Ask &ask) {
-    const bodyfile::Body body = abstract::Body(ask.place);
+    bodyfile::Body body;
+    std::string why;
+    if (ask.model.empty()) body = abstract::Body(ask.place);
+    else if (!sentbody::Read(ask.model, body, why)) return std::fprintf(stderr, "avatars: %s isn't drawn: %s\n", ask.model.c_str(), why.c_str()), 1;
     figure::Figure figure(body);
     const double until = std::min(std::max(ask.at, 0.0), 30.0);
     wearer::Seen seen;
@@ -58,8 +62,8 @@ int Person(const Ask &ask) {
         windowview::Draw(painter, avatar, figure.bones(), view.clip, view.sees, billboard::Light(), side * canvas::kFine, side * canvas::kFine);
         if (canvas::Save(ask.out, canvas.Read(true), 2 * side, side)) {
             status = 0;
-            std::printf("wrote %s: place %d, %s, on a sheet %.1f m a side from %.1f m, %dx%d an eye\n", ask.out.c_str(), ask.place, ask.pose.c_str(), view.sheet.glass.width,
-                        (mid - view.sheet.glass.centre).norm(), side, side);
+            std::printf("wrote %s: place %d, %s, in %s, on a sheet %.1f m a side from %.1f m, %dx%d an eye\n", ask.out.c_str(), ask.place, ask.pose.c_str(),
+                        ask.model.empty() ? "the abstract body" : "the avatar they sent", view.sheet.glass.width, (mid - view.sheet.glass.centre).norm(), side, side);
         } else {
             std::fprintf(stderr, "avatars: can't write %s\n", ask.out.c_str());
         }

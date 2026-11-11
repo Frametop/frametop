@@ -1,7 +1,8 @@
 // A program's end of ft-together's local socket (together/README.md, "ft-together"), for one
 // that draws the room, plays it or tells it where its wearer is: it keeps asking who is in the
-// room, watches the others' poses, listens to their voices if they are wanted, sees to it that
-// your floor is laid in the room (floor.h), and hands your own pose over.
+// room, watches the others' poses and asks where their avatars' files are, listens to their
+// voices if they are wanted, sees to it that your floor is laid in the room (floor.h), says
+// which avatar you have on, and hands your own pose over.
 //
 // One socket, bound to a name of the program's own, does it all: ft-together answers to it and
 // sends the watched poses to it, and whatever comes from anyone else is a question to this
@@ -33,6 +34,8 @@ class Client {
 public:
     static constexpr double kStateS = 0.5;    // between questions about the room
     static constexpr double kWatchS = 1.0;    // ...and between asks to watch (ft-together forgets a watcher after five)
+    static constexpr double kLooksS = 1.0;    // ...and about the others' avatars, for one that watches
+    static constexpr double kWearS = 2.0;     // between words of the avatar you have on
     static constexpr double kFloorS = 0.5;    // between questions about the floor while none is known,
     static constexpr double kFloorKnownS = 2; // and once one is: ft-together's is the one that counts
     static constexpr double kSilentS = 2.5;   // no word of the room for this long: there is none
@@ -46,6 +49,9 @@ public:
     // (together/proto/voicewire.h) goes to `heard` as it comes, with their place.
     using Heard = std::function<void(int person, const uint8_t *voice, size_t n)>;
     void Listen(Heard heard) { voice_ = std::move(heard); }
+    // Which of your models you have on ("": none). ft-together is told at the next Tick and
+    // every kWearS after it, in a room or not: it may have started again since.
+    void Wear(const std::string &model);
     // The socket, for a loop that sleeps until something comes; -1 when closed.
     int fd() const { return sock_; }
     Client() = default;
@@ -80,10 +86,12 @@ private:
     sockaddr_un together_{};
     socklen_t togetherLen_ = 0;
     bool watch_ = false, laid_ = false, none_ = false;   // none_: ft-together said the room has no floor yet
+    bool wears_ = false;   // Wear was called
+    std::string wear_;
     roompeople::People people_;
     roomfloor::Floor floor_;
     Heard voice_;
-    double asked_ = -1e9, watched_ = -1e9, listened_ = -1e9, floored_ = -1e9, heard_ = -1e9;
+    double asked_ = -1e9, watched_ = -1e9, listened_ = -1e9, floored_ = -1e9, heard_ = -1e9, looked_ = -1e9, wore_ = -1e9;
     std::deque<Question> questions_;
     unsigned posesIn_ = 0;
 };

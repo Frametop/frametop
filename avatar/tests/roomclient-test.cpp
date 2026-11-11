@@ -1,7 +1,7 @@
 // A program's end of ft-together's local socket (avatar/room/client.h), against a stand-in for
 // ft-together on a socket of the test's own: the room asked about, the others' poses watched,
-// the floor laid, your own pose handed over, questions from other programs kept, and an
-// ft-together that goes quiet. The clock is the test's: nothing here waits.
+// the floor laid, the avatar you have on told and the others' asked about, your own pose handed
+// over, questions from other programs kept, and an ft-together that goes quiet. The clock is the test's: nothing here waits.
 #include "../room/client.h"
 
 #include "../../conf/ftsock.h"
@@ -53,6 +53,8 @@ struct Together {
     Sock sock;
     std::string state = "{\"mode\":\"idle\",\"note\":\"\",\"me\":-1,\"owner\":0,\"people\":[],\"asks\":[],\"codes\":0}";
     std::string floor = "ok none";   // what `floor` answers; one said is taken while this is "ok none"
+    std::string looks = "error you aren't in a room";   // what `looks` answers
+    std::vector<std::string> worn;   // the `wear` questions, whole
     bool answers = true;
     std::map<std::string, int> asked;   // each question's first word, counted
     std::vector<std::string> said;      // the floors said, whole
@@ -73,6 +75,8 @@ struct Together {
             if (q == "state") reply = "ok " + state;
             else if (q == "watch" || q == "listen") reply = "ok";
             else if (q == "floor") reply = floor;
+            else if (q == "looks") reply = looks;
+            else if (q == "wear" || q.rfind("wear ", 0) == 0) worn.push_back(q), reply = q == "wear secret" ? "error that avatar isn't marked as one the others may have" : "ok";
             else if (q.rfind("floor ", 0) == 0) {
                 said.push_back(q);
                 if (floor == "ok none") floor = "ok " + q.substr(6);
@@ -199,6 +203,31 @@ int main() {
     proto::Pose mine;
     check("...as a pose", proto::Read(reinterpret_cast<const uint8_t *>(together.poses[0].data()), together.poses[0].size(), mine) && mine.eyes[0] == -0.5f);
 
+    // avatars
+    check("one that watches asks where the others' avatars are, every second", together.asked["looks"] >= 8 && together.asked["looks"] == together.asked["watch"]);
+    check("...and until it is told which avatar its wearer has on, it says nothing of it", together.worn.empty() && c.people().person(0).avatar.empty());
+    together.looks = "ok {\"wear\":\"\",\"sent\":false,\"why\":\"\",\"people\":[{\"id\":0,\"file\":\"/run/looks/aa.ftmodel\"}]}";
+    for (int i = 0; i < 9; ++i) pass(0.125, head);
+    check("where someone's avatar is kept is known from the answer", c.people().person(0).avatar == "/run/looks/aa.ftmodel");
+    check("...which isn't taken for the room's state: the room is as it was", c.people().inRoom() && c.people().me() == 1 && c.people().person(0).name == "ada" && c.laid());
+    together.looks = "ok {\"wear\":\"\",\"sent\":false,\"why\":\"\",\"people\":[{\"id\":0,\"file\":\"\"}]}";
+    for (int i = 0; i < 9; ++i) pass(0.125, head);
+    check("an avatar taken off is gone", c.people().person(0).avatar.empty() && c.people().inRoom());
+    c.Wear("fox");
+    pass(0.0625, head);
+    check("the avatar the wearer has on is told at once", together.worn == std::vector<std::string>{"wear fox"});
+    for (int i = 0; i < 32; ++i) pass(0.125, head);
+    check("...and again every other second: ft-together may have started since", together.worn.size() == 3 && together.worn.back() == "wear fox");
+    c.Wear("fox");
+    pass(0.0625, head);
+    check("the same one said again isn't told any sooner", together.worn.size() == 3);
+    c.Wear("secret");
+    pass(0.0625, head);
+    check("another is told at once, and ft-together's no changes nothing here", together.worn.size() == 4 && together.worn.back() == "wear secret" && c.people().inRoom());
+    c.Wear("");
+    pass(0.0625, head);
+    check("none is told as none", together.worn.size() == 5 && together.worn.back() == "wear");
+
     // other programs
     {
         Sock other(Name("other"));
@@ -228,6 +257,10 @@ int main() {
     pass(0.5, head);
     pass(0.0625, head);
     check("out of the room, there is no floor", !c.people().inRoom() && !c.laid());
+    const int looked = together.asked["looks"];
+    const size_t wore = together.worn.size();
+    for (int i = 0; i < 32; ++i) pass(0.125, head);
+    check("...nobody's avatar is asked about, and the wearer's own is still told", together.asked["looks"] == looked && together.worn.size() == wore + 2);
     together.state = kRoom;
     pass(0.5, head);
     for (int i = 0; i < 12; ++i) pass(0.125, head);

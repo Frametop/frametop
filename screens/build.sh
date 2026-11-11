@@ -61,7 +61,7 @@ for f in bodymesh handfit demo bodygpu windowview mirrorview belowview sheet sta
   $cxx -Wextra -I. -c -o build/avatars-$f.o ../avatar/view/$f.cpp
   avatars="$avatars build/avatars-$f.o"
 done
-for f in room/people room/client room/room room/pretend room/roompicture abstract/abstract; do   # the people of a shared room
+for f in room/people room/client room/room room/sentbody room/pretend room/roompicture abstract/abstract; do   # the people of a shared room
   $cxx -Wextra -I. -c -o build/avatars-${f/\//-}.o ../avatar/$f.cpp
   avatars="$avatars build/avatars-${f/\//-}.o"
 done

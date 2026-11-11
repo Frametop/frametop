@@ -7,6 +7,8 @@ the questions).
   ft-room join HOST PORT CODE     calls a room's owner
   ft-room accept N | decline N    someone who asks to come in (state's "asks")
   ft-room state                   the room as JSON
+  ft-room wear [NAME]             the avatar you have on: one of your models, or none
+  ft-room looks                   what you have on, whether the others get it, and theirs
   ft-room leave
 
   --socket NAME   another ft-together's local socket (ft_together)

@@ -1,10 +1,12 @@
 // ft-avatars with a headset on, in a shared room (docs/together.md): the other people, drawn
 // where they are, and you, told to them. It asks ft-together who is in the room and watches
 // their poses (client.h), lays your floor in the room (floor.h), and sends your own pose, from
-// your head and your tracked hands, thirty times a second. Each of the others is posed in the
-// body they are given (figure.h: the abstract one in the colour of their place, until avatars
-// are sent) and drawn for each eye on a sheet that stands where they are and faces you
-// (billboard.h), as an overlay SteamVR shows in the room.
+// your head and your tracked hands, thirty times a second, and which avatar you have on
+// (AVATAR_MODEL in frametop.conf), every other second. Each of the others is posed in their body
+// (figure.h): the avatar they have on, once its file came and if it may be drawn (sentbody.h),
+// and until then the abstract one in the colour of their place. They are drawn for each eye on a
+// sheet that stands where they are and faces you (billboard.h), as an overlay SteamVR shows in
+// the room.
 //
 // Outside a room it draws nothing and waits. Someone whose poses stop isn't drawn: nobody
 // stands frozen in the room.

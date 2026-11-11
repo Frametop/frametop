@@ -30,14 +30,20 @@ void Client::Close() {
     if (sock_ >= 0) close(sock_);
     sock_ = -1;
     people_.Gone();
-    watch_ = laid_ = none_ = false;
-    asked_ = watched_ = listened_ = floored_ = heard_ = -1e9;
+    watch_ = laid_ = none_ = wears_ = false;
+    wear_.clear();
+    asked_ = watched_ = listened_ = floored_ = heard_ = looked_ = wore_ = -1e9;
     questions_.clear();
     posesIn_ = 0;
 }
 
 void Client::Ask(const std::string &text) {
     sendto(sock_, text.data(), text.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&together_), togetherLen_);
+}
+
+void Client::Wear(const std::string &model) {
+    if (!wears_ || model != wear_) wore_ = -1e9;
+    wears_ = true, wear_ = model;
 }
 
 bool Client::Send(const proto::Pose &pose) {
@@ -48,7 +54,9 @@ bool Client::Send(const proto::Pose &pose) {
 
 // One of ft-together's answers. They aren't numbered: each kind is told by how it reads.
 void Client::Answer(const std::string &text, double now) {
-    if (text.rfind("ok {", 0) == 0) {   // state
+    if (text.rfind("ok {\"wear\":", 0) == 0) {   // looks
+        people_.Looks(text.substr(3));
+    } else if (text.rfind("ok {", 0) == 0) {   // state
         people_.Room(text.substr(3));
         heard_ = now;
     } else if (text == "ok none") {     // floor: none laid yet
@@ -59,7 +67,7 @@ void Client::Answer(const std::string &text, double now) {
         if (std::sscanf(text.c_str(), "ok %lf %lf %lf %c", &f.x, &f.z, &f.yaw, &more) == 3 && std::isfinite(f.x) && std::isfinite(f.z) && std::isfinite(f.yaw))
             floor_ = f, laid_ = true, none_ = false;
     }
-    // "ok" alone is `watch` heard, and an error says what the next state will
+    // "ok" alone is `watch` or `wear` heard, and an error says what the next state or looks will
 }
 
 void Client::Take(double now) {
@@ -95,8 +103,10 @@ void Client::Tick(double now, const double *head) {
     if (now - heard_ > kSilentS) people_.Gone();
     if (!people_.inRoom()) laid_ = none_ = false;
     if (now - asked_ >= kStateS) asked_ = now, Ask("state");
+    if (wears_ && now - wore_ >= kWearS) wore_ = now, Ask(wear_.empty() ? "wear" : "wear " + wear_);
     if (!people_.inRoom()) return;
     if (watch_ && now - watched_ >= kWatchS) watched_ = now, Ask("watch");
+    if (watch_ && now - looked_ >= kLooksS) looked_ = now, Ask("looks");
     if (voice_ && now - listened_ >= kWatchS) listened_ = now, Ask("listen");
     if (now - floored_ < (laid_ ? kFloorKnownS : kFloorS)) return;
     floored_ = now;

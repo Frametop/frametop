@@ -113,6 +113,9 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -Werror -fsanitize=address,undefined -Iscreens avatar/tests/room-test.cpp \
       avatar/room/people.cpp avatar/abstract/abstract.cpp $roomhand -o build/tests/avatar-room-test
     run avatar/tests/room-test.cpp build/tests/avatar-room-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -Werror -fsanitize=address,undefined -Iscreens avatar/tests/sentbody-test.cpp \
+      avatar/room/sentbody.cpp avatar/abstract/abstract.cpp $roomhand -o build/tests/sentbody-test
+    run avatar/tests/sentbody-test.cpp build/tests/sentbody-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/roomclient-test.cpp avatar/room/client.cpp \
       avatar/room/people.cpp -o build/tests/avatar-roomclient-test
     run avatar/tests/roomclient-test.cpp build/tests/avatar-roomclient-test

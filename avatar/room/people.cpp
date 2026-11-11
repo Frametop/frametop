@@ -65,6 +65,20 @@ bool People::Room(const std::string &text) {
     return true;
 }
 
+bool People::Looks(const std::string &text) {
+    std::string file[proto::kPeople];
+    json::Value looks;
+    bool ok = inRoom_ && json::Parse(text, looks) && looks.type == json::Value::kObject && looks["people"].type == json::Value::kArray;
+    for (size_t i = 0; ok && i < looks["people"].items.size(); ++i) {
+        const json::Value &v = looks["people"].items[i], &at = v["file"];
+        int id = -1;
+        ok = Whole(v["id"], 0, proto::kPeople - 1, id) && at.type == json::Value::kString && (at.string.empty() || (at.string[0] == '/' && at.string.size() <= kMostPath));
+        if (ok) file[id] = at.string;
+    }
+    for (int id = 0; id < proto::kPeople; ++id) people_[id].avatar = ok && people_[id].here && id != me_ ? file[id] : "";
+    return ok;
+}
+
 bool People::Pose(const uint8_t *data, size_t n, double now) {
     if (!inRoom_ || n < 3 || data[0] != local::kPoseToWatcher || data[1] >= proto::kPeople) return false;
     Person &p = people_[data[1]];

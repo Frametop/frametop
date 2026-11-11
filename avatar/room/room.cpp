@@ -9,6 +9,9 @@
 #include "client.h"
 #include "figure.h"
 #include "handcut.h"
+#include "sentbody.h"
+
+#include "../../conf/ft_conf.h"
 
 #include <signal.h>
 #include <sys/resource.h>
@@ -29,6 +32,7 @@ constexpr int64_t kDrawNs = 30'000'000;   // someone is drawn as often as their 
 constexpr int64_t kSendNs = 30'000'000;   // your own pose goes out this often
 constexpr double kInSight = 80 * bodypose::kPi / 180;   // ...and they are drawn only while within this of where the head looks
 constexpr int kOrder = 3;   // among the overlays: over the mirror, under the panels (5-21)
+constexpr int64_t kWearNs = 2'000'000'000;   // between looks at which avatar the wearer has on
 
 volatile sig_atomic_t g_stop = 0;
 void Stop(int) { g_stop = 1; }
@@ -45,23 +49,42 @@ double CpuSeconds() {
     return double(r.ru_utime.tv_sec + r.ru_stime.tv_sec) + double(r.ru_utime.tv_usec + r.ru_stime.tv_usec) / 1e6;
 }
 
+// The model the wearer has on, by its name: frametop.conf's, if it is a name a model can have.
+std::string Worn() {
+    const std::string name = ft_conf::Setting("AVATAR_MODEL", "");
+    return modelfile::NameOk(name) ? name : "";
+}
+
 // Whoever has one place in the room, once someone there was first drawn: their body on the GPU,
 // what poses it, and the sheet they are shown on.
 struct Drawn {
     bool made = false, failed = false;
     unsigned since = 0;   // which newcomer to the place this is (roompeople::Person::since)
+    std::string file;     // the avatar's file their body was last looked for in ("": none)
+    bool own = false;     // ...and it is that avatar: else the abstract body
     std::unique_ptr<figure::Figure> figure;
     bodygpu::Avatar avatar;
     sheet::Sheet sheet;
     int64_t posedAt = 0, drawnAt = 0;
 
-    bool Make(const stage::Stage &stage, int place, int side) {
-        const bodyfile::Body body = abstract::Body(place);
+    bool Make(const stage::Stage &stage, int place, int side, const std::string &from) {
         const std::string key = "frametop.avatars.person." + std::to_string(place), name = "Person " + std::to_string(place + 1);
         if (!sheet.Make(stage.maker, key.c_str(), name.c_str(), kOrder, side, side)) return failed = true, false;
+        Wear(stage, place, from);
+        return made = true;
+    }
+    // Their body from now on: the avatar in `from` if it is one that is drawn, else the abstract
+    // one. A file that isn't drawn is said once, and not looked at again.
+    void Wear(const stage::Stage &stage, int place, const std::string &from) {
+        bodyfile::Body body;
+        std::string why;
+        own = !from.empty() && sentbody::Read(from, body, why);
+        if (!from.empty() && !own) std::fprintf(stderr, "avatars: person %d's avatar isn't drawn: %s\n", place + 1, why.c_str());
+        if (!own) body = abstract::Body(place);
+        avatar.Free();
         avatar.Upload(stage.painter, body);
         figure = std::make_unique<figure::Figure>(body);
-        return made = true;
+        file = from;
     }
     // Out of sight, and what was known of how they moved forgotten.
     void Rest() {
@@ -95,7 +118,7 @@ int Run(const Ask &ask) {
     handcut::Hands hands;
     vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount];
     const int64_t start = MonoNs();
-    int64_t lastSent = 0, lastStatus = start;
+    int64_t lastSent = 0, lastStatus = start, lastWear = 0;
     int draws = 0, sent = 0;
     unsigned posesIn = 0;
     double cpu0 = CpuSeconds();
@@ -117,6 +140,7 @@ int Run(const Ask &ask) {
         const Vec eye[2] = {{eyes[0][0], eyes[0][1], eyes[0][2]}, {eyes[1][0], eyes[1][1], eyes[1][2]}}, between = (eye[0] + eye[1]) * 0.5;
         const Vec ahead = hp.bPoseIsValid ? wearer::Watch::Ahead(head) : Vec{0, 0, -1};
         const double stands[3] = {between.x, between.z, roomfloor::Facing(ahead)};
+        if (!lastWear || now - lastWear >= kWearNs) lastWear = now, client.Wear(Worn());
         client.Tick(nowS, hp.bPoseIsValid ? stands : nullptr);
 
         roomclient::Question q;
@@ -144,8 +168,9 @@ int Run(const Ask &ask) {
                 d.Rest();
                 continue;
             }
-            if (!d.made && !d.Make(stage, place, side)) continue;
             const roompeople::Person &person = people.person(place);
+            if (!d.made && !d.Make(stage, place, side, person.avatar)) continue;
+            if (person.avatar != d.file) d.Wear(stage, place, person.avatar);   // they put another on, or its file came
             if (person.since != d.since) d.figure->Reset(), d.since = person.since;
             if (d.sheet.drawing() || now - d.drawnAt < kDrawNs) continue;
             if (!d.figure->Pose(person.pose, client.floor(), std::min(1.0, double(now - d.posedAt) / 1e9))) continue;
@@ -164,14 +189,17 @@ int Run(const Ask &ask) {
 
         if (now - lastStatus >= int64_t((ask.status > 0 ? ask.status : 2) * 1e9)) {
             const double dt = double(now - lastStatus) / 1e9, cpu1 = CpuSeconds();
-            int here = 0, shown = 0;
-            for (int place = 0; place < proto::kPeople; ++place) here += people.person(place).here && people.inRoom(), shown += drawn[place].made && drawn[place].sheet.visible();
+            int here = 0, shown = 0, own = 0;
+            for (int place = 0; place < proto::kPeople; ++place) {
+                const bool seen = drawn[place].made && drawn[place].sheet.visible();
+                here += people.person(place).here && people.inRoom(), shown += seen, own += seen && drawn[place].own;
+            }
             char line[320];
             if (!people.inRoom()) std::snprintf(line, sizeof line, "not in a room; CPU %.1f%%", 100 * (cpu1 - cpu0) / dt);
             else if (people.Away()) std::snprintf(line, sizeof line, "in a room of %d, away; CPU %.1f%%", here, 100 * (cpu1 - cpu0) / dt);
             else
-                std::snprintf(line, sizeof line, "in a room of %d as %s, floor %s; %d shown, %.1f draws/s; poses %.1f/s in, %.1f/s out; CPU %.1f%%", here,
-                              people.person(people.me()).name.c_str(), client.laid() ? "laid" : "not laid yet", shown, draws / dt, (client.posesIn() - posesIn) / dt, sent / dt,
+                std::snprintf(line, sizeof line, "in a room of %d as %s, floor %s; %d shown, %d of them in their avatar, %.1f draws/s; poses %.1f/s in, %.1f/s out; CPU %.1f%%",
+                              here, people.person(people.me()).name.c_str(), client.laid() ? "laid" : "not laid yet", shown, own, draws / dt, (client.posesIn() - posesIn) / dt, sent / dt,
                               100 * (cpu1 - cpu0) / dt);
             statusLine = line;
             if (ask.status > 0) std::printf("%s\n", line);

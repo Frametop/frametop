@@ -251,6 +251,46 @@ static void people() {
     check("when ft-together goes quiet, so does the room", !p.inRoom() && !p.Drawn(0, 20) && !p.person(0).here);
 }
 
+// What ft-together's `looks` answers, with the people's part as given.
+static std::string looks(const std::string &people) { return "{\"wear\":\"fox\",\"sent\":true,\"why\":\"\",\"people\":[" + people + "]}"; }
+
+static void avatars() {
+    const char *const kAda = "{\"id\":0,\"name\":\"ada\",\"login\":\"ada@x\",\"away\":0,\"linked\":true,\"spot\":[1,0,2,0.5]}";
+    const char *const kBen = "{\"id\":1,\"name\":\"ben\",\"login\":\"ben@x\",\"away\":0,\"linked\":true,\"spot\":[1.9,0,2,0.5]}";
+    const char *const kCy = "{\"id\":2,\"name\":\"cy\",\"login\":\"cy@x\",\"away\":0,\"linked\":true,\"spot\":[2.8,0,2,0.5]}";
+    const std::string room = state("joined", 1, (std::string(kAda) + "," + kBen + "," + kCy).c_str());
+    const std::string both = looks("{\"id\":0,\"file\":\"/run/user/1000/ft_together-looks/aa.ftmodel\"},{\"id\":2,\"file\":\"\"}");
+    roompeople::People p;
+    check("outside a room, nobody has an avatar", !p.Looks(both) && p.person(0).avatar.empty());
+    p.Room(room);
+    check("in a room, where someone's avatar is kept is read", p.Looks(both) && p.person(0).avatar == "/run/user/1000/ft_together-looks/aa.ftmodel");
+    check("...and someone whose file didn't come has none", p.person(2).avatar.empty() && p.inRoom());
+    check("the room said again leaves it", p.Room(room) && p.person(0).avatar == "/run/user/1000/ft_together-looks/aa.ftmodel");
+    check("another file is another avatar", p.Looks(looks("{\"id\":0,\"file\":\"/b.ftmodel\"},{\"id\":2,\"file\":\"/c.ftmodel\"}")) && p.person(0).avatar == "/b.ftmodel" &&
+                                              p.person(2).avatar == "/c.ftmodel");
+    check("someone it doesn't name has none any more", p.Looks(looks("{\"id\":2,\"file\":\"/c.ftmodel\"}")) && p.person(0).avatar.empty() && p.person(2).avatar == "/c.ftmodel");
+    check("a file of your own, or of a place nobody has, isn't anyone's", p.Looks(looks("{\"id\":1,\"file\":\"/mine.ftmodel\"},{\"id\":3,\"file\":\"/d.ftmodel\"}")) &&
+                                                                            p.person(1).avatar.empty() && p.person(3).avatar.empty() && p.person(2).avatar.empty());
+    const std::string longest = "/" + std::string(roompeople::People::kMostPath - 1, 'a');
+    check("a file's name may be so long", p.Looks(looks("{\"id\":0,\"file\":\"" + longest + "\"}")) && p.person(0).avatar == longest);
+    for (const std::string &bad : {looks("{\"id\":0,\"file\":\"" + longest + "a\"}"), looks("{\"id\":0,\"file\":\"b.ftmodel\"}"), looks("{\"id\":0,\"file\":\"../b.ftmodel\"}"),
+                                   looks("{\"id\":4,\"file\":\"/b.ftmodel\"}"), looks("{\"id\":-1,\"file\":\"/b.ftmodel\"}"), looks("{\"id\":0.5,\"file\":\"/b.ftmodel\"}"),
+                                   looks("{\"id\":\"0\",\"file\":\"/b.ftmodel\"}"), looks("{\"id\":0,\"file\":7}"), looks("{\"id\":0}"), looks("{\"file\":\"/b.ftmodel\"}"), looks("7"),
+                                   std::string("{\"wear\":\"fox\"}"), std::string("{\"wear\":\"fox\",\"people\":{}}"), std::string("[]"), std::string("{\"wear\":\"fox\",\"people\":["),
+                                   std::string("")}) {
+        p.Looks(looks("{\"id\":0,\"file\":\"/b.ftmodel\"},{\"id\":2,\"file\":\"/c.ftmodel\"}"));
+        const bool took = p.Looks(bad);
+        if (took || !p.person(0).avatar.empty() || !p.person(2).avatar.empty() || !p.inRoom()) std::printf("      taken: %s\n", bad.c_str());
+        check("what isn't an answer about avatars leaves nobody with one, and the room as it was", !took && p.person(0).avatar.empty() && p.person(2).avatar.empty() && p.inRoom());
+    }
+    p.Looks(both);
+    const std::string other = "{\"id\":0,\"name\":\"dee\",\"login\":\"dee@x\",\"away\":0,\"linked\":true,\"spot\":[1,0,2,0.5]}";
+    check("someone new in a place doesn't have the avatar of the one before", p.Room(state("joined", 1, (other + "," + kBen).c_str())) && p.person(0).avatar.empty());
+    p.Looks(both);
+    p.Gone();
+    check("with the room gone, so are the avatars", p.person(0).avatar.empty() && !p.Looks(both));
+}
+
 static void figures() {
     using namespace bodyfile;
     const Body body = abstract::Body(2);
@@ -312,6 +352,7 @@ int main() {
     poses();
     sheets();
     people();
+    avatars();
     figures();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;

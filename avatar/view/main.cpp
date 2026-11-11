@@ -27,7 +27,7 @@ int Usage() {
                  "       ft-avatars --below-snapshot OUT.png MODEL [the same]\n"
                  "       ft-avatars --thumb OUT.png MODEL [--size PX]\n"
                  "       ft-avatars --room [--together SOCKET] [--size PX] [--seconds S] [--status S]\n"
-                 "       ft-avatars --room-snapshot OUT.png [--place N] [--pose NAME] [--at SECONDS] [--away METRES] [--round DEGREES] [--size PX]\n"
+                 "       ft-avatars --room-snapshot OUT.png [--place N] [--pose NAME] [--at SECONDS] [--away METRES] [--round DEGREES] [--size PX] [--model FILE]\n"
                  "       ft-avatars --pretend POSE [--together SOCKET] [--walked RIGHT,BACK,DEGREES] [--seconds S] [--status S]\n"
                  "       ft-avatars --poses\n"
                  "       ft-avatars --hear SECONDS\n"
@@ -99,6 +99,7 @@ int RoomSnapshot(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--away")) ask.away = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--round")) ask.round = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--size")) ask.size = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--model")) ask.model = argv[++i];
         else return Usage();
     }
     return roompicture::Person(ask);

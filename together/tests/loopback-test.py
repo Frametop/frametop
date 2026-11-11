@@ -239,11 +239,16 @@ def main(program, root):
 
         # its video: from the program that encodes it, over the links, to the programs that show it
         src = Program(ada, b"S", 0)
-        got = src.messages(1, 2)
+        got = src.messages(5, 2)   # (it comes at once: the seconds are for a Frame that is busy)
+        if sorted(got) != [(b"R", struct.pack("<I", 2000000)), (b"W", b"\0")]:
+            print("      got:", got)
         check("a program that encodes a panel is told the bitrate, and that nobody watches", sorted(got) == [(b"R", struct.pack("<I", 2000000)), (b"W", b"\0")])
         src.ignore = b"R"   # (from here on the bitrate follows how the pictures fare, which isn't this test's to say)
         view = Program(ben, b"V", 0)
-        check("someone's program shows the panel: the encoder hears it is watched, and is asked for a keyframe", sorted(src.messages(2, 2)) == [(b"K", b""), (b"W", b"\1")])
+        got = src.messages(5, 2)
+        if sorted(got) != [(b"K", b""), (b"W", b"\1")]:
+            print("      got:", got)
+        check("someone's program shows the panel: the encoder hears it is watched, and is asked for a keyframe", sorted(got) == [(b"K", b""), (b"W", b"\1")])
         check("its pictures cross the link and come out in order, byte for byte", crosses(src, [view], [os.urandom(20000)] + [os.urandom(1500 + i) for i in range(30)]))
         src.messages(0.2)
         late = Program(cy, b"V", 0)

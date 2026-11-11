@@ -1,5 +1,6 @@
 // Who is in the room with you, as ft-together tells it (together/README.md, "ft-together"): the
-// room's people from its `state`, and each one's newest pose from the datagrams a watcher gets.
+// room's people from its `state`, each one's newest pose from the datagrams a watcher gets, and
+// where the file of the avatar each has on is from its `looks`.
 // What ft-together passes on it has checked already (together/local/posegate.h); a pose is read
 // again here all the same, since this is another program.
 //
@@ -25,6 +26,7 @@ struct Person {
     bool posed = false;
     proto::Pose pose;         // their newest, in the room's directions
     double posedAt = 0;
+    std::string avatar;       // the file of the avatar they have on, as ft-together kept it; "" for none, or one that didn't come yet
 };
 
 class People {
@@ -34,6 +36,10 @@ public:
     // What `state` answered, after its "ok ". False, and nobody is in any room, when it isn't
     // that: ft-together isn't one this program knows.
     bool Room(const std::string &json);
+    // What `looks` answered, after its "ok ": where each one's avatar is. False when it isn't
+    // that or there is no room, and then nobody has one.
+    bool Looks(const std::string &json);
+    static constexpr size_t kMostPath = 512;   // a file's name longer than this isn't one
     // ft-together didn't answer: there is no room.
     void Gone();
 

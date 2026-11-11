@@ -41,9 +41,9 @@ FT_CMD = os.path.join(HERE, "ft-cmd")
 # moves the install, the link stays).
 ONDESKTOP_LINK = os.path.expanduser("~/.local/bin/ft-ondesktop")
 ONDESKTOP = os.path.join(REPO, "steam", "ft-ondesktop")
-# Commands find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice) on their PATH, as
+# Commands find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice, ft-room) on their PATH, as
 # the relay's "command:CMD" always did.
-TOOL_DIRS = [os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice", "commands")]
+TOOL_DIRS = [os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice", "together", "commands")]
 UNIT_PREFIX = "frametop-cmd-"
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
 # bash's reserved words and builtins: an alias by one of these names would hide it.

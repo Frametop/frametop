@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-"""ft-room: a question to this Frame's ft-together from a terminal (session/commands.h has
-the questions).
+"""ft-room: a question to this Frame's ft-together from a terminal or a key (session/commands.h
+has the questions), or about moving and sharing to its ft-roompanels.
 
   ft-room open                    opens a room, with you its owner
   ft-room invite                  a one-time code for it
@@ -11,7 +11,14 @@ the questions).
   ft-room looks                   what you have on, whether the others get it, and theirs
   ft-room leave
 
+To ft-roompanels (its own text has them all):
+
+  ft-room step FORWARD RIGHT DEGREES    metres the way you face and to your right, then a turn left
+  ft-room go person N | go panel ID | go X Z DEGREES
+  ft-room share N | unshare N           screen N of this desktop, into the room and back
+
   --socket NAME   another ft-together's local socket (ft_together)
+  --panels NAME   another ft-roompanels' (ft_roompanels)
 """
 
 import json
@@ -21,17 +28,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 
+PANELS = ("step", "go", "pull", "share", "unshare", "panels")   # what ft-roompanels is asked, not ft-together
+
 
 def main():
     words = sys.argv[1:]
-    sock = "ft_together"
-    if len(words) >= 2 and words[0] == "--socket":
-        sock, words = words[1], words[2:]
+    names = {"--socket": "ft_together", "--panels": "ft_roompanels"}
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
     if not words or words[0] in ("-h", "--help"):
         sys.exit(__doc__.strip())
-    reply, why = ftipc.exchange(sock, " ".join(words), 2.0)
+    to, program = ("--panels", "ft-roompanels") if words[0] in PANELS else ("--socket", "ft-together")
+    reply, why = ftipc.exchange(names[to], " ".join(words), 2.0)
     if reply is None:
-        sys.exit("ft-together isn't running" if why == ftipc.NOBODY else f"no answer from ft-together ({why})")
+        sys.exit(f"{program} isn't running" if why == ftipc.NOBODY else f"no answer from {program} ({why})")
     if reply.startswith("ok {"):
         print(json.dumps(json.loads(reply[3:]), indent=1))
     else:

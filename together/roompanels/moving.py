@@ -8,6 +8,7 @@ their next pose on, and the panels they share stay where the room has them.
   go_person(n)   to in front of someone, facing them
   go_panel(id)   to where a shared panel reads well, facing it
   pull(...)      the room pulled past by so much on your own floor (grabbing the air)
+  step(...)      so far the way you face or to your right, and a turn where you stand (a key)
 
 The rules only. Its questions go out through the two functions the keeper has too, each a text
 in and the answer or None back: `together` (ft-together's local socket) and `screens`
@@ -24,6 +25,7 @@ SPAN = math.radians(60)            # of your view, across: what a panel you go t
 NEAREST, FARTHEST = 0.6, 3.0       # metres from a panel you go to, whatever its size
 FURTHEST = 1000.0                  # metres: where ft-together lets a floor lie (together/local/floor.h)
 MOST_PULL = 5.0                    # metres at once: a pull is a hand's move, not a jump
+MOST_STEP = 5.0                    # ...and a step is a step
 
 
 def beside(eyes, yaw):
@@ -49,12 +51,12 @@ def reading(panel):
     return (panel["at"][0] + front[0] * away, panel["at"][2] + front[1] * away, math.atan2(front[0], front[1]))
 
 
-USAGE = "error go X Z DEGREES | go person N | go panel ID | pull DX DZ DEGREES"
+USAGE = "error go X Z DEGREES | go person N | go panel ID | pull DX DZ DEGREES | step FORWARD RIGHT DEGREES"
 
 
 def answer(mover, words):
     """The answer to one of ft-roompanels' questions when it is about moving, or None."""
-    if words[:1] not in (["go"], ["pull"]):
+    if words[:1] not in (["go"], ["pull"], ["step"]):
         return None
     if words[0] == "go" and len(words) == 3 and words[1] in ("person", "panel") and words[2].isdigit() and len(words[2]) < 4:
         return (mover.go_person if words[1] == "person" else mover.go_panel)(int(words[2]))
@@ -63,6 +65,8 @@ def answer(mover, words):
         return USAGE
     if words[0] == "pull":
         return mover.pull(*got)
+    if words[0] == "step":
+        return mover.step(*got)
     if max(abs(got[0]), abs(got[1])) > FURTHEST or abs(got[2]) > 360:
         return "error that is too far"
     return mover.go((got[0], got[1], math.radians(got[2])))
@@ -93,14 +97,23 @@ class Mover:
 
     def go(self, spot):
         """Their head comes to stand over `spot` (x, z, yaw) of the room, facing its way."""
-        floor = self._floor()
-        if isinstance(floor, str):
-            return floor
-        head = _reply(self.screens("head"), 4)
-        if head is None:
-            return "error no head pose (is the headset on?)"
-        to = placing.lay((spot[0], 0.0, spot[1], spot[2]), (head[0], head[2], math.radians(head[3])))
-        return self._shift(floor, placing.then(placing.back(to), floor))
+        here = self._here()
+        return here if isinstance(here, str) else self._to(*here, spot)
+
+    def step(self, forward, right, degrees):
+        """They go `forward` metres the way their head faces and `right` metres to its right
+        (over the floor, wherever they look up or down), and turn `degrees` to the left where
+        they then stand."""
+        if math.hypot(forward, right) > MOST_STEP or abs(degrees) > 180:
+            return "error that is more than a step"
+        here = self._here()
+        if isinstance(here, str):
+            return here
+        floor, head = here
+        at = placing.turned(floor[2], (head[0], 0.0, head[1]))
+        facing = floor[2] + head[2]
+        way = placing.turned(facing, (right, 0.0, -forward))
+        return self._to(floor, head, (floor[0] + at[0] + way[0], floor[1] + at[2] + way[2], placing.wrap(facing + math.radians(degrees))))
 
     def go_person(self, place):
         room = self._room()
@@ -138,6 +151,22 @@ class Mover:
         return floor if isinstance(floor, str) else self._shift(floor, (dx, dz, math.radians(degrees)))
 
     # ---- the move ----
+
+    def _here(self):
+        """(this Frame's floor in the room, the head on it as (x, z, yaw)), or the error that
+        says why one of them isn't known."""
+        floor = self._floor()
+        if isinstance(floor, str):
+            return floor
+        head = _reply(self.screens("head"), 4)
+        if head is None:
+            return "error no head pose (is the headset on?)"
+        return floor, (head[0], head[2], math.radians(head[3]))
+
+    def _to(self, floor, head, spot):
+        """The head, at `head` of the floor, comes to stand over `spot` (x, z, yaw) of the room."""
+        to = placing.lay((spot[0], 0.0, spot[1], spot[2]), head)
+        return self._shift(floor, placing.then(placing.back(to), floor))
 
     def _shift(self, floor, shift):
         """Everything here moves by `shift` on the floor, and the floor so that the room stands

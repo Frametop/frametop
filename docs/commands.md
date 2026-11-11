@@ -35,7 +35,7 @@ Mapped buttons and key combinations that run a command still work while Frametop
 
 ## How they run
 
-A command runs with `sh -c`, as you, on the headset (not in Frametop's container). Nothing waits for it, and running it again starts another copy. Frametop's own tools (`ft-layout`, `ft-float`, `ft-steam`, `ft-voice`) are on its PATH.
+A command runs with `sh -c`, as you, on the headset (not in Frametop's container). Nothing waits for it, and running it again starts another copy. Frametop's own tools (`ft-layout`, `ft-float`, `ft-steam`, `ft-voice`, `ft-room`) are on its PATH.
 
 Each run is a transient systemd user unit named `frametop-cmd-NAME-TIME`:
 

@@ -20,6 +20,8 @@ Frame's floor lies in the room now:
   go person N           to in front of the person at place N, facing them
   go panel ID           to where the room's panel ID reads well, facing it
   pull DX DZ DEGREES    the room pulled past by that much on your own floor
+  step FORWARD RIGHT DEGREES   that many metres the way you face and to your right, then
+                        turned that far to the left where you stand
 
   --socket NAME     its own socket's name (ft_roompanels)
   --together NAME   ft-together's (ft_together)
@@ -54,7 +56,7 @@ def answer(keeper, mover, text):
         return keeper.panels()
     if len(words) == 2 and words[0] in ("share", "unshare") and words[1].isdigit() and len(words[1]) < 4:
         return (keeper.share if words[0] == "share" else keeper.unshare)(int(words[1]))
-    return "error share N | unshare N | state | panels | go ... | pull DX DZ DEGREES"
+    return "error share N | unshare N | state | panels | go ... | pull DX DZ DEGREES | step FORWARD RIGHT DEGREES"
 
 
 def main():

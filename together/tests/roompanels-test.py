@@ -2,13 +2,14 @@
 """ft-roompanels between two real ft-together on this machine's loopback, each with a stand-in
 for its Frame's ft-screens (fakescreens.py): what one shares stands at the other's where the
 room says, both ways, and goes when it is taken back, when its owner leaves and when
-ft-roompanels ends; and one of them moves through the room (go, pull) while everything in it
+ft-roompanels ends; and one of them moves through the room (go, pull, step) while everything in it
 stays where the room has it for both. No video goes: that is panels-test.py.
 
     roompanels-test.py FT-TOGETHER
 """
 import math
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -109,6 +110,16 @@ def moves(ada, ben):
     check("ben pulls the room past him", ben.ask("pull 0.5 -0.25 20").startswith("ok "))
     check("his floor lies where the pull's way back puts it", near(ben.floor(), placing.then(was, placing.back((0.5, -0.25, math.radians(20)))), 1e-4))
     check("so he faces the other way round by as much", abs(placing.wrap(ben.head()[2] - before[2] + math.radians(20))) < 1e-3)
+    before = ben.head()
+    step = subprocess.run([sys.executable, str(HERE.parent / "ft-room"), "--socket", ben.end.sock, "--panels", ben.name + "_panels", "step", "0.5", "0", "-90"],
+                          capture_output=True, text=True, timeout=10)
+    check("ben steps forward and turns right, asked through ft-room", step.returncode == 0 and step.stdout.startswith("ok "))
+    ahead = placing.turned(before[2], (0.0, 0.0, -1.0))
+    check("he is half a metre further the way he faced, turned a quarter to the right",
+          at_spot(ben, (before[0] + 0.5 * ahead[0], before[1] + 0.5 * ahead[2], placing.wrap(before[2] - math.pi / 2))))
+    asked = subprocess.run([sys.executable, str(HERE.parent / "ft-room"), "--socket", ben.end.sock, "--panels", ben.name + "_panels", "state"],
+                           capture_output=True, text=True, timeout=10)
+    check("and what isn't about moving still goes to ft-together", asked.returncode == 0 and '"mode": "joined"' in asked.stdout)
     time.sleep(0.8)    # a few looks of each ft-roompanels
     now = panel_in_room(ada.end, 8)
     check("ben's own shared screen is where the room had it, for all his moving",

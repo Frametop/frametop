@@ -2,9 +2,36 @@
 
 #include <fcntl.h>
 #include <gbm.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 namespace media {
+
+namespace {
+
+// Puts a new buffer's bytes out of the CPU's caches. The kernel noughts a buffer's pages through
+// a cached view of its own, and those lines of noughts stay in the caches after our pictures
+// have gone to the memory under them (we write uncached). The Frame's encoder reads through the
+// caches: it found most of each buffer's first picture black, and the rest of it only where a
+// line had happened to fall out. Done once, before anything is drawn, nothing stale is left.
+bool Uncache(int fd, size_t size) {
+#if defined(__aarch64__)
+    void *map = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) return false;
+    unsigned long ctr = 0;
+    asm volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    const size_t line = size_t(4) << ((ctr >> 16) & 0xf);   // the smallest data cache line, in bytes
+    const char *at = static_cast<const char *>(map);
+    for (size_t o = 0; o < size; o += line) asm volatile("dc civac, %0" : : "r"(at + o) : "memory");
+    asm volatile("dsb ish" : : : "memory");
+    munmap(map, size);
+#else
+    (void)fd, (void)size;
+#endif
+    return true;
+}
+
+}  // namespace
 
 bool Pictures::Open(int width, int height, int rows, std::string &err) {
     Close();
@@ -20,6 +47,8 @@ bool Pictures::Open(int width, int height, int rows, std::string &err) {
     stride_ = gbm_bo_get_stride(bo_[0]);
     const off_t end = lseek(fd_[0], 0, SEEK_END);
     size_ = end > 0 ? size_t(end) : 0;
+    for (int i = 0; i < kCount; ++i)
+        if (!size_ || !Uncache(fd_[i], size_)) return err = "a picture buffer couldn't be mapped", Close(), false;
     return true;
 }
 

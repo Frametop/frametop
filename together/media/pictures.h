@@ -25,7 +25,8 @@ public:
 
     // Pictures of width x height in buffers `rows` rows long (height, when that is more): the
     // encoder reads whole rows past a picture's last, up to its own step (irisenc.h, frameSize),
-    // and they are the buffer's to have. False with `err` saying what GBM refused.
+    // and they are the buffer's to have. Each buffer is put out of the CPU's caches, so that the
+    // encoder reads what is drawn from the first picture on. False with `err` saying what failed.
     bool Open(int width, int height, int rows, std::string &err);
     void Close();
 

@@ -3,11 +3,12 @@
 // Frametop on a local socket, one datagram a question: the session's (session/commands.h), and
 //
 //   watch            -> the asker gets the other people's poses from now on (local/watchers.h)
+//   listen           -> the asker gets their voices
 //   floor [X Z YAW]  -> where this Frame's own floor lies in the room (local/floor.h)
 //   media            -> which shared panels have a program here, and how their video goes
 //
-// A datagram there that is a pose (local/datagrams.h) is the wearer's own: it goes to everyone
-// in the room, and theirs come back to whoever watches. The shared panels' video comes from and
+// A datagram there that is a pose or a voice (local/datagrams.h) is the wearer's own: it goes
+// to everyone in the room, and theirs come back to whoever watches or listens. The shared panels' video comes from and
 // goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
 // between the Frames on the links, a stream a picture (flow/video.h).
 //
@@ -29,6 +30,7 @@
 #include "local/floor.h"
 #include "local/media.h"
 #include "local/posegate.h"
+#include "local/voicegate.h"
 #include "local/watchers.h"
 #include "net/quiclinks.h"
 #include "net/tailnet.h"
@@ -120,6 +122,8 @@ struct Local {
     local::PoseGate gate;
     local::PoseCount count;
     local::Watchers watchers;
+    local::VoiceGate voices;
+    local::Watchers listeners{local::kVoiceToListener};
     local::Floor floor;
     local::Media media;
 };
@@ -143,8 +147,21 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, flow::Programs
     return true;
 }
 
-// What a link saw. A pose from someone in the room goes to this Frame's watchers; anything
-// else in a datagram (voice, later) is dropped. A picture goes to the video's rules.
+// A datagram from a link: a pose from someone in the room goes to this Frame's watchers, their
+// voice to its listeners, and anything else is dropped.
+void Datagram(int sock, const End &end, Local &local, const net::Event &e, double now) {
+    const int person = end.session->PersonOn(e.link);
+    if (person < 0 || e.bytes.empty()) return;
+    const uint8_t *data = e.bytes.data();
+    const size_t n = e.bytes.size();
+    if (data[0] == proto::kVoiceDatagram) {
+        if (local.voices.Take(e.link, data, n, now)) local.listeners.Send(sock, person, data, n, now);
+    } else if (local.gate.Take(e.link, data, n, now)) {
+        local.watchers.Send(sock, person, data, n, now);
+    }
+}
+
+// What a link saw. A picture goes to the video's rules.
 void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     session::Session &session = *end.session;
     switch (e.kind) {
@@ -153,12 +170,9 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     case net::Event::kDown:
         session.Down(e.link, now);
         local.gate.Forget(e.link);
+        local.voices.Forget(e.link);
         break;
-    case net::Event::kDatagram: {
-        const int person = session.PersonOn(e.link);
-        if (person >= 0 && local.gate.Take(e.link, e.bytes.data(), e.bytes.size(), now)) local.watchers.Send(sock, person, e.bytes.data(), e.bytes.size(), now);
-        break;
-    }
+    case net::Event::kDatagram: Datagram(sock, end, local, e, now); break;
     case net::Event::kFrame: end.video->Frame(e.link, e.bytes.data(), e.bytes.size(), now); break;
     case net::Event::kFrameLost: end.video->Lost(e.link, e.tag, now); break;
     }
@@ -182,7 +196,16 @@ void Mine(End &end, Local &local, const uint8_t *data, size_t n) {
     for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
 }
 
-// One datagram from the local socket seen to, if one waits: a question answered, or a pose sent on.
+// The wearer's own voice, from this Frame's program that hears them, to everyone in the room.
+void MyVoice(End &end, const uint8_t *data, size_t n) {
+    proto::Voice voice;
+    if (!end.inRoom() || !proto::ReadVoice(data, n, voice)) return;
+    const std::vector<uint8_t> out(data, data + n);
+    for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
+}
+
+// One datagram from the local socket seen to, if one waits: a question answered, or a pose or
+// a voice sent on.
 bool Answer(int sock, End &end, Local &local, double now) {
     char text[kMostQuestion + 1];
     sockaddr_un from;
@@ -190,11 +213,13 @@ bool Answer(int sock, End &end, Local &local, double now) {
     const ssize_t n = recvfrom(sock, text, sizeof text, MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&from), &fromLen);
     if (n < 0) return false;
     if (n > 0 && uint8_t(text[0]) == proto::kPoseDatagram) return Mine(end, local, reinterpret_cast<const uint8_t *>(text), size_t(n)), true;
+    if (n > 0 && uint8_t(text[0]) == proto::kVoiceDatagram) return MyVoice(end, reinterpret_cast<const uint8_t *>(text), size_t(n)), true;
     const std::string asked(text, size_t(n));
     std::string reply;
     if (size_t(n) > kMostQuestion) reply = "error that is too long";
     else if (!end.session) reply = "error Tailscale isn't running on this headset";
     else if (asked == "watch") reply = local.watchers.Add(from, fromLen, now) ? "ok" : "error too many programs are watching";
+    else if (asked == "listen") reply = local.listeners.Add(from, fromLen, now) ? "ok" : "error too many programs are listening";
     else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = local.floor.Ask(asked, end.inRoom());
     else if (asked == "media") reply = "ok " + MediaState(end, local);
     else reply = session::Command(*end.session, asked, now);

@@ -7,6 +7,10 @@
 //                      It isn't answered.
 //   to a watcher       kPoseToWatcher, whose it is (their place in the room, a byte), then that
 //                      person's pose datagram (watchers.h)
+//   to ft-together     a voice datagram as it goes on a link (proto/voicewire.h: its first
+//                      byte is proto::kVoiceDatagram, 2): 20 ms of your own voice. It isn't
+//                      answered.
+//   to a listener      kVoiceToListener, whose it is, then that person's voice datagram
 #pragma once
 
 #include <cstdint>
@@ -14,5 +18,6 @@
 namespace local {
 
 constexpr uint8_t kPoseToWatcher = 0x81;
+constexpr uint8_t kVoiceToListener = 0x82;
 
 }  // namespace local

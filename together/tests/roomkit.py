@@ -1,6 +1,7 @@
-"""What the tests that run ft-together for real share (loopback-test.py, panels-test.py): one
-ft-together on this machine's loopback and the questions to it, a program on its media socket,
-a program whose printed lines are read as they come, and the checks' tally."""
+"""What the tests that run ft-together for real share: one ft-together on this machine's
+loopback and the questions to it, a program on its media socket, a program that hands it poses
+and voices and gets the others', a program whose printed lines are read as they come, and the
+checks' tally."""
 import json
 import os
 import signal
@@ -127,6 +128,64 @@ class Program:
     def let_go(self, seconds=3.0):
         """Whether ft-together closes the socket in that time."""
         return self.messages(seconds)[-1:] == [None]
+
+    def close(self):
+        self.sock.close()
+
+
+def pose(x, turn=0, eye_height=1.6, z=0.0):
+    """A pose datagram (proto/posewire.h): a head at (x, 1.6, z) looking ahead, no hands."""
+    return struct.pack("<BH3f4hHB5s", 1, turn, x, 1.6, z, 32767, 0, 0, 0, round(eye_height * 1000), 0, bytes(5))
+
+
+def voice(count, size=60):
+    """A voice datagram (proto/voicewire.h): its count, and a packet of that many bytes."""
+    return struct.pack("<BH", 2, count) + bytes([count & 255]) * size
+
+
+class Watcher:
+    """One of a Frame's own programs: it hands ft-together the wearer's pose or voice, and gets the others'."""
+
+    def __init__(self, end):
+        self.to = ftipc.address(end.sock)
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+        self.sock.bind("")
+
+    def send(self, data):
+        self.sock.sendto(data, self.to)
+
+    def ask(self, text):
+        self.sock.settimeout(2.0)
+        self.send(text.encode())
+        try:
+            while True:
+                data = self.sock.recv(4096)
+                if data[:1] not in (b"\x81", b"\x82"):
+                    return data.decode()
+        except OSError:
+            return "none"
+
+    def poses(self, seconds=0.5):
+        """What came in that time: [(person, pose bytes)]."""
+        return self.got(b"\x81", seconds)
+
+    def voices(self, seconds=0.5):
+        return self.got(b"\x82", seconds)
+
+    def got(self, kind, seconds):
+        got = []
+        deadline = time.monotonic() + seconds
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return got
+            self.sock.settimeout(left)
+            try:
+                data = self.sock.recv(4096)
+            except OSError:
+                return got
+            if data[:1] == kind:
+                got.append((data[1], data[2:]))
 
     def close(self):
         self.sock.close()

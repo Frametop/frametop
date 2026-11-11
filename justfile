@@ -137,6 +137,10 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/local-test.cpp together/local/watchers.cpp \
       -o build/tests/together-local-test
     run together/tests/local-test.cpp build/tests/together-local-test
+    # the room's voices: the jitter buffer, where a voice is heard from, the Opus codec and the mix
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/voice-test.cpp together/voice/codec.cpp \
+      together/voice/voices.cpp -lopus -o build/tests/together-voice-test
+    run together/tests/voice-test.cpp build/tests/together-voice-test
     # the links are msquic, which together/build.sh fetches and builds
     if [ -f together/build/libmsquic.so.2 ]; then
         quic="-Itogether/build/msquic/src/inc together/build/libmsquic.so.2 -Wl,-rpath,$PWD/together/build $(pkg-config --libs openssl) -lpthread"
@@ -152,8 +156,12 @@ test-c:
         # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
         # video through the hardware encoder and decoder, is run by hand: together/README.md.)
         run together/tests/roompanels-test.py python3 together/tests/roompanels-test.py build/tests/ft-together
+        g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-roomvoice.cpp together/voice/codec.cpp \
+          together/voice/voices.cpp together/voice/sender.cpp together/voice/player.cpp together/voice/headask.cpp together/voice/pulse.cpp \
+          avatar/room/client.cpp avatar/room/people.cpp $(pkg-config --cflags --libs opus libpulse-simple) -lpthread -o build/tests/ft-roomvoice
+        run together/tests/roomvoice-test.py python3 together/tests/roomvoice-test.py build/tests/ft-together build/tests/ft-roomvoice
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

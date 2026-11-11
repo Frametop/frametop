@@ -3,7 +3,8 @@
 //
 // In, from a link: a datagram is passed on only when it is a pose (proto::Read takes it), newer
 // than the last one that link sent, and within what a link may send in a second. Everything a
-// peer sends counts against that, rubbish too, so a flood costs a read each and no more.
+// peer sends counts against that, rubbish too, so a flood costs a read each and no more
+// (linkgate.h).
 //
 // Out, to the links: a pose this Frame's own program hands over is read the same way and sent
 // with ft-together's own count in it, so the count goes on when that program starts again
@@ -13,10 +14,9 @@
 #pragma once
 
 #include "../proto/posewire.h"
+#include "linkgate.h"
 
-#include <cmath>
 #include <cstdint>
-#include <map>
 #include <vector>
 
 namespace local {
@@ -28,27 +28,15 @@ public:
 
     // Whether the datagram that came on `link` at `now` (seconds) is passed on.
     bool Take(int link, const uint8_t *data, size_t n, double now) {
-        Seen &s = seen_[link];
-        if (s.known) s.left = std::fmin(kAtOnce, s.left + (now - s.at) * kASecond);
-        s.known = true, s.at = now;
-        if (s.left < 1) return false;
-        s.left -= 1;
         proto::Pose pose;
-        if (!proto::Read(data, n, pose) || (s.any && !proto::Newer(pose.turn, s.turn))) return false;
-        s.any = true, s.turn = pose.turn;
-        return true;
+        return gate_.Count(link, now) && proto::Read(data, n, pose) && gate_.Newer(link, pose.turn);
     }
     // The link is gone: one that gets its number later starts afresh.
-    void Forget(int link) { seen_.erase(link); }
-    size_t links() const { return seen_.size(); }
+    void Forget(int link) { gate_.Forget(link); }
+    size_t links() const { return gate_.links(); }
 
 private:
-    struct Seen {
-        bool known = false, any = false;   // something came; a pose was taken
-        uint16_t turn = 0;
-        double left = kAtOnce, at = 0;
-    };
-    std::map<int, Seen> seen_;
+    LinkGate gate_{kASecond, kAtOnce};
 };
 
 // This Frame's own poses, counted for the links.

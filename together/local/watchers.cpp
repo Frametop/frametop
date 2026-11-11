@@ -1,4 +1,4 @@
-// Who gets the room's poses on this Frame (watchers.h).
+// Who gets the room's poses, or its voices, on this Frame (watchers.h).
 #include "watchers.h"
 
 #include <cerrno>
@@ -18,11 +18,11 @@ bool Watchers::Add(const sockaddr_un &from, socklen_t len, double now) {
     return true;
 }
 
-void Watchers::Send(int sock, int person, const uint8_t *pose, size_t n, double now) {
+void Watchers::Send(int sock, int person, const uint8_t *datagram, size_t n, double now) {
     if (watching_.empty()) return;
     std::vector<uint8_t> out(n + 2);
-    out[0] = kPoseToWatcher, out[1] = uint8_t(person);
-    std::memcpy(out.data() + 2, pose, n);
+    out[0] = kind_, out[1] = uint8_t(person);
+    std::memcpy(out.data() + 2, datagram, n);
     for (size_t i = 0; i < watching_.size();) {
         const Watcher &w = watching_[i];
         const bool gone = now - w.asked > kKeptS ||

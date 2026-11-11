@@ -31,7 +31,7 @@ void Client::Close() {
     sock_ = -1;
     people_.Gone();
     watch_ = laid_ = none_ = false;
-    asked_ = watched_ = floored_ = heard_ = -1e9;
+    asked_ = watched_ = listened_ = floored_ = heard_ = -1e9;
     questions_.clear();
     posesIn_ = 0;
 }
@@ -71,6 +71,7 @@ void Client::Take(double now) {
         if (n < 0) return;
         if (q.fromLen == togetherLen_ && !std::memcmp(&q.from, &together_, togetherLen_)) {
             if (n > 0 && buf[0] == local::kPoseToWatcher) posesIn_ += people_.Pose(buf, size_t(n), now);
+            else if (n > 0 && buf[0] == local::kVoiceToListener) Voice(buf, size_t(n));
             else Answer(std::string(reinterpret_cast<const char *>(buf), size_t(n)), now);
         } else if (questions_.size() < kMostQuestions) {
             q.text.assign(reinterpret_cast<const char *>(buf), size_t(n));
@@ -78,6 +79,14 @@ void Client::Take(double now) {
             questions_.push_back(q);
         }
     }
+}
+
+// A datagram a listener got (0x82, whose, the voice): on to whoever plays it, if it is of
+// someone else in the room.
+void Client::Voice(const uint8_t *data, size_t n) {
+    const int place = n > 2 ? data[1] : -1;
+    if (!voice_ || !people_.inRoom() || place < 0 || place >= proto::kPeople || place == people_.me() || !people_.person(place).here) return;
+    voice_(place, data + 2, n - 2);
 }
 
 void Client::Tick(double now, const double *head) {
@@ -88,6 +97,7 @@ void Client::Tick(double now, const double *head) {
     if (now - asked_ >= kStateS) asked_ = now, Ask("state");
     if (!people_.inRoom()) return;
     if (watch_ && now - watched_ >= kWatchS) watched_ = now, Ask("watch");
+    if (voice_ && now - listened_ >= kWatchS) listened_ = now, Ask("listen");
     if (now - floored_ < (laid_ ? kFloorKnownS : kFloorS)) return;
     floored_ = now;
     if (none_ && head) {   // nobody has laid it: where the wearer stands now is their spot

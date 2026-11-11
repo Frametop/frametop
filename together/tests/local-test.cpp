@@ -5,6 +5,7 @@
 #include "../local/floor.h"
 #include "../local/mediawire.h"
 #include "../local/posegate.h"
+#include "../local/voicegate.h"
 #include "../local/watchers.h"
 
 #include <algorithm>
@@ -134,6 +135,53 @@ static void watchers() {
     for (int fd : {from, a, more[0], more[1], more[2], more[3]}) close(fd);
 }
 
+// 20 ms of someone's voice: the bytes are whatever, as far as ft-together goes.
+static std::vector<uint8_t> voice(uint16_t count, size_t size = 60) {
+    const std::vector<uint8_t> opus(size, uint8_t(count));
+    return proto::PackVoice(count, opus.data(), size);
+}
+
+static void voices() {
+    proto::Voice v;
+    const std::vector<uint8_t> d = voice(0xabcd, 70);
+    check("a voice datagram reads back: its count and its packet", d.size() == 73 && proto::ReadVoice(d.data(), d.size(), v) && v.count == 0xabcd && v.size == 70 &&
+                                                                     v.opus == d.data() + 3 && v.opus[69] == 0xcd);
+    const std::vector<uint8_t> most = voice(1, proto::kMostVoice), one = voice(2, 1);
+    std::vector<uint8_t> over = most, none(d.begin(), d.begin() + 3), other = d;
+    over.push_back(0), other[0] = proto::kPoseDatagram;
+    check("the longest and the shortest packet read", proto::ReadVoice(most.data(), most.size(), v) && proto::ReadVoice(one.data(), one.size(), v) && v.size == 1);
+    check("one with no packet, one too long and another kind don't, and aren't packed either",
+          !proto::ReadVoice(none.data(), none.size(), v) && !proto::ReadVoice(over.data(), over.size(), v) && !proto::ReadVoice(other.data(), other.size(), v) &&
+              !proto::ReadVoice(nullptr, 0, v) && voice(3, 0).empty() && voice(3, proto::kMostVoice + 1).empty());
+
+    local::VoiceGate g;
+    const auto take = [&g](int link, const std::vector<uint8_t> &datagram, double now) { return g.Take(link, datagram.data(), datagram.size(), now); };
+    check("a link's voice is passed on in order, with gaps where nothing was said", take(1, voice(500), 0) && take(1, voice(501), 0.02) && take(1, voice(650), 3));
+    check("one that comes after a newer one isn't, nor the same again", !take(1, voice(649), 3.01) && !take(1, voice(650), 3.02) && take(1, voice(651), 3.03));
+    check("what isn't voice isn't passed on, and each link has its own count", !take(1, over, 3.1) && !take(1, pose(700), 3.1) && take(2, voice(3), 3.1));
+    int taken = 0;
+    uint16_t count = 1000;
+    for (int i = 0; i < 2000; ++i) taken += take(3, voice(count++), 5 + i * 0.0005);   // two thousand in a second
+    check("a link that floods has about a hundred and fifty a second passed on",
+          taken >= int(local::VoiceGate::kASecond) && taken <= int(local::VoiceGate::kASecond + local::VoiceGate::kAtOnce) + 1);
+    taken = 0;
+    for (int i = 0; i < 250; ++i) taken += take(4, voice(count++), 7 + i * 0.02);
+    check("fifty a second all pass, for as long as they come", taken == 250);
+    g.Forget(1);
+    check("a link that is gone is forgotten", take(1, voice(2), 20));
+
+    local::Watchers w(local::kVoiceToListener);
+    const int from = sock(name("vhub").c_str()), a = sock(name("va").c_str());
+    sockaddr_un at;
+    const socklen_t len = ft_sock_addr(name("va").c_str(), &at);
+    w.Add(at, len, 0);
+    w.Send(from, 3, d.data(), d.size(), 0.1);
+    const std::string got = next(a);
+    check("a listener gets a voice as 0x82, whose it is, and the datagram",
+          got.size() == d.size() + 2 && uint8_t(got[0]) == local::kVoiceToListener && got[1] == 3 && got.substr(2) == std::string(d.begin(), d.end()));
+    close(from), close(a);
+}
+
 static void floor() {
     local::Floor f;
     check("outside a room there is no floor to lay", f.Ask("floor", false).rfind("error", 0) == 0 && f.Ask("floor 1 2 3", false).rfind("error", 0) == 0 && !f.laid());
@@ -211,6 +259,7 @@ int main() {
     gate();
     count();
     watchers();
+    voices();
     floor();
     mediawire();
     std::printf("%s\n", failed ? "FAILED" : "all ok");

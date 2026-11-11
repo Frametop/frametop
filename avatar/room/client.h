@@ -1,7 +1,7 @@
 // A program's end of ft-together's local socket (together/README.md, "ft-together"), for one
-// that draws the room or tells it where its wearer is: it keeps asking who is in the room,
-// watches the others' poses, sees to it that your floor is laid in the room (floor.h), and
-// hands your own pose over.
+// that draws the room, plays it or tells it where its wearer is: it keeps asking who is in the
+// room, watches the others' poses, listens to their voices if they are wanted, sees to it that
+// your floor is laid in the room (floor.h), and hands your own pose over.
 //
 // One socket, bound to a name of the program's own, does it all: ft-together answers to it and
 // sends the watched poses to it, and whatever comes from anyone else is a question to this
@@ -15,6 +15,7 @@
 #include "people.h"
 
 #include <deque>
+#include <functional>
 #include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -41,6 +42,12 @@ public:
     // `err` when the name is taken (the program runs already) or isn't one.
     bool Open(const std::string &own, const std::string &together, bool watch, std::string &err);
     void Close();
+    // The others' voices are wanted too: each voice datagram of someone in the room
+    // (together/proto/voicewire.h) goes to `heard` as it comes, with their place.
+    using Heard = std::function<void(int person, const uint8_t *voice, size_t n)>;
+    void Listen(Heard heard) { voice_ = std::move(heard); }
+    // The socket, for a loop that sleeps until something comes; -1 when closed.
+    int fd() const { return sock_; }
     Client() = default;
     Client(const Client &) = delete;
     Client &operator=(const Client &) = delete;
@@ -65,6 +72,7 @@ public:
 
 private:
     void Take(double now);
+    void Voice(const uint8_t *data, size_t n);
     void Answer(const std::string &text, double now);
     void Ask(const std::string &text);
 
@@ -74,7 +82,8 @@ private:
     bool watch_ = false, laid_ = false, none_ = false;   // none_: ft-together said the room has no floor yet
     roompeople::People people_;
     roomfloor::Floor floor_;
-    double asked_ = -1e9, watched_ = -1e9, floored_ = -1e9, heard_ = -1e9;
+    Heard voice_;
+    double asked_ = -1e9, watched_ = -1e9, listened_ = -1e9, floored_ = -1e9, heard_ = -1e9;
     std::deque<Question> questions_;
     unsigned posesIn_ = 0;
 };

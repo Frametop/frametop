@@ -71,7 +71,7 @@ struct Together {
             ++asked[q.substr(0, q.find(' '))];
             std::string reply = "error what?";
             if (q == "state") reply = "ok " + state;
-            else if (q == "watch") reply = "ok";
+            else if (q == "watch" || q == "listen") reply = "ok";
             else if (q == "floor") reply = floor;
             else if (q.rfind("floor ", 0) == 0) {
                 said.push_back(q);
@@ -172,6 +172,28 @@ int main() {
     check("...but not one of nobody, nor rubbish", c.posesIn() == 1);
     pass(1.25, head);
     check("someone whose poses stop isn't drawn any more", !c.people().Drawn(0, now));
+
+    // voices
+    std::vector<std::pair<int, std::string>> heard;
+    const int listens = together.asked["listen"];
+    const auto say = [&](int place) {
+        const uint8_t voice[] = {local::kVoiceToListener, uint8_t(place), 2, 7, 0, 'o', 'p', 'u', 's'};
+        sendto(together.sock.fd, voice, sizeof voice, MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&together.asker), together.askerLen);
+    };
+    say(0);
+    pass(0.0625, head);
+    check("a program that doesn't listen isn't asked for, and a voice that comes all the same goes nowhere", together.asked["listen"] == listens && heard.empty());
+    c.Listen([&heard](int person, const uint8_t *voice, size_t n) { heard.push_back({person, std::string(reinterpret_cast<const char *>(voice), n)}); });
+    for (int i = 0; i < 16; ++i) pass(0.125, head);
+    check("one that listens asks to every second", together.asked["listen"] - listens == 2);
+    say(0);
+    say(1);   // your own place
+    say(3);   // nobody's
+    say(200);
+    pass(0.0625, head);
+    check("a voice of someone else in the room is handed on as it came, with whose it is; your own and nobody's aren't",
+          heard.size() == 1 && heard[0].first == 0 && heard[0].second == std::string("\x02\x07\x00opus", 7));
+    check("the socket is there for a loop to sleep on", c.fd() >= 0);
 
     check("your own pose is handed to ft-together", c.Send(Standing(-0.5f)) && (together.Serve(), together.poses.size() == 1));
     proto::Pose mine;

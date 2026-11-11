@@ -20,56 +20,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import roomkit  # noqa: E402  (ft-together on the loopback, the questions to it, the tally)
-from roomkit import End, Program, check, free_port, let_in, linked, names  # noqa: E402
+from roomkit import End, Program, Watcher, check, free_port, let_in, linked, names, pose, voice  # noqa: E402
 
 ftipc = roomkit.ftipc
-
-
-def pose(x, turn=0, eye_height=1.6):
-    """A pose datagram (proto/posewire.h): a head at (x, 1.6, 0) looking ahead, no hands."""
-    return struct.pack("<BH3f4hHB5s", 1, turn, x, 1.6, 0.0, 32767, 0, 0, 0, round(eye_height * 1000), 0, bytes(5))
-
-
-class Watcher:
-    """One of a Frame's own programs: it hands ft-together the wearer's pose, and watches the others'."""
-
-    def __init__(self, end):
-        self.to = ftipc.address(end.sock)
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
-        self.sock.bind("")
-
-    def send(self, data):
-        self.sock.sendto(data, self.to)
-
-    def ask(self, text):
-        self.sock.settimeout(2.0)
-        self.send(text.encode())
-        try:
-            while True:
-                data = self.sock.recv(4096)
-                if data[:1] != b"\x81":
-                    return data.decode()
-        except OSError:
-            return "none"
-
-    def poses(self, seconds=0.5):
-        """What came in that time: [(person, pose bytes)]."""
-        got = []
-        deadline = time.monotonic() + seconds
-        while True:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                return got
-            self.sock.settimeout(left)
-            try:
-                data = self.sock.recv(4096)
-            except OSError:
-                return got
-            if data[:1] == b"\x81":
-                got.append((data[1], data[2:]))
-
-    def close(self):
-        self.sock.close()
 
 
 def crosses(source, sinks, units, tries=4):
@@ -165,6 +118,22 @@ def main(program):
         sees.send(pose(-1.0))
         check("a guest's pose goes to the owner and the other guest alike", ok and [p for p, _ in mine.poses()] == [ids["ben"]] and
               [p for p, _ in cys.poses(0.2)] == [ids["ben"]])
+
+        # voices: the same way, to whoever listens
+        check("a program asks to listen", sees.ask("listen") == "ok" and mine.ask("listen") == "ok")
+        for count in (65534, 65535, 0, 40):   # a gap is silence, and the count goes round
+            mine.send(voice(count))
+        got = sees.voices()
+        check("a voice handed to ft-together reaches the others' listeners as it was, whose it is said",
+              got == [(ids["ada"], voice(c)) for c in (65534, 65535, 0, 40)] and sees.poses(0.1) == [])
+        mine.send(voice(39))
+        mine.send(voice(41, 0))
+        mine.send(voice(42, 401))
+        mine.send(voice(43, 400))
+        check("what came late or isn't a voice goes nowhere", sees.voices(0.3) == [(ids["ada"], voice(43, 400))])
+        check("nobody hears themselves, and someone who doesn't listen gets none", mine.voices(0.2) == [] and cys.voices(0.1) == [])
+        sees.send(voice(7))
+        check("a guest's voice goes to the owner", [p for p, _ in mine.voices()] == [ids["ben"]])
 
         # the floor: where each one's own floor lies in the room
         check("no floor is laid until a program says where", mine.ask("floor") == "ok none" and mine.ask("floor 1 2").startswith("error floor") and

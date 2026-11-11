@@ -1,8 +1,10 @@
 // What ft-together does for this Frame's own programs (together/local): which poses it passes
-// on, the count and the mouth it sends its own with, who watches, where the floor lies in the
-// room, and the messages on the media programs' socket.
+// on, the count and the mouth it sends its own with, who watches, the others' input on its way
+// to the desktop, where the floor lies in the room, and the messages on the media programs'
+// socket.
 #include "../../conf/ftsock.h"
 #include "../local/floor.h"
+#include "../local/inputs.h"
 #include "../local/mediawire.h"
 #include "../local/mouth.h"
 #include "../local/posegate.h"
@@ -171,9 +173,60 @@ static void watchers() {
 
     // a watcher that doesn't read: nobody waits for it
     w.Add(at[0], len[0], 9);
-    for (int i = 0; i < 5000; ++i) w.Send(from, 1, p.data(), p.size(), 9 + i * 1e-4), next(more[2]);
+    size_t missed = 0;
+    for (int i = 0; i < 5000; ++i) missed += w.Send(from, 1, p.data(), p.size(), 9 + i * 1e-4), next(more[2]);
     check("a watcher that doesn't read holds nothing up, and still watches", w.count() == 2 && !next(a).empty());
+    check("...and how many it missed is known", missed > 4000 && missed < 5000);
     for (int fd : {from, a, more[0], more[1], more[2], more[3]}) close(fd);
+}
+
+// The input ft-together passes to the program that gives it to the desktop.
+static void inputs() {
+    const int from = sock(name("ihub").c_str()), a = sock(name("ia").c_str()), b = sock(name("ib").c_str());
+    sockaddr_un at[2];
+    const socklen_t len[2] = {ft_sock_addr(name("ia").c_str(), &at[0]), ft_sock_addr(name("ib").c_str(), &at[1])};
+    local::Inputs in(from);
+    proto::Act move, press;
+    move.panel = 9, move.what = proto::kActMove, move.a = 40000, move.b = 7;
+    press.panel = 9, press.what = proto::kActButton, press.a = proto::kLeft, press.b = 1;
+    const auto is = [](const std::string &got, int person, const proto::Act &act) {
+        const std::vector<uint8_t> body = proto::Body(act);
+        return got.size() == body.size() + 2 && uint8_t(got[0]) == local::kInputToTaker && uint8_t(got[1]) == person && got.substr(2) == std::string(body.begin(), body.end());
+    };
+
+    in.Input(1, move);
+    check("with no program to give it to the desktop, input goes nowhere and nothing counts as missed", next(a).empty() && in.missed() == 0);
+    check("a program asks for the input, and a second one is told no: each would click", in.Add(at[0], len[0], 0) && in.Add(at[0], len[0], 1) && !in.Add(at[1], len[1], 1));
+    in.Input(1, move), in.Input(2, press);
+    proto::Act read;
+    const std::string first = next(a);
+    check("it gets an act as 0x85, whose it is, and the act's ten bytes", is(first, 1, move) && first.size() == 12 &&
+                                                                            proto::Read(std::vector<uint8_t>(first.begin() + 2, first.end()), read) && read.a == 40000 && read.b == 7);
+    check("...each in the order it came", is(next(a), 2, press) && next(a).empty() && next(b).empty());
+
+    // a program that doesn't read misses some: whatever was held is let go before it gets more
+    int sent = 0;
+    for (; sent < 5000 && in.missed() == 0; ++sent) in.Input(1, move);
+    const size_t missed = in.missed();
+    in.Input(1, press);
+    check("an act a full queue has no room for is missed, and so is what follows while it stays full", missed == 1 && in.missed() == 2);
+    while (!next(a).empty()) {}
+    press.b = 0;
+    in.Input(2, press);
+    proto::Act letGo;
+    letGo.what = proto::kActLetGo;
+    check("the next one it has room for comes after a let-go from nobody: a missed release leaves nothing down", is(next(a), local::Inputs::kNobody, letGo) && is(next(a), 2, press) &&
+                                                                                                                   next(a).empty());
+    in.Input(1, move);
+    check("...and then they come as before", is(next(a), 1, move) && next(a).empty() && in.missed() == 2);
+
+    in.At(6.5);   // the first program last asked more than five seconds ago
+    in.Input(1, move);
+    check("a program that stopped asking gets no more, and another may take its place", next(a).empty() && in.Add(at[1], len[1], 6.5) && (in.Input(1, move), is(next(b), 1, move)));
+    close(b);
+    in.At(7), in.Input(1, move);
+    check("one that is gone is nobody's miss", in.missed() == 2 && in.Add(at[0], len[0], 7) && (in.Input(2, press), is(next(a), 2, press)));
+    for (int fd : {from, a}) close(fd);
 }
 
 // 20 ms of someone's voice: the bytes are whatever, as far as ft-together goes.
@@ -301,6 +354,7 @@ int main() {
     count();
     mouth();
     watchers();
+    inputs();
     voices();
     floor();
     mediawire();

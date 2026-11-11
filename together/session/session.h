@@ -61,6 +61,9 @@ struct Config {
     std::function<void(int link, const proto::Watch &watch, double now)> watched;
     // Someone in the room asks for the file of an avatar (flow/looks.h sends ours, if it is that).
     std::function<void(int link, const proto::Want &want, double now)> wanted;
+    // Someone in the room says a message of a kind the session doesn't read itself (control's:
+    // flow/control.h). False when it wasn't theirs to say: the link is closed.
+    std::function<bool(int link, uint16_t kind, const std::vector<uint8_t> &body, double now)> said;
 };
 
 enum class Mode { kIdle, kHosting, kCalling, kJoined };
@@ -114,6 +117,9 @@ public:
     std::string Unshare(int number);
     // Tells a panel's owner what the wearer has of it.
     std::string Watch(const proto::Watch &watch);
+    // A framed message to one of the room's people, on the link to them: for what the session
+    // carries without reading it (Config::said at the other end).
+    std::string Tell(int person, const std::vector<uint8_t> &message);
 
     Mode mode() const { return mode_; }
     int me() const { return me_; }

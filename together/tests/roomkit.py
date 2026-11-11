@@ -1,7 +1,7 @@
 """What the tests that run ft-together for real share: one ft-together on this machine's
-loopback and the questions to it, a program on its media socket, a program that hands it poses
-and voices and gets the others', a program whose printed lines are read as they come, and the
-checks' tally."""
+loopback and the questions to it, a program on its media socket, a program that hands it poses,
+voices and pointers and gets the others', a program whose printed lines are read as they come,
+and the checks' tally."""
 import json
 import os
 import signal
@@ -143,8 +143,19 @@ def voice(count, size=60):
     return struct.pack("<BH", 2, count) + bytes([count & 255]) * size
 
 
+def point(panel, x, y, pressed=False, count=0):
+    """A pointer datagram (proto/pointwire.h): at (x, y) of 65535 across and down a panel."""
+    return struct.pack("<BHBHHB", 3, count, panel, x, y, 1 if pressed else 0)
+
+
+def act(panel, what, a, b):
+    """An act's body (proto/control.h): 1 a move, 2 a button, 3 a scroll, 4 a key; 0 lets go."""
+    return struct.pack("<BBii", panel, what, a, b)
+
+
 class Watcher:
-    """One of a Frame's own programs: it hands ft-together the wearer's pose or voice, and gets the others'."""
+    """One of a Frame's own programs: it hands ft-together the wearer's pose, voice or pointer, and gets what
+    the others send, or the input they may give the desktop."""
 
     def __init__(self, end):
         self.to = ftipc.address(end.sock)
@@ -160,7 +171,7 @@ class Watcher:
         try:
             while True:
                 data = self.sock.recv(4096)
-                if data[:1] not in (b"\x81", b"\x82"):
+                if data[:1] < b"\x80":   # an answer is text; what comes unasked begins 0x81 or above (local/datagrams.h)
                     return data.decode()
         except OSError:
             return "none"

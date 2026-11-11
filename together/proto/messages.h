@@ -25,7 +25,11 @@ constexpr size_t kMostName = 48, kMostLogin = 96, kMostAddress = 45, kMostCode =
 constexpr float kFar = 100;        // metres from the room's middle: nothing is further
 static_assert(kPanelFar == kFar, "a panel is no further than a person");
 
-enum Kind : uint16_t { kHello = 1, kWelcome = 2, kRefuse = 3, kRoom = 4, kAway = 5, kLeave = 6, kPanel = 7, kUnpanel = 8, kWatch = 9, kLook = 10, kWant = 11 };
+// 12 to 14 are control's (control.h): the session passes them on unread to whoever knows them.
+enum Kind : uint16_t {
+    kHello = 1, kWelcome = 2, kRefuse = 3, kRoom = 4, kAway = 5, kLeave = 6, kPanel = 7, kUnpanel = 8, kWatch = 9, kLook = 10, kWant = 11,
+    kAskControl = 12, kGrant = 13, kAct = 14,
+};
 
 // Why someone isn't let in. The numbers and Refuse's layout stay as they are in every version,
 // so that a peer on another one can still be told to update.
@@ -126,6 +130,15 @@ struct Watch {
     uint8_t level = kHidden;
     bool fresh = false;
 };
+
+// A body framed as a message of `kind`.
+inline std::vector<uint8_t> Framed(uint16_t kind, const wire::Out &body) {
+    wire::Out out;
+    out.U32(uint32_t(body.b.size()));
+    out.U16(kind);
+    out.Bytes(body.b.data(), body.b.size());
+    return out.b;
+}
 
 // A message, framed, ready to send. Our own text is cut to its limit (wire::Clean).
 std::vector<uint8_t> Pack(const Hello &m);

@@ -8,7 +8,8 @@
 //   a byte), then the datagram as it came (proto/posewire.h, proto/voicewire.h)
 //
 // sent to the address it asked from. One that stops asking, or is gone, stops being sent to.
-// One Watchers is those who asked for one kind.
+// One Watchers is those who asked for one kind. The others' pointers (`points`, pointgate.h)
+// and the input they may give this Frame's desktop (`inputs`, inputs.h) go out the same way.
 #pragma once
 
 #include "datagrams.h"
@@ -26,14 +27,14 @@ public:
     static constexpr size_t kMost = 4;
     static constexpr double kKeptS = 5;   // after it last asked
 
-    // `kind`: the first byte of what they are sent.
-    explicit Watchers(uint8_t kind = kPoseToWatcher) : kind_(kind) {}
-    // The program at `from` watches from `now` on. False when kMost others do already, or it
+    // `kind`: the first byte of what they are sent. `most`: how many may watch at a time.
+    explicit Watchers(uint8_t kind = kPoseToWatcher, size_t most = kMost) : kind_(kind), most_(most) {}
+    // The program at `from` watches from `now` on. False when `most` others do already, or it
     // asked from a socket with no name (there is nowhere to send to).
     bool Add(const sockaddr_un &from, socklen_t len, double now);
     // A person's datagram to everyone who watches, from the socket `sock`. Nobody is waited
-    // for: a watcher whose queue is full misses this one.
-    void Send(int sock, int person, const uint8_t *datagram, size_t n, double now);
+    // for: a watcher whose queue is full misses this one. How many missed it comes back.
+    size_t Send(int sock, int person, const uint8_t *datagram, size_t n, double now);
     size_t count() const { return watching_.size(); }
 
 private:
@@ -43,6 +44,7 @@ private:
         double asked;
     };
     const uint8_t kind_;
+    const size_t most_;
     std::vector<Watcher> watching_;
 };
 

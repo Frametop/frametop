@@ -11,6 +11,11 @@ Frametop is paused). So the tests ask it everything without any of them.
 
 Someone nobody can tell about is taken to be there: a Frame without the pointer helper running
 still has a wearer, and the room is told nothing it doesn't know.
+
+That is enough for the room, and not for letting others use this Frame's desktop. In a room,
+at each look where the helper's own answer has the headset worn and nothing has the wearer
+away, ft-together is also told `control here`: control of a panel is given, and stands, only
+while that keeps being said (together/README.md, "Control of a shared panel").
 """
 import json
 
@@ -94,3 +99,8 @@ class Teller:
         want = away(self._worn.get(now), self._paused.get(now))
         if want != said[0] and (self._together("away " + WORDS[want]) or "").startswith("ok"):
             self.told = WORDS[want]
+        # What the wearer lets others do on their desktop stands only on a fresh word that they
+        # are there (flow/control.h). Here nobody is taken to be: it is said only while the
+        # pointer helper says the headset is on their head.
+        if self.in_room and want == 0 and self._worn.get(now) is True:
+            self._together("control here")

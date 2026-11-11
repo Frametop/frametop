@@ -15,6 +15,11 @@
 //                      (proto/posewire.h's `mouth`: aa, ih, ou, ee, oh, 255 whole), from the
 //                      program that hears you. It goes out in your poses (mouth.h), and isn't
 //                      answered.
+//   to ft-together     a pointer datagram as it goes on a link (proto/pointwire.h: its first
+//                      byte is proto::kPointDatagram, 3): where you point now. It isn't answered.
+//   to who asks `points`  kPointToWatcher, whose it is, then that person's pointer datagram
+//   to who asks `inputs`  kInputToTaker, whose it is, then an act's body (proto/control.h):
+//                      input someone may give this Frame's desktop now (inputs.h)
 #pragma once
 
 #include "../proto/posewire.h"
@@ -27,6 +32,8 @@ namespace local {
 constexpr uint8_t kPoseToWatcher = 0x81;
 constexpr uint8_t kVoiceToListener = 0x82;
 constexpr uint8_t kMouthToTogether = 0x83;
+constexpr uint8_t kPointToWatcher = 0x84;
+constexpr uint8_t kInputToTaker = 0x85;
 constexpr size_t kMouthBytes = 1 + proto::kMouthShapes;
 
 }  // namespace local

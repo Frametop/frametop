@@ -6,14 +6,6 @@ namespace {
 
 constexpr size_t kFrame = 6;   // u32 length, u16 kind
 
-std::vector<uint8_t> Framed(uint16_t kind, const wire::Out &body) {
-    wire::Out out;
-    out.U32(uint32_t(body.b.size()));
-    out.U16(kind);
-    out.Bytes(body.b.data(), body.b.size());
-    return out.b;
-}
-
 void Put(wire::Out &out, const Look &m) {
     out.Bytes(m.hash, kLookHash);
     out.U32(m.size);

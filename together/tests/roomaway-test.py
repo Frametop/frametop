@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """ft-roomaway next to a real ft-together in a room with another, with stand-ins for the pointer
-helper and the input relay: what they say of the wearer reaches the other end's room.
+helper and the input relay: what they say of the wearer reaches the other end's room, and that
+the wearer is there reaches their own ft-together.
 
     roomaway-test.py FT-TOGETHER
 """
 import os
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -39,11 +41,21 @@ def main():
     def bens(end):
         return lambda state: [p["away"] for p in state["people"] if p["name"] == "ben"]
 
+    def there(whether, seconds=5.0):
+        """Whether ben's ft-together comes to say he is there (or not), as far as control goes."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if ('"there":true' in ben.ask("control")) == whether:
+                return True
+            time.sleep(0.1)
+        return False
+
     try:
         check("it starts in no room", tool.said("in no room"))
         check("ada opens a room and ben comes in", ada.ask("open") == "ok" and roomkit.let_in(ada, ben) and ada.until(roomkit.linked) and ben.until(roomkit.linked))
         check("it sees the room, and has nothing to tell", tool.said("in a room") and helper.asked[-1] == "gaze ? headset" and relay.asked[-1] == "pause ?"
               and bens(ada)(ada.state()) == [0])
+        check("...but that he is there, for what he gave of his desktop to stand", there(True))
         helper.reply = "ok on away"
         check("ben's headset comes off: ada's room has him away", ada.until(lambda s: bens(ada)(s) == [2]) and tool.said("in a room: off"))
         helper.reply, relay.reply = "ok off worn", '{"t": "pause", "paused": true, "reason": "game"}'
@@ -55,6 +67,7 @@ def main():
         check("off again", ada.until(lambda s: bens(ada)(s) == [2]))
         helper.reply = None
         check("a helper that stops answering: after a few seconds he is taken to be there", ada.until(lambda s: bens(ada)(s) == [0], 12))
+        check("...but nobody says so of what he gave: that stands only on the helper's word", there(False, 12))
         lines = len(tool.lines)
         check("ben leaves: it is in no room again", ben.ask("leave") == "ok" and tool.said("in no room", since=lines))
         check("told to end, it ends cleanly", tool.end() == 0 and not any("Traceback" in line for line in tool.lines))

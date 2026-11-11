@@ -27,6 +27,8 @@ struct Frame : session::Links, session::Tailnet {
     std::function<void(int link, const proto::Watch &watch, double now)> onWatch;   // ...told here too, when set
     std::vector<std::pair<int, proto::Want>> wants;      // the avatars' files its people asked it for, and on which link
     std::function<void(int link, const proto::Want &want, double now)> onWant;
+    // A message of a kind the session doesn't read, from someone in the room: false closes the link.
+    std::function<bool(int link, uint16_t kind, const std::vector<uint8_t> &body, double now)> onSaid;
 
     Frame(Net &n, const std::string &address, uint16_t port, const std::string &name);
     int Call(const std::string &host, uint16_t port) override;
@@ -154,6 +156,7 @@ inline Frame::Frame(Net &n, const std::string &at, uint16_t p, const std::string
         wants.push_back({link, w});
         if (onWant) onWant(link, w, now);
     };
+    c.said = [this](int link, uint16_t kind, const std::vector<uint8_t> &body, double now) { return !onSaid || onSaid(link, kind, body, now); };
     s = std::make_unique<session::Session>(*this, *this, c);
     net.frames.push_back(this);
 }

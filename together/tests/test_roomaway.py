@@ -64,6 +64,8 @@ class World:
             return "ok " + json.dumps({"mode": self.mode, "me": 1, "away": self.away, "people": [{"id": 0, "away": 0}, {"id": 1, "away": 0}]})
         if self.refuse:
             return "error not now"
+        if text == "control here":
+            return "ok"
         self.away = {"away back": 0, "away game": 1, "away off": 2}[text]
         return "ok"
 
@@ -101,12 +103,33 @@ class Telling(unittest.TestCase):
         t.tick()
         self.assertEqual((t.in_room, w.said()), (True, []))
 
-    def test_worn_and_not_paused_there_is_nothing_to_tell(self):
+    def test_worn_and_not_paused_only_that_they_are_there_is_told(self):
         w = World()
         t = w.teller()
         t.tick()
-        self.assertEqual(w.asked, ["state", "helper: gaze ? headset", "relay: pause ?"])
+        self.assertEqual(w.asked, ["state", "helper: gaze ? headset", "relay: pause ?", "control here"])
         self.assertEqual((t.in_room, t.told), (True, None))
+
+    def test_that_they_are_there_is_said_each_look_and_only_while_the_helper_says_so(self):
+        def here(w, t):
+            w.asked = []
+            t.tick()
+            return w.asked.count("control here")
+
+        w = World()
+        t = w.teller()
+        self.assertEqual((here(w, t), here(w, t)), (1, 1))
+        w.pause = '{"t": "pause", "paused": true}'
+        self.assertEqual(here(w, t), 0)     # in a game
+        w.pause, w.headset = '{"t": "pause", "paused": false}', "ok on away"
+        self.assertEqual(here(w, t), 0)     # off their head
+        w.headset = "ok on worn"
+        self.assertEqual(here(w, t), 1)
+        w.mode = "idle"
+        self.assertEqual(here(w, t), 0)     # in no room there is nothing to stand
+        w.mode, w.headset = "hosting", None
+        w.now += teller.FRESH + 1
+        self.assertEqual(here(w, t), 0)     # nobody knows: taken to be there for the room, not for this
 
     def test_the_headset_off_a_game_and_back(self):
         w = World()

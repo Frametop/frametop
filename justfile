@@ -142,6 +142,13 @@ test-c:
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
       -o build/tests/together-video-test
     run together/tests/video-test.cpp build/tests/together-video-test
+    # control of shared panels: the rules by themselves, then several Frames' sessions against each other
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/controlrules-test.cpp -o build/tests/together-controlrules-test
+    run together/tests/controlrules-test.cpp build/tests/together-controlrules-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/control-test.cpp together/flow/control.cpp \
+      together/local/controlask.cpp together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp \
+      together/proto/messages.cpp -o build/tests/together-control-test
+    run together/tests/control-test.cpp build/tests/together-control-test
     # the avatars people have on: who is asked for a file and whose is kept, and the files on this Frame
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/looks-test.cpp together/flow/looks.cpp \
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
@@ -155,7 +162,7 @@ test-c:
       together/net/lookup.cpp -o build/tests/together-tailnet-test
     run together/tests/tailnet-test.cpp build/tests/together-tailnet-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/local-test.cpp together/local/watchers.cpp \
-      -o build/tests/together-local-test
+      together/local/inputs.cpp -o build/tests/together-local-test
     run together/tests/local-test.cpp build/tests/together-local-test
     # the room's voices: the jitter buffer, where a voice is heard from, the Opus codec and the mix
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/voice-test.cpp together/voice/codec.cpp \
@@ -171,8 +178,8 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
           together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
           together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
-          together/flow/video.cpp together/flow/looks.cpp together/local/watchers.cpp together/local/media.cpp together/local/wardrobe.cpp \
-          avatar/modelfile.cpp -o build/tests/ft-together $quic
+          together/flow/video.cpp together/flow/looks.cpp together/flow/control.cpp together/local/watchers.cpp together/local/media.cpp \
+          together/local/wardrobe.cpp together/local/inputs.cpp together/local/controlask.cpp avatar/modelfile.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
         # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
         # video through the hardware encoder and decoder, is run by hand: together/README.md.)
@@ -182,8 +189,9 @@ test-c:
           avatar/room/client.cpp avatar/room/people.cpp $(pkg-config --cflags --libs opus libpulse-simple) -lpthread -o build/tests/ft-roomvoice
         run together/tests/roomvoice-test.py python3 together/tests/roomvoice-test.py build/tests/ft-together build/tests/ft-roomvoice
         run together/tests/roomaway-test.py python3 together/tests/roomaway-test.py build/tests/ft-together
+        run together/tests/roomcontrol-test.py python3 together/tests/roomcontrol-test.py build/tests/ft-together
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

@@ -210,8 +210,8 @@ void Session::Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, 
     case proto::kLeave:
         if (fromOwner) return End("The room ended: its owner closed it.");
         return Drop(link);   // an owner's Drop takes them out of the room
-    default:
-        if (l.state != Link::kMember) Drop(link);
+    default:   // a kind the session doesn't read: a member's goes to whoever does, or is one of a later version
+        if (l.state != Link::kMember || (config_.said && !config_.said(link, kind, body, now))) Drop(link);
     }
 }
 

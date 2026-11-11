@@ -165,6 +165,13 @@ std::string Session::Watch(const proto::Watch &watch) {
     return "";
 }
 
+std::string Session::Tell(int person, const std::vector<uint8_t> &message) {
+    const int link = person == me_ ? -1 : LinkTo(person);
+    if (link < 0) return "no link to them yet";
+    links_.Send(link, message);
+    return "";
+}
+
 std::vector<Ask> Session::asks() const {
     std::vector<Ask> out;
     for (const auto &[id, l] : link_)

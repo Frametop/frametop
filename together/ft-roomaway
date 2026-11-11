@@ -3,7 +3,9 @@
 "Away"). While ft-together runs, it asks the pointer helper whether the headset is worn and the
 input relay whether Frametop is paused for a game (once a second in a room, every other second
 outside one), and says `away off`, `away game` or `away back` to ft-together when that has it
-otherwise. The rules are in roomaway/teller.py; this is the loop around them.
+otherwise. In a room, while the helper says the headset is worn and no game is on, it also says
+`control here`, which lets what the wearer gave of their desktop stand (together/README.md,
+"Control of a shared panel"). The rules are in roomaway/teller.py; this is the loop around them.
 
   --together NAME   ft-together's socket (ft_together)
   --helper NAME     the pointer helper's (ft_pointer_helper)

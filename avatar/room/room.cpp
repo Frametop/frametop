@@ -9,6 +9,7 @@
 #include "client.h"
 #include "figure.h"
 #include "handcut.h"
+#include "roomface.h"
 #include "sentbody.h"
 
 #include "../../conf/ft_conf.h"
@@ -56,13 +57,14 @@ std::string Worn() {
 }
 
 // Whoever has one place in the room, once someone there was first drawn: their body on the GPU,
-// what poses it, and the sheet they are shown on.
+// what poses it and its face, and the sheet they are shown on.
 struct Drawn {
     bool made = false, failed = false;
     unsigned since = 0;   // which newcomer to the place this is (roompeople::Person::since)
     std::string file;     // the avatar's file their body was last looked for in ("": none)
     bool own = false;     // ...and it is that avatar: else the abstract body
     std::unique_ptr<figure::Figure> figure;
+    roomface::Face expression;
     bodygpu::Avatar avatar;
     sheet::Sheet sheet;
     int64_t posedAt = 0, drawnAt = 0;
@@ -70,6 +72,7 @@ struct Drawn {
     bool Make(const stage::Stage &stage, int place, int side, const std::string &from) {
         const std::string key = "frametop.avatars.person." + std::to_string(place), name = "Person " + std::to_string(place + 1);
         if (!sheet.Make(stage.maker, key.c_str(), name.c_str(), kOrder, side, side)) return failed = true, false;
+        expression = roomface::Face(uint32_t(place) + 1);
         Wear(stage, place, from);
         return made = true;
     }
@@ -85,6 +88,14 @@ struct Drawn {
         avatar.Upload(stage.painter, body);
         figure = std::make_unique<figure::Figure>(body);
         file = from;
+    }
+    // Their face as their pose has it now, before they are drawn: the mouth their voice
+    // moves, and the eyes' own blinks. The abstract body has no face to move.
+    void Face(const proto::Pose &pose, int64_t now) {
+        static_assert(face::kWeights == bodymesh::kShapes, "a face's weights go by Shape::Id");
+        float shapes[face::kWeights];
+        expression.After(pose.mouth, double(now - drawnAt) / 1e9, avatar.has(bodyfile::Shape::kBlink), shapes);
+        avatar.Shape(shapes);
     }
     // Out of sight, and what was known of how they moved forgotten.
     void Rest() {
@@ -182,6 +193,7 @@ int Run(const Ask &ask) {
             }
             if (d.sheet.visible() && !mirror::InSight(view.sheet.glass, between, ahead, kInSight)) continue;   // behind you: as they were
             vroutput::Buffer &into = d.sheet.Next(&view.sheet.glass);
+            d.Face(person.pose, now);
             windowview::Draw(stage.painter, d.avatar, d.figure->bones(), view.clip, view.sees, billboard::Light(), side, side);
             vroutput::Fence(stage.maker, into);
             d.drawnAt = now, ++draws;

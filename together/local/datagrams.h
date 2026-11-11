@@ -11,13 +11,22 @@
 //                      byte is proto::kVoiceDatagram, 2): 20 ms of your own voice. It isn't
 //                      answered.
 //   to a listener      kVoiceToListener, whose it is, then that person's voice datagram
+//   to ft-together     kMouthToTogether, then the five weights of your own mouth's shapes now
+//                      (proto/posewire.h's `mouth`: aa, ih, ou, ee, oh, 255 whole), from the
+//                      program that hears you. It goes out in your poses (mouth.h), and isn't
+//                      answered.
 #pragma once
 
+#include "../proto/posewire.h"
+
+#include <cstddef>
 #include <cstdint>
 
 namespace local {
 
 constexpr uint8_t kPoseToWatcher = 0x81;
 constexpr uint8_t kVoiceToListener = 0x82;
+constexpr uint8_t kMouthToTogether = 0x83;
+constexpr size_t kMouthBytes = 1 + proto::kMouthShapes;
 
 }  // namespace local

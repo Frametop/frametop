@@ -8,13 +8,15 @@
 //
 // Out, to the links: a pose this Frame's own program hands over is read the same way and sent
 // with ft-together's own count in it, so the count goes on when that program starts again
-// while the links stay up.
+// while the links stay up, and with the wearer's mouth as the program that hears them last
+// told it (mouth.h).
 //
 // The rules only: no sockets here. Header only.
 #pragma once
 
 #include "../proto/posewire.h"
 #include "linkgate.h"
+#include "mouth.h"
 
 #include <cstdint>
 #include <vector>
@@ -42,10 +44,12 @@ private:
 // This Frame's own poses, counted for the links.
 class PoseCount {
 public:
-    // The pose `data` as it goes to the links. False when it isn't a pose.
-    bool Stamp(const uint8_t *data, size_t n, std::vector<uint8_t> &out) {
+    // The pose `data` as it goes to the links at `now`, the wearer's mouth in it. False when
+    // it isn't a pose.
+    bool Stamp(const uint8_t *data, size_t n, const Mouth &mouth, double now, std::vector<uint8_t> &out) {
         proto::Pose pose;
         if (!proto::Read(data, n, pose)) return false;
+        mouth.Into(pose, now);
         pose.turn = ++turn_;
         out = proto::Pack(pose);
         return true;

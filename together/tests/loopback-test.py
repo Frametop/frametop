@@ -178,6 +178,26 @@ def main(program, root):
         check("a guest's pose goes to the owner and the other guest alike", ok and [p for p, _ in mine.poses()] == [ids["ben"]] and
               [p for p, _ in cys.poses(0.2)] == [ids["ben"]])
 
+        # the wearer's mouth: told by the program that hears them, sent in their poses
+        def mouth_of(got):
+            return [bytes(data[26:31]) for _, data in got]
+        mine.send(b"\x83" + bytes([200, 0, 30, 4, 255]))
+        mine.send(pose(0.25))
+        check("the wearer's mouth, told by one of their Frame's programs, goes out in their poses", mouth_of(sees.poses()) == [bytes([200, 0, 30, 4, 255])])
+        for bad in (b"\x83" + bytes([9, 8, 7, 6, 5]), b"\x83", b"\x83" + bytes(4), b"\x83" + bytes(6)):
+            mine.send(bad)
+        mine.send(pose(0.25))
+        check("what isn't a mouth changes nothing", mouth_of(sees.poses()) == [bytes([9, 8, 7, 6, 5])])
+        time.sleep(0.2)   # (with the half second that took: longer than a mouth is held)
+        mine.send(pose(0.25))
+        check("a mouth that isn't told again shuts", mouth_of(sees.poses()) == [bytes(5)])
+        sees.send(b"\x83" + bytes([1, 2, 3, 4, 5]))
+        mine.send(pose(0.25))
+        got = mouth_of(sees.poses())
+        check("...and nobody's mouth is anyone else's", got == [bytes(5)])
+        if got != [bytes(5)]:
+            print(got)
+
         # voices: the same way, to whoever listens
         check("a program asks to listen", sees.ask("listen") == "ok" and mine.ask("listen") == "ok")
         for count in (65534, 65535, 0, 40):   # a gap is silence, and the count goes round

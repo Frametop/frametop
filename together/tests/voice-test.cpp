@@ -1,12 +1,15 @@
 // A voice's way from the link to the ears (together/voice): the order its packets are played
 // in (jitter.h), how loud someone is in each ear (spatial.h), Opus there and back (codec.h)
-// with what a peer might send instead, and the room's voices mixed (voices.h).
+// with what a peer might send instead, the room's voices mixed (voices.h), and the wearer's
+// mouth as their own voice moves it (mouthsay.h).
 #include "../proto/voicewire.h"
 #include "../voice/codec.h"
 #include "../voice/jitter.h"
+#include "../voice/mouthsay.h"
 #include "../voice/spatial.h"
 #include "../voice/voices.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -266,11 +269,68 @@ static void voices() {
     check("places there aren't are told of as nobody", !v.told(9).speaking && (v.Place(9, true, right), v.Forget(-3), true));
 }
 
+// The wearer's mouth over `frames` 20 ms turns of a hum this loud (0: silence), counted on from
+// `from`: the datagrams there were to hand ft-together. `twin` hears the same, to tell what
+// the mouth's weights should be.
+struct Said {
+    int told = 0, open = 0;   // datagrams; those with the mouth open
+    int widest = 0;           // the mouth's shapes' sum at its most
+    bool right = true;        // each was a mouth datagram with the weights the voice makes, 255 whole
+    int last = -1;            // the last one's sum
+};
+static Said speak(voice::MouthSay &mouth, face::Mouth &twin, int from, int frames, double loud) {
+    Said said;
+    for (int i = 0; i < frames; ++i) {
+        const std::vector<float> pcm = loud > 0 ? hum(from + i, 220, loud) : std::vector<float>(kFrame, 0.0f);
+        float want[face::kWeights] = {};
+        twin.Hear(pcm.data(), pcm.size(), voice::kRate);
+        twin.After(0.02, want);
+        uint8_t out[local::kMouthBytes];
+        if (!mouth.Hear(pcm.data(), pcm.size(), voice::kRate, out)) continue;
+        int sum = 0;
+        said.right = said.right && out[0] == local::kMouthToTogether;
+        for (int k = 0; k < proto::kMouthShapes; ++k) {
+            sum += out[1 + k];
+            said.right = said.right && out[1 + k] == std::lround(want[bodyfile::Shape::kAa + k] * 255);
+        }
+        ++said.told, said.open += sum > 0, said.widest = std::max(said.widest, sum), said.last = sum;
+    }
+    return said;
+}
+
+static void mouths() {
+    voice::MouthSay mouth;
+    face::Mouth twin;
+    uint8_t out[local::kMouthBytes];
+    check("a wearer who says nothing has nothing told of their mouth", speak(mouth, twin, 0, 100, 0).told == 0 && !mouth.Shut(out));
+    twin = face::Mouth();
+    const Said spoke = speak(mouth, twin, 100, 100, 0.3);
+    check("one who speaks has it told every 20 ms, open", spoke.told >= 98 && spoke.open == spoke.told && spoke.widest > 100 && spoke.widest <= 255 + proto::kMouthShapes);
+    check("...as the weights their voice makes of the five shapes, 255 whole", spoke.right);
+    const Said after = speak(mouth, twin, 200, 100, 0);
+    check("when they stop it shuts, is told shut once, and then nothing more is said",
+          after.told >= 2 && after.told < 60 && after.open == after.told - 1 && after.last == 0 && after.right);
+    check("...until they speak again", speak(mouth, twin, 300, 50, 0).told == 0 && speak(mouth, twin, 350, 50, 0.3).open > 30);
+    const bool told = mouth.Shut(out);
+    int sum = 0;
+    for (size_t k = 1; k < sizeof out; ++k) sum += out[k];
+    check("the microphone closes on an open mouth: it is told shut, once", told && out[0] == local::kMouthToTogether && sum == 0 && !mouth.Shut(out));
+    twin = face::Mouth();
+    const Said again = speak(mouth, twin, 400, 50, 0.3);
+    check("...and when it opens again the mouth starts afresh", again.right && again.open > 30);
+    std::vector<float> bad(kFrame, std::nanf(""));
+    bad[3] = INFINITY;
+    mouth.Shut(out);
+    check("what isn't sound moves nothing", !mouth.Hear(bad.data(), bad.size(), voice::kRate, out) && !mouth.Hear(bad.data(), 0, voice::kRate, out) &&
+                                                !mouth.Hear(bad.data(), bad.size(), 0, out));
+}
+
 int main() {
     jitter();
     spatial();
     codec();
     voices();
+    mouths();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;
 }

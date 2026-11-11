@@ -2,7 +2,8 @@
 """ft-roomvoice between two real ft-together on this machine's loopback, with no sound devices:
 each one's wearer hums a note of their own (--hum) and what would be played is measured
 (--probe). One's voice reaches the other's ears as the note it was, from the side its owner
-stands on, and stops when they mute, take the headset off or leave.
+stands on, and stops when they mute, take the headset off or leave. Their mouth, as the others
+are told it in their poses, moves with it.
 
     roomvoice-test.py FT-TOGETHER FT-ROOMVOICE
 """
@@ -56,6 +57,21 @@ class Frame:
         return False
 
 
+def mouths(frame, seconds=1.5):
+    """How wide `frame`'s wearer's mouth was in the poses the others got over that time, while a
+    program of theirs said where their head is thirty times a second: [its shapes' sum]."""
+    watcher = [f for f in Frame.all if f is not frame][0].body
+    if watcher.ask("watch") != "ok":
+        return []
+    watcher.poses(0.2)   # (what waited there is from before)
+    got = []
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        frame.body.send(roomkit.pose(0.0))
+        got += [sum(data[26:31]) for _, data in watcher.poses(0.033)]
+    return got
+
+
 def hears(hz, left=True, right=True):
     """A state in which that note is played, in the ears named."""
     def what(state):
@@ -91,6 +107,9 @@ def main():
         told = ben.state()["voices"]
         check("and is told who speaks", len(told) == 1 and told[0]["person"] == ids["ada"] and told[0]["speaking"] and not told[0]["placed"] and told[0]["level"] > 0.1
               and told[0]["played"] > 20 and told[0]["late"] == 0)
+        wide = mouths(ada)
+        check("ada's mouth moves with her voice in the poses ben gets", len(wide) > 20 and max(wide) > 100 and max(wide) <= 260)
+        check("...and ben's, who is muted, stays shut", set(mouths(ben, 0.7)) == {0})
         check("ada hears nothing: ben is muted", ada.until(lambda s: s["playing"] and s["out"]["frames"] >= 50 and quiet(s)) and ada.state()["voices"][0]["played"] == 0)
 
         # where ada stands: ben's head is on his spot, facing the way the spot faces
@@ -108,7 +127,9 @@ def main():
                                                                                       and abs(s["out"]["left"] - s["out"]["right"]) < 0.1 * s["out"]["left"]))
 
         check("ben unmutes, and ada hears his note", ben.ask("unmute") == "ok" and ben.tool.said("the microphone is open") and ada.until(hears(330)))
+        check("...and sees his mouth move", max(mouths(ben, 1.0), default=0) > 100)
         check("ben mutes: his microphone closes and ada hears nothing", ben.ask("mute") == "ok" and ben.until(lambda s: s["mic"] == "closed" and s["muted"]) and ada.until(quiet))
+        check("...and his mouth is shut", set(mouths(ben, 0.7)[3:]) == {0})
         check("a question it doesn't know is refused", ben.ask("louder").startswith("error") and ben.ask("unmute") == "ok" and ada.until(hears(330)))
 
         check("ben takes the headset off: nothing listens and nothing is played there", ben.end.ask("away off") == "ok"

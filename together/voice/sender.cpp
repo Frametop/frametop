@@ -4,6 +4,7 @@
 #include "../../conf/ftsock.h"
 #include "../proto/voicewire.h"
 #include "codec.h"
+#include "mouthsay.h"
 
 #include <atomic>
 #include <cmath>
@@ -60,9 +61,18 @@ bool Sender::Start(OpenSource open, const std::string &together) {
         uint16_t count = 0;
         float frame[kFrame];
         uint8_t opus[proto::kMostVoice];
+        MouthSay mouth;
+        uint8_t said[local::kMouthBytes];
+        const auto hand = [&s](const uint8_t *data, size_t n) {
+            return sendto(s->sock, data, n, MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&s->to), s->toLen) == ssize_t(n);
+        };
+        const auto shut = [&] {   // the microphone, and with it the wearer's mouth
+            mic.reset(), s->open = false, s->level = 0;
+            if (mouth.Shut(said)) hand(said, sizeof said);
+        };
         while (!s->stop) {
             if (!s->want) {
-                if (mic) mic.reset(), s->open = false, s->level = 0;
+                if (mic) shut();
                 Rest(s->stop, 0.05);
                 continue;
             }
@@ -79,7 +89,7 @@ bool Sender::Start(OpenSource open, const std::string &together) {
                 s->open = true, count = CountNow();
             }
             if (!mic->Read(frame)) {   // it went: opened again next time round
-                mic.reset(), s->open = false, s->level = 0;
+                shut();
                 Rest(s->stop, 0.5);
                 continue;
             }
@@ -89,9 +99,10 @@ bool Sender::Start(OpenSource open, const std::string &together) {
             s->level = 0.5f * s->level + 0.5f * float(std::fmin(1.0, std::sqrt(squares / kFrame) * 4));
             const size_t n = encoder.Encode(frame, opus, sizeof opus);
             const std::vector<uint8_t> out = proto::PackVoice(count, opus, n);
-            if (!out.empty() && sendto(s->sock, out.data(), out.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&s->to), s->toLen) == ssize_t(out.size()))
-                ++s->sent;
+            if (!out.empty() && hand(out.data(), out.size())) ++s->sent;
+            if (mouth.Hear(frame, kFrame, kRate, said)) hand(said, sizeof said);
         }
+        if (mouth.Shut(said)) hand(said, sizeof said);
         s->open = false, s->done = true;
     }).detach();
     return true;

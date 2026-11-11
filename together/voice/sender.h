@@ -1,7 +1,8 @@
 // Your own voice on its way out (docs/together.md, "Sound"): while it is wanted, a thread of
 // its own reads the microphone 20 ms at a time, makes each an Opus packet, and hands those
 // that aren't silence to ft-together as voice datagrams (proto/voicewire.h), which sends them
-// to everyone in the room.
+// to everyone in the room. What each 20 ms makes of the wearer's mouth goes to ft-together too
+// (mouthsay.h), for their poses.
 //
 // The microphone is open only while the voice is wanted, so outside a room, muted or with the
 // headset off nothing listens. Each packet's count is one more than the last, also for those

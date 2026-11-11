@@ -28,24 +28,26 @@ int Usage() {
                  "       ft-avatars --thumb OUT.png MODEL [--size PX]\n"
                  "       ft-avatars --room [--together SOCKET] [--size PX] [--seconds S] [--status S]\n"
                  "       ft-avatars --room-snapshot OUT.png [--place N] [--pose NAME] [--at SECONDS] [--away METRES] [--round DEGREES] [--size PX] [--model FILE]\n"
+                 "                                   [--mouth VOWEL=WEIGHT]...\n"
                  "       ft-avatars --pretend POSE [--together SOCKET] [--walked RIGHT,BACK,DEGREES] [--seconds S] [--status S]\n"
                  "       ft-avatars --poses\n"
                  "       ft-avatars --hear SECONDS\n"
                  "poses: rest %s\n"
-                 "shapes: aa ih ou ee oh blink blinkLeft blinkRight\n",
+                 "shapes: aa ih ou ee oh blink blinkLeft blinkRight; vowels: the first five\n",
                  demo::kNames);
     return 2;
 }
 
-// "blink=1" into the weights. False for a shape that isn't one or a weight that isn't 0 to 1.
-bool Shape(const char *arg, float weights[bodymesh::kShapes]) {
+// "blink=1" into the weights. False for a shape that isn't one of the first `known` or a weight
+// that isn't 0 to 1.
+bool Shape(const char *arg, float weights[bodymesh::kShapes], int known = bodymesh::kShapes - 1) {
     static const char *const kNames[bodymesh::kShapes] = {"", "aa", "ih", "ou", "ee", "oh", "blink", "blinkLeft", "blinkRight"};
     const char *eq = std::strchr(arg, '=');
     if (!eq) return false;
     char *end = nullptr;
     const double w = std::strtod(eq + 1, &end);
     if (end == eq + 1 || *end || !(w >= 0 && w <= 1)) return false;
-    for (int id = 1; id < bodymesh::kShapes; ++id)
+    for (int id = 1; id <= known; ++id)
         if (std::strlen(kNames[id]) == size_t(eq - arg) && !std::strncmp(arg, kNames[id], size_t(eq - arg))) return weights[id] = float(w), true;
     return false;
 }
@@ -100,6 +102,7 @@ int RoomSnapshot(int argc, char **argv) {
         else if (!std::strcmp(argv[i], "--round")) ask.round = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--size")) ask.size = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--model")) ask.model = argv[++i];
+        else if (!std::strcmp(argv[i], "--mouth") && Shape(argv[i + 1], ask.shapes, bodyfile::Shape::kOh)) ++i;
         else return Usage();
     }
     return roompicture::Person(ask);

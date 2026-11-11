@@ -12,8 +12,9 @@
 //   looks            -> what of that the others see, and where the files of their avatars are
 //
 // A datagram there that is a pose or a voice (local/datagrams.h) is the wearer's own: it goes
-// to everyone in the room, and theirs come back to whoever watches or listens. The shared panels' video comes from and
-// goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
+// to everyone in the room, and theirs come back to whoever watches or listens. One that is the
+// wearer's mouth goes out in their poses (local/mouth.h). The shared panels' video comes from
+// and goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
 // between the Frames on the links, a stream a picture (flow/video.h). An avatar's file goes to
 // whoever in the room asks its wearer for it, on a stream too (flow/looks.h).
 //
@@ -35,6 +36,7 @@
 #include "flow/video.h"
 #include "local/floor.h"
 #include "local/media.h"
+#include "local/mouth.h"
 #include "local/posegate.h"
 #include "local/voicegate.h"
 #include "local/wardrobe.h"
@@ -132,6 +134,7 @@ struct End {
 struct Local {
     local::PoseGate gate;
     local::PoseCount count;
+    local::Mouth mouth;   // the wearer's own, as the program that hears them tells it
     local::Watchers watchers;
     local::VoiceGate voices;
     local::Watchers listeners{local::kVoiceToListener};
@@ -207,10 +210,11 @@ std::string MediaState(const End &end, const Local &local) {
     return state + ",\"bitrate\":[" + rates + "],\"viewers\":[" + viewers + "],\"dropped\":" + std::to_string(end.video->dropped()) + "}";
 }
 
-// The wearer's own pose, from one of this Frame's programs, to everyone in the room.
-void Mine(End &end, Local &local, const uint8_t *data, size_t n) {
+// The wearer's own pose, from one of this Frame's programs, to everyone in the room, with their
+// mouth as the program that hears them has it.
+void Mine(End &end, Local &local, const uint8_t *data, size_t n, double now) {
     std::vector<uint8_t> out;
-    if (!end.inRoom() || !local.count.Stamp(data, n, out)) return;
+    if (!end.inRoom() || !local.count.Stamp(data, n, local.mouth, now, out)) return;
     for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
 }
 
@@ -231,16 +235,18 @@ std::string Wear(End &end, Local &local, const std::string &name, double now) {
     return whyNot.empty() ? "ok" : "error " + whyNot;
 }
 
-// One datagram from the local socket seen to, if one waits: a question answered, or a pose or
-// a voice sent on.
+// One datagram from the local socket seen to, if one waits: a question answered, a pose or a
+// voice sent on, or the wearer's mouth kept for their poses.
 bool Answer(int sock, End &end, Local &local, double now) {
     char text[kMostQuestion + 1];
     sockaddr_un from;
     socklen_t fromLen = sizeof from;
     const ssize_t n = recvfrom(sock, text, sizeof text, MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&from), &fromLen);
     if (n < 0) return false;
-    if (n > 0 && uint8_t(text[0]) == proto::kPoseDatagram) return Mine(end, local, reinterpret_cast<const uint8_t *>(text), size_t(n)), true;
-    if (n > 0 && uint8_t(text[0]) == proto::kVoiceDatagram) return MyVoice(end, reinterpret_cast<const uint8_t *>(text), size_t(n)), true;
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(text);
+    if (n > 0 && bytes[0] == proto::kPoseDatagram) return Mine(end, local, bytes, size_t(n), now), true;
+    if (n > 0 && bytes[0] == proto::kVoiceDatagram) return MyVoice(end, bytes, size_t(n)), true;
+    if (n > 0 && bytes[0] == local::kMouthToTogether) return local.mouth.Take(bytes, size_t(n), now), true;
     const std::string asked(text, size_t(n));
     std::string reply;
     if (size_t(n) > kMostQuestion) reply = "error that is too long";

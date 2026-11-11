@@ -6,9 +6,11 @@
 #include "../view/demo.h"
 #include "../view/windowview.h"
 #include "figure.h"
+#include "roomface.h"
 #include "sentbody.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace roompicture {
@@ -33,10 +35,12 @@ int Person(const Ask &ask) {
     figure::Figure figure(body);
     const double until = std::min(std::max(ask.at, 0.0), 30.0);
     wearer::Seen seen;
+    proto::Pose told;
     for (double t = 0;; t += kStep) {
         if (!demo::Wearer(ask.pose.c_str(), std::min(t, until), 1.6, -0.08, seen)) return std::fprintf(stderr, "avatars: no pose called %s (%s)\n", ask.pose.c_str(), demo::kNames), 1;
-        const std::vector<uint8_t> bytes = proto::Pack(roomwire::ToRoom(seen, kTheirs));
-        proto::Pose told;
+        proto::Pose tells = roomwire::ToRoom(seen, kTheirs);
+        for (int k = 0; k < proto::kMouthShapes; ++k) tells.mouth[k] = uint8_t(std::lround(std::min(std::max(ask.shapes[bodyfile::Shape::kAa + k], 0.0f), 1.0f) * 255));
+        const std::vector<uint8_t> bytes = proto::Pack(tells);
         if (!proto::Read(bytes.data(), bytes.size(), told) || !figure.Pose(told, kMine, kStep)) return std::fprintf(stderr, "avatars: the pose can't be told\n"), 1;
         if (t >= until) break;
     }
@@ -59,6 +63,9 @@ int Person(const Ask &ask) {
     int status = 1;
     if (canvas.Open(2 * side * canvas::kFine, side * canvas::kFine) && painter.Init("avatars")) {
         avatar.Upload(painter, body);
+        float shapes[face::kWeights];
+        roomface::Face().After(told.mouth, 0, avatar.has(bodyfile::Shape::kBlink), shapes);   // (no time passes: the eyes are open)
+        avatar.Shape(shapes);
         windowview::Draw(painter, avatar, figure.bones(), view.clip, view.sees, billboard::Light(), side * canvas::kFine, side * canvas::kFine);
         if (canvas::Save(ask.out, canvas.Read(true), 2 * side, side)) {
             status = 0;

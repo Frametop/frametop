@@ -141,8 +141,12 @@ class SentAvatarTest(ImportCase):
         person.write_bytes(fixtures.glb(bodyfixtures.person('unity', extras=False)))
         hands = cls.dir / 'hands.glb'
         hands.write_bytes(fixtures.glb(fixtures.make()))
-        cls.given, cls.kept, cls.hands = (cls.model(source, name, *more) for source, name, more in (
-            (person, 'given', ['--may-share']), (person, 'kept', []), (hands, 'hands', ['--may-share'])))
+        rig = bodyfixtures.person('unity', extras=False)
+        rig.shapes['aa'] = {v: (0.0, -0.06, 0.03) for v in rig.shapes['aa']}   # a mouth that opens wide enough to show from across a room
+        talker = cls.dir / 'talker.glb'
+        talker.write_bytes(fixtures.glb(rig))
+        cls.given, cls.kept, cls.hands, cls.talker = (cls.model(source, name, *more) for source, name, more in (
+            (person, 'given', ['--may-share']), (person, 'kept', []), (hands, 'hands', ['--may-share']), (talker, 'talker', ['--may-share'])))
 
     @classmethod
     def model(cls, source, name, *more):
@@ -180,6 +184,20 @@ class SentAvatarTest(ImportCase):
         self.assertEqual(sent[3], self.draw('--model', self.given, '--place', '2')[0][3])   # their own colours, not their place's
         self.assertNotEqual(sent[3], self.draw('--model', self.given, '--round', '90')[0][3])
 
+    def test_their_mouth_moves_as_their_pose_tells_it(self):
+        def rows(*args):
+            return self.draw('--model', self.talker, '--size', '640', *args)[0][3]
+
+        shut, wide, half = rows(), rows('--mouth', 'aa=1'), rows('--mouth', 'aa=0.5')
+        self.assertTrue(wide != shut and half != shut and half != wide)
+        changed = [y for y in range(640) if shut[y] != wide[y]]
+        top = min(y for there in RoomPictureTest.halves(self.draw('--model', self.talker, '--size', '640')[0]) for _, y, _ in there)
+        self.assertLess(max(changed), top + 0.25 * 640)   # only up at the head
+        self.assertTrue(rows('--mouth', 'aa=0') == shut)
+        # a shape their avatar hasn't got moves nothing, and neither does any on the abstract body
+        self.assertTrue(rows('--mouth', 'ee=1') == shut)
+        self.assertTrue(self.draw('--mouth', 'aa=1')[0][3] == self.draw()[0][3])
+
     def test_a_file_that_was_not_theirs_to_send_is_not_drawn(self):
         self.refused(self.kept, "isn't marked")
 
@@ -200,6 +218,8 @@ class RoomModesTest(unittest.TestCase):
 
     def test_options_that_are_not_theirs_are_a_usage_error(self):
         for args in (['--room', '--size'], ['--room', '--height', '400'], ['--room', 'now'], ['--room-snapshot'], ['--room-snapshot', 'x.png', '--place'], ['--room-snapshot', 'x.png', '--model'],
+                     ['--room-snapshot', 'x.png', '--mouth'], ['--room-snapshot', 'x.png', '--mouth', 'blink=1'], ['--room-snapshot', 'x.png', '--mouth', 'aa=2'],
+                     ['--room-snapshot', 'x.png', '--mouth', 'aa'],
                      ['--room-snapshot', 'x.png', '--walked', '0,0,0'], ['--pretend'], ['--pretend', 'wave', '--walked'], ['--pretend', 'wave', '--walked', '1,2'],
                      ['--pretend', 'wave', '--walked', '1,2,3,4'], ['--pretend', 'wave', '--walked', '99,0,0'], ['--pretend', 'wave', '--walked', '0,0,400'],
                      ['--pretend', 'wave', '--walked', 'nan,0,0'], ['--pretend', 'wave', '--size', '64']):

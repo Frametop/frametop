@@ -1,9 +1,10 @@
 // What ft-together does for this Frame's own programs (together/local): which poses it passes
-// on, the count it sends its own with, who watches, where the floor lies in the room, and the
-// messages on the media programs' socket.
+// on, the count and the mouth it sends its own with, who watches, where the floor lies in the
+// room, and the messages on the media programs' socket.
 #include "../../conf/ftsock.h"
 #include "../local/floor.h"
 #include "../local/mediawire.h"
+#include "../local/mouth.h"
 #include "../local/posegate.h"
 #include "../local/voicegate.h"
 #include "../local/watchers.h"
@@ -63,20 +64,60 @@ static void gate() {
 
 static void count() {
     local::PoseCount c;
+    const local::Mouth shut;
     std::vector<uint8_t> out;
     const std::vector<uint8_t> mine = pose(555, 0.5f);
     proto::Pose a, b;
-    bool ok = c.Stamp(mine.data(), mine.size(), out) && proto::Read(out.data(), out.size(), a) && c.Stamp(mine.data(), mine.size(), out) &&
+    bool ok = c.Stamp(mine.data(), mine.size(), shut, 0, out) && proto::Read(out.data(), out.size(), a) && c.Stamp(mine.data(), mine.size(), shut, 0, out) &&
               proto::Read(out.data(), out.size(), b);
     check("this Frame's own poses go out with ft-together's count, one more each time", ok && a.turn == 1 && b.turn == 2 && a.eyes[0] == 0.5f && b.eyes[1] == 1.6f);
     std::vector<uint8_t> bad = mine;
     bad.push_back(0);
     out.clear();
-    check("what isn't a pose doesn't go out", !c.Stamp(bad.data(), bad.size(), out) && !c.Stamp(nullptr, 0, out) && out.empty());
+    check("what isn't a pose doesn't go out", !c.Stamp(bad.data(), bad.size(), shut, 0, out) && !c.Stamp(nullptr, 0, shut, 0, out) && out.empty());
     local::PoseGate g;
     ok = true;
-    for (int i = 0; i < 70000 && ok; ++i) ok = c.Stamp(mine.data(), mine.size(), out) && g.Take(1, out.data(), out.size(), i / 30.0);
+    for (int i = 0; i < 70000 && ok; ++i) ok = c.Stamp(mine.data(), mine.size(), shut, 0, out) && g.Take(1, out.data(), out.size(), i / 30.0);
     check("...and the far end takes every one of seventy thousand, round the count and on", ok);
+}
+
+// The mouth of the pose `mine` as it goes out at `now`: its five weights, "a,b,c,d,e".
+static std::string sent(local::PoseCount &c, const local::Mouth &m, const std::vector<uint8_t> &mine, double now) {
+    std::vector<uint8_t> out;
+    proto::Pose p;
+    if (!c.Stamp(mine.data(), mine.size(), m, now, out) || !proto::Read(out.data(), out.size(), p)) return "none";
+    std::string said;
+    for (uint8_t w : p.mouth) said += (said.empty() ? "" : ",") + std::to_string(w);
+    return said;
+}
+
+static void mouth() {
+    local::PoseCount c;
+    local::Mouth m;
+    const std::vector<uint8_t> mine = pose(1, 0.5f);
+    check("a pose goes out with its mouth shut while nobody told of the wearer's", sent(c, m, mine, 5) == "0,0,0,0,0");
+    const uint8_t open[local::kMouthBytes] = {local::kMouthToTogether, 200, 0, 30, 4, 255};
+    check("the wearer's mouth, told by the program that hears them, goes out in their next pose", m.Take(open, sizeof open, 10) && sent(c, m, mine, 10.01) == "200,0,30,4,255");
+    check("...and in those after it, for as long as it is held", sent(c, m, mine, 10 + local::Mouth::kHeldS) == "200,0,30,4,255");
+    check("one that isn't told again shuts: the program may be gone", sent(c, m, mine, 10.01 + local::Mouth::kHeldS) == "0,0,0,0,0");
+    const uint8_t less[local::kMouthBytes] = {local::kMouthToTogether, 9, 8, 7, 6, 5};
+    check("told again, it is as it was last told", m.Take(open, sizeof open, 20) && m.Take(less, sizeof less, 20.02) && sent(c, m, mine, 20.03) == "9,8,7,6,5");
+    const uint8_t shut[local::kMouthBytes] = {local::kMouthToTogether, 0, 0, 0, 0, 0};
+    check("...and shut when it is told shut", m.Take(shut, sizeof shut, 20.04) && sent(c, m, mine, 20.05) == "0,0,0,0,0");
+
+    // a pose that has a mouth of its own keeps it while none was told lately
+    proto::Pose own;
+    own.eyes[1] = 1.6f, own.mouth[2] = 77;
+    const std::vector<uint8_t> theirs = proto::Pack(own);
+    check("a pose with a mouth of its own keeps it while none was told lately", sent(c, m, theirs, 30) == "0,0,77,0,0");
+    check("...and has the one that was told while it is", m.Take(less, sizeof less, 30) && sent(c, m, theirs, 30.1) == "9,8,7,6,5");
+
+    uint8_t wrong[local::kMouthBytes + 1] = {local::kMouthToTogether, 1, 2, 3, 4, 5, 6};
+    bool refused = !m.Take(wrong, sizeof wrong, 30.2) && !m.Take(wrong, sizeof wrong - 2, 30.2) && !m.Take(wrong, 1, 30.2) && !m.Take(wrong, 0, 30.2);
+    wrong[0] = proto::kPoseDatagram;
+    refused = refused && !m.Take(wrong, local::kMouthBytes, 30.2) && !m.Take(mine.data(), mine.size(), 30.2);
+    check("what isn't a mouth isn't taken for one, and changes nothing", refused && sent(c, m, mine, 30.3) == "9,8,7,6,5");
+    check("a clock that went back doesn't open it", sent(c, m, mine, 29) == "0,0,0,0,0");
 }
 
 // A socket in the abstract namespace, named or not.
@@ -258,6 +299,7 @@ static void mediawire() {
 int main() {
     gate();
     count();
+    mouth();
     watchers();
     voices();
     floor();

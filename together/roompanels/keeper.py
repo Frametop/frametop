@@ -20,15 +20,27 @@ SLOTS = 3                               # the panels a Frame shares at most (scr
 REMOTE_FIRST, REMOTE_LAST = 101, 116    # ft-screens' remote screens (screens/remote.h)
 FPS = 30
 MOST_WIDE, MOST_HIGH = 1920, 1200       # a shared screen's video, at most
+# The encoder's sizes. Across, only multiples of 128: any other width resets the Frame as the
+# encoder starts (media/irisenc.h, kWidthStep, which refuses them). Down, multiples of 8, as
+# every height it has been seen to take is.
+ACROSS, DOWN = 128, 8
 FLOOR_WAIT = 5.0    # seconds in a room with no head pose before the floor is laid without one
 MISSES = 8          # questions to ft-together in a row with no answer: it is taken for gone
 PLAIN = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,:;'()+-_#&/")
 
 
 def stream_size(width, height):
-    """The video's pixels for a screen of width x height: it whole, made smaller to fit, even."""
+    """The video's pixels for a screen of width x height: it whole, no larger than may be, in a
+    size the encoder takes, and as near the screen's shape as that allows. Across, the nearest
+    multiple of ACROSS that fits; down, what keeps the shape, to a multiple of DOWN. The screen
+    is drawn over the whole of it, and shown at the panel's shape, so a pixel or two of stretch
+    is all a screen of another size pays."""
     k = min(1.0, MOST_WIDE / width, MOST_HIGH / height)
-    return tuple(min(4096, max(128, int(v * k + 0.5) & ~1)) for v in (width, height))
+    across = max(ACROSS, min(MOST_WIDE // ACROSS * ACROSS, int(width * k / ACROSS + 0.5) * ACROSS))
+    while across > ACROSS and across * height / width > MOST_HIGH:
+        across -= ACROSS
+    down = int(across * height / width / DOWN + 0.5) * DOWN
+    return across, min(MOST_HIGH // DOWN * DOWN, max(128, down))
 
 
 def plain(name, otherwise):

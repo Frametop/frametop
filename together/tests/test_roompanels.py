@@ -271,9 +271,9 @@ class Mine(KeeperCase):
         self.assertEqual(self.keeper.share(1), "ok 0")
         self.ticks()
         panel = self.together.panels[8]
-        self.assertEqual((panel["size"], panel["name"], panel["metres"], panel["curve"]), ([1920, 804], "Screen 1", 1.2, 0.0))
+        self.assertEqual((panel["size"], panel["name"], panel["metres"], panel["curve"]), ([1920, 800], "Screen 1", 1.2, 0.0))
         self.assertTrue(near(panel["at"], (0, 1.5, -2)) and near(panel["turn"], (0, 0, 1, 0)), panel)   # (0, 1.5, 2) turned half round, then 4 m back
-        self.assertEqual(self.screens.shares, {1: (0, "1920x804")})
+        self.assertEqual(self.screens.shares, {1: (0, "1920x800")})
         self.assertEqual((self.together.count("share"), self.screens.count("share 1 start")), (1, 1))
 
     def test_moving_the_screen_moves_it_in_the_room(self):
@@ -309,11 +309,20 @@ class Mine(KeeperCase):
         self.ticks()
         self.assertEqual((self.together.panels, self.screens.shares, self.keeper.wishes), ({}, {}, {}))
 
-    def test_the_video_is_never_larger_than_it_may_be_and_always_even(self):
-        cases = {(3440, 1440): (1920, 804), (1920, 1080): (1920, 1080), (1280, 800): (1280, 800), (2560, 1600): (1920, 1200),
-                 (1080, 1920): (674, 1200), (1367, 769): (1366, 768), (20000, 100): (1920, 128)}
+    def test_the_video_is_never_larger_than_it_may_be_and_of_the_screens_shape(self):
+        cases = {(3440, 1440): (1920, 800), (1920, 1080): (1920, 1080), (1280, 800): (1280, 800), (2560, 1600): (1920, 1200),
+                 (1080, 1920): (640, 1136), (1366, 768): (1408, 792), (854, 480): (896, 504), (1900, 1200): (1792, 1128),
+                 (1600, 900): (1664, 936), (1280, 720): (1280, 720), (640, 360): (640, 360), (20000, 100): (1920, 128), (100, 20000): (128, 1200)}
         for screen, video in cases.items():
             self.assertEqual(keeper.stream_size(*screen), video)
+
+    def test_the_video_is_always_of_a_size_the_encoder_takes(self):
+        # (media/irisenc.h: any other width across resets the Frame as the encoder starts)
+        for width in list(range(1, 400)) + list(range(400, 8200, 7)):
+            for height in (1, 99, 128, 360, 480, 600, 767, 768, 800, 900, 1050, 1080, 1200, 1440, 1600, 2160, 4320, 8191):
+                across, down = keeper.stream_size(width, height)
+                self.assertTrue(128 <= across <= 1920 and across % 128 == 0, (width, height, across, down))
+                self.assertTrue(128 <= down <= 1200 and down % 8 == 0, (width, height, across, down))
 
     def test_what_an_earlier_one_shared_is_taken_back(self):
         self.together.panel(9)
@@ -362,7 +371,7 @@ class Leaving(KeeperCase):
     def test_a_start_outside_a_room_clears_what_an_earlier_one_left(self):
         self.together.mode = "idle"
         self.screens.remotes = {116: ["peer-2", "1280x720"]}
-        self.screens.shares = {1: (0, "1920x804")}
+        self.screens.shares = {1: (0, "1920x800")}
         self.ticks()
         self.assertEqual((self.screens.remotes, self.screens.shares), ({}, {}))
 

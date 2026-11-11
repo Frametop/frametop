@@ -145,6 +145,10 @@ test-c:
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
       -o build/tests/together-video-test
     run together/tests/video-test.cpp build/tests/together-video-test
+    # the sizes the Frame's encoder is given (one it isn't resets the Frame): against /dev/null
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/encsize-test.cpp together/media/irisenc.cpp \
+      -o build/tests/together-encsize-test
+    run together/tests/encsize-test.cpp build/tests/together-encsize-test
     # control of shared panels: the rules by themselves, then several Frames' sessions against each other
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/controlrules-test.cpp -o build/tests/together-controlrules-test
     run together/tests/controlrules-test.cpp build/tests/together-controlrules-test

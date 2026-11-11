@@ -36,6 +36,11 @@ bool Encoder::Fail(const char *what) {
 
 bool Encoder::Open(const Config &cfg, std::string &err) {
     Close();
+    if (!Takes(cfg.width, cfg.height)) {
+        err = err_ = "the encoder isn't given a picture of " + std::to_string(cfg.width) + "x" + std::to_string(cfg.height) + ": " +
+                     std::to_string(kWidthStep) + " to 8192 across in steps of " + std::to_string(kWidthStep) + ", 128 to 8192 down and even";
+        return false;
+    }
     cfg_ = cfg;
     auto fail = [&](const char *what) {
         Fail(what);

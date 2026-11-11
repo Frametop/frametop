@@ -17,8 +17,18 @@
 
 namespace irisenc {
 
+// The sizes the encoder is given. Across, only multiples of kWidthStep: a row of the encoder's
+// picture is as long as the next multiple of it, and when the picture was narrower than its
+// rows (1366 x 768 from DMA-BUFs, 2026-11-11) the Frame reset itself in the second the encoder
+// started, with nothing in the kernel's log. 640, 1280 and 1920 across are known to work. So
+// Open refuses every other width before it touches the device, whoever asks.
+constexpr int kWidthStep = 128;
+inline bool Takes(int width, int height) {
+    return width >= 128 && height >= 128 && width <= 8192 && height <= 8192 && width % kWidthStep == 0 && height % 2 == 0;
+}
+
 struct Config {
-    int width = 0, height = 0;   // even, 128 to 8192
+    int width = 0, height = 0;   // what Takes says yes to
     int fps = 30;
     int bitrate = 3000000;       // bits a second
     int keyframeEvery = 0;       // frames between keyframes; 0: only when asked (ForceKey)
@@ -42,7 +52,8 @@ class Encoder {
     Encoder(const Encoder &) = delete;
     Encoder &operator=(const Encoder &) = delete;
 
-    // False with `err` saying what the driver refused.
+    // False with `err` saying what the driver refused, or that the size is none the encoder is
+    // given (Takes): then the device wasn't opened.
     bool Open(const Config &cfg, std::string &err);
     void Close();
     bool isOpen() const { return fd_ >= 0; }

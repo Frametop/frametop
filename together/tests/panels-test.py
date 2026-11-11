@@ -125,8 +125,18 @@ def main(together, share, peer):
         stay.end()
         src.end()
 
-        # the sizes a panel is sent at
-        for size in ["1920x1080", "1280x800", "1366x768", "854x480", "1920x1200"]:
+        # a size the encoder isn't given (media/irisenc.h: it reset the Frame, twice): refused by
+        # the program before the device is touched, which encsize-test.cpp says without the Frame
+        ok = ada.ask("share 0 1366 768 %s Test" % WHERE) == "ok"
+        src = sharer(ada, 0, "1366x768")
+        view = prober(ben, 0, "--seconds", "3")
+        check("a panel 1366 pixels across: the program says it can't encode that, and nothing is encoded",
+              ok and src.said("can't encode: the encoder isn't given a picture of 1366x768", 5) and view.wait(10) == 0 and pictures(view) == [])
+        src.end()
+
+        # the sizes a panel is sent at (roompanels/keeper.py, stream_size): screens of 1920x1080,
+        # 1280x800, 1366x768, 854x480, 1920x1200 and one on its side
+        for size in ["1920x1080", "1280x800", "1408x792", "896x504", "1920x1200", "640x1136"]:
             width, height = size.split("x")
             ok = ada.ask("share 0 %s %s %s Test" % (width, height, WHERE)) == "ok"
             src = sharer(ada, 0, size)

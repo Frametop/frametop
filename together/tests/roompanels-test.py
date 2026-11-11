@@ -99,9 +99,9 @@ def main():
         check("ben's floor puts his head on his spot", near(ben.floor(), placing.lay(spot, (-0.4, 0.3, math.radians(-120))), 1e-3))
 
         check("ada shares her screen 1", ada.ask("share 1") == "ok 0")
-        check("it is in the room, as a 1920x804 video", ben.end.until(lambda s: [(p["id"], p["size"], p["name"]) for p in s["panels"]] == [(0, [1920, 804], "Screen 1")]))
-        check("ada's ft-screens sends its pictures", ada.until(lambda s: s.shares == {1: (0, "1920x804")}))
-        check("ben's ft-screens has a panel for it, the last remote screen", ben.until(lambda s: s.remotes.get(116) == ["peer-0", "1920x804"] and "curve" in s.panels[116]))
+        check("it is in the room, as a 1920x800 video", ben.end.until(lambda s: [(p["id"], p["size"], p["name"]) for p in s["panels"]] == [(0, [1920, 800], "Screen 1")]))
+        check("ada's ft-screens sends its pictures", ada.until(lambda s: s.shares == {1: (0, "1920x800")}))
+        check("ben's ft-screens has a panel for it, the last remote screen", ben.until(lambda s: s.remotes.get(116) == ["peer-0", "1920x800"] and "curve" in s.panels[116]))
         check("standing where ada's screen stands", stands(ben, 116, ada, 1))
         with ben.lock:
             panel = dict(ben.screens.panels[116])
@@ -133,7 +133,7 @@ def main():
         check("his ft-roompanels takes the room's panels away and shares nothing", ben.tool.said("in no room", since=2)
               and ben.until(lambda s: sorted(s.remotes) == [101] and s.shares == {}))
         check("and his panel goes at ada's", ada.until(lambda s: s.remotes == {}))
-        check("ada's own share stays", ada.until(lambda s: s.shares == {1: (0, "1920x804")}, 1.0))
+        check("ada's own share stays", ada.until(lambda s: s.shares == {1: (0, "1920x800")}, 1.0))
 
         check("ada's ft-roompanels ends cleanly", ada.tool.end() == 0)
         check("and leaves nothing behind in ft-screens", ada.until(lambda s: s.shares == {} and s.remotes == {}, 1.0))

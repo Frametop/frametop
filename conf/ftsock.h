@@ -31,6 +31,7 @@
 #define FT_SOCK_AVATARS "ft_avatars"           /* ft-avatars' mirror (avatar/view/live.cpp) */
 #define FT_SOCK_AVATARS_ROOM "ft_avatars_room" /* ft-avatars' people of a shared room (avatar/room/room.cpp) */
 #define FT_SOCK_TOGETHER "ft_together"         /* ft-together (together/ft-together.cpp) */
+#define FT_SOCK_TOGETHER_MEDIA FT_SOCK_TOGETHER "_media" /* ...and its media programs', a stream socket (together/local/media.h) */
 #define FT_SOCK_FRUNNER "ft_frunner"           /* frunner (frunner/) */
 #define FT_SOCK_SPOTPANEL "ft_spotpanel"       /* frunner's panel (frunner/ft-spotpanel.cpp) */
 #define FT_SOCK_DASHPATCH "ft_dashpatch"       /* ft-dashpatch (pointer/dashpatch/) */

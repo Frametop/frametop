@@ -36,8 +36,9 @@ if [ ! -f build/libmsquic.so.2 ]; then
   strip --strip-unneeded build/libmsquic.so.2
 fi
 quic="-I$src/src/inc build/libmsquic.so.2 -Wl,-rpath,\$ORIGIN"
-g++ $flags -o build/ft-together ft-together.cpp net/quiclinks.cpp net/lookup.cpp net/tailnet.cpp net/selfcert.cpp \
-  session/session.cpp session/commands.cpp proto/messages.cpp local/watchers.cpp $quic $(pkg-config --libs openssl) -lpthread
+g++ $flags -o build/ft-together ft-together.cpp net/quiclinks.cpp net/quicframes.cpp net/lookup.cpp net/tailnet.cpp \
+  net/selfcert.cpp session/session.cpp session/wearer.cpp session/commands.cpp proto/messages.cpp flow/video.cpp \
+  local/watchers.cpp local/media.cpp $quic $(pkg-config --libs openssl) -lpthread
 strip --strip-unneeded build/ft-together
 [ $spikes = 1 ] || { echo "built build/ft-together"; exit 0; }
 g++ $flags $(pkg-config --cflags gbm) -o build/ft-enctest spike/ft-enctest.cpp media/irisenc.cpp \

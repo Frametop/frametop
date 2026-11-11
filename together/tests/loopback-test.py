@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """ft-together for real, several of it on this machine's loopback: a room opened, people let
-in and kept out, the guests' own links, poses passed between them, each one's floor, leaving,
-a program that dies, and the owner's end.
+in and kept out, the guests' own links, poses passed between them, each one's floor, the panels
+they share and the video of one from the program that encodes it to the programs that show it,
+leaving, a program that dies, and the owner's end.
 
     together/tests/loopback-test.py PATH-TO-ft-together
 
@@ -54,7 +55,7 @@ class End:
 
     def state(self):
         reply = self.ask("state")
-        return json.loads(reply[3:]) if reply.startswith("ok {") else {"mode": reply, "note": "", "people": [], "asks": [], "codes": 0}
+        return json.loads(reply[3:]) if reply.startswith("ok {") else {"mode": reply, "note": "", "people": [], "panels": [], "asks": [], "codes": 0}
 
     def until(self, what, seconds=5.0):
         """Whether what(state) comes true in time."""
@@ -123,6 +124,80 @@ class Watcher:
 
     def close(self):
         self.sock.close()
+
+
+class Program:
+    """One of a Frame's media programs on ft-together's stream socket (local/mediawire.h): one
+    that encodes the wearer's panel (hello b"S", its number) or shows someone's (b"V", its id)."""
+
+    def __init__(self, end, hello=None, which=0):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_CLOEXEC)
+        self.sock.connect(ftipc.address(end.sock + "_media"))
+        self.buf = b""
+        self.ignore = b""   # kinds of message messages() leaves out
+        if hello:
+            self.send(hello, bytes([which]))
+
+    def send(self, kind, body=b""):
+        self.sock.sendall(struct.pack("<I", 1 + len(body)) + kind + body)
+
+    def unit(self, data, key=False):
+        self.send(b"U", bytes([1 if key else 0]) + data)
+
+    def messages(self, seconds=0.5, count=None):
+        """What came in that time, or until `count` of them did: [(kind, body)], with None as
+        the last when ft-together closed the socket."""
+        got = []
+        deadline = time.monotonic() + seconds
+        while True:
+            while len(self.buf) >= 4:
+                n = struct.unpack_from("<I", self.buf)[0]
+                if len(self.buf) < 4 + n:
+                    break
+                if self.buf[4:5] not in self.ignore:
+                    got.append((self.buf[4:5], self.buf[5:4 + n]))
+                self.buf = self.buf[4 + n:]
+                if count is not None and len(got) >= count:
+                    return got
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return got
+            self.sock.settimeout(left)
+            try:
+                data = self.sock.recv(1 << 20)
+            except socket.timeout:
+                return got
+            except OSError:
+                data = b""
+            if not data:
+                return got + [None]
+            self.buf += data
+
+    def let_go(self, seconds=3.0):
+        """Whether ft-together closes the socket in that time."""
+        return self.messages(seconds)[-1:] == [None]
+
+    def close(self):
+        self.sock.close()
+
+
+def crosses(source, sinks, units, tries=4):
+    """Whether pictures handed to `source` (a keyframe first) come out of every one of `sinks`,
+    in order and byte for byte. A link gives a picture up when it is 150 ms late, which a busy
+    machine can make happen: then the whole run is tried again."""
+    want = [(b"U", bytes([0 if i else 1]) + u) for i, u in enumerate(units)]
+    for _ in range(tries):
+        for i, u in enumerate(units):
+            source.unit(u, key=i == 0)
+            time.sleep(0.005)
+        got = [sink.messages(5, len(want)) for sink in sinks]
+        if all(g == want for g in got):
+            return True
+        time.sleep(0.7)   # (a keyframe may be asked for again by then)
+        source.messages(0.1)
+        for sink in sinks:
+            sink.messages(0.3)
+    return False
 
 
 def names(state):
@@ -232,6 +307,74 @@ def main(program):
         ok = ok and ben.ask("away back") == "ok" and all(e.until(lambda s: [p["away"] for p in s["people"] if p["name"] == "ben"] == [0]) for e in (ada, ben, cy))
         check("being away is told to everyone, and being back", ok)
 
+        # the panels people share
+        screen = "1920 1080 0 1.5 -2 1 0 0 0 2 0"
+        ok = ada.ask("share 0 %s Screen 1" % screen) == "ok"
+        ok = ok and all(e.until(lambda s: [(p["id"], p["owner"], p["name"]) for p in s["panels"]] == [(0, ids["ada"], "Screen 1")]) for e in (ada, ben, cy))
+        check("a panel the owner shares is in everyone's room", ok)
+        bens = ids["ben"] * 8 + 1
+        ok = ben.ask("share 1 1280 720 1 1 1 1 0 0 0 1.2 1.8 ben's") == "ok"
+        ok = ok and all(e.until(lambda s: sorted(p["id"] for p in s["panels"]) == [0, bens]) for e in (ada, ben, cy))
+        check("...and a guest's, which goes through the owner", ok and [p["curve"] for p in cy.state()["panels"] if p["id"] == bens] == [1.8])
+
+        # its video: from the program that encodes it, over the links, to the programs that show it
+        src = Program(ada, b"S", 0)
+        got = src.messages(1, 2)
+        check("a program that encodes a panel is told the bitrate, and that nobody watches", sorted(got) == [(b"R", struct.pack("<I", 2000000)), (b"W", b"\0")])
+        src.ignore = b"R"   # (from here on the bitrate follows how the pictures fare, which isn't this test's to say)
+        view = Program(ben, b"V", 0)
+        check("someone's program shows the panel: the encoder hears it is watched, and is asked for a keyframe", sorted(src.messages(2, 2)) == [(b"K", b""), (b"W", b"\1")])
+        check("its pictures cross the link and come out in order, byte for byte", crosses(src, [view], [os.urandom(20000)] + [os.urandom(1500 + i) for i in range(30)]))
+        src.messages(0.2)
+        late = Program(cy, b"V", 0)
+        ok = src.messages(2, 1) == [(b"K", b"")]
+        delta = os.urandom(900)
+        src.unit(delta)
+        check("a second viewer waits for a keyframe, which is asked for, while the first goes on", ok and view.messages(2, 1) == [(b"U", b"\0" + delta)] and late.messages(0.3) == [])
+        check("...and from the keyframe on both get every picture", crosses(src, [view, late], [os.urandom(30000)] + [os.urandom(2000) for i in range(10)]))
+        check("a picture of a megabyte crosses whole", crosses(src, [view, late], [os.urandom(1 << 20)]))
+        media = json.loads(ada.ask("media")[3:]), json.loads(ben.ask("media")[3:])
+        check("ft-together says which panels have a program, and who watches", media[0]["sources"] == [0] and media[0]["viewers"] == [2, 0, 0] and media[0]["sinks"] == [] and
+              media[1]["sinks"] == [0] and media[1]["sources"] == [] and media[1]["dropped"] == 0 and len(media[0]["bitrate"]) == 3)
+
+        src.messages(0.2)
+        view.send(b"A", b"\0\0")
+        late.close()
+        ok = src.messages(3, 1) == [(b"W", b"\0")]
+        src.unit(os.urandom(5000), key=True)
+        check("one hides the panel and the other's program goes: the encoder hears nobody watches, and nothing is sent", ok and view.messages(0.5) == [])
+        view.send(b"A", b"\2\0")
+        check("looking again: watched, and a keyframe is asked for", sorted(src.messages(2, 2)) == [(b"K", b""), (b"W", b"\1")])
+
+        # a program that doesn't take its pictures
+        lazy = Program(cy, b"V", 0)
+        src.messages(1.5)
+        for i in range(12):
+            src.unit(os.urandom(1 << 20), key=True)
+            view.messages(0.3)
+        check("a program that doesn't take its pictures is let go, and the others still get theirs", lazy.let_go(10) and crosses(src, [view], [os.urandom(4000), os.urandom(400)]))
+
+        # programs that say what they may not
+        twin = Program(ada, b"S", 0)
+        check("a second program for the same panel takes the first one's place", src.let_go() and sorted(kind for kind, _ in twin.messages(1, 2)) == [b"R", b"W"])
+        twin.ignore = b"R"
+        wrong = [Program(ada, b"S", 3), Program(ada, b"V", 32), Program(ada, b"X", 0), Program(ben), Program(ben), Program(ben, b"V", bens), Program(ada, b"S", 1)]
+        wrong[3].sock.sendall(bytes(4))                               # a message of no length
+        wrong[4].sock.sendall(struct.pack("<I", (1 << 20) + 3))       # ...and one longer than any
+        wrong[5].unit(b"a picture, from a program that shows them")
+        wrong[6].send(b"A", b"\1\0")
+        check("a program that says what it may not is let go", all(w.let_go() for w in wrong))
+        quiet = Program(ada)
+        check("...and one that doesn't say what it is, after five seconds", quiet.messages(3) == [] and quiet.let_go(4))
+        check("the others are still there", crosses(twin, [view], [os.urandom(4000), os.urandom(400)]) and json.loads(ada.ask("media")[3:])["sources"] == [0])
+
+        ok = ada.ask("unshare 0") == "ok" and all(e.until(lambda s: [p["id"] for p in s["panels"]] == [bens]) for e in (ada, ben, cy))
+        twin.messages(0.5)
+        twin.unit(os.urandom(3000), key=True)
+        check("a panel taken back is out of everyone's room, and its pictures go nowhere", ok and view.messages(0.5) == [])
+        for one in [twin, view, lazy, quiet] + wrong:
+            one.close()
+
         # a program that dies without a word
         cy.proc.kill()
         cy.proc.wait()
@@ -240,7 +383,7 @@ def main(program):
 
         # leaving, and coming back
         ok = ben.ask("leave") == "ok" and ben.state()["mode"] == "idle" and ada.until(lambda s: names(s) == ["ada"], 3)
-        check("a guest who leaves is out at once", ok)
+        check("a guest who leaves is out at once, and their panel with them", ok and ada.state()["panels"] == [])
         sees.send(pose(-1.0))
         check("...and their pose goes nowhere, and their floor is lifted", mine.poses(0.3) == [] and sees.ask("floor").startswith("error you aren't in a room"))
         dee = start("dee")

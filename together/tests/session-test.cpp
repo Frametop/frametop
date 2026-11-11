@@ -1,193 +1,20 @@
 // A Frametop Together session's rules and its commands (together/session), several sessions run against
-// each other on a network made here: a link is two queues, and the test hands the bytes over.
+// each other on a network made in the test (fakenet.h).
 // Invites, asking and being let in or not, a full room, the guests' own links, leaving, a lost
-// owner, another version, and people who say what they may not. No sockets, no clock.
-#include "../session/commands.h"
+// owner, another version, the panels people share and who watches them, and people who say what
+// they may not. No sockets, no clock.
+#include "../room/panels.h"
+#include "fakenet.h"
 
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <deque>
-#include <memory>
-#include <set>
 
 static int failed = 0;
 static void check(const char *what, bool ok) {
     failed += !ok;
     std::printf("%s  %s\n", ok ? "ok  " : "FAIL", what);
-}
-
-static uint64_t g_seed = 99;
-static uint64_t roll() { return g_seed = g_seed * 6364136223846793005ull + 1442695040888963407ull, g_seed >> 11; }
-
-struct Net;
-
-// One Frame: its session, and its end of every link.
-struct Frame : session::Links, session::Tailnet {
-    Net &net;
-    std::string address, login;
-    uint16_t port;
-    bool onTailnet = true;
-    std::unique_ptr<session::Session> s;
-    std::vector<std::string> called;   // every host it called
-
-    Frame(Net &n, const std::string &address, uint16_t port, const std::string &name);
-    int Call(const std::string &host, uint16_t port) override;
-    void Send(int link, const std::vector<uint8_t> &message) override;
-    void Close(int link) override;
-    bool Self(session::Who &who, std::string &at) override { return who.login = login, who.name = "frame-" + login, at = address, onTailnet; }
-    bool WhoIs(const std::string &at, session::Who &who) override;
-    bool MayCall(const std::string &at) override { return at.rfind("100.", 0) == 0; }
-
-    std::string ask(const std::string &text);
-    std::string state() { return session::State(*s); }
-    bool has(const std::string &text) { return state().find(text) != std::string::npos; }
-    // The number of the first ask waiting for this owner's answer, or 0.
-    int asking() {
-        const std::string st = state();
-        const size_t at = st.find("\"asks\":[{\"id\":");
-        return at == std::string::npos ? 0 : std::atoi(st.c_str() + at + 14);
-    }
-};
-
-// The network between them. A link has a number at each end; what one end does reaches the
-// other when the test pumps.
-struct Net {
-    struct End {
-        Frame *frame = nullptr;
-        int link = -1;
-    };
-    struct Event {
-        End to;
-        enum { kUp, kBytes, kDown } what;
-        std::string address;
-        std::vector<uint8_t> bytes;
-    };
-    std::vector<Frame *> frames;
-    std::map<std::pair<Frame *, int>, End> far;   // each end's other end
-    std::deque<Event> queue;
-    std::map<int, std::vector<uint8_t>> heard;    // what was sent on a link whose other end is the test's
-    std::set<int> shut;                           // ...and the ones of those that were closed
-    std::function<void(Event &)> tamper;          // rewrites what is on its way
-    int nextLink = 1;
-    double now = 1000;
-    size_t piece = 0;   // bytes arrive in pieces this long (0: whole)
-
-    void pump() {
-        while (!queue.empty()) {
-            Event e = queue.front();
-            queue.pop_front();
-            if (tamper) tamper(e);
-            session::Session &s = *e.to.frame->s;
-            if (e.what == Event::kUp) s.Up(e.to.link, e.address, now);
-            else if (e.what == Event::kDown) s.Down(e.to.link, now);
-            else if (!piece) s.Bytes(e.to.link, e.bytes.data(), e.bytes.size(), now);
-            else
-                for (size_t at = 0; at < e.bytes.size(); at += piece) s.Bytes(e.to.link, e.bytes.data() + at, std::min(piece, e.bytes.size() - at), now);
-        }
-    }
-    void wait(double seconds) {
-        for (double end = now + seconds; now < end;) {
-            now += 1;
-            for (Frame *f : frames) f->s->Tick(now);
-            pump();
-        }
-    }
-    // The link between two Frames breaks under both.
-    void cut(Frame &a, Frame &b) {
-        for (auto it = far.begin(); it != far.end();) {
-            if (it->first.first != &a || it->second.frame != &b) {
-                ++it;
-                continue;
-            }
-            queue.push_back({{&a, it->first.second}, Event::kDown, "", {}});
-            queue.push_back({it->second, Event::kDown, "", {}});
-            far.erase({it->second.frame, it->second.link});
-            it = far.erase(it);
-        }
-        pump();
-    }
-    // A new link to `to` whose other end is the test's: what comes in on it is the test's to write.
-    End stranger(Frame &to, const std::string &from) {
-        const End theirs = {&to, nextLink++};
-        queue.push_back({theirs, Event::kUp, from, {}});
-        pump();
-        return theirs;
-    }
-    void say(const End &to, const std::vector<uint8_t> &bytes) {
-        queue.push_back({to, Event::kBytes, "", bytes});
-        pump();
-    }
-    // Why the test's end of a link was refused, or 0 when it wasn't.
-    int refused(const End &theirs) {
-        const std::vector<uint8_t> &bytes = heard[theirs.link];
-        proto::Parser parser;
-        parser.Feed(bytes.data(), bytes.size());
-        uint16_t kind = 0;
-        std::vector<uint8_t> body;
-        proto::Refuse r;
-        while (parser.Next(kind, body))
-            if (kind == proto::kRefuse && proto::Read(body, r)) return int(r.why);
-        return 0;
-    }
-};
-
-Frame::Frame(Net &n, const std::string &at, uint16_t p, const std::string &name) : net(n), address(at), login(name + "@example.com"), port(p) {
-    session::Config c;
-    c.name = name, c.port = p, c.dice = roll;
-    s = std::make_unique<session::Session>(*this, *this, c);
-    net.frames.push_back(this);
-}
-
-int Frame::Call(const std::string &host, uint16_t p) {
-    called.push_back(host);
-    const int mine = net.nextLink++;
-    Frame *callee = nullptr;
-    for (Frame *f : net.frames)
-        if ((f->address == host || "frame-" + f->login == host) && f->port == p) callee = f;
-    if (!callee) return net.queue.push_back({{this, mine}, Net::Event::kDown, "", {}}), mine;
-    const int theirs = net.nextLink++;
-    net.far[{this, mine}] = {callee, theirs};
-    net.far[{callee, theirs}] = {this, mine};
-    net.queue.push_back({{callee, theirs}, Net::Event::kUp, address, {}});
-    net.queue.push_back({{this, mine}, Net::Event::kUp, callee->address, {}});
-    return mine;
-}
-
-void Frame::Send(int link, const std::vector<uint8_t> &message) {
-    const auto it = net.far.find({this, link});
-    if (it != net.far.end()) net.queue.push_back({it->second, Net::Event::kBytes, "", message});
-    else net.heard[link].insert(net.heard[link].end(), message.begin(), message.end());
-}
-
-void Frame::Close(int link) {
-    const auto it = net.far.find({this, link});
-    if (it == net.far.end()) return void(net.shut.insert(link));
-    net.queue.push_back({it->second, Net::Event::kDown, "", {}});
-    net.far.erase({it->second.frame, it->second.link});
-    net.far.erase({this, link});
-}
-
-bool Frame::WhoIs(const std::string &at, session::Who &who) {
-    for (Frame *f : net.frames)
-        if (f->address == at && f->onTailnet) return who.login = f->login, who.name = "frame-" + f->login, true;
-    return false;
-}
-
-std::string Frame::ask(const std::string &text) {
-    const std::string reply = session::Command(*s, text, net.now);
-    net.pump();
-    return reply;
-}
-
-static std::string where(const Frame &f) { return f.address + " " + std::to_string(f.port); }
-
-// `guest` joins `owner`'s room with a fresh invite and is let in.
-static bool join(Frame &owner, Frame &guest) {
-    const std::string invite = owner.ask("invite");
-    if (invite.rfind("ok ", 0) != 0 || guest.ask("join " + where(owner) + " " + invite.substr(3)) != "ok") return false;
-    return owner.ask("accept " + std::to_string(owner.asking())) == "ok" && guest.s->mode() == session::Mode::kJoined;
 }
 
 static std::vector<uint8_t> hello(uint16_t version, const std::string &code, const uint8_t *room = nullptr) {
@@ -441,6 +268,124 @@ static void knocks() {
     check("a guest who knocks before the owner's word of them waits, and is let in when it comes", ok && b.called.size() == 1);
 }
 
+static proto::Panel panel(int owner, int number, float x = 0) {
+    proto::Panel p;
+    p.id = proto::PanelId(owner, number), p.width = 1920, p.height = 1080, p.at[0] = x, p.at[1] = 1.4f, p.metres = 1.2f;
+    return p;
+}
+
+static void panels() {
+    Net net;
+    Frame a(net, "100.64.0.1", 47193, "Ann"), b(net, "100.64.0.2", 47193, "Bo"), c(net, "100.64.0.3", 47193, "Cy");
+    const std::string screen = "share 0 2560 1440 0 1.4 -1.5 1 0 0 0 1.6 1.8 Screen 1";
+    bool ok = a.ask(screen).rfind("error you aren't", 0) == 0 && a.ask("unshare 0").rfind("error", 0) == 0 && a.ask("open") == "ok" && join(a, b) && join(a, c);
+    check("nobody shares a panel outside a room", ok);
+    ok = a.ask(screen) == "ok" && a.has("\"panels\":[{\"id\":0,\"owner\":0,\"number\":0,\"name\":\"Screen 1\",\"size\":[2560,1440],\"at\":[0,1.4,-1.5],\"turn\":[1,0,0,0],\"metres\":1.6,\"curve\":1.8}]");
+    for (Frame *f : {&b, &c}) ok = ok && f->s->room().panels.size() == 1 && f->s->room().panel(0) && f->s->room().panel(0)->name == "Screen 1" && f->s->room().panel(0)->width == 2560;
+    check("the owner shares a screen, and it is in everyone's room where the owner put it", ok);
+    ok = b.ask("share 1 1920 1080 0.5 1.2 -1 0.7071068 0 0.7071068 0 1.2 0 Bo's window") == "ok";
+    for (Frame *f : {&a, &b, &c}) {
+        const proto::Panel *p = f->s->room().panel(9);
+        ok = ok && f->s->room().panels.size() == 2 && p && p->owner() == 1 && p->name == "Bo's window" && p->at[0] == 0.5f && std::fabs(p->turn[2] - 0.7071068f) < 1e-4;
+    }
+    check("a guest shares a window through the owner: its id says whose it is", ok);
+
+    size_t toOwner = 0;
+    net.tamper = [&](Net::Event &e) { toOwner += e.to.frame == &a && e.what == Net::Event::kBytes; };
+    uint32_t turn = a.s->room().turn;
+    ok = b.ask("share 1 1920 1080 0.5 1.2 -1 0.7071068 0 0.7071068 0 1.2 0 Bo's window") == "ok" && toOwner == 0 && a.ask(screen) == "ok" && a.s->room().turn == turn;
+    check("a panel said again as it is tells nobody anything", ok);
+    ok = b.ask("share 1 1920 1080 0.75 1.2 -1 0.7071068 0 0.7071068 0 1.2 0 Bo's window") == "ok" && toOwner == 1 && a.s->room().turn == turn + 1;
+    for (Frame *f : {&a, &b, &c}) ok = ok && f->s->room().panel(9)->at[0] == 0.75f && f->s->room().panels.size() == 2;
+    check("moved, it moves in everyone's room", ok);
+    net.tamper = nullptr;
+
+    ok = true;
+    for (const char *bad : {"share 3 1920 1080 0 0 0 1 0 0 0 1 0", "share -1 1920 1080 0 0 0 1 0 0 0 1 0", "share 0 100 1080 0 0 0 1 0 0 0 1 0", "share 0 1921 1080 0 0 0 1 0 0 0 1 0",
+                            "share 0 1920 1080 0 0 0 0 0 0 0 1 0", "share 0 1920 1080 500 0 0 1 0 0 0 1 0", "share 0 1920 1080 0 0 0 1 0 0 0 0.01 0", "share 0 1920 1080 0 0 0 1 0 0 0 1 0.2",
+                            "share 0 1920 1080 0 0 0 1 0 0 0 1", "share 0 1920 1080 0 nan 0 1 0 0 0 1 0", "share 0.5 1920 1080 0 0 0 1 0 0 0 1 0", "share", "unshare", "unshare x", "unshare 3"})
+        ok = ok && c.ask(bad).rfind("error", 0) == 0;
+    check("a fourth panel, a size no stream has, a turn that isn't one, a place a mile off: errors", ok && c.s->room().panels.size() == 2 && a.s->room().panels.size() == 2);
+    ok = c.ask("share 2 1280 720 0 1 -1 1 0 0 0 1 0 A\x1b[31mname") == "ok" && a.s->room().panel(18) && a.s->room().panel(18)->name == "A[31mname" && c.ask("unshare 2") == "ok";
+    for (Frame *f : {&a, &b, &c}) ok = ok && f->s->room().panels.size() == 2 && !f->s->room().panel(18);
+    check("a name is cleaned on its way out, and a panel taken back is gone from every room", ok && c.ask("unshare 2") == "ok" && c.ask("unshare 0") == "ok");
+
+    // who watches what
+    proto::Watch w;
+    w.panel = 0, w.level = proto::kInView, w.fresh = true;
+    ok = c.s->Watch(w).empty();
+    net.pump();
+    ok = ok && a.watches.size() == 1 && a.s->PersonOn(a.watches[0].first) == 2 && a.watches[0].second.panel == 0 && a.watches[0].second.fresh && b.watches.empty();
+    w.panel = 9, w.level = proto::kFocused, w.fresh = false;
+    ok = ok && c.s->Watch(w).empty() && a.s->Watch(w).empty();
+    net.pump();
+    ok = ok && b.watches.size() == 2 && b.s->PersonOn(b.watches[0].first) == 2 && b.s->PersonOn(b.watches[1].first) == 0 && b.watches[0].second.level == proto::kFocused && a.watches.size() == 1;
+    check("what a viewer has of a panel goes to the panel's owner, owner of the room or not, on the viewer's own link", ok);
+    ok = !b.s->Watch(w).empty();
+    w.panel = 1;
+    ok = ok && !c.s->Watch(w).empty();
+    net.cut(b, c);
+    w.panel = 9;
+    ok = ok && !c.s->Watch(w).empty();
+    net.wait(session::Session::kMeshRetryS + 1);
+    check("nobody watches their own panel, one there isn't, or one whose owner they have no link to", ok && c.s->Watch(w).empty());
+
+    // what a guest may not say about panels
+    proto::Unpanel u;
+    u.panel = 0;
+    ok = a.ask("unshare 0") == "ok" && a.ask(screen) == "ok";
+    w.panel = 1, w.level = proto::kInView;   // a panel of Ann's that isn't shared: no harm, and nothing told
+    const size_t told = a.watches.size();
+    c.Send(c.s->MemberLinks()[0], proto::Pack(w));
+    net.pump();
+    check("a word about a panel that just went is passed over", ok && a.watches.size() == told && c.s->mode() == session::Mode::kJoined && a.s->room().people.size() == 3);
+    const auto owners = [&](Frame &who) {
+        for (int link : who.s->MemberLinks())
+            if (who.s->PersonOn(link) == 0) return link;
+        return -1;
+    };
+    c.Send(owners(c), proto::Pack(panel(1, 0, 9)));   // Cy shares a panel as Bo's
+    net.pump();
+    ok = idle(c) && a.s->room().people.size() == 2 && !a.s->room().panel(8) && a.s->room().panel(9)->at[0] == 0.75f;
+    check("a guest who shares a panel as someone else's is dropped, and the room stands", ok);
+    ok = join(a, c);
+    c.Send(owners(c), proto::Pack(panel(2, 5)));
+    net.pump();
+    ok = ok && idle(c) && join(a, c);
+    u.panel = 9;
+    c.Send(owners(c), proto::Pack(u));   // ...takes Bo's back
+    net.pump();
+    ok = ok && idle(c) && a.s->room().panel(9) && join(a, c);
+    w.panel = 9;
+    c.Send(owners(c), proto::Pack(w));   // ...tells Ann of watching Bo's
+    net.pump();
+    check("...so is one who shares past a headset's three, takes another's panel back, or tells the wrong Frame what they watch", ok && idle(c) && a.s->room().panels.size() == 2 && join(a, c));
+    for (int link : c.s->MemberLinks())
+        if (c.s->PersonOn(link) == 1) c.Send(link, proto::Pack(panel(2, 0)));   // a panel is the owner's to take, not another guest's
+    net.pump();
+    ok = c.s->mode() == session::Mode::kJoined && b.s->MemberLinks().size() == 1 && b.s->room().panels.size() == 2;
+    net.wait(session::Session::kMeshRetryS + 1);
+    check("a guest takes no panel from another guest: that link ends, not the room", ok && b.s->MemberLinks().size() == 2);
+
+    // a flood
+    for (int i = 0; i < 200 && c.s->mode() == session::Mode::kJoined; ++i) c.ask("share 0 1280 720 " + std::to_string(i * 0.01) + " 1 -1 1 0 0 0 1 0");
+    ok = idle(c) && a.s->room().people.size() == 2 && a.s->room().panels.size() == 2 && a.s->room().turn < turn + 80;
+    check("a guest who moves a panel faster than anyone could is dropped, and their panel with them", ok);
+    ok = join(a, c);
+    for (int i = 0; i < 12 && ok; ++i) {   // a hand dragging a panel, four times a second
+        net.now += 0.25;
+        ok = c.ask("share 0 1280 720 " + std::to_string(i * 0.01) + " 1 -1 1 0 0 0 1 0") == "ok" && c.s->mode() == session::Mode::kJoined;
+    }
+    check("...and one who drags it by hand is not", ok && a.s->room().panels.size() == 3);
+
+    // leaving
+    ok = c.ask("leave") == "ok" && a.s->room().panels.size() == 2 && b.s->room().panels.size() == 2 && !b.s->room().panel(16);
+    net.cut(a, b);
+    check("someone's panels leave the room with them, however they go", ok && a.s->room().panels.size() == 1 && a.s->room().panel(0) && idle(b));
+    ok = join(a, b) && b.s->room().panels.size() == 1 && b.ask("share 1 1920 1080 0 1 -1 1 0 0 0 1 0") == "ok" && a.s->room().panels.size() == 2;
+    check("back in a room, a guest shares afresh", ok && a.ask("leave") == "ok" && idle(b) && b.s->room().panels.empty());
+}
+
 // Noise on every kind of link: nothing crashes (the sanitizers watch), and the owner's room
 // only ever holds the people it let in.
 static void noise() {
@@ -449,7 +394,7 @@ static void noise() {
         Net net;
         net.piece = round % 3 ? 0 : 1 + round % 7;
         Frame a(net, "100.64.0.1", 47193, "Ann"), b(net, "100.64.0.2", 47193, "Bo"), c(net, "100.64.0.3", 47193, "Cy");
-        ok = ok && a.ask("open") == "ok" && join(a, b) && join(a, c);
+        ok = ok && a.ask("open") == "ok" && join(a, b) && join(a, c) && a.ask("share 0 1280 720 0 1 -1 1 0 0 0 1 0") == "ok" && b.ask("share 2 1280 720 0 1 -1 1 0 0 0 1 0") == "ok";
         const std::string code = a.ask("invite").substr(3);
         for (int i = 0; i < 40; ++i) {
             std::vector<uint8_t> bytes;
@@ -461,8 +406,13 @@ static void noise() {
                 // a real message, whole or damaged, of a kind that may not be its sender's to send
                 proto::Welcome w;
                 w.you = 1, w.room = a.s->room();
-                const std::vector<uint8_t> real[6] = {proto::Pack(a.s->room()), proto::Pack(w), hello(proto::kVersion, code, a.s->room().room), proto::PackLeave(), proto::Pack(proto::Away{}), proto::Pack(proto::Refuse{})};
-                bytes = real[roll() % 6];
+                proto::Watch watch;
+                watch.panel = uint8_t(roll() % 34), watch.level = uint8_t(roll() % 4);
+                proto::Unpanel unpanel;
+                unpanel.panel = uint8_t(roll() % 34);
+                const std::vector<uint8_t> real[9] = {proto::Pack(a.s->room()), proto::Pack(w), hello(proto::kVersion, code, a.s->room().room), proto::PackLeave(), proto::Pack(proto::Away{}), proto::Pack(proto::Refuse{}),
+                                                      proto::Pack(panel(int(roll() % 4), int(roll() % 8))), proto::Pack(unpanel), proto::Pack(watch)};
+                bytes = real[roll() % 9];
                 if (kind == 2) bytes[roll() % bytes.size()] = uint8_t(roll());
                 if (kind == 3) bytes.resize(1 + roll() % bytes.size());
             }
@@ -473,11 +423,13 @@ static void noise() {
             if (roll() % 8 == 0) net.wait(2);
             const proto::Room &r = a.s->room();
             ok = ok && a.s->mode() == session::Mode::kHosting && r.person(0) && r.people.size() <= 3 && r.people.size() == a.s->MemberLinks().size() + 1 && !a.asking();
+            ok = ok && r.panels.size() <= size_t(room::kFramePanels) * r.people.size();
+            for (const proto::Panel &p : r.panels) ok = ok && r.person(p.owner()) && p.number() < room::kFramePanels;
             for (Frame *g : {&b, &c})
                 if (g->s->mode() == session::Mode::kJoined) ok = ok && g->s->room().person(g->s->me()) && r.person(g->s->me()) && g->s->room().people.size() <= 3;
         }
     }
-    check("noise and forged messages on every link: the owner's room holds only who it let in", ok);
+    check("noise and forged messages on every link: the owner's room holds only who it let in, and only their own panels", ok);
 }
 
 int main() {
@@ -486,6 +438,7 @@ int main() {
     versions();
     strangers();
     knocks();
+    panels();
     noise();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;

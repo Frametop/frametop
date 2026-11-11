@@ -1,9 +1,9 @@
-// A Frametop Together session's rules (session.h).
+// A Frametop Together session's rules: what the links bring (session.h). What the wearer does
+// is wearer.cpp's.
 #include "session.h"
 
-#include "../room/seats.h"
+#include "../room/panels.h"
 
-#include <cmath>
 #include <cstring>
 #include <tuple>
 
@@ -107,7 +107,7 @@ void Session::End(const std::string &note) {
     for (const auto &[id, l] : link_) links_.Close(id);
     link_.clear();
     invites_.Clear();
-    mode_ = Mode::kIdle, me_ = -1, room_ = proto::Room{}, code_.clear();
+    mode_ = Mode::kIdle, me_ = -1, room_ = proto::Room{}, code_.clear(), asked_.clear();
     for (double &t : meshTried_) t = -1e9;
     note_ = note;
 }
@@ -123,6 +123,7 @@ void Session::Remove(int person) {
         if (room_.people[i].id == person && person != room_.owner) {
             note_ = room_.people[i].name + " left.";
             room_.people.erase(room_.people.begin() + long(i));
+            room::DropPanelsOf(room_, person);   // what they shared goes with them
             return Changed();
         }
 }
@@ -157,6 +158,28 @@ void Session::Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, 
         if (mode_ != Mode::kHosting || l.state != Link::kMember || !proto::Read(body, a)) return Drop(link);
         for (proto::Person &p : room_.people)
             if (p.id == l.person && p.away != a.away) p.away = a.away, Changed();
+        return;
+    }
+    case proto::kPanel: {   // a guest shares a panel of theirs, or says where it is now
+        proto::Panel p;
+        if (mode_ != Mode::kHosting || l.state != Link::kMember || !proto::Read(body, p) || !l.panelWords.Spend(now)) return Drop(link);
+        const room::Shared shared = room::SetPanel(room_, l.person, p);
+        if (shared == room::Shared::kNo) return Drop(link);
+        if (shared == room::Shared::kChanged) Changed();
+        return;
+    }
+    case proto::kUnpanel: {
+        proto::Unpanel u;
+        if (mode_ != Mode::kHosting || l.state != Link::kMember || !proto::Read(body, u) || !l.panelWords.Spend(now)) return Drop(link);
+        if (u.panel / proto::kPanelNumbers != l.person) return Drop(link);
+        if (room::DropPanel(room_, l.person, u.panel)) Changed();
+        return;
+    }
+    case proto::kWatch: {   // what they have of a panel of ours; one that just went is nothing
+        proto::Watch w;
+        if (l.state != Link::kMember || !proto::Read(body, w) || !l.panelWords.Spend(now)) return Drop(link);
+        if (w.panel / proto::kPanelNumbers != me_) return Drop(link);
+        if (room_.panel(w.panel) && config_.watched) config_.watched(link, w, now);
         return;
     }
     case proto::kLeave:
@@ -221,27 +244,6 @@ bool Session::Knocked(int link, Link &l) {
     return false;
 }
 
-std::string Session::Answer(int ask, bool accept) {
-    for (auto &[id, l] : link_) {
-        if (mode_ != Mode::kHosting || l.state != Link::kAsking || l.ask != ask) continue;
-        const int place = room::FreeId(room_);
-        if (!accept) return Refuse(id, proto::Why::kDeclined, "The room's owner said no."), "";
-        if (place < 0) return Refuse(id, proto::Why::kFull, "The room is full."), "the room is full";
-        proto::Person p;
-        p.id = uint8_t(place), p.name = l.hello.name.empty() ? l.who.name : l.hello.name, p.login = l.who.login;
-        p.address = l.address, p.port = l.hello.port, p.spot = room::SpotBeside(room_.person(room_.owner)->spot, place);
-        note_ = p.name + " came in.";
-        room_.people.push_back(p);
-        Changed();   // to those already in: the newcomer's copy is their welcome
-        l.state = Link::kMember, l.person = place;
-        proto::Welcome w;
-        w.you = p.id, w.room = room_;
-        links_.Send(id, proto::Pack(w));
-        return "";
-    }
-    return "no such ask";
-}
-
 // A guest's side: the room as its owner has it now.
 void Session::OnRoom(const proto::Room &r, double now) {
     if (r.turn <= room_.turn) return;
@@ -295,76 +297,6 @@ void Session::Tick(double now) {
         Drop(id);
     }
     Mesh(now);
-}
-
-std::string Session::Open(const proto::Spot &spot) {
-    if (mode_ != Mode::kIdle) return "you are in a room already";
-    for (float v : {spot.at[0], spot.at[1], spot.at[2]})
-        if (!(std::fabs(v) <= proto::kFar)) return "that spot is too far away";
-    if (!(std::fabs(spot.yaw) <= 7)) return "that isn't a direction";
-    Who who;
-    proto::Person p;
-    if (!tailnet_.Self(who, p.address)) return "Tailscale isn't running on this headset";
-    p.spot = spot;
-    p.name = config_.name.empty() ? who.name : config_.name, p.login = who.login, p.port = config_.port;
-    room_ = proto::Room{};
-    for (size_t i = 0; i < proto::kRoomId; i += 8) {
-        const uint64_t roll = config_.dice();
-        std::memcpy(room_.room + i, &roll, 8);
-    }
-    room_.people.push_back(p);
-    mode_ = Mode::kHosting, me_ = 0, note_ = "Your room is open.";
-    return "";
-}
-
-std::string Session::Invite(double now, std::string &code) {
-    if (mode_ != Mode::kHosting) return "open a room first";
-    code = invites_.Make(now, config_.dice);
-    return "";
-}
-
-std::string Session::Join(const std::string &host, uint16_t port, const std::string &code, double now) {
-    if (mode_ != Mode::kIdle) return "you are in a room already";
-    if (host.empty() || host.size() > 253 || !port || code.size() > proto::kMostCode) return "that isn't a headset and an invite code";
-    const int link = links_.Call(host, port);
-    if (link < 0) return "couldn't call " + host;
-    Link &l = link_[link];
-    l.state = Link::kCalledOwner, l.address = host, l.since = now;
-    mode_ = Mode::kCalling, code_ = code, note_.clear();
-    return "";
-}
-
-std::string Session::SetAway(uint8_t away) {
-    if (away & ~(proto::kAwayGame | proto::kAwayOff)) return "that isn't a way to be away";
-    if (mode_ == Mode::kHosting) {
-        if (room_.people[0].away != away) room_.people[0].away = away, Changed();
-    } else if (mode_ == Mode::kJoined) {
-        proto::Away a;
-        a.away = away;
-        links_.Send(LinkOf(room_.owner), proto::Pack(a));
-    } else {
-        return "you aren't in a room";
-    }
-    return "";
-}
-
-std::string Session::Leave() {
-    if (mode_ == Mode::kIdle) return "you aren't in a room";
-    const char *const note = mode_ == Mode::kHosting ? "You closed your room." : mode_ == Mode::kCalling ? "You stopped calling." : "You left the room.";
-    for (int link : MemberLinks()) links_.Send(link, proto::PackLeave());
-    std::vector<int> asking;
-    for (const auto &[id, l] : link_)
-        if (l.state == Link::kAsking) asking.push_back(id);
-    for (int id : asking) Refuse(id, proto::Why::kNotOpen, "The room closed.");
-    End(note);
-    return "";
-}
-
-std::vector<Ask> Session::asks() const {
-    std::vector<Ask> out;
-    for (const auto &[id, l] : link_)
-        if (l.state == Link::kAsking) out.push_back({l.ask, l.hello.name, l.who.login, l.address});
-    return out;
 }
 
 }  // namespace session

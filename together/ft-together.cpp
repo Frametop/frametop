@@ -4,9 +4,12 @@
 //
 //   watch            -> the asker gets the other people's poses from now on (local/watchers.h)
 //   floor [X Z YAW]  -> where this Frame's own floor lies in the room (local/floor.h)
+//   media            -> which shared panels have a program here, and how their video goes
 //
 // A datagram there that is a pose (local/datagrams.h) is the wearer's own: it goes to everyone
-// in the room, and theirs come back to whoever watches.
+// in the room, and theirs come back to whoever watches. The shared panels' video comes from and
+// goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
+// between the Frames on the links, a stream a picture (flow/video.h).
 //
 //   ft-together [--port N] [--name NAME] [--socket NAME] [--loopback]
 //
@@ -22,7 +25,9 @@
 //
 // One loop, one thread of ours: the links queue what msquic's threads see (net/quiclinks.h).
 #include "../conf/ftsock.h"
+#include "flow/video.h"
 #include "local/floor.h"
+#include "local/media.h"
 #include "local/posegate.h"
 #include "local/watchers.h"
 #include "net/quiclinks.h"
@@ -46,6 +51,8 @@ constexpr double kRetryS = 3;        // between looks at whether Tailscale is up
 constexpr double kLeaveS = 0.5;      // what leaving gets to reach the others when the program ends
 constexpr int kMostAtOnce = 256;     // events or questions taken before the loop looks at the rest
 constexpr size_t kMostQuestion = 512;
+constexpr int kSendingMs = 20;       // between looks at the links while pictures are on their way
+constexpr int kMediaMs = 100;        // ...and at the video's rules while a media program is here
 
 volatile sig_atomic_t g_stop = 0;
 void Stop(int) { g_stop = 1; }
@@ -91,10 +98,20 @@ bool Read(int argc, char **argv, Args &args) {
     return true;
 }
 
-// This Frame's end, once the tailnet says who we are: the links, and the session on them.
+// The links, as the video sends its pictures on them.
+struct PictureWires : flow::Wires {
+    net::QuicLinks &links;
+    explicit PictureWires(net::QuicLinks &l) : links(l) {}
+    bool Frame(int link, std::vector<uint8_t> bytes, uint32_t tag) override { return links.Frame(link, std::move(bytes), tag); }
+};
+
+// This Frame's end, once the tailnet says who we are: the links, the session on them, and the
+// shared panels' video between the links and this Frame's programs.
 struct End {
     std::unique_ptr<net::QuicLinks> links;
     std::unique_ptr<session::Session> session;
+    std::unique_ptr<PictureWires> wires;
+    std::unique_ptr<flow::Video> video;
     bool inRoom() const { return session && (session->mode() == session::Mode::kHosting || session->mode() == session::Mode::kJoined); }
 };
 
@@ -104,10 +121,11 @@ struct Local {
     local::PoseCount count;
     local::Watchers watchers;
     local::Floor floor;
+    local::Media media;
 };
 
 // False with nothing in `err` while Tailscale isn't up, and with the reason when it can't work.
-bool Start(const Args &args, session::Tailnet &tailnet, End &end, std::string &err) {
+bool Start(const Args &args, session::Tailnet &tailnet, End &end, flow::Programs &programs, std::string &err) {
     session::Who who;
     net::QuicLinks::Config links;
     if (!tailnet.Self(who, links.listen)) return false;
@@ -117,13 +135,16 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, std::string &e
     if (!end.links) return false;
     session::Config config;
     config.name = args.name.empty() ? who.name : args.name, config.port = args.port, config.dice = Dice;
+    config.watched = [&end](int link, const proto::Watch &watch, double now) { end.video->Watch(link, watch, now); };
     end.session = std::make_unique<session::Session>(*end.links, tailnet, config);
+    end.wires = std::make_unique<PictureWires>(*end.links);
+    end.video = std::make_unique<flow::Video>(*end.session, *end.wires, programs);
     std::printf("ft-together: %s (%s) at %s port %d\n", config.name.c_str(), who.login.c_str(), links.listen.c_str(), int(args.port));
     return true;
 }
 
 // What a link saw. A pose from someone in the room goes to this Frame's watchers; anything
-// else in a datagram (voice, later) is dropped.
+// else in a datagram (voice, later) is dropped. A picture goes to the video's rules.
 void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     session::Session &session = *end.session;
     switch (e.kind) {
@@ -138,7 +159,20 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
         if (person >= 0 && local.gate.Take(e.link, e.bytes.data(), e.bytes.size(), now)) local.watchers.Send(sock, person, e.bytes.data(), e.bytes.size(), now);
         break;
     }
+    case net::Event::kFrame: end.video->Frame(e.link, e.bytes.data(), e.bytes.size(), now); break;
+    case net::Event::kFrameLost: end.video->Lost(e.link, e.tag, now); break;
     }
+}
+
+// How the shared panels' video goes: {"sources":[...],"sinks":[...],"bitrate":[...],"viewers":[...],"dropped":N}.
+std::string MediaState(const End &end, const Local &local) {
+    std::string state = local.media.State(), rates, viewers;
+    for (int number = 0; number < room::kFramePanels; ++number) {
+        rates += (number ? "," : "") + std::to_string(end.video->bitrate(number));
+        viewers += (number ? "," : "") + std::to_string(end.video->viewers(number));
+    }
+    state.pop_back();
+    return state + ",\"bitrate\":[" + rates + "],\"viewers\":[" + viewers + "],\"dropped\":" + std::to_string(end.video->dropped()) + "}";
 }
 
 // The wearer's own pose, from one of this Frame's programs, to everyone in the room.
@@ -162,6 +196,7 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (!end.session) reply = "error Tailscale isn't running on this headset";
     else if (asked == "watch") reply = local.watchers.Add(from, fromLen, now) ? "ok" : "error too many programs are watching";
     else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = local.floor.Ask(asked, end.inRoom());
+    else if (asked == "media") reply = "ok " + MediaState(end, local);
     else reply = session::Command(*end.session, asked, now);
     if (!end.inRoom()) local.floor.Lift();   // the room was left: the next one's floor is its own
     // an asker that doesn't wait for its answer doesn't hold up the loop
@@ -192,6 +227,9 @@ int main(int argc, char **argv) {
 
     End end;
     Local local;
+    if (!local.media.Listen(args.socket + "_media"))
+        return std::fprintf(stderr, "ft-together: listen @%s_media: %s\n", args.socket.c_str(), std::strerror(errno)), 1;
+    std::vector<pollfd> fds;
     double tried = -1e9, ticked = Now();
     bool waiting = false;
     std::string note;
@@ -200,14 +238,17 @@ int main(int argc, char **argv) {
         if (!end.session && now - tried >= kRetryS) {
             tried = now;
             std::string err;
-            if (!Start(args, *tailnet, end, err)) {
+            if (!Start(args, *tailnet, end, local.media, err)) {
                 if (!err.empty()) return std::fprintf(stderr, "ft-together: %s\n", err.c_str()), 1;
                 if (!waiting) std::printf("ft-together: waiting for Tailscale\n");
                 waiting = true;
             }
         }
-        pollfd fds[2] = {{sock, POLLIN, 0}, {end.links ? end.links->fd() : -1, POLLIN, 0}};
-        if (poll(fds, 2, 1000) < 0 && errno != EINTR) return std::perror("ft-together: poll"), 1;
+        fds.assign({{sock, POLLIN, 0}, {end.links ? end.links->fd() : -1, POLLIN, 0}});
+        local.media.Fds(fds);
+        // pictures on their way are given up in time only if the links are looked at often
+        const int wait = end.links && end.links->Sending() ? kSendingMs : local.media.clients() ? kMediaMs : 1000;
+        if (poll(fds.data(), fds.size(), wait) < 0 && errno != EINTR) return std::perror("ft-together: poll"), 1;
         now = Now();
         if (end.session) {
             net::Event e;
@@ -215,10 +256,14 @@ int main(int argc, char **argv) {
             if (!end.inRoom()) local.floor.Lift();
         }
         for (int i = 0; i < kMostAtOnce && Answer(sock, end, local, now); ++i) {}
+        local.media.Serve(end.video.get(), now);
+        if (end.session) {
+            end.links->Tick();
+            end.video->Tick(now);
+        }
         if (end.session && now - ticked >= 1) {
             ticked = now;
             end.session->Tick(now);
-            end.links->Tick();
         }
         if (end.session && end.session->note() != note) {
             note = end.session->note();

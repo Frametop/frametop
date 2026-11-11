@@ -1,10 +1,12 @@
 // Frametop Together's bytes (together/proto): text a peer may show us, the control stream's
-// messages there and back and cut short at every length, the parser on a stream that comes in
-// pieces, the pose datagram, and all of them on noise. No sockets.
+// messages there and back and cut short at every length, the panels a room holds, the parser
+// on a stream that comes in pieces, the pose datagram, and all of them on noise. No sockets.
 #include "../proto/messages.h"
 #include "../proto/posewire.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 static int failed = 0;
@@ -31,7 +33,22 @@ static proto::Room room3() {
         p.spot.at[0] = 0.9f * float(i), p.spot.at[2] = -0.25f, p.spot.yaw = 0.5f;
         r.people.push_back(p);
     }
+    for (int i = 0; i < 2; ++i) {   // the owner's first panel, and the second of the guest in place 3
+        proto::Panel p;
+        p.id = proto::PanelId(i ? 3 : 0, i), p.width = 2560, p.height = uint16_t(i ? 1080 : 1440);
+        p.at[0] = 0.5f * float(i), p.at[1] = 1.4f, p.at[2] = -1.5f;
+        p.turn[0] = 0.7071068f, p.turn[2] = i ? -0.7071068f : 0.7071068f;
+        p.metres = 1.6f, p.curve = i ? 0 : 1.8f, p.name = i ? "ゲスト's window" : "Screen 1";
+        r.panels.push_back(p);
+    }
     return r;
+}
+
+// A turn goes as 16 bits a part, so it comes back near what it was.
+static bool same(const proto::Panel &a, const proto::Panel &b) {
+    bool ok = a.id == b.id && a.width == b.width && a.height == b.height && a.metres == b.metres && a.curve == b.curve && a.name == b.name && !std::memcmp(a.at, b.at, sizeof a.at);
+    for (int i = 0; i < 4; ++i) ok = ok && std::fabs(a.turn[i] - b.turn[i]) < 1e-4;
+    return ok;
 }
 
 static bool same(const proto::Room &a, const proto::Room &b) {
@@ -41,6 +58,8 @@ static bool same(const proto::Room &a, const proto::Room &b) {
         ok = p.id == q.id && p.name == q.name && p.login == q.login && p.address == q.address && p.port == q.port && p.away == q.away &&
              !std::memcmp(p.spot.at, q.spot.at, sizeof p.spot.at) && p.spot.yaw == q.spot.yaw;
     }
+    ok = ok && a.panels.size() == b.panels.size();
+    for (size_t i = 0; ok && i < a.panels.size(); ++i) ok = same(a.panels[i], b.panels[i]);
     return ok;
 }
 
@@ -142,12 +161,114 @@ static void messages() {
         std::vector<uint8_t> noise(roll() % 200);
         for (uint8_t &b : noise) b = uint8_t(roll());
         if (i % 3 == 0 && noise.size() > 24) noise[proto::kRoomId + 5] = uint8_t(1 + roll() % 4);   // a count that could be one
-        if (proto::Read(noise, r2)) ok = ok && r2.people.size() >= 1 && r2.people.size() <= size_t(proto::kPeople) && r2.person(r2.owner);
+        if (proto::Read(noise, r2)) ok = ok && r2.people.size() >= 1 && r2.people.size() <= size_t(proto::kPeople) && r2.person(r2.owner) && r2.panels.size() <= proto::kMostPanels;
         if (proto::Read(noise, w2)) ok = ok && w2.room.person(w2.you);
         if (proto::Read(noise, h2) && h2.version == proto::kVersion) ok = ok && wire::IsText(h2.name) && h2.name.size() <= proto::kMostName;
         proto::Read(noise, f2), proto::Read(noise, a2);
     }
     check("noise is refused or read as something within every bound", ok);
+}
+
+static void panels() {
+    const proto::Room r = room3();
+    proto::Room r2;
+    proto::Panel p = r.panels[1], p2;
+    bool ok = proto::Read(body(proto::Pack(p)), p2) && same(p, p2) && p2.owner() == 3 && p2.number() == 1;
+    double norm = 0;
+    for (float v : p2.turn) norm += double(v) * v;
+    check("a panel comes back as it went, its turn a unit one again", ok && std::fabs(norm - 1) < 1e-6);
+    p.name = std::string(60, 'n') + "\n";
+    check("its name is cleaned and cut on the way out", proto::Read(body(proto::Pack(p)), p2) && p2.name == std::string(proto::kMostPanelName, 'n'));
+
+    const auto refused = [&](const char *what, void (*spoil)(proto::Panel &)) {
+        proto::Panel bad = room3().panels[0];
+        spoil(bad);
+        proto::Room in = room3();
+        in.panels[0] = bad;
+        check(what, !proto::Read(body(proto::Pack(bad)), p2) && !proto::Read(body(proto::Pack(in)), r2));
+    };
+    refused("a panel of a place there isn't is refused, alone and in a room", [](proto::Panel &x) { x.id = 32; });
+    refused("...one too small to be a stream", [](proto::Panel &x) { x.width = 64; });
+    refused("...or too large", [](proto::Panel &x) { x.height = 4098; });
+    refused("...or with an odd side", [](proto::Panel &x) { x.width = 1281; });
+    refused("...a mile away", [](proto::Panel &x) { x.at[2] = -1609; });
+    refused("...or nowhere", [](proto::Panel &x) { x.at[0] = std::numeric_limits<float>::quiet_NaN(); });
+    refused("...with a turn that isn't one", [](proto::Panel &x) { x.turn[0] = x.turn[2] = 0; });
+    refused("...the size of a stamp", [](proto::Panel &x) { x.metres = 0.01f; });
+    refused("...or of a house", [](proto::Panel &x) { x.metres = 50; });
+    refused("...rolled up tighter than a panel bends", [](proto::Panel &x) { x.curve = 0.1f; });
+    refused("...or with no size at all", [](proto::Panel &x) { x.metres = std::numeric_limits<float>::quiet_NaN(); });
+    std::vector<uint8_t> raw = body(proto::Pack(r.panels[0]));
+    raw[raw.size() - 3] = 0x1b;   // in its name
+    check("...or with a name that isn't text", !proto::Read(raw, p2));
+
+    const auto room = [&](const char *what, void (*spoil)(proto::Room &)) {
+        proto::Room bad = room3();
+        spoil(bad);
+        check(what, !proto::Read(body(proto::Pack(bad)), r2));
+    };
+    room("a room with a panel of someone who isn't in it is refused", [](proto::Room &x) { x.panels[1].id = proto::PanelId(2, 0); });
+    room("...with the same panel twice", [](proto::Room &x) { x.panels[1] = x.panels[0]; });
+    room("...with its panels out of order", [](proto::Room &x) { std::swap(x.panels[0], x.panels[1]); });
+    room("...with more panels than a room holds", [](proto::Room &x) {
+        const proto::Panel one = x.panels[0];
+        x.panels.clear();
+        for (int id = 0; id < 17; ++id) x.panels.push_back(one), x.panels.back().id = uint8_t(id < 16 ? id : 24);
+    });
+
+    // the fullest room there can be is a message
+    proto::Room full = room3();
+    full.people.resize(4, full.people[0]);
+    for (int i = 0; i < 4; ++i) {
+        proto::Person &who = full.people[size_t(i)];
+        who.id = uint8_t(i), who.name = std::string(proto::kMostName, 'n'), who.login = std::string(proto::kMostLogin, 'l'), who.address = std::string(proto::kMostAddress, '1');
+    }
+    full.panels.clear();
+    for (size_t i = 0; i < proto::kMostPanels; ++i) {
+        full.panels.push_back(r.panels[0]);
+        full.panels.back().id = uint8_t(i * 2), full.panels.back().name = std::string(proto::kMostPanelName, 'p');
+    }
+    const std::vector<uint8_t> big = body(proto::Pack(full));
+    check("a full room with every panel it may hold fits a message", big.size() <= proto::kMostMessage && proto::Read(big, r2) && same(full, r2));
+
+    proto::Unpanel u, u2;
+    u.panel = 25;
+    ok = proto::Read(body(proto::Pack(u)), u2) && u2.panel == 25;
+    u.panel = 32;
+    check("a panel taken back comes back, and one of no place is refused", ok && !proto::Read(body(proto::Pack(u)), u2));
+    proto::Watch w, w2;
+    w.panel = 9, w.level = proto::kFocused, w.fresh = true;
+    ok = proto::Read(body(proto::Pack(w)), w2) && w2.panel == 9 && w2.level == proto::kFocused && w2.fresh;
+    std::vector<uint8_t> b = body(proto::Pack(w));
+    b[1] = 3;
+    ok = ok && !proto::Read(b, w2);
+    b[1] = 1, b[2] = 2;
+    ok = ok && !proto::Read(b, w2);
+    b[2] = 0, b[0] = 32;
+    check("what a viewer has of a panel comes back; a level, a flag or a panel there isn't is refused", ok && !proto::Read(b, w2));
+
+    const std::vector<uint8_t> whole[3] = {body(proto::Pack(r.panels[0])), body(proto::Pack(proto::Unpanel{})), body(proto::Pack(proto::Watch{}))};
+    ok = true;
+    for (int which = 0; which < 3; ++which) {
+        const auto reads = [&](const std::vector<uint8_t> &m) { return which == 0 ? proto::Read(m, p2) : which == 1 ? proto::Read(m, u2) : proto::Read(m, w2); };
+        ok = ok && reads(whole[which]);
+        for (size_t n = 0; n < whole[which].size(); ++n) ok = ok && !reads(std::vector<uint8_t>(whole[which].begin(), whole[which].begin() + long(n)));
+        std::vector<uint8_t> more = whole[which];
+        more.push_back(0);
+        ok = ok && !reads(more);
+    }
+    check("each cut short anywhere, or with more after it, is refused", ok);
+
+    ok = true;
+    size_t read = 0;
+    for (int i = 0; i < 200000; ++i) {
+        std::vector<uint8_t> noise = i % 2 ? whole[0] : std::vector<uint8_t>(30 + roll() % 60);
+        for (uint32_t k = i % 2 ? 1 + roll() % 3 : uint32_t(noise.size()); k > 0; --k) noise[roll() % noise.size()] = uint8_t(roll());
+        if (!proto::Read(noise, p2)) continue;
+        ++read;
+        ok = ok && proto::Fits(p2, proto::kPeople) && p2.name.size() <= proto::kMostPanelName && wire::IsText(p2.name);
+    }
+    check("noise and damaged panels are refused or read as a panel within every bound", ok && read > 0);
 }
 
 static void parser() {
@@ -270,6 +391,7 @@ static void poses() {
 int main() {
     texts();
     messages();
+    panels();
     parser();
     poses();
     std::printf("%s\n", failed ? "FAILED" : "all ok");

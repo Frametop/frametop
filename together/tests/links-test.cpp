@@ -1,17 +1,22 @@
 // The links for real (together/net/quiclinks.h): two or three ends in this one program, on
 // loopback. What a link promises the session: Up with the far end's address, the control
 // stream's bytes in order, a close that lets what was sent arrive and then says nothing more,
-// datagrams, and limits on what a far end can make this end hold.
+// datagrams, a picture whole on a stream of its own or given up in time, and limits on what a
+// far end can make this end hold.
 #include "../net/quiclinks.h"
 #include "../net/tailnet.h"
+#include "../proto/framewire.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <functional>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 static int failed = 0;
@@ -63,6 +68,7 @@ struct End {
     // Whether `want` comes true in time, taking what the links tell meanwhile.
     bool Until(const std::function<bool()> &want, double seconds = 5) {
         for (const double until = Now() + seconds;;) {
+            links->Tick();
             Take();
             if (want()) return true;
             if (Now() >= until) return false;
@@ -81,6 +87,20 @@ struct End {
             if (seen[i].kind == net::Event::kUp) return seen[i].link;
         return -1;
     }
+    // The pictures that came on a link, as they came.
+    std::vector<std::vector<uint8_t>> Frames(int link) const {
+        std::vector<std::vector<uint8_t>> out;
+        for (const net::Event &e : seen)
+            if (e.kind == net::Event::kFrame && e.link == link) out.push_back(e.bytes);
+        return out;
+    }
+    // The tags of the pictures a link gave up, in the order it told of them.
+    std::vector<uint32_t> Lost(int link) const {
+        std::vector<uint32_t> out;
+        for (const net::Event &e : seen)
+            if (e.kind == net::Event::kFrameLost && e.link == link) out.push_back(e.tag);
+        return out;
+    }
     std::vector<uint8_t> Bytes(int link) const {
         std::vector<uint8_t> out;
         for (const net::Event &e : seen)
@@ -89,10 +109,11 @@ struct End {
     }
 };
 
-// A link from `a` to `b`, up at both ends: a's number for it and b's.
-static bool Link(End &a, End &b, int &atA, int &atB) {
+// A link from `a` to `b`, up at both ends: a's number for it and b's. `via` is another port to
+// call, whose packets reach b.
+static bool Link(End &a, End &b, int &atA, int &atB, uint16_t via = 0) {
     const int ups = b.Count(net::Event::kUp);
-    atA = a.links->Call("127.0.0.1", b.port);
+    atA = a.links->Call("127.0.0.1", via ? via : b.port);
     if (atA < 0 || !a.Until([&] { return a.Count(net::Event::kUp, atA) == 1; }) || !b.Until([&] { return b.Count(net::Event::kUp) == ups + 1; })) return false;
     atB = b.Newest();
     return true;
@@ -233,6 +254,169 @@ static void limits() {
     }
 }
 
+// The network between a caller and the end at port `to`, which can stop carrying anything.
+struct Wire {
+    int fd = -1;
+    uint16_t port = 0, to = 0;
+    std::atomic<bool> dead{false}, stop{false};
+    std::thread thread;
+
+    explicit Wire(uint16_t toPort) : to(toPort) {
+        fd = socket(AF_INET, SOCK_DGRAM, 0);
+        sockaddr_in a = {};
+        a.sin_family = AF_INET, a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        socklen_t len = sizeof a;
+        bind(fd, reinterpret_cast<sockaddr *>(&a), sizeof a);
+        getsockname(fd, reinterpret_cast<sockaddr *>(&a), &len);
+        port = ntohs(a.sin_port);
+        const int room = 4 << 20;
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &room, sizeof room), setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &room, sizeof room);
+        const timeval wait = {0, 20000};
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof wait);
+        thread = std::thread([this] { Carry(); });
+    }
+    ~Wire() {
+        stop = true;
+        thread.join();
+        close(fd);
+    }
+    void Carry() {
+        sockaddr_in caller = {}, callee = {};
+        callee.sin_family = AF_INET, callee.sin_addr.s_addr = htonl(INADDR_LOOPBACK), callee.sin_port = htons(to);
+        bool known = false;
+        std::vector<uint8_t> packet(65536);
+        while (!stop) {
+            sockaddr_in from = {};
+            socklen_t len = sizeof from;
+            const ssize_t n = recvfrom(fd, packet.data(), packet.size(), 0, reinterpret_cast<sockaddr *>(&from), &len);
+            if (n <= 0 || dead) continue;
+            if (ntohs(from.sin_port) == to) {
+                if (known) sendto(fd, packet.data(), size_t(n), 0, reinterpret_cast<sockaddr *>(&caller), sizeof caller);
+            } else {
+                caller = from, known = true;
+                sendto(fd, packet.data(), size_t(n), 0, reinterpret_cast<sockaddr *>(&callee), sizeof callee);
+            }
+        }
+    }
+};
+
+// One picture sent until it arrives: on a slow machine one may be given up, as it should be.
+static bool Arrives(End &from, int link, End &to, int farLink, const std::vector<uint8_t> &picture) {
+    for (int tries = 0; tries < 20; ++tries) {
+        const size_t had = to.Frames(farLink).size(), lost = from.Lost(link).size();
+        if (!from.links->Frame(link, picture, 1)) return false;
+        from.Until([&] { return to.Take(), to.Frames(farLink).size() > had || from.Lost(link).size() > lost; }, 10);
+        if (to.Frames(farLink).size() > had) return to.Frames(farLink).back() == picture;
+    }
+    return false;
+}
+
+static void pictures() {
+    const size_t most = proto::kFrameHead + proto::kMostFrame;
+    {
+        End a, b;
+        int la = -1, lb = -1;
+        bool ok = Link(a, b, la, lb);
+        ok = ok && Arrives(a, la, b, lb, Noise(40000)) && Arrives(b, lb, a, la, Noise(900)) && a.Until([&] { return !a.links->Sending() && !b.links->Sending(); });
+        check("a picture arrives whole on a stream of its own, either way", ok && b.Frames(lb).size() >= 1 && a.Frames(la).size() >= 1);
+        check("...the longest one a panel may send too", Arrives(a, la, b, lb, Noise(most)));
+        ok = !a.links->Frame(la, Noise(most + 1), 1) && !a.links->Frame(la, {}, 1) && !a.links->Frame(la + 1000, Noise(10), 1) && !a.links->Frame(-1, Noise(10), 1);
+        check("...and one too long, an empty one, or one for no link isn't sent", ok && !a.links->Sending());
+
+        // many at once: each arrives or is told lost, none twice, none silently
+        const size_t had = b.Frames(lb).size(), lost = a.Lost(la).size();
+        std::vector<std::vector<uint8_t>> sent;
+        size_t refused = 0;
+        for (int i = 0; i < 80; ++i) {
+            std::vector<uint8_t> picture = Noise(2000 + roll() % 20000);
+            picture[0] = uint8_t(i);
+            if (a.links->Frame(la, picture, uint32_t(i))) sent.push_back(picture);
+            else ++refused;
+        }
+        ok = a.Until([&] { return b.Take(), b.Frames(lb).size() - had + (a.Lost(la).size() - lost) >= sent.size() && !a.links->Sending(); }, 20);
+        usleep(200000), a.Take(), b.Take();
+        const std::vector<std::vector<uint8_t>> got = b.Frames(lb);
+        const std::vector<uint32_t> gone = a.Lost(la);
+        bool whole = true;
+        for (size_t i = had; i < got.size(); ++i) {
+            size_t matches = 0;
+            for (const std::vector<uint8_t> &picture : sent) matches += picture == got[i];
+            whole = whole && matches == 1;
+            for (size_t k = lost; k < gone.size(); ++k) whole = whole && gone[k] != got[i][0];   // not both
+        }
+        std::printf("    of 80 at once: %zu taken, %zu arrived, %zu given up\n", sent.size(), got.size() - had, gone.size() - lost);
+        ok = ok && whole && sent.size() + refused == 80 && sent.size() >= 64 && got.size() - had + (gone.size() - lost) == sent.size() && got.size() > had;
+        check("a burst of pictures: each one taken arrives whole or is told lost, never both", ok);
+        const std::vector<uint8_t> word = Noise(3000);
+        a.links->Send(la, word);
+        check("...with the control stream going on beside them", b.Until([&] { return b.Bytes(lb) == word; }) && a.Count(net::Event::kDown) == 0 && b.Count(net::Event::kDown) == 0);
+
+        // a far end that doesn't take what comes: it holds so much and no more, and the link stays
+        for (int i = 0; i < 8; ++i) {
+            a.links->Frame(la, Noise(most), 100);
+            a.Until([&] { return !a.links->Sending(); }, 10);
+        }
+        usleep(300000);
+        const size_t before = b.Frames(lb).size();
+        b.Take();
+        const size_t held = b.Frames(lb).size() - before;
+        std::printf("    of 8 MB untaken: %zu MB held\n", held);
+        ok = held >= 1 && held <= 4 && b.Count(net::Event::kDown) == 0 && Arrives(a, la, b, lb, Noise(5000));
+        check("pictures that pile up untaken are dropped past a few, and the link goes on", ok);
+
+        // closing with pictures on their way
+        const size_t told = a.seen.size();
+        a.links->Frame(la, Noise(most), 5), a.links->Frame(la, Noise(most), 6);
+        a.links->Close(la);
+        ok = !a.links->Frame(la, Noise(10), 7) && b.Until([&] { return b.Count(net::Event::kDown, lb) == 1; }, 10) && a.Until([&] { return a.links->Quiet() && !a.links->Sending(); }, 10);
+        bool silent = true;
+        for (size_t i = told; i < a.seen.size(); ++i) silent = silent && a.seen[i].link != la;
+        check("a link closed with pictures on their way goes down, and its closer hears nothing more of them", ok && silent);
+    }
+    {
+        // the network stops carrying: what was sent is given up in time, and told
+        End a, b;
+        Wire wire(b.port);
+        int la = -1, lb = -1;
+        bool ok = Link(a, b, la, lb, wire.port) && Arrives(a, la, b, lb, Noise(30000));
+        const size_t had = b.Frames(lb).size(), lost = a.Lost(la).size();
+        wire.dead = true;
+        const double from = Now();
+        for (uint32_t tag = 11; tag <= 13; ++tag) ok = ok && a.links->Frame(la, Noise(30000), tag);
+        ok = ok && a.links->Sending() && a.Until([&] { return a.Lost(la).size() == lost + 3; }, 5);
+        const double took = Now() - from;
+        std::vector<uint32_t> gone = a.Lost(la);
+        gone.erase(gone.begin(), gone.begin() + long(lost));
+        std::sort(gone.begin(), gone.end());
+        std::printf("    given up after %.0f ms\n", took * 1000);
+        check("pictures the network doesn't carry are given up a moment later, each told with its tag", ok && gone == std::vector<uint32_t>{11, 12, 13} && took > 0.1 && took < 1.5 && !a.links->Sending());
+        // their streams wait for the far end's word that it knows: with those, a link has so many on their way
+        size_t taken = 0;
+        for (uint32_t i = 0; i < 80; ++i) taken += a.links->Frame(la, Noise(3000), 100 + i);
+        ok = taken == 61 && a.Until([&] { return a.Lost(la).size() == lost + 3 + taken; }, 5) && !a.links->Sending();
+        check("...and a link holds so many on their way and no more: the rest aren't sent", ok);
+        wire.dead = false;
+        const std::vector<uint8_t> word = Noise(500);
+        a.links->Send(la, word);
+        ok = b.Until([&] { return b.Bytes(lb) == word; }, 8) && b.Frames(lb).size() == had && a.Count(net::Event::kDown) == 0;
+        check("...they never arrive, late or in part, and the link is still a link", ok);
+        check("...which carries the next picture whole", Arrives(a, la, b, lb, Noise(30000)));
+    }
+    {
+        // an end taken down with pictures on their way, in and out
+        End b;
+        int la = -1, lb = -1;
+        bool ok = false;
+        {
+            End a;
+            ok = Link(a, b, la, lb);
+            for (int i = 0; i < 6; ++i) a.links->Frame(la, Noise(most), 1), b.links->Frame(lb, Noise(200000), 2);
+            a.links.reset();
+        }
+        check("an end taken down with pictures on their way lets go of them", ok && b.Until([&] { return b.Count(net::Event::kDown, lb) == 1 && !b.links->Sending(); }, 6) && b.links->Quiet());
+    }
+}
+
 static void ending() {
     End b;
     int la = -1, lb = -1;
@@ -256,6 +440,7 @@ int main() {
     talking();
     refusing();
     limits();
+    pictures();
     ending();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;

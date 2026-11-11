@@ -1,0 +1,41 @@
+#!/usr/bin/python3
+"""ft-room: a question to this Frame's ft-together from a terminal (session/commands.h has
+the questions).
+
+  ft-room open                    opens a room, with you its owner
+  ft-room invite                  a one-time code for it
+  ft-room join HOST PORT CODE     calls a room's owner
+  ft-room accept N | decline N    someone who asks to come in (state's "asks")
+  ft-room state                   the room as JSON
+  ft-room leave
+
+  --socket NAME   another ft-together's local socket (ft_together)
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+
+
+def main():
+    words = sys.argv[1:]
+    sock = "ft_together"
+    if len(words) >= 2 and words[0] == "--socket":
+        sock, words = words[1], words[2:]
+    if not words or words[0] in ("-h", "--help"):
+        sys.exit(__doc__.strip())
+    reply, why = ftipc.exchange(sock, " ".join(words), 2.0)
+    if reply is None:
+        sys.exit("ft-together isn't running" if why == ftipc.NOBODY else f"no answer from ft-together ({why})")
+    if reply.startswith("ok {"):
+        print(json.dumps(json.loads(reply[3:]), indent=1))
+    else:
+        print(reply)
+    sys.exit(0 if reply.startswith("ok") else 1)
+
+
+if __name__ == "__main__":
+    main()

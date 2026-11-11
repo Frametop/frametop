@@ -1,13 +1,17 @@
 // What ft-together does for this Frame's own programs (together/local): which poses it passes
-// on, the count it sends its own with, who watches, and where the floor lies in the room.
+// on, the count it sends its own with, who watches, where the floor lies in the room, and the
+// messages on the media programs' socket.
 #include "../../conf/ftsock.h"
 #include "../local/floor.h"
+#include "../local/mediawire.h"
 #include "../local/posegate.h"
 #include "../local/watchers.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <unistd.h>
+#include <utility>
 
 static int failed = 0;
 static void check(const char *what, bool ok) {
@@ -144,11 +148,71 @@ static void floor() {
     check("asking outside a room lifts it too", f.Ask("floor", false).rfind("error", 0) == 0 && f.Ask("floor", true) == "ok none");
 }
 
+static void mediawire() {
+    using Message = std::pair<uint8_t, std::vector<uint8_t>>;
+    std::vector<uint8_t> bytes;
+    const std::vector<uint8_t> unit(3000, 0x5a);
+    local::PutMedia(bytes, local::kMediaSource, 2);
+    local::PutMediaUnit(bytes, true, unit.data(), unit.size());
+    local::PutMediaRate(bytes, 1400000);
+    local::PutMedia(bytes, local::kMediaKey);
+    local::PutMedia(bytes, local::kMediaAttention, 2, 1);
+    uint8_t kind = 0;
+    std::vector<uint8_t> body;
+    bool ok = true;
+    for (size_t piece : {bytes.size(), size_t(1), size_t(7), size_t(1000)}) {
+        local::MediaReader r;
+        std::vector<Message> got;
+        for (size_t at = 0; at < bytes.size(); at += piece) {
+            ok = ok && r.Feed(bytes.data() + at, std::min(piece, bytes.size() - at));
+            while (r.Next(kind, body)) got.push_back({kind, body});
+        }
+        ok = ok && got.size() == 5 && got[0] == Message{'S', {2}} && got[1].first == 'U' && got[1].second.size() == unit.size() + 1 && got[1].second[0] == 1 &&
+             std::equal(unit.begin(), unit.end(), got[1].second.begin() + 1) && got[2].first == 'R' && got[2].second.size() == 4 &&
+             local::MediaU32(got[2].second.data()) == 1400000 && got[3] == Message{'K', {}} && got[4] == Message{'A', {2, 1}} && r.held() == 0 && !r.broken();
+    }
+    check("the media socket's messages come out whole, however the socket cuts them up", ok);
+
+    const uint8_t none[4] = {0, 0, 0, 0};
+    local::MediaReader r;
+    check("a message of no length breaks the reader for good", !r.Feed(none, 4) && r.broken() && !r.Feed(bytes.data(), bytes.size()) && !r.Next(kind, body) && r.held() == 0);
+    const std::vector<uint8_t> longest(local::kMostMediaUnit, 1);
+    std::vector<uint8_t> big;
+    local::PutMediaUnit(big, false, longest.data(), longest.size());
+    local::MediaReader r2;
+    check("the longest picture there may be passes", r2.Feed(big.data(), big.size()) && r2.Next(kind, body) && kind == 'U' && body.size() == longest.size() + 1 && !r2.broken());
+    const uint32_t over = uint32_t(local::kMostMedia + 1);
+    const uint8_t head[4] = {uint8_t(over), uint8_t(over >> 8), uint8_t(over >> 16), uint8_t(over >> 24)};
+    check("...and one a byte longer is refused before any of it is held", !r2.Feed(head, 4) && r2.broken() && r2.held() == 0);
+    std::vector<uint8_t> two;
+    local::PutMedia(two, local::kMediaKey);
+    two.insert(two.end(), none, none + 4);
+    local::MediaReader r3;
+    check("what came whole before the rubbish still comes out", r3.Feed(two.data(), two.size()) && r3.Next(kind, body) && kind == 'K' && r3.broken() && !r3.Next(kind, body));
+
+    uint64_t seed = 7;
+    const auto roll = [&seed] { return seed = seed * 6364136223846793005ull + 1442695040888963407ull, seed >> 33; };
+    ok = true;
+    for (int round = 0; round < 300 && ok; ++round) {
+        local::MediaReader noisy(4096);
+        for (int i = 0; i < 200 && ok; ++i) {
+            uint8_t chunk[64];
+            const size_t n = 1 + roll() % sizeof chunk;
+            for (size_t k = 0; k < n; ++k) chunk[k] = roll() % 4 ? 0 : uint8_t(roll());   // mostly short lengths, so messages do come
+            noisy.Feed(chunk, n);
+            while (noisy.Next(kind, body)) ok = ok && body.size() < 4096;
+            ok = ok && noisy.held() <= 4096 + 4 + sizeof chunk;
+        }
+    }
+    check("noise never makes it hold more than a message", ok);
+}
+
 int main() {
     gate();
     count();
     watchers();
     floor();
+    mediawire();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;
 }

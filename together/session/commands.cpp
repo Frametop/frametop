@@ -35,6 +35,22 @@ std::string Quoted(const std::string &s) {
 
 std::string Said(const std::string &whyNot) { return whyNot.empty() ? "ok" : "error " + whyNot; }
 
+// share K W H X Y Z QW QX QY QZ METRES CURVE [NAME...], after its verb. The session checks
+// what the numbers say (proto::Fits); here they only have to be numbers.
+bool Panel(const std::vector<std::string> &w, int &number, proto::Panel &panel) {
+    double v[12];
+    if (w.size() < 13) return false;
+    for (int i = 0; i < 12; ++i)
+        if (!Number(w[size_t(i) + 1], -1e6, 1e6, v[i])) return false;
+    if (v[0] != std::floor(v[0]) || v[1] != std::floor(v[1]) || v[2] != std::floor(v[2]) || v[1] < 0 || v[1] > 65535 || v[2] < 0 || v[2] > 65535) return false;
+    number = int(v[0]), panel.width = uint16_t(v[1]), panel.height = uint16_t(v[2]);
+    for (int i = 0; i < 3; ++i) panel.at[i] = float(v[3 + i]);
+    for (int i = 0; i < 4; ++i) panel.turn[i] = float(v[6 + i]);
+    panel.metres = float(v[10]), panel.curve = float(v[11]);
+    for (size_t i = 13; i < w.size(); ++i) panel.name += (i > 13 ? " " : "") + w[i];
+    return true;
+}
+
 }  // namespace
 
 std::string Command(Session &session, const std::string &text, double now) {
@@ -66,7 +82,18 @@ std::string Command(Session &session, const std::string &text, double now) {
     if (verb == "away" && w.size() == 2 && (w[1] == "game" || w[1] == "off" || w[1] == "back"))
         return Said(session.SetAway(w[1] == "game" ? proto::kAwayGame : w[1] == "off" ? proto::kAwayOff : 0));
     if (verb == "leave" && w.size() == 1) return Said(session.Leave());
-    return "error state|open [X Z YAW]|invite|join HOST PORT CODE|accept N|decline N|away game|off|back|leave";
+    if (verb == "share") {
+        int number = 0;
+        proto::Panel panel;
+        if (!Panel(w, number, panel)) return "error share K W H X Y Z QW QX QY QZ METRES CURVE [NAME]";
+        return Said(session.Share(number, panel));
+    }
+    if (verb == "unshare" && w.size() == 2) {
+        double number = 0;
+        if (!Number(w[1], 0, 255, number) || number != std::floor(number)) return "error unshare K";
+        return Said(session.Unshare(int(number)));
+    }
+    return "error state|open [X Z YAW]|invite|join HOST PORT CODE|accept N|decline N|away game|off|back|leave|share ...|unshare K";
 }
 
 std::string State(const Session &session) {
@@ -78,6 +105,13 @@ std::string State(const Session &session) {
         const proto::Person &p = room.people[i];
         out << (i ? "," : "") << "{\"id\":" << int(p.id) << ",\"name\":" << Quoted(p.name) << ",\"login\":" << Quoted(p.login) << ",\"away\":" << int(p.away)
             << ",\"linked\":" << (session.Linked(p.id) ? "true" : "false") << ",\"spot\":[" << p.spot.at[0] << "," << p.spot.at[1] << "," << p.spot.at[2] << "," << p.spot.yaw << "]}";
+    }
+    out << "],\"panels\":[";
+    for (size_t i = 0; i < room.panels.size(); ++i) {
+        const proto::Panel &p = room.panels[i];
+        out << (i ? "," : "") << "{\"id\":" << int(p.id) << ",\"owner\":" << p.owner() << ",\"number\":" << p.number() << ",\"name\":" << Quoted(p.name) << ",\"size\":[" << p.width << ","
+            << p.height << "],\"at\":[" << p.at[0] << "," << p.at[1] << "," << p.at[2] << "],\"turn\":[" << p.turn[0] << "," << p.turn[1] << "," << p.turn[2] << "," << p.turn[3]
+            << "],\"metres\":" << p.metres << ",\"curve\":" << p.curve << "}";
     }
     out << "],\"asks\":[";
     const std::vector<Ask> asks = session.asks();

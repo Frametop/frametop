@@ -1,7 +1,8 @@
 // A Frametop Together session, its rules (docs/together.md): opening a room, inviting, asking
-// to come in and being let in or not, who is in the room, and the links between its people.
-// The owner's copy of the room is the room; a guest holds the last one the owner sent, and
-// links up with the other guests it lists (the one with the lower address calls).
+// to come in and being let in or not, who is in the room, the panels they share, and the links
+// between its people. The owner's copy of the room is the room; a guest holds the last one the
+// owner sent, and links up with the other guests it lists (the one with the lower address
+// calls). A guest's panel is in the room once the owner has put it there on the guest's word.
 //
 // Everything a link brings is untrusted input, also after its sender was let in: the messages
 // are bounded by their readers (proto/messages.h), and here every message is checked against
@@ -9,10 +10,12 @@
 //
 // The rules only. The network, the tailnet, the clock and the dice are handed in, so two of
 // these can be run against each other in a test, and ft-together and the fake peer are the same
-// code on different links. commands.h puts it behind a line of text.
+// code on different links. commands.h puts it behind a line of text. session.cpp has what the
+// links bring, wearer.cpp what this Frame's wearer does.
 #pragma once
 
 #include "../proto/messages.h"
+#include "../room/allowance.h"
 #include "../room/invites.h"
 
 #include <cstdint>
@@ -53,6 +56,8 @@ struct Config {
     std::string name;              // what the others call this person
     uint16_t port = 0;             // where this end listens
     std::function<uint64_t()> dice;
+    // Someone in the room says what they have of a panel of ours (flow/video.h sends by it).
+    std::function<void(int link, const proto::Watch &watch, double now)> watched;
 };
 
 enum class Mode { kIdle, kHosting, kCalling, kJoined };
@@ -69,6 +74,8 @@ public:
     static constexpr double kAskWaitS = 120;    // ...and the owner this long to answer an ask
     static constexpr double kMeshRetryS = 3;    // between calls to a guest that didn't answer
     static constexpr size_t kMostStrangers = 8; // links that haven't said who they are, at once
+    // What one link may say about panels (shared, moved, taken back, watched): a second, at once.
+    static constexpr double kPanelWordsASecond = 40, kPanelWordsAtOnce = 40;
 
     Session(Links &links, Tailnet &tailnet, Config config);
 
@@ -87,6 +94,13 @@ public:
     std::string Answer(int ask, bool accept);                // one of asks()
     std::string SetAway(uint8_t away);                       // proto::kAwayGame, kAwayOff, or 0 for back
     std::string Leave();                                     // its owner leaving ends the room for everyone
+    // Shares the wearer's panel `number` (0 to room::kFramePanels - 1) with the room, or says
+    // where and how large it is now. The panel's id is set here; a guest's is in room() once
+    // the owner has taken it.
+    std::string Share(int number, proto::Panel panel);
+    std::string Unshare(int number);
+    // Tells a panel's owner what the wearer has of it.
+    std::string Watch(const proto::Watch &watch);
 
     Mode mode() const { return mode_; }
     int me() const { return me_; }
@@ -113,6 +127,7 @@ private:
         Who who;
         int person = -1;        // kMember, kCalledPeer
         int ask = 0;            // kAsking
+        room::Allowance panelWords{kPanelWordsASecond, kPanelWordsAtOnce};
     };
 
     void Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, double now);
@@ -138,6 +153,7 @@ private:
     room::Invites invites_;
     std::map<int, Link> link_;
     std::string code_, note_;   // the invite a call carries; the last thing worth telling
+    std::map<uint8_t, proto::Panel> asked_;   // a guest's panels, as the owner was last told of them
     int nextAsk_ = 0;
     double meshTried_[proto::kPeople] = {};
 };

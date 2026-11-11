@@ -1,5 +1,8 @@
-// A room's own rules (together/room): its invites and where its people stand.
+// A room's own rules (together/room): its invites, where its people stand, the panels they
+// share, and how often someone may say a thing.
+#include "../room/allowance.h"
 #include "../room/invites.h"
+#include "../room/panels.h"
 #include "../room/seats.h"
 
 #include <cctype>
@@ -98,9 +101,55 @@ static void seats() {
     check("the lowest free place is the next one's, and a full room has none", ok && room::FreeId(r) == -1);
 }
 
+static proto::Panel panel(int owner, int number, float x = 0) {
+    proto::Panel p;
+    p.id = proto::PanelId(owner, number), p.width = 1920, p.height = 1080, p.at[0] = x;
+    return p;
+}
+
+static void panels() {
+    using room::Shared;
+    proto::Room r;
+    for (int id : {0, 2}) {
+        proto::Person p;
+        p.id = uint8_t(id);
+        r.people.push_back(p);
+    }
+    bool ok = room::SetPanel(r, 2, panel(2, 1)) == Shared::kChanged && room::SetPanel(r, 0, panel(0, 2)) == Shared::kChanged && room::SetPanel(r, 0, panel(0, 0)) == Shared::kChanged;
+    ok = ok && r.panels.size() == 3 && r.panels[0].id == 0 && r.panels[1].id == 2 && r.panels[2].id == 17;
+    check("people share their panels, and the room keeps them in the order of their ids", ok);
+    ok = room::SetPanel(r, 0, panel(0, 2)) == Shared::kSame && room::SetPanel(r, 0, panel(0, 2, 0.5f)) == Shared::kChanged && r.panels.size() == 3 && r.panel(2)->at[0] == 0.5f;
+    check("a panel said again is the same one, moved if it says so", ok);
+    ok = room::SetPanel(r, 0, panel(2, 0)) == Shared::kNo && room::SetPanel(r, 2, panel(0, 0, 9)) == Shared::kNo && r.panel(0)->at[0] == 0;
+    check("nobody shares a panel as someone else's, or moves one that is", ok && r.panels.size() == 3);
+    check("someone who isn't in the room shares nothing", room::SetPanel(r, 1, panel(1, 0)) == Shared::kNo && room::SetPanel(r, 7, panel(7, 0)) == Shared::kNo);
+    check("a headset shares three panels, and no fourth", room::SetPanel(r, 2, panel(2, room::kFramePanels)) == Shared::kNo && room::SetPanel(r, 2, panel(2, 7)) == Shared::kNo);
+    ok = !room::DropPanel(r, 0, 17) && !room::DropPanel(r, 2, 0) && !room::DropPanel(r, 2, 18) && r.panels.size() == 3;
+    check("only its owner takes a panel back", ok && room::DropPanel(r, 2, 17) && r.panels.size() == 2 && !r.panel(17));
+    room::SetPanel(r, 2, panel(2, 0));
+    ok = room::DropPanelsOf(r, 0) && r.panels.size() == 1 && r.panels[0].id == 16 && !room::DropPanelsOf(r, 0);
+    check("someone's panels go with them, and nobody else's", ok);
+}
+
+static void allowance() {
+    room::Allowance a(10, 5);
+    int spent = 0;
+    for (int i = 0; i < 100; ++i) spent += a.Spend(0);
+    check("so many at once, and no more", spent == 5 && !a.Spend(0.05));
+    spent = 0;
+    for (int i = 1; i <= 1000; ++i) spent += a.Spend(0.001 * i);
+    check("so many a second, however fast they come", spent >= 9 && spent <= 11);
+    spent = 0;
+    for (int i = 0; i < 100; ++i) spent += a.Spend(60);
+    check("a quiet minute saves up only what may come at once", spent == 5);
+    check("a clock that steps back gives nothing away", !a.Spend(-1000) && !a.Spend(-999.95));
+}
+
 int main() {
     invites();
     seats();
+    panels();
+    allowance();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;
 }

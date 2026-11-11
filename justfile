@@ -118,8 +118,14 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/room-test.cpp -o build/tests/together-room-test
     run together/tests/room-test.cpp build/tests/together-room-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/session-test.cpp together/session/session.cpp \
-      together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-session-test
+      together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-session-test
     run together/tests/session-test.cpp build/tests/together-session-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/flow-test.cpp -o build/tests/together-flow-test
+    run together/tests/flow-test.cpp build/tests/together-flow-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/video-test.cpp together/flow/video.cpp \
+      together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
+      -o build/tests/together-video-test
+    run together/tests/video-test.cpp build/tests/together-video-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/tailnet-test.cpp together/net/tailnet.cpp \
       together/net/lookup.cpp -o build/tests/together-tailnet-test
     run together/tests/tailnet-test.cpp build/tests/together-tailnet-test
@@ -130,11 +136,13 @@ test-c:
     if [ -f together/build/libmsquic.so.2 ]; then
         quic="-Itogether/build/msquic/src/inc together/build/libmsquic.so.2 -Wl,-rpath,$PWD/together/build $(pkg-config --libs openssl) -lpthread"
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/links-test.cpp together/net/quiclinks.cpp \
-          together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp -o build/tests/together-links-test $quic
+          together/net/quicframes.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
+          -o build/tests/together-links-test $quic
         run together/tests/links-test.cpp build/tests/together-links-test
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
-          together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp together/session/session.cpp together/session/commands.cpp \
-          together/proto/messages.cpp together/local/watchers.cpp -o build/tests/ft-together $quic
+          together/net/quicframes.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
+          together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
+          together/flow/video.cpp together/local/watchers.cpp together/local/media.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
     else
         echo "together/tests/{links-test.cpp,loopback-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"

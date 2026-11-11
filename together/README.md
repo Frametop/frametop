@@ -2,18 +2,20 @@
 
 Shared rooms: up to four people in one owner's room, each on their own Frame, over Tailscale. The design, its decisions and the milestones are in [docs/together.md](../docs/together.md). This file says what is in this folder and what goes over a link.
 
-Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, `ft-together`, which opens a room, lets people in and keeps the room's people linked, and poses: each person's head and hands go to the others, and `ft-avatars --room` ([avatar/README.md](../avatar/README.md)) draws them as abstract avatars. Panels and voice are not built yet, so people in a room see each other but not each other's screens, and don't hear each other so far.
+Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, `ft-together`, which opens a room, lets people in and keeps the room's people linked, and poses: each person's head and hands go to the others, and `ft-avatars --room` ([avatar/README.md](../avatar/README.md)) draws them as abstract avatars. Shared panels are being built: the room's list of them, the video's path through `ft-together` from the program that encodes a panel to the programs that show it, and its rules are done; the programs that encode and decode are next. Voice is not built yet.
 
 ## What is where
 
 | Folder | What it holds | Depends on |
 |---|---|---|
-| `proto/` | The bytes on a link: bounded readers and writers (`bytes.h`), the control stream's messages (`messages.h`), the pose datagram (`posewire.h`). No I/O, standard library only, so the PC sender in the Vibepollo fork can take the folder as it is | nothing |
-| `room/` | A room's own rules: invites (`invites.h`) and where people stand (`seats.h`) | `proto/` |
-| `session/` | The session: who may join, who is in the room, who links to whom, and what each link may say (`session.h`). The network, the tailnet, the clock and the dice are handed in. `commands.h` puts a session behind lines of text | `proto/`, `room/` |
-| `local/` | What ft-together does for this Frame's own programs beyond the session's commands: the poses it lets through each way (`posegate.h`), who gets the others' poses (`watchers.h`), where this Frame's floor lies in the room (`floor.h`), and the datagrams on the local socket that aren't text (`datagrams.h`) | `proto/` |
-| `net/` | The real network: the links on msquic (`quiclinks.h`), with the self-signed certificate QUIC wants (`selfcert.h`), which address a name stands for (`lookup.h`), and who is at an address by tailscaled's word (`tailnet.h`, with the small JSON reader for its answers, `json.h`) | `session/`, msquic, OpenSSL |
-| `ft-together.cpp` | The program: one loop over the links and a local socket | `session/`, `net/`, `local/` |
+| `proto/` | The bytes on a link: bounded readers and writers (`bytes.h`), the control stream's messages (`messages.h`), a shared panel as the room lists it (`panel.h`), a picture on its stream (`framewire.h`), the pose datagram (`posewire.h`). No I/O, standard library only, so the PC sender in the Vibepollo fork can take the folder as it is | nothing |
+| `room/` | A room's own rules: invites (`invites.h`), where people stand (`seats.h`), whose panels are in it (`panels.h`), and how often someone may do a thing (`allowance.h`) | `proto/` |
+| `session/` | The session: who may join, who is in the room, who links to whom, and what each link may say (`session.h`; `session.cpp` has what the links bring, `wearer.cpp` what this Frame's wearer does). The network, the tailnet, the clock and the dice are handed in. `commands.h` puts a session behind lines of text | `proto/`, `room/` |
+| `flow/` | The shared panels' video, its rules: who gets a panel's next picture (`sendgate.h`), the order a viewer decodes them in (`framegate.h`), the bitrate (`pace.h`), and the path through ft-together between the links and this Frame's media programs (`video.h`). The links and the programs are handed in | `proto/`, `room/`, `session/` |
+| `local/` | What ft-together does for this Frame's own programs beyond the session's commands: the poses it lets through each way (`posegate.h`), who gets the others' poses (`watchers.h`), where this Frame's floor lies in the room (`floor.h`), the datagrams on the local socket that aren't text (`datagrams.h`), and the media programs on their own socket (`media.h`, with what is said there in `mediawire.h`) | `proto/`, `flow/` |
+| `net/` | The real network: the links on msquic (`quiclinks.h`; `quiclinks.cpp` has the connections, the control stream and the datagrams, `quicframes.cpp` the streams that carry a picture each), with the self-signed certificate QUIC wants (`selfcert.h`), which address a name stands for (`lookup.h`), and who is at an address by tailscaled's word (`tailnet.h`, with the small JSON reader for its answers, `json.h`) | `session/`, msquic, OpenSSL |
+| `ft-together.cpp` | The program: one loop over the links and the local sockets | `session/`, `flow/`, `net/`, `local/` |
+| `ft-room` | Asks a running ft-together one question from a shell: `together/ft-room state`, `together/ft-room open`, `together/ft-room --socket NAME invite` | `conf/ftipc.py` |
 | `media/` | The iris hardware encoder (`irisenc.h`) | V4L2 |
 | `spike/` | The M0 spikes, `ft-enctest` and `ft-quictest` | `media/`, `net/` |
 | `tests/` | The tests below | |
@@ -32,13 +34,16 @@ The rest of Frametop talks to it on `@ft_together`, one datagram a question and 
 
 | Question | Answer |
 |---|---|
-| `state` | `ok` and the session as JSON: `mode` (`idle`, `hosting`, `calling`, `joined`), `note` (the last thing worth telling the wearer), `me`, `owner`, `people` (place, name, login, away, whether there is a link to them, spot), `asks` (who waits for the owner's answer: number, name, Tailscale login, address) and `codes` (invites nobody used yet) |
+| `state` | `ok` and the session as JSON: `mode` (`idle`, `hosting`, `calling`, `joined`), `note` (the last thing worth telling the wearer), `me`, `owner`, `people` (place, name, login, away, whether there is a link to them, spot), `panels` (each shared panel's id, owner, number, name, size in pixels, place and turn in the room, width in metres and curve), `asks` (who waits for the owner's answer: number, name, Tailscale login, address) and `codes` (invites nobody used yet) |
 | `open [X Z YAW]` | A room, with you its owner standing there |
 | `invite` | `ok` and a code |
 | `join HOST PORT CODE` | Calls a room's owner. `state` tells how it went |
 | `accept N`, `decline N` | An ask answered |
 | `away game`, `away off`, `away back` | Tells the room |
 | `leave` | Leaves the room. Its owner leaving ends it for everyone |
+| `share K W H X Y Z QW QX QY QZ METRES CURVE [NAME]` | Shares your panel number K (0 to 2) with the room, or says where it is now: its video's size in pixels, its middle and its turn in the room (the panel faces its own +z), its width in metres, and its curve (0 for flat, else the radius in metres). Saying the same again costs nothing |
+| `unshare K` | Takes it back |
+| `media` | `ok` and how the shared panels' video goes, as JSON: which of your panels have a program that encodes them (`sources`), which panels have a program that shows them here (`sinks`), and for each of your three panels the bitrate its encoder is asked for and how many people watch it |
 | `watch` | `ok`, and for the next five seconds every pose a person in the room sends comes to the asker (below). A program that draws the room asks again each second. At most four watch at once |
 | `floor` | Where this Frame's own floor lies in the room: `ok X Z YAW`, or `ok none` while no program has said |
 | `floor X Z YAW` | Says where it lies. The first said stands until you leave the room, and the answer is the one that stands |
@@ -53,18 +58,37 @@ Two kinds of datagram on the socket aren't text, and are told by their first byt
 Anything that can't be done is answered with `error` and why. Ending the program (SIGTERM) leaves the room first, so the others are told at once.
 
 ```
+together/ft-room state
 echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_together,bind=
 ```
+
+### The media programs' socket
+
+The programs that encode your shared panels and show other people's talk to ft-together on a second socket, `@ft_together_media` (`@NAME_media` with `--socket NAME`). It is a stream socket, one connection a program, and only your own user's programs are let in. Every message is a `u32` length (little-endian), a byte that says what it is, and its body ([local/mediawire.h](local/mediawire.h)).
+
+| Who | Message | Meaning |
+|---|---|---|
+| An encoder, first | `S`, panel number | It encodes your panel of that number |
+| An encoder | `U`, flags (1: a keyframe), the encoded picture | One picture, at most 1 MB |
+| To an encoder | `R`, bits a second | Encode at this rate from now on |
+| To an encoder | `K` | Make the next picture a keyframe |
+| To an encoder | `W`, 1 or 0 | Whether anyone watches the panel. If nobody does, nothing need be encoded |
+| A viewer's program, first | `V`, panel id | It shows that panel of someone else's |
+| A viewer's program | `A`, level (0 hidden, 1 in view, 2 focused), 1 if its decoder needs a keyframe | What the panel has of its viewer |
+| To a viewer's program | `U`, flags, the encoded picture | The next picture to decode: in order, none missing since the last keyframe |
+
+One program for each panel: a second one that names the same panel takes the first one's place. A program that says anything else, says nothing for five seconds, or leaves 4 MB waiting for it is let go, and may come again.
 
 `--loopback` is for tests: no Tailscale, the links are on 127.0.0.1 only, and everyone there is let in as `someone@loopback`. A fake peer for the live Frame is a second `ft-together` in the normal mode on another port and socket: it has this Frame's tailnet address, and the session tells people apart by address and port.
 
 ## The links
 
-One QUIC connection for every two people, with one stream for the control messages, opened by the caller, and datagrams beside it for poses and voice (at most 1187 bytes each, what a link over Tailscale carries). msquic runs threads of its own; what they see is queued, and `ft-together`'s one loop takes it out and tells the session.
+One QUIC connection for every two people, with one stream for the control messages, opened by the caller, datagrams beside it for poses and voice (at most 1187 bytes each, what a link over Tailscale carries), and a one-way stream for each picture of a shared panel. msquic runs threads of its own; what they see is queued, and `ft-together`'s one loop takes it out and tells the session.
 
 - The listener takes calls sent to this Frame's tailnet address only. Who a caller is comes from tailscaled, asked about the address the call came from. The certificate QUIC wants is made new at each start, names nobody, and isn't checked: Tailscale already encrypts the path and vouches for the address at its other end.
 - A name is looked up before a call, and only an address on the tailnet is ever sent a packet.
 - An end holds at most 32 connections. A link whose bytes pile up untaken past 1 MB is cut, and datagrams past 256 KB untaken are dropped: the session reads faster than anyone has reason to write.
+- A picture that isn't all acknowledged 150 ms after it was sent is given up: its stream is reset and the sender's loop is told. At most 64 are on their way out on a link, and more aren't sent. Coming in, a link holds at most 32 picture streams at once and 4 MB in all; a stream past that is refused, which its sender sees as a picture given up.
 - Closing a link lets what was sent before arrive, then tells the closer nothing more of it. A link that is silent for ten seconds is down.
 
 ## Joining
@@ -96,10 +120,25 @@ Each link has one reliable, ordered stream of messages. A message is a `u32` bod
 | 4 Room | room id, turn, owner's place, 1 to 4 people: place, name, login, address, port, away, spot | The owner, to every guest, whenever the room changes. `turn` counts up; an older one is passed over |
 | 5 Away | playing a game, headset off, or back | A guest to the owner, who puts it in the room |
 | 6 Leave | nothing | Anyone, before hanging up. From the owner it ends the room |
+| 7 Panel | id, size in pixels, place, turn, width in metres, curve, name | A guest to the owner: share my panel, or it is here now. The owner puts it in the room |
+| 8 Unpanel | id | A guest to the owner: take my panel back |
+| 9 Watch | panel id, level (hidden, in view, focused), whether a keyframe is needed | Anyone in the room, to the panel's owner |
+
+The Room message lists the shared panels after the people (16 at most). A panel's id is its owner's place times 8 plus its number, and a headset shares numbers 0 to 2. The owner takes a Panel or Unpanel only for the sender's own panels, and a Watch is taken only by the panel's owner. A link may say 40 of these three a second: a panel being dragged says about four.
 
 A Hello of another version is read no further than its version, and answered with Refuse (why 1) and a sentence asking to update. Kinds a reader doesn't know are skipped when they come from someone in the room, so a later version can add messages.
 
 A link that says anything it may not is closed: a stranger who says anything but Hello, a second Hello, a Room or Welcome from anyone but the owner, a message that doesn't read. A link gets ten seconds to say Hello, and at most eight links wait to at once.
+
+## A shared panel's video
+
+Each picture goes on a one-way stream of its own: a byte that says what the stream carries (2), the panel's id, the picture's number (`u32`, counted per panel), flags (1: a keyframe), then the encoded picture to the stream's end, at most 1 MB.
+
+A panel is encoded once for everyone who watches it. A viewer is in step with that video or waits for its next keyframe: they wait when they begin to watch, when they say their decoder lost its place, and when a picture sent to them was given up. The encoder is asked for a keyframe when someone waits, at most twice a second, and the keyframe puts everyone in step. A panel nobody watches is not sent, and its encoder is told so.
+
+A viewer takes a picture only from the link of the panel's owner, for a panel that is in the room and that a program on the viewer's Frame shows, and at most 120 a second for a panel. Pictures can overtake one another, so the viewer puts them back in order: a keyframe passes when it is newer than the last picture shown, any other picture only right after the one before it, and a few early ones are held until the gap fills. When pictures are held and nothing has passed for 0.3 s, the viewer asks for a keyframe. A viewer says what it has of each panel again every second, so an owner whose link came late learns it.
+
+The bitrate of a panel starts at 2 Mbit/s. Two pictures given up within a second bring it down to 70%, not below 300 kbit/s; five seconds of sending with none given up bring it up by 15%, to the owner's cap (3 Mbit/s until the cap can be picked).
 
 ## The pose datagram
 
@@ -115,10 +154,12 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 
 | Test | What it covers |
 |---|---|
-| `tests/proto-test.cpp` | Every message and the pose datagram there and back, each cut short at every length, damaged, and made of noise; the stream parser fed in pieces of any size |
-| `tests/room-test.cpp` | Invites (once, ten minutes, eight waiting, the wrong-guess limit) and spots |
-| `tests/session-test.cpp` | Up to five sessions run against each other on a network the test makes: joining, declining, a full room, the guests' links, leaving, a lost owner, another version, and guests and strangers who say what they may not. Three hundred rounds of noise and forged messages on every kind of link |
+| `tests/proto-test.cpp` | Every message and the pose datagram there and back, each cut short at every length, damaged, and made of noise; the stream parser fed in pieces of any size; panels alone and in a room |
+| `tests/room-test.cpp` | Invites (once, ten minutes, eight waiting, the wrong-guess limit), spots, whose panels a room takes, and the allowance |
+| `tests/session-test.cpp` | Up to five sessions run against each other on a network the test makes (`tests/fakenet.h`): joining, declining, a full room, the guests' links, leaving, a lost owner, another version, panels shared, moved and taken back, who is told who watches, and guests and strangers who say what they may not. Three hundred rounds of noise and forged messages on every kind of link |
+| `tests/flow-test.cpp` | The video's small rules: who gets the next picture, the order a viewer decodes them in, the bitrate, and a picture's bytes on its stream |
+| `tests/video-test.cpp` | Three sessions on the test's network, each with the video's rules, a wire the test can lose, hold back and refuse pictures on, and programs that remember what they were told: who is sent what and when, keyframes asked for, pictures out of order, the bitrate, a guest's panel over the guests' own link, and pictures nobody may send |
 | `tests/tailnet-test.cpp` | tailscaled's answers, kept in the test: this node's address and name, who is at an address, Tailscale stopped or logged out, answers that aren't what they should be; the JSON reader on good texts, nearly good ones and noise; which addresses are on the tailnet; a name looked up |
-| `tests/local-test.cpp` | The pose gate (what passes, an older pose, a flood, a link forgotten), ft-together's own count, the watchers (four at most, forgotten after five seconds, what each is sent) and the floor (the first said stands, lifted on leaving) |
-| `tests/links-test.cpp` | Real links between ends in one program, on loopback: bytes in order both ways, datagrams, closing, calls that may not be made or that nobody answers, a call to another address of this machine, the limits on what a far end can make an end hold, and taking an end down with links up |
-| `tests/loopback-test.py` | Four `ft-together --loopback` programs: a room opened, a wrong code, a declined ask, noise on the port, two guests let in and linked to each other, away, a guest whose program is killed, leaving and coming back, a second program on the same socket, and the owner's program ending. Poses: one handed to a program reaches the watchers of the others' programs with whose it is and that program's own count, from the owner and from a guest, and nothing reaches a program nobody watches, a pose's own sender, or anyone after leaving; each program keeps its own floor |
+| `tests/local-test.cpp` | The pose gate (what passes, an older pose, a flood, a link forgotten), ft-together's own count, the watchers (four at most, forgotten after five seconds, what each is sent), the floor (the first said stands, lifted on leaving), and the media socket's messages however the socket cuts them up |
+| `tests/links-test.cpp` | Real links between ends in one program, on loopback: bytes in order both ways, datagrams, closing, calls that may not be made or that nobody answers, a call to another address of this machine, the limits on what a far end can make an end hold, and taking an end down with links up. Pictures: whole either way, the longest, a burst, untaken ones bounded, and on a network that stops carrying, each given up after 150 ms and told, never arriving late |
+| `tests/loopback-test.py` | Four `ft-together --loopback` programs: a room opened, a wrong code, a declined ask, noise on the port, two guests let in and linked to each other, away, a guest whose program is killed, leaving and coming back, a second program on the same socket, and the owner's program ending. Poses: one handed to a program reaches the watchers of the others' programs with whose it is and that program's own count, from the owner and from a guest, and nothing reaches a program nobody watches, a pose's own sender, or anyone after leaving; each program keeps its own floor. Panels: shared by the owner and by a guest, in everyone's room, gone with their owner. Video: test programs on the media sockets stand in for an encoder and two viewers' programs, and pictures cross real links in order and byte for byte, up to a megabyte; a second viewer waits for its keyframe; nobody watching is told to the encoder; and programs that say what they may not, say nothing, or don't take their pictures are let go |

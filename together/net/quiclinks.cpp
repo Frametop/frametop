@@ -1,20 +1,14 @@
-// The links between Frames, on msquic (quiclinks.h).
-#include "quiclinks.h"
+// The links between Frames, on msquic (quiclinks.h): the connections, the control stream and
+// the datagrams. The streams that carry a picture each are quicframes.cpp's.
+#include "quicimpl.h"
 
 #include "lookup.h"
 #include "selfcert.h"
 
-#define QUIC_API_ENABLE_PREVIEW_FEATURES 1   // BBR, which the video was measured with (spike T3)
-#include <msquic.h>
-
 #include <algorithm>
 #include <arpa/inet.h>
-#include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
-#include <map>
-#include <mutex>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -26,29 +20,9 @@ const QUIC_BUFFER kAlpn = {sizeof("ft-together") - 1, (uint8_t *)"ft-together"};
 constexpr size_t kMostLinks = 32;                   // connections at once, the ones being closed too
 constexpr size_t kMostQueued = 1u << 20;            // bytes of one link the loop hasn't taken: more, and the link is cut
 constexpr size_t kMostDatagramsQueued = 256u << 10; // ...and with this many waiting, its datagrams are dropped
-constexpr size_t kEventCost = 64;                   // what a waiting event counts for beside its bytes, so a thousand tiny ones aren't free
 constexpr size_t kMostWaiting = 64u << 10;          // bytes sent to a caller whose stream isn't there yet
 constexpr int kMostDatagramsOut = 128;              // datagrams msquic holds for one link: a late one is worth nothing
 constexpr std::chrono::seconds kCloseWait(5);       // a closed link gets this long to take what was sent
-
-using Clock = std::chrono::steady_clock;
-
-struct Conn {
-    QuicLinks::Impl *impl = nullptr;
-    int id = -1;
-    HQUIC conn = nullptr, stream = nullptr;
-    bool caller = false;
-    bool hadStream = false;   // the far end's control stream came
-    bool up = false;
-    bool closed = false;      // Close()d here: nothing more is told of it
-    bool failed = false;      // Call couldn't start it, and closes it itself
-    Clock::time_point closedAt;
-    std::string address;
-    std::vector<std::vector<uint8_t>> waiting;
-    size_t waitingBytes = 0, queued = 0;
-    int datagramsOut = 0;
-    uint16_t maxDatagram = 0;
-};
 
 std::string Text(const QUIC_ADDR &a) {
     char buf[INET6_ADDRSTRLEN] = "";
@@ -75,215 +49,207 @@ QUIC_STATUS QUIC_API Nothing(HQUIC, void *, QUIC_CONNECTION_EVENT *) { return QU
 
 }  // namespace
 
-struct QuicLinks::Impl {
-    const QUIC_API_TABLE *q = nullptr;
-    HQUIC registration = nullptr, serverConfig = nullptr, clientConfig = nullptr, listener = nullptr;
-    std::function<bool(const std::string &)> mayCall;
-    int wake = -1;
-    // msquic may call back from inside a call made in one of its callbacks, so the lock is one
-    // a thread can take twice.
-    std::recursive_mutex m;
-    std::map<int, Conn *> conns;
-    std::deque<Event> queue;
-    int nextLink = 1;
-    bool stopping = false;
-
-    ~Impl() {
-        {
-            std::lock_guard<std::recursive_mutex> lock(m);
-            stopping = true;
-        }
-        if (q) {
-            // Not under the lock: these wait for msquic's threads, whose callbacks take it. Each
-            // connection is closed and freed by its last callback.
-            if (listener) q->ListenerClose(listener);
-            if (registration) q->RegistrationShutdown(registration, QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0);   // the far ends are told
-            if (serverConfig) q->ConfigurationClose(serverConfig);
-            if (clientConfig) q->ConfigurationClose(clientConfig);
-            if (registration) q->RegistrationClose(registration);
-            MsQuicClose(q);
-        }
-        if (wake >= 0) close(wake);
+QuicLinks::Impl::~Impl() {
+    {
+        std::lock_guard<std::recursive_mutex> lock(m);
+        stopping = true;
     }
-
-    HQUIC Configure(const QUIC_CREDENTIAL_CONFIG &cred, uint16_t peerStreams) {
-        QUIC_SETTINGS s = {};
-        s.IdleTimeoutMs = 10000;
-        s.IsSet.IdleTimeoutMs = TRUE;
-        s.KeepAliveIntervalMs = 2000;
-        s.IsSet.KeepAliveIntervalMs = TRUE;
-        s.DatagramReceiveEnabled = TRUE;
-        s.IsSet.DatagramReceiveEnabled = TRUE;
-        s.PeerBidiStreamCount = peerStreams;   // the control stream, which the caller opens
-        s.IsSet.PeerBidiStreamCount = TRUE;
-        s.SendBufferingEnabled = FALSE;        // a send is done when the far end has acknowledged it
-        s.IsSet.SendBufferingEnabled = TRUE;
-        s.CongestionControlAlgorithm = QUIC_CONGESTION_CONTROL_ALGORITHM_BBR;
-        s.IsSet.CongestionControlAlgorithm = TRUE;
-        HQUIC config = nullptr;
-        if (QUIC_FAILED(q->ConfigurationOpen(registration, &kAlpn, 1, &s, sizeof s, nullptr, &config))) return nullptr;
-        if (QUIC_FAILED(q->ConfigurationLoadCredential(config, &cred))) {
-            q->ConfigurationClose(config);
-            return nullptr;
-        }
-        return config;
+    if (q) {
+        // Not under the lock: these wait for msquic's threads, whose callbacks take it. Each
+        // connection is closed and freed by its last callback.
+        if (listener) q->ListenerClose(listener);
+        if (registration) q->RegistrationShutdown(registration, QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0);   // the far ends are told
+        if (serverConfig) q->ConfigurationClose(serverConfig);
+        if (clientConfig) q->ConfigurationClose(clientConfig);
+        if (registration) q->RegistrationClose(registration);
+        MsQuicClose(q);
     }
+    if (wake >= 0) close(wake);
+}
 
-    // With the lock held.
-    void Post(Conn &c, Event e) {
-        if (c.closed || stopping) return;
-        e.link = c.id;
-        c.queued += e.bytes.size() + kEventCost;
-        queue.push_back(std::move(e));
-        const uint64_t one = 1;
-        const ssize_t woke = write(wake, &one, sizeof one);
-        (void)woke;   // it fails only with the counter full, and then the fd is readable already
+HQUIC QuicLinks::Impl::Configure(const QUIC_CREDENTIAL_CONFIG &cred, uint16_t peerStreams) {
+    QUIC_SETTINGS s = {};
+    s.IdleTimeoutMs = 10000;
+    s.IsSet.IdleTimeoutMs = TRUE;
+    s.KeepAliveIntervalMs = 2000;
+    s.IsSet.KeepAliveIntervalMs = TRUE;
+    s.DatagramReceiveEnabled = TRUE;
+    s.IsSet.DatagramReceiveEnabled = TRUE;
+    s.PeerBidiStreamCount = peerStreams;   // the control stream, which the caller opens
+    s.IsSet.PeerBidiStreamCount = TRUE;
+    s.PeerUnidiStreamCount = kMostFrameStreams;   // the pictures on their way in, a stream each
+    s.IsSet.PeerUnidiStreamCount = TRUE;
+    s.SendBufferingEnabled = FALSE;        // a send is done when the far end has acknowledged it
+    s.IsSet.SendBufferingEnabled = TRUE;
+    s.CongestionControlAlgorithm = QUIC_CONGESTION_CONTROL_ALGORITHM_BBR;
+    s.IsSet.CongestionControlAlgorithm = TRUE;
+    HQUIC config = nullptr;
+    if (QUIC_FAILED(q->ConfigurationOpen(registration, &kAlpn, 1, &s, sizeof s, nullptr, &config))) return nullptr;
+    if (QUIC_FAILED(q->ConfigurationLoadCredential(config, &cred))) {
+        q->ConfigurationClose(config);
+        return nullptr;
     }
+    return config;
+}
 
-    void Write(Conn &c, const std::vector<uint8_t> &bytes) {
-        QUIC_BUFFER *b = Copy(bytes);
-        if (b && QUIC_FAILED(q->StreamSend(c.stream, b, 1, QUIC_SEND_FLAG_NONE, b))) std::free(b);
+void QuicLinks::Impl::Post(Conn &c, Event e) {
+    if (c.closed || stopping) return;
+    e.link = c.id;
+    (e.kind == Event::kFrame ? c.framesQueued : c.queued) += e.bytes.size() + kEventCost;
+    queue.push_back(std::move(e));
+    const uint64_t one = 1;
+    const ssize_t woke = write(wake, &one, sizeof one);
+    (void)woke;   // it fails only with the counter full, and then the fd is readable already
+}
+
+void QuicLinks::Impl::Write(Conn &c, const std::vector<uint8_t> &bytes) {
+    QUIC_BUFFER *b = Copy(bytes);
+    if (b && QUIC_FAILED(q->StreamSend(c.stream, b, 1, QUIC_SEND_FLAG_NONE, b))) std::free(b);
+}
+
+void QuicLinks::Impl::Cut(Conn &c) { q->ConnectionShutdown(c.conn, QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0); }
+
+Conn *QuicLinks::Impl::Find(int link) {
+    const auto it = conns.find(link);
+    return it == conns.end() ? nullptr : it->second;
+}
+
+QUIC_STATUS QUIC_API QuicLinks::Impl::OnListener(HQUIC, void *context, QUIC_LISTENER_EVENT *ev) {
+    Impl &impl = *static_cast<Impl *>(context);
+    if (ev->Type != QUIC_LISTENER_EVENT_NEW_CONNECTION) return QUIC_STATUS_SUCCESS;
+    std::lock_guard<std::recursive_mutex> lock(impl.m);
+    if (impl.stopping || impl.conns.size() >= kMostLinks) return QUIC_STATUS_CONNECTION_REFUSED;
+    auto *c = new Conn;
+    c->impl = &impl, c->id = impl.nextLink++, c->conn = ev->NEW_CONNECTION.Connection;
+    c->address = Text(*ev->NEW_CONNECTION.Info->RemoteAddress);
+    impl.q->SetCallbackHandler(c->conn, reinterpret_cast<void *>(OnConnection), c);
+    const QUIC_STATUS status = impl.q->ConnectionSetConfiguration(c->conn, impl.serverConfig);
+    if (QUIC_FAILED(status)) {   // msquic drops it, and nothing of ours is told
+        impl.q->SetCallbackHandler(c->conn, reinterpret_cast<void *>(Nothing), nullptr);
+        delete c;
+        return status;
     }
+    impl.conns[c->id] = c;
+    return QUIC_STATUS_SUCCESS;
+}
 
-    void Cut(Conn &c) { q->ConnectionShutdown(c.conn, QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, 0); }
-
-    Conn *Find(int link) {
-        const auto it = conns.find(link);
-        return it == conns.end() ? nullptr : it->second;
-    }
-
-    static QUIC_STATUS QUIC_API OnListener(HQUIC, void *context, QUIC_LISTENER_EVENT *ev) {
-        Impl &impl = *static_cast<Impl *>(context);
-        if (ev->Type != QUIC_LISTENER_EVENT_NEW_CONNECTION) return QUIC_STATUS_SUCCESS;
-        std::lock_guard<std::recursive_mutex> lock(impl.m);
-        if (impl.stopping || impl.conns.size() >= kMostLinks) return QUIC_STATUS_CONNECTION_REFUSED;
-        auto *c = new Conn;
-        c->impl = &impl, c->id = impl.nextLink++, c->conn = ev->NEW_CONNECTION.Connection;
-        c->address = Text(*ev->NEW_CONNECTION.Info->RemoteAddress);
-        impl.q->SetCallbackHandler(c->conn, reinterpret_cast<void *>(OnConnection), c);
-        const QUIC_STATUS status = impl.q->ConnectionSetConfiguration(c->conn, impl.serverConfig);
-        if (QUIC_FAILED(status)) {   // msquic drops it, and nothing of ours is told
-            impl.q->SetCallbackHandler(c->conn, reinterpret_cast<void *>(Nothing), nullptr);
-            delete c;
-            return status;
-        }
-        impl.conns[c->id] = c;
-        return QUIC_STATUS_SUCCESS;
-    }
-
-    static QUIC_STATUS QUIC_API OnConnection(HQUIC conn, void *context, QUIC_CONNECTION_EVENT *ev) {
-        Conn &c = *static_cast<Conn *>(context);
-        Impl &impl = *c.impl;
-        std::unique_lock<std::recursive_mutex> lock(impl.m);
-        switch (ev->Type) {
-        case QUIC_CONNECTION_EVENT_CONNECTED: {
-            if (c.failed || c.closed) break;
-            if (c.caller) {
-                QUIC_ADDR remote = {};
-                uint32_t len = sizeof remote;
-                if (QUIC_SUCCEEDED(impl.q->GetParam(conn, QUIC_PARAM_CONN_REMOTE_ADDRESS, &len, &remote))) c.address = Text(remote);
-                HQUIC stream = nullptr;
-                if (QUIC_FAILED(impl.q->StreamOpen(conn, QUIC_STREAM_OPEN_FLAG_NONE, OnStream, &c, &stream))) {
-                    impl.Cut(c);
-                    break;
-                }
-                c.stream = stream;
-                if (QUIC_FAILED(impl.q->StreamStart(stream, QUIC_STREAM_START_FLAG_IMMEDIATE))) {
-                    if (c.stream == stream) c.stream = nullptr, impl.q->StreamClose(stream);
-                    impl.Cut(c);
-                    break;
-                }
-            }
-            c.up = true;
-            Event e;
-            e.kind = Event::kUp, e.address = c.address;
-            impl.Post(c, std::move(e));
-            break;
-        }
-        case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED: {
-            const HQUIC stream = ev->PEER_STREAM_STARTED.Stream;
-            const bool oneWay = (ev->PEER_STREAM_STARTED.Flags & QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL) != 0;
-            if (c.caller || c.hadStream || oneWay || c.closed) {   // a link has one control stream, and its caller opens it
-                impl.q->StreamClose(stream);
+QUIC_STATUS QUIC_API QuicLinks::Impl::OnConnection(HQUIC conn, void *context, QUIC_CONNECTION_EVENT *ev) {
+    Conn &c = *static_cast<Conn *>(context);
+    Impl &impl = *c.impl;
+    std::unique_lock<std::recursive_mutex> lock(impl.m);
+    switch (ev->Type) {
+    case QUIC_CONNECTION_EVENT_CONNECTED: {
+        if (c.failed || c.closed) break;
+        if (c.caller) {
+            QUIC_ADDR remote = {};
+            uint32_t len = sizeof remote;
+            if (QUIC_SUCCEEDED(impl.q->GetParam(conn, QUIC_PARAM_CONN_REMOTE_ADDRESS, &len, &remote))) c.address = Text(remote);
+            HQUIC stream = nullptr;
+            if (QUIC_FAILED(impl.q->StreamOpen(conn, QUIC_STREAM_OPEN_FLAG_NONE, OnStream, &c, &stream))) {
+                impl.Cut(c);
                 break;
             }
-            c.stream = stream, c.hadStream = true;
-            impl.q->SetCallbackHandler(stream, reinterpret_cast<void *>(OnStream), &c);
-            for (const std::vector<uint8_t> &bytes : c.waiting) impl.Write(c, bytes);
-            c.waiting.clear(), c.waitingBytes = 0;
-            break;
-        }
-        case QUIC_CONNECTION_EVENT_DATAGRAM_STATE_CHANGED:
-            c.maxDatagram = ev->DATAGRAM_STATE_CHANGED.SendEnabled ? ev->DATAGRAM_STATE_CHANGED.MaxSendLength : 0;
-            break;
-        case QUIC_CONNECTION_EVENT_DATAGRAM_RECEIVED: {
-            const QUIC_BUFFER *b = ev->DATAGRAM_RECEIVED.Buffer;
-            if (!c.up || b->Length == 0 || b->Length > kMostDatagram || c.queued > kMostDatagramsQueued) break;
-            Event e;
-            e.kind = Event::kDatagram, e.bytes.assign(b->Buffer, b->Buffer + b->Length);
-            impl.Post(c, std::move(e));
-            break;
-        }
-        case QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED:
-            if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(ev->DATAGRAM_SEND_STATE_CHANGED.State)) {
-                std::free(ev->DATAGRAM_SEND_STATE_CHANGED.ClientContext);
-                --c.datagramsOut;
+            c.stream = stream;
+            if (QUIC_FAILED(impl.q->StreamStart(stream, QUIC_STREAM_START_FLAG_IMMEDIATE))) {
+                impl.q->StreamClose(stream);
+                c.stream = nullptr;
+                impl.Cut(c);
+                break;
             }
-            break;
-        case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE: {
-            if (c.failed) break;   // Call closes and frees it
-            Event e;
-            e.kind = Event::kDown;
-            impl.Post(c, std::move(e));
-            impl.conns.erase(c.id);
-            lock.unlock();
-            impl.q->ConnectionClose(conn);
-            delete &c;
-            break;
         }
-        default:
-            break;
-        }
-        return QUIC_STATUS_SUCCESS;
+        c.up = true;
+        Event e;
+        e.kind = Event::kUp, e.address = c.address;
+        impl.Post(c, std::move(e));
+        break;
     }
-
-    static QUIC_STATUS QUIC_API OnStream(HQUIC stream, void *context, QUIC_STREAM_EVENT *ev) {
-        Conn &c = *static_cast<Conn *>(context);
-        Impl &impl = *c.impl;
-        std::lock_guard<std::recursive_mutex> lock(impl.m);
-        switch (ev->Type) {
-        case QUIC_STREAM_EVENT_RECEIVE: {
-            Event e;
-            e.kind = Event::kBytes;
-            for (uint32_t i = 0; i < ev->RECEIVE.BufferCount; ++i) {
-                const QUIC_BUFFER &b = ev->RECEIVE.Buffers[i];
-                e.bytes.insert(e.bytes.end(), b.Buffer, b.Buffer + b.Length);
-            }
-            if (!e.bytes.empty()) impl.Post(c, std::move(e));
-            if (c.queued > kMostQueued) impl.Cut(c);   // the session reads faster than anyone has reason to write
+    case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED: {
+        const HQUIC stream = ev->PEER_STREAM_STARTED.Stream;
+        if (ev->PEER_STREAM_STARTED.Flags & QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL) {   // a picture
+            TakeFrameStream(impl, c, stream);
             break;
         }
-        case QUIC_STREAM_EVENT_SEND_COMPLETE:
-            std::free(ev->SEND_COMPLETE.ClientContext);
-            break;
-        case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
-        case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
-        case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:
-            impl.Cut(c);   // a link without its control stream is no link
-            break;
-        case QUIC_STREAM_EVENT_SEND_SHUTDOWN_COMPLETE:
-            if (c.closed) impl.Cut(c);   // what was sent before Close has gone
-            break;
-        case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
-            if (c.stream == stream) c.stream = nullptr;
+        if (c.caller || c.hadStream || c.closed) {   // a link has one control stream, and its caller opens it
             impl.q->StreamClose(stream);
             break;
-        default:
-            break;
         }
-        return QUIC_STATUS_SUCCESS;
+        c.stream = stream, c.hadStream = true;
+        impl.q->SetCallbackHandler(stream, reinterpret_cast<void *>(OnStream), &c);
+        for (const std::vector<uint8_t> &bytes : c.waiting) impl.Write(c, bytes);
+        c.waiting.clear(), c.waitingBytes = 0;
+        break;
     }
-};
+    case QUIC_CONNECTION_EVENT_DATAGRAM_STATE_CHANGED:
+        c.maxDatagram = ev->DATAGRAM_STATE_CHANGED.SendEnabled ? ev->DATAGRAM_STATE_CHANGED.MaxSendLength : 0;
+        break;
+    case QUIC_CONNECTION_EVENT_DATAGRAM_RECEIVED: {
+        const QUIC_BUFFER *b = ev->DATAGRAM_RECEIVED.Buffer;
+        if (!c.up || b->Length == 0 || b->Length > kMostDatagram || c.queued > kMostDatagramsQueued) break;
+        Event e;
+        e.kind = Event::kDatagram, e.bytes.assign(b->Buffer, b->Buffer + b->Length);
+        impl.Post(c, std::move(e));
+        break;
+    }
+    case QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED:
+        if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(ev->DATAGRAM_SEND_STATE_CHANGED.State)) {
+            std::free(ev->DATAGRAM_SEND_STATE_CHANGED.ClientContext);
+            --c.datagramsOut;
+        }
+        break;
+    case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE: {
+        if (c.failed) break;   // Call closes and frees it
+        Event e;
+        e.kind = Event::kDown;
+        impl.Post(c, std::move(e));
+        impl.conns.erase(c.id);
+        ForgetFrames(c);
+        lock.unlock();
+        impl.q->ConnectionClose(conn);
+        delete &c;
+        break;
+    }
+    default:
+        break;
+    }
+    return QUIC_STATUS_SUCCESS;
+}
+
+QUIC_STATUS QUIC_API QuicLinks::Impl::OnStream(HQUIC stream, void *context, QUIC_STREAM_EVENT *ev) {
+    Conn &c = *static_cast<Conn *>(context);
+    Impl &impl = *c.impl;
+    std::lock_guard<std::recursive_mutex> lock(impl.m);
+    switch (ev->Type) {
+    case QUIC_STREAM_EVENT_RECEIVE: {
+        Event e;
+        e.kind = Event::kBytes;
+        for (uint32_t i = 0; i < ev->RECEIVE.BufferCount; ++i) {
+            const QUIC_BUFFER &b = ev->RECEIVE.Buffers[i];
+            e.bytes.insert(e.bytes.end(), b.Buffer, b.Buffer + b.Length);
+        }
+        if (!e.bytes.empty()) impl.Post(c, std::move(e));
+        if (c.queued > kMostQueued) impl.Cut(c);   // the session reads faster than anyone has reason to write
+        break;
+    }
+    case QUIC_STREAM_EVENT_SEND_COMPLETE:
+        std::free(ev->SEND_COMPLETE.ClientContext);
+        break;
+    case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
+    case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
+    case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:
+        impl.Cut(c);   // a link without its control stream is no link
+        break;
+    case QUIC_STREAM_EVENT_SEND_SHUTDOWN_COMPLETE:
+        if (c.closed) impl.Cut(c);   // what was sent before Close has gone
+        break;
+    case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+        if (c.stream == stream) c.stream = nullptr;
+        if (!ev->SHUTDOWN_COMPLETE.AppCloseInProgress) impl.q->StreamClose(stream);   // or whoever closes it is doing so now
+        break;
+    default:
+        break;
+    }
+    return QUIC_STATUS_SUCCESS;
+}
 
 QuicLinks::QuicLinks(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 QuicLinks::~QuicLinks() = default;
@@ -345,7 +311,10 @@ bool QuicLinks::Next(Event &event) {
     }
     event = std::move(impl.queue.front());
     impl.queue.pop_front();
-    if (Conn *c = impl.Find(event.link)) c->queued -= std::min(c->queued, event.bytes.size() + kEventCost);
+    if (Conn *c = impl.Find(event.link)) {
+        size_t &queued = event.kind == Event::kFrame ? c->framesQueued : c->queued;
+        queued -= std::min(queued, event.bytes.size() + kEventCost);
+    }
     return true;
 }
 
@@ -355,6 +324,7 @@ void QuicLinks::Tick() {
     const Clock::time_point now = Clock::now();
     for (const auto &[id, c] : impl.conns)
         if (c->closed && now - c->closedAt > kCloseWait) impl.Cut(*c);
+    GiveUpLateFrames(impl, now);
 }
 
 bool QuicLinks::Quiet() {
@@ -405,7 +375,7 @@ void QuicLinks::Close(int link) {
     impl.queue.erase(std::remove_if(impl.queue.begin(), impl.queue.end(), [link](const Event &e) { return e.link == link; }), impl.queue.end());
     Conn *c = impl.Find(link);
     if (!c || c->closed) return;
-    c->closed = true, c->closedAt = Clock::now(), c->queued = 0;
+    c->closed = true, c->closedAt = Clock::now(), c->queued = c->framesQueued = 0;
     if (c->stream) impl.q->StreamShutdown(c->stream, QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL, 0);
     else impl.Cut(*c);
 }

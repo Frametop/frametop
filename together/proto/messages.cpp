@@ -27,6 +27,8 @@ void Put(wire::Out &out, const Room &m) {
         for (float v : p.spot.at) out.F32(v);
         out.F32(p.spot.yaw);
     }
+    out.U8(uint8_t(m.panels.size()));
+    for (const Panel &p : m.panels) panelwire::Put(out, p);
 }
 
 bool Take(wire::In &in, Room &m) {
@@ -47,7 +49,16 @@ bool Take(wire::In &in, Room &m) {
         if (!in.ok || p.id >= kPeople || taken[p.id] || (p.away & ~(kAwayGame | kAwayOff))) return false;
         taken[p.id] = true;
     }
-    return m.owner < kPeople && taken[m.owner];
+    if (m.owner >= kPeople || !taken[m.owner]) return false;
+    const size_t panels = in.U8();
+    if (!in.ok || panels > size_t(kMostPanels)) return false;
+    m.panels.assign(panels, Panel{});
+    int last = -1;
+    for (Panel &p : m.panels) {
+        if (!panelwire::Take(in, p, kPeople) || !taken[p.owner()] || p.id <= last) return false;
+        last = p.id;
+    }
+    return true;
 }
 
 }  // namespace
@@ -85,6 +96,24 @@ std::vector<uint8_t> Pack(const Away &m) {
     wire::Out out;
     out.U8(m.away);
     return Framed(kAway, out);
+}
+
+std::vector<uint8_t> Pack(const Panel &m) {
+    wire::Out out;
+    panelwire::Put(out, m);
+    return Framed(kPanel, out);
+}
+
+std::vector<uint8_t> Pack(const Unpanel &m) {
+    wire::Out out;
+    out.U8(m.panel);
+    return Framed(kUnpanel, out);
+}
+
+std::vector<uint8_t> Pack(const Watch &m) {
+    wire::Out out;
+    out.U8(m.panel), out.U8(m.level), out.U8(m.fresh);
+    return Framed(kWatch, out);
 }
 
 std::vector<uint8_t> PackLeave() { return Framed(kLeave, wire::Out{}); }
@@ -125,6 +154,26 @@ bool Read(const std::vector<uint8_t> &body, Away &m) {
     wire::In in(body.data(), body.size());
     m.away = in.U8();
     return in.done() && !(m.away & ~(kAwayGame | kAwayOff));
+}
+
+bool Read(const std::vector<uint8_t> &body, Panel &m) {
+    wire::In in(body.data(), body.size());
+    m = Panel{};
+    return panelwire::Take(in, m, kPeople) && in.done();
+}
+
+bool Read(const std::vector<uint8_t> &body, Unpanel &m) {
+    wire::In in(body.data(), body.size());
+    m.panel = in.U8();
+    return in.done() && m.panel < kPeople * kPanelNumbers;
+}
+
+bool Read(const std::vector<uint8_t> &body, Watch &m) {
+    wire::In in(body.data(), body.size());
+    m.panel = in.U8(), m.level = in.U8();
+    const uint8_t fresh = in.U8();
+    m.fresh = fresh == 1;
+    return in.done() && m.panel < kPeople * kPanelNumbers && m.level <= kFocused && fresh <= 1;
 }
 
 bool Parser::Feed(const uint8_t *data, size_t n) {

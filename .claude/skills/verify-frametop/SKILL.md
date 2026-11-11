@@ -46,7 +46,7 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
   lease the host's keyboard and mouse; `--allow-host-input` drops that, under the rule above.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
-  and hands) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
+  and hands, fake peers) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
   run.
 - Don't restart SteamVR, gamescope, KWin or the Frametop desktop to make a check pass without
   telling the user. Restarting SteamVR with the testbench goes only through

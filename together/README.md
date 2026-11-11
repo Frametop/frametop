@@ -129,7 +129,7 @@ The programs that encode your shared panels and show other people's talk to ft-t
 
 One program for each panel: a second one that names the same panel takes the first one's place. A program that says anything else, says nothing for five seconds, or leaves 4 MB waiting for it is let go, and may come again.
 
-`--loopback` is for tests: no Tailscale, the links are on 127.0.0.1 only, and everyone there is let in as `someone@loopback`. A fake peer for the live Frame is a second `ft-together` in the normal mode on another port and socket: it has this Frame's tailnet address, and the session tells people apart by address and port.
+`--loopback` is for tests: no Tailscale, the links are on 127.0.0.1 only, and everyone there is let in as `someone@loopback`. A fake peer for the live Frame is a second `ft-together` in the normal mode on another port and socket: it has this Frame's tailnet address, and the session tells people apart by address and port. The testbench runs up to three of them, each with a pretended wearer and a hummed voice, and lets them into this Frame's room ([testbench/docs/peers.md](../testbench/docs/peers.md)).
 
 ## The links
 

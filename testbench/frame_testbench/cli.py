@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
-from . import controller_inputs, desktop, fakes, handshape, hostinput, install, pose, record, transport
+from . import controller_inputs, desktop, fakes, handshape, hostinput, install, peer_cli, peers, pose, record, transport
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKES_UNIT = 'frame-testbench-fakes'
@@ -216,7 +216,8 @@ def parser():
         pointers.add_parser(name, help={'recenter': 'the cursor back in front'}.get(name))
     power = commands.add_parser('power', help="ft-powerd: the headset displays' state, or turn them on or off")
     power.add_argument('state', choices=desktop.POWER_COMMANDS)
-    commands.add_parser('release', help='restore physical HMD pose/proximity, disconnect synthetic controllers, stop fake trackers')
+    peer_cli.add_parser(commands)
+    commands.add_parser('release', help='restore physical HMD pose/proximity, disconnect synthetic controllers, stop fake trackers and fake peers')
     capture = commands.add_parser('capture', help='fresh compositor stereo PNGs and metadata')
     capture.add_argument('--output', help='new output directory, on headset when using --host')
     capture.add_argument('--fetch', help='with --host, download PNGs into this new local directory')
@@ -348,10 +349,13 @@ def dispatch(args, bench):
         for kind, path in files.items():
             reply = bench.fakes(f"replay-{kind} {path} {'loop' if args.loop else 'once'}", start=True)
         return reply
+    if args.command == 'peer':
+        return peer_cli.dispatch(args)
     if args.command == 'release':
         # The fake trackers first: they don't need SteamVR, so they go even when it's down. A
         # daemon that doesn't answer is stopped (it cleans up on SIGTERM), and the input proxy
         # is released either way.
+        gone = peers.stop_all()   # like the fake trackers, they don't need SteamVR
         try:
             faked = bench.fakes('release') or {'running': False}
         except (OSError, RuntimeError) as error:
@@ -360,6 +364,7 @@ def dispatch(args, bench):
         result = bench.control('release')
         hostinput.clear_flag()
         result['fakes'] = faked
+        result['peers'] = gone
         return result
     if args.command in ('pose', 'controller'):
         controller = args.command == 'controller'

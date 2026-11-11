@@ -110,7 +110,14 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `overlay_list` | None | `pointer overlays` |
 | `overlay_measure` | `overlay`: an overlay key | `pointer measure -- KEY` |
 | `display_power` | `state`: `status`, `on`, or `off` | `power STATE` |
-| `release_all` | None | `release`, which also stops the fake trackers |
+| `peer_start` | `peer` (1-3); optional `name` | `peer N start [--name NAME]` |
+| `peer_stop`, `peer_state`, `peer_join`, `peer_leave` | `peer` | `peer N stop`, `state`, `join` (the room open on this Frame), `leave` |
+| `peer_pose` | `peer`, `pose`: `stand`, `wave`, `reach`, `type`, `sit`, `lean`, or `look` | `peer N pose NAME` |
+| `peer_walk` | `peer`, `right`, `back` (metres, ±20); optional `degrees` (±360) | `peer N walk -- RIGHT BACK DEGREES` |
+| `peer_avatar` | `peer`; optional `model` (a name in the avatars folder; none without it) | `peer N wear [MODEL]` |
+| `peer_speak` | `peer`; optional `hz` (50-2000; quiet without it) | `peer N speak HZ` or `speak off` |
+| `peer_away` | `peer`, `state`: `game`, `off`, or `back` | `peer N away STATE` |
+| `release_all` | None | `release`, which also stops the fake trackers and the fake peers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ
 arrays in meters. Rotation is `[yaw, pitch, roll]` in degrees. All numbers must
@@ -119,6 +126,7 @@ are `[0, 0, 0]`. Space is `standing` by default, or `raw`. Moves require a prior
 pose set for that device and follow the existing CLI's coordinate conventions.
 Hand positions are in the head frame, not standing space; see
 [fake eye and hand trackers](fake-trackers.md).
+The `peer_*` tools drive fake peers for Frametop Together; see [fake peers](peers.md).
 
 ### Controller inputs
 

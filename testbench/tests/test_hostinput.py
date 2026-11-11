@@ -323,7 +323,9 @@ class WornGuardTests(Fixture):
         self.alive = True
         for patch in (mock.patch.object(hostinput, 'state', lambda detail=False: real(self.layout, self.proc, detail)),
                       mock.patch.object(hostinput, 'start_guard', start_guard),
-                      mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': self.alive)):
+                      mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': self.alive),
+                      # release stops the fake peers: never this machine's
+                      mock.patch.object(cli.peers, 'stop_all', mock.Mock(return_value={'stopped': []}))):
             patch.start()
             self.addCleanup(patch.stop)
 

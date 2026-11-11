@@ -12,9 +12,10 @@ Headset and controller pose tools for closed-loop development on Steam Frame. A 
 - Independent left/right synthetic controller translation and rotation, without requiring powered physical controllers.
 - Fake eye tracking and hand tracking at Frametop's boundary: gaze directions and eye states for ft-gaze, and posed hands with pinches and grips in place of ft-hands, or recorded tracker output played back. See [fake eye and hand trackers](docs/fake-trackers.md).
 - Frametop's desktop through its own control sockets: a keyboard and mouse plugged into its input relay, typed text, the pointer helper's state, overlays and cursor, and the headset displays' power. See [keyboard, mouse, pointer and display power](docs/desktop.md).
+- Fake peers for Frametop Together: up to three people in a shared room who aren't there, each the real session code and programs with nobody wearing them, who join, stand, walk, hum, wear an avatar and go away on command. See [fake peers](docs/peers.md).
 - SteamVR stereo screenshots, with runtime pose/frame metadata and optional downloads to the agent machine.
 
-Input overrides and fake trackers stay active across CLI calls. `release` restores physical input and stops the fake trackers. There is no per-screenshot activation/rollback cycle. Do not wear the headset while another person or agent is driving its pose.
+Input overrides, fake trackers and fake peers stay active across CLI calls. `release` restores physical input and stops the fake trackers and the fake peers. There is no per-screenshot activation/rollback cycle. Do not wear the headset while another person or agent is driving its pose.
 
 The input adapter wraps the existing `cv` driver at public OpenVR interface boundaries. It forwards display components, unrelated devices, and unrelated inputs. It does not add a second HMD. This interception is experimental, not a Valve-supported extension mechanism.
 

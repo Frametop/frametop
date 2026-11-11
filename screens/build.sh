@@ -3,7 +3,8 @@
 # ft-handtest, which tries the hand cutouts (handcut.cpp) on a test panel of its own, and
 # ft-handview, which draws the hands when Room View is off (handview.cpp), and
 # ft-spotpanel, frunner's search panel (frunner/ft-spotpanel.cpp; ft-frunner runs it), and
-# ft-avatars, which draws avatar bodies (avatar/view, posed by avatar/pose): it is built here
+# ft-avatars, which draws avatar bodies (avatar/view, posed by avatar/pose; avatar/room for the
+# people of a shared room): it is built here
 # because it wears the hands ft-handview draws (handskin.cpp, handcut.cpp) and shows its mirror
 # the way ft-handview shows them (vroutput.cpp).
 # compositor.c is the wlroots side (C; wlroots headers aren't C++), vr.cpp the OpenVR side,
@@ -52,9 +53,13 @@ $cxx -c -o build/handview.o handview.cpp
 $cxx -c -o build/bodyfile.o ../avatar/bodyfile.cpp
 $cxx -c -o build/bodypose.o ../avatar/pose/bodypose.cpp
 avatars=""
-for f in bodymesh handfit demo bodygpu mirrorview belowview sheet picture live main; do
+for f in bodymesh handfit demo bodygpu windowview mirrorview belowview sheet stage canvas picture live main; do
   $cxx -Wextra -I. -c -o build/avatars-$f.o ../avatar/view/$f.cpp
   avatars="$avatars build/avatars-$f.o"
+done
+for f in room/people room/client room/room room/pretend room/roompicture abstract/abstract; do   # the people of a shared room
+  $cxx -Wextra -I. -c -o build/avatars-${f/\//-}.o ../avatar/$f.cpp
+  avatars="$avatars build/avatars-${f/\//-}.o"
 done
 for f in micear ownface; do   # the face of the avatar you wear: its mouth from the microphone
   $cxx -Wextra $(pkg-config --cflags libpulse-simple) -c -o build/avatars-$f.o ../avatar/face/$f.cpp

@@ -2,7 +2,7 @@
 
 Shared rooms: up to four people in one owner's room, each on their own Frame, over Tailscale. The design, its decisions and the milestones are in [docs/together.md](../docs/together.md). This file says what is in this folder and what goes over a link.
 
-Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, and `ft-together`, which opens a room, lets people in and keeps the room's people linked. Poses, panels and voice are not built yet, so people in a room don't see or hear each other so far.
+Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, `ft-together`, which opens a room, lets people in and keeps the room's people linked, and poses: each person's head and hands go to the others, and `ft-avatars --room` ([avatar/README.md](../avatar/README.md)) draws them as abstract avatars. Panels and voice are not built yet, so people in a room see each other but not each other's screens, and don't hear each other so far.
 
 ## What is where
 
@@ -11,8 +11,9 @@ Built so far: the spikes (M0), and from M3 the session's wire format and rules, 
 | `proto/` | The bytes on a link: bounded readers and writers (`bytes.h`), the control stream's messages (`messages.h`), the pose datagram (`posewire.h`). No I/O, standard library only, so the PC sender in the Vibepollo fork can take the folder as it is | nothing |
 | `room/` | A room's own rules: invites (`invites.h`) and where people stand (`seats.h`) | `proto/` |
 | `session/` | The session: who may join, who is in the room, who links to whom, and what each link may say (`session.h`). The network, the tailnet, the clock and the dice are handed in. `commands.h` puts a session behind lines of text | `proto/`, `room/` |
+| `local/` | What ft-together does for this Frame's own programs beyond the session's commands: the poses it lets through each way (`posegate.h`), who gets the others' poses (`watchers.h`), where this Frame's floor lies in the room (`floor.h`), and the datagrams on the local socket that aren't text (`datagrams.h`) | `proto/` |
 | `net/` | The real network: the links on msquic (`quiclinks.h`), with the self-signed certificate QUIC wants (`selfcert.h`), which address a name stands for (`lookup.h`), and who is at an address by tailscaled's word (`tailnet.h`, with the small JSON reader for its answers, `json.h`) | `session/`, msquic, OpenSSL |
-| `ft-together.cpp` | The program: one loop over the links and a local socket | `session/`, `net/` |
+| `ft-together.cpp` | The program: one loop over the links and a local socket | `session/`, `net/`, `local/` |
 | `media/` | The iris hardware encoder (`irisenc.h`) | V4L2 |
 | `spike/` | The M0 spikes, `ft-enctest` and `ft-quictest` | `media/`, `net/` |
 | `tests/` | The tests below | |
@@ -38,6 +39,16 @@ The rest of Frametop talks to it on `@ft_together`, one datagram a question and 
 | `accept N`, `decline N` | An ask answered |
 | `away game`, `away off`, `away back` | Tells the room |
 | `leave` | Leaves the room. Its owner leaving ends it for everyone |
+| `watch` | `ok`, and for the next five seconds every pose a person in the room sends comes to the asker (below). A program that draws the room asks again each second. At most four watch at once |
+| `floor` | Where this Frame's own floor lies in the room: `ok X Z YAW`, or `ok none` while no program has said |
+| `floor X Z YAW` | Says where it lies. The first said stands until you leave the room, and the answer is the one that stands |
+
+Two kinds of datagram on the socket aren't text, and are told by their first byte, which no text starts with:
+
+- **Your own pose**, to ft-together: a pose datagram as it goes on a link (first byte 1, below), in the room's directions. ft-together reads it as it reads a peer's, puts its own count in it and sends it to everyone in the room it has a link to. It isn't answered, and outside a room it goes nowhere.
+- **Someone's pose**, to each watcher: the byte `0x81`, their place in the room (a byte), then their pose datagram. Only a pose from a link whose person is in the room is passed on, only if it reads, is newer than that link's last, and is within 90 datagrams a second from that link (three times what a Frame sends), rubbish counted.
+
+**Your floor in the room.** Everyone tracks themselves on their own floor, and the room has its owner's directions. A place on your floor, turned by YAW radians about the way up and then moved by X and Z metres, is that place in the room. It is laid once, when you come in, so that where you stand then is the spot the room gave you, facing the way the spot faces. Every program of yours that draws the room or tells it where you are needs the same answer, so ft-together keeps it: the first program that knows where you stood says it, and the rest ask.
 
 Anything that can't be done is answered with `error` and why. Ending the program (SIGTERM) leaves the room first, so the others are told at once.
 
@@ -92,13 +103,15 @@ A link that says anything it may not is closed: a stranger who says anything but
 
 ## The pose datagram
 
-One datagram per person, about 30 times a second, at most 215 bytes: a `u8` kind (1), a `u16` count that tells a newer one from an older, the eyes' place, the head's turn, the eye height when standing, a flag nibble per hand, five mouth shapes, then for each tracked hand the wrist, its turn, fifteen finger joint turns when its fingers are tracked, and the elbow if the sender knows it. Places are in the room's coordinates. These are the inputs of the body solver ([avatar/README.md](../avatar/README.md)), not its result: every Frame runs the same solver on them.
+One datagram per person, about 30 times a second, at most 215 bytes: a `u8` kind (1), a `u16` count that tells a newer one from an older, the eyes' place, the head's turn, the eye height when standing, a flag nibble per hand, five mouth shapes, then for each tracked hand the wrist, its turn, fifteen finger bone turns when its fingers are tracked, and the elbow if the sender knows it. Places are in the room's coordinates. These are the inputs of the body solver ([avatar/README.md](../avatar/README.md)), not its result: every Frame runs the same solver on them.
+
+A hand's turns belong to no body. The hand's turn is the frame of its palm, and each finger turn is the frame of that bone, all in the room's directions: which way the bone points and which way its back faces. The sender has them from its hand tracker, and each receiver fits them to the body it draws for that person, whose bones may rest differently from anyone else's. So the same datagram poses the abstract avatar and, once avatars are sent, the person's own.
 
 A reader takes a datagram only if every place is within 100 m of the room's middle, every turn is close to unit length, the eye height is between 0.5 and 2.5 m, the flags make sense together and no byte is left over.
 
 ## Tests
 
-`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The last two need msquic, which `together/build.sh` builds; without it they are SKIPPED.
+`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test and the loopback test need msquic, which `together/build.sh` builds; without it they are SKIPPED.
 
 | Test | What it covers |
 |---|---|
@@ -106,5 +119,6 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 | `tests/room-test.cpp` | Invites (once, ten minutes, eight waiting, the wrong-guess limit) and spots |
 | `tests/session-test.cpp` | Up to five sessions run against each other on a network the test makes: joining, declining, a full room, the guests' links, leaving, a lost owner, another version, and guests and strangers who say what they may not. Three hundred rounds of noise and forged messages on every kind of link |
 | `tests/tailnet-test.cpp` | tailscaled's answers, kept in the test: this node's address and name, who is at an address, Tailscale stopped or logged out, answers that aren't what they should be; the JSON reader on good texts, nearly good ones and noise; which addresses are on the tailnet; a name looked up |
+| `tests/local-test.cpp` | The pose gate (what passes, an older pose, a flood, a link forgotten), ft-together's own count, the watchers (four at most, forgotten after five seconds, what each is sent) and the floor (the first said stands, lifted on leaving) |
 | `tests/links-test.cpp` | Real links between ends in one program, on loopback: bytes in order both ways, datagrams, closing, calls that may not be made or that nobody answers, a call to another address of this machine, the limits on what a far end can make an end hold, and taking an end down with links up |
-| `tests/loopback-test.py` | Four `ft-together --loopback` programs: a room opened, a wrong code, a declined ask, noise on the port, two guests let in and linked to each other, away, a guest whose program is killed, leaving and coming back, a second program on the same socket, and the owner's program ending |
+| `tests/loopback-test.py` | Four `ft-together --loopback` programs: a room opened, a wrong code, a declined ask, noise on the port, two guests let in and linked to each other, away, a guest whose program is killed, leaving and coming back, a second program on the same socket, and the owner's program ending. Poses: one handed to a program reaches the watchers of the others' programs with whose it is and that program's own count, from the owner and from a guest, and nothing reaches a program nobody watches, a pose's own sender, or anyone after leaving; each program keeps its own floor |

@@ -100,6 +100,17 @@ test-c:
     run avatar/tests/bodyview-test.cpp build/tests/bodyview-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/face-test.cpp -o build/tests/face-test
     run avatar/tests/face-test.cpp build/tests/face-test
+    # the people of a shared room: the body someone has with no avatar, their pose over the wire onto it, and the client of ft-together
+    roomhand="avatar/view/handfit.cpp avatar/view/demo.cpp avatar/pose/bodypose.cpp avatar/bodyfile.cpp avatar/modelfile.cpp screens/handskin.cpp screens/handmodels.cpp screens/handmesh.cpp screens/handcut.cpp build/tests/handasset.cpp"
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -Werror -fsanitize=address,undefined -Iscreens avatar/tests/abstract-test.cpp \
+      avatar/abstract/abstract.cpp $roomhand -o build/tests/abstract-test
+    run avatar/tests/abstract-test.cpp build/tests/abstract-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter -Werror -fsanitize=address,undefined -Iscreens avatar/tests/room-test.cpp \
+      avatar/room/people.cpp avatar/abstract/abstract.cpp $roomhand -o build/tests/avatar-room-test
+    run avatar/tests/room-test.cpp build/tests/avatar-room-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/roomclient-test.cpp avatar/room/client.cpp \
+      avatar/room/people.cpp -o build/tests/avatar-roomclient-test
+    run avatar/tests/roomclient-test.cpp build/tests/avatar-roomclient-test
     # Frametop Together: what a peer sends is read here first, so its readers and rules run under the sanitizers
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/proto-test.cpp together/proto/messages.cpp \
       -o build/tests/together-proto-test
@@ -112,6 +123,9 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/tailnet-test.cpp together/net/tailnet.cpp \
       together/net/lookup.cpp -o build/tests/together-tailnet-test
     run together/tests/tailnet-test.cpp build/tests/together-tailnet-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/local-test.cpp together/local/watchers.cpp \
+      -o build/tests/together-local-test
+    run together/tests/local-test.cpp build/tests/together-local-test
     # the links are msquic, which together/build.sh fetches and builds
     if [ -f together/build/libmsquic.so.2 ]; then
         quic="-Itogether/build/msquic/src/inc together/build/libmsquic.so.2 -Wl,-rpath,$PWD/together/build $(pkg-config --libs openssl) -lpthread"
@@ -120,7 +134,7 @@ test-c:
         run together/tests/links-test.cpp build/tests/together-links-test
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
           together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp together/session/session.cpp together/session/commands.cpp \
-          together/proto/messages.cpp -o build/tests/ft-together $quic
+          together/proto/messages.cpp together/local/watchers.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
     else
         echo "together/tests/{links-test.cpp,loopback-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"

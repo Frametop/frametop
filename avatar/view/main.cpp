@@ -1,12 +1,18 @@
 // ft-avatars: Frametop's avatar bodies, drawn. With a headset on it is the mirror that shows you
-// the body you wear (live.h). With none it makes pictures of one (picture.h): a sheet to check
-// an import by eye, the picture Settings shows for it, and what the mirror would show.
+// the body you wear (live.h), or the other people in a shared room (../room/room.h). With none
+// it makes pictures of one (picture.h): a sheet to check an import by eye, the picture Settings
+// shows for it, and what the mirror would show; a picture of someone in a room
+// (../room/roompicture.h); and it pretends to be someone in one (../room/pretend.h).
 #include "../face/ownface.h"
+#include "../room/pretend.h"
+#include "../room/room.h"
+#include "../room/roompicture.h"
 #include "demo.h"
 #include "live.h"
 #include "picture.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +26,9 @@ int Usage() {
                  "       ft-avatars --mirror-snapshot OUT.png MODEL [the same]\n"
                  "       ft-avatars --below-snapshot OUT.png MODEL [the same]\n"
                  "       ft-avatars --thumb OUT.png MODEL [--size PX]\n"
+                 "       ft-avatars --room [--together SOCKET] [--size PX] [--seconds S] [--status S]\n"
+                 "       ft-avatars --room-snapshot OUT.png [--place N] [--pose NAME] [--at SECONDS] [--away METRES] [--round DEGREES] [--size PX]\n"
+                 "       ft-avatars --pretend POSE [--together SOCKET] [--walked RIGHT,BACK,DEGREES] [--seconds S] [--status S]\n"
                  "       ft-avatars --poses\n"
                  "       ft-avatars --hear SECONDS\n"
                  "poses: rest %s\n"
@@ -64,11 +73,65 @@ int Mirror(int argc, char **argv) {
     return live::Mirror(ask);
 }
 
+// --room and its options.
+int Room(int argc, char **argv) {
+    room::Ask ask;
+    for (int i = 2; i < argc; ++i) {
+        if (i + 1 >= argc) return Usage();
+        if (!std::strcmp(argv[i], "--together")) ask.together = argv[++i];
+        else if (!std::strcmp(argv[i], "--size")) ask.side = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--seconds")) ask.seconds = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--status")) ask.status = std::atof(argv[++i]);
+        else return Usage();
+    }
+    return room::Run(ask);
+}
+
+// --room-snapshot OUT.png and its options.
+int RoomSnapshot(int argc, char **argv) {
+    roompicture::Ask ask;
+    ask.out = argv[2];
+    for (int i = 3; i < argc; ++i) {
+        if (i + 1 >= argc) return Usage();
+        if (!std::strcmp(argv[i], "--place")) ask.place = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--pose")) ask.pose = argv[++i];
+        else if (!std::strcmp(argv[i], "--at")) ask.at = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--away")) ask.away = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--round")) ask.round = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--size")) ask.size = std::atoi(argv[++i]);
+        else return Usage();
+    }
+    return roompicture::Person(ask);
+}
+
+// --pretend POSE and its options.
+int Pretend(int argc, char **argv) {
+    pretend::Ask ask;
+    ask.pose = argv[2];
+    for (int i = 3; i < argc; ++i) {
+        if (i + 1 >= argc) return Usage();
+        if (!std::strcmp(argv[i], "--together")) ask.together = argv[++i];
+        else if (!std::strcmp(argv[i], "--seconds")) ask.seconds = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--status")) ask.status = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--walked")) {
+            double degrees = 0;
+            char more = 0;
+            if (std::sscanf(argv[++i], "%lf,%lf,%lf%c", &ask.walked.x, &ask.walked.z, &degrees, &more) != 3 || !(std::fabs(ask.walked.x) <= 50 && std::fabs(ask.walked.z) <= 50 && std::fabs(degrees) <= 360))
+                return Usage();
+            ask.walked.yaw = degrees * 3.14159265358979323846 / 180;
+        } else return Usage();
+    }
+    return pretend::Run(ask);
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
     if (argc == 2 && !std::strcmp(argv[1], "--poses")) return std::printf("rest %s\n", demo::kNames), 0;
     if (argc >= 3 && !std::strcmp(argv[1], "--mirror")) return Mirror(argc, argv);
+    if (argc >= 2 && !std::strcmp(argv[1], "--room")) return Room(argc, argv);
+    if (argc >= 3 && !std::strcmp(argv[1], "--room-snapshot")) return RoomSnapshot(argc, argv);
+    if (argc >= 3 && !std::strcmp(argv[1], "--pretend")) return Pretend(argc, argv);
     if (argc == 3 && !std::strcmp(argv[1], "--hear")) return std::atof(argv[2]) > 0 ? ownface::Hear(std::atof(argv[2])) : Usage();
     if (argc < 4) return Usage();
     const bool thumb = !std::strcmp(argv[1], "--thumb"), glass = !std::strcmp(argv[1], "--mirror-snapshot"), below = !std::strcmp(argv[1], "--below-snapshot");

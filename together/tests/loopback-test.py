@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ft-together for real, several of it on this machine's loopback: a room opened, people let
-in and kept out, the guests' own links, leaving, a program that dies, and the owner's end.
+in and kept out, the guests' own links, poses passed between them, each one's floor, leaving,
+a program that dies, and the owner's end.
 
     together/tests/loopback-test.py PATH-TO-ft-together
 
@@ -12,6 +13,7 @@ import json
 import os
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -74,6 +76,53 @@ class End:
             out, _ = self.proc.communicate()
             return -99, out
         return self.proc.returncode, out
+
+
+def pose(x, turn=0, eye_height=1.6):
+    """A pose datagram (proto/posewire.h): a head at (x, 1.6, 0) looking ahead, no hands."""
+    return struct.pack("<BH3f4hHB5s", 1, turn, x, 1.6, 0.0, 32767, 0, 0, 0, round(eye_height * 1000), 0, bytes(5))
+
+
+class Watcher:
+    """One of a Frame's own programs: it hands ft-together the wearer's pose, and watches the others'."""
+
+    def __init__(self, end):
+        self.to = ftipc.address(end.sock)
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+        self.sock.bind("")
+
+    def send(self, data):
+        self.sock.sendto(data, self.to)
+
+    def ask(self, text):
+        self.sock.settimeout(2.0)
+        self.send(text.encode())
+        try:
+            while True:
+                data = self.sock.recv(4096)
+                if data[:1] != b"\x81":
+                    return data.decode()
+        except OSError:
+            return "none"
+
+    def poses(self, seconds=0.5):
+        """What came in that time: [(person, pose bytes)]."""
+        got = []
+        deadline = time.monotonic() + seconds
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return got
+            self.sock.settimeout(left)
+            try:
+                data = self.sock.recv(4096)
+            except OSError:
+                return got
+            if data[:1] == b"\x81":
+                got.append((data[1], data[2:]))
+
+    def close(self):
+        self.sock.close()
 
 
 def names(state):
@@ -147,6 +196,38 @@ def main(program):
         check("a guest can't invite, and nobody can open or join a second room",
               ben.ask("invite").startswith("error") and ben.ask("open").startswith("error") and ada.ask("join 127.0.0.1 %d ABCDEFGH" % ben.port).startswith("error"))
 
+        # poses: from one Frame's program to the others' watchers
+        ids = {p["name"]: p["id"] for p in ada.state()["people"]}
+        mine, sees, cys = Watcher(ada), Watcher(ben), Watcher(cy)
+        check("a program asks to watch, as often as it likes", sees.ask("watch") == "ok" and cys.ask("watch") == "ok" and sees.ask("watch") == "ok")
+        mine.send(pose(0.25))
+        got = sees.poses()
+        check("a pose handed to ft-together reaches the others' watchers, and says whose it is",
+              len(got) == 1 and got[0][0] == ids["ada"] and got[0][1][3:] == pose(0.25)[3:] and [p for p, _ in cys.poses()] == [ids["ada"]])
+        for i in range(5):
+            mine.send(pose(0.5 + i, turn=7))   # whatever count the program put in, ft-together's own goes out
+        got = sees.poses()
+        counts = [struct.unpack_from("<H", data, 1)[0] for _, data in got]
+        check("ft-together counts them itself, so each is newer than the last", len(got) == 5 and len(cys.poses(0.2)) == 5 and counts == sorted(set(counts)) and
+              [round(struct.unpack_from("<f", data, 3)[0], 2) for _, data in got] == [0.5, 1.5, 2.5, 3.5, 4.5])
+        mine.send(pose(1e9))
+        mine.send(pose(0.25, eye_height=9))
+        mine.send(pose(0.25)[:-3])
+        mine.send(b"\x01")
+        check("what isn't a pose goes nowhere", sees.poses(0.3) == [])
+        check("nobody is told of their own pose, and someone who doesn't watch gets none", mine.poses(0.2) == [])
+        ok = mine.ask("watch") == "ok"
+        sees.send(pose(-1.0))
+        check("a guest's pose goes to the owner and the other guest alike", ok and [p for p, _ in mine.poses()] == [ids["ben"]] and
+              [p for p, _ in cys.poses(0.2)] == [ids["ben"]])
+
+        # the floor: where each one's own floor lies in the room
+        check("no floor is laid until a program says where", mine.ask("floor") == "ok none" and mine.ask("floor 1 2").startswith("error floor") and
+              mine.ask("floor 1 2 nan").startswith("error floor") and mine.ask("floor 5000 0 0").startswith("error floor") and mine.ask("floor") == "ok none")
+        check("the first one said stands, whoever asks", mine.ask("floor 1.5 -2 0.25") == "ok 1.500000 -2.000000 0.250000" and
+              mine.ask("floor 9 9 1") == "ok 1.500000 -2.000000 0.250000" and ada.ask("floor") == "ok 1.500000 -2.000000 0.250000")
+        check("each Frame has its own", sees.ask("floor") == "ok none" and sees.ask("floor 0 0 3") == "ok 0.000000 0.000000 3.000000")
+
         ok = ben.ask("away game") == "ok" and all(e.until(lambda s: [p["away"] for p in s["people"] if p["name"] == "ben"] == [1]) for e in (ada, ben, cy))
         ok = ok and ben.ask("away back") == "ok" and all(e.until(lambda s: [p["away"] for p in s["people"] if p["name"] == "ben"] == [0]) for e in (ada, ben, cy))
         check("being away is told to everyone, and being back", ok)
@@ -160,9 +241,18 @@ def main(program):
         # leaving, and coming back
         ok = ben.ask("leave") == "ok" and ben.state()["mode"] == "idle" and ada.until(lambda s: names(s) == ["ada"], 3)
         check("a guest who leaves is out at once", ok)
+        sees.send(pose(-1.0))
+        check("...and their pose goes nowhere, and their floor is lifted", mine.poses(0.3) == [] and sees.ask("floor").startswith("error you aren't in a room"))
         dee = start("dee")
         check("the room goes on: ben comes back, and someone new", let_in(ada, ben) and let_in(ada, dee) and
               all(e.until(lambda s: names(s) == ["ada", "ben", "dee"] and linked(s)) for e in (ada, ben, dee)))
+        ids = {p["name"]: p["id"] for p in ada.state()["people"]}
+        ok = mine.ask("watch") == "ok"   # (a watcher is forgotten when it hasn't asked for a while)
+        sees.send(pose(2.0))
+        check("back in the room, ben's poses are passed on again, and the floor is laid afresh",
+              ok and [p for p, _ in mine.poses()] == [ids["ben"]] and sees.ask("floor") == "ok none" and ada.ask("floor") == "ok 1.500000 -2.000000 0.250000")
+        for w in (mine, sees, cys):
+            w.close()
 
         # a second program
         twin = start("twin", sock=ada.sock)

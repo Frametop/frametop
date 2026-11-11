@@ -8,13 +8,11 @@
 #include "below.h"
 #include "belowview.h"
 #include "bodygpu.h"
-#include "gpuctx.h"
 #include "handcut.h"
 #include "mirror.h"
 #include "mirrorview.h"
-#include "rendernode.h"
 #include "sheet.h"
-#include "vroutput.h"
+#include "stage.h"
 #include "wearer.h"
 
 #include <signal.h>
@@ -102,23 +100,16 @@ int Mirror(const Ask &ask) {
         if (bind(sock, reinterpret_cast<sockaddr *>(&addr), ft_sock_addr(FT_SOCK_AVATARS, &addr)) != 0)
             return std::perror("avatars: bind @" FT_SOCK_AVATARS " (already running?)"), 1;
     }
-    vr::EVRInitError vrErr = vr::VRInitError_None;
-    vr::VR_Init(&vrErr, vr::VRApplication_Overlay);
-    if (vrErr != vr::VRInitError_None) return std::fprintf(stderr, "avatars: openvr: %s\n", vr::VR_GetVRInitErrorAsEnglishDescription(vrErr)), 1;
-    if (!vr::VRIPCResourceManager()) return std::fprintf(stderr, "avatars: openvr: no IVRIPCResourceManagerClient\n"), 1;
+    stage::Stage stage;
+    const vroutput::Maker &maker = stage.maker;
+    const bodygpu::Painter &painter = stage.painter;
 
     const int h = std::min(std::max(ask.height, 240), 1600), w = mirror::EyeWidth(mirror::Glass{}, h);
     const int side = std::min(std::max(ask.belowSide, 256), 1280);
-    vroutput::Maker maker;
-    maker.who = "avatars", maker.egl = gpuctx::Load(), maker.modifiers = vroutput::Modifiers();
-    maker.gbm = rendernode::Acquire("avatars");
-    EGLContext ctx = EGL_NO_CONTEXT;
-    bodygpu::Painter painter;
     Worn worn;
     sheet::Sheet screen, under;   // the mirror; your own body below you
     int status = 1;
-    if (maker.gbm && gpuctx::Open("avatars", maker.gbm, maker.egl, gpuctx::kDestroyImage, &maker.dpy, &ctx) && painter.Init("avatars") &&
-        screen.Make(maker, "frametop.avatars.mirror", "Mirror", 2, w, h)) {   // under the panels (5-21): a panel in front of the glass covers it
+    if (stage.Open("avatars") && screen.Make(maker, "frametop.avatars.mirror", "Mirror", 2, w, h)) {   // under the panels (5-21): a panel in front of the glass covers it
         worn.Wear(body, name, painter);
         status = 0;
         std::printf("ft-avatars: the mirror, %s, %dx%d an eye\n", worn.name.c_str(), w, h);
@@ -240,10 +231,8 @@ int Mirror(const Ask &ask) {
 
     if (belowMade) under.Free(maker);
     screen.Free(maker);
-    worn.Free(), painter.Done();
-    gpuctx::Close(maker.dpy, ctx);
-    if (maker.gbm) rendernode::Release();
-    vr::VR_Shutdown();
+    worn.Free();
+    stage.Close();
     close(sock);
     return status;
 }

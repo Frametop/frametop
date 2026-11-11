@@ -1,6 +1,6 @@
 # Avatars and hand models
 
-How you look in Frametop: the hands ft-handview draws for you today, and the avatar other people will see in a shared room ([docs/together.md](../docs/together.md), "Avatars and hands"). This folder has the model file, the importer that writes it, the solver that poses a body from a headset's wearer, the program that draws bodies, and Frametop Settings' Appearance page.
+How you look in Frametop: the hands ft-handview draws for you today, and the avatar other people will see in a shared room ([docs/together.md](../docs/together.md), "Avatars and hands"). This folder has the model file, the importer that writes it, the solver that poses a body from a headset's wearer, the program that draws bodies (yours in a mirror, and the other people in a shared room), and Frametop Settings' Appearance page.
 
 | File | What |
 |---|---|
@@ -10,11 +10,13 @@ How you look in Frametop: the hands ft-handview draws for you today, and the ava
 | `vec.h` | A point in three dimensions, for the importer and the solver |
 | `pose/` | The pose solver (`bodypose.h`): a body's 55 bones from the wearer's head and hands. Sums only, no tracking, GPU or SteamVR code |
 | `face/` | An avatar's face while it is worn: when its eyes blink and how its mouth moves with a voice (`face.h`, sums only), the microphone it hears you by (`micear.h`), and the two together for the avatar you wear yourself (`ownface.h`). Built into `ft-avatars` |
+| `abstract/` | The body someone has in a shared room when no avatar of theirs is drawn: a head with a visor and two hands in the colour of their place, made in code as a whole valid body, so it is posed and drawn as an imported one is |
+| `room/` | The other people in a shared room, for `ft-avatars --room`: your floor laid in the room (`floor.h`), a wearer as the pose the room is told and back (`wire.h`), who is in the room and their newest poses (`people.h`), the program's end of ft-together's socket (`client.h`), a person posed in their body (`figure.h`) on the sheet they are drawn on (`billboard.h`), the loop that draws them and tells the room of you (`room.h`), a pretended person for tests (`pretend.h`) and a picture of one (`roompicture.h`) |
 | `view/` | `ft-avatars`: bodies drawn with GLES 2, in pictures, in the mirror that shows you the avatar you wear, and below you when you look down (an experiment). It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws and shows its mirror the way ft-handview shows them (`screens/vroutput.h`) |
 | `import/` | `ft-model-import`: a VRM, glTF, GLB or FBX model into a `.ftmodel` (`build.sh` builds it into `avatar/build/`) |
 | `ftmodel.py` | The same file read in Python, for the tests and the Settings page |
 | `hand_models.py`, `avatar_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove, and your avatars: which one you wear, and the mirror |
-| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, the square your own body is drawn on, a tracked wearer) and `face-test.cpp` (the blinks, and the mouth on made-up voices), all in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb, the mirror and the body below), `test_appearance.py` (the page's backend) |
+| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, the square your own body is drawn on, a tracked wearer) and `face-test.cpp` (the blinks, and the mouth on made-up voices), all in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb, the mirror and the body below), `test_appearance.py` (the page's backend). For shared rooms: `abstract-test.cpp` (the abstract body is a valid one, in every place's colour, and poses), `room-test.cpp` (floors, a pose over the wire onto another floor, sheets, who is drawn and when, a person posed and seen by both eyes) and `roomclient-test.cpp` (the client against a made-up ft-together, on a made-up clock), in `just test-c`, and `test_room_picture.py` (the built `ft-avatars`: a person's picture in each place's colour, facing the way they face, and what the room's modes refuse) |
 
 ## The model file
 
@@ -60,7 +62,7 @@ A headset knows where its wearer's head is and, while they are tracked, the hand
 - **The trunk** hangs from the head. It turns after the head once the head has turned 15 degrees from it, never lags more than 75, and takes about a third of a second to follow. When the head comes down while looking down, the spine leans; when it comes down level, the knees bend.
 - **An arm** reaches a tracked wrist with two bones, the elbow down and out (or where the tracker says it is). The forearm takes half of the hand's twist. An arm whose hand isn't tracked hangs, and it moves between the two over about a tenth of a second.
 - **The legs** stand under the hips. The lower the hips, the further forward the feet, so a seated wearer's body sits.
-- **The fingers** take the tracked hand's turns (`view/handfit.cpp` fits the tracker's hand to the body's own finger bones).
+- **The fingers** take the tracked hand's turns (`view/handfit.cpp` fits the tracker's hand to the body's own finger bones). What is fitted is the frame of the palm and of each finger bone (`handfit::Frames`), which belongs to no body: that is what a shared room is told, so each Frame fits it to the body it draws.
 
 The same solver poses your own body and the people you share a room with. It refuses input that isn't numbers and never produces any: `bodypose-test.cpp` runs it on thousands of random inputs under the sanitizers.
 
@@ -74,11 +76,14 @@ screens/build/ft-avatars --below-snapshot OUT.png MODEL [the same]
 screens/build/ft-avatars --thumb OUT.png MODEL [--size PX]
 screens/build/ft-avatars --poses
 screens/build/ft-avatars --hear SECONDS
+screens/build/ft-avatars --room [--together SOCKET] [--size PX] [--seconds S] [--status S]
+screens/build/ft-avatars --room-snapshot OUT.png [--place N] [--pose NAME] [--at SECONDS] [--away METRES] [--round DEGREES] [--size PX]
+screens/build/ft-avatars --pretend POSE [--together SOCKET] [--walked RIGHT,BACK,DEGREES] [--seconds S] [--status S]
 ```
 
 `ft-avatars` draws a model file's body on the GPU (`view/bodygpu.cpp`): the mesh is skinned in the vertex shader by the pose's 55 matrices, the face shapes move the vertices before that (`view/bodymesh.cpp`), and each part is drawn with its material's look: lit, in two tones for a cartoon material, or in its own colours; solid, cut out or see-through.
 
-With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. `--mirror-snapshot` writes what the mirror would show that wearer, both eyes' views side by side, and `--below-snapshot` what that wearer would see of their own body looking down. The people in a shared room come next.
+With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. `--mirror-snapshot` writes what the mirror would show that wearer, both eyes' views side by side, and `--below-snapshot` what that wearer would see of their own body looking down. `--room-snapshot` writes someone in a shared room as you would see them (below). The offscreen picture itself is `view/canvas.cpp`.
 
 ## The mirror
 
@@ -96,7 +101,24 @@ Cost, 2026-11-10, a 528 by 960 picture an eye, the headset off the head (SteamVR
 echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_avatars,bind=
 ```
 
-The avatar you wear is `AVATAR_MODEL` in `~/.config/frametop.conf`: the name of one of your models that has a body, or nothing. The Appearance page lists them with their pictures (`ft-avatars --thumb`, kept in `~/.cache/frametop/avatar-thumbs` until the model's file changes). Wearing one also picks its hands (`HANDS_VIEW_MODEL`), which you can change again; a model you import that turns out to be a whole avatar is worn at once; removing the one you wear takes the mirror away. Nobody else sees your avatar until shared rooms exist (M3).
+The avatar you wear is `AVATAR_MODEL` in `~/.config/frametop.conf`: the name of one of your models that has a body, or nothing. The Appearance page lists them with their pictures (`ft-avatars --thumb`, kept in `~/.cache/frametop/avatar-thumbs` until the model's file changes). Wearing one also picks its hands (`HANDS_VIEW_MODEL`), which you can change again; a model you import that turns out to be a whole avatar is worn at once; removing the one you wear takes the mirror away. Nobody else sees your avatar yet: in a shared room the others see the abstract one until avatars are sent (later in M3).
+
+## People in a shared room
+
+`ft-avatars --room` runs beside `ft-together` ([together/README.md](../together/README.md)) and does two things while you are in a room: it tells the room where you are, and it draws the others.
+
+- **Your floor** (`room/floor.h`). You track yourself on your own floor, and the room has its owner's directions. When you come in, your floor is laid in the room so that where you stand is the spot the room gave you. ft-together keeps that for all of your programs; `room/client.cpp` says it if nobody has, and asks otherwise.
+- **You, told** (`room/wire.h`). Thirty times a second, while the headset tracks: your eyes, your head's turn, how tall you stand, and each tracked hand as its wrist and the frames of its palm and finger bones, all in the room's directions. No body is sent with it.
+- **The others** (`room/people.h`, `room/figure.h`). ft-together passes each person's poses on. Each is posed by the solver above in the body they are given: until avatars are sent (later in M3), the abstract one in the colour of their place, teal, orange, purple or pink. Someone whose poses stop for a second isn't drawn, so nobody stands frozen in the room.
+- **Drawn on a sheet** (`room/billboard.h`, `view/windowview.cpp`). A person is drawn as your own body below you is: a sheet stands where they are, upright and turned to face you, no bigger than what is drawn of them needs, and each eye gets its view of the body through that sheet as a window, the two side by side. So they have depth of their own. Each person is one SteamVR overlay with its own buffers (`view/sheet.cpp`), 768 pixels a side an eye unless `--size` says otherwise, drawn as often as their poses come and only while they are within 80 degrees of where your head looks.
+
+Outside a room it draws nothing and sleeps. Commands, one datagram each on `@ft_avatars_room`: `state` (the last status line: the room, who you are in it, how many are shown, draws and poses a second, the CPU it takes) and `quit`.
+
+What it doesn't do yet: people's sheets sort under the panels, so a panel behind someone draws over them where they overlap; there is nothing between two poses, so a link that drops some shows it; a hand that isn't tracked hangs at the abstract body's side, where no arm is drawn to explain it; your pose goes out whenever the headset tracks, worn or not, until away is built; and nothing starts the program for you (Settings will, later in M3).
+
+**Without a headset.** `--room-snapshot` writes a picture of the person at a place (0 to 3), as a demo wearer whose pose went the whole way a real one's does: told in the room's directions, packed, read, fitted on another floor, and drawn on their sheet for a pair of eyes `--away` metres in front of them (`--round` walks those eyes around them). `--pretend POSE` is a person who isn't there: it tells an ft-together the pose of a demo wearer thirty times a second, with no GPU or SteamVR. With a second `ft-together` that joined a room, that is a fake peer: the others see someone on their spot, or wherever `--walked` says they have walked to since they came in (metres to their right and back, and degrees turned).
+
+Cost, 2026-11-10, one pretended person, the headset off the head: 27 draws a second, 30 poses a second in and 27 out, 3.5% of one core in all. In the headset, and with three people, it is still to be measured (`HEADSET-TESTS.md`).
 
 ## Your own body
 
@@ -106,7 +128,7 @@ An overlay is a flat picture, and a body isn't. So the picture is drawn the way 
 
 - **It is fixed in the room, not to your head.** SteamVR places a room-fixed overlay afresh every frame from the newest head pose, so turning your head can't make the body slide, however late the picture is. What does trail is moving your head: the square is put under your eyes again at each draw (45 a second), and between draws the picture is the one for where your eyes were. That is the question the spike asks in the headset.
 - **The head is folded away** (`below::Fold`): your eyes are inside it. Its vertices, and those of a hand the hand tracker is showing (ft-handview draws your hands, with the same model), collapse to the neck and the wrist.
-- **It is drawn only while you look down** more than 12 degrees (`--below-from DEGREES` to try another angle; -90 draws it always), and its buffers are made the first time it is wanted (`view/sheet.cpp` is the overlay and its three buffers, the same for the mirror).
+- **It is drawn only while you look down** more than 12 degrees (`--below-from DEGREES` to try another angle; -90 draws it always), and its buffers are made the first time it is wanted (`view/sheet.cpp` is the overlay and its three buffers, the same for the mirror and for each person in a shared room; `view/stage.cpp` is what they all stand on: SteamVR, the GPU context and the program bodies are drawn with).
 
 What the trial can't do, by its making: it sorts under every panel and the mirror, so a panel far behind your arm still draws over the arm where they overlap; what is more than 58 degrees from straight down (hands held out far ahead) is cut at the square's edge; and each eye's picture is 1024 pixels a side, about twice the mirror's pixels, whose cost in the headset is still to be measured.
 

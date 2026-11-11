@@ -1,6 +1,12 @@
 // ft-together: this Frame's end of Frametop Together (docs/together.md, together/README.md).
 // It holds the links to the other Frames and the session on them, and answers the rest of
-// Frametop on a local socket, one datagram a question (session/commands.h):
+// Frametop on a local socket, one datagram a question: the session's (session/commands.h), and
+//
+//   watch            -> the asker gets the other people's poses from now on (local/watchers.h)
+//   floor [X Z YAW]  -> where this Frame's own floor lies in the room (local/floor.h)
+//
+// A datagram there that is a pose (local/datagrams.h) is the wearer's own: it goes to everyone
+// in the room, and theirs come back to whoever watches.
 //
 //   ft-together [--port N] [--name NAME] [--socket NAME] [--loopback]
 //
@@ -16,6 +22,9 @@
 //
 // One loop, one thread of ours: the links queue what msquic's threads see (net/quiclinks.h).
 #include "../conf/ftsock.h"
+#include "local/floor.h"
+#include "local/posegate.h"
+#include "local/watchers.h"
 #include "net/quiclinks.h"
 #include "net/tailnet.h"
 #include "session/commands.h"
@@ -29,6 +38,7 @@
 #include <string>
 #include <sys/random.h>
 #include <unistd.h>
+#include <vector>
 
 namespace {
 
@@ -85,6 +95,15 @@ bool Read(int argc, char **argv, Args &args) {
 struct End {
     std::unique_ptr<net::QuicLinks> links;
     std::unique_ptr<session::Session> session;
+    bool inRoom() const { return session && (session->mode() == session::Mode::kHosting || session->mode() == session::Mode::kJoined); }
+};
+
+// What this Frame's own programs are given of the room, and give it (together/local).
+struct Local {
+    local::PoseGate gate;
+    local::PoseCount count;
+    local::Watchers watchers;
+    local::Floor floor;
 };
 
 // False with nothing in `err` while Tailscale isn't up, and with the reason when it can't work.
@@ -103,26 +122,48 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, std::string &e
     return true;
 }
 
-void Tell(session::Session &session, const net::Event &e, double now) {
+// What a link saw. A pose from someone in the room goes to this Frame's watchers; anything
+// else in a datagram (voice, later) is dropped.
+void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
+    session::Session &session = *end.session;
     switch (e.kind) {
     case net::Event::kUp: session.Up(e.link, e.address, now); break;
     case net::Event::kBytes: session.Bytes(e.link, e.bytes.data(), e.bytes.size(), now); break;
-    case net::Event::kDown: session.Down(e.link, now); break;
-    case net::Event::kDatagram: break;   // poses and voice: nobody sends them yet
+    case net::Event::kDown:
+        session.Down(e.link, now);
+        local.gate.Forget(e.link);
+        break;
+    case net::Event::kDatagram: {
+        const int person = session.PersonOn(e.link);
+        if (person >= 0 && local.gate.Take(e.link, e.bytes.data(), e.bytes.size(), now)) local.watchers.Send(sock, person, e.bytes.data(), e.bytes.size(), now);
+        break;
+    }
     }
 }
 
-// One question from the local socket answered, if one waits.
-bool Answer(int sock, End &end, double now) {
+// The wearer's own pose, from one of this Frame's programs, to everyone in the room.
+void Mine(End &end, Local &local, const uint8_t *data, size_t n) {
+    std::vector<uint8_t> out;
+    if (!end.inRoom() || !local.count.Stamp(data, n, out)) return;
+    for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
+}
+
+// One datagram from the local socket seen to, if one waits: a question answered, or a pose sent on.
+bool Answer(int sock, End &end, Local &local, double now) {
     char text[kMostQuestion + 1];
     sockaddr_un from;
     socklen_t fromLen = sizeof from;
     const ssize_t n = recvfrom(sock, text, sizeof text, MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&from), &fromLen);
     if (n < 0) return false;
+    if (n > 0 && uint8_t(text[0]) == proto::kPoseDatagram) return Mine(end, local, reinterpret_cast<const uint8_t *>(text), size_t(n)), true;
+    const std::string asked(text, size_t(n));
     std::string reply;
     if (size_t(n) > kMostQuestion) reply = "error that is too long";
     else if (!end.session) reply = "error Tailscale isn't running on this headset";
-    else reply = session::Command(*end.session, std::string(text, size_t(n)), now);
+    else if (asked == "watch") reply = local.watchers.Add(from, fromLen, now) ? "ok" : "error too many programs are watching";
+    else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = local.floor.Ask(asked, end.inRoom());
+    else reply = session::Command(*end.session, asked, now);
+    if (!end.inRoom()) local.floor.Lift();   // the room was left: the next one's floor is its own
     // an asker that doesn't wait for its answer doesn't hold up the loop
     if (fromLen > sizeof(sa_family_t)) sendto(sock, reply.data(), reply.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<sockaddr *>(&from), fromLen);
     return true;
@@ -150,6 +191,7 @@ int main(int argc, char **argv) {
     else tailnet = std::make_unique<net::Tailscale>();
 
     End end;
+    Local local;
     double tried = -1e9, ticked = Now();
     bool waiting = false;
     std::string note;
@@ -169,9 +211,10 @@ int main(int argc, char **argv) {
         now = Now();
         if (end.session) {
             net::Event e;
-            for (int i = 0; i < kMostAtOnce && end.links->Next(e); ++i) Tell(*end.session, e, now);
+            for (int i = 0; i < kMostAtOnce && end.links->Next(e); ++i) Tell(sock, end, local, e, now);
+            if (!end.inRoom()) local.floor.Lift();
         }
-        for (int i = 0; i < kMostAtOnce && Answer(sock, end, now); ++i) {}
+        for (int i = 0; i < kMostAtOnce && Answer(sock, end, local, now); ++i) {}
         if (end.session && now - ticked >= 1) {
             ticked = now;
             end.session->Tick(now);

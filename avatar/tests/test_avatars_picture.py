@@ -9,21 +9,19 @@ pose that isn't one) ends in an error.
 It runs the built programs (avatar/build.sh, screens/build.sh) and is skipped where they aren't
 built or there is no GPU to draw on.
 Run: python3 avatar/tests/test_avatars_picture.py"""
-import struct
 import subprocess
 import sys
 import unittest
-import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bodyfixtures  # noqa: E402
 import fixtures  # noqa: E402
+from avatarsprogram import TOOL, built  # noqa: E402
 from importcase import REPO, ImportCase  # noqa: E402
+from pngread import read_png  # noqa: E402
 
-TOOL = REPO / 'screens/build/ft-avatars'
-SOURCES = [*(REPO / 'avatar/view').glob('*'), *(REPO / 'avatar/pose').glob('*'), *(REPO / 'avatar').glob('bodyfile.*'), REPO / 'avatar/vec.h']
 GREY = 82   # what a sheet is drawn over
 GLASS, FRAME = (23, 26, 31), (140, 148, 158)   # the mirror's glass with nothing in it, and its edge
 
@@ -37,50 +35,10 @@ def lopsided(there):
     return sum(x < middle for x in by_head) - sum(x > middle for x in by_head)
 
 
-def read_png(path):
-    """(width, height, channels, rows of bytes) of an 8 bit RGB or RGBA PNG."""
-    data = Path(path).read_bytes()
-    assert data[:8] == b'\x89PNG\r\n\x1a\n'
-    at, packed, width, height, channels = 8, b'', 0, 0, 0
-    while at < len(data):
-        size, tag = struct.unpack_from('>I4s', data, at)
-        body = data[at + 8:at + 8 + size]
-        if tag == b'IHDR':
-            width, height, depth, colour = struct.unpack_from('>IIBB', body)
-            assert depth == 8 and colour in (2, 6)
-            channels = 3 if colour == 2 else 4
-        elif tag == b'IDAT':
-            packed += body
-        at += 12 + size
-    raw, stride, rows, last = zlib.decompress(packed), width * channels, [], bytes(width * channels)
-    for y in range(height):
-        kind, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
-        for i in range(stride):
-            left, up, corner = (line[i - channels] if i >= channels else 0), last[i], (last[i - channels] if i >= channels else 0)
-            if kind == 1:
-                line[i] = (line[i] + left) & 255
-            elif kind == 2:
-                line[i] = (line[i] + up) & 255
-            elif kind == 3:
-                line[i] = (line[i] + (left + up) // 2) & 255
-            elif kind == 4:
-                p = left + up - corner
-                near = min((abs(p - left), 0, left), (abs(p - up), 1, up), (abs(p - corner), 2, corner))[2]
-                line[i] = (line[i] + near) & 255
-        rows.append(bytes(line))
-        last = rows[-1]
-    return width, height, channels, rows
-
-
 class AvatarsPictureTest(ImportCase):
     @classmethod
     def setUpClass(cls):
-        if not TOOL.exists():
-            raise unittest.SkipTest('screens/build/ft-avatars is not built (screens/build.sh)')
-        if any(src.stat().st_mtime > TOOL.stat().st_mtime for src in SOURCES):
-            raise unittest.SkipTest('screens/build/ft-avatars is older than its sources (screens/build.sh)')
-        if not Path('/dev/dri/renderD128').exists():
-            raise unittest.SkipTest('no GPU to draw on')
+        built(gpu=True)
         super().setUpClass()
         rig = bodyfixtures.person('opaque', extras=False)   # no stand under the feet: the views are fitted to the person
         path = cls.dir / 'person.vrm'

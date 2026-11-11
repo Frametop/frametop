@@ -4,6 +4,10 @@
 // stand, and their mouth's five shapes. The receiver poses a body from it with the solver the
 // sender poses its own with (avatar/pose/bodypose.h), so no bones cross the link.
 //
+// A hand's turns belong to no body: `turn` is the frame of the palm and finger[k] the frame of
+// finger bone k, each in the room's directions (which way the bone points, which way its back
+// faces). Each end fits them to the body it draws for that person (avatar/view/handfit.h).
+//
 // About thirty a second, at most 215 bytes, and a late one is worth nothing: `turn` counts
 // them, and the receiver keeps the newest (Newer). A turn is a unit quaternion (w, x, y, z).
 //

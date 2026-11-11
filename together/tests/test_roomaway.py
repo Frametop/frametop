@@ -36,16 +36,16 @@ class Reading(unittest.TestCase):
         self.assertEqual(teller.away(False, True), teller.OFF)   # off their head in a game: off
         self.assertEqual(teller.away(False, None), teller.OFF)
 
-    def test_how_the_room_has_me(self):
-        def state(mode, me=1, away=2):
-            return "ok " + json.dumps({"mode": mode, "me": me, "people": [{"id": 0, "away": 0}, {"id": 1, "away": away}]})
-        self.assertEqual(teller.mine(state("joined")), 2)
-        self.assertEqual(teller.mine(state("hosting", me=0)), 0)
-        self.assertIsNone(teller.mine(state("idle")))
-        self.assertIsNone(teller.mine(state("calling")))
-        self.assertIsNone(teller.mine(state("joined", me=3)))
-        for other in (None, "", "error no", "ok", "ok {", "ok []", 'ok {"mode": "joined"}', 'ok {"mode": "joined", "me": 0, "people": [{"id": 0, "away": "x"}]}'):
-            self.assertIsNone(teller.mine(other), other)
+    def test_how_ft_together_has_me(self):
+        def state(mode, away=2):
+            return "ok " + json.dumps({"mode": mode, "me": 1, "away": away, "people": [{"id": 0, "away": 0}, {"id": 1, "away": 0}]})
+        self.assertEqual(teller.has(state("joined")), (2, True))
+        self.assertEqual(teller.has(state("hosting", 0)), (0, True))
+        self.assertEqual(teller.has(state("idle", 1)), (1, False))
+        self.assertEqual(teller.has(state("calling", 0)), (0, False))
+        for other in (None, "", "error no", "ok", "ok {", "ok []", 'ok {"mode": "joined"}', 'ok {"mode": "joined", "away": "x"}', 'ok {"mode": "joined", "away": true}',
+                      'ok {"mode": "joined", "away": 1.5}'):
+            self.assertIsNone(teller.has(other), other)
 
 
 class World:
@@ -54,12 +54,14 @@ class World:
     def __init__(self):
         self.mode, self.away, self.now = "joined", 0, 100.0
         self.headset, self.pause = "ok on worn", '{"t": "pause", "paused": false}'
-        self.asked, self.refuse = [], False
+        self.asked, self.refuse, self.down = [], False, False
 
     def together(self, text):
         self.asked.append(text)
+        if self.down:
+            return None
         if text == "state":
-            return "ok " + json.dumps({"mode": self.mode, "me": 1, "people": [{"id": 0, "away": 0}, {"id": 1, "away": self.away}]})
+            return "ok " + json.dumps({"mode": self.mode, "me": 1, "away": self.away, "people": [{"id": 0, "away": 0}, {"id": 1, "away": 0}]})
         if self.refuse:
             return "error not now"
         self.away = {"away back": 0, "away game": 1, "away off": 2}[text]
@@ -82,12 +84,22 @@ class World:
 
 
 class Telling(unittest.TestCase):
-    def test_outside_a_room_nobody_is_asked(self):
+    def test_without_ft_together_nobody_is_asked(self):
         w = World()
-        w.mode = "idle"
+        w.down = True
         t = w.teller()
         t.tick()
         self.assertEqual((t.in_room, t.told, w.asked), (False, None, ["state"]))
+
+    def test_outside_a_room_it_is_told_too_so_the_next_room_has_it_from_the_start(self):
+        w = World()
+        w.mode, w.headset = "idle", "ok on away"
+        t = w.teller()
+        t.tick()
+        self.assertEqual((t.in_room, t.told, w.said()), (False, "off", ["away off"]))
+        w.mode = "hosting"
+        t.tick()
+        self.assertEqual((t.in_room, w.said()), (True, []))
 
     def test_worn_and_not_paused_there_is_nothing_to_tell(self):
         w = World()
@@ -146,18 +158,18 @@ class Telling(unittest.TestCase):
         t.tick()
         self.assertEqual(w.said(), ["away back"])
 
-    def test_leaving_the_room_and_coming_back(self):
+    def test_an_ft_together_that_started_again_is_told_again(self):
         w = World()
         t = w.teller()
         w.headset = "ok on away"
         t.tick()
-        w.mode, w.away = "idle", 0
+        w.down = True
         t.tick()
         self.assertEqual((t.in_room, t.told), (False, None))
         w.said()
-        w.mode = "hosting"
+        w.down, w.mode, w.away = False, "idle", 0
         t.tick()
-        self.assertEqual(w.said(), ["away off"])
+        self.assertEqual((w.said(), t.told), (["away off"], "off"))
 
 
 if __name__ == "__main__":

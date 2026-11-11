@@ -18,7 +18,7 @@ std::string Session::Open(const proto::Spot &spot) {
     Who who;
     proto::Person p;
     if (!tailnet_.Self(who, p.address)) return "Tailscale isn't running on this headset";
-    p.spot = spot;
+    p.spot = spot, p.away = away_;
     p.name = config_.name.empty() ? who.name : config_.name, p.login = who.login, p.port = config_.port;
     room_ = proto::Room{};
     for (size_t i = 0; i < proto::kRoomId; i += 8) {
@@ -70,14 +70,13 @@ std::string Session::Answer(int ask, bool accept) {
 
 std::string Session::SetAway(uint8_t away) {
     if (away & ~(proto::kAwayGame | proto::kAwayOff)) return "that isn't a way to be away";
+    away_ = away;
     if (mode_ == Mode::kHosting) {
         if (room_.people[0].away != away) room_.people[0].away = away, Changed();
     } else if (mode_ == Mode::kJoined) {
         proto::Away a;
         a.away = away;
         links_.Send(LinkOf(room_.owner), proto::Pack(a));
-    } else {
-        return "you aren't in a room";
     }
     return "";
 }

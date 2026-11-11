@@ -146,6 +146,11 @@ void Session::Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, 
         mode_ = Mode::kJoined, me_ = w.you, room_ = w.room;
         l.state = Link::kMember, l.person = room_.owner;
         note_ = "You are in " + room_.person(room_.owner)->name + "'s room.";
+        if (room_.person(me_)->away != away_) {   // away before coming in: the room hears it first
+            proto::Away a;
+            a.away = away_;
+            links_.Send(link, proto::Pack(a));
+        }
         return Mesh(now);
     }
     case proto::kRoom: {

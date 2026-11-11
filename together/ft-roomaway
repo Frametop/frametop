@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 """ft-roomaway: tells a Together room whether this Frame's wearer is there (docs/together.md,
-"Away"). While ft-together says this Frame is in a room, it asks the pointer helper whether the
-headset is worn and the input relay whether Frametop is paused for a game, once a second, and
-says `away off`, `away game` or `away back` to ft-together when the room has it otherwise. The
-rules are in roomaway/teller.py; this is the loop around them.
+"Away"). While ft-together runs, it asks the pointer helper whether the headset is worn and the
+input relay whether Frametop is paused for a game (once a second in a room, every other second
+outside one), and says `away off`, `away game` or `away back` to ft-together when that has it
+otherwise. The rules are in roomaway/teller.py; this is the loop around them.
 
   --together NAME   ft-together's socket (ft_together)
   --helper NAME     the pointer helper's (ft_pointer_helper)
@@ -44,7 +44,7 @@ def main():
         teller.tick()
         if (teller.in_room, teller.told) != was:
             was = (teller.in_room, teller.told)
-            print(("in a room" + (": " + teller.told if teller.told else "")) if teller.in_room else "in no room", flush=True)
+            print(("in a room" if teller.in_room else "in no room") + (": " + teller.told if teller.told else ""), flush=True)
         time.sleep(IN_ROOM if teller.in_room else IDLE)
 
 

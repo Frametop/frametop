@@ -40,7 +40,7 @@ def main():
         return lambda state: [p["away"] for p in state["people"] if p["name"] == "ben"]
 
     try:
-        check("it starts in no room, and asks nobody but ft-together", tool.said("in no room") and not helper.asked and not relay.asked)
+        check("it starts in no room", tool.said("in no room"))
         check("ada opens a room and ben comes in", ada.ask("open") == "ok" and roomkit.let_in(ada, ben) and ada.until(roomkit.linked) and ben.until(roomkit.linked))
         check("it sees the room, and has nothing to tell", tool.said("in a room") and helper.asked[-1] == "gaze ? headset" and relay.asked[-1] == "pause ?"
               and bens(ada)(ada.state()) == [0])

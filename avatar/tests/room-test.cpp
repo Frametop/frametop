@@ -227,6 +227,10 @@ static void people() {
     check("someone new in a place isn't the one before", p.Room(state("hosting", 0, (std::string(kAda) + "," + kCy).c_str())) && p.me() == 0 && p.person(1).name == "cy" &&
                                                            p.person(1).since == benSince + 1 && !p.person(1).posed && !p.Drawn(0, 12.2));
     check("...and you are back when it has you back", !p.Away());
+    std::string mine = state("hosting", 0, (std::string(kAda) + "," + kCy).c_str());
+    mine.insert(1, "\"away\":2,");
+    check("what your own ft-together says of you counts before the room's copy of you", p.Room(mine) && p.Away() && p.MyAway() == 2 && p.person(0).away == 0);
+    check("...and is gone with it", p.Room(state("hosting", 0, (std::string(kAda) + "," + kCy).c_str())) && !p.Away());
     d = watched(1, 0.5f);
     check("...and is drawn from their own first pose", p.Pose(d.data(), d.size(), 13) && p.Drawn(1, 13));
     check("someone who left isn't there", p.Room(state("hosting", 0, kAda)) && !p.person(1).here && !p.Drawn(1, 13) && !p.Pose(d.data(), d.size(), 13));

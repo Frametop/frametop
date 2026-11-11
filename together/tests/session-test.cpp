@@ -69,12 +69,18 @@ static void joining() {
 
     ok = b.ask("away off") == "ok" && a.s->room().person(1)->away == proto::kAwayOff && b.s->room().person(1)->away == proto::kAwayOff;
     ok = ok && a.ask("away game") == "ok" && b.s->room().person(0)->away == proto::kAwayGame && b.ask("away back") == "ok" && a.s->room().person(1)->away == 0;
-    check("away and back reach everyone", ok && a.ask("away asleep").rfind("error", 0) == 0 && c.ask("away off").rfind("error", 0) == 0);
+    check("away and back reach everyone", ok && a.ask("away asleep").rfind("error", 0) == 0);
+    ok = c.ask("away off") == "ok" && idle(c) && c.has("\"away\":2") && join(a, c) && a.s->room().person(2) && a.s->room().person(2)->away == proto::kAwayOff;
+    ok = ok && b.s->room().person(2)->away == proto::kAwayOff && c.s->room().person(2)->away == proto::kAwayOff;
+    ok = ok && c.ask("away back") == "ok" && a.s->room().person(2)->away == 0 && c.has("\"away\":0") && c.ask("leave") == "ok" && idle(c);
+    check("someone away before they come in is away in the room from the start", ok);
 
     ok = b.ask("leave") == "ok" && idle(b) && a.s->room().people.size() == 1 && a.has("Bo left.") && a.s->MemberLinks().empty();
     check("a guest leaves, and the room goes on without them", ok);
     ok = join(a, b) && a.ask("leave") == "ok" && idle(a) && idle(b) && b.has("its owner closed it");
     check("the owner leaves, and the room ends for everyone", ok && net.far.empty());
+    ok = a.ask("away game") == "ok" && a.ask("open") == "ok" && a.s->room().person(0)->away == proto::kAwayGame && a.ask("leave") == "ok" && a.has("\"away\":1");
+    check("...and so is an owner who opens a room, in the next room too", ok && a.ask("away back") == "ok" && idle(a));
     ok = b.ask("join 100.64.0.1 47193 " + fourth) == "ok" && idle(b) && b.has("No room is open");
     check("nobody joins a headset with no room open", ok);
 

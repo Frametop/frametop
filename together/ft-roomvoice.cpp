@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
         client.Tick(now, head.known(now) ? stands : nullptr);
 
         const roompeople::People &people = client.people();
-        const bool worn = people.inRoom() && !(people.person(people.me()).away & proto::kAwayOff);
+        const bool worn = people.inRoom() && !(people.MyAway() & proto::kAwayOff);
         sender.Want(worn && !muted);
         player.Want(worn);
         Place(*voices, client, head, since, now);

@@ -100,7 +100,7 @@ std::string State(const Session &session) {
     static const char *const kModes[] = {"idle", "hosting", "calling", "joined"};
     const proto::Room &room = session.room();
     std::ostringstream out;
-    out << "{\"mode\":\"" << kModes[int(session.mode())] << "\",\"note\":" << Quoted(session.note()) << ",\"me\":" << session.me() << ",\"owner\":" << int(room.owner) << ",\"people\":[";
+    out << "{\"mode\":\"" << kModes[int(session.mode())] << "\",\"note\":" << Quoted(session.note()) << ",\"me\":" << session.me() << ",\"away\":" << int(session.away()) << ",\"owner\":" << int(room.owner) << ",\"people\":[";
     for (size_t i = 0; i < room.people.size(); ++i) {
         const proto::Person &p = room.people[i];
         out << (i ? "," : "") << "{\"id\":" << int(p.id) << ",\"name\":" << Quoted(p.name) << ",\"login\":" << Quoted(p.login) << ",\"away\":" << int(p.away)

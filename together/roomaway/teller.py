@@ -1,6 +1,8 @@
-"""What ft-roomaway keeps true while this Frame is in a room (docs/together.md, "Away"): the
-room knows whether its wearer is there. With the headset off their head they are away ("off"),
-with Frametop paused for a game they are in a game ("game"), and otherwise they are back.
+"""What ft-roomaway keeps true (docs/together.md, "Away"): this Frame's ft-together knows
+whether its wearer is there, and through it the room they are in. With the headset off their
+head they are away ("off"), with Frametop paused for a game they are in a game ("game"), and
+otherwise they are back. It is kept true outside a room too, so that a room has it from the
+moment it is opened or joined: no microphone opens for a headset that lies on a desk.
 
 The rules only. Its questions go out through three functions it is given, each a text in and
 the answer or None back: `together` (ft-together's local socket), `helper` (the pointer helper,
@@ -43,17 +45,18 @@ def away(is_worn, is_paused):
     return GAME if is_paused else 0
 
 
-def mine(reply):
-    """How the room has this Frame's wearer away, from ft-together's "state": a number, or None
-    while this Frame is in no room."""
+def has(reply):
+    """ft-together's "state" read: (how it has this Frame's wearer away, whether it is in a
+    room), or None when that isn't its answer."""
     if not reply or not reply.startswith("ok "):
         return None
     try:
         state = json.loads(reply[3:])
-        if state.get("mode") not in ("hosting", "joined"):
+        away_now = state["away"]
+        if not isinstance(away_now, int) or isinstance(away_now, bool):
             return None
-        return next(int(p["away"]) for p in state["people"] if p["id"] == state["me"])
-    except (ValueError, TypeError, KeyError, AttributeError, StopIteration):
+        return away_now, state.get("mode") in ("hosting", "joined")
+    except (ValueError, TypeError, KeyError, AttributeError):
         return None
 
 
@@ -76,18 +79,18 @@ class Teller:
         self._together, self._helper, self._relay, self._clock = together, helper, relay, clock
         self._worn, self._paused = Known(), Known()
         self.in_room = False
-        self.told = None    # the last thing the room was told: "back", "game", "off"
+        self.told = None    # the last thing ft-together was told: "back", "game", "off"
 
     def tick(self):
-        """One look. Outside a room nobody else is asked anything."""
-        has = mine(self._together("state"))
-        self.in_room = has is not None
-        if not self.in_room:
+        """One look. While ft-together isn't there nobody else is asked anything."""
+        said = has(self._together("state"))
+        self.in_room = bool(said and said[1])
+        if said is None:
             self.told = None
             return
         now = self._clock()
         self._worn.take(worn(self._helper("gaze ? headset")), now)
         self._paused.take(paused(self._relay("pause ?")), now)
         want = away(self._worn.get(now), self._paused.get(now))
-        if want != has and (self._together("away " + WORDS[want]) or "").startswith("ok"):
+        if want != said[0] and (self._together("away " + WORDS[want]) or "").startswith("ok"):
             self.told = WORDS[want]

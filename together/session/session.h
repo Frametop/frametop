@@ -92,7 +92,9 @@ public:
     // Calls a room's owner. How it went shows in mode() and note().
     std::string Join(const std::string &host, uint16_t port, const std::string &code, double now);
     std::string Answer(int ask, bool accept);                // one of asks()
-    std::string SetAway(uint8_t away);                       // proto::kAwayGame, kAwayOff, or 0 for back
+    // proto::kAwayGame, kAwayOff, or 0 for back. It is the wearer's own, in a room or not: the
+    // next room has it from the start, so nobody is there for a moment who isn't.
+    std::string SetAway(uint8_t away);
     std::string Leave();                                     // its owner leaving ends the room for everyone
     // Shares the wearer's panel `number` (0 to room::kFramePanels - 1) with the room, or says
     // where and how large it is now. The panel's id is set here; a guest's is in room() once
@@ -104,6 +106,7 @@ public:
 
     Mode mode() const { return mode_; }
     int me() const { return me_; }
+    uint8_t away() const { return away_; }                   // as the wearer was last said to be
     const proto::Room &room() const { return room_; }
     const std::string &note() const { return note_; }        // the last thing worth telling the wearer
     std::vector<Ask> asks() const;                           // who waits for the owner's answer
@@ -149,6 +152,7 @@ private:
     Config config_;
     Mode mode_ = Mode::kIdle;
     int me_ = -1;
+    uint8_t away_ = 0;
     proto::Room room_;
     room::Invites invites_;
     std::map<int, Link> link_;

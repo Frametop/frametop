@@ -19,7 +19,7 @@ bool Whole(const json::Value &v, int lo, int hi, int &out) {
 }  // namespace
 
 void People::Gone() {
-    inRoom_ = false, me_ = -1;
+    inRoom_ = false, me_ = -1, myAway_ = 0;
     for (Person &p : people_) {
         const unsigned since = p.since + (p.here ? 1 : 0);
         p = Person();
@@ -61,6 +61,7 @@ bool People::Room(const std::string &text) {
             people_[id].since = since;
         }
     inRoom_ = true, me_ = me;
+    if (!Whole(state["away"], 0, 255, myAway_)) myAway_ = people_[me].away;   // an ft-together that doesn't say
     return true;
 }
 

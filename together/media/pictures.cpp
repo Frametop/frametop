@@ -6,13 +6,13 @@
 
 namespace media {
 
-bool Pictures::Open(int width, int height, std::string &err) {
+bool Pictures::Open(int width, int height, int rows, std::string &err) {
     Close();
     drm_ = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
     gbm_ = drm_ >= 0 ? gbm_create_device(drm_) : nullptr;
     if (!gbm_) return err = "no GBM device (/dev/dri/renderD128)", Close(), false;
     for (int i = 0; i < kCount; ++i) {
-        bo_[i] = gbm_bo_create(gbm_, uint32_t(width), uint32_t(height), GBM_FORMAT_ABGR8888, GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
+        bo_[i] = gbm_bo_create(gbm_, uint32_t(width), uint32_t(rows > height ? rows : height), GBM_FORMAT_ABGR8888, GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
         fd_[i] = bo_[i] ? gbm_bo_get_fd(bo_[i]) : -1;
         if (fd_[i] < 0) return err = "GBM made no " + std::to_string(width) + "x" + std::to_string(height) + " buffer", Close(), false;
     }

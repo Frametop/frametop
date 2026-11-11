@@ -23,8 +23,10 @@ public:
     Pictures(const Pictures &) = delete;
     Pictures &operator=(const Pictures &) = delete;
 
-    // False with `err` saying what GBM refused.
-    bool Open(int width, int height, std::string &err);
+    // Pictures of width x height in buffers `rows` rows long (height, when that is more): the
+    // encoder reads whole rows past a picture's last, up to its own step (irisenc.h, frameSize),
+    // and they are the buffer's to have. False with `err` saying what GBM refused.
+    bool Open(int width, int height, int rows, std::string &err);
     void Close();
 
     int width() const { return width_; }

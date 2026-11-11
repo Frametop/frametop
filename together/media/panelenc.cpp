@@ -16,11 +16,15 @@ int64_t NowUs() {
 
 bool PanelEncoder::Open(int width, int height, int fps, int bitrate, std::string &err) {
     Close();
-    if (!pictures_.Open(width, height, err)) return false;
     irisenc::Config cfg;
     cfg.width = width, cfg.height = height, cfg.fps = fps, cfg.bitrate = bitrate;
     cfg.hevc = true, cfg.dmabuf = true;
     if (!enc_.Open(cfg, err)) return Close(), false;
+    // The encoder reads rows past the picture's last, to its own step down (1080 rows as 1088):
+    // the buffers are made that long.
+    const size_t rows = enc_.stride() > 0 ? (enc_.frameSize() + size_t(enc_.stride()) - 1) / size_t(enc_.stride()) : 0;
+    if (rows > 8192 + 64) return err = "the encoder's layout makes no sense", Close(), false;
+    if (!pictures_.Open(width, height, int(rows), err)) return Close(), false;
     if (uint32_t(enc_.stride()) != pictures_.stride() || pictures_.size() < enc_.frameSize()) {
         err = "the encoder's layout isn't a GBM buffer's at " + std::to_string(width) + "x" + std::to_string(height) + " (stride " +
               std::to_string(enc_.stride()) + " and " + std::to_string(pictures_.stride()) + ", size " + std::to_string(enc_.frameSize()) + " and " +

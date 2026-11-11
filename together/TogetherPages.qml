@@ -49,6 +49,30 @@ Item {
         ]
     }
 
+    // Asked once of a model that can't say itself whether it may be passed on (a VRM's licence
+    // does): its file goes to the room only after a yes here.
+    Kirigami.PromptDialog {
+        id: allowDialog
+        objectName: "allowDialog"
+        title: "Let the others have your avatar?"
+        subtitle: "The people you share a room with get a copy of its file, to see you in it. "
+                  + "Say yes only for a model that is yours to pass on: one you made, or one whose licence allows it."
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                objectName: "allowAction"
+                text: "Let them have it"
+                icon.name: "dialog-ok"
+                onTriggered: { allowDialog.close(); backend.allowAvatar() }
+            },
+            Kirigami.Action {
+                text: "Cancel"
+                icon.name: "dialog-cancel"
+                onTriggered: allowDialog.close()
+            }
+        ]
+    }
+
     Component {
         id: togetherPage
         Kirigami.ScrollablePage {
@@ -302,6 +326,23 @@ Item {
                         onToggled: {
                             backend.setMuted(!checked)
                             checked = Qt.binding(() => backend.voiceUp && !backend.muted)
+                        }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Your avatar:"
+                        spacing: Kirigami.Units.largeSpacing
+                        Controls.Label {
+                            objectName: "avatarLabel"
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 18
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: backend.avatarText
+                        }
+                        Controls.Button {
+                            objectName: "allowAvatarButton"
+                            visible: backend.avatarAllow
+                            text: "Let them have it…"
+                            onClicked: allowDialog.open()
                         }
                     }
                     Kirigami.Separator {

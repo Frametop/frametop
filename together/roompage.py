@@ -1,6 +1,6 @@
 """What Frametop Settings' Together page shows and sends, without Qt: the programs' answers read
-into what the page says (ft-together's `state` and `here`, ft-roomvoice's and ft-roompanels'
-`state`, ft-screens' `screens`), and what its person typed read into a question.
+into what the page says (ft-together's `state`, `here` and `looks`, ft-roomvoice's and
+ft-roompanels' `state`, ft-screens' `screens`), and what its person typed read into a question.
 
 Everything read here is text another program sent, and some of it text a peer chose (names,
 logins): what doesn't parse is nothing, and the page shows names as plain text.
@@ -142,3 +142,24 @@ def shares(found, panels):
     full = len(mine) >= SHARES
     return [{"screen": n, "title": f"Screen {n} ({size.replace('x', ' × ')})", "shared": n in mine, "live": mine.get(n, False),
              "can": panels is not None and (n in mine or not full)} for n, size in found]
+
+
+def avatar(worn, looks):
+    """What the room gets of the avatar its person has on: {"text", "allow"}. `worn` is
+    roomavatar's (None: no avatar on), `looks` ft-together's `looks` (or None). allow: the file
+    stays on this headset until its person says the others may have it, and can say so."""
+    abstract = "The others see an abstract figure"
+    if not worn:
+        return {"text": f"{abstract}: you have no avatar on (Appearance)", "allow": False}
+    title = worn["title"]
+    if not worn["body"]:
+        return {"text": f"{abstract}: {title} isn't a whole avatar", "allow": False}
+    if not worn["may_share"]:
+        if worn["vrm"]:
+            return {"text": f"{abstract}: {title}'s licence doesn't let it be passed on", "allow": False}
+        return {"text": f"{abstract}: {title} stays on this headset", "allow": True}
+    if not looks or looks.get("wear") != worn["name"]:
+        return {"text": f"The others will see you as {title}", "allow": False}   # the room wasn't told yet
+    if looks.get("sent"):
+        return {"text": f"The others see you as {title}", "allow": False}
+    return {"text": f"{abstract}: {str(looks.get('why') or 'your avatar can not be sent')}", "allow": False}

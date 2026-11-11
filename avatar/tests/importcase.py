@@ -17,7 +17,7 @@ import ftmodel  # noqa: E402
 TOOL = Path(os.environ.get('FT_MODEL_IMPORT') or REPO / 'avatar/build/ft-model-import')
 FUZZ = int(os.environ.get('FT_MODEL_IMPORT_FUZZ') or 120)   # damaged copies tried of each file
 SOURCES = [*(REPO / 'avatar/import').glob('*'), *(REPO / 'avatar').glob('modelfile.*'), *(REPO / 'avatar').glob('bodyfile.*'),
-           REPO / 'avatar/modelbytes.h', REPO / 'avatar/vec.h']
+           *(REPO / 'avatar').glob('sharemark.*'), REPO / 'avatar/modelbytes.h', REPO / 'avatar/vec.h']
 
 
 class ImportCase(unittest.TestCase):

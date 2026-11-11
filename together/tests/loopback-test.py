@@ -219,6 +219,9 @@ def main(program, root):
         ok = ada.ask("wear secret").startswith("error that avatar isn't marked") and looks(ada)["wear"] == "secret" and looks(ada)["sent"] is False
         ok = ok and ben.until(lambda s: list(files(ben)) == [ids["cy"]] and list(home["ben"].kept().values()) == [owl], 10)
         check("one that isn't marked as one the others may have is worn in private: the room hears of none, and the file it had goes", ok)
+        marked = home["ada"].put("secret", 1, os.urandom(1000))
+        ok = ada.ask("wear secret") == "ok" and looks(ada)["sent"] is True and comes(ben, home["ben"], ids["ada"], marked) and comes(cy, home["cy"], ids["ada"], marked)
+        check("once its owner marks the file (Settings asks first), saying it again sends it", ok)
         ok = ada.ask("wear wolf") == "ok" and comes(ben, home["ben"], ids["ada"], wolf, 30) and comes(cy, home["cy"], ids["ada"], wolf, 30)
         check("another, of two megabytes, crosses whole", ok)
         check("no avatar of that name, or a name that would lead out of the folder, is none",

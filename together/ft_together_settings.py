@@ -1,9 +1,11 @@
 """Frametop Settings' Together page: turn Frametop Together on, open a room or join someone's,
-let people in, and choose what of yours the room gets (your voice, your screens).
+let people in, and choose what of yours the room gets (your voice, your avatar, your screens).
 
 The page's backend (TogetherPages.qml; settings/ft_settings.py makes it). It only asks: the
 room is ft-together's (@ft_together), the voice ft-roomvoice's, the shared screens
 ft-roompanels', and each is asked on a worker thread, once a second while the page shows. The
+avatar its person has on is read there too (roomavatar.py), and marked as one the others may
+have by ft-model-import, once its person said so. The
 switch enables and starts frametop-together.service on the host, which the room's other
 programs start and stop with (together/run.sh, "Running it" in together/README.md). What the
 answers mean for the page is roompage.py's, without Qt.
@@ -17,6 +19,7 @@ from PySide6.QtGui import QGuiApplication
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
+import roomavatar  # noqa: E402  (the avatar its person has on)
 import roompage  # noqa: E402  (what the answers mean, without Qt)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 
@@ -31,9 +34,12 @@ class Backend(QObject):
     message = Signal(str, bool)
     _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
-    def __init__(self, units=None, sockets=None):
+    def __init__(self, units=None, sockets=None, worn=None):
         super().__init__()
         self._units = units or UNITS
+        self._worn = worn or roomavatar.Worn()
+        self._avatar = None    # what its file says of the avatar its person has on
+        self._allowing = None  # the ft-model-import running
         self._to = dict({name: name for name in WHO}, **(sockets or {}))
         self._answers = {}     # what was asked for -> (the answer or None, why there was none)
         self._code = ""        # the invite made last, while its room stands
@@ -61,7 +67,7 @@ class Backend(QObject):
     def _settle(self):
         """What goes with an answer that is gone: the others' answers, and a room's invite."""
         if not self.ready:
-            for key in ("here", "voice", "panels", "screens"):
+            for key in ("here", "looks", "voice", "panels", "screens"):
                 self._answers.pop(key, None)
         if self.mode != "hosting":
             self._code = ""
@@ -93,6 +99,8 @@ class Backend(QObject):
         self._ask("state", TOGETHER, "state")
         if self.ready:
             self._ask("here", TOGETHER, "here")
+            self._ask("looks", TOGETHER, "looks")
+            self._ipc.run(lambda _client: self._worn.look(), self._wears)
             self._ask("voice", VOICE, "state")
             self._ask("panels", PANELS, "state")
             self._ask("screens", SCREENS, "screens")
@@ -243,6 +251,49 @@ class Backend(QObject):
     @Slot(bool)
     def setMuted(self, on):
         self._do(VOICE, "mute" if on else "unmute")
+
+    # --- your avatar ---
+    def _wears(self, avatar):
+        if avatar != self._avatar:
+            self._avatar = avatar
+            self.changed.emit()
+
+    def _avatar_row(self):
+        return roompage.avatar(self._avatar, self._told("looks"))
+
+    @Property(str, notify=changed)
+    def avatarText(self):
+        return self._avatar_row()["text"]
+
+    @Property(bool, notify=changed)
+    def avatarAllow(self):
+        return self._avatar_row()["allow"] and self._allowing is None
+
+    @Slot()
+    def allowAvatar(self):
+        """Its person said the others may have the avatar they have on: its file is marked, and
+        the room has it the next time ft-together reads the file."""
+        if not self.avatarAllow:
+            return
+        argv = roomavatar.allow_command(self._avatar["path"])
+        proc = QProcess(self)
+        self._allowing = proc
+        out = []
+
+        def finished(code=1, *_):
+            if self._allowing is not proc:
+                return
+            self._allowing = None
+            proc.deleteLater()
+            ok, text = roomavatar.allowed(code, "".join(out))
+            self.message.emit(text, not ok)
+            self.changed.emit()
+            self.refresh()
+        proc.readyReadStandardOutput.connect(lambda: out.append(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
+        proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda err: err == QProcess.FailedToStart and finished(1))
+        proc.start(argv[0], argv[1:])
+        self.changed.emit()
 
     # --- your screens ---
     @Property("QVariantList", notify=changed)

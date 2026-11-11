@@ -96,6 +96,9 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/bodyfile-test.cpp avatar/bodyfile.cpp avatar/modelfile.cpp \
       -o build/tests/bodyfile-test
     run avatar/tests/bodyfile-test.cpp build/tests/bodyfile-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/sharemark-test.cpp avatar/sharemark.cpp \
+      avatar/abstract/abstract.cpp avatar/bodyfile.cpp avatar/modelfile.cpp -o build/tests/sharemark-test
+    run avatar/tests/sharemark-test.cpp build/tests/sharemark-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined avatar/tests/bodypose-test.cpp avatar/pose/bodypose.cpp \
       avatar/bodyfile.cpp avatar/modelfile.cpp -o build/tests/bodypose-test
     run avatar/tests/bodypose-test.cpp build/tests/bodypose-test

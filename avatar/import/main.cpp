@@ -3,6 +3,7 @@
 // Appearance page runs this).
 //
 //   ft-model-import FILE [--name NAME] [--to DIR] [--side left|right] [--may-share] [--check]
+//   ft-model-import --allow-share MODEL.ftmodel
 //
 //   FILE         a VRM (0.x or 1.0), a glTF or GLB, or an FBX: an avatar, or a hand or a pair
 //   --name NAME  the model's name (its file is NAME.ftmodel): lower-case letters, digits, "-"
@@ -13,6 +14,11 @@
 //   --may-share  you may pass this model on to the people you share a room with (a glTF or an
 //                FBX can't say; a VRM's licence does, and this can't override it)
 //   --check      read and convert, write nothing
+//
+//   --allow-share  says the same of a model you imported before, in its own file (sharemark.h):
+//                the file is marked and nothing else in it changes. Refused for a model that
+//                came from a VRM whose licence says no. Prints "ok", the model's "name" and
+//                "format" and "share yes", or "error WHY".
 //
 // It takes the model's hands, which become the hands ft-handview draws for you, and, when the
 // model is a whole person, its body, which is how the people you share a room with see you
@@ -30,6 +36,7 @@
 #include <cstring>
 #include <sys/stat.h>
 
+#include "../sharemark.h"
 #include "bodypart.h"
 #include "handpart.h"
 
@@ -43,7 +50,8 @@ int Fail(const std::string &why) {
 }
 
 int Usage() {
-    std::fprintf(stderr, "usage: ft-model-import FILE [--name NAME] [--to DIR] [--side left|right] [--may-share] [--check]\n");
+    std::fprintf(stderr, "usage: ft-model-import FILE [--name NAME] [--to DIR] [--side left|right] [--may-share] [--check]\n"
+                         "       ft-model-import --allow-share MODEL.ftmodel\n");
     return 2;
 }
 
@@ -75,9 +83,19 @@ bool MakeFolder(const std::string &dir) {
     return true;
 }
 
+// --allow-share MODEL.ftmodel
+int AllowShare(const std::string &path) {
+    modelfile::Info info;
+    std::string err;
+    if (!sharemark::Allow(path, info, err)) return Fail(err);
+    std::printf("ok\nname %s\nformat %s\nshare yes\n", modelfile::Plain(info.name).c_str(), info.format.c_str());
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
+    if (argc == 3 && !std::strcmp(argv[1], "--allow-share")) return AllowShare(argv[2]);
     std::string file, name, to;
     Side said = Side::Unsaid;
     bool mayShare = false, check = false;

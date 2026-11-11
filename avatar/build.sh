@@ -27,7 +27,7 @@ $cxx -isystem build/deps -c -o build/fbxscene.o import/fbxscene.cpp
 $cxx -isystem build/deps -c -o build/fbxlook.o import/fbxlook.cpp
 $cxx -isystem build/deps -c -o build/reduce.o import/reduce.cpp
 $cxx -o build/ft-model-import import/main.cpp import/handbones.cpp import/handpart.cpp import/bodybones.cpp import/bodypart.cpp \
-  import/bodylook.cpp import/shapenames.cpp modelfile.cpp bodyfile.cpp \
+  import/bodylook.cpp import/shapenames.cpp modelfile.cpp bodyfile.cpp sharemark.cpp \
   build/gltfscene.o build/gltfvrm.o build/gltflook.o build/fbxscene.o build/fbxlook.o build/image.o build/reduce.o \
   build/ufbx.o build/simplifier.o build/allocator.o $(pkg-config --libs jsoncpp) -lm
 strip --strip-unneeded build/ft-model-import

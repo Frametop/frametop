@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <functional>
 #include <netinet/in.h>
@@ -223,9 +224,10 @@ static void limits() {
         const std::vector<uint8_t> chunk = Noise(64000);
         for (int i = 0; i < 64; ++i) a.links->Send(la, chunk);   // 4 MB
         ok = ok && a.Until([&] { return a.Count(net::Event::kDown, la) == 1; }, 20);
-        b.Take();
+        const bool down = b.Until([&] { return b.Count(net::Event::kDown, lb) == 1; });   // the end that cut it is told a moment after the far one
         const size_t held = b.Bytes(lb).size();
-        check("a link whose bytes pile up untaken is cut, with at most a little over the limit held", ok && held > (1u << 20) && held < (3u << 19) && b.Count(net::Event::kDown, lb) == 1);
+        std::printf("    of 4 MB untaken: %zu KB held\n", held >> 10);
+        check("a link whose bytes pile up untaken is cut, with at most a little over the limit held", ok && held > (1u << 20) && held < (3u << 19) && down);
     }
     // datagrams nobody takes are dropped, and the link stays
     {
@@ -335,7 +337,8 @@ static void pictures() {
         ok = ok && Arrives(a, la, b, lb, Picture(40000)) && Arrives(b, lb, a, la, Picture(900)) && a.Until([&] { return !a.links->Sending() && !b.links->Sending(); });
         check("a picture arrives whole on a stream of its own, either way", ok && b.Frames(lb).size() >= 1 && a.Frames(la).size() >= 1);
         check("...the longest one a panel may send too", Arrives(a, la, b, lb, Picture(most)));
-        ok = !a.links->Frame(la, Picture(most + 1), 1) && !a.links->Frame(la, {}, 1) && !a.links->Frame(la + 1000, Picture(10), 1) && !a.links->Frame(-1, Picture(10), 1);
+        ok = a.Until([&] { return !a.links->Sending(); });   // it arrived; its acknowledgement may still be on its way
+        ok = ok && !a.links->Frame(la, Picture(most + 1), 1) && !a.links->Frame(la, {}, 1) && !a.links->Frame(la + 1000, Picture(10), 1) && !a.links->Frame(-1, Picture(10), 1);
         check("...and one too long, an empty one, or one for no link isn't sent", ok && !a.links->Sending());
 
         // many at once: each arrives or is told lost, none twice, none silently
@@ -533,13 +536,43 @@ static void ending() {
     check("...and the far end's links go down without waiting for the silence to be noticed", b.Until([&] { return b.Count(net::Event::kDown, lb) == 1; }, 4) && b.links->Quiet());
 }
 
+// Files started on a link that is busy both ways: msquic's thread is in this end's callbacks
+// all the while, and a call that waited for that thread with the end's lock held would never
+// come back.
+static void busy() {
+    End a, b;
+    int la = -1, lb = -1;
+    bool ok = Link(a, b, la, lb);
+    const Shared file = std::make_shared<const std::vector<uint8_t>>(Noise(2000));
+    const std::vector<uint8_t> small = Noise(200);
+    int rounds = 0;
+    for (; ok && rounds < 300; ++rounds) {
+        b.links->AwaitFile(lb, file->size());
+        for (int i = 0; i < 20; ++i) a.links->Datagram(la, small), b.links->Datagram(lb, small);
+        ok = Sends(a, la, file) && b.Until([&] { return b.Count(net::Event::kFile, lb) == rounds + 1; }, 10);
+        a.Take();
+    }
+    std::printf("    %d files on a busy link\n", rounds);
+    check("files started while a link is busy both ways all go out and arrive", ok && a.Count(net::Event::kDown) == 0 && b.Count(net::Event::kDown) == 0);
+}
+
+// A test that is stuck says so and ends, where it would hold up everything after it.
+static void stuck(int) {
+    static const char said[] = "FAIL  stuck: the test didn't end in time\nFAILED\n";
+    if (write(STDOUT_FILENO, said, sizeof said - 1) < 0) {}
+    _exit(1);
+}
+
 int main() {
+    signal(SIGALRM, stuck);
+    alarm(900);
     opening();
     talking();
     refusing();
     limits();
     pictures();
     files();
+    busy();
     ending();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;

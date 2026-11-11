@@ -41,6 +41,14 @@ QUIC_STATUS QUIC_API OnFileOut(HQUIC stream, void *context, QUIC_STREAM_EVENT *e
     QuicLinks::Impl &impl = *f.impl;
     std::lock_guard<std::recursive_mutex> lock(impl.m);
     switch (ev->Type) {
+    case QUIC_STREAM_EVENT_START_COMPLETE: {
+        // The pictures, the control stream and the voices go first. Set here, on msquic's
+        // thread, before any of the file is in a packet: set from File() it would wait for this
+        // thread while holding the lock this thread's callbacks take.
+        const uint16_t last = 0;
+        if (QUIC_SUCCEEDED(ev->START_COMPLETE.Status)) impl.q->SetParam(stream, QUIC_PARAM_STREAM_PRIORITY, sizeof last, &last);
+        break;
+    }
     case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:   // the far end won't take it
         impl.q->StreamShutdown(stream, QUIC_STREAM_SHUTDOWN_FLAG_ABORT_SEND, 0);
         break;
@@ -133,8 +141,6 @@ bool QuicLinks::File(int link, std::shared_ptr<const std::vector<uint8_t>> bytes
         delete f;
         return false;
     }
-    const uint16_t last = 0;   // the pictures, the control stream and the voices go first
-    impl.q->SetParam(f->stream, QUIC_PARAM_STREAM_PRIORITY, sizeof last, &last);
     // Once the send is taken the stream's shutdown always comes (msquic starts it with
     // SHUTDOWN_ON_FAIL), and frees it.
     if (QUIC_SUCCEEDED(impl.q->StreamSend(f->stream, f->buffers, 2, QUIC_SEND_FLAG_START | QUIC_SEND_FLAG_FIN, nullptr))) {

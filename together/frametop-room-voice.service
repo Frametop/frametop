@@ -1,0 +1,16 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop Together: your voice in the room, and the others'
+Documentation=file://@REPO@/together/README.md
+After=frametop-together.service pipewire.service wireplumber.service
+PartOf=frametop-together.service
+
+[Service]
+# In the container it was built in. It opens the microphone only while you are in a room,
+# unmuted, with the headset on.
+ExecStartPre=-/usr/bin/pkill -x ft-roomvoice
+ExecStart=@REPO@/scripts/in-box @REPO@/together/build/ft-roomvoice
+ExecStopPost=-/usr/bin/pkill -x ft-roomvoice
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5

@@ -128,7 +128,7 @@ int Run(const Ask &ask) {
         }
 
         const roompeople::People &people = client.people();
-        const bool there = hp.bPoseIsValid && people.inRoom() && client.laid();   // you are somewhere in the room
+        const bool there = hp.bPoseIsValid && people.inRoom() && client.laid() && !people.Away();   // you are somewhere in the room, and looking at it
         if (there && now - lastSent >= kSendNs) {
             static const std::vector<handcut::Hand> kNone;
             const std::vector<handcut::Hand> &tracked = hands.Update(head, now) ? hands.shown() : kNone;
@@ -168,6 +168,7 @@ int Run(const Ask &ask) {
             for (int place = 0; place < proto::kPeople; ++place) here += people.person(place).here && people.inRoom(), shown += drawn[place].made && drawn[place].sheet.visible();
             char line[320];
             if (!people.inRoom()) std::snprintf(line, sizeof line, "not in a room; CPU %.1f%%", 100 * (cpu1 - cpu0) / dt);
+            else if (people.Away()) std::snprintf(line, sizeof line, "in a room of %d, away; CPU %.1f%%", here, 100 * (cpu1 - cpu0) / dt);
             else
                 std::snprintf(line, sizeof line, "in a room of %d as %s, floor %s; %d shown, %.1f draws/s; poses %.1f/s in, %.1f/s out; CPU %.1f%%", here,
                               people.person(people.me()).name.c_str(), client.laid() ? "laid" : "not laid yet", shown, draws / dt, (client.posesIn() - posesIn) / dt, sent / dt,

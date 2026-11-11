@@ -160,8 +160,9 @@ test-c:
           together/voice/voices.cpp together/voice/sender.cpp together/voice/player.cpp together/voice/headask.cpp together/voice/pulse.cpp \
           avatar/room/client.cpp avatar/room/people.cpp $(pkg-config --cflags --libs opus libpulse-simple) -lpthread -o build/tests/ft-roomvoice
         run together/tests/roomvoice-test.py python3 together/tests/roomvoice-test.py build/tests/ft-together build/tests/ft-roomvoice
+        run together/tests/roomaway-test.py python3 together/tests/roomaway-test.py build/tests/ft-together
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

@@ -209,6 +209,7 @@ static void people() {
                                                                                        p.person(0).spot[1] == 2 && p.person(0).spot[2] == 0.5 && p.person(1).away == 1 &&
                                                                                        !p.person(2).here);
     check("nobody is drawn before a pose of theirs comes", !p.Drawn(0, 10));
+    check("you are away when the room has you so", p.Away() && !roompeople::People().Away());
     std::vector<uint8_t> d = watched(0, 0.25f);
     check("a watched pose is theirs from then on, and they are drawn", p.Pose(d.data(), d.size(), 10) && p.Drawn(0, 10.5) && p.person(0).pose.eyes[0] == 0.25f);
     check("...for a second: then they aren't, until the next", p.Drawn(0, 11) && !p.Drawn(0, 11.01) && p.Pose(d.data(), d.size(), 12) && p.Drawn(0, 12.2));
@@ -225,11 +226,12 @@ static void people() {
     const unsigned benSince = p.person(1).since;
     check("someone new in a place isn't the one before", p.Room(state("hosting", 0, (std::string(kAda) + "," + kCy).c_str())) && p.me() == 0 && p.person(1).name == "cy" &&
                                                            p.person(1).since == benSince + 1 && !p.person(1).posed && !p.Drawn(0, 12.2));
+    check("...and you are back when it has you back", !p.Away());
     d = watched(1, 0.5f);
     check("...and is drawn from their own first pose", p.Pose(d.data(), d.size(), 13) && p.Drawn(1, 13));
     check("someone who left isn't there", p.Room(state("hosting", 0, kAda)) && !p.person(1).here && !p.Drawn(1, 13) && !p.Pose(d.data(), d.size(), 13));
 
-    check("outside a room there is nobody, and that is still an answer", p.Room(state("idle", -1, "")) && !p.inRoom() && p.me() == -1 && !p.person(0).here);
+    check("outside a room there is nobody, and that is still an answer", p.Room(state("idle", -1, "")) && !p.inRoom() && p.me() == -1 && !p.person(0).here && !p.Away());
     p.Room(state("joined", 1, (std::string(kAda) + "," + kBen).c_str()));
     check("what isn't ft-together's state is no room", !p.Room("{\"mode\":\"joined\"") && !p.inRoom() && !p.Room("[]") && !p.Room(state("dancing", 0, kAda)) &&
                                                          !p.Room(state("joined", 4, kAda)) && !p.Room(state("joined", 1, kAda)) && !p.inRoom());

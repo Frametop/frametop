@@ -15,6 +15,7 @@ AREAS = {
     "remote": ("remote-displays", "ft_remote_displays", "RemoteDisplayPages.qml"),
     "access": ("remote", "remote_access", "RemoteAccessPages.qml"),
     "avatar": ("avatar", "ft_avatar_settings", "AvatarPages.qml"),
+    "together": ("together", "ft_together_settings", "TogetherPages.qml"),
 }
 # The sidebar, in its order: (section name, area, group, title, icon, search words).
 SECTIONS = [
@@ -51,6 +52,8 @@ SECTIONS = [
      "display off sleep idle plugged autostart start with steamvr"),
     ("remote-access", "access", "System", "Remote access", "preferences-desktop-remote-desktop",
      "vnc tailscale tailnet password screen sharing"),
+    ("together", "together", "System", "Frametop Together", "system-users",
+     "room guest friend invite join people collaborate multiplayer mute"),
 ]
 NAMES = [s[0] for s in SECTIONS]
 

@@ -44,6 +44,9 @@ public:
     bool inRoom() const { return inRoom_; }
     int me() const { return me_; }   // your own place; -1 outside a room
     const Person &person(int place) const { return people_[place >= 0 && place < proto::kPeople ? place : 0]; }
+    // Whether you are away yourself: in a game, or with the headset off your head. The room is
+    // neither drawn for you nor told where you are then.
+    bool Away() const { return inRoom_ && people_[me_ >= 0 && me_ < proto::kPeople ? me_ : 0].away != 0; }
     // Whether the person at `place` is drawn at `now`.
     bool Drawn(int place, double now) const {
         const Person &p = person(place);

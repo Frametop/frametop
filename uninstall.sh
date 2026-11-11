@@ -88,7 +88,7 @@ desktop_entries() {
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
 running() {
   local n out=()
-  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands ft-voiced whisper-server framekeyboard; do
+  for n in ft-screens ft-pointer ft-powerd ft-eyegrab ft-camd ft-hands ft-voiced whisper-server framekeyboard ft-together ft-roomvoice; do
     pgrep -x "$n" >/dev/null && out+=("$n")
   done
   pgrep -f '[i]nput/input-relay\.py' >/dev/null && out+=("input relay")

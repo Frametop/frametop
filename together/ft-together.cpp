@@ -6,6 +6,7 @@
 //   listen           -> the asker gets their voices
 //   floor [X Z YAW]  -> where this Frame's own floor lies in the room (local/floor.h)
 //   media            -> which shared panels have a program here, and how their video goes
+//   here             -> where the others call this Frame: its address, port and name
 //
 // A datagram there that is a pose or a voice (local/datagrams.h) is the wearer's own: it goes
 // to everyone in the room, and theirs come back to whoever watches or listens. The shared panels' video comes from and
@@ -114,6 +115,7 @@ struct End {
     std::unique_ptr<session::Session> session;
     std::unique_ptr<PictureWires> wires;
     std::unique_ptr<flow::Video> video;
+    std::string here;   // where the others call this Frame: "ADDRESS PORT NAME"
     bool inRoom() const { return session && (session->mode() == session::Mode::kHosting || session->mode() == session::Mode::kJoined); }
 };
 
@@ -143,6 +145,7 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, flow::Programs
     end.session = std::make_unique<session::Session>(*end.links, tailnet, config);
     end.wires = std::make_unique<PictureWires>(*end.links);
     end.video = std::make_unique<flow::Video>(*end.session, *end.wires, programs);
+    end.here = links.listen + " " + std::to_string(args.port) + " " + config.name;
     std::printf("ft-together: %s (%s) at %s port %d\n", config.name.c_str(), who.login.c_str(), links.listen.c_str(), int(args.port));
     return true;
 }
@@ -222,6 +225,7 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "listen") reply = local.listeners.Add(from, fromLen, now) ? "ok" : "error too many programs are listening";
     else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = local.floor.Ask(asked, end.inRoom());
     else if (asked == "media") reply = "ok " + MediaState(end, local);
+    else if (asked == "here") reply = "ok " + end.here;
     else reply = session::Command(*end.session, asked, now);
     if (!end.inRoom()) local.floor.Lift();   // the room was left: the next one's floor is its own
     // an asker that doesn't wait for its answer doesn't hold up the loop

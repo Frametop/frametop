@@ -57,6 +57,7 @@ def main(program):
         ok = all(e.until(lambda s: s["mode"] == "idle") for e in (ada, ben, cy))
         if not check("three of them start, each on its own port and socket", ok):
             return
+        check("each says where the others call it", ada.ask("here") == "ok 127.0.0.1 %d ada" % ada.port and ben.ask("here") == "ok 127.0.0.1 %d ben" % ben.port)
         check("nobody is in a room, and nothing can be done in one",
               ada.ask("invite").startswith("error") and ada.ask("leave").startswith("error") and ada.ask("away game").startswith("error"))
         check("nonsense is answered with what can be asked", ada.ask("dance").startswith("error state|open") and ada.ask("").startswith("error") and

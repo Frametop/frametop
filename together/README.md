@@ -21,12 +21,47 @@ Built so far: the spikes (M0), and from M3 the session's wire format and rules, 
 | `ft-peerpanel.cpp` | Decodes one panel someone else shares, into a remote screen of ft-screens' | `stream/iris.h` (the remote displays' decoder), `local/mediaclient.h` |
 | `roompanels/` | ft-roompanels' rules: the sums between this Frame's floor and the room (`placing.py`) and what it keeps true (`keeper.py`) | Python's standard library |
 | `ft-roompanels` | The program around them: its loop and its socket | `roompanels/`, `conf/ftipc.py` |
+| `roomaway/` | ft-roomaway's rules: what the pointer helper and the relay say of the wearer, and what the room is told (`teller.py`) | Python's standard library |
+| `ft-roomaway` | The program around them: tells the room when the headset comes off or a game starts | `roomaway/`, `conf/ftipc.py` |
+| `roompage.py` | Frametop Settings' Together page without Qt: the programs' answers read into what the page says, and what is typed read into a `join` | Python's standard library |
+| `ft_together_settings.py`, `TogetherPages.qml` | The page: its backend, which asks the room's programs off the UI's thread, and its QML | `roompage.py`, `conf/ftipc.py`, `conf/fthost.py`, PySide6 |
+| `frametop-together.service`, `frametop-room-*.service`, `run.sh` | The user units the programs run as, and their installer | `scripts/install-lib.sh` |
 | `voice/` | What `ft-roomvoice` is made of: Opus each way (`codec.h`), the buffer that plays a voice's packets in step however they arrive (`jitter.h`), where a voice is heard from (`spatial.h`), everyone's voices mixed for two ears (`voices.h`), the thread that sends the wearer's (`sender.h`) and the one that plays the others' (`player.h`), the sound devices behind two small interfaces (`sound.h`, on PulseAudio in `pulse.cpp`, pretended for tests in `pretend.h`), and where the wearer's head is (`headask.h`) | libopus, libpulse-simple |
 | `ft-roomvoice.cpp` | The room's voices on this Frame | `voice/`, `avatar/room/client.h` |
 | `spike/` | The M0 spikes, `ft-enctest` and `ft-quictest` | `media/`, `net/` |
 | `tests/` | The tests below | |
 
 `together/build.sh` builds `build/ft-together`, `build/ft-sharepanel`, `build/ft-peerpanel`, `build/ft-roomvoice` and msquic (pinned by commit) in the dev container, and with `--spikes` the spikes too.
+
+## Running it
+
+Frametop Together is a part of its own: `install.sh` offers it (no by default while it is experimental; `--together` and `--no-together` answer for it), and `together/run.sh install` installs it later. Installed, it is off. The switch on Frametop Settings' Frametop Together page turns it on, now and at every login, as `together/run.sh on` does.
+
+| Unit | Runs | Where |
+| --- | --- | --- |
+| `frametop-together.service` | `ft-together` | the container |
+| `frametop-room-people.service` | `ft-avatars --room`: the others, drawn, and your own pose told | the container; it waits for SteamVR |
+| `frametop-room-panels.service` | `ft-roompanels` | the host |
+| `frametop-room-voice.service` | `ft-roomvoice` | the container |
+| `frametop-room-away.service` | `ft-roomaway` | the host |
+
+Only the first is ever enabled. It wants the other four, and each of them is part of it, so they start, stop and restart with it and never run without it. Outside a room they wait: none of them opens the microphone, draws, or encodes anything until ft-together says this Frame is in one. `together/run.sh status` shows the five, `log` their journal, and `off` stops them and leaves a room this Frame is in (its own room ends for everyone). ft-together takes calls only on the tailnet address, and answers nobody who isn't on the tailnet (below, "The links").
+
+`scripts/fast-install` builds `together/` as a component, and a release brings it built (`pack/Containerfile`); msquic is fetched at the commit `together/build.sh` pins.
+
+### The page
+
+Frametop Settings > Frametop Together (`ft_together_settings.py`, `TogetherPages.qml`) is how a room is used from inside the headset:
+
+- The switch, with what ft-together says when it can't run ("Tailscale isn't running on this headset"), and this headset's tailnet address to give to a guest.
+- In no room: Open a room, or join someone's with their headset's address (`name`, `name:port` or `name port`) and the invite code they gave you.
+- In your own room: Make an invite code (shown until the room ends, with a copy button), and each person who asks to come in with Let in and No. Closing the room asks first when others are in it.
+- In any room: who is in it and how (you, the owner, in a game, headset off, connecting), and Leave.
+- What you share: your voice (the switch mutes `ft-roomvoice`), and a switch per screen of the desktop (`share N` and `unshare N` to `ft-roompanels`), three at most.
+
+The page asks `state` and `here` of ft-together, `state` of ft-roomvoice and ft-roompanels and `screens` of ft-screens once a second while it shows, on a worker thread, and nothing while it doesn't. Names, logins and notes in the answers are text a peer chose: they are shown as plain text, and what is typed for a `join` is sent only when it reads as an address and a code (`roompage.py`).
+
+Not there yet: someone asking to come in shows only on this page, not as a notification; mute is forgotten when ft-roomvoice restarts.
 
 ## ft-together
 
@@ -49,6 +84,7 @@ The rest of Frametop talks to it on `@ft_together`, one datagram a question and 
 | `leave` | Leaves the room. Its owner leaving ends it for everyone |
 | `share K W H X Y Z QW QX QY QZ METRES CURVE [NAME]` | Shares your panel number K (0 to 2) with the room, or says where it is now: its video's size in pixels, its middle and its turn in the room (the panel faces its own +z), its width in metres, and its curve (0 for flat, else the radius in metres). Saying the same again costs nothing |
 | `unshare K` | Takes it back |
+| `here` | Where the others call this Frame: `ok ADDRESS PORT NAME`, its tailnet address, the port it takes calls on, and what the others call you. An invite is that address and port and a code from `invite` |
 | `media` | `ok` and how the shared panels' video goes, as JSON: which of your panels have a program that encodes them (`sources`), which panels have a program that shows them here (`sinks`), and for each of your three panels the bitrate its encoder is asked for and how many people watch it |
 | `watch` | `ok`, and for the next five seconds every pose a person in the room sends comes to the asker (below). A program that draws the room asks again each second. At most four watch at once |
 | `listen` | `ok`, and for the next five seconds every voice datagram a person in the room sends comes to the asker (below). Asked again each second, like `watch`. At most four listen at once |
@@ -151,7 +187,7 @@ The bitrate of a panel starts at 2 Mbit/s. Two pictures given up within a second
 
 ## A shared panel on a Frame
 
-Four programs make a shared panel, each with one job. None of them is started by Frametop yet (Settings will); until then they are run by hand.
+Four programs make a shared panel, each with one job. ft-roompanels runs as a unit ("Running it"); ft-screens starts `ft-sharepanel` and `ft-peerpanel` when a screen is shared or a panel comes.
 
 ```
 ft-sharepanel --panel K --size WxH [--fps F] [--socket NAME] (--fd N | --pattern)
@@ -178,7 +214,7 @@ What isn't there yet: a viewer can move their own copy of someone's panel until 
 ft-roomvoice [--socket NAME] [--together NAME] [--screens NAME] [--muted] [--hum HZ] [--probe]
 ```
 
-One program sends the wearer's voice to the room and plays the others'. Frametop doesn't start it yet (Settings will); until then it is run by hand, next to ft-together.
+One program sends the wearer's voice to the room and plays the others'. It runs as a unit next to ft-together ("Running it").
 
 - **Your voice.** The session's default microphone, which on the Frame runs through echo cancelling (it shows in the mixer as "Your voice in the room"), 20 ms at a time into Opus: mono, 24 kbit/s, with what the decoder needs to make up a lost packet from the next one. Silence isn't sent, but for a small packet every 400 ms that tells how the quiet sounds. The microphone is open only while you are in a room, not muted, and the headset is on your head: away in a game your voice stays on, with the headset off (`away off`) it doesn't.
 - **Their voices.** Each person's packets wait about 60 ms in a buffer of their own (`voice/jitter.h`), so ones that come late or in a bunch still play in step. A lost one is made up from the next when that is there and guessed otherwise; after 100 ms of guessing with nothing waiting the voice stops until its next packet, and a voice more than 240 ms behind jumps to now. Packets are decoded here and nowhere else, and only ones that hold 20 ms.
@@ -186,7 +222,15 @@ One program sends the wearer's voice to the room and plays the others'. Frametop
 - **Questions** on `@ft_roomvoice`: `mute`, `unmute`, `quit`, and `state`, which answers `ok` and JSON: `room`, `muted`, `mic` (`open`, `closed`, `failed`), `sent` and `level` (your voice), `playing`, and for each other person `person`, `speaking`, `placed`, `level`, `played`, `lost`, `late`.
 - `--hum HZ` and `--probe` are for tests: the wearer hums a note in place of the microphone, and what would be played is measured (in `state`, as `out`) in place of the loudspeakers.
 
-What isn't there yet: a volume for each person and for the room, the microphone's level made even, mute kept across runs or shown in the room, the avatars' mouths moved by these voices (the pose's mouth shapes are still sent shut), and anything that says `away off` when the headset comes off. A steady tone is taken for noise by the encoder and not sent, which is right for a fan and wrong for a held note.
+What isn't there yet: a volume for each person and for the room, the microphone's level made even, mute kept across runs or shown in the room, the avatars' mouths moved by these voices (the pose's mouth shapes are still sent shut), and how loud someone is shown on their figure. A steady tone is taken for noise by the encoder and not sent, which is right for a fan and wrong for a held note.
+
+## Away
+
+```
+ft-roomaway [--together NAME] [--helper NAME] [--relay NAME]
+```
+
+While this Frame is in a room, `ft-roomaway` asks the pointer helper once a second whether the headset is worn (`gaze ? headset`) and the input relay whether Frametop is paused for a game (`pause ?`), and tells ft-together `away off`, `away game` or `away back` whenever the room has it otherwise. The headset off wins over a game. An answer stands for five seconds; with none, the wearer is taken to be there, so a Frame without the pointer helper running isn't away for good. What follows from being away is each program's own: `ft-roomvoice` closes the microphone and plays nothing with the headset off, and a paused Frametop draws no screens, so a shared one stands still.
 
 ## The voice datagram
 
@@ -202,7 +246,7 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 
 ## Tests
 
-`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test, the loopback test and ft-roompanels' and ft-roomvoice's tests between two `ft-together` need msquic, which `together/build.sh` builds; without it they are SKIPPED. `tests/roomkit.py` is what the Python tests share: one `ft-together` on the loopback and the questions to it, a program on its media socket, a program whose lines are read as they come, a pose and a voice datagram, and a program that watches and listens.
+`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test, the loopback test and ft-roompanels', ft-roomvoice's and ft-roomaway's tests between two `ft-together` need msquic, which `together/build.sh` builds; without it they are SKIPPED. `tests/roomkit.py` is what the Python tests share: one `ft-together` on the loopback and the questions to it, a program on its media socket, a program whose lines are read as they come, a pose and a voice datagram, and a program that watches and listens.
 
 | Test | What it covers |
 |---|---|
@@ -219,6 +263,10 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 | `tests/roompanels-test.py` | `ft-roompanels` itself between two real `ft-together --loopback`, each with a stand-in ft-screens on a socket (`tests/fakescreens.py`): each floor laid, a screen shared by the owner and one by the guest standing at the other's where the room says (each side's pose taken back to the room through its own floor), moved, taken back, gone when its owner leaves, and nothing left behind when ft-roompanels ends |
 | `tests/voice-test.cpp` | The voices' parts without a sound device: the buffer (in step, late, in a bunch, lost, a pause, a stall, the count going round, a voice far behind), where a voice is heard from, Opus there and back (the note that went in comes out, silence isn't sent, a lost packet made up, four thousand packets of noise, a packet that isn't 20 ms), and the mix (two voices, each in its ear, never past full scale, a person forgotten) |
 | `tests/roomvoice-test.py` | `ft-roomvoice` itself, twice, between two real `ft-together --loopback`, each with a stand-in ft-screens, humming a note of its own and measuring what it would play: nothing outside a room, one's note heard by the other and not by themselves, from the side its owner stands on and quieter from further off, in the middle when their place isn't known, mute and unmute, the headset off and a game, leaving, and ending cleanly |
+| `tests/test_roomaway.py` | ft-roomaway's rules (`just test-python`): the helper's and the relay's answers read, good and not; the headset off, a game, both, back; what the room has put right; an answer that stands five seconds; leaving and coming back |
+| `tests/roomaway-test.py` | `ft-roomaway` itself next to a real `ft-together` in a room with another, with stand-ins for the pointer helper and the relay: off, a game and back reach the other end's room, what another program said is put right, a helper that stops answering, leaving, and ending cleanly |
+| `tests/test_roompage.py` | The Settings page (`just test-python`): the answers read, good and not; what is typed to join; and the backend and the page itself driven against stand-ins for the four programs on sockets of the test's own, with a made-up systemctl: the switch, a room opened, an invite, an ask let in, joining, mute, a screen shared, and no QML warnings |
+| `tests/test_units.py` | The units as files: the room's four go with ft-together's and are never enabled themselves, each starts a program there is, each cleans up only its own, and `run.sh` and `install.sh` name them all |
 | `screens/tests/share-test.c` | ft-screens' share tap with made-up buffers, the test being the `ft-sharepanel` it starts: the commands, each buffer described once, one picture out at a time and the newest next, the rate, a program that keeps a picture or dies, pictures only while watched |
 | `screens/tests/remote-test.c` | With the remote displays' cases: a room's panel is given its id and the room's socket, waits for an old program of its own screen and for no host's queue, and what isn't one is refused |
 | `tests/panels-test.py` | **Run by hand, not by `just test`, and not at all for now** (docs/together.md, "Open questions": the Frame reset during its first run). The real video: `ft-sharepanel --pattern` to `ft-peerpanel --probe` through two `ft-together`, checking every picture's size, number and colours, the encoder closing when nobody watches, a viewer coming back, the sharer starting again, and several sizes. It needs the Frame's encoder and decoder |

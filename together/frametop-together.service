@@ -1,0 +1,24 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop Together: this headset's end of a shared room
+Documentation=file://@REPO@/together/README.md
+# The programs that make a room on this Frame start and stop with it (each is PartOf it).
+Wants=frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service
+
+[Service]
+# In the container it was built in (scripts/in-box). It waits for Tailscale by itself, and
+# takes calls only on this Frame's tailnet address. Clean the process up explicitly around it:
+# in the container it isn't in this unit's cgroup, and its SIGTERM is how the room hears that
+# you left.
+ExecStartPre=-/usr/bin/pkill -x ft-together
+ExecStart=@REPO@/scripts/in-box @REPO@/together/build/ft-together
+ExecStop=-/usr/bin/pkill -x ft-together
+ExecStopPost=-/usr/bin/pkill -x ft-together
+Restart=on-failure
+RestartSec=3
+# The container session (conmon) ignores SIGTERM; don't wait 90 s for it.
+TimeoutStopSec=5
+
+[Install]
+# Enabled only while Together is turned on (Frametop Settings, or together/run.sh on).
+WantedBy=default.target

@@ -437,7 +437,10 @@ def pages(f, keys):
                  ["Power", "Turning the displays off when the headset is unused, and staying awake on the charger",
                   "settings:power"],
                  ["Remote access", "See and use the Frametop desktop from another computer on your tailnet, over VNC",
-                  "settings:remote-access"]],
+                  "settings:remote-access"],
+                 ["Frametop Together", "A room shared with other Steam Frames on your tailnet: open one or join "
+                                       "someone's, let people in, and choose which of your screens they see",
+                  "settings:together"]],
         "actions": [], "clips": []})
 
     more = {"id": "more", "title": "And more", "icon": "help-about",

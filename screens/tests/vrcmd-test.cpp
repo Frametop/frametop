@@ -27,7 +27,7 @@ int main() {
     struct { const char *cmd; Verb verb; } lines[] = {
         {"place 1 0.5 1.2 -2 10 -5 0", Place}, {"width 2 1.6", Width}, {"curve 1 on", CurveOnOff},
         {"curve 1 off", CurveOnOff}, {"curve 1 2.5", Curve}, {"pin all head", Pin}, {"unpin 3", Unpin},
-        {"get 1", Get}, {"screens", Screens}, {"universe", Universe}, {"head", Head},
+        {"get 1", Get}, {"screens", Screens}, {"universe", Universe}, {"head", Head}, {"reach", Reach},
         {"visibility auto", Visibility}, {"wrist 0.8", Wrist}, {"gesture left 0.5", Gesture},
         {"gamepadpill", GamepadPill}, {"concealed", Concealed}, {"conceal 2", ConcealReveal},
         {"reveal all", ConcealReveal}, {"hide", HideShowToggle}, {"show", HideShowToggle},
@@ -92,6 +92,7 @@ int main() {
     check("curve with a long word: %7s stops at 7, so not off", V("curve 1 offoffoff") == Unknown);
     check("pin with one word is no pin", V("pin all") == Unknown);
     check("head is a prefix: headset is head", V("headset") == Head);
+    check("reach is the whole word", V("reach") == Reach && V("reaches") == Unknown && V("reach 1") == Unknown && GroupOf(Reach) == ReadoutGroup);
     check("screens and state are prefixes", V("screens please") == Screens && V("statex") == State);
     check("concealed before conceal", V("concealed 2") == Concealed);
     check("hide, show, toggle are prefixes", V("hidex") == HideShowToggle && V("toggled") == HideShowToggle);

@@ -1,7 +1,8 @@
 """A stand-in for ft-screens, as far as ft-roompanels asks it (test_roompanels.py asks it
 directly; roompanels-test.py serves it on a socket): the desktop's screens and where they stand,
-the remote screens, the share tap, the head, and "shift", which moves all that stands in the
-room as ft-screens does (screens/roomshift.h): its sum is kept, and "shift back" undoes it."""
+the remote screens, the share tap, the head, the hand controllers ("reach", which ft-roommove
+asks), and "shift", which moves all that stands in the room as ft-screens does
+(screens/roomshift.h): its sum is kept, and "shift back" undoes it."""
 import math
 import socket
 import threading
@@ -24,6 +25,7 @@ class Screens:
         self.shares = {}      # number -> (slot, size)
         self.panels = {}      # a remote screen's number -> {"pose", "width", "curve"}
         self.head = "ok 0.5000 1.6000 0.2500 90.00"
+        self.hands = None     # ((x, y, z), (x, y, z)) of the left and right controller, an error's text, or None: not tracked
         self.asked = []
         self.there = True
 
@@ -34,6 +36,12 @@ class Screens:
         w = text.split()
         if text == "head":
             return self.head
+        if text == "reach":
+            if isinstance(self.hands, str):
+                return self.hands
+            if self.hands is None:
+                return "error no left controller tracked"
+            return "ok " + " ".join(f"{v:.4f}" for hand in self.hands for v in hand)
         if text == "screens":
             return f"ok {len(self.kwin)}" + "".join(f" {n}:{s[0]}x{s[1]}:1.200" for n, s in sorted(self.kwin.items()))
         if text == "remotes":

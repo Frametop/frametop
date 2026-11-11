@@ -1,0 +1,13 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop Together: pulls you through the room by both grips
+Documentation=file://@REPO@/together/README.md
+After=frametop-together.service
+PartOf=frametop-together.service
+
+[Service]
+# On the host: Python's standard library, conf/ftipc.py and input/vrws.py.
+ExecStart=/usr/bin/python3 @REPO@/together/ft-roommove
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5

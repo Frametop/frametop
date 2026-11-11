@@ -340,7 +340,7 @@ fi
 # Frametop Together (together/README.md): installed, it is off until its switch in Frametop
 # Settings turns it on. An install that has it already keeps it, also with --yes.
 step "12/13 Frametop Together (optional, experimental: a room shared with other Steam Frames on your tailnet)"
-together_units="frametop-together.service frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service frametop-room-input.service frametop-room-points.service"
+together_units="frametop-together.service frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service frametop-room-input.service frametop-room-points.service frametop-room-move.service"
 together_default=n
 on_frame '[ -f ~/.config/systemd/user/frametop-together.service ]' && together_default=y
 if [ "$together" = 0 ]; then

@@ -124,6 +124,7 @@ EXTRA_DIRS = {
     'frametop-room-panels.service': ('conf',),
     'frametop-room-away.service': ('conf',),
     'frametop-room-input.service': ('conf',),
+    'frametop-room-move.service': ('conf', 'input'),   # input/: vrws
 }
 # Units restarted for the files their processes run, not those files' folders: the desktop
 # (restarting it ends what's open on it; input/ft-textinput shouldn't restart it for all of

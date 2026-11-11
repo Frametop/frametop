@@ -7649,6 +7649,21 @@ static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                       std::atan2(m.m[0][2], m.m[2][2]) * 180 / M_PI);
         return;
     }
+    case vrcmd::Reach: {
+        // Where both hand controllers are on the floor, for the program that pulls you through a
+        // shared room by them (together/ft-roommove). In a game they are the game's.
+        if (g_gameRunning) return (void)std::snprintf(reply, size, "error a game has the controllers");
+        Mat hand[2];
+        const char *side[2] = {"left", "right"};
+        for (int i = 0; i < 2; ++i) {
+            const vr::TrackedDeviceIndex_t dev = HandDevice(side[i]);
+            if (!IsHandController(dev) || !DevicePose(dev, &hand[i]))
+                return (void)std::snprintf(reply, size, "error no %s controller tracked", side[i]);
+        }
+        std::snprintf(reply, size, "ok %.4f %.4f %.4f %.4f %.4f %.4f", hand[0].m[0][3], hand[0].m[1][3], hand[0].m[2][3],
+                      hand[1].m[0][3], hand[1].m[1][3], hand[1].m[2][3]);
+        return;
+    }
     case vrcmd::GamepadPill: {
         std::snprintf(reply, size, "ok over %d shown %d pad %d ours %d lasers %d hover %d", g_pill.target + 1, g_pill.shown + 1,
                       g_pill.pad + 1, PadMine() ? 1 : 0, g_pill.lasers ? 1 : 0, g_pill.hover ? 1 : 0);
@@ -8207,6 +8222,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //                     [12 numbers: device->screen, when pinned]"   (pin: none|left|right|head)
 //   screens       -> "ok <count> <index>:<pixels w>x<h>:<metres> ..."
 //   head          -> "ok x y z yaw"
+//   reach         -> "ok lx ly lz rx ry rz"   where the left and the right hand controller are
+//                    (metres, as head); an error while either isn't tracked or a game runs
 //   universe      -> "ok <id> room|temporary|unknown"   SteamVR's universe now (universefix.h)
 //   visibility always|dashboard|gesture|toggle
 //   wrist <degrees>           a pinned screen shows while you see its front within this

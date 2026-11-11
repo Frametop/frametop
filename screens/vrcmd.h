@@ -15,7 +15,7 @@ namespace vrcmd {
 
 enum Verb {
     Unknown,
-    Place, Width, CurveOnOff, Curve, Pin, Unpin, Get, Screens, Universe, Head,
+    Place, Width, CurveOnOff, Curve, Pin, Unpin, Get, Screens, Universe, Head, Reach,
     Visibility, Wrist, Gesture, GamepadPill, Concealed, ConcealReveal, HideShowToggle,
     Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
     SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
@@ -58,7 +58,7 @@ inline Group GroupOf(Verb v) {
     switch (v) {
     case Place: case Width: case CurveOnOff: case Curve: case Pin: case Unpin: case Get: case Pose: case Front:
         return PanelGroup;
-    case Screens: case Universe: case Head: case GamepadPill: case Concealed: case Debug: case State:
+    case Screens: case Universe: case Head: case Reach: case GamepadPill: case Concealed: case Debug: case State:
         return ReadoutGroup;
     case Visibility: case Wrist: case Gesture: case ConcealReveal: case HideShowToggle: case Pause: case InGames:
     case SteamvrMode: case Controllers:
@@ -96,6 +96,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::strncmp(cmd, "screens", 7) == 0) return Screens;
     if (std::strcmp(cmd, "universe") == 0) return Universe;
     if (std::strncmp(cmd, "head", 4) == 0) return Head;
+    if (std::strcmp(cmd, "reach") == 0) return Reach;
     if (std::sscanf(cmd, "visibility %15s", c.word) == 1) return Visibility;
     if (std::sscanf(cmd, "wrist %lf", &c.w) == 1) return Wrist;
     if (std::sscanf(cmd, "gesture %15s %lf", c.hand, &c.w) == 2) return Gesture;

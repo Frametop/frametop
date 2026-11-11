@@ -209,6 +209,8 @@ test-c:
         run together/tests/roomcontrol-test.py python3 together/tests/roomcontrol-test.py build/tests/ft-together
         # ft-roominput next to one of them, with stand-ins for ft-roompanels and ft-screens
         run together/tests/roominput-test.py python3 together/tests/roominput-test.py build/tests/ft-together
+        # ft-roommove next to one of them and a real ft-roompanels, with a stand-in ft-screens
+        run together/tests/roommove-test.py python3 together/tests/roommove-test.py build/tests/ft-together
         # ft-roompoints at one of three of them, with a stand-in for ft-roompanels. It draws through
         # SteamVR, so it wants OpenVR's header (together/build.sh fetches it) and library to build;
         # with --probe it draws nothing.
@@ -225,7 +227,7 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
         run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

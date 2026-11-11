@@ -20,8 +20,8 @@ namespace irisenc {
 // The sizes the encoder is given. Across, only multiples of kWidthStep: a row of the encoder's
 // picture is as long as the next multiple of it, and when the picture was narrower than its
 // rows (1366 x 768 from DMA-BUFs, 2026-11-11) the Frame reset itself in the second the encoder
-// started, with nothing in the kernel's log. 640, 1280 and 1920 across are known to work. So
-// Open refuses every other width before it touches the device, whoever asks.
+// started, with nothing in the kernel's log. 640, 896, 1280, 1408, 1664 and 1920 across are known
+// to work. So Open refuses every other width before it touches the device, whoever asks.
 constexpr int kWidthStep = 128;
 inline bool Takes(int width, int height) {
     return width >= 128 && height >= 128 && width <= 8192 && height <= 8192 && width % kWidthStep == 0 && height % 2 == 0;

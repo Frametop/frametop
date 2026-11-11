@@ -2,7 +2,7 @@
 
 Shared rooms: up to four people in one owner's room, each on their own Frame, over Tailscale. The design, its decisions and the milestones are in [docs/together.md](../docs/together.md). This file says what is in this folder and what goes over a link.
 
-Built so far: the spikes (M0), and the session's wire format and rules with their tests (the first part of M3). The links themselves, `ft-together`, panels and voice are not built yet.
+Built so far: the spikes (M0), and from M3 the session's wire format and rules, the links, and `ft-together`, which opens a room, lets people in and keeps the room's people linked. Poses, panels and voice are not built yet, so people in a room don't see or hear each other so far.
 
 ## What is where
 
@@ -10,13 +10,51 @@ Built so far: the spikes (M0), and the session's wire format and rules with thei
 |---|---|---|
 | `proto/` | The bytes on a link: bounded readers and writers (`bytes.h`), the control stream's messages (`messages.h`), the pose datagram (`posewire.h`). No I/O, standard library only, so the PC sender in the Vibepollo fork can take the folder as it is | nothing |
 | `room/` | A room's own rules: invites (`invites.h`) and where people stand (`seats.h`) | `proto/` |
-| `session/` | The session: who may join, who is in the room, who links to whom, and what each link may say (`session.h`). The network, the tailnet, the clock and the dice are handed in | `proto/`, `room/` |
-| `net/` | The real network: a self-signed certificate for QUIC (`selfcert.h`). msquic's links and the tailnet through tailscaled come next | msquic, OpenSSL |
+| `session/` | The session: who may join, who is in the room, who links to whom, and what each link may say (`session.h`). The network, the tailnet, the clock and the dice are handed in. `commands.h` puts a session behind lines of text | `proto/`, `room/` |
+| `net/` | The real network: the links on msquic (`quiclinks.h`), with the self-signed certificate QUIC wants (`selfcert.h`), which address a name stands for (`lookup.h`), and who is at an address by tailscaled's word (`tailnet.h`, with the small JSON reader for its answers, `json.h`) | `session/`, msquic, OpenSSL |
+| `ft-together.cpp` | The program: one loop over the links and a local socket | `session/`, `net/` |
 | `media/` | The iris hardware encoder (`irisenc.h`) | V4L2 |
 | `spike/` | The M0 spikes, `ft-enctest` and `ft-quictest` | `media/`, `net/` |
 | `tests/` | The tests below | |
 
-`together/build.sh --spikes` builds the spikes and msquic (pinned by commit) in the dev container.
+`together/build.sh` builds `build/ft-together` and msquic (pinned by commit) in the dev container, and with `--spikes` the spikes too.
+
+## ft-together
+
+```
+ft-together [--port N] [--name NAME] [--socket NAME] [--loopback]
+```
+
+It runs while Together is wanted. It asks tailscaled for this Frame's tailnet address and name, takes calls on that address (port 47193 unless `--port` says otherwise), and holds the session. While Tailscale isn't running it waits and looks again every three seconds. `--name` is what the others call you; without it, the headset's name on the tailnet.
+
+The rest of Frametop talks to it on `@ft_together`, one datagram a question and one back, like the other Frametop sockets:
+
+| Question | Answer |
+|---|---|
+| `state` | `ok` and the session as JSON: `mode` (`idle`, `hosting`, `calling`, `joined`), `note` (the last thing worth telling the wearer), `me`, `owner`, `people` (place, name, login, away, whether there is a link to them, spot), `asks` (who waits for the owner's answer: number, name, Tailscale login, address) and `codes` (invites nobody used yet) |
+| `open [X Z YAW]` | A room, with you its owner standing there |
+| `invite` | `ok` and a code |
+| `join HOST PORT CODE` | Calls a room's owner. `state` tells how it went |
+| `accept N`, `decline N` | An ask answered |
+| `away game`, `away off`, `away back` | Tells the room |
+| `leave` | Leaves the room. Its owner leaving ends it for everyone |
+
+Anything that can't be done is answered with `error` and why. Ending the program (SIGTERM) leaves the room first, so the others are told at once.
+
+```
+echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_together,bind=
+```
+
+`--loopback` is for tests: no Tailscale, the links are on 127.0.0.1 only, and everyone there is let in as `someone@loopback`. A fake peer for the live Frame is a second `ft-together` in the normal mode on another port and socket: it has this Frame's tailnet address, and the session tells people apart by address and port.
+
+## The links
+
+One QUIC connection for every two people, with one stream for the control messages, opened by the caller, and datagrams beside it for poses and voice (at most 1187 bytes each, what a link over Tailscale carries). msquic runs threads of its own; what they see is queued, and `ft-together`'s one loop takes it out and tells the session.
+
+- The listener takes calls sent to this Frame's tailnet address only. Who a caller is comes from tailscaled, asked about the address the call came from. The certificate QUIC wants is made new at each start, names nobody, and isn't checked: Tailscale already encrypts the path and vouches for the address at its other end.
+- A name is looked up before a call, and only an address on the tailnet is ever sent a packet.
+- An end holds at most 32 connections. A link whose bytes pile up untaken past 1 MB is cut, and datagrams past 256 KB untaken are dropped: the session reads faster than anyone has reason to write.
+- Closing a link lets what was sent before arrive, then tells the closer nothing more of it. A link that is silent for ten seconds is down.
 
 ## Joining
 
@@ -60,10 +98,13 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 
 ## Tests
 
-`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them.
+`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The last two need msquic, which `together/build.sh` builds; without it they are SKIPPED.
 
 | Test | What it covers |
 |---|---|
 | `tests/proto-test.cpp` | Every message and the pose datagram there and back, each cut short at every length, damaged, and made of noise; the stream parser fed in pieces of any size |
 | `tests/room-test.cpp` | Invites (once, ten minutes, eight waiting, the wrong-guess limit) and spots |
 | `tests/session-test.cpp` | Up to five sessions run against each other on a network the test makes: joining, declining, a full room, the guests' links, leaving, a lost owner, another version, and guests and strangers who say what they may not. Three hundred rounds of noise and forged messages on every kind of link |
+| `tests/tailnet-test.cpp` | tailscaled's answers, kept in the test: this node's address and name, who is at an address, Tailscale stopped or logged out, answers that aren't what they should be; the JSON reader on good texts, nearly good ones and noise; which addresses are on the tailnet; a name looked up |
+| `tests/links-test.cpp` | Real links between ends in one program, on loopback: bytes in order both ways, datagrams, closing, calls that may not be made or that nobody answers, a call to another address of this machine, the limits on what a far end can make an end hold, and taking an end down with links up |
+| `tests/loopback-test.py` | Four `ft-together --loopback` programs: a room opened, a wrong code, a declined ask, noise on the port, two guests let in and linked to each other, away, a guest whose program is killed, leaving and coming back, a second program on the same socket, and the owner's program ending |

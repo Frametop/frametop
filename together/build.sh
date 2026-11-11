@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Build Frametop Together's programs (docs/together.md) in the dev container on the Frame. For
-# now that is only the spikes, with --spikes:
+# Build Frametop Together's programs (docs/together.md, together/README.md) in the dev container
+# on the Frame:
+#   together/build/ft-together  this Frame's end of a session: the links and the session's rules
+# and with --spikes, the programs that measured what the design stands on:
 #   together/build/ft-enctest   spikes T1, T2 and T4 (spike/ft-enctest.cpp on media/irisenc.cpp):
 #                               the hardware encoder under several sessions
 #   together/build/ft-quictest  spike T3 (spike/ft-quictest.cpp): video as QUIC datagrams
@@ -14,7 +16,6 @@ spikes=0
 [ "${1:-}" = --spikes ] && spikes=1
 exec "$root/scripts/frame.sh" -C together "spikes=$spikes"'; set -e; mkdir -p build
 flags="-std=c++17 -O2 -Wall -Wextra -Wno-missing-field-initializers"
-[ $spikes = 1 ] || exit 0
 mq=16ca4d8d785d34fb22285e7c652e477ac16475a5  # v2.6.3
 src=build/msquic
 if [ ! -f $src/.ft-$mq ]; then
@@ -35,9 +36,13 @@ if [ ! -f build/libmsquic.so.2 ]; then
   strip --strip-unneeded build/libmsquic.so.2
 fi
 quic="-I$src/src/inc build/libmsquic.so.2 -Wl,-rpath,\$ORIGIN"
+g++ $flags -o build/ft-together ft-together.cpp net/quiclinks.cpp net/lookup.cpp net/tailnet.cpp net/selfcert.cpp \
+  session/session.cpp session/commands.cpp proto/messages.cpp $quic $(pkg-config --libs openssl) -lpthread
+strip --strip-unneeded build/ft-together
+[ $spikes = 1 ] || { echo "built build/ft-together"; exit 0; }
 g++ $flags $(pkg-config --cflags gbm) -o build/ft-enctest spike/ft-enctest.cpp media/irisenc.cpp \
   $(pkg-config --libs gbm) -lpthread
 g++ $flags -o build/ft-quictest spike/ft-quictest.cpp net/selfcert.cpp $quic \
   $(pkg-config --libs openssl) -lpthread
 strip --strip-unneeded build/ft-enctest build/ft-quictest
-echo "built build/ft-enctest build/ft-quictest"'
+echo "built build/ft-together build/ft-enctest build/ft-quictest"'

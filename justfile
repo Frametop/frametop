@@ -109,6 +109,22 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/session-test.cpp together/session/session.cpp \
       together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-session-test
     run together/tests/session-test.cpp build/tests/together-session-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/tailnet-test.cpp together/net/tailnet.cpp \
+      together/net/lookup.cpp -o build/tests/together-tailnet-test
+    run together/tests/tailnet-test.cpp build/tests/together-tailnet-test
+    # the links are msquic, which together/build.sh fetches and builds
+    if [ -f together/build/libmsquic.so.2 ]; then
+        quic="-Itogether/build/msquic/src/inc together/build/libmsquic.so.2 -Wl,-rpath,$PWD/together/build $(pkg-config --libs openssl) -lpthread"
+        g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/links-test.cpp together/net/quiclinks.cpp \
+          together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp -o build/tests/together-links-test $quic
+        run together/tests/links-test.cpp build/tests/together-links-test
+        g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
+          together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp together/session/session.cpp together/session/commands.cpp \
+          together/proto/messages.cpp -o build/tests/ft-together $quic
+        run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
+    else
+        echo "together/tests/{links-test.cpp,loopback-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+    fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)
         g++ -std=c++17 -Wall -Wextra -Werror -I. "$t" -o "build/tests/$n"

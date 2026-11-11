@@ -133,6 +133,9 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/session-test.cpp together/session/session.cpp \
       together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-session-test
     run together/tests/session-test.cpp build/tests/together-session-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/rejoin-test.cpp together/session/session.cpp \
+      together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-rejoin-test
+    run together/tests/rejoin-test.cpp build/tests/together-rejoin-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/flow-test.cpp -o build/tests/together-flow-test
     run together/tests/flow-test.cpp build/tests/together-flow-test
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/video-test.cpp together/flow/video.cpp \

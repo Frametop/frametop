@@ -33,6 +33,12 @@ int Session::LinkOf(int person) const {
     return -1;
 }
 
+int Session::GuestAt(const std::string &address, uint16_t port) const {
+    for (const proto::Person &p : room_.people)
+        if (p.id != room_.owner && p.address == address && p.port == port) return p.id;
+    return -1;
+}
+
 int Session::PersonOn(int link) const {
     const auto it = link_.find(link);
     return it != link_.end() && it->second.state == Link::kMember ? it->second.person : -1;
@@ -242,7 +248,9 @@ void Session::Asked(int link, Link &l, double now) {
     if (!tailnet_.WhoIs(l.address, who)) return Refuse(link, proto::Why::kBad, "Your headset isn't on this room's tailnet.");
     size_t asking = 0;
     for (const auto &[id, other] : link_) asking += other.state == Link::kAsking;
-    if (room_.people.size() + asking >= size_t(proto::kPeople)) return Refuse(link, proto::Why::kFull, "The room is full.");
+    // a headset the room lists already asks for the place it has (wearer.cpp, Answer)
+    const size_t others = room_.people.size() - (GuestAt(l.address, l.hello.port) >= 0);
+    if (others + asking >= size_t(proto::kPeople)) return Refuse(link, proto::Why::kFull, "The room is full.");
     if (invites_.Use(l.hello.code, l.address, now) != room::Invites::Answer::kGood)
         return Refuse(link, proto::Why::kCode, "That invite code isn't good. A code works once, for ten minutes.");
     l.state = Link::kAsking, l.who = who, l.ask = ++nextAsk_, l.since = now;

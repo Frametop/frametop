@@ -104,6 +104,20 @@ struct Net {
         }
         pump();
     }
+    // The link between two Frames is lost, and only `hears` learns of it yet: `other` holds a
+    // link that goes nowhere.
+    void lose(Frame &hears, Frame &other) {
+        for (auto it = far.begin(); it != far.end();) {
+            if (it->first.first != &hears || it->second.frame != &other) {
+                ++it;
+                continue;
+            }
+            queue.push_back({{&hears, it->first.second}, Event::kDown, "", {}});
+            far.erase({it->second.frame, it->second.link});
+            it = far.erase(it);
+        }
+        pump();
+    }
     // A new link to `to` whose other end is the test's: what comes in on it is the test's to write.
     End stranger(Frame &to, const std::string &from) {
         const End theirs = {&to, nextLink++};

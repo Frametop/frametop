@@ -162,6 +162,8 @@ private:
     void End(const std::string &note);
     proto::Hello MyHello(const std::string &code) const;
     int LinkOf(int person) const;
+    // The guest the room lists at a headset's address and port, or -1.
+    int GuestAt(const std::string &address, uint16_t port) const;
 
     Links &links_;
     Tailnet &tailnet_;

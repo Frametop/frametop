@@ -50,8 +50,11 @@ std::string Session::Join(const std::string &host, uint16_t port, const std::str
 std::string Session::Answer(int ask, bool accept) {
     for (auto &[id, l] : link_) {
         if (mode_ != Mode::kHosting || l.state != Link::kAsking || l.ask != ask) continue;
-        const int place = room::FreeId(room_);
         if (!accept) return Refuse(id, proto::Why::kDeclined, "The room's owner said no."), "";
+        // A headset comes in once. One the room lists already lost its link, and its end of that
+        // was heard there first: the old link and its place go before the new one is given.
+        if (const int was = GuestAt(l.address, l.hello.port); was >= 0) LinkOf(was) >= 0 ? Drop(LinkOf(was)) : Remove(was);
+        const int place = room::FreeId(room_);
         if (place < 0) return Refuse(id, proto::Why::kFull, "The room is full."), "the room is full";
         proto::Person p;
         p.id = uint8_t(place), p.name = l.hello.name.empty() ? l.who.name : l.hello.name, p.login = l.who.login;

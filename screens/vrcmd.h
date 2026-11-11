@@ -7,6 +7,7 @@
 // (screens/tests/vrcmd-test.cpp). The commands are listed above ft_vr_command.
 #pragma once
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -20,7 +21,7 @@ enum Verb {
     SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
     WindowDrag, Pulled,
-    Spin,
+    Spin, Shift, ShiftBack,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
 constexpr Verb kLastVerb = State;
@@ -71,7 +72,7 @@ inline Group GroupOf(Verb v) {
     case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case CarryToggle:
     case CarryTake: case CarryTurn: case Carry: case Up: case WindowDrag: case Pulled:
         return FloatGroup;
-    case Spin:
+    case Spin: case Shift: case ShiftBack:
         return SpinGroup;
     case Unknown:
         break;
@@ -140,10 +141,18 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "windowdrag %15s %15s %15s %15s", c.mod, c.b1, c.b2, c.b3) == 4) return WindowDrag;
     if (std::sscanf(cmd, "pulled %d %lf %lf %d", &c.n, &c.x, &c.y, &c.seq) >= 3) return Pulled;   // (no SEQ: 0, refused)
     if (!std::strncmp(cmd, "spin ", 5)) return Spin;
+    char more = 0;
+    if (std::sscanf(cmd, "shift %lf %lf %lf %c", &c.x, &c.z, &c.yaw, &more) == 3) return Shift;
+    if (std::strcmp(cmd, "shift back") == 0) return ShiftBack;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;
     if (std::strcmp(cmd, "debug") == 0) return Debug;
     if (std::strncmp(cmd, "state", 5) == 0) return State;
     return Unknown;
 }
+
+// Whether a "shift" is one ft_vr_command makes: metres a panel's place still tells apart a
+// millimetre at, degrees within a turn, and numbers at all.
+constexpr double kShiftFurthest = 5000;
+inline bool ShiftOk(const Cmd &c) { return std::fabs(c.x) <= kShiftFurthest && std::fabs(c.z) <= kShiftFurthest && std::fabs(c.yaw) <= 360; }
 
 }  // namespace vrcmd

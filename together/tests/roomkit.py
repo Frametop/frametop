@@ -183,6 +183,20 @@ class Watcher:
     def voices(self, seconds=0.5):
         return self.got(b"\x82", seconds)
 
+    def words(self, seconds=0.5):
+        """The text that came unasked in that time (a floor that moved: local/watchers.h, Tell)."""
+        got = []
+        deadline = time.monotonic() + seconds
+        while (left := deadline - time.monotonic()) > 0:
+            self.sock.settimeout(left)
+            try:
+                data = self.sock.recv(4096)
+            except OSError:
+                break
+            if data[:1] < b"\x80":
+                got.append(data.decode())
+        return got
+
     def got(self, kind, seconds):
         got = []
         deadline = time.monotonic() + seconds

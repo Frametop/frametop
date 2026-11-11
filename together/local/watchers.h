@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <vector>
@@ -35,6 +36,9 @@ public:
     // A person's datagram to everyone who watches, from the socket `sock`. Nobody is waited
     // for: a watcher whose queue is full misses this one. How many missed it comes back.
     size_t Send(int sock, int person, const uint8_t *datagram, size_t n, double now);
+    // A word of ft-together's own to everyone who watches, as an answer they didn't ask for
+    // (the floor when it moved: they read it as they read the answer to `floor`).
+    void Tell(int sock, const std::string &text, double now) const;
     size_t count() const { return watching_.size(); }
 
 private:

@@ -13,6 +13,14 @@ Questions, one datagram each on @ft_roompanels:
   panels       -> "ok COUNT ID:SCREEN:WxH ...": the screen here that shows each of the room's
                   panels, and its picture's shape (ft-roompoints asks)
 
+and to move through the room (roompanels/moving.py), each -> "ok X Z DEGREES", where this
+Frame's floor lies in the room now:
+
+  go X Z DEGREES        to stand at X, Z of the room, facing DEGREES to the left of its -z
+  go person N           to in front of the person at place N, facing them
+  go panel ID           to where the room's panel ID reads well, facing it
+  pull DX DZ DEGREES    the room pulled past by that much on your own floor
+
   --socket NAME     its own socket's name (ft_roompanels)
   --together NAME   ft-together's (ft_together)
   --screens NAME    ft-screens' (ft_screens)
@@ -29,20 +37,24 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "conf"))
 sys.path.insert(0, str(HERE))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
+from roompanels import moving  # noqa: E402
 from roompanels.keeper import Keeper  # noqa: E402
 
 IN_ROOM, IDLE = 0.25, 1.0   # seconds between looks
 
 
-def answer(keeper, text):
+def answer(keeper, mover, text):
     words = text.split()
+    moved = moving.answer(mover, words)
+    if moved is not None:
+        return moved
     if words == ["state"]:
         return "ok " + keeper.state()
     if words == ["panels"]:
         return keeper.panels()
     if len(words) == 2 and words[0] in ("share", "unshare") and words[1].isdigit() and len(words[1]) < 4:
         return (keeper.share if words[0] == "share" else keeper.unshare)(int(words[1]))
-    return "error share N | unshare N | state | panels"
+    return "error share N | unshare N | state | panels | go ... | pull DX DZ DEGREES"
 
 
 def main():
@@ -59,7 +71,8 @@ def main():
         sys.exit("ft-roompanels is running already")
     sock.setblocking(False)
     together, screens = ftipc.Client(timeout=0.5), ftipc.Client(timeout=0.5)
-    keeper = Keeper(lambda text: together.ask(names["--together"], text), lambda text: screens.ask(names["--screens"], text), time.monotonic)
+    ask_together, ask_screens = (lambda text: together.ask(names["--together"], text)), (lambda text: screens.ask(names["--screens"], text))
+    keeper, mover = Keeper(ask_together, ask_screens, time.monotonic), moving.Mover(ask_together, ask_screens)
 
     def ended(*_):
         raise SystemExit(0)
@@ -79,7 +92,7 @@ def main():
                     break
                 try:
                     data, who = sock.recvfrom(256)
-                    sock.sendto(answer(keeper, data.decode("utf-8", "replace")).encode(), who)
+                    sock.sendto(answer(keeper, mover, data.decode("utf-8", "replace")).encode(), who)
                 except OSError:
                     pass   # an asker that went before its answer
     finally:

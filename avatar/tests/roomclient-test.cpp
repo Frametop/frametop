@@ -85,6 +85,8 @@ struct Together {
             if (answers) sendto(sock.fd, reply.data(), reply.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&asker), askerLen);
         }
     }
+    // To whoever asked last, unasked: a floor that moved (together/local/watchers.h, Tell).
+    void Tell(const std::string &text) { sendto(sock.fd, text.data(), text.size(), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&asker), askerLen); }
     // To whoever asked last, as ft-together sends a watched pose.
     void Pose(int person, const proto::Pose &pose) {
         std::vector<uint8_t> out = {local::kPoseToWatcher, uint8_t(person)};
@@ -163,6 +165,19 @@ int main() {
         for (int i = 0; i < 17; ++i) pass(0.125, head);
     }
     check("...and an answer that isn't a floor changes nothing", c.laid() && c.floor().x == 7 && together.said.size() == 1);
+
+    // the wearer moved through the room: ft-together tells the new floor at once, unasked
+    together.floor = "ok 7.000000 8.000000 0.250000";
+    pass(0.125, head);
+    const int before = together.asked["floor"];
+    together.floor = "ok -2.500000 3.000000 1.500000";
+    together.Tell(together.floor);
+    c.Tick(now, head);
+    check("a floor that moved is taken as it is told, before the next question about it",
+          c.laid() && c.floor().x == -2.5 && c.floor().z == 3 && c.floor().yaw == 1.5 && together.asked["floor"] == before && together.said.size() == 1);
+    together.floor = "ok 7.000000 8.000000 0.250000";
+    for (int i = 0; i < 17; ++i) pass(0.125, head);
+    check("...and the next answer about it counts again", c.floor().x == 7 && c.floor().yaw == 0.25);
 
     // poses
     check("nobody is drawn before their pose comes", !c.people().Drawn(0, now) && c.posesIn() == 0);

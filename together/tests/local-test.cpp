@@ -1,7 +1,7 @@
 // What ft-together does for this Frame's own programs (together/local): which poses it passes
 // on, the count and the mouth it sends its own with, who watches, the others' input on its way
-// to the desktop, where the floor lies in the room, and the messages on the media programs'
-// socket.
+// to the desktop, where the floor lies in the room and how it moves, and the messages on the
+// media programs' socket. (Where the others are: whereabouts-test.cpp.)
 #include "../../conf/ftsock.h"
 #include "../local/floor.h"
 #include "../local/inputs.h"
@@ -177,6 +177,13 @@ static void watchers() {
     for (int i = 0; i < 5000; ++i) missed += w.Send(from, 1, p.data(), p.size(), 9 + i * 1e-4), next(more[2]);
     check("a watcher that doesn't read holds nothing up, and still watches", w.count() == 2 && !next(a).empty());
     check("...and how many it missed is known", missed > 4000 && missed < 5000);
+
+    // a word of ft-together's own, to everyone who still watches
+    while (!next(a).empty() || !next(more[2]).empty()) {}
+    w.Tell(from, "ok 1.000000 2.000000 0.500000", 9.6);
+    check("a word to the watchers reaches each as it was said", next(a) == "ok 1.000000 2.000000 0.500000" && next(more[2]) == "ok 1.000000 2.000000 0.500000");
+    w.Tell(from, "ok 3.000000 2.000000 0.500000", 13.5);   // e last asked at 8, a at 9
+    check("...but not one that stopped asking", next(more[2]).empty() && next(a) == "ok 3.000000 2.000000 0.500000");
     for (int fd : {from, a, more[0], more[1], more[2], more[3]}) close(fd);
 }
 
@@ -285,9 +292,20 @@ static void floor() {
                                                           f.Ask("floor 0 0 9", true).rfind("error", 0) == 0 && f.Ask("floor 1e9 0 0", true).rfind("error", 0) == 0 && !f.laid());
     check("the first to say lays it", f.Ask("floor 1.5 -2.25 0.5", true) == "ok 1.500000 -2.250000 0.500000" && f.laid());
     check("...and it stands: a second saying gets the first one's", f.Ask("floor 9 9 1", true) == "ok 1.500000 -2.250000 0.500000" && f.Ask("floor", true) == "ok 1.500000 -2.250000 0.500000");
+    check("moved, the new one stands", f.Ask("floor move 4 5 -1", true) == "ok 4.000000 5.000000 -1.000000" && f.Ask("floor", true) == "ok 4.000000 5.000000 -1.000000");
+    check("...a saying still gets the one that stands", f.Ask("floor 9 9 1", true) == "ok 4.000000 5.000000 -1.000000");
+    check("...and moved again, the newest", f.Ask("floor move -7 0.5 3", true) == "ok -7.000000 0.500000 3.000000" && f.Ask("floor", true) == "ok -7.000000 0.500000 3.000000");
+    check("a move that isn't three numbers in bounds moves nothing", f.Ask("floor move 1 2", true).rfind("error", 0) == 0 && f.Ask("floor move 1 2 3 4", true).rfind("error", 0) == 0 &&
+                                                                         f.Ask("floor move 1001 0 0", true).rfind("error", 0) == 0 && f.Ask("floor move 0 -1001 0", true).rfind("error", 0) == 0 &&
+                                                                         f.Ask("floor move 0 0 7.5", true).rfind("error", 0) == 0 && f.Ask("floor move inf 0 0", true).rfind("error", 0) == 0 &&
+                                                                         f.Ask("floor move", true).rfind("error", 0) == 0 && f.Ask("floor movex 1 2 3", true).rfind("error", 0) == 0 &&
+                                                                         f.Ask("floor home", true).rfind("error", 0) == 0 && f.Ask("floors", true).rfind("error", 0) == 0 &&
+                                                                         f.Ask("floor", true) == "ok -7.000000 0.500000 3.000000");
     f.Lift();
+    check("no floor laid, none moves", f.Ask("floor move 1 2 3", true).rfind("error", 0) == 0 && f.Ask("floor", true) == "ok none" && !f.laid());
     check("leaving the room lifts it, and the next room's is laid afresh", f.Ask("floor", true) == "ok none" && f.Ask("floor 9 9 1", true) == "ok 9.000000 9.000000 1.000000");
     check("asking outside a room lifts it too", f.Ask("floor", false).rfind("error", 0) == 0 && f.Ask("floor", true) == "ok none");
+    check("nothing moves outside a room", f.Ask("floor move 1 2 3", false).rfind("error", 0) == 0);
 }
 
 static void mediawire() {

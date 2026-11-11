@@ -28,10 +28,14 @@ public:
     static constexpr double kASecond = 90;   // poses taken from one link a second, three times what a Frame sends
     static constexpr double kAtOnce = 30;    // ...and this many may come in one go after a quiet moment
 
-    // Whether the datagram that came on `link` at `now` (seconds) is passed on.
+    // Whether the datagram that came on `link` at `now` (seconds) is passed on. `pose`: what it
+    // says, when it is.
+    bool Take(int link, const uint8_t *data, size_t n, double now, proto::Pose &pose) {
+        return gate_.Count(link, now) && proto::Read(data, n, pose) && gate_.Newer(link, pose.turn);
+    }
     bool Take(int link, const uint8_t *data, size_t n, double now) {
         proto::Pose pose;
-        return gate_.Count(link, now) && proto::Read(data, n, pose) && gate_.Newer(link, pose.turn);
+        return Take(link, data, n, now, pose);
     }
     // The link is gone: one that gets its number later starts afresh.
     void Forget(int link) { gate_.Forget(link); }

@@ -35,4 +35,9 @@ size_t Watchers::Send(int sock, int person, const uint8_t *datagram, size_t n, d
     return missed;
 }
 
+void Watchers::Tell(int sock, const std::string &text, double now) const {
+    for (const Watcher &w : watching_)
+        if (now - w.asked <= kKeptS) sendto(sock, text.data(), text.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&w.at), w.len);
+}
+
 }  // namespace local

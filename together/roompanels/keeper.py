@@ -175,8 +175,8 @@ class Keeper:
         self._leave()
 
     def _leave(self):
-        """Out of the room: its panels go, and nothing is shared. Also what a start finds left
-        of an earlier ft-roompanels' room."""
+        """Out of the room: its panels go, nothing is shared, and what moving through it moved
+        is put back. Also what a start finds left of an earlier ft-roompanels' room."""
         self.in_room, self.floor, self._floorless = False, None, None
         self.wishes.clear(), self.told.clear(), self.shown.clear(), self.mine.clear()
         if self.tidy:
@@ -189,6 +189,7 @@ class Keeper:
                 self.screens(f"remote {number} stop")
         for number in shares:
             self.screens(f"share {number} stop")
+        self.screens("shift back")   # the desktop's own screens stand where they did before its person moved through the room (moving.py)
         self.tidy = True
 
     def _floor(self, room):

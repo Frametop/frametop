@@ -4,7 +4,9 @@
 //
 //   watch            -> the asker gets the other people's poses from now on (local/watchers.h)
 //   listen           -> the asker gets their voices
-//   floor [X Z YAW]  -> where this Frame's own floor lies in the room (local/floor.h)
+//   floor [X Z YAW]  -> where this Frame's own floor lies in the room; `floor move X Z YAW`
+//                       moves it, and the wearer through the room with it (local/floor.h)
+//   where            -> where the others in the room are (local/whereabouts.h)
 //   media            -> which shared panels have a program here, and how their video goes
 //   here             -> where the others call this Frame: its address, port and name
 //   wear [NAME]      -> the avatar the wearer has on, by its model's name: the others may have
@@ -50,6 +52,7 @@
 #include "local/voicegate.h"
 #include "local/wardrobe.h"
 #include "local/watchers.h"
+#include "local/whereabouts.h"
 #include "net/quiclinks.h"
 #include "net/tailnet.h"
 #include "session/commands.h"
@@ -150,6 +153,7 @@ struct Local {
     local::VoiceGate voices;
     local::Watchers listeners{local::kVoiceToListener};
     local::Floor floor;
+    local::Whereabouts whereabouts;
     local::Media media;
     local::Wardrobe wardrobe;
     local::PointGate points;
@@ -194,9 +198,18 @@ void Datagram(int sock, const End &end, Local &local, const net::Event &e, doubl
         if (local.voices.Take(e.link, data, n, now)) local.listeners.Send(sock, person, data, n, now);
     } else if (data[0] == proto::kPointDatagram) {
         if (local.points.Take(e.link, data, n, now)) local.pointers.Send(sock, person, data, n, now);
-    } else if (local.gate.Take(e.link, data, n, now)) {
+    } else if (proto::Pose pose; local.gate.Take(e.link, data, n, now, pose)) {
+        local.whereabouts.Saw(person, pose, now);
         local.watchers.Send(sock, person, data, n, now);
     }
+}
+
+// A question about this Frame's floor. One that moved it is told at once to the programs that
+// draw the room and say where the wearer is in it: they ask only now and then.
+std::string FloorAsk(int sock, const End &end, Local &local, const std::string &asked, double now) {
+    const std::string reply = local.floor.Ask(asked, end.inRoom());
+    if (asked.rfind("floor move ", 0) == 0 && reply.rfind("ok ", 0) == 0) local.watchers.Tell(sock, reply, now), local.listeners.Tell(sock, reply, now);
+    return reply;
 }
 
 // What a link saw. A picture goes to the video's rules, a file to the avatars'.
@@ -282,7 +295,8 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (!end.session) reply = "error Tailscale isn't running on this headset";
     else if (asked == "watch") reply = local.watchers.Add(from, fromLen, now) ? "ok" : "error too many programs are watching";
     else if (asked == "listen") reply = local.listeners.Add(from, fromLen, now) ? "ok" : "error too many programs are listening";
-    else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = local.floor.Ask(asked, end.inRoom());
+    else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = FloorAsk(sock, end, local, asked, now);
+    else if (asked == "where") reply = end.inRoom() ? local.whereabouts.Ask(now) : "error you aren't in a room";
     else if (asked == "media") reply = "ok " + MediaState(end, local);
     else if (asked == "here") reply = "ok " + end.here;
     else if (asked == "wear" || asked.rfind("wear ", 0) == 0) reply = Wear(end, local, asked.size() > 5 ? asked.substr(5) : "", now);

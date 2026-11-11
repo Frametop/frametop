@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <cstring>
 
 using namespace vrcmd;
@@ -41,6 +42,7 @@ int main() {
         {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry toggle", CarryToggle}, {"carry take 5", CarryTake},
         {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up},
         {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02 7", Pulled}, {"spin 30", Spin},
+        {"shift 0.25 -1.5 30", Shift}, {"shift back", ShiftBack},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;
@@ -95,6 +97,15 @@ int main() {
     check("hide, show, toggle are prefixes", V("hidex") == HideShowToggle && V("toggled") == HideShowToggle);
     check("hold needs its two numbers", V("hold 1 2") == Hold && V("hold") == Unknown);
     check("spindistance is no spin; spin needs its space", V("spindistance x") == Unknown && V("spin") == Unknown);
+    c = {};
+    check("shift 0.25 -1.5 30: across, along, degrees", Parse("shift 0.25 -1.5 30", c) == Shift && near(c.x, 0.25) && near(c.z, -1.5) && near(c.yaw, 30) && ShiftOk(c));
+    check("shift needs its three numbers and no more", V("shift 1 2") == Unknown && V("shift 1 2 3 4") == Unknown && V("shift a b c") == Unknown && V("shift") == Unknown);
+    check("shift back is exact", V("shift back") == ShiftBack && V("shift back 1") == Unknown && V("shift backwards") == Unknown);
+    bool refused = true;
+    for (const char *bad : {"shift nan 0 0", "shift 0 inf 0", "shift 0 0 nan", "shift 5001 0 0", "shift 0 -5001 0", "shift 0 0 361", "shift 0 0 -361"})
+        refused &= Parse(bad, c) == Shift && !ShiftOk(c);
+    check("a shift too far, more than a turn, or of no number is refused", refused);
+    check("...and one at the limits is taken", Parse("shift 5000 -5000 -360", c) == Shift && ShiftOk(c));
     check("steamvrmode with too few numbers is no steamvr list", V("steamvrmode 1 2") == Unknown);
     check("handsetting needs both words (and is no \"hands\" either)", V("handsetting KEY") == Unknown);
     check("hands needs three", V("hands hand controller") == Unknown);
@@ -116,6 +127,6 @@ int main() {
     check("groups: helper words, hand features, cutouts, floating, spin",
           GroupOf(Hands) == HelperWordGroup && GroupOf(SpinDistance) == HelperWordGroup &&
               GroupOf(GrabThat) == HandFeatureGroup && GroupOf(Cutouts) == CutoutsGroup && GroupOf(Up) == FloatGroup &&
-              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup);
+              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup && GroupOf(Shift) == SpinGroup && GroupOf(ShiftBack) == SpinGroup);
     return failed ? 1 : 0;
 }

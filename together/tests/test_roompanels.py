@@ -87,8 +87,11 @@ class Together:
         self.mode = "joined"
         self.me = 1
         self.spot = [1.0, 0.0, 0.5, 0.0]
+        self.ada = [0, 0, 0, 0]     # the spot of the other one in the room
         self.floor = None
         self.panels = {}     # id -> the state's panel
+        self.seen = {}       # place -> (x, y, z, yaw): where the others' poses say they are
+        self.fixed = False   # the floor won't move
         self.asked = []
         self.there = True
 
@@ -102,13 +105,22 @@ class Together:
             return None
         w = text.split()
         if text == "state":
-            people = [{"id": 0, "name": "ada", "spot": [0, 0, 0, 0]}, {"id": self.me, "name": "ben", "spot": self.spot}]
+            people = [{"id": 0, "name": "ada", "spot": self.ada}, {"id": self.me, "name": "ben", "spot": self.spot}]
             return "ok " + json.dumps({"mode": self.mode, "me": self.me, "owner": 0, "people": people, "panels": list(self.panels.values())})
         if text == "floor":
-            return "ok none" if self.floor is None else "ok {:.4f} {:.4f} {:.5f}".format(*self.floor)
+            if self.mode not in ("hosting", "joined"):
+                return "error you aren't in a room"
+            return "ok none" if self.floor is None else "ok {:.6f} {:.6f} {:.6f}".format(*self.floor)
+        if text == "where":
+            return f"ok {len(self.seen)}" + "".join(" {}:{:.3f}:{:.3f}:{:.3f}:{:.4f}".format(n, *s) for n, s in sorted(self.seen.items()))
+        if w[:2] == ["floor", "move"]:
+            if self.floor is None or self.fixed:
+                return "error no floor is laid to move"
+            self.floor = tuple(float(v) for v in w[2:])
+            return "ok {:.6f} {:.6f} {:.6f}".format(*self.floor)
         if w[0] == "floor":
             self.floor = self.floor or tuple(float(v) for v in w[1:])
-            return "ok {:.4f} {:.4f} {:.5f}".format(*self.floor)
+            return "ok {:.6f} {:.6f} {:.6f}".format(*self.floor)
         if w[0] == "share":
             v = [float(x) for x in w[2:13]]
             self.panel(self.me * 8 + int(w[1]), at=v[2:5], turn=v[5:9], size=(int(v[0]), int(v[1])), metres=v[9], curve=v[10], name=" ".join(w[13:]))
@@ -272,7 +284,8 @@ class Mine(KeeperCase):
         self.ticks()
         panel = self.together.panels[8]
         self.assertEqual((panel["size"], panel["name"], panel["metres"], panel["curve"]), ([1920, 800], "Screen 1", 1.2, 0.0))
-        self.assertTrue(near(panel["at"], (0, 1.5, -2)) and near(panel["turn"], (0, 0, 1, 0)), panel)   # (0, 1.5, 2) turned half round, then 4 m back
+        half_round = near(panel["turn"], (0, 0, 1, 0)) or near(panel["turn"], (0, 0, -1, 0))   # one turn, either way of writing it
+        self.assertTrue(near(panel["at"], (0, 1.5, -2)) and half_round, panel)   # (0, 1.5, 2) turned half round, then 4 m back
         self.assertEqual(self.screens.shares, {1: (0, "1920x800")})
         self.assertEqual((self.together.count("share"), self.screens.count("share 1 start")), (1, 1))
 
@@ -452,6 +465,31 @@ class Leaving(KeeperCase):
         self.screens.shares = {1: (0, "1920x800")}
         self.ticks()
         self.assertEqual((self.screens.remotes, self.screens.shares), ({}, {}))
+        self.assertEqual(self.screens.shifted, ["back"])   # and what moving through it moved is put back
+
+    def test_leaving_puts_back_what_moving_through_the_room_moved(self):
+        stood = dict(self.screens.at)
+        self.ticks()
+        self.screens("shift 1.5000 -0.2500 40.000")
+        self.screens("shift -3.0000 2.0000 -110.000")
+        self.assertFalse(near(self.screens.at[1], stood[1], 0.5))
+        self.ticks()
+        self.assertEqual(self.screens.count("shift back"), 0)   # not while in the room
+        self.together.mode = "idle"
+        self.ticks()
+        self.assertEqual(self.screens.count("shift back"), 1)
+        self.assertTrue(all(near(self.screens.at[n], stood[n], 1e-6) for n in stood), self.screens.at)
+        self.assertTrue(all(abs(placing.wrap(v)) < 1e-9 for v in self.screens.yaw.values()))
+
+    def test_with_ft_screens_gone_the_way_back_waits_for_it(self):
+        self.ticks()
+        self.screens.there = False
+        self.together.mode = "idle"
+        self.ticks()
+        self.screens.there = True
+        self.assertEqual(self.screens.shifted, [])
+        self.ticks(1)
+        self.assertEqual(self.screens.shifted, ["back"])
 
     def test_ending_takes_everything_away_too(self):
         self.together.panel(2)

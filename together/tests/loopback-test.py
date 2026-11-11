@@ -221,6 +221,25 @@ def main(program, root):
               mine.ask("floor 9 9 1") == "ok 1.500000 -2.000000 0.250000" and ada.ask("floor") == "ok 1.500000 -2.000000 0.250000")
         check("each Frame has its own", sees.ask("floor") == "ok none" and sees.ask("floor 0 0 3") == "ok 0.000000 0.000000 3.000000")
 
+        # moving through the room: the floor moves under its person, and the programs that draw the room are told
+        check("a floor that isn't laid doesn't move", cys.ask("floor") == "ok none" and cys.ask("floor move 1 1 1").startswith("error no floor") and cys.ask("floor") == "ok none")
+        ok = mine.ask("watch") == "ok" and mine.ask("listen") == "ok" and sees.ask("watch") == "ok"
+        mine.words(0.1), sees.words(0.1)
+        check("a floor that is moved is the one that stands", ok and ada.ask("floor move 3 -1 0.5") == "ok 3.000000 -1.000000 0.500000" and
+              ada.ask("floor") == "ok 3.000000 -1.000000 0.500000" and ada.ask("floor 9 9 1") == "ok 3.000000 -1.000000 0.500000")
+        check("...and its Frame's programs that watch or listen are told at once, unasked", mine.words(0.3) == ["ok 3.000000 -1.000000 0.500000"] * 2)
+        check("...and nobody else's", sees.words(0.2) == [] and sees.ask("floor") == "ok 0.000000 0.000000 3.000000")
+        check("a move that isn't one moves nothing", ada.ask("floor move 5000 0 0").startswith("error floor") and ada.ask("floor move 1 2").startswith("error floor") and
+              mine.words(0.2) == [] and ada.ask("floor move 1.5 -2 0.25") == "ok 1.500000 -2.000000 0.250000")
+        sees.send(pose(-1.0, z=2.5))
+        check("where the others are is known from their poses", ada.until(lambda s: ada.ask("where") == "ok 1 %d:-1.000:1.600:2.500:0.0000" % ids["ben"]) and
+              ben.ask("where") == "ok 0")
+        sees.send(pose(1e9))
+        check("...and not from what isn't one", ada.ask("where") == "ok 1 %d:-1.000:1.600:2.500:0.0000" % ids["ben"])
+        time.sleep(2.2)
+        check("someone whose poses stopped is nowhere", ada.ask("where") == "ok 0")
+        mine.poses(0.1), cys.poses(0.1)   # (the pose that said where ben was)
+
         ok = ben.ask("away game") == "ok" and all(e.until(lambda s: [p["away"] for p in s["people"] if p["name"] == "ben"] == [1]) for e in (ada, ben, cy))
         ok = ok and ben.ask("away back") == "ok" and all(e.until(lambda s: [p["away"] for p in s["people"] if p["name"] == "ben"] == [0]) for e in (ada, ben, cy))
         check("being away is told to everyone, and being back", ok)
@@ -334,7 +353,8 @@ def main(program, root):
         check("a guest who leaves is out at once, and their panel with them", ok and ada.state()["panels"] == [])
         check("...and the files they were sent are gone", ben.until(lambda s: home["ben"].kept() == {} and files(ben) == {}, 5))
         sees.send(pose(-1.0))
-        check("...and their pose goes nowhere, and their floor is lifted", mine.poses(0.3) == [] and sees.ask("floor").startswith("error you aren't in a room"))
+        check("...and their pose goes nowhere, and their floor is lifted", mine.poses(0.3) == [] and sees.ask("floor").startswith("error you aren't in a room") and
+              sees.ask("floor move 1 1 1").startswith("error you aren't in a room") and sees.ask("where").startswith("error you aren't in a room"))
         dee = start("dee")
         check("the room goes on: ben comes back, and someone new", let_in(ada, ben) and let_in(ada, dee) and
               all(e.until(lambda s: names(s) == ["ada", "ben", "dee"] and linked(s)) for e in (ada, ben, dee)))

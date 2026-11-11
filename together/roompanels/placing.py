@@ -2,7 +2,8 @@
 "pose": SteamVR's standing universe), and in the room, as ft-together does ("share" and the
 room's state: the owner's directions). Between them lies the floor (together/local/floor.h): a
 place on your floor, turned by `yaw` about the way up and then moved by (x, z), is that place in
-the room. The sums only; avatar/room/floor.h has the same ones for people.
+the room. And a floor that moves under its person (moving.py) is one floor laid on another.
+The sums only; avatar/room/floor.h has the same ones for people.
 """
 import math
 
@@ -24,6 +25,20 @@ def lay(spot, head):
     yaw = wrap(spot[3] - head[2])
     at = turned(yaw, (head[0], 0.0, head[1]))
     return (spot[0] - at[0], spot[2] - at[2], yaw)
+
+
+def then(outer, inner):
+    """One floor laid on another (x, z, yaw): a place on `inner` is one on `outer`, which is one
+    in the room. A move of everything on a floor is the same three numbers, so this is also
+    one move after another (`inner` first)."""
+    at = turned(outer[2], (inner[0], 0.0, inner[1]))
+    return (outer[0] + at[0], outer[1] + at[2], wrap(outer[2] + inner[2]))
+
+
+def back(floor):
+    """The way back: then(floor, back(floor)) moves nothing."""
+    at = turned(-floor[2], (-floor[0], 0.0, -floor[1]))
+    return (at[0], at[2], wrap(-floor[2]))
 
 
 def quat(x, y, z):

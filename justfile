@@ -176,6 +176,8 @@ test-c:
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/local-test.cpp together/local/watchers.cpp \
       together/local/inputs.cpp -o build/tests/together-local-test
     run together/tests/local-test.cpp build/tests/together-local-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/whereabouts-test.cpp -o build/tests/together-whereabouts-test
+    run together/tests/whereabouts-test.cpp build/tests/together-whereabouts-test
     # where the others point: which word stands, which panel here shows the room's, where on it, and the mark's picture
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/points-test.cpp -o build/tests/together-points-test
     run together/tests/points-test.cpp build/tests/together-points-test
@@ -258,6 +260,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/posemath-test.cpp \
       -o build/tests/posemath-test
     run screens/tests/posemath-test.cpp build/tests/posemath-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/roomshift-test.cpp \
+      -o build/tests/roomshift-test
+    run screens/tests/roomshift-test.cpp build/tests/roomshift-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test

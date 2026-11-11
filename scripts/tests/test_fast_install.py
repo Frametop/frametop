@@ -93,7 +93,7 @@ class Paths(unittest.TestCase):
         self.assertEqual(rebuilt('avatar/room/client.cpp'), {'avatar', 'screens', 'together'})   # built into ft-roomvoice too
         self.assertEqual(rebuilt('together/net/quiclinks.cpp'), {'together'})
         self.assertEqual(rebuilt('together/build.sh'), {'together'})
-        for path in ('together/ft-roompanels', 'together/roomaway/teller.py', 'together/tests/voice-test.cpp', 'together/README.md'):
+        for path in ('together/ft-roompanels', 'together/roomaway/teller.py', 'together/roominput/giver.py', 'together/tests/voice-test.cpp', 'together/README.md'):
             self.assertEqual(rebuilt(path), set())
         self.assertIn('together', openvr)
 
@@ -160,6 +160,8 @@ class Paths(unittest.TestCase):
             self.assertEqual(fi.dirs_used(tree, 'frametop-keyboard.service', ['--data-dir', '/r/0.1/keyboard'],
                                           roots), {'keyboard'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-away.service', ['python3', '/r/0.1/together/ft-roomaway'],
+                                          roots), {'together', 'conf'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-input.service', ['python3', '/r/0.1/together/ft-roominput'],
                                           roots), {'together', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-people.service',
                                           ['/r/0.1/scripts/in-box', '/r/0.1/screens/build/ft-avatars', '--room'],

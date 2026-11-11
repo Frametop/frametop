@@ -1,0 +1,87 @@
+#!/usr/bin/python3
+"""ft-roominput: gives this Frame's desktop the input of the others in a Together room
+(docs/together.md, "Control and moving"). ft-together says whose input is taken and passes it
+on (together/README.md, "Control of a shared panel"); this takes it (`inputs`, asked once a
+second) and gives each act to ft-screens as a "peer" command (screens/peerinput.h), on the
+screen the panel is. The rules are in roominput/giver.py; this is the loop and the sockets
+around them.
+
+Only one program takes the input: a second ft-roominput is told no by ft-together and gives
+nothing.
+
+  --together NAME   ft-together's socket (ft_together)
+  --panels NAME     ft-roompanels' (ft_roompanels)
+  --screens NAME    ft-screens' (ft_screens)
+"""
+
+import select
+import signal
+import socket
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "conf"))
+sys.path.insert(0, str(HERE))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+from roominput.giver import INPUT, Giver  # noqa: E402
+
+LOOK = 1.0   # seconds between looks
+
+
+def main():
+    names = {"--together": "ft_together", "--panels": "ft_roompanels", "--screens": "ft_screens"}
+    words = sys.argv[1:]
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
+    if words:
+        sys.exit(__doc__.strip())
+    # The acts come to this one, which also asks for them. Its answers ("ok") come to it too.
+    taker = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    taker.bind("")
+    taker.setblocking(False)
+    # ft-screens answers a socket with a name, and nobody reads its answers here: this one has none.
+    out = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    out.setblocking(False)
+    asker = ftipc.Client(timeout=0.3)
+
+    def send(sock, to, data):
+        try:
+            sock.sendto(data, ftipc.address(names[to]))
+        except OSError:
+            pass   # it isn't running, or its queue is full: the desk lets go for whoever missed an "up"
+
+    giver = Giver(lambda text: asker.ask(names["--together"], text), lambda text: asker.ask(names["--panels"], text),
+                  lambda text: send(out, "--screens", text.encode()), time.monotonic)
+
+    def ended(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, ended)
+    signal.signal(signal.SIGINT, ended)
+    was = refused = None
+    try:
+        while True:
+            send(taker, "--together", b"inputs")
+            giver.look()
+            if giver.live != was:
+                was = giver.live
+                print("someone has a panel of this desktop" if was else "nobody has a panel of this desktop", flush=True)
+            until = time.monotonic() + LOOK
+            while (left := until - time.monotonic()) > 0 and select.select([taker], [], [], left)[0]:
+                try:
+                    data = taker.recv(64)
+                except OSError:
+                    continue
+                if data[:1] == bytes([INPUT]):
+                    giver.act(data)
+                elif (data[:5] == b"error") != refused:
+                    refused = data[:5] == b"error"
+                    print("ft-together: " + data.decode("utf-8", "replace") if refused else "taking the input", flush=True)
+    finally:
+        giver.end()
+
+
+if __name__ == "__main__":
+    main()

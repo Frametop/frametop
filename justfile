@@ -64,6 +64,9 @@ test-c:
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/relay-buttons-test.c \
       -o build/tests/relay-buttons-test
     run screens/tests/relay-buttons-test.c build/tests/relay-buttons-test
+    gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g screens/tests/peerinput-test.c \
+      -o build/tests/peerinput-test
+    run screens/tests/peerinput-test.c build/tests/peerinput-test
     gcc -std=c11 -Wall -Wextra -Werror screens/tests/held-keys-test.c \
       -o build/tests/held-keys-test
     run screens/tests/held-keys-test.c build/tests/held-keys-test
@@ -190,8 +193,10 @@ test-c:
         run together/tests/roomvoice-test.py python3 together/tests/roomvoice-test.py build/tests/ft-together build/tests/ft-roomvoice
         run together/tests/roomaway-test.py python3 together/tests/roomaway-test.py build/tests/ft-together
         run together/tests/roomcontrol-test.py python3 together/tests/roomcontrol-test.py build/tests/ft-together
+        # ft-roominput next to one of them, with stand-ins for ft-roompanels and ft-screens
+        run together/tests/roominput-test.py python3 together/tests/roominput-test.py build/tests/ft-together
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

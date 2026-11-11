@@ -23,6 +23,8 @@ Built so far: the spikes (M0), and from M3 the session's wire format and rules, 
 | `ft-roompanels` | The program around them: its loop and its socket | `roompanels/`, `conf/ftipc.py` |
 | `roomaway/` | ft-roomaway's rules: what the pointer helper and the relay say of the wearer, and what the room is told (`teller.py`) | Python's standard library |
 | `ft-roomaway` | The program around them: tells the room when the headset comes off or a game starts | `roomaway/`, `conf/ftipc.py` |
+| `roominput/` | ft-roominput's rules: an act ft-together passed on, read into a `peer` command for ft-screens on the screen its panel is (`giver.py`) | Python's standard library |
+| `ft-roominput` | The program around them: takes the others' input from ft-together and gives it to the desktop | `roominput/`, `conf/ftipc.py`; ft-screens' side is `screens/peerinput.h` |
 | `roompage.py` | Frametop Settings' Together page without Qt: the programs' answers read into what the page says, and what is typed read into a `join` | Python's standard library |
 | `roomavatar.py` | The avatar the wearer has on, for the page, without Qt: which one frametop.conf names, what its file says of it, and the command that marks it as one the others may have | `conf/ft_conf.py`, `avatar/ftmodel.py` |
 | `ft_together_settings.py`, `TogetherPages.qml` | The page: its backend, which asks the room's programs off the UI's thread, and its QML | `roompage.py`, `roomavatar.py`, `conf/ftipc.py`, `conf/fthost.py`, PySide6 |
@@ -45,8 +47,9 @@ Frametop Together is a part of its own: `install.sh` offers it (no by default wh
 | `frametop-room-panels.service` | `ft-roompanels` | the host |
 | `frametop-room-voice.service` | `ft-roomvoice` | the container |
 | `frametop-room-away.service` | `ft-roomaway` | the host |
+| `frametop-room-input.service` | `ft-roominput` | the host |
 
-Only the first is ever enabled. It wants the other four, and each of them is part of it, so they start, stop and restart with it and never run without it. Outside a room they wait: none of them opens the microphone, draws, or encodes anything until ft-together says this Frame is in one. `together/run.sh status` shows the five, `log` their journal, and `off` stops them and leaves a room this Frame is in (its own room ends for everyone). ft-together takes calls only on the tailnet address, and answers nobody who isn't on the tailnet (below, "The links").
+Only the first is ever enabled. It wants the other five, and each of them is part of it, so they start, stop and restart with it and never run without it. Outside a room they wait: none of them opens the microphone, draws, or encodes anything until ft-together says this Frame is in one. `together/run.sh status` shows the six, `log` their journal, and `off` stops them and leaves a room this Frame is in (its own room ends for everyone). ft-together takes calls only on the tailnet address, and answers nobody who isn't on the tailnet (below, "The links").
 
 `scripts/fast-install` builds `together/` as a component, and a release brings it built (`pack/Containerfile`); msquic is fetched at the commit `together/build.sh` pins.
 
@@ -290,7 +293,36 @@ Everyone in a room sees everyone's pointer. Clicking and typing on someone's pan
 
 **What a grant gives away.** The panel names where the pointer goes. Keys go wherever the keyboard focus is on your desktop, which a click on the panel usually sets but which a shortcut can move. So giving someone a panel is letting them type on that desktop while you watch, and it is given only while you wear the headset for that reason.
 
-What isn't there yet: the program that gives the input to the desktop (nothing asks `inputs` so far, so a grant moves nothing), the guest's side that turns a pointer on a peer's panel into `control act`, the others' pointers drawn in the room, and asks and grants in Frametop Settings. A panel that shows one of your PCs is to ask a second time.
+What isn't there yet: the guest's side that turns a pointer on a peer's panel into `control act`, the others' pointers drawn in the room, and asks and grants in Frametop Settings. A panel that shows one of your PCs is to ask a second time.
+
+### To the desktop
+
+```
+ft-roominput [--together NAME] [--panels NAME] [--screens NAME]
+```
+
+`ft-roominput` is the program that takes the input (`inputs`, asked once a second) and gives it to the desktop. Each act becomes one command on `@ft_screens`, on the screen the panel is, which it learns from `ft-roompanels` (`state`):
+
+| Command on `@ft_screens` | What ft-screens does |
+|---|---|
+| `peer <screen> move X Y` | Their pointer, 0 to 65535 across and down the screen, to the seat |
+| `peer <screen> button B 0\|1` | A button, where they last moved to. A release only of what they pressed |
+| `peer <screen> scroll RIGHT DOWN` | A scroll there, 120 a notch |
+| `peer <screen> key CODE 0\|1` | A key. A press only while typing is that screen's; a release only of what they pressed |
+| `peer letgo` | Every button and key they hold comes up |
+| `peer on` | Someone has been given a panel: for the next five seconds ft-together hears `control own` when your own hand is on the desktop |
+
+An act for a panel that is no screen of the desktop is dropped. `peer on` is said once a second while someone has a panel. `peer letgo` is said when ft-together says so (it missed telling an act), when nobody has a panel any more, when ft-together stops answering, and when ft-roominput ends.
+
+The rules on the seat are ft-screens' own (`screens/peerinput.h`), because it is the one place that sees both people's input to the event:
+
+- **Only the desktop's own screens.** Not a floating window's output, a remote display, Steam, or frunner's search. Nothing while Frametop is paused or Steam's PIN locks it.
+- **What is theirs is kept apart.** Where their pointer is and what they hold is remembered for them, so a release reaches the seat only for a button or key they pressed, never one of yours, and their click lands where they point, wherever your pointer has been since. A key that is down already isn't pressed again for them.
+- **Your hand takes the turn at once.** A click, a scroll, a drag, a spin to the front or a key of yours lets go of everything they hold before it reaches the desktop, and ft-together is told `control own`, at most twice a second.
+- **Your resting pointer doesn't pull theirs.** While they hold a button, or were at the pointer in the last second and a half, a laser or gaze of yours that only rests on a screen or passes over it moves nothing: their drag isn't pulled to where you look.
+- **Their click doesn't take your typing.** It takes the keyboard focus on the desktop to its screen, as any click does, but not the typing away from Steam, frunner or a remote display, and they type only while typing is the desktop's and on that screen.
+
+What isn't there yet: all of this is tested against stand-ins and has not run on a live desktop (spike T6 is the headset test). While your pointer rests, the desktop's cursor stays where they left it. A side button of your mouse (Back) lands where the seat's pointer is, which may be theirs. The first notch of your wheel after they pointed at another screen can be lost.
 
 ## The pointer datagram
 
@@ -310,7 +342,7 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 
 ## Tests
 
-`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test, the loopback test, ft-roompanels', ft-roomvoice's and ft-roomaway's tests between two `ft-together` and control's between three need msquic, which `together/build.sh` builds; without it they are SKIPPED. `tests/roomkit.py` is what the Python tests share: one `ft-together` on the loopback and the questions to it, a program on its media socket, a program whose lines are read as they come, a pose, a voice and a pointer datagram, an act's bytes, and a program that watches and listens.
+`just test-c` builds these with the address and undefined-behaviour sanitizers and runs them. The links' test, the loopback test, ft-roompanels', ft-roomvoice's, ft-roomaway's and ft-roominput's tests between two `ft-together` and control's between three need msquic, which `together/build.sh` builds; without it they are SKIPPED. `tests/roomkit.py` is what the Python tests share: one `ft-together` on the loopback and the questions to it, a program on its media socket, a program whose lines are read as they come, a pose, a voice and a pointer datagram, an act's bytes, and a program that watches and listens.
 
 | Test | What it covers |
 |---|---|
@@ -335,9 +367,12 @@ A reader takes a datagram only if every place is within 100 m of the room's midd
 | `tests/test_roomaway.py` | ft-roomaway's rules (`just test-python`): the helper's and the relay's answers read, good and not; the headset off, a game, both, back; what the room has put right; an answer that stands five seconds; told outside a room too, and again to an `ft-together` that started again |
 | `tests/roomaway-test.py` | `ft-roomaway` itself next to a real `ft-together` in a room with another, with stand-ins for the pointer helper and the relay: off, a game and back reach the other end's room, what another program said is put right, a helper that stops answering, leaving, and ending cleanly. That the wearer is there reaches their own `ft-together` while the helper says so, and stops when it stops answering |
 | `tests/roomcontrol-test.py` | Three real `ft-together --loopback`: one program takes a desktop's input and a second is told no; a panel asked for, not given until the wearer is said to be there, then given; the guest's moves, clicks, keys and scrolls reach that program in order as theirs, and nobody else's do; a held button let go when the panel is taken back and when its holder leaves; a grant that runs out by the real clock about ten seconds after the last word, with the held key let go; and pointers from one program to the others' with ft-together's own count, and what isn't one |
+| `tests/test_roominput.py` | ft-roominput's rules (`just test-python`): ft-together's and ft-roompanels' answers and an act's bytes read, good and not; nothing said while nobody has a panel; `peer on` each look while someone has; an act on the screen its panel is; a let-go; what is no act or for no screen dropped; a panel given since the last look asked about at once, not too often; and everything let go once when the grants end, when ft-together stops answering and at the end |
+| `tests/roominput-test.py` | `ft-roominput` itself next to a real `ft-together` in a room with another, with stand-ins for ft-roompanels and ft-screens: a second one is told no; a guest's moves, clicks, keys and scrolls reach ft-screens in order on the right screen; `control own` lets go of a held button and holds their input off for a moment; a panel that is no screen goes nowhere until it is one; a key let go when the panel is taken back, then everything; and everything let go when ft-together goes and when it ends |
+| `screens/tests/peerinput-test.c` | ft-screens' side (`just test-c`, with the sanitizers), against a desk that writes down what it is asked: their pointer in the screen's pixels, buttons where they point, releases only of what they hold, keys only where typing is that screen's, eight keys at most, letting go in order, a screen that went, what isn't a command, whose turn the pointer is, and when ft-together is told of the wearer's hand |
 | `tests/test_roompage.py` | The Settings page (`just test-python`): the answers read, good and not; what is typed to join; and the backend and the page itself driven against stand-ins for the four programs on sockets of the test's own (`tests/pagekit.py`), with a made-up systemctl: the switch, a room opened, an invite, an ask let in, joining, mute, a screen shared, and no QML warnings |
 | `tests/test_roomavatar.py` | The page's avatar row: what the worn model's file and `looks` say read into the row; the file read once until it changes; nothing marked before a yes, nor after a cancel; a command that fails; and the built `ft-model-import` marking a model it imported, from the page |
-| `tests/test_units.py` | The units as files: the room's four go with ft-together's and are never enabled themselves, each starts a program there is, each cleans up only its own, and `run.sh` and `install.sh` name them all |
+| `tests/test_units.py` | The units as files: the room's five go with ft-together's and are never enabled themselves, each starts a program there is, each cleans up only its own, and `run.sh` and `install.sh` name them all |
 | `screens/tests/share-test.c` | ft-screens' share tap with made-up buffers, the test being the `ft-sharepanel` it starts: the commands, each buffer described once, one picture out at a time and the newest next, the rate, a program that keeps a picture or dies, pictures only while watched |
 | `screens/tests/remote-test.c` | With the remote displays' cases: a room's panel is given its id and the room's socket, waits for an old program of its own screen and for no host's queue, and what isn't one is refused |
 | `tests/panels-test.py` | **Run by hand, not by `just test`, and not at all for now** (docs/together.md, "Open questions": the Frame reset during its first run). The real video: `ft-sharepanel --pattern` to `ft-peerpanel --probe` through two `ft-together`, checking every picture's size, number and colours, the encoder closing when nobody watches, a viewer coming back, the sharer starting again, and several sizes. It needs the Frame's encoder and decoder |

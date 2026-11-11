@@ -22,7 +22,7 @@ def keys(unit, key):
 class Units(unittest.TestCase):
     def test_the_rooms_programs_go_with_ft_together(self):
         self.assertIn(MAIN, UNITS)
-        self.assertEqual(len(ROOMS), 4)
+        self.assertEqual(len(ROOMS), 5)
         self.assertEqual(sorted(" ".join(keys(MAIN, "Wants")).split()), ROOMS)
         self.assertEqual(keys(MAIN, "WantedBy"), ["default.target"])
         for unit in ROOMS:

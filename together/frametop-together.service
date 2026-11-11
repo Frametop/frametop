@@ -3,7 +3,7 @@
 Description=Frametop Together: this headset's end of a shared room
 Documentation=file://@REPO@/together/README.md
 # The programs that make a room on this Frame start and stop with it (each is PartOf it).
-Wants=frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service
+Wants=frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service frametop-room-input.service
 
 [Service]
 # In the container it was built in (scripts/in-box). It waits for Tailscale by itself, and

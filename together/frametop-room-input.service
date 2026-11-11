@@ -1,0 +1,13 @@
+# Template: the installer replaces @REPO@ with the repo path on the Frame.
+[Unit]
+Description=Frametop Together: gives the desktop the input of someone you gave a panel to
+Documentation=file://@REPO@/together/README.md
+After=frametop-together.service
+PartOf=frametop-together.service
+
+[Service]
+# On the host: Python's standard library and conf/ftipc.py.
+ExecStart=/usr/bin/python3 @REPO@/together/ft-roominput
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5

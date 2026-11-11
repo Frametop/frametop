@@ -22,7 +22,7 @@ UNITS = [("power/frametop-power.service", None), ("pointer/helper/frametop-point
          ("session/frametop-autostart.service", None), ("input/frametop-input-relay.service", None),
          ("together/frametop-together.service", None), ("together/frametop-room-people.service", None),
          ("together/frametop-room-panels.service", None), ("together/frametop-room-voice.service", None),
-         ("together/frametop-room-away.service", None)]
+         ("together/frametop-room-away.service", None), ("together/frametop-room-input.service", None)]
 ENTRIES = [("gaze/bench/ft-gazebench.desktop", "frametop-gazebench.desktop"),
            ("gaze/rec/ft-eyerec.desktop", "frametop-eyerec.desktop"),
            ("hands/rec/ft-handrec.desktop", "frametop-handrec.desktop"),

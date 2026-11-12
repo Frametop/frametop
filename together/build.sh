@@ -13,7 +13,8 @@
 #                                 (SteamVR overlays)
 #   together/build/ft-pcsend      a split compute PC's end, here with canned pictures: what the
 #                                 tests and the fake peer have for a PC (it isn't installed on a
-#                                 Frame; the PC's streaming host runs its own build with --feed)
+#                                 Frame; the PC's streaming host runs its own build with --feed,
+#                                 which together/pcsend/build-host.sh makes on the PC)
 # ft-roompanels, which keeps the two panel programs in step with the room, is a script
 # (together/ft-roompanels).
 # and with --spikes, the programs that measured what the design stands on:

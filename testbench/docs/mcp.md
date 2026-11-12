@@ -117,6 +117,14 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `peer_avatar` | `peer`; optional `model` (a name in the avatars folder; none without it) | `peer N wear [MODEL]` |
 | `peer_speak` | `peer`; optional `hz` (50-2000; quiet without it) | `peer N speak HZ` or `speak off` |
 | `peer_away` | `peer`, `state`: `game`, `off`, or `back` | `peer N away STATE` |
+| `peer_point` | `peer`; optional `panel` (its id, 0-31; off without it), `x`, `y` (0-1 across and down the picture, 0.5 each), `down` | `peer N point PANEL X Y [--down]` or `point off` |
+| `peer_look` | `peer`; optional `yaw` (degrees to its left, ±63.5; off without it), `pitch` (up) | `peer N look -- YAW PITCH` or `look off` |
+| `peer_control_ask` | `peer`, `panel` | `peer N ask PANEL` |
+| `peer_act_move` | `peer`, `panel`, `x`, `y` (0-1) | `peer N act PANEL move X Y` |
+| `peer_act_button` | `peer`, `panel`, `button` (1 left, 2 right, 3 middle), `down` | `peer N act PANEL button B 0\|1` |
+| `peer_act_scroll` | `peer`, `panel`; optional `right`, `down` (120 a notch, ±2400) | `peer N act PANEL scroll -- RIGHT DOWN` |
+| `peer_act_key` | `peer`, `panel`, `code` (a Linux key code, 1-111), `down` | `peer N act PANEL key CODE 0\|1` |
+| `peer_put` | `peer`, `panel`, `x`, `y`, `z` (metres, ±100); optional `degrees` (±360) | `peer N put PANEL -- X Y Z DEGREES` |
 | `release_all` | None | `release`, which also stops the fake trackers and the fake peers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ
@@ -127,6 +135,7 @@ pose set for that device and follow the existing CLI's coordinate conventions.
 Hand positions are in the head frame, not standing space; see
 [fake eye and hand trackers](fake-trackers.md).
 The `peer_*` tools drive fake peers for Frametop Together; see [fake peers](peers.md).
+A fake peer can ask for control of a panel, and no tool gives it: the panel's owner does.
 
 ### Controller inputs
 

@@ -13,6 +13,8 @@ and answers questions on @ft_peer_sim_N, one datagram a question and one back:
   wear [NAME]           has the model NAME of its avatars folder on, or none
   speak HZ | speak off  hums that note, or is quiet
   away game|off|back    as ft-together's; nobody stands there while it is away
+  point, look, ask, act, put
+                        its hand and its eyes in the room (peeracts.py has them)
   quit                  leaves, ends its programs and itself
 
   ft-peer-sim N [--name NAME] [--port PORT] [--loopback] [--models DIR] [--tag TAG]
@@ -35,6 +37,8 @@ import sys
 import time
 from pathlib import Path
 
+from . import peeracts
+
 REPO = Path(__file__).resolve().parents[2]
 PEERS = (1, 2, 3)
 POSES = ('stand', 'wave', 'reach', 'type', 'sit', 'lean', 'look')   # avatar/view/demo.h
@@ -46,7 +50,8 @@ CODE = re.compile(r'[A-Za-z0-9]{1,32}')
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}')
 TAG = re.compile(r'[A-Za-z0-9_]{0,32}')
 WEAR_EVERY_S = 2.0   # as ft-avatars --room tells it
-QUESTIONS = 'state | join HOST PORT CODE | leave | pose NAME | walk RIGHT BACK DEGREES | wear [NAME] | speak HZ|off | away game|off|back | quit'
+QUESTIONS = ('state | join HOST PORT CODE | leave | pose NAME | walk RIGHT BACK DEGREES | wear [NAME] | speak HZ|off | away game|off|back | '
+             + peeracts.QUESTIONS + ' | quit')
 
 
 def sim_socket(n, tag=''):
@@ -69,6 +74,7 @@ class Sim:
         self.asker = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
         self.asker.bind('')
         self.asker.settimeout(2.0)
+        self.acts = peeracts.Acts(lambda text: self.ask(text), lambda data: self.send(data), clock)
 
     def start(self):
         env = dict(os.environ, FT_AVATARS_DIR=str(self.models)) if self.models else None
@@ -115,18 +121,25 @@ class Sim:
         except OSError as error:
             return 'error its ft-together gave no answer (%s)' % (error.strerror or 'timeout')
 
+    def send(self, data):
+        """A datagram for the peer's own ft-together that has no answer: its pointer."""
+        try:
+            self.asker.sendto(data, '\0' + self.socket)
+        except OSError:
+            pass   # nothing listens there now, as `state` says
+
     def tick(self):
+        self.acts.tick()
         if self.wears and self.clock() - self.told_wear >= WEAR_EVERY_S:
             self.told_wear, self.wear_reply = self.clock(), self.ask('wear ' + self.wears)
 
     def state(self):
-        reply = self.ask('state')
-        together = json.loads(reply[3:]) if reply.startswith('ok {') else {'error': reply}
+        together = peeracts.told(self.ask('state'))
         running = {name: child is not None and child.poll() is None
                    for name, child in (('ft-together', self.together), ('ft-avatars', self.body), ('ft-roomvoice', self.voice))}
         return {'peer': self.n, 'name': self.name, 'port': self.port, 'socket': self.socket, 'pose': self.pose,
                 'walked': list(self.walked), 'away': self.away, 'speaks': self.hz, 'wears': self.wears, 'wear': self.wear_reply,
-                'running': running, 'together': together}
+                'running': running, 'together': together, **self.acts.state()}
 
     def answer(self, text):
         words = text.split()
@@ -139,10 +152,14 @@ class Sim:
         if what == 'state' and not rest:
             return 'ok ' + json.dumps(self.state())
         if what == 'join' and len(rest) == 3 and HOST.fullmatch(rest[0]) and 0 < int(rest[1]) < 65536 and CODE.fullmatch(rest[2]):
+            self.acts.rest()   # what it pointed at was another room's
             return self.ask('join %s %d %s' % (rest[0], int(rest[1]), rest[2]))
         if what == 'leave' and not rest:
+            self.acts.rest()
             return self.ask('leave')
         if what == 'away' and rest in (['game'], ['off'], ['back']):
+            if rest[0] != 'back':
+                self.acts.rest()   # someone away points at nothing and looks nowhere
             reply = self.ask('away ' + rest[0])
             if reply.startswith('ok') and self.away != (rest[0] != 'back'):
                 self.away = rest[0] != 'back'
@@ -167,7 +184,10 @@ class Sim:
             self.hz = 0.0 if rest[0] == 'off' else float(rest[0])
             self.hum()
             return 'ok'
-        raise ValueError
+        reply = self.acts.act(what, rest)
+        if reply is None:
+            raise ValueError
+        return reply
 
     def end(self):
         if self.together is not None and self.together.poll() is None:

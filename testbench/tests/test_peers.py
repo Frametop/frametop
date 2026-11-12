@@ -149,7 +149,18 @@ class CommandsTest(unittest.TestCase):
                  (['peer', '1', 'walk', '--', '-1.5', '0', '-45'], ('tell', 1, 'walk -1.5 0.0 -45.0')),
                  (['peer', '1', 'wear', 'Robot'], ('tell', 1, 'wear Robot')), (['peer', '1', 'wear'], ('tell', 1, 'wear')),
                  (['peer', '1', 'speak', '220'], ('tell', 1, 'speak 220')), (['peer', '1', 'speak', 'off'], ('tell', 1, 'speak off')),
-                 (['peer', '2', 'away', 'game'], ('tell', 2, 'away game'))]
+                 (['peer', '2', 'away', 'game'], ('tell', 2, 'away game')),
+                 (['peer', '1', 'point', '8', '0.25', '0.75'], ('tell', 1, 'point 8 0.25 0.75')),
+                 (['peer', '1', 'point', '8', '0.25', '0.75', '--down'], ('tell', 1, 'point 8 0.25 0.75 down')),
+                 (['peer', '1', 'point', 'off'], ('tell', 1, 'point off')),
+                 (['peer', '1', 'look', '20', '5'], ('tell', 1, 'look 20 5')), (['peer', '1', 'look', '--', '-20', '-5.5'], ('tell', 1, 'look -20 -5.5')),
+                 (['peer', '1', 'look', 'off'], ('tell', 1, 'look off')), (['peer', '3', 'ask', '31'], ('tell', 3, 'ask 31')), (['peer', '3', 'ask', '0'], ('tell', 3, 'ask 0')),
+                 (['peer', '1', 'act', '8', 'move', '0.5', '1'], ('tell', 1, 'act 8 move 0.5 1')),
+                 (['peer', '1', 'act', '8', 'button', '1', '0'], ('tell', 1, 'act 8 button 1 0')),
+                 (['peer', '1', 'act', '8', 'scroll', '--', '0', '-120'], ('tell', 1, 'act 8 scroll 0 -120')),
+                 (['peer', '1', 'act', '8', 'key', '30', '1'], ('tell', 1, 'act 8 key 30 1')),
+                 (['peer', '1', 'put', '8', '1', '1.5', '2'], ('tell', 1, 'put 8 1.0 1.5 2.0 0.0')),
+                 (['peer', '1', 'put', '8', '--', '-1', '1.5', '-2', '-90'], ('tell', 1, 'put 8 -1.0 1.5 -2.0 -90.0'))]
         for argv, expected in cases:
             with self.subTest(argv=argv):
                 self.assertTrue(peer_cli.dispatch(cli.parser().parse_args(argv))['ok'])
@@ -159,7 +170,10 @@ class CommandsTest(unittest.TestCase):
 
     def test_what_isnt_a_command_is_refused_by_the_parser(self):
         for argv in (['peer', '0', 'state'], ['peer', '4', 'state'], ['peer', '1'], ['peer', '1', 'pose', 'fly'], ['peer', '1', 'speak', '10'],
-                     ['peer', '1', 'speak', 'nan'], ['peer', '1', 'away', 'gone'], ['peer', '1', 'walk', '1', '2']):
+                     ['peer', '1', 'speak', 'nan'], ['peer', '1', 'away', 'gone'], ['peer', '1', 'walk', '1', '2'], ['peer', '1', 'point'],
+                     ['peer', '1', 'look'], ['peer', '1', 'ask'], ['peer', '1', 'ask', '32'], ['peer', '1', 'ask', '-1'], ['peer', '1', 'ask', 'screen'],
+                     ['peer', '1', 'act', '32', 'key', '30', '1'], ['peer', '1', 'act', '8', 'type', '30', '1'], ['peer', '1', 'act', '8', 'key', '30'],
+                     ['peer', '1', 'put', '8', '1', '2'], ['peer', '1', 'put', '32', '1', '2', '3'], ['peer', '1', 'put', '8', '1', '2', 'far']):
             with self.subTest(argv=argv), self.assertRaises(SystemExit), mock.patch('sys.stderr'):
                 cli.parser().parse_args(argv)
 

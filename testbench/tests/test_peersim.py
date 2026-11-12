@@ -6,16 +6,13 @@ import os
 import socket
 import struct
 import subprocess
-import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
 
+import peerkit
 from frame_testbench import peersim
 
-TESTBENCH = Path(__file__).resolve().parents[1]
-POSE_HEAD = '<BH3f'   # together/proto/posewire.h: kind, count, the eyes' place
 MOUTH = slice(26, 31)  # ...and the five mouth shapes
 
 
@@ -46,6 +43,8 @@ class RulesTest(unittest.TestCase):
 
         self.sim = peersim.Sim(2, 'Bo', 47195, programs, loopback=True, models='/models', tag='_t', spawn=spawn, clock=lambda: self.now)
         self.sim.ask = lambda text: self.asked.append(text) or ('ok {"mode": "idle"}' if text == 'state' else 'ok')
+        self.sent = []
+        self.sim.send = self.sent.append
         self.sim.start()
         self.addCleanup(self.sim.asker.close)
 
@@ -104,13 +103,47 @@ class RulesTest(unittest.TestCase):
         self.sim.tick()
         self.assertEqual(self.asked[2:], ['wear'])
 
+    def test_its_hand_and_eyes_are_asked_what_is_theirs_and_kept_up(self):
+        for text in ('point 3 0.5 0.5', 'look 10 5', 'ask 3', 'act 3 key 30 1', 'put 3 0 1 -2'):
+            self.assertEqual(self.sim.answer(text), 'ok', text)
+        self.assertEqual(self.asked, ['gaze pointer hand', 'gaze on', 'gaze say 10 5', 'control ask 3', 'control act 3 key 30 1', 'move 3 0 1 -2 1.000000 0 0.000000 0'])
+        self.assertEqual(len(self.sent), 1)
+        self.now += 1
+        self.sim.tick()
+        self.assertEqual((self.asked[6:], len(self.sent)), (['gaze pointer hand', 'gaze say 10 5'], 2))
+        state = json.loads(self.sim.answer('state')[3:])
+        self.assertEqual((state['points']['panel'], state['looks'], state['control'], state['gaze']), (3, [10.0, 5.0], {'error': 'ok'}, {'error': 'ok'}))
+
+    def test_a_pointer_goes_to_its_own_session_and_is_lost_when_none_listens(self):
+        del self.sim.send   # the Sim's own again
+        self.sim.send(b'nobody there')
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC) as session:
+            session.bind('\0ft_peer_2_t')
+            session.settimeout(2)
+            self.assertEqual(self.sim.answer('point 3 0.5 0.5 down'), 'ok')
+            self.assertEqual(session.recv(64), struct.pack('<BHBHHB', 3, 0, 3, 32768, 32768, 1))
+
+    def test_it_points_and_looks_at_nothing_once_it_leaves_goes_away_or_joins(self):
+        for text in ('leave', 'away off', 'join 100.64.0.1 47193 ABCD2345'):
+            self.sim.answer('point 3 0.5 0.5 down')
+            self.sim.answer('look 10 5')
+            del self.asked[:], self.sent[:]
+            self.assertEqual(self.sim.answer(text), 'ok')
+            self.assertEqual((self.asked, len(self.sent)), (['gaze off', text], 1), text)
+            state = json.loads(self.sim.answer('state')[3:])
+            self.assertEqual((state['points'], state['looks']), (None, None), text)
+        self.sim.answer('point 3 0.5 0.5')
+        self.assertEqual(self.sim.answer('away back'), 'ok')
+        self.assertEqual(json.loads(self.sim.answer('state')[3:])['points']['panel'], 3, 'coming back takes its hand off nothing')
+
     def test_what_isnt_a_question_starts_nothing_and_asks_nothing(self):
         for text in ('', 'pose fly', 'pose', 'walk 1 2', 'walk 99 0 0', 'walk nan 0 0', 'walk a b c', 'speak', 'speak 10', 'speak nan',
                      'speak 440 880', 'away', 'away gone', 'join host 47193', 'join ho;st 47193 CODE', 'join host 0 CODE',
                      'join host 70000 CODE', 'join host port CODE', 'join host 47193 co/de', 'wear ../x', 'wear ' + 'a' * 65,
-                     'state now', 'leave now', 'run ls', 'join -h 1 CODE'):
+                     'state now', 'leave now', 'run ls', 'join -h 1 CODE', 'point 32 0 0', 'point 3 2 0', 'look 90 0', 'ask panel', 'act 3 key 99 1',
+                     'act 3 press 1 1', 'put 3 0 0', 'control give 0 1', 'gaze on', 'move 3 0 0 0 1 0 0 0'):
             self.assertTrue(self.sim.answer(text).startswith('error state | join'), text)
-        self.assertEqual((len(self.started), self.asked), (2, []))
+        self.assertEqual((len(self.started), self.asked, self.sent), (2, [], []))
 
     def test_ending_leaves_the_room_and_ends_every_program(self):
         self.sim.answer('speak 300')
@@ -126,116 +159,10 @@ class RulesTest(unittest.TestCase):
             self.assertIsNone(peersim.arguments(bad), bad)
 
 
-def free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
-
-
-class Asker:
-    """A socket of its own for questions to one program, which also gets what the program sends it."""
-
-    def __init__(self, name):
-        self.to = '\0' + name
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
-        self.sock.bind('')
-
-    def ask(self, text, seconds=3.0):
-        deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
-            self.sock.settimeout(max(0.05, deadline - time.monotonic()))
-            try:
-                self.sock.sendto(text.encode(), self.to)
-                while True:
-                    data = self.sock.recv(1 << 20)
-                    if data[:1] not in (b'\x81', b'\x82'):
-                        return data.decode()
-            except (ConnectionRefusedError, FileNotFoundError):
-                time.sleep(0.05)   # not listening yet
-            except OSError:
-                break
-        return 'none'
-
-    def state(self):
-        reply = self.ask('state')
-        return json.loads(reply[3:]) if reply.startswith('ok {') else {}
-
-    def until(self, what, seconds=10.0):
-        deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
-            if what(self.state()):
-                return True
-            time.sleep(0.05)
-        return False
-
-    def got(self, kind, question, seconds):
-        """What the program passed on in that time: [(person, datagram)]."""
-        self.ask(question)
-        got, deadline = [], time.monotonic() + seconds
-        while (left := deadline - time.monotonic()) > 0:
-            self.sock.settimeout(left)
-            try:
-                data = self.sock.recv(4096)
-            except OSError:
-                break
-            if data[:1] == kind:
-                got.append((data[1], data[2:]))
-        return got
-
-
-@unittest.skipUnless(all(path.is_file() for path in peersim.PROGRAMS.values()), 'Frametop Together is not built (together/build.sh, screens/build.sh)')
-class FakePeerTest(unittest.TestCase):
-    def setUp(self):
-        self.tag = '_%d' % os.getpid()
-        self.port = free_port()
-        self.log = tempfile.TemporaryFile()
-        self.addCleanup(self.log.close)
-        self.owner_socket = 'ft_peer_test_owner' + self.tag
-        self.owner_proc = self.run_program([str(peersim.PROGRAMS['ft-together']), '--loopback', '--name', 'Owner',
-                                            '--port', str(self.port), '--socket', self.owner_socket])
-        self.sim_proc = self.run_program([sys.executable, str(TESTBENCH / 'ft-peer-sim'), '1', '--loopback', '--name', 'Sim',
-                                          '--port', str(free_port()), '--tag', self.tag, '--models', tempfile.gettempdir()])
-        self.owner, self.sim = Asker(self.owner_socket), Asker(peersim.sim_socket(1, self.tag))
-        self.addCleanup(self.owner.sock.close)
-        self.addCleanup(self.sim.sock.close)
-
-    def run_program(self, argv):
-        proc = subprocess.Popen(argv, stdout=self.log, stderr=subprocess.STDOUT, cwd=TESTBENCH)
-        self.addCleanup(self.end, proc)
-        return proc
-
-    @staticmethod
-    def end(proc):
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-
-    def said(self):
-        self.log.seek(0)
-        return self.log.read().decode(errors='replace')[-3000:]
-
-    def eyes(self, seconds=0.6):
-        """Where the owner is told the peer's eyes are: the newest (x, z)."""
-        poses = [pose for person, pose in self.owner.got(b'\x81', 'watch', seconds) if person == 1]
-        self.assertTrue(poses, 'the owner got no pose of the peer\n' + self.said())
-        _, _, x, _, z = struct.unpack_from(POSE_HEAD, poses[-1])
-        return x, z, poses
-
+@unittest.skipUnless(peerkit.BUILT, peerkit.NOT_BUILT)
+class FakePeerTest(peerkit.RealRoom):
     def test_a_fake_peer_comes_in_stands_walks_speaks_and_leaves(self):
-        self.assertEqual(self.owner.ask('open'), 'ok', self.said())
-        code = self.owner.ask('invite')
-        self.assertTrue(code.startswith('ok '), code)
-        self.assertTrue(self.sim.until(lambda s: s.get('together', {}).get('mode') == 'idle'), self.said())
-        self.assertEqual(self.sim.ask('join 127.0.0.1 %d %s' % (self.port, code[3:])), 'ok')
-        self.assertTrue(self.owner.until(lambda s: s.get('asks')), self.said())
-        ask = self.owner.state()['asks'][0]
-        self.assertEqual(ask['name'], 'Sim')
-        self.assertEqual(self.owner.ask('accept %d' % ask['id']), 'ok')
-        self.assertTrue(self.sim.until(lambda s: s['together'].get('mode') == 'joined' and s['together'].get('me') == 1), self.said())
+        self.join()
 
         x, z, poses = self.eyes(1.5)
         self.assertGreater(len(poses), 10, 'a standing peer is told about 30 times a second')

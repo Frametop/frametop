@@ -1,11 +1,36 @@
 """The CLI's `peer` commands: a fake peer for Frametop Together (peers.py, docs/peers.md)."""
-from . import peers, peersim
+from . import peeracts, peers, peersim
 
 
 def hz(text):
     if text != 'off' and not 50 <= float(text) <= 2000:
         raise ValueError('a note is 50 to 2000 Hz, or off')
     return text
+
+
+def panel(text):
+    if not 0 <= int(text) < peeracts.PANELS:
+        raise ValueError("a panel's id is 0 to %d" % (peeracts.PANELS - 1))
+    return int(text)
+
+
+def add_acts(does):
+    """What a peer does in a room with its hand and its eyes (peeracts.py)."""
+    point = does.add_parser('point', help='its pointer on a panel of the room (its id), across and down the picture, each 0 to 1; or off')
+    point.add_argument('where', nargs='+', metavar='PANEL X Y | off')
+    point.add_argument('--down', action='store_true', help='with a button held')
+    look = does.add_parser('look', help='it shares where it looks: degrees to its left and up from the way its head faces; or off')
+    look.add_argument('where', nargs='+', metavar='YAW PITCH | off')
+    does.add_parser('ask', help="asks a panel's owner for it").add_argument('panel', type=panel)
+    act = does.add_parser('act', help='on a panel it was given: move X Y (each 0 to 1), button B 0|1, scroll RIGHT DOWN, key CODE 0|1')
+    act.add_argument('panel', type=panel)
+    act.add_argument('act', choices=('move',) + tuple(peeracts.ACTS))
+    act.add_argument('numbers', nargs=2, metavar='N')
+    put = does.add_parser('put', help="puts someone's panel there in the room: its middle in metres, and a turn to its left in degrees")
+    put.add_argument('panel', type=panel)
+    for name in ('x', 'y', 'z'):
+        put.add_argument(name, type=float)
+    put.add_argument('degrees', type=float, nargs='?', default=0.0)
 
 
 def add_parser(commands):
@@ -29,6 +54,7 @@ def add_parser(commands):
     does.add_parser('wear', help='the model it has on, or none').add_argument('model', nargs='?')
     does.add_parser('speak', help='it hums a note of that many Hz, or is quiet').add_argument('hz', type=hz, metavar='HZ|off')
     does.add_parser('away', help='in a game, the headset off, or back').add_argument('away', choices=('game', 'off', 'back'))
+    add_acts(does)
 
 
 def dispatch(args):
@@ -47,6 +73,14 @@ def dispatch(args):
         return peers.tell(n, 'join ' + ' '.join(args.invite))
     if what == 'walk':
         return peers.tell(n, 'walk %r %r %r' % (args.right, args.back, args.degrees))
+    if what in ('point', 'look'):
+        return peers.tell(n, ' '.join([what] + args.where + (['down'] if getattr(args, 'down', False) else [])))
+    if what == 'ask':
+        return peers.tell(n, 'ask %d' % args.panel)
+    if what == 'act':
+        return peers.tell(n, 'act %d %s %s %s' % (args.panel, args.act, *args.numbers))
+    if what == 'put':
+        return peers.tell(n, 'put %d %r %r %r %r' % (args.panel, args.x, args.y, args.z, args.degrees))
     words = {'leave': '', 'pose': getattr(args, 'pose', ''), 'wear': getattr(args, 'model', None) or '',
              'speak': getattr(args, 'hz', ''), 'away': getattr(args, 'away', '')}
     return peers.tell(n, (what + ' ' + words[what]).strip())

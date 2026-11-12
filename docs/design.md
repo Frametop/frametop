@@ -30,6 +30,21 @@ Before settling on this, we tried KWin's screencast virtual outputs. KWin 6.2.5 
 
 A few wlroots details worth knowing: `wlr_shm_create` wants DRM format codes, not `wl_shm` ones, and KWin asks for server-side decorations before its first commit, when setting the mode would assert, so ft-screens answers on the first commit.
 
+KWin 6.6 takes nested output scale from the host's `wp_fractional_scale_v1.preferred_scale`,
+then applies it when an `xdg_toplevel.configure` resizes the output. `kscreen-doctor` alone
+cannot change that scale. ft-screens advertises `wp_fractional_scale_manager_v1` and sends
+preferred scale before logical dimensions, at startup and when scale changes. Screen
+resolutions stay in pixels; configure dimensions divide them by the scale rounded to 120ths.
+They also keep the resulting pixel dimensions divisible by the whole buffer scale KWin 6.2
+requires. ft-floatd sends spares' logical dimensions itself, after enabling and scaling them.
+`kscreen-doctor` doesn't show that scale either: from 6.6 it reports a nested output's stored
+scale setting, which stays 1. ft-layout sends ft-screens the layout's scales and never the
+ones KWin reports, which would put a scaled screen back at 1, and positions screens by the
+layout's scales too. ft-floatd and `ft-layout remote-view` also take screens' scales from the
+layout (`kwin_scales` in `layout/ft_layout.py`), so a window floated off a screen at 200% floats
+at 200%. KWin's support information (`qdbus6 org.kde.KWin /KWin supportInformation`) shows the
+scale an output has.
+
 ### Placing and sizing
 
 Because the overlays are ours, ft-screens places them exactly with `SetOverlayTransformAbsolute` and draws its own controls under each screen. OpenVR has no overlay-relative transforms, so the controls are repositioned whenever their screen moves.

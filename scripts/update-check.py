@@ -63,7 +63,9 @@ PACKAGES = {
                            "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
                            "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
                            "Steam field, and its lasers, controller tips and fingertips press keys",
-    "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
+    "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "
+            "its scale a minute after the desktop starts (KWin's support information shows it; "
+            "kscreen-doctor shows 1 from 6.6); every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
             "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
             "logout watcher ends it: if it no longer crashes, the watcher can go)",
@@ -430,6 +432,9 @@ def check_kwin_host_protocols():
         return
     names = host_protocol_names(blob)
     required = [KWIN_HOST_PROTOCOLS[n] for n in names if n in KWIN_HOST_PROTOCOLS]
+    # KWin binds this for nested scaling without a missing-protocol warning.
+    if b"wp_fractional_scale_manager_v1" in blob and "wp_fractional_scale_manager_v1" not in required:
+        required.append("wp_fractional_scale_manager_v1")
     unknown = [n for n in names if n not in KWIN_HOST_PROTOCOLS and n not in KWIN_HOST_OPTIONAL]
     if unknown:
         report("warn", "KWin host protocols",
@@ -447,11 +452,11 @@ def check_kwin_host_protocols():
     missing = [iface for iface in required if not binary_has_token(built, iface)]
     if missing:
         report("FAIL", "KWin host protocols",
-               "this KWin exits unless the host compositor offers " + ", ".join(missing)
+               "this KWin needs the host compositor to offer " + ", ".join(missing)
                + "; rebuild ft-screens (screens/build.sh)")
     elif required:
         report("ok", "KWin host protocols",
-               f"ft-screens offers the {len(required)} {os.path.basename(src)} requires to start")
+               f"ft-screens offers the {len(required)} {os.path.basename(src)} requires for nested outputs")
     elif not unknown:
         report("warn", "KWin host protocols",
                f"{os.path.basename(src)} has the warning text but no known interface names")

@@ -545,8 +545,15 @@ def screens_socket():
 
 def screen_args(layout=None):
     layout = layout or load_layout()
-    return " ".join(f"--screen {w}x{h}@{screen_metres(layout, i):.3f}"
-                    for i, (w, h) in ((i, screen_pixels(layout, i)) for i in range(screen_count(layout))))
+    args = []
+    for i in range(screen_count(layout)):
+        w, h = screen_pixels(layout, i)
+        metres, s = screen_metres(layout, i), screen_scale(layout, i)
+        value = f"{w}x{h}@{metres:.3f}"
+        if abs(s - 1.0) > 1e-3:
+            value += f"x{s:g}"
+        args.append(f"--screen {value}")
+    return " ".join(args)
 
 
 def visibility(layout):
@@ -1725,26 +1732,43 @@ def arrangement(count):
     return [[b["i"] for b in sorted(c, key=lambda b: -b["pitch"])] for c in columns] + [[i] for i in pinned]
 
 
-def send_scales(outs):
-    """KWin's scale for each screen, as it is now, to ft-screens: KWin's nested backend
-    doesn't undo its scale on pointer input, so ft-screens does (panel pixels / scale)."""
+def send_layout_scales(layout, count):
+    """The layout's scale for each screen to ft-screens. It gives KWin 6.6 that as its
+    preferred scale, with a logical configure size, and undoes it on pointer input (panel
+    pixels / scale), which KWin's nested backend doesn't."""
     if backend() != "screens":
         return
-    try:
-        sock = screens_socket()
-        for i, o in enumerate(outs):
-            reply = sock.ask(f"scale {i + 1} {float(o.get('scale', 1)):g}")
-            if not reply.startswith("ok"):
-                log(f"screen {i + 1}: scale: {reply}")
-    except RuntimeError as e:
-        log(f"scale: {e}")
+    sock = screens_socket()
+    for i in range(count):
+        sock.ask(f"scale {i + 1} {screen_scale(layout, i):g}")
 
 
-def logical_size(o):
+def kwin_scales(layout=None):
+    """Each screen's scale in KWin, by output name (WL-0, ...): with ft-screens, the layout's,
+    which send_layout_scales gives KWin. Read these, not kscreen-doctor's: from 6.6 it shows a
+    nested output's stored scale setting, 1 whatever its scale is. Empty with gamescope."""
+    if backend() != "screens":
+        return {}
+    layout = layout or load_layout()
+    return {f"WL-{i}": screen_scale(layout, i) for i in range(screen_count(layout))}
+
+
+def logical_size(o, scale=None):
     """An output's size in logical units. kscreen's "size" is in pixels (already turned for a
-    rotation); positions are logical, the pixels divided by the scale (KWin rounds up)."""
-    s = float(o.get("scale", 1))
+    rotation); positions are logical, the pixels divided by the scale (KWin rounds up): this
+    one, or kscreen's."""
+    s = scale or float(o.get("scale", 1))
     return (math.ceil(o["size"]["width"] / s - 1e-6), math.ceil(o["size"]["height"] / s - 1e-6))
+
+
+def mode_size(o):
+    """Current mode's pixel size, falling back to kscreen's rotated pixel size."""
+    mode = next((m for m in o.get("modes", []) if m.get("id") == o.get("currentModeId")), {})
+    size = mode.get("size") or o.get("size") or {}
+    w, h = size.get("width", 0), size.get("height", 0)
+    if mode.get("size") and KSCREEN_ROTATION.get(o.get("rotation"), "normal") in ("left", "right"):
+        w, h = h, w
+    return w, h
 
 
 def apply_scales():
@@ -1754,11 +1778,15 @@ def apply_scales():
     if not env:
         raise RuntimeError("the Frametop desktop isn't running")
     layout = load_layout()
+    count = screen_count(layout)
+    send_layout_scales(layout, count)
     args = []
     outs = outputs(env)
     for i, o in enumerate(outs):
         s = screen_scale(layout, i)
-        if abs(float(o.get("scale", 1)) - s) > 1e-3:
+        if not o.get("enabled", True):
+            args.append(f"output.{o['id']}.enable")
+        if abs((o.get("scale") or 1.0) - s) > 0.01:
             args.append(f"output.{o['id']}.scale.{s:g}")
         rot = screen_rotation(layout, i)
         if KSCREEN_ROTATION.get(o.get("rotation"), "normal") != rot:
@@ -1772,8 +1800,17 @@ def apply_scales():
     # Laid out as you see the screens around you (arrangement), centred on one line, so
     # the pointer and dragged windows cross to the screen you see next to this one.
     outs = outputs(env)
-    send_scales(outs)
-    sizes = [logical_size(o) for o in outs if o.get("size")]
+    # KWin's scale isn't read back for ft-screens. From 6.6 kscreen-doctor shows a nested
+    # output's stored scale setting, 1 whatever its scale is, and ft-screens would give KWin
+    # that as the scale to have. Positions use the layout's scales for the same reason, and
+    # because a configure may still be pending.
+    sizes = []
+    for i, o in enumerate(outs):
+        if not o.get("size"):
+            continue
+        w, h = mode_size(o)
+        s = screen_scale(layout, i)
+        sizes.append((round(w / s), round(h / s)) if w and h else logical_size(o))
     if len(sizes) == len(outs) and outs:
         columns = arrangement(len(outs))
         if not columns or sorted(i for c in columns for i in c) != list(range(len(outs))):
@@ -1817,7 +1854,8 @@ def remote_view():
     outs = [o for o in outputs(env) if o.get("enabled", True) and o.get("size") and o.get("pos")]
     if not outs:
         raise RuntimeError("the Frametop desktop has no screens yet")
-    rects = [(o["pos"]["x"], o["pos"]["y"], *logical_size(o)) for o in outs]
+    scales = kwin_scales()
+    rects = [(o["pos"]["x"], o["pos"]["y"], *logical_size(o, scales.get(o.get("name")))) for o in outs]
     left, top = min(r[0] for r in rects), min(r[1] for r in rects)
     right, bottom = max(r[0] + r[2] for r in rects), max(r[1] + r[3] for r in rects)
     p = next((i for i, o in enumerate(outs) if o.get("priority") == 1), 0)

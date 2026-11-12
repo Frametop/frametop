@@ -171,20 +171,25 @@ def output_rects():
         data = json.loads(kscreen("-j") or "{}")
     except ValueError:
         return {}
+    scales = ft_layout.kwin_scales()  # the screens' (kscreen-doctor shows 1 from KWin 6.6)
     out = {}
     for o in data.get("outputs", []):
-        pos, size, scale = o.get("pos") or {}, o.get("size") or {}, float(o.get("scale", 1)) or 1.0
+        pos, size = o.get("pos") or {}, o.get("size") or {}
+        scale = scales.get(o.get("name")) or float(o.get("scale", 1)) or 1.0
         if o.get("name") and size:
             out[o["name"]] = (pos.get("x", 0), pos.get("y", 0), size.get("width", 0) / scale, size.get("height", 0) / scale)
     return out
 
 
 def output_scales():
+    """Each output's scale in KWin: a screen's from the layout (ft_layout.kwin_scales), so a
+    window floated off a screen at 200% floats at 200%; a spare's as kscreen-doctor shows it."""
     try:
         data = json.loads(kscreen("-j") or "{}")
     except ValueError:
-        return {}
-    return {o["name"]: float(o.get("scale", 1)) for o in data.get("outputs", []) if o.get("name")}
+        data = {}
+    shown = {o["name"]: float(o.get("scale", 1)) for o in data.get("outputs", []) if o.get("name")}
+    return {**shown, **ft_layout.kwin_scales()}
 
 
 def load_places():
@@ -743,7 +748,6 @@ class Daemon:
         # then the window.
         slot.want = None
         self.set_size(slot, (w + 2 * m, h + 2 * m), whole(slot.kscale, s))
-        self.screens.ask(f"scale {slot.index} {s:g}")  # for pointer positions (KWin's units)
         self.set_panel(f, (m, m, w, h), title=round((ev["client"]["y"] - fr["y"]) * s))
         if place:
             self.pose(f, *place)
@@ -756,6 +760,7 @@ class Daemon:
             self.screens.ask(f"torn {slot.index} {gx} {gy}", quiet=True)
         kscreen(f"output.{slot.output}.enable", f"output.{slot.output}.scale.{s:g}",
                 f"output.{slot.output}.position.{slot.pos[0]},{slot.pos[1]}")
+        self.screens.ask(f"scale {slot.index} {s:g}")
         self.rescaled(slot, s)
         self.command(cmd="place", id=wid, output=slot.output, x=slot.pos[0] + m / s, y=slot.pos[1] + m / s,
                      w=fr["w"], h=fr["h"], onAllDesktops=True)

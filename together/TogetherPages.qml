@@ -296,6 +296,13 @@ Item {
                                 textFormat: Text.PlainText
                                 opacity: 0.7
                             }
+                            Controls.ToolButton {
+                                objectName: "goPerson"
+                                visible: !personRow.modelData.you
+                                text: "Go to them"
+                                icon.name: "go-jump"
+                                onClicked: backend.goTo("person", personRow.modelData.id)
+                            }
                         }
                     }
                     Controls.Button {
@@ -305,6 +312,13 @@ Item {
                         icon.name: "window-close"
                         onClicked: backend.mode === "hosting" && backend.people.length > 1 ? closeDialog.open() : backend.leave()
                     }
+                }
+
+                RoomPanels {
+                    objectName: "roomPanelRows"
+                    Layout.fillWidth: true
+                    visible: backend.ready && root.inRoom && any
+                    backend: root.backend
                 }
 
                 // --- what the room gets of yours ---
@@ -372,7 +386,7 @@ Item {
                         text: backend.shares.length === 0
                               ? "The desktop's screens show here while the Frametop desktop runs."
                               : "Up to three at a time. The others see a shared screen where it stands in your room; "
-                                + "they can't click or type on it."
+                                + "they can click and type on it only once you give it to them."
                     }
                 }
             }

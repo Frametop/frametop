@@ -1,5 +1,6 @@
 """Frametop Settings' Together page: turn Frametop Together on, open a room or join someone's,
-let people in, and choose what of yours the room gets (your voice, your avatar, your screens).
+let people in, choose what of yours the room gets (your voice, your avatar, your screens), and
+go to someone or to a panel in it. Who may use which screen is ft_together_control.py's part.
 
 The page's backend (TogetherPages.qml; settings/ft_settings.py makes it). It only asks: the
 room is ft-together's (@ft_together), the voice ft-roomvoice's, the shared screens
@@ -19,6 +20,7 @@ from PySide6.QtGui import QGuiApplication
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
+import ft_together_control  # noqa: E402  (who may use which screen)
 import roomavatar  # noqa: E402  (the avatar its person has on)
 import roompage  # noqa: E402  (what the answers mean, without Qt)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
@@ -46,6 +48,8 @@ class Backend(QObject):
         self._switching = None   # the systemctl running
         self._ipcDone.connect(lambda then, answer: then(answer))
         self._ipc = ftipc.Worker(self._ipcDone.emit)
+        self._control = ft_together_control.Control(self._told, lambda text: self._do(TOGETHER, text))
+        self.changed.connect(self._control.changed)
         self.poll = QTimer(interval=1000, timeout=self.refresh)
 
     # --- asking ---
@@ -100,6 +104,7 @@ class Backend(QObject):
         if self.ready:
             self._ask("here", TOGETHER, "here")
             self._ask("looks", TOGETHER, "looks")
+            self._ask("control", TOGETHER, "control")
             self._ipc.run(lambda _client: self._worn.look(), self._wears)
             self._ask("voice", VOICE, "state")
             self._ask("panels", PANELS, "state")
@@ -221,6 +226,17 @@ class Backend(QObject):
     @Slot()
     def leave(self):
         self._do(TOGETHER, "leave")
+
+    @Property(QObject, constant=True)
+    def control(self):
+        return self._control
+
+    @Slot(str, int)
+    def goTo(self, kind, ident):
+        """Its person jumps to in front of someone ("person", their place) or a panel ("panel",
+        its id in the room)."""
+        if kind in ("person", "panel"):
+            self._do(PANELS, f"go {kind} {int(ident)}")
 
     @Slot(str)
     def copy(self, text):

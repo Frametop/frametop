@@ -117,7 +117,7 @@ def room_text(state):
 
 
 def people(state):
-    """The room's people as rows: {"id", "name", "login", "what"}."""
+    """The room's people as rows: {"id", "name", "login", "what", "you"}."""
     rows = []
     for p in state.get("people") or []:
         if not isinstance(p, dict):
@@ -125,7 +125,8 @@ def people(state):
         what = [w for w in ("you" if p.get("id") == state.get("me") else "", "the room's owner" if p.get("id") == state.get("owner") else "",
                             AWAY.get(p.get("away"), "away"),
                             "" if p.get("linked") or p.get("id") == state.get("me") else "connecting") if w]
-        rows.append({"id": int(p.get("id", -1)), "name": str(p.get("name", "")), "login": str(p.get("login", "")), "what": ", ".join(what)})
+        rows.append({"id": int(p.get("id", -1)), "name": str(p.get("name", "")), "login": str(p.get("login", "")), "what": ", ".join(what),
+                     "you": p.get("id") == state.get("me")})
     return rows
 
 

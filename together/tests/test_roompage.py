@@ -86,6 +86,9 @@ class Rules(unittest.TestCase):
         rows = roompage.people(roompage.told(state("hosting", [ADA, BEN, dict(BEN, id=2, name="cy", away=1, linked=False), "junk"])))
         self.assertEqual([(r["id"], r["name"], r["what"]) for r in rows],
                          [(0, "ada", "you, the room's owner"), (1, "ben", "headset off"), (2, "cy", "in a game, connecting")])
+        self.assertEqual([r["you"] for r in rows], [True, False, False])
+        guest = roompage.people(roompage.told(state("joined", [ADA, BEN], me=1)))
+        self.assertEqual([(r["you"], r["what"]) for r in guest], [(False, "the room's owner, connecting"), (True, "you, headset off")])
         self.assertEqual(roompage.people({}), [])
         asked = roompage.asks(roompage.told(state("hosting", [ADA], [{"id": 3, "name": "ben", "login": "ben@example.org", "address": "100.64.0.9"}, 7])))
         self.assertEqual(asked, [{"id": 3, "name": "ben", "login": "ben@example.org", "address": "100.64.0.9"}])

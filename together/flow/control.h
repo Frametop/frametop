@@ -64,6 +64,12 @@ public:
     std::string Ask(int panel, double now);                      // someone else's panel, asked for
     std::string Act(const proto::Act &act, double now);          // their input on a panel they were given
 
+    // Whether `person` has this Frame's panel `number` now, by a grant that stands. And whether
+    // the wearer has someone else's `panel`, by the last word of its owner. A grant covers
+    // moving the panel too (moves.h).
+    bool Granted(int number, int person, double now);
+    bool Holds(uint8_t panel, double now) const;
+
     // {"there":B,"left":S,"asks":[{"number":N,"person":P}],"given":[...],"holder":P,
     //  "held":[{"panel":ID,"left":S}],"asked":[ID],"passed":N,"dropped":N}
     std::string State(double now) const;

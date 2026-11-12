@@ -22,6 +22,8 @@ Frame's floor lies in the room now:
   pull DX DZ DEGREES    the room pulled past by that much on your own floor
   step FORWARD RIGHT DEGREES   that many metres the way you face and to your right, then
                         turned that far to the left where you stand
+  fly panel ID          as "go panel ID", but flown there in a moment and not in one jump
+                        (roompanels/gliding.py) -> "ok"
 
   --socket NAME     its own socket's name (ft_roompanels)
   --together NAME   ft-together's (ft_together)
@@ -39,24 +41,26 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "conf"))
 sys.path.insert(0, str(HERE))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
-from roompanels import moving  # noqa: E402
+from roompanels import gliding, moving  # noqa: E402
 from roompanels.keeper import Keeper  # noqa: E402
 
 IN_ROOM, IDLE = 0.25, 1.0   # seconds between looks
 
 
-def answer(keeper, mover, text):
+def answer(keeper, mover, glide, text):
     words = text.split()
     moved = moving.answer(mover, words)
     if moved is not None:
         return moved
+    if len(words) == 3 and words[:2] == ["fly", "panel"] and words[2].isdigit() and len(words[2]) < 4:
+        return glide.to_panel(int(words[2]))
     if words == ["state"]:
         return "ok " + keeper.state()
     if words == ["panels"]:
         return keeper.panels()
     if len(words) == 2 and words[0] in ("share", "unshare") and words[1].isdigit() and len(words[1]) < 4:
         return (keeper.share if words[0] == "share" else keeper.unshare)(int(words[1]))
-    return "error share N | unshare N | state | panels | go ... | pull DX DZ DEGREES | step FORWARD RIGHT DEGREES"
+    return "error share N | unshare N | state | panels | go ... | pull DX DZ DEGREES | step FORWARD RIGHT DEGREES | fly panel ID"
 
 
 def main():
@@ -74,29 +78,33 @@ def main():
     sock.setblocking(False)
     together, screens = ftipc.Client(timeout=0.5), ftipc.Client(timeout=0.5)
     ask_together, ask_screens = (lambda text: together.ask(names["--together"], text)), (lambda text: screens.ask(names["--screens"], text))
-    keeper, mover = Keeper(ask_together, ask_screens, time.monotonic), moving.Mover(ask_together, ask_screens)
+    mover = moving.Mover(ask_together, ask_screens)
+    glide = gliding.Glide(mover, time.monotonic)
+    keeper = Keeper(ask_together, ask_screens, time.monotonic, glide.to_panel)
 
     def ended(*_):
         raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, ended)
     signal.signal(signal.SIGINT, ended)
-    was = None
+    was, look = None, 0.0
     try:
         while True:
-            keeper.tick()
-            if keeper.in_room != was:
-                was = keeper.in_room
-                print("in a room" if was else "in no room", flush=True)
-            until = time.monotonic() + (IN_ROOM if keeper.in_room else IDLE)
-            while (left := until - time.monotonic()) > 0:
-                if not select.select([sock], [], [], left)[0]:
-                    break
-                try:
-                    data, who = sock.recvfrom(256)
-                    sock.sendto(answer(keeper, mover, data.decode("utf-8", "replace")).encode(), who)
-                except OSError:
-                    pass   # an asker that went before its answer
+            if time.monotonic() >= look:
+                keeper.tick()
+                if keeper.in_room != was:
+                    was = keeper.in_room
+                    print("in a room" if was else "in no room", flush=True)
+                look = time.monotonic() + (IN_ROOM if keeper.in_room else IDLE)
+            glide.step()
+            left = max(0.0, look - time.monotonic())
+            if not select.select([sock], [], [], min(left, gliding.STEP) if glide.going else left)[0]:
+                continue
+            try:
+                data, who = sock.recvfrom(256)
+                sock.sendto(answer(keeper, mover, glide, data.decode("utf-8", "replace")).encode(), who)
+            except OSError:
+                pass   # an asker that went before its answer
     finally:
         keeper.end()
 

@@ -361,7 +361,7 @@ class WithTheKeeper(MoverCase):
         self.before = self.stands()
         self.assertTrue(self.mover.go((-3.0, 4.5, 2.0)).startswith("ok "))
         self.ticks()
-        self.assertEqual(self.screens.count("pose 116"), placed)
+        self.assertEqual((self.screens.count("pose 116"), self.together.count("move ")), (placed, 0))      # nor does it count as carried
         self.assertRoomStoodStill()
         want = placing.to_floor(self.together.floor, self.together.panels[2])
         self.assertTrue(near(self.screens.panels[116]["pose"], want, 2e-3))      # where the keeper would put it now

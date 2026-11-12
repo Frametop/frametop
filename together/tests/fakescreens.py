@@ -2,7 +2,11 @@
 directly; roompanels-test.py serves it on a socket): the desktop's screens and where they stand,
 the remote screens, the share tap, the head, the hand controllers ("reach", which ft-roommove
 asks), and "shift", which moves all that stands in the room as ft-screens does
-(screens/roomshift.h): its sum is kept, and "shift back" undoes it."""
+(screens/roomshift.h): its sum is kept, and "shift back" undoes it.
+
+A remote screen says where it stands ("get") as it was last put ("pose", "width", "curve"), as
+ft-screens does; a test that plays its viewer's hand moves it with `carry`. A desktop screen
+that is put somewhere stands there upright, turned as the pose's x axis says."""
 import math
 import socket
 import threading
@@ -48,6 +52,11 @@ class Screens:
             return f"ok {len(self.remotes)}" + "".join(f" {n}:{r[0]}:live:{r[1]}" for n, r in sorted(self.remotes.items()))
         if text == "shares":
             return f"ok {len(self.shares)}" + "".join(f" {n}:{s[0]}:live:{s[1]}" for n, s in sorted(self.shares.items()))
+        if w[0] == "get" and int(w[1]) in self.panels:
+            panel = self.panels[int(w[1])]       # (one that was never put stands where ft-screens makes them)
+            p, wide, curve = panel.get("pose", [1, 0, 0, 0, 0, 1, 0, 1.5, 0, 0, 1, -2.5]), panel.get("width", [1.0])[0], panel.get("curve", [0.0])[0]
+            return ("ok {:.4f} {:.4f} {:.4f}  ".format(p[3], p[7], p[11]) + "  ".join("{:.5f} {:.5f} {:.5f}".format(*p[k:12:4]) for k in range(3))
+                    + f"  {wide:.4f} {wide * 0.5625:.4f} {curve:.3f} none")
         if w[0] == "get":
             if int(w[1]) not in self.at:
                 return f"error no screen {w[1]}"
@@ -64,10 +73,17 @@ class Screens:
         if w[0] == "remote" and w[2] == "stop":
             self.panels.pop(int(w[1]), None)
             return "ok" if self.remotes.pop(int(w[1]), None) else f"error no remote screen {w[1]}"
+        if w[0] == "pose" and int(w[1]) in self.at:
+            p = [float(v) for v in w[2:]]
+            self.at[int(w[1])], self.yaw[int(w[1])] = (p[3], p[7], p[11]), math.atan2(-p[8], p[0])
+            return "ok"
         if w[0] in ("pose", "width", "curve"):
             if int(w[1]) not in self.panels:
                 return f"error no screen {w[1]}"
-            self.panels[int(w[1])][w[0]] = [float(v) for v in w[2:]]
+            said = [float(v) for v in w[2:]]
+            if w[0] == "curve":
+                said = [max(0.5, said[0]) if said[0] > 0 else 0.0]       # as ft-screens bends: no tighter than half a metre
+            self.panels[int(w[1])][w[0]] = said
             return "ok"
         if text == "shift back":
             for dx, dz, yaw in [s for s in reversed(self.shifted) if s != "back"]:
@@ -99,6 +115,13 @@ class Screens:
             if p:
                 cols = [_turned(yaw, p[k::4]) for k in range(3)] + [moved(p[3::4])]
                 panel["pose"] = [cols[k][row] for row in range(3) for k in range(4)]
+
+    def carry(self, number, by=(0.0, 0.0, 0.0), yaw=0.0):
+        """Its viewer's hand: the remote screen `number` moved `by` on the floor and turned `yaw`
+        to the left about its own middle."""
+        p = self.panels[number]["pose"]
+        cols = [_turned(yaw, p[k::4]) for k in range(3)] + [tuple(a + b for a, b in zip(p[3::4], by))]
+        self.panels[number]["pose"] = [cols[k][row] for row in range(3) for k in range(4)]
 
     def count(self, start):
         return sum(1 for a in self.asked if a.startswith(start))

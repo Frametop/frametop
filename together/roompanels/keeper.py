@@ -1,7 +1,8 @@
 """What ft-roompanels keeps true while this Frame is in a room (docs/together.md, "What a guest
 sees"): every panel the others share stands as a panel of ft-screens' here, where the room says;
 and every screen this Frame's person shares is in the room where it stands here, with ft-screens
-sending its pictures to an ft-sharepanel.
+sending its pictures to an ft-sharepanel. What becomes of a panel that someone other than its
+owner moves is carrying.py's.
 
 The rules only. Its questions go out through two functions it is given, each a text in and the
 answer or None back: `together` (ft-together's local socket) and `screens` (ft-screens'). So the
@@ -15,6 +16,7 @@ import json
 import math
 
 from . import placing
+from .carrying import Carrying
 
 SLOTS = 3                               # the panels a Frame shares at most (screens/share.h)
 REMOTE_FIRST, REMOTE_LAST = 101, 116    # ft-screens' remote screens (screens/remote.h)
@@ -84,8 +86,10 @@ def _listed(reply, parts):
 
 
 class Keeper:
-    def __init__(self, together, screens, now):
+    def __init__(self, together, screens, now, fly=lambda ident: None):
+        """`fly(ident)`: takes this Frame's person to the room's panel `ident` (carrying.py)."""
         self.together, self.screens, self.now = together, screens, now
+        self.carrying = Carrying(together, screens, now, fly)
         self.wishes = {}     # screen number -> slot: what this Frame's person shares
         self.told = {}       # slot -> the "share" the room has from us
         self.shown = {}      # a peer's panel id -> [its remote screen, the room's panel as placed]
@@ -151,6 +155,8 @@ class Keeper:
         self.in_room, self.tidy = True, False
         self.floor = self._floor(room)
         self._others(room)
+        if self.floor is not None:
+            self.carrying.brought(self.floor, {slot: number for number, slot in self.wishes.items() if slot in self.told})
         self._mine(room)
 
     def _room(self):
@@ -179,6 +185,7 @@ class Keeper:
         is put back. Also what a start finds left of an earlier ft-roompanels' room."""
         self.in_room, self.floor, self._floorless = False, None, None
         self.wishes.clear(), self.told.clear(), self.shown.clear(), self.mine.clear()
+        self.carrying.only(())
         if self.tidy:
             return
         remotes, shares = self._remotes(), self._shares()
@@ -239,6 +246,7 @@ class Keeper:
                 del self.shown[ident]
         for ident in [i for i, s in self.shown.items() if s[0] not in remotes or i not in wanted]:
             del self.shown[ident]
+        self.carrying.only(self.shown)
         if self.floor is None:
             return
         for ident, panel in sorted(wanted.items()):
@@ -261,16 +269,11 @@ class Keeper:
         return True
 
     def _place(self, ident, panel):
-        """Puts the panel where the room has it, when the room moved it (or it is new here).
-        Between those it stays where its viewer left it."""
+        """The panel stands where the room has it: put there when it is new here or the room
+        moved it, and looked at each time for whether its viewer moved it (carrying.py)."""
         number, placed = self.shown[ident]
         want = {k: panel[k] for k in ("size", "at", "turn", "metres", "curve")}
-        if placed == want:
-            return
-        pose = " ".join(f"{v:.5f}" for v in placing.to_floor(self.floor, panel))
-        asked = [f"pose {number} {pose}", f"width {number} {panel['metres']:.3f}", f"curve {number} {panel['curve']:.3f}"]
-        if all([_ok(self.screens(a)) for a in asked]):
-            self.shown[ident][1] = want
+        self.shown[ident][1] = self.carrying.place(ident, number, self.floor, want, placed)
 
     # ---- this Frame's own ----
 

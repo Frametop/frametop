@@ -49,7 +49,7 @@ fi
 quic="-I$src/src/inc build/libmsquic.so.2 -Wl,-rpath,\$ORIGIN"
 g++ $flags -o build/ft-together ft-together.cpp net/quiclinks.cpp net/quicframes.cpp net/quicfiles.cpp net/lookup.cpp \
   net/tailnet.cpp net/selfcert.cpp session/session.cpp session/wearer.cpp session/commands.cpp proto/messages.cpp flow/video.cpp \
-  flow/looks.cpp flow/control.cpp local/watchers.cpp local/media.cpp local/wardrobe.cpp local/inputs.cpp local/controlask.cpp \
+  flow/looks.cpp flow/control.cpp flow/moves.cpp local/watchers.cpp local/media.cpp local/wardrobe.cpp local/inputs.cpp local/controlask.cpp local/moveask.cpp \
   ../avatar/modelfile.cpp $quic $(pkg-config --libs openssl) -lpthread
 gpu="gbm libdrm egl glesv2"
 g++ $flags $(pkg-config --cflags $gpu) -o build/ft-sharepanel ft-sharepanel.cpp media/irisenc.cpp media/pictures.cpp \

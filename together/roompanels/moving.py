@@ -85,6 +85,12 @@ def _reply(text, count):
     return _numbers(words[1:], count) if words[:1] == ["ok"] else None
 
 
+def _stood(floor, head):
+    """Where a head at `head` of a floor is over the room's floor, and the way it faces."""
+    at = placing.turned(floor[2], (head[0], 0.0, head[1]))
+    return (floor[0] + at[0], floor[1] + at[2], placing.wrap(floor[2] + head[2]))
+
+
 def _shift_words(shift):
     return f"shift {shift[0]:.5f} {shift[1]:.5f} {math.degrees(shift[2]):.4f}"
 
@@ -109,11 +115,15 @@ class Mover:
         here = self._here()
         if isinstance(here, str):
             return here
-        floor, head = here
-        at = placing.turned(floor[2], (head[0], 0.0, head[1]))
-        facing = floor[2] + head[2]
+        x, z, facing = _stood(*here)
         way = placing.turned(facing, (right, 0.0, -forward))
-        return self._to(floor, head, (floor[0] + at[0] + way[0], floor[1] + at[2] + way[2], placing.wrap(facing + math.radians(degrees))))
+        return self._to(*here, (x + way[0], z + way[2], placing.wrap(facing + math.radians(degrees))))
+
+    def standing(self):
+        """Where their head is over the room's floor and the way it faces (x, z, yaw), or the
+        error that says why that isn't known."""
+        here = self._here()
+        return here if isinstance(here, str) else _stood(*here)
 
     def go_person(self, place):
         room = self._room()
@@ -133,14 +143,19 @@ class Mover:
         return self.go(beside((seen[0], seen[1]), seen[2]))
 
     def go_panel(self, ident):
+        spot = self.panel_spot(ident)
+        return spot if isinstance(spot, str) else self.go(spot)
+
+    def panel_spot(self, ident):
+        """The spot the room's panel `ident` reads well from, or the error that says why there
+        is none."""
         room = self._room()
         if room is None:
             return "error no answer from ft-together"
         panel = next((p for p in room.get("panels", []) if p.get("id") == ident), None)
         if panel is None:
             return f"error no panel {ident} in the room"
-        spot = reading(panel)
-        return self.go(spot) if spot else f"error panel {ident} has no front to stand before"
+        return reading(panel) or f"error panel {ident} has no front to stand before"
 
     def pull(self, dx, dz, degrees):
         """The room moves by (dx, dz) metres on their own floor and turns `degrees` to the left

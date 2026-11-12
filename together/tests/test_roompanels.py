@@ -94,6 +94,9 @@ class Together:
         self.fixed = False   # the floor won't move
         self.asked = []
         self.there = True
+        self.may = "ok"      # what "move" is answered
+        self.takes = True    # ...and whether the room then has the panel there, as when its owner's Frame took it
+        self.others = []     # "moves": where the others put this Frame's panels, as (number, person, at, turn), or the answer itself
 
     def panel(self, ident, at=(0.0, 1.5, -2.0), turn=(1.0, 0.0, 0.0, 0.0), size=(1280, 720), metres=1.5, curve=0.0, name="Screen 1"):
         self.panels[ident] = {"id": ident, "owner": ident // 8, "number": ident % 8, "name": name, "size": list(size),
@@ -128,6 +131,15 @@ class Together:
         if w[0] == "unshare":
             self.panels.pop(self.me * 8 + int(w[1]), None)
             return "ok"
+        if w[0] == "move":
+            if self.may == "ok" and self.takes:
+                self.panels[int(w[1])].update(at=[float(v) for v in w[2:5]], turn=[float(v) for v in w[5:9]])
+            return self.may
+        if text == "moves":
+            said, self.others = self.others, []
+            if not isinstance(said, list):
+                return said
+            return f"ok {len(said)}" + "".join(" {}:{}:{:.4f}:{:.4f}:{:.4f}:{:.5f}:{:.5f}:{:.5f}:{:.5f}".format(n, who, *at, *turn) for n, who, at, turn in said)
         raise AssertionError(f"ft-together was asked {text!r}")
 
     def count(self, start):
@@ -188,7 +200,7 @@ class Others(KeeperCase):
         self.assertEqual((panel["label"], panel["width"], panel["curve"]), ("Screen 2", [1.5], [2.0]))
         self.assertTrue(near(panel["pose"], [-1, 0, 0, 0, 0, 1, 0, 1.5, 0, 0, -1, -2]), panel["pose"])
 
-    def test_it_is_placed_once_and_then_left_to_its_viewer(self):
+    def test_it_is_placed_once_while_it_stands_where_the_room_has_it(self):
         self.together.panel(2)
         self.ticks(8)
         self.assertEqual((self.screens.count("remote 116 peer"), self.screens.count("pose"), self.screens.count("width")), (1, 1, 1))

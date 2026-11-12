@@ -15,6 +15,7 @@ To ft-roompanels (its own text has them all):
 
   ft-room step FORWARD RIGHT DEGREES    metres the way you face and to your right, then a turn left
   ft-room go person N | go panel ID | go X Z DEGREES
+  ft-room fly panel ID                  as "go panel ID", flown there in a moment
   ft-room share N | unshare N           screen N of this desktop, into the room and back
 
   --socket NAME   another ft-together's local socket (ft_together)
@@ -28,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 
-PANELS = ("step", "go", "pull", "share", "unshare", "panels")   # what ft-roompanels is asked, not ft-together
+PANELS = ("step", "go", "fly", "pull", "share", "unshare", "panels")   # what ft-roompanels is asked, not ft-together
 
 
 def main():

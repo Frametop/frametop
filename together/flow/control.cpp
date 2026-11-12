@@ -152,12 +152,21 @@ std::string Control::Act(const proto::Act &act, double now) {
     const proto::Panel *p = session_.room().panel(act.panel);
     if (!p) return "no such panel";
     if (p->owner() == session_.me()) return "that panel is yours";
-    const auto held = held_.find(act.panel);
-    if (held == held_.end() || held->second <= now) return "you have no control of that panel";
+    if (!Holds(act.panel, now)) return "you have no control of that panel";
     proto::Act read;
     if (!proto::Read(proto::Body(act), read) || (act.what == proto::kActKey && !room::Typed(act.a))) return "that isn't input a panel takes";
     if (!mine_.try_emplace(p->owner()).first->second.acts.Spend(now)) return "too fast";
     return session_.Tell(p->owner(), proto::Pack(act));
+}
+
+bool Control::Granted(int number, int person, double now) {
+    Same(person, now);
+    return grants_.May(number, person, now);
+}
+
+bool Control::Holds(uint8_t panel, double now) const {
+    const auto held = held_.find(panel);
+    return held != held_.end() && held->second > now;
 }
 
 std::string Control::State(double now) const {

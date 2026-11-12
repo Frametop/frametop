@@ -83,6 +83,12 @@ def parse_get(reply):
     return {"at": tuple(g[0:3]), "x": tuple(g[3:6]), "y": tuple(g[6:9]), "z": tuple(g[9:12]), "metres": g[12], "curve": g[14]}
 
 
+def twelve(got):
+    """A panel of this Frame's (parse_get) as the twelve numbers of ft-screens' "pose"."""
+    x, y, z, at = got["x"], got["y"], got["z"], got["at"]
+    return [x[0], y[0], z[0], at[0], x[1], y[1], z[1], at[1], x[2], y[2], z[2], at[2]]
+
+
 def to_room(floor, got):
     """A panel of this Frame's (parse_get) as the room has it: {"at", "turn", "metres", "curve"}."""
     x, z, yaw = floor

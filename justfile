@@ -161,6 +161,11 @@ test-c:
       together/local/controlask.cpp together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp \
       together/proto/messages.cpp -o build/tests/together-control-test
     run together/tests/control-test.cpp build/tests/together-control-test
+    # moving shared panels: who may, and where a move ends up
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/moves-test.cpp together/flow/moves.cpp \
+      together/local/moveask.cpp together/flow/control.cpp together/local/controlask.cpp together/session/session.cpp together/session/wearer.cpp \
+      together/session/commands.cpp together/proto/messages.cpp -o build/tests/together-moves-test
+    run together/tests/moves-test.cpp build/tests/together-moves-test
     # the avatars people have on: who is asked for a file and whose is kept, and the files on this Frame
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/looks-test.cpp together/flow/looks.cpp \
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
@@ -195,12 +200,15 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
           together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
           together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
-          together/flow/video.cpp together/flow/looks.cpp together/flow/control.cpp together/local/watchers.cpp together/local/media.cpp \
-          together/local/wardrobe.cpp together/local/inputs.cpp together/local/controlask.cpp avatar/modelfile.cpp -o build/tests/ft-together $quic
+          together/flow/video.cpp together/flow/looks.cpp together/flow/control.cpp together/flow/moves.cpp together/local/watchers.cpp \
+          together/local/media.cpp together/local/wardrobe.cpp together/local/inputs.cpp together/local/controlask.cpp together/local/moveask.cpp \
+          avatar/modelfile.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
         # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
         # video through the hardware encoder and decoder, is run by hand: together/README.md.)
         run together/tests/roompanels-test.py python3 together/tests/roompanels-test.py build/tests/ft-together
+        # ...and panels moved by someone other than their owner
+        run together/tests/roomcarry-test.py python3 together/tests/roomcarry-test.py build/tests/ft-together
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-roomvoice.cpp together/voice/codec.cpp \
           together/voice/voices.cpp together/voice/sender.cpp together/voice/player.cpp together/voice/headask.cpp together/voice/pulse.cpp \
           avatar/room/client.cpp avatar/room/people.cpp $(pkg-config --cflags --libs opus libpulse-simple) -lpthread -o build/tests/ft-roomvoice
@@ -227,7 +235,7 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
         run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomcarry-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

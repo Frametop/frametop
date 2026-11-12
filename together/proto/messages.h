@@ -25,10 +25,11 @@ constexpr size_t kMostName = 48, kMostLogin = 96, kMostAddress = 45, kMostCode =
 constexpr float kFar = 100;        // metres from the room's middle: nothing is further
 static_assert(kPanelFar == kFar, "a panel is no further than a person");
 
-// 12 to 14 are control's (control.h): the session passes them on unread to whoever knows them.
+// 12 to 14 are control's (control.h) and 15 is a panel moved (move.h): the session passes them
+// on unread to whoever knows them.
 enum Kind : uint16_t {
     kHello = 1, kWelcome = 2, kRefuse = 3, kRoom = 4, kAway = 5, kLeave = 6, kPanel = 7, kUnpanel = 8, kWatch = 9, kLook = 10, kWant = 11,
-    kAskControl = 12, kGrant = 13, kAct = 14,
+    kAskControl = 12, kGrant = 13, kAct = 14, kMove = 15,
 };
 
 // Why someone isn't let in. The numbers and Refuse's layout stay as they are in every version,

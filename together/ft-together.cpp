@@ -17,6 +17,8 @@
 //   inputs           -> the asker gets the input the others may give this Frame's desktop
 //                       from now on (local/inputs.h)
 //   points           -> the asker gets where the others point
+//   move ..., moves  -> someone else's panel put elsewhere, and where the others put this
+//                       Frame's (local/moveask.h, flow/moves.h)
 //
 // A datagram there that is a pose, a voice or a pointer (local/datagrams.h) is the wearer's
 // own: it goes to everyone in the room, and theirs come back to whoever watches, listens or
@@ -41,12 +43,14 @@
 #include "../conf/ftsock.h"
 #include "flow/control.h"
 #include "flow/looks.h"
+#include "flow/moves.h"
 #include "flow/video.h"
 #include "local/controlask.h"
 #include "local/floor.h"
 #include "local/inputs.h"
 #include "local/media.h"
 #include "local/mouth.h"
+#include "local/moveask.h"
 #include "local/pointgate.h"
 #include "local/posegate.h"
 #include "local/voicegate.h"
@@ -140,6 +144,7 @@ struct End {
     std::unique_ptr<flow::Video> video;
     std::unique_ptr<flow::Looks> looks;
     std::unique_ptr<flow::Control> control;
+    std::unique_ptr<flow::Moves> moves;
     std::string here;   // where the others call this Frame: "ADDRESS PORT NAME"
     bool inRoom() const { return session && (session->mode() == session::Mode::kHosting || session->mode() == session::Mode::kJoined); }
 };
@@ -176,12 +181,16 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, Local &local, 
     config.name = args.name.empty() ? who.name : args.name, config.port = args.port, config.dice = Dice;
     config.watched = [&end](int link, const proto::Watch &watch, double now) { end.video->Watch(link, watch, now); };
     config.wanted = [&end](int link, const proto::Want &want, double now) { end.looks->Wanted(link, want, now); };
-    config.said = [&end](int link, uint16_t kind, const std::vector<uint8_t> &body, double now) { return end.control->Said(link, kind, body, now); };
+    config.said = [&end](int link, uint16_t kind, const std::vector<uint8_t> &body, double now) {
+        return kind == proto::kMove ? end.moves->Said(link, body, now) : end.control->Said(link, kind, body, now);
+    };
     end.session = std::make_unique<session::Session>(*end.links, tailnet, config);
     end.wires = std::make_unique<StreamWires>(*end.links);
     end.video = std::make_unique<flow::Video>(*end.session, *end.wires, local.media);
     end.looks = std::make_unique<flow::Looks>(*end.session, *end.wires, local.wardrobe);
     end.control = std::make_unique<flow::Control>(*end.session, local.inputs);
+    end.moves = std::make_unique<flow::Moves>(*end.session, [&end](int number, int person, double now) { return end.control->Granted(number, person, now); },
+                                              [&end](uint8_t panel, double now) { return end.control->Holds(panel, now); });
     end.here = links.listen + " " + std::to_string(args.port) + " " + config.name;
     std::printf("ft-together: %s (%s) at %s port %d\n", config.name.c_str(), who.login.c_str(), links.listen.c_str(), int(args.port));
     return true;
@@ -225,6 +234,7 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
         local.points.Forget(e.link);
         end.looks->Down(e.link);
         end.control->Down(e.link);
+        end.moves->Down(e.link);
         break;
     case net::Event::kDatagram: Datagram(sock, end, local, e, now); break;
     case net::Event::kFrame: end.video->Frame(e.link, e.bytes.data(), e.bytes.size(), now); break;
@@ -303,7 +313,7 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "looks") reply = "ok " + local.wardrobe.State(end.session->room(), end.session->me());
     else if (asked == "inputs") reply = local.inputs.Add(from, fromLen, now) ? "ok" : "error another program takes the input";
     else if (asked == "points") reply = local.pointers.Add(from, fromLen, now) ? "ok" : "error too many programs ask where people point";
-    else if (local::ControlAsk(*end.control, asked, now, reply)) {}
+    else if (local::ControlAsk(*end.control, asked, now, reply) || local::MoveAsk(*end.moves, asked, now, reply)) {}
     else reply = session::Command(*end.session, asked, now);
     if (!end.inRoom()) local.floor.Lift();   // the room was left: the next one's floor is its own
     // an asker that doesn't wait for its answer doesn't hold up the loop
@@ -370,6 +380,7 @@ int main(int argc, char **argv) {
             end.links->Tick();
             end.video->Tick(now);
             end.control->Tick(now);
+            end.moves->Tick(now);
         }
         if (end.session && now - ticked >= 1) {
             ticked = now;

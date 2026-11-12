@@ -16,7 +16,7 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | The dev box and builds, `ft dev build`, `pack/Containerfile`, CI, `framedrop/build.sh` and the zip, FrameDrop, `get.sh`, `install-release.sh`, `install.sh`, `fast-install`, the models, `uninstall.sh` | G7 Build and release | `G7-release.mmd`, `G7-release.tla` |
 | Frametop Together: its units, a room and who is in it, the links between its people, away, voices and mouths, shared panels, control of a panel and the turn on a desktop, pointers, where people look, moving through the room and moving panels, the avatars people have on | G9 Frametop Together | `G9-together.mmd`, `G9-together.tla` |
 
-All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `cda8438` (2026-11-11).
+All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `67b480e` (2026-11-12).
 
 ## Files
 
@@ -422,6 +422,8 @@ Fixed bugs:
 The model's shortest path to T1: `Open -> Invite -> Join -> GuestLeave -> Join -> DeliverO -> Invite -> Answer -> DeliverO -> Answer`. PreFix holds Settled all the same: the double listing went once the old link's end was heard.
 
 The encoder and decoder path of a shared panel runs on the Frame's hardware since `bd03df2`, `acdef52` and `ce5299d` (the chart's green legend box). Given pictures at a width that isn't a multiple of 128, the Frame's encoder reset the Frame, twice on 2026-11-11; it also read past buffers that were only as long as the picture, and encoded each new buffer's first picture black. The encoder now refuses such a width before it opens the device, `tests/panels-test.py` holds all three on the hardware, and [together/README.md](../../together/README.md) ("What the Frame's encoder needs") has the rules. A reset on 2026-11-10 during the first run of that test was not pinned down.
+
+A shared panel's video follows who sees it since `74c2dee`, `94e99d6`, `6e87517` and `67b480e` (the chart's parts "A screen of yours in the room" and "Someone's panel here"): its owner encodes it for the viewer who sees most of it and within the quality they picked, and a viewer's Frame decodes it only while its wearer sees it and the decoder has room, keeping the last picture otherwise. These rules are small sums with no room for a model (`together/flow/attention.h`, `budget.h`, `quality.h`), held by `together/tests/flow-test.cpp`, `video-test.cpp`, `budget-test.cpp` and `quality-test.cpp`, and on the hardware by `tests/panels-test.py`.
 
 Control is the part of this group where someone else reaches a desktop, and its rules are few: input is taken for a panel only from someone its owner gave it to, only while a program keeps saying the owner wears the headset, from one person at a time, and whatever they hold down is let go when any of that ends. They are checked in the owner's `ft-together` (`flow/control.cpp`, `room/grants.h`, `room/desk.h`), which the chart's legend says, and held by `together/tests/controlrules-test.cpp` (grants and the turn), `control-test.cpp` (several sessions against each other) and `roomcontrol-test.py` (the real programs) rather than by a model.
 

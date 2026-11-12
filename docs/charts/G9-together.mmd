@@ -1,5 +1,5 @@
 ---
-title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars (cda8438, branch dee-193-together)"
+title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars (67b480e, branch dee-193-together)"
 ---
 stateDiagram-v2
   state "Legend" as legend {
@@ -15,6 +15,7 @@ stateDiagram-v2
     lg8: Another group: arrows into it are what G9 reads or drives there
     lg9: A grant is checked where it is enforced, in the ft-together of the panel's owner. A guest's own refuses the same things first, to say why
     lg10: Control, the turn, pointers, gaze and moving are drawn from the code and its tests. The model is of the room and its links
+    lg11: A panel's video (74c2dee, 94e99d6, 6e87517, 67b480e): encoded for the viewer who sees most of it, decoded only where it is seen, within its owner's quality. tests/panels-test.py runs the Frame out of video sessions and through the three qualities on the hardware
   }
   class lg0 teal
   class lg1 blue
@@ -27,6 +28,7 @@ stateDiagram-v2
   class lg8 xgroup
   class lg9 legendNote
   class lg10 legendNote
+  class lg11 legendNote
   state "Together on this Frame (together/run.sh, frametop-together.service, the eight frametop-room-* units PartOf it)" as un {
     u0: Not installed: the installer's optional part
     [*] --> u0
@@ -75,16 +77,20 @@ stateDiagram-v2
   state "A screen of yours in the room (ft-roompanels keeper.py, screens/share.c, ft-sharepanel)" as sh {
     x0: Not shared
     [*] --> x0
-    x1: In the room, nobody watches: no pictures asked for, the encoder closed
-    x2: Watched: encoded once for everyone, a stream a picture
+    x1: In the room, nobody watches: no pictures asked for, the encoder closed after 3 s
+    x4: Watched, in view at the most: a third of its pictures a second, five at the least
+    x2: Watched, focused by someone: all the pictures its owner's quality gives it. Encoded once for everyone, a stream a picture
+    x5: The encoder opens again for another quality's pictures a second, and begins with a keyframe
     x3: A viewer waits for a keyframe: asked of the encoder, twice a second at most
   }
   state "Someone's panel here (keeper.py _others, remote.c peer, ft-peerpanel, flow/video.h)" as pe {
     y0: In the room, no screen for it here yet
     [*] --> y0
-    y1: A remote screen (116 down), ft-peerpanel waits for a keyframe
+    y1: A remote screen (116 down), ft-peerpanel has a decoder and waits for a keyframe
     y2: In step: pictures in order, decoded, shown where the room has it
     y3: Lost its place: held pictures, nothing passed for 0.3 s
+    y4: Out of your view for 3 s: its decoder given up, the last picture stays, its owner hears hidden
+    y5: A still: seen, but without a decoder. The last picture stays, and its owner hears that nobody sees it here
   }
   state "The avatar someone has on (flow/looks.h, local/wardrobe.h, avatar/room/sentbody.h)" as lk {
     k0: None listed: the abstract figure
@@ -218,17 +224,30 @@ stateDiagram-v2
   v2 --> v0: not told for 0.5 s: the poses carry a shut mouth
   v2 --> g5: G5: the hands in the same pose come from hand tracking
   x0 --> x1: share N: Share to the room (a guest's goes through the owner), ft-screens share N start, the video at a width that is a multiple of 128 (keeper.py stream_size)
-  x1 --> x2: a Watch from a member who has it in view
+  x1 --> x4: a Watch from a member who has it in view
+  x4 --> x2: someone has it focused (flow/attention.h, the P word to the encoder)
+  x2 --> x4: nobody has it focused any more
+  x4 --> x1: nobody watches any more: each viewer says hidden 3 s after it left their view, or that it is a still there
+  x2 --> x5: quality NAME, or the box on the Together page (kept in frametop.conf): Low 1 Mbit/s and 15, Balanced 3 and 30, High 8 and 60. The room is told the panel's pictures a second
+  x4 --> x5: quality NAME
+  x5 --> x2: open again (the F word). The bitrate is at the new cap at once if it was above, and climbs to a higher one by 15% each 5 clean seconds
   x2 --> x3: someone begins, lost their place, or a picture to them was given up
   x3 --> x2: the keyframe puts everyone in step
-  x2 --> x1: nobody watches any more
+  x2 --> x1: its last viewer's program went
   x1 --> x0: unshare N, the room left, or ft-roompanels ends
   x2 --> x0: unshare N, the room left, or ft-roompanels ends
+  x4 --> x0: unshare N, the room left, or ft-roompanels ends
   x2 --> g2: G2: ft-screens hands the screen's buffers over, and draws it while watched
   y0 --> y1: keeper: remote N peer ID
   y1 --> y2: a keyframe from the owner's link
   y2 --> y3: pictures overtook one another and the gap didn't fill
   y3 --> y1: Watch says the decoder needs a keyframe
+  y2 --> y4: out of your view for 3 s (flow/attention.h Seen): told to decode no more
+  y4 --> y1: in view again, and the budget has a decoder for it
+  y2 --> y5: its decoder goes to a panel you see more of (flow/budget.h): 6 at once and a third of the Frame's decode load at the most, a panel costing its size times the pictures a second the room says it has
+  y1 --> y5: the hardware gives no decoder: no more are tried for 10 s, then one more at a time
+  y4 --> y5: in view again, and no decoder for it
+  y5 --> y1: room for it again: a panel went out of view or costs less, or it takes the place of one you see less of
   y2 --> y0: the panel left the room or changed size, or the room was left
   y1 --> g6: G6: a peer's panel is a remote screen, numbered down from 116
   k0 --> k1: Room: their Look
@@ -335,10 +354,14 @@ stateDiagram-v2
   class x1 yellow
   class x2 blue
   class x3 yellow
+  class x4 blue
+  class x5 yellow
   class y0 teal
   class y1 yellow
   class y2 blue
   class y3 orange
+  class y4 teal
+  class y5 orange
   class k0 teal
   class k1 yellow
   class k2 yellow

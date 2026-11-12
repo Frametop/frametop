@@ -17,7 +17,11 @@
 //   'V' u8 the panel's id in the room
 // and then, whenever it changes, what the panel has of its viewer:
 //   'A' u8 level (0 hidden, 1 in view, 2 focused), u8 1 when its decoder needs a keyframe to go on
-// It is handed the panel's pictures, in order, none missing since the last keyframe:
+// and what became of its decoder:
+//   'D' u8 0 it has none any more, 1 it has one, 2 the hardware gave it none
+// It is told whether to decode (it begins without a decoder, a still):
+//   'D' u8 1 decode the panel, 0 give the decoder up and keep the last picture
+// and handed the panel's pictures, in order, none missing since the last keyframe:
 //   'U' u8 flags (1: a keyframe), the encoded picture
 //
 // The bytes only. Header only.
@@ -30,7 +34,8 @@
 
 namespace local {
 
-constexpr uint8_t kMediaSource = 'S', kMediaSink = 'V', kMediaUnit = 'U', kMediaRate = 'R', kMediaPictures = 'P', kMediaKey = 'K', kMediaWatched = 'W', kMediaAttention = 'A';
+constexpr uint8_t kMediaSource = 'S', kMediaSink = 'V', kMediaUnit = 'U', kMediaRate = 'R', kMediaPictures = 'P', kMediaKey = 'K', kMediaWatched = 'W', kMediaAttention = 'A', kMediaDecoder = 'D';
+constexpr uint8_t kDecoderNone = 0, kDecoderHas = 1, kDecoderRefused = 2;   // what a sink says of its decoder
 constexpr size_t kMostMediaUnit = 1u << 20;              // an encoded picture (proto::kMostFrame)
 constexpr size_t kMostMedia = 2 + kMostMediaUnit;        // a message after its length: what it is, flags, a picture
 

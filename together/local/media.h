@@ -48,6 +48,7 @@ public:
     void Key(int number) override;
     void Watched(int number, bool watched) override;
     void Show(uint8_t panel, bool key, const std::vector<uint8_t> &unit) override;
+    void Decode(uint8_t panel, bool decode) override;
 
 private:
     enum class Role { kNone, kSource, kSink };

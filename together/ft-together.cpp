@@ -247,16 +247,17 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     }
 }
 
-// How the shared panels' video goes: {"sources":[...],"sinks":[...],"bitrate":[...],"pictures":[...],"viewers":[...],"dropped":N}.
+// How the shared panels' video goes: {"sources":[...],"sinks":[...],"bitrate":[...],"pictures":[...],"viewers":[...],"stills":[...],"dropped":N}.
 std::string MediaState(const End &end, const Local &local) {
-    std::string state = local.media.State(), rates, pictures, viewers;
+    std::string state = local.media.State(), rates, pictures, viewers, stills;
+    for (const uint8_t panel : end.video->stills()) stills += (stills.empty() ? "" : ",") + std::to_string(int(panel));
     for (int number = 0; number < room::kFramePanels; ++number) {
         rates += (number ? "," : "") + std::to_string(end.video->bitrate(number));
         pictures += (number ? "," : "") + std::to_string(end.video->pictures(number));
         viewers += (number ? "," : "") + std::to_string(end.video->viewers(number));
     }
     state.pop_back();
-    return state + ",\"bitrate\":[" + rates + "],\"pictures\":[" + pictures + "],\"viewers\":[" + viewers + "],\"dropped\":" +
+    return state + ",\"bitrate\":[" + rates + "],\"pictures\":[" + pictures + "],\"viewers\":[" + viewers + "],\"stills\":[" + stills + "],\"dropped\":" +
            std::to_string(end.video->dropped()) + "}";
 }
 

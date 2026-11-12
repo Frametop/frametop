@@ -36,6 +36,7 @@ struct Seat : flow::Wires, flow::Programs {
     std::map<int, int> rate, keys, pictures, pictureWords;
     std::map<int, bool> watched;
     std::vector<Shown> shown;
+    std::vector<std::pair<uint8_t, bool>> decode;   // each word to a program that shows a panel: whether to decode
 
     // the wire
     bool refuse = false;                           // nothing can be sent
@@ -68,6 +69,7 @@ struct Seat : flow::Wires, flow::Programs {
     void Key(int number) override { ++keys[number]; }
     void Watched(int number, bool w) override { watched[number] = w; }
     void Show(uint8_t panel, bool key, const Unit &unit) override { shown.push_back({panel, key, unit}); }
+    void Decode(uint8_t panel, bool d) override { decode.push_back({panel, d}); }
 
     // The source of panel `number` hands over a picture of `size` bytes.
     Unit unit(int number, bool key, size_t size = 600) {
@@ -353,6 +355,95 @@ static void tiers() {
     check("the one who had it focused leaves the room: a third for the one who stays", ok && sa.video.viewers(0) == 1 && sa.pictures[0] == view);
 }
 
+// Which of the panels shown here decode (flow/budget.h has the rules; here, what is said to whom).
+static void stills() {
+    Table t;
+    Seat &sa = t.sa, &sb = t.sb;
+    if (!check("three people sit in a room, and one shares two panels",
+               t.sit() && t.a.ask(std::string("share 0") + kScreen) == "ok" && t.a.ask(std::string("share 1") + kScreen) == "ok"))
+        return;
+    using Words = std::vector<std::pair<uint8_t, bool>>;
+    const uint8_t p0 = proto::PanelId(t.a.s->me(), 0), p1 = proto::PanelId(t.a.s->me(), 1);
+    sa.video.SourceCame(0), sa.video.SourceCame(1);
+    sb.video.SinkCame(p0, t.net.now), sb.video.SinkCame(p1, t.net.now);
+    t.net.pump();
+    check("a program that shows a panel is told to decode it", sb.decode == (Words{{p0, true}, {p1, true}}) && sb.video.stills().empty() && sa.watched[0] && sa.watched[1]);
+    sb.video.SinkDecodes(p0, true, t.net.now);
+
+    sb.video.SinkRefused(p1, t.net.now);
+    t.tick(0.01);
+    check("the hardware gives the second none: it is a still, and its owner hears at once that nobody sees it there",
+          sb.video.stills() == std::vector<uint8_t>{p1} && !sa.watched[1] && sa.watched[0] && sb.decode.size() == 2);
+    sb.video.Attention(p1, proto::kFocused, false, t.net.now);
+    t.tick(20);
+    check("...which holds while it waits to try again, however much of it they see", sb.video.stills() == std::vector<uint8_t>{p1} && !sa.watched[1] && sb.decode.size() == 2);
+    int keys = sa.keys[1];
+    t.tick(10.1);
+    check("then it is told to decode again, and its owner that it is seen and needs a keyframe",
+          sb.decode.size() == 3 && sb.decode.back() == std::make_pair(p1, true) && sb.video.stills().empty() && sa.watched[1] && sa.keys[1] == keys + 1);
+
+    sb.video.SinkRefused(p1, t.net.now);
+    const bool atOnce = sb.decode.size() == 4;
+    t.tick(0.01);
+    check("refused while one the wearer sees less of decodes: that one gives its decoder up at once, and its owner hears it isn't seen",
+          atOnce && sb.decode.size() == 4 && sb.decode.back() == std::make_pair(p0, false) && !sa.watched[0] && !sa.watched[1] && sb.video.stills() == (std::vector<uint8_t>{p0, p1}));
+    keys = sa.keys[1];
+    sb.video.SinkDecodes(p0, false, t.net.now);
+    t.tick(0.6);
+    check("...and once it has, the other decodes in its place, from a keyframe",
+          sb.decode.size() == 5 && sb.decode.back() == std::make_pair(p1, true) && sa.watched[1] && !sa.watched[0] && sa.keys[1] == keys + 1 && sb.video.stills() == std::vector<uint8_t>{p0});
+    sb.video.SinkDecodes(p1, true, t.net.now);
+    const Unit k1 = sa.unit(1, true);
+    const size_t n = sb.shown.size();
+    const Unit d1 = sa.unit(1, false);
+    sa.unit(0, true);
+    check("its pictures come, and none of the still's", sb.since(n, p1) == std::vector<Unit>{d1});
+    keys = sa.keys[0];
+    t.tick(10.1);
+    check("ten seconds on the still tries again", sb.decode.size() == 6 && sb.decode.back() == std::make_pair(p0, true) && sa.watched[0] && sa.keys[0] == keys + 1);
+    sb.video.SinkDecodes(p0, true, t.net.now);
+    sa.unit(0, true);
+
+    sb.video.Attention(p0, proto::kHidden, false, t.net.now);
+    t.tick(1.01), t.tick(1.01);
+    check("a panel the wearer stops seeing keeps its decoder while its pictures still come", sb.decode.size() == 6 && sa.watched[0]);
+    t.tick(1.01);
+    check("...and gives it up when they stop", sb.decode.size() == 7 && sb.decode.back() == std::make_pair(p0, false) && !sa.watched[0] && sb.video.stills() == std::vector<uint8_t>{p0});
+    sb.video.SinkDecodes(p0, false, t.net.now);
+    keys = sa.keys[0];
+    sb.video.Attention(p0, proto::kInView, false, t.net.now);
+    t.net.pump();
+    check("seen again, it decodes again at once, from a keyframe", sb.decode.size() == 8 && sb.decode.back() == std::make_pair(p0, true) && sa.watched[0] && sa.keys[0] == keys + 1);
+
+    sb.video.SinkWent(p0);
+    sb.video.SinkDecodes(p0, true, t.net.now), sb.video.SinkRefused(p0, t.net.now);
+    t.tick(0.01);
+    check("a program that went is no still, and what is said of it means nothing", sb.video.stills().empty() && sb.decode.size() == 8);
+    sb.video.SinkCame(p0, t.net.now);
+    t.net.pump();
+    check("...and one that comes in its place begins anew", sb.decode.size() == 9 && sb.decode.back() == std::make_pair(p0, true));
+
+    // a decoder given up and had back before the panel's owner heard of either
+    sb.video.SinkDecodes(p0, true, t.net.now);
+    t.tick(0.6);
+    sa.unit(0, true), sa.unit(1, true);
+    t.tick(0.6);
+    keys = sa.keys[0];
+    sb.video.SinkRefused(p1, t.net.now);
+    bool ok = sb.decode.size() == 10 && sb.decode.back() == std::make_pair(p0, false);
+    size_t shown = sb.shown.size();
+    sa.unit(0, false);
+    check("a picture that comes for a panel that is a still by now isn't shown", ok && sb.shown.size() == shown);
+    sb.video.SinkDecodes(p0, false, t.net.now);
+    sb.video.SinkRefused(p1, t.net.now);
+    ok = sb.decode.size() == 12 && sb.decode[10] == std::make_pair(p1, true) && sb.decode.back() == std::make_pair(p0, true);
+    t.tick(0.6);
+    check("the one refused in its place too leaves it its decoder back: its owner, who heard of neither, is asked for a keyframe", ok && sa.watched[0] && sa.keys[0] == keys + 1);
+    shown = sb.shown.size();
+    const Unit k0 = sa.unit(0, true);
+    check("...and it is shown from there", sb.since(shown, p0) == std::vector<Unit>{k0});
+}
+
 static void rules() {
     Table t;
     Seat &sa = t.sa, &sb = t.sb, &sc = t.sc;
@@ -451,6 +542,7 @@ int main() {
     watching();
     order();
     tiers();
+    stills();
     rules();
     std::printf(failed ? "FAILED\n" : "all ok\n");
     return failed ? 1 : 0;

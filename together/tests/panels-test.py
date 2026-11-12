@@ -8,8 +8,13 @@ it over a loopback link, and ft-peerpanel decodes it and reads it back.
 It needs the Frame's video devices, and is skipped without them. What ft-together does with
 the pictures is tested with made-up ones in loopback-test.py; this is what only the hardware
 shows: that the pictures decode, whole and in order, in the colours they were drawn in, at
-every size a panel is sent at, that a panel nobody has focused is encoded less often, and that
-nothing is encoded while nobody watches.
+every size a panel is sent at, that a panel nobody has focused is encoded less often, that
+nothing is encoded while nobody watches, and that a panel becomes a still when the Frame has no
+decoder for it.
+
+For that last part the test takes every video session the Frame has left, for about 45
+seconds: nothing else on the Frame can open a decoder or an encoder meanwhile (what runs
+already goes on).
 """
 import json
 import os
@@ -34,6 +39,17 @@ def pictures(tool, since=0):
     return got
 
 
+def hold_sessions():
+    """Every video session the Frame has left, taken: [fds]. Decoders and encoders share them."""
+    fds = []
+    try:
+        while len(fds) < 32:
+            fds.append(os.open(DEVICES[1], os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC))
+    except OSError:
+        pass
+    return fds
+
+
 def jumps(numbers):
     """How often the next number isn't the one after (they wrap at 65536)."""
     return sum(1 for a, b in zip(numbers, numbers[1:]) if b != (a + 1) % 65536)
@@ -46,7 +62,7 @@ def true_colours(pics):
 
 
 def main(together, share, peer):
-    ends, tools = [], []
+    ends, tools, held = [], [], []
 
     def start(name):
         e = roomkit.End(together, name)
@@ -117,6 +133,47 @@ def main(together, share, peer):
         if not check("...and that many pictures come, whole and in order", status == 0 and 30 <= len(numbers) <= 75 and -1 not in numbers and jumps(numbers) <= 2):
             print("    (status %s, %d pictures in 6 s: %s)" % (status, len(numbers), numbers))
 
+        # someone who looks away and back: their program has a decoder only while they see the panel
+        blink = prober(ben, 0, "--away", "2-8", "--seconds", "14")
+        ok = blink.said("decoding", 5) and blink.until(lambda lines: len(pictures(blink)) >= 20, 5)
+        closed = blink.said("a still: the decoder is closed", 10)
+        mark = len(blink.lines)
+        status = blink.wait(40)
+        numbers = [p["number"] for p in pictures(blink, mark)]
+        check("a viewer who looks away: a few seconds on, their program gives its decoder up", ok and closed)
+        if not check("...and has one again when they look back, and the pictures come", status == 0 and blink.said("decoding", 0, mark) and len(numbers) >= 60 and
+                     -1 not in numbers and jumps(numbers) <= 2):
+            print("    (status %s, %d pictures after: %s; it said %s)" % (status, len(numbers), numbers[:5], [x for x in blink.lines if "picture " not in x][-6:]))
+
+        # the Frame's decoders run out: the panel its wearer sees least of becomes a still
+        ok = ada.ask("share 1 640 360 %s Second" % WHERE) == "ok" and ben.until(lambda s: sorted(p["id"] for p in s["panels"]) == [0, 1])
+        src1 = sharer(ada, 1, "640x360")
+        seen = prober(ben, 0, "--view", "--seconds", "75")
+        look = prober(ben, 1, "--away", "2-6", "--seconds", "70")
+        ok = ok and seen.said("decoding", 5) and look.said("a still: the decoder is closed", 10)
+        held += hold_sessions()
+        at = len(seen.lines), len(look.lines), len(src.lines)
+        ok = ok and look.said("the hardware has no decoder", 6, at[1]) and seen.said("a still: the decoder is closed", 5, at[0]) and look.said("decoding", 5, at[1])
+        if not check("no decoder is left: a panel the wearer looks at takes the decoder of one they only have in view",
+                     ok and look.until(lambda lines: len(pictures(look, at[1])) >= 20, 10)):
+            print("    (the one looked at said %s; the other %s)" % (look.lines[at[1]:][:6], [x for x in seen.lines[at[0]:] if "picture " not in x][:6]))
+        check("...which is a still meanwhile, as ft-together says", json.loads(ben.ask("media")[3:])["stills"] == [0])
+        ok = src.said("nobody watches: the encoder is closed", 10, at[2])
+        held += hold_sessions()
+        check("ten seconds on the still tries again, and stays one while the hardware has none",
+              ok and seen.said("the hardware has no decoder", 15, at[0]) and json.loads(ben.ask("media")[3:])["stills"] == [0])
+        while held:
+            os.close(held.pop())
+        at = len(seen.lines)
+        ok = seen.said("decoding", 45, at) and seen.until(lambda lines: len(pictures(seen, at)) >= 10, 10)
+        numbers = [p["number"] for p in pictures(seen, at)]
+        if not check("...and half a minute after that it tries once more: with decoders to be had, its pictures come again",
+                     ok and -1 not in numbers and jumps(numbers) <= 2 and json.loads(ben.ask("media")[3:])["stills"] == []):
+            print("    (it said %s)" % [x for x in seen.lines[at:] if "picture " not in x][:6])
+        for one in (seen, look, src1):
+            one.end()
+        ada.ask("unshare 1")
+
         # the one who shares starts its program again, as ft-screens does when it ends
         mark = len(src.lines)
         stay = prober(ben, 0, "--seconds", "25")
@@ -172,6 +229,8 @@ def main(together, share, peer):
         check("...and the programs on their sockets end with them, to be started again", src.wait(10) == 1 and stay.wait(10) == 1 and
               src.said("ft-together went", 1) and stay.said("ft-together went", 1))
     finally:
+        while held:
+            os.close(held.pop())
         for t in tools:
             t.end()
         for e in ends:

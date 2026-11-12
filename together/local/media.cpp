@@ -71,9 +71,16 @@ void Media::Handle(Client &c, uint8_t kind, const std::vector<uint8_t> &body, fl
         video.Unit(c.which, body[0] == 1, body.data() + 1, body.size() - 1, now);
         return;
     case Role::kSink:
-        if (kind != kMediaAttention || body.size() != 2 || body[0] > proto::kFocused || body[1] > 1) break;
-        video.Attention(c.which, body[0], body[1] == 1, now);
-        return;
+        if (kind == kMediaAttention && body.size() == 2 && body[0] <= proto::kFocused && body[1] <= 1) {
+            video.Attention(c.which, body[0], body[1] == 1, now);
+            return;
+        }
+        if (kind == kMediaDecoder && body.size() == 1 && body[0] <= kDecoderRefused) {
+            if (body[0] == kDecoderRefused) video.SinkRefused(c.which, now);
+            else video.SinkDecodes(c.which, body[0] == kDecoderHas, now);
+            return;
+        }
+        break;
     }
     c.gone = true;   // it said what it may not
 }
@@ -169,6 +176,13 @@ void Media::Show(uint8_t panel, bool key, const std::vector<uint8_t> &unit) {
     Client *c = Find(Role::kSink, panel);
     if (!c || unit.empty() || unit.size() > kMostMediaUnit || !Room(*c, 6 + unit.size())) return;
     PutMediaUnit(c->out, key, unit.data(), unit.size());
+    Flush(*c);
+}
+
+void Media::Decode(uint8_t panel, bool decode) {
+    Client *c = Find(Role::kSink, panel);
+    if (!c || !Room(*c, 6)) return;
+    PutMedia(c->out, kMediaDecoder, uint8_t(decode ? 1 : 0));
     Flush(*c);
 }
 

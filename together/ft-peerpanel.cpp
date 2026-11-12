@@ -13,21 +13,26 @@
 //                    STRIDE" with the ring's three fds, "frame I"
 //
 // How much of the panel its viewer sees goes on to ft-together, so that a panel nobody looks at
-// isn't sent, and so does word that the decoder lost its place and needs a keyframe. When the
-// panel's video begins anew as another stream (its owner's encoder was started again), the
-// decoder takes no more: another one is opened in its place.
+// isn't sent, and so does word that the decoder lost its place and needs a keyframe.
+//
+// The program has a decoder only while ft-together says to decode: the Frame's decoders are
+// shared out among the panels its wearer sees most of (flow/budget.h). Without one the panel
+// is a still, the last picture it showed. ft-together hears when the decoder is there, when it
+// is gone, and when the hardware gave none. When the panel's video begins anew as another
+// stream (its owner's encoder was started again), the decoder takes no more: another one is
+// opened in its place.
 //
 // The wearer's hand on the panel goes to ft-together's local socket: where they point, for
 // everyone in the room to see, and what they click and type, for the panel's owner, who takes
 // it only from someone the panel was given to (local/panelhand.h).
 //
-//   ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--view] [--frames N] [--seconds S])
+//   ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--view] [--away FROM-TO] [--frames N] [--seconds S])
 //
 // --panel: the panel's id in the room. --probe: no ft-screens; every picture decoded is read
 // back as ft-sharepanel --pattern's test picture (media/testpattern.h) and a line printed:
 // "picture <count> <W>x<H> number <n> light <v> dark <v> grey <v>". The probe has the panel
-// focused, or with --view only in view. It ends when ft-together or ft-screens goes; ft-screens
-// starts it again.
+// focused, or with --view only in view, and with --away hidden from FROM to TO seconds after it
+// began. It ends when ft-together or ft-screens goes; ft-screens starts it again.
 #include "local/handsend.h"
 #include "local/mediaclient.h"
 #include "media/testpattern.h"
@@ -43,7 +48,7 @@ constexpr size_t kMostWaiting = 30;       // pictures waiting for the decoder; p
 constexpr int64_t kStuckNs = 1'000'000'000;   // the decoder took nothing for this long: the same
 
 struct Args {
-    int panel = -1, fd = -1, frames = 0, seconds = 0;
+    int panel = -1, fd = -1, frames = 0, seconds = 0, awayFrom = 0, awayTo = 0;
     bool probe = false, view = false;
     std::string socket = FT_SOCK_TOGETHER;
 };
@@ -58,10 +63,11 @@ bool ReadArgs(int argc, char **argv, Args &a) {
         else if (k == "--fd" && v) a.fd = std::atoi(v), ++i;
         else if (k == "--frames" && v) a.frames = std::atoi(v), ++i;
         else if (k == "--seconds" && v) a.seconds = std::atoi(v), ++i;
+        else if (k == "--away" && v && std::sscanf(v, "%d-%d", &a.awayFrom, &a.awayTo) == 2 && a.awayFrom < a.awayTo) ++i;
         else if (k == "--socket" && v && *v) a.socket = v, ++i;
         else return false;
     }
-    return a.panel >= 0 && a.panel <= 255 && (a.probe != (a.fd >= 0)) && (a.probe || !a.view);
+    return a.panel >= 0 && a.panel <= 255 && (a.probe != (a.fd >= 0)) && (a.probe || (!a.view && !a.awayTo));
 }
 
 // ft-screens' end, or nobody's (--probe).
@@ -90,6 +96,8 @@ struct Incoming {
         units.clear(), needKey = true, stuckSince = -1;
         Tell(true);
     }
+    // The decoder begins or is gone: what follows has to begin at a keyframe.
+    void Anew() { units.clear(), needKey = true, stuckSince = -1; }
     void Take(uint8_t kind, std::vector<uint8_t> &body) {
         if (kind != local::kMediaUnit || body.size() < 2) return;
         const bool key = body[0] & 1;
@@ -111,12 +119,36 @@ void Probe(const Converter &conv, int count) {
                 media::testpattern::Read(rows.data(), width * 4, width), at(0), at(1), at(media::testpattern::kSquares + 1));
 }
 
-// A decoder for the panel's video, in place of whatever `dec` was.
-bool OpenDecoder(Decoder &dec) {
-    dec = Decoder{};
-    dec.toSteamVR = false;
-    return dec.Open("/dev/video-dec0", 6);
-}
+// The panel's decoder, had only while ft-together says to decode, and what ft-together hears of it.
+struct Decoding {
+    local::MediaClient &together;
+    Decoder dec;
+    bool has = false;
+
+    void Say(uint8_t what) {
+        std::vector<uint8_t> out;
+        local::PutMedia(out, local::kMediaDecoder, what);
+        together.Send(std::move(out));
+    }
+    // A decoder, if the hardware has one.
+    void Begin() {
+        if (has) return;
+        dec = Decoder{};
+        dec.toSteamVR = false;
+        has = dec.Open("/dev/video-dec0", 6);
+        if (!has) dec.Close();
+        std::printf(has ? "decoding\n" : "the hardware has no decoder: the panel is a still\n");
+        Say(has ? local::kDecoderHas : local::kDecoderRefused);
+    }
+    // It is given up, or (`what`) the hardware took it back.
+    void End(uint8_t what = local::kDecoderNone) {
+        if (!has) return;
+        dec.Close();
+        has = false;
+        std::printf(what == local::kDecoderNone ? "a still: the decoder is closed\n" : "the hardware has no room for its pictures: the panel is a still\n");
+        Say(what);
+    }
+};
 
 int Run(const Args &args) {
     Screens screens{args.fd};
@@ -149,8 +181,9 @@ int Run(const Args &args) {
             conv.modifiers.push_back(m);
         }
     }
-    Decoder dec;
-    if (!OpenDecoder(dec) || !conv.Init()) return screens.Say("state lost no decoder"), 1;
+    Decoding decoding{together, {}};
+    Decoder &dec = decoding.dec;
+    if (!conv.Init()) return screens.Say("state lost no decoder"), 1;
     screens.Say("state connecting");
     in.Tell(false);
     std::printf("panel %d: waiting for its pictures\n", args.panel);
@@ -160,10 +193,10 @@ int Run(const Args &args) {
     uint64_t seq = 0;
     int shown = 0, dropped = 0, lastSent = -1, total = 0;
     int64_t lastReport = MonoNs(), allHeldSince = -1;
-    const int64_t until = args.seconds > 0 ? MonoNs() + int64_t(args.seconds) * 1'000'000'000 : 0;
+    const int64_t began0 = MonoNs(), until = args.seconds > 0 ? began0 + int64_t(args.seconds) * 1'000'000'000 : 0;
     int code = 0;
     while (!g_stop) {
-        pollfd p[3] = {{dec.fd, short(POLLIN | POLLPRI | (in.units.empty() ? 0 : POLLOUT)), 0}, together.Poll(), {screens.fd, POLLIN, 0}};
+        pollfd p[3] = {{decoding.has ? dec.fd : -1, short(POLLIN | POLLPRI | (in.units.empty() ? 0 : POLLOUT)), 0}, together.Poll(), {screens.fd, POLLIN, 0}};
         const double due = hand.Wait(MonoNs() / 1e9);   // a move that waits to go, or a resting pointer to say again
         if (poll(p, 3, due < 0 || due > 0.1 ? 100 : int(due * 1000) + 1) > 0 && (p[0].revents & POLLERR)) usleep(1000);
 
@@ -174,7 +207,20 @@ int Run(const Args &args) {
         }
         uint8_t kind;
         std::vector<uint8_t> body;
-        while (together.Next(kind, body)) in.Take(kind, body);
+        while (together.Next(kind, body)) {
+            if (kind == local::kMediaDecoder && body.size() == 1) {
+                if (body[0]) decoding.Begin();
+                else decoding.End();
+                in.Anew();
+            } else if (decoding.has) {
+                in.Take(kind, body);
+            }
+        }
+        if (args.awayTo) {   // the probe looks away for a while
+            const double t = (MonoNs() - began0) / 1e9;
+            const int level = t >= args.awayFrom && t < args.awayTo ? 0 : args.view ? 1 : 2;
+            if (level != in.level) in.level = level, in.Tell(false);
+        }
 
         bool open = true;
         while (screens.fd >= 0) {
@@ -199,15 +245,25 @@ int Run(const Args &args) {
         toRoom.Send(said);
         if (!open) break;   // ft-screens closed its end
 
-        const bool began = dec.Events();
-        if (dec.changedAgain) {
-            dec.Close();
-            if (!OpenDecoder(dec)) {
-                screens.Say("state lost no decoder");
+        if (!decoding.has) {
+            if (!together.Flush()) {
+                std::printf("ft-together went\n");
                 code = 1;
                 break;
             }
-            in.Lost("its video began anew");
+            if (until && MonoNs() >= until) break;
+            continue;
+        }
+        const bool began = dec.Events();
+        if (dec.noCapture) {
+            decoding.End(local::kDecoderRefused);
+            in.Anew();
+            continue;
+        }
+        if (dec.changedAgain) {
+            decoding.End();
+            decoding.Begin();
+            if (decoding.has) in.Lost("its video began anew");
             continue;
         }
         if (began) {
@@ -278,7 +334,7 @@ int Run(const Args &args) {
     hand.End(MonoNs() / 1e9, said);
     toRoom.Send(said);
     screens.Say(code ? "state lost ft-together went" : "state lost");
-    dec.Close();
+    if (decoding.has) dec.Close();
     return code;
 }
 
@@ -288,7 +344,7 @@ int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     Args args;
     if (!ReadArgs(argc, argv, args)) {
-        std::fprintf(stderr, "usage: ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--view] [--frames N] [--seconds S])\n");
+        std::fprintf(stderr, "usage: ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--view] [--away FROM-TO] [--frames N] [--seconds S])\n");
         return 2;
     }
     // ft-screens blocks SIGTERM for its own loop, and a child inherits that.

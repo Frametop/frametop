@@ -39,7 +39,7 @@ public:
 
 private:
     int level_ = proto::kInView;   // a panel that has just come gets its first pictures
-    double hiddenAt_ = -1e9;   // when it last went out of view
+    double hiddenAt_ = 0;   // when it last went out of view
 };
 
 }  // namespace flow

@@ -58,7 +58,9 @@ static void viewers() {
     check("...and waits for a keyframe when they look again", v.For(false) == Links{2} && v.waiting() == 1);
     v.Watch(2, 1, false);
     check("one who sees less of it than before stays in step", v.level() == 1 && v.For(false) == Links{2});
-    v.Watch(1, 2, false), v.Gone(1);
+    v.Watch(1, 2, false);
+    check("whichever of them sees most of it", v.level() == 2);
+    v.Gone(1);
     check("...and what the panel is seen as falls back when the one who saw most goes", v.level() == 1);
     v.Gone(1), v.Gone(2), v.Gone(3);
     check("when the last viewer is gone the panel isn't watched", !v.watched() && !v.WantsKey(100) && v.level() == 0);

@@ -78,20 +78,38 @@ void Video::Frame(int link, const uint8_t *data, size_t n, double now) {
     for (const Order::Frame &f : pass) programs_.Show(head.panel, f.key, f.unit);
 }
 
+// After anything that may have changed which of the panels shown here decode: their programs
+// are told. One that is to decode begins at a keyframe, and nothing more is shown of a still.
+void Video::Decoders(double now) {
+    for (const auto &[panel, w] : watching_) budget_.Sees(panel, w.seen.Told(now), now);
+    for (const Budget::Word &word : budget_.Settle(now)) {
+        programs_.Decode(word.panel, word.decode);
+        Watching &w = watching_[word.panel];
+        w.fresh = true, w.order.Reset();
+    }
+}
+
+// What a panel's owner is to hear its viewer here sees of it: nothing while it is a still.
+int Video::Told(uint8_t panel, const Watching &w, double now) const { return budget_.decodes(panel) ? w.seen.Told(now) : int(proto::kHidden); }
+
 void Video::Tell(uint8_t panel, Watching &w, double now) {
     proto::Watch watch;
-    watch.panel = panel, watch.level = uint8_t(w.seen.Told(now)), watch.fresh = w.fresh;
+    watch.panel = panel, watch.level = uint8_t(Told(panel, w, now)), watch.fresh = w.fresh;
     if (!session_.Watch(watch).empty()) return;   // no link to its owner yet: said again at the next Tick
     w.fresh = false, w.told = now, w.said = watch.level;
 }
 
 void Video::SinkCame(uint8_t panel, double now) {
     Watching &w = watching_[panel] = Watching{};
+    const proto::Panel *shown = session_.room().panel(panel);
+    budget_.Came(panel, shown ? Budget::Load(shown->width, shown->height, kBalancedPictures) : 0);
+    Decoders(now);
     Tell(panel, w, now);
 }
 
 void Video::SinkWent(uint8_t panel) {
     if (!watching_.erase(panel)) return;
+    budget_.Went(panel);
     proto::Watch watch;
     watch.panel = panel, watch.level = proto::kHidden;
     session_.Watch(watch);
@@ -103,13 +121,32 @@ void Video::Attention(uint8_t panel, int level, bool fresh, double now) {
     Watching &w = it->second;
     if (fresh) w.fresh = true, w.order.Reset();
     w.seen.Set(level, now);
+    Decoders(now);
     Tell(panel, w, now);
 }
 
+void Video::SinkDecodes(uint8_t panel, bool has, double now) {
+    budget_.Has(panel, has);
+    Decoders(now);
+}
+
+void Video::SinkRefused(uint8_t panel, double now) {
+    budget_.Refused(panel, now);
+    Decoders(now);
+}
+
+std::vector<uint8_t> Video::stills() const {
+    std::vector<uint8_t> out;
+    for (const auto &[panel, w] : watching_)
+        if (!budget_.decodes(panel)) out.push_back(panel);
+    return out;
+}
+
 void Video::Tick(double now) {
+    Decoders(now);
     for (auto &[panel, w] : watching_) {
         if (w.order.WantsKey(now)) w.fresh = true;
-        if (w.fresh || now - w.told >= kTellEvery || w.seen.Told(now) != w.said) Tell(panel, w, now);
+        if (w.fresh || now - w.told >= kTellEvery || Told(panel, w, now) != w.said) Tell(panel, w, now);
     }
     for (int number = 0; number < room::kFramePanels; ++number) {
         Shared &s = shared_[number];

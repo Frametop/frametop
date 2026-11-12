@@ -183,7 +183,6 @@ static void message(struct share *s, const char *msg) {
     int rate;
     if (sscanf(msg, "rate %d", &rate) == 1) {
         s->rate = rate < 1 ? 1 : rate > s->fps ? s->fps : rate;
-        pump(s);  // (a picture that waited for its turn at the old rate)
     } else if (strcmp(msg, "want 1") == 0) {
         s->wanted = s->fresh = true;  // the picture as it is now, whether or not it has had it
         s->sent_ms = 0;

@@ -1743,10 +1743,21 @@ def send_layout_scales(layout, count):
         sock.ask(f"scale {i + 1} {screen_scale(layout, i):g}")
 
 
-def logical_size(o):
+def kwin_scales(layout=None):
+    """Each screen's scale in KWin, by output name (WL-0, ...): with ft-screens, the layout's,
+    which send_layout_scales gives KWin. Read these, not kscreen-doctor's: from 6.6 it shows a
+    nested output's stored scale setting, 1 whatever its scale is. Empty with gamescope."""
+    if backend() != "screens":
+        return {}
+    layout = layout or load_layout()
+    return {f"WL-{i}": screen_scale(layout, i) for i in range(screen_count(layout))}
+
+
+def logical_size(o, scale=None):
     """An output's size in logical units. kscreen's "size" is in pixels (already turned for a
-    rotation); positions are logical, the pixels divided by the scale (KWin rounds up)."""
-    s = float(o.get("scale", 1))
+    rotation); positions are logical, the pixels divided by the scale (KWin rounds up): this
+    one, or kscreen's."""
+    s = scale or float(o.get("scale", 1))
     return (math.ceil(o["size"]["width"] / s - 1e-6), math.ceil(o["size"]["height"] / s - 1e-6))
 
 
@@ -1843,7 +1854,8 @@ def remote_view():
     outs = [o for o in outputs(env) if o.get("enabled", True) and o.get("size") and o.get("pos")]
     if not outs:
         raise RuntimeError("the Frametop desktop has no screens yet")
-    rects = [(o["pos"]["x"], o["pos"]["y"], *logical_size(o)) for o in outs]
+    scales = kwin_scales()
+    rects = [(o["pos"]["x"], o["pos"]["y"], *logical_size(o, scales.get(o.get("name")))) for o in outs]
     left, top = min(r[0] for r in rects), min(r[1] for r in rects)
     right, bottom = max(r[0] + r[2] for r in rects), max(r[1] + r[3] for r in rects)
     p = next((i for i, o in enumerate(outs) if o.get("priority") == 1), 0)

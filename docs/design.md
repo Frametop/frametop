@@ -40,8 +40,10 @@ requires. ft-floatd sends spares' logical dimensions itself, after enabling and 
 `kscreen-doctor` doesn't show that scale either: from 6.6 it reports a nested output's stored
 scale setting, which stays 1. ft-layout sends ft-screens the layout's scales and never the
 ones KWin reports, which would put a scaled screen back at 1, and positions screens by the
-layout's scales too. KWin's support information (`qdbus6 org.kde.KWin /KWin
-supportInformation`) shows the scale an output has.
+layout's scales too. ft-floatd and `ft-layout remote-view` also take screens' scales from the
+layout (`kwin_scales` in `layout/ft_layout.py`), so a window floated off a screen at 200% floats
+at 200%. KWin's support information (`qdbus6 org.kde.KWin /KWin supportInformation`) shows the
+scale an output has.
 
 ### Placing and sizing
 

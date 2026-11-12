@@ -305,9 +305,9 @@ def main(program, root):
         check("...and from the keyframe on both get every picture", crosses(src, [view, late], [os.urandom(30000)] + [os.urandom(2000) for i in range(10)]))
         check("a picture of a megabyte crosses whole", crosses(src, [view, late], [os.urandom(1 << 20)]))
         media = json.loads(ada.ask("media")[3:]), json.loads(ben.ask("media")[3:])
-        check("ft-together says which panels have a program, and who watches", media[0]["sources"] == [0] and media[0]["viewers"] == [2, 0, 0] and media[0]["sinks"] == [] and
-              media[1]["sinks"] == [0] and media[1]["sources"] == [] and media[1]["dropped"] == 0 and len(media[0]["bitrate"]) == 3 and
-              media[0]["pictures"] == [10, 10, 10] and media[1]["stills"] == [])
+        check("ft-together says which panels have a program, and who watches", media[0]["sources"] == [0] and media[0]["viewers"] == [2] + [0] * 6 and media[0]["sinks"] == [] and
+              media[1]["sinks"] == [0] and media[1]["sources"] == [] and media[1]["dropped"] == 0 and len(media[0]["bitrate"]) == 7 and
+              media[0]["pictures"] == [10] * 7 and media[1]["stills"] == [] and media[0]["sender"] is False)
 
         src.messages(0.2)
         view.send(b"A", b"\0\0")
@@ -332,7 +332,7 @@ def main(program, root):
         view.send(b"A", b"\1\0")
         check("only in view: a third of the rate", src.messages(2, 1) == [(b"P", b"\x0a")])
         view.send(b"A", b"\2\0")
-        check("...and focused, all of it", src.messages(2, 1) == [(b"P", b"\x1e")] and json.loads(ada.ask("media")[3:])["pictures"] == [30, 10, 10])
+        check("...and focused, all of it", src.messages(2, 1) == [(b"P", b"\x1e")] and json.loads(ada.ask("media")[3:])["pictures"] == [30] + [10] * 6)
 
         # how good its owner lets the video get
         def says(pictures):
@@ -347,14 +347,14 @@ def main(program, root):
             print("      got:", got)
         media = json.loads(ada.ask("media")[3:])
         check("High: the encoder is to be set for 60 pictures a second, and makes them for the one who has the panel focused",
-              ok and got == [(b"F", b"\x3c"), (b"P", b"\x3c")] and media["pictures"] == [60, 20, 20] and media["bitrate"][1] == 2000000)
+              ok and got == [(b"F", b"\x3c"), (b"P", b"\x3c")] and media["pictures"] == [60] + [20] * 6 and media["bitrate"][1] == 2000000)
         check("...and everyone's room says so of its owner's panels, and of nobody else's", says({0: 60, bens: 30}))
         check("a guest picks: the same, through the owner", ben.ask("quality low") == "ok low" and says({0: 60, bens: 15}))
         ok = ada.ask("quality low") == "ok low"
         got = src.messages(2, 2)
         media = json.loads(ada.ask("media")[3:])
         check("Low: fewer pictures, and the bitrate comes down to its cap at once",
-              ok and got == [(b"F", b"\x0f"), (b"P", b"\x0f")] and media["pictures"] == [15, 5, 5] and media["bitrate"][1] == 1000000 and media["bitrate"][0] <= 1000000 and
+              ok and got == [(b"F", b"\x0f"), (b"P", b"\x0f")] and media["pictures"] == [15] + [5] * 6 and media["bitrate"][1] == 1000000 and media["bitrate"][0] <= 1000000 and
               says({0: 15, bens: 15}))
         ok = ada.ask("quality balanced") == "ok balanced" and ben.ask("quality balanced") == "ok balanced"
         got = src.messages(2, 2)

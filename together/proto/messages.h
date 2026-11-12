@@ -26,10 +26,11 @@ constexpr float kFar = 100;        // metres from the room's middle: nothing is 
 static_assert(kPanelFar == kFar, "a panel is no further than a person");
 
 // 12 to 14 are control's (control.h) and 15 is a panel moved (move.h): the session passes them
-// on unread to whoever knows them.
+// on unread to whoever knows them. 16 and 17 are between a split compute PC and its person's
+// Frame (sender.h), on a link that isn't in any room.
 enum Kind : uint16_t {
     kHello = 1, kWelcome = 2, kRefuse = 3, kRoom = 4, kAway = 5, kLeave = 6, kPanel = 7, kUnpanel = 8, kWatch = 9, kLook = 10, kWant = 11,
-    kAskControl = 12, kGrant = 13, kAct = 14, kMove = 15,
+    kAskControl = 12, kGrant = 13, kAct = 14, kMove = 15, kSender = 16, kEncode = 17,
 };
 
 // Why someone isn't let in. The numbers and Refuse's layout stay as they are in every version,

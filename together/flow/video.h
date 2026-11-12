@@ -42,7 +42,8 @@ public:
     virtual bool Frame(int link, std::vector<uint8_t> bytes, uint32_t tag) = 0;
 };
 
-// This Frame's programs that make the pictures and show them.
+// This Frame's programs that make the pictures and show them, and the wearer's PC for the
+// panels it makes them of.
 class Programs {
 public:
     virtual ~Programs() = default;
@@ -65,8 +66,9 @@ public:
 
     Video(session::Session &session, Wires &wires, Programs &programs) : session_(session), wires_(wires), programs_(programs) {}
 
-    // From this Frame's programs. A source encodes the wearer's panel `number`; a sink shows
-    // the panel `panel` of someone else.
+    // From this Frame's programs. A source encodes the wearer's panel `number` (for the numbers
+    // past the Frame's own it is the wearer's PC: pcpanels.h); a sink shows the panel `panel`
+    // of someone else.
     void SourceCame(int number);
     void Unit(int number, bool key, const uint8_t *unit, size_t n, double now);
     void SinkCame(uint8_t panel, double now);
@@ -126,7 +128,7 @@ private:
     Wires &wires_;
     Programs &programs_;
     const Quality *quality_ = &kBalanced;
-    Shared shared_[room::kFramePanels];
+    Shared shared_[room::kOwnPanels];
     std::map<uint8_t, Watching> watching_;
     Budget budget_;
     size_t dropped_ = 0;

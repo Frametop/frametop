@@ -57,10 +57,10 @@ void Media::Handle(Client &c, uint8_t kind, const std::vector<uint8_t> &body, fl
         const bool sink = kind == kMediaSink && body.size() == 1 && body[0] < proto::kPeople * proto::kPanelNumbers;
         if (!source && !sink) break;
         const Role role = source ? Role::kSource : Role::kSink;
-        if (Client *old = Find(role, body[0])) {   // the new one takes its place
-            if (sink) video.SinkWent(body[0]);
-            old->role = Role::kNone, old->gone = true;
-        }
+        // The new one takes the old one's place: also of one that went in this same pass and
+        // isn't cleared away yet (its going must not take the new one's watch with it).
+        for (Client &old : clients_)
+            if (old.role == role && old.which == body[0]) old.role = Role::kNone, old.gone = true;
         c.role = role, c.which = body[0];
         if (source) video.SourceCame(c.which);
         else video.SinkCame(c.which, now);

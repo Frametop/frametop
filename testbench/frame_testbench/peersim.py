@@ -2,8 +2,8 @@
 
 A fake peer is Frametop's own programs with nobody wearing them: an ft-together of its own
 (the real session code, on a port and a socket of its own), `ft-avatars --pretend` standing in
-for a tracked wearer, `ft-roomvoice --hum` for their voice, and `ft-sharepanel --pattern` for a
-screen they share. This program keeps them and answers questions on @ft_peer_sim_N, one datagram a question and one back:
+for a tracked wearer, `ft-roomvoice --hum` for their voice, `ft-sharepanel --pattern` for a
+screen they share, and `ft-pcsend` for their split compute PC. This program keeps them and answers questions on @ft_peer_sim_N, one datagram a question and one back:
 
   state                 ok and JSON: what the peer does, and its ft-together's own state
   join HOST PORT CODE   calls a room's owner (ft-together's join)
@@ -17,10 +17,12 @@ screen they share. This program keeps them and answers questions on @ft_peer_sim
                         its hand and its eyes in the room (peeracts.py has them)
   share, unshare, give, take
                         a test panel of its own in the room (peershare.py has them)
+  pc, unpc              its split compute PC and that one's windows in the room (peerpc.py)
   quit                  leaves, ends its programs and itself
 
   ft-peer-sim N [--name NAME] [--port PORT] [--loopback] [--models DIR] [--tag TAG]
               [--ft-together PATH] [--ft-avatars PATH] [--ft-roomvoice PATH] [--ft-sharepanel PATH]
+              [--ft-pcsend PATH]
 
 N is 1 to 3. --loopback is ft-together's: no Tailscale, links on 127.0.0.1 only. --models is
 the folder `wear` names models in (the wearer's own without it). --tag is for tests: the
@@ -39,14 +41,16 @@ import sys
 import time
 from pathlib import Path
 
-from . import peeracts, peerline, peershare
+from . import peeracts, peerline, peerpc, peershare
 
 REPO = Path(__file__).resolve().parents[2]
 PEERS = (1, 2, 3)
 POSES = ('stand', 'wave', 'reach', 'type', 'sit', 'lean', 'look')   # avatar/view/demo.h
 FIRST_PORT = 47193   # ft-together's own; peer N takes calls on FIRST_PORT + N
 PROGRAMS = {'ft-together': REPO / 'together/build/ft-together', 'ft-avatars': REPO / 'screens/build/ft-avatars',
-            'ft-roomvoice': REPO / 'together/build/ft-roomvoice', 'ft-sharepanel': REPO / 'together/build/ft-sharepanel'}
+            'ft-roomvoice': REPO / 'together/build/ft-roomvoice', 'ft-sharepanel': REPO / 'together/build/ft-sharepanel',
+            'ft-pcsend': REPO / 'together/build/ft-pcsend'}
+PC_LOOP = REPO / 'together/assets/pcloop-640x360.bin'   # what its PC's windows show (together/tests/record-loop.py made it)
 HOST = re.compile(r'[A-Za-z0-9][A-Za-z0-9.:-]{0,252}')
 CODE = re.compile(r'[A-Za-z0-9]{1,32}')
 MODEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}')
@@ -54,7 +58,7 @@ TAG = re.compile(r'[A-Za-z0-9_]{0,32}')
 WEAR_EVERY_S = 2.0   # as ft-avatars --room tells it
 PANEL_FPS = 30       # its test panel's pictures a second
 QUESTIONS = ('state | join HOST PORT CODE | leave | pose NAME | walk RIGHT BACK DEGREES | wear [NAME] | speak HZ|off | away game|off|back | '
-             + peeracts.QUESTIONS + ' | ' + peershare.QUESTIONS + ' | quit')
+             + peeracts.QUESTIONS + ' | ' + peershare.QUESTIONS + ' | ' + peerpc.QUESTIONS + ' | quit')
 
 
 def sim_socket(n, tag=''):
@@ -78,6 +82,7 @@ class Sim:
         self.acts = peeracts.Acts(lambda text: self.ask(text), lambda data: self.send(data), clock)
         self.share = peershare.Share(lambda text: self.ask(text), self.line.heard, self.picture, self.stop, lambda: not self.away,
                                      ((n - 2) * 2.4, 1.5, -2.5), clock)
+        self.pc = peerpc.Pc(lambda text: self.ask(text), self.sender, self.stop, ((n - 2) * 2.4, 1.5, -2.5))
 
     def start(self):
         # (Balanced, whatever the frametop.conf of the wearer beside it has: what it sends is its own)
@@ -110,6 +115,12 @@ class Sim:
         return self.spawn([str(self.programs['ft-sharepanel']), '--panel', str(panel), '--size', '%dx%d' % size,
                            '--fps', str(PANEL_FPS), '--socket', self.socket, '--pattern'])
 
+    def sender(self, address, port, code):
+        """The program that stands for its PC: it calls the peer's ft-together there with that
+        code, and sends a loop of pictures for each of its windows someone watches."""
+        return self.spawn([str(self.programs['ft-pcsend']), address, str(port), code, '--loop', str(PC_LOOP)]
+                          + (['--loopback'] if self.loopback else []))
+
     @staticmethod
     def stop(child):
         if child is None or child.poll() is not None:
@@ -139,10 +150,10 @@ class Sim:
         together = peeracts.told(self.ask('state'))
         running = {name: child is not None and child.poll() is None
                    for name, child in (('ft-together', self.together), ('ft-avatars', self.body), ('ft-roomvoice', self.voice),
-                                       ('ft-sharepanel', self.share.child))}
+                                       ('ft-sharepanel', self.share.child), ('ft-pcsend', self.pc.child))}
         return {'peer': self.n, 'name': self.name, 'port': self.port, 'socket': self.socket, 'pose': self.pose,
                 'walked': list(self.walked), 'away': self.away, 'speaks': self.hz, 'wears': self.wears, 'wear': self.wear_reply,
-                'running': running, 'together': together, **self.acts.state(), **self.share.state()}
+                'running': running, 'together': together, **self.acts.state(), **self.share.state(), **self.pc.state()}
 
     def answer(self, text):
         words = text.split()
@@ -187,21 +198,22 @@ class Sim:
             self.hz = 0.0 if rest[0] == 'off' else float(rest[0])
             self.hum()
             return 'ok'
-        for theirs in (self.acts, self.share):
+        for theirs in (self.acts, self.share, self.pc):
             reply = theirs.act(what, rest)
             if reply is not None:
                 return reply
         raise ValueError
 
     def rest(self):
-        """Out of the room it is in with its hand, its eyes and its panel."""
+        """Out of the room it is in with its hand, its eyes, its panel and its PC's windows."""
         self.acts.rest()
         self.share.rest()
+        self.pc.rest()
 
     def end(self):
         if self.together is not None and self.together.poll() is None:
             self.ask('leave')   # ft-together leaves on SIGTERM too; this tells the room first
-        for child in (self.share.child, self.voice, self.body, self.together):
+        for child in (self.pc.child, self.share.child, self.voice, self.body, self.together):
             self.stop(child)
         self.line.close()
 
@@ -209,7 +221,7 @@ class Sim:
 def arguments(argv):
     """(n, the options) of a command line, or None."""
     options = {'--name': None, '--port': None, '--models': None, '--loopback': False, '--tag': '',
-               '--ft-together': None, '--ft-avatars': None, '--ft-roomvoice': None, '--ft-sharepanel': None}
+               '--ft-together': None, '--ft-avatars': None, '--ft-roomvoice': None, '--ft-sharepanel': None, '--ft-pcsend': None}
     words = list(argv)
     if not words or not words[0].isdigit() or int(words[0]) not in PEERS:
         return None

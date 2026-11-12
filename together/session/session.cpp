@@ -102,6 +102,11 @@ void Session::Drop(int link) {
     Down(link, 0);
 }
 
+void Session::Hang(int link) {
+    const auto it = link_.find(link);
+    if (it != link_.end() && it->second.state == Link::kDevice) Drop(link);
+}
+
 void Session::Refuse(int link, proto::Why why, const std::string &text) {
     proto::Refuse r;
     r.why = why, r.text = text;
@@ -109,9 +114,16 @@ void Session::Refuse(int link, proto::Why why, const std::string &text) {
     Drop(link);
 }
 
+// The room is over, or the call to one: every link to a Frame ends. A device's isn't the room's.
 void Session::End(const std::string &note) {
-    for (const auto &[id, l] : link_) links_.Close(id);
-    link_.clear();
+    for (auto it = link_.begin(); it != link_.end();) {
+        if (it->second.state == Link::kDevice) {
+            ++it;
+            continue;
+        }
+        links_.Close(it->first);
+        it = link_.erase(it);
+    }
     invites_.Clear();
     mode_ = Mode::kIdle, me_ = -1, room_ = proto::Room{}, code_.clear(), asked_.clear(), lookSaid_ = -1e9;
     for (double &t : meshTried_) t = -1e9;
@@ -136,6 +148,11 @@ void Session::Remove(int person) {
 
 void Session::Handle(int link, uint16_t kind, const std::vector<uint8_t> &body, double now) {
     Link &l = link_.at(link);
+    if (l.state == Link::kDevice || (l.state == Link::kStranger && !l.helloed && kind == proto::kSender)) {
+        l.state = Link::kDevice;   // not a Frame, and nothing here is said to it or timed
+        if (!config_.device || !config_.device(link, l.address, kind, body, now)) Drop(link);
+        return;
+    }
     const bool fromOwner = mode_ == Mode::kJoined && l.state == Link::kMember && l.person == room_.owner;
     switch (kind) {
     case proto::kHello:

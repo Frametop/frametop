@@ -225,7 +225,8 @@ static void panels() {
     room("...with more panels than a room holds", [](proto::Room &x) {
         const proto::Panel one = x.panels[0];
         x.panels.clear();
-        for (int id = 0; id < 17; ++id) x.panels.push_back(one), x.panels.back().id = uint8_t(id < 16 ? id : 24);
+        x.people.push_back(x.people[0]), x.people.back().id = 2;   // (four people, so that each id is someone's)
+        for (size_t id = 0; id <= proto::kMostPanels; ++id) x.panels.push_back(one), x.panels.back().id = uint8_t(id);
     });
 
     // the fullest room there can be is a message
@@ -238,7 +239,7 @@ static void panels() {
     full.panels.clear();
     for (size_t i = 0; i < proto::kMostPanels; ++i) {
         full.panels.push_back(r.panels[0]);
-        full.panels.back().id = uint8_t(i * 2), full.panels.back().name = std::string(proto::kMostPanelName, 'p');
+        full.panels.back().id = uint8_t(i), full.panels.back().name = std::string(proto::kMostPanelName, 'p');
     }
     const std::vector<uint8_t> big = body(proto::Pack(full));
     check("a full room with every panel it may hold fits a message", big.size() <= proto::kMostMessage && proto::Read(big, r2) && same(full, r2));

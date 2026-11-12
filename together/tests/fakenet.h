@@ -30,6 +30,8 @@ struct Frame : session::Links, session::Tailnet {
     std::function<void(int link, const proto::Want &want, double now)> onWant;
     // A message of a kind the session doesn't read, from someone in the room: false closes the link.
     std::function<bool(int link, uint16_t kind, const std::vector<uint8_t> &body, double now)> onSaid;
+    // What a link that isn't a Frame's says: false, or nobody to hear it, closes the link.
+    std::function<bool(int link, const std::string &address, uint16_t kind, const std::vector<uint8_t> &body, double now)> onDevice;
 
     Frame(Net &n, const std::string &address, uint16_t port, const std::string &name);
     int Call(const std::string &host, uint16_t port) override;
@@ -68,6 +70,7 @@ struct Net {
     std::deque<Event> queue;
     std::map<int, std::vector<uint8_t>> heard;    // what was sent on a link whose other end is the test's
     std::set<int> shut;                           // ...and the ones of those that were closed
+    std::set<std::string> devices;                // addresses on the tailnet that aren't a Frame's
     std::function<void(Event &)> tamper;          // rewrites what is on its way
     int nextLink = 1;
     double now = 1000;
@@ -158,6 +161,7 @@ inline Frame::Frame(Net &n, const std::string &at, uint16_t p, const std::string
         if (onWant) onWant(link, w, now);
     };
     c.said = [this](int link, uint16_t kind, const std::vector<uint8_t> &body, double now) { return !onSaid || onSaid(link, kind, body, now); };
+    c.device = [this](int link, const std::string &at, uint16_t kind, const std::vector<uint8_t> &body, double now) { return onDevice && onDevice(link, at, kind, body, now); };
     s = std::make_unique<session::Session>(*this, *this, c);
     net.frames.push_back(this);
 }
@@ -195,7 +199,7 @@ inline void Frame::Close(int link) {
 inline bool Frame::WhoIs(const std::string &at, session::Who &who) {
     for (Frame *f : net.frames)
         if (f->address == at && f->onTailnet) return who.login = f->login, who.name = "frame-" + f->login, true;
-    return false;
+    return net.devices.count(at) ? (who.login = login, who.name = "pc", true) : false;
 }
 
 inline std::string Frame::ask(const std::string &text) {

@@ -7,7 +7,8 @@
 //   floor [X Z YAW]  -> where this Frame's own floor lies in the room; `floor move X Z YAW`
 //                       moves it, and the wearer through the room with it (local/floor.h)
 //   where            -> where the others in the room are (local/whereabouts.h)
-//   media            -> which shared panels have a program here, and how their video goes
+//   media, sender    -> which shared panels have a program here and how their video goes,
+//                       and a code for the wearer's PC to send its own with (local/mediaask.h)
 //   here             -> where the others call this Frame: its address, port and name
 //   wear [NAME]      -> the avatar the wearer has on, by its model's name: the others may have
 //                       its file if it is one that may be sent (local/wardrobe.h)
@@ -27,8 +28,10 @@
 // is the wearer's own: what of it the room is told is local/own.h's to say, and theirs come back
 // to whoever watches, listens or asked `points`. The shared panels' video comes from
 // and goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
-// between the Frames on the links, a stream a picture (flow/video.h). An avatar's file goes to
-// whoever in the room asks its wearer for it, on a stream too (flow/looks.h).
+// between the Frames on the links, a stream a picture (flow/video.h). The wearer's split
+// compute PC hands over the pictures of its panels on a link of its own (flow/pcpanels.h). An
+// avatar's file goes to whoever in the room asks its wearer for it, on a stream too
+// (flow/looks.h).
 //
 //   ft-together [--port N] [--name NAME] [--socket NAME] [--loopback]
 //
@@ -53,7 +56,7 @@
 #include "local/gazeask.h"
 #include "local/glances.h"
 #include "local/inputs.h"
-#include "local/media.h"
+#include "local/mediaask.h"
 #include "local/moveask.h"
 #include "local/own.h"
 #include "local/qualityask.h"
@@ -83,7 +86,7 @@ constexpr double kLeaveS = 0.5;      // what leaving gets to reach the others wh
 constexpr int kMostAtOnce = 256;     // events or questions taken before the loop looks at the rest
 constexpr size_t kMostQuestion = 512;
 constexpr int kSendingMs = 20;       // between looks at the links while pictures are on their way
-constexpr int kMediaMs = 100;        // ...and at the video's rules while a media program is here
+constexpr int kMediaMs = 100;        // ...and at the video's rules while a media program or the wearer's PC is here
 constexpr int kControlMs = 100;      // ...and at who has the desk while someone does
 
 volatile sig_atomic_t g_stop = 0;
@@ -145,6 +148,7 @@ struct End {
     std::unique_ptr<net::QuicLinks> links;
     std::unique_ptr<session::Session> session;
     std::unique_ptr<StreamWires> wires;
+    std::unique_ptr<flow::PcPanels> pc;   // the programs the video talks to: this Frame's, and the wearer's PC
     std::unique_ptr<flow::Video> video;
     std::unique_ptr<flow::Looks> looks;
     std::unique_ptr<flow::Control> control;
@@ -187,9 +191,13 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, Local &local, 
     config.said = [&end](int link, uint16_t kind, const std::vector<uint8_t> &body, double now) {
         return kind == proto::kMove ? end.moves->Said(link, body, now) : end.control->Said(link, kind, body, now);
     };
+    config.device = [&end](int link, const std::string &address, uint16_t kind, const std::vector<uint8_t> &body, double now) {
+        return end.pc->Said(link, address, kind, body, *end.video, now);
+    };
     end.session = std::make_unique<session::Session>(*end.links, tailnet, config);
     end.wires = std::make_unique<StreamWires>(*end.links);
-    end.video = std::make_unique<flow::Video>(*end.session, *end.wires, local.media);
+    end.pc = std::make_unique<flow::PcPanels>(*end.session, *end.links, tailnet, local.media, Dice);
+    end.video = std::make_unique<flow::Video>(*end.session, *end.wires, *end.pc);
     end.video->SetQuality(local::QualityKept());
     end.looks = std::make_unique<flow::Looks>(*end.session, *end.wires, local.wardrobe);
     end.control = std::make_unique<flow::Control>(*end.session, local.inputs);
@@ -228,7 +236,8 @@ std::string FloorAsk(int sock, const End &end, Local &local, const std::string &
     return reply;
 }
 
-// What a link saw. A picture goes to the video's rules, a file to the avatars'.
+// What a link saw. A picture goes to the video's rules (the PC's by way of its own), a file to
+// the avatars'.
 void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     session::Session &session = *end.session;
     switch (e.kind) {
@@ -242,26 +251,15 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
         end.looks->Down(e.link);
         end.control->Down(e.link);
         end.moves->Down(e.link);
+        end.pc->Down(e.link);
         break;
     case net::Event::kDatagram: Datagram(sock, end, local, e, now); break;
-    case net::Event::kFrame: end.video->Frame(e.link, e.bytes.data(), e.bytes.size(), now); break;
+    case net::Event::kFrame:
+        if (!end.pc->Frame(e.link, e.bytes.data(), e.bytes.size(), *end.video, now)) end.video->Frame(e.link, e.bytes.data(), e.bytes.size(), now);
+        break;
     case net::Event::kFrameLost: end.video->Lost(e.link, e.tag, now); break;
     case net::Event::kFile: end.looks->File(e.link, e.bytes, now); break;
     }
-}
-
-// How the shared panels' video goes: {"sources":[...],"sinks":[...],"bitrate":[...],"pictures":[...],"viewers":[...],"stills":[...],"dropped":N}.
-std::string MediaState(const End &end, const Local &local) {
-    std::string state = local.media.State(), rates, pictures, viewers, stills;
-    for (const uint8_t panel : end.video->stills()) stills += (stills.empty() ? "" : ",") + std::to_string(int(panel));
-    for (int number = 0; number < room::kFramePanels; ++number) {
-        rates += (number ? "," : "") + std::to_string(end.video->bitrate(number));
-        pictures += (number ? "," : "") + std::to_string(end.video->pictures(number));
-        viewers += (number ? "," : "") + std::to_string(end.video->viewers(number));
-    }
-    state.pop_back();
-    return state + ",\"bitrate\":[" + rates + "],\"pictures\":[" + pictures + "],\"viewers\":[" + viewers + "],\"stills\":[" + stills + "],\"dropped\":" +
-           std::to_string(end.video->dropped()) + "}";
 }
 
 // A datagram of the wearer's own, from one of this Frame's programs: what the room is told for
@@ -303,7 +301,6 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "listen") reply = local.listeners.Add(from, fromLen, now) ? "ok" : "error too many programs are listening";
     else if (asked == "floor" || asked.rfind("floor ", 0) == 0) reply = FloorAsk(sock, end, local, asked, now);
     else if (asked == "where") reply = end.inRoom() ? local.whereabouts.Ask(now) : "error you aren't in a room";
-    else if (asked == "media") reply = "ok " + MediaState(end, local);
     else if (asked == "here") reply = "ok " + end.here;
     else if (asked == "wear" || asked.rfind("wear ", 0) == 0) reply = Wear(end, local, asked.size() > 5 ? asked.substr(5) : "", now);
     else if (asked == "looks") reply = "ok " + local.wardrobe.State(end.session->room(), end.session->me());
@@ -311,7 +308,7 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "points") reply = local.pointers.Add(from, fromLen, now) ? "ok" : "error too many programs ask where people point";
     else if (local::ControlAsk(*end.control, asked, now, reply, [&](const proto::Act &act, std::vector<proto::Act> &go) { local.own.Act(act, now, go); }) ||
              local::MoveAsk(*end.moves, asked, now, reply) || local::GazeAsk(local.own.gaze(), asked, end.inRoom(), now, reply) ||
-             local::QualityAsk(*end.video, asked, reply)) {}
+             local::QualityAsk(*end.video, asked, reply) || local::MediaAsk(*end.video, *end.pc, local.media, asked, now, reply)) {}
     else reply = session::Command(*end.session, asked, now);
     // an asker that doesn't wait for its answer doesn't hold up the loop
     if (fromLen > sizeof(sa_family_t)) sendto(sock, reply.data(), reply.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<sockaddr *>(&from), fromLen);
@@ -362,7 +359,8 @@ int main(int argc, char **argv) {
         local.media.Fds(fds);
         // pictures on their way are given up in time only if the links are looked at often
         const bool held = end.control && end.control->busy();
-        const int wait = end.links && end.links->Sending() ? kSendingMs : local.media.clients() ? kMediaMs : held ? kControlMs : 1000;
+        const bool media = local.media.clients() || (end.pc && end.pc->linked());
+        const int wait = end.links && end.links->Sending() ? kSendingMs : media ? kMediaMs : held ? kControlMs : 1000;
         if (poll(fds.data(), fds.size(), wait) < 0 && errno != EINTR) return std::perror("ft-together: poll"), 1;
         now = Now();
         local.inputs.At(now);
@@ -374,6 +372,7 @@ int main(int argc, char **argv) {
         local.media.Serve(end.video.get(), now);
         if (end.session) {
             end.links->Tick();
+            end.pc->Tick(now);
             end.video->Tick(now);
             end.control->Tick(now);
             end.moves->Tick(now);

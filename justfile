@@ -151,6 +151,12 @@ test-c:
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
       -o build/tests/together-quality-test
     run together/tests/quality-test.cpp build/tests/together-quality-test
+    # a split compute PC's panels: who may send them, and its pictures on their way to the room
+    # (a panel's number indexes what is kept of it: what the sanitizer says of one out of range ends the test)
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined together/tests/pcpanels-test.cpp together/flow/pcpanels.cpp \
+      together/flow/video.cpp together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
+      -o build/tests/together-pcpanels-test
+    run together/tests/pcpanels-test.cpp build/tests/together-pcpanels-test
     # the sizes the Frame's encoder is given (one it isn't resets the Frame): against /dev/null
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/encsize-test.cpp together/media/irisenc.cpp \
       -o build/tests/together-encsize-test
@@ -211,10 +217,15 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-together.cpp together/net/quiclinks.cpp \
           together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
           together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
-          together/flow/video.cpp together/flow/looks.cpp together/flow/control.cpp together/flow/moves.cpp together/local/watchers.cpp \
+          together/flow/video.cpp together/flow/pcpanels.cpp together/flow/looks.cpp together/flow/control.cpp together/flow/moves.cpp together/local/watchers.cpp \
           together/local/media.cpp together/local/wardrobe.cpp together/local/inputs.cpp together/local/controlask.cpp together/local/moveask.cpp \
           together/local/gazeask.cpp avatar/modelfile.cpp -o build/tests/ft-together $quic
         run together/tests/loopback-test.py python3 together/tests/loopback-test.py build/tests/ft-together
+        # a PC's sender (with canned pictures) at one of them, and its panels at the other
+        g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-pcsend.cpp together/net/quiclinks.cpp \
+          together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
+          together/proto/messages.cpp -o build/tests/ft-pcsend $quic
+        run together/tests/pcsend-test.py python3 together/tests/pcsend-test.py build/tests/ft-together build/tests/ft-pcsend
         # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
         # video through the hardware encoder and decoder, is run by hand: together/README.md.)
         run together/tests/roompanels-test.py python3 together/tests/roompanels-test.py build/tests/ft-together
@@ -248,7 +259,7 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
         run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,roompanels-test.py,roomcarry-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,pcsend-test.py,roompanels-test.py,roomcarry-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

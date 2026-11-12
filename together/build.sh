@@ -11,6 +11,8 @@
 #                                 theirs, each from where their head is (Opus, PulseAudio)
 #   together/build/ft-roompoints  draws where the others point, on the panels they point at
 #                                 (SteamVR overlays)
+#   together/build/ft-pcsend      a split compute PC's end, with canned pictures: what the tests
+#                                 and the fake peer have for a PC (it isn't installed)
 # ft-roompanels, which keeps the two panel programs in step with the room, is a script
 # (together/ft-roompanels).
 # and with --spikes, the programs that measured what the design stands on:
@@ -49,7 +51,7 @@ fi
 quic="-I$src/src/inc build/libmsquic.so.2 -Wl,-rpath,\$ORIGIN"
 g++ $flags -o build/ft-together ft-together.cpp net/quiclinks.cpp net/quicframes.cpp net/quicfiles.cpp net/lookup.cpp \
   net/tailnet.cpp net/selfcert.cpp session/session.cpp session/wearer.cpp session/commands.cpp proto/messages.cpp flow/video.cpp \
-  flow/looks.cpp flow/control.cpp flow/moves.cpp local/watchers.cpp local/media.cpp local/wardrobe.cpp local/inputs.cpp local/controlask.cpp local/moveask.cpp local/gazeask.cpp \
+  flow/pcpanels.cpp flow/looks.cpp flow/control.cpp flow/moves.cpp local/watchers.cpp local/media.cpp local/wardrobe.cpp local/inputs.cpp local/controlask.cpp local/moveask.cpp local/gazeask.cpp \
   ../avatar/modelfile.cpp $quic $(pkg-config --libs openssl) -lpthread
 gpu="gbm libdrm egl glesv2"
 g++ $flags $(pkg-config --cflags $gpu) -o build/ft-sharepanel ft-sharepanel.cpp media/irisenc.cpp media/pictures.cpp \
@@ -61,11 +63,13 @@ g++ $flags $(pkg-config --cflags opus libpulse-simple) -o build/ft-roomvoice ft-
   voice/sender.cpp voice/player.cpp voice/headask.cpp voice/pulse.cpp ../avatar/room/client.cpp ../avatar/room/people.cpp \
   $(pkg-config --libs opus libpulse-simple) -lpthread
 g++ $flags $OPENVR_CFLAGS -o build/ft-roompoints ft-roompoints.cpp points/asker.cpp points/dots.cpp $OPENVR_LIBS
-strip --strip-unneeded build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints
-[ $spikes = 1 ] || { echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints"; exit 0; }
+g++ $flags -o build/ft-pcsend ft-pcsend.cpp net/quiclinks.cpp net/quicframes.cpp net/quicfiles.cpp net/lookup.cpp net/tailnet.cpp \
+  net/selfcert.cpp proto/messages.cpp $quic $(pkg-config --libs openssl) -lpthread
+strip --strip-unneeded build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints build/ft-pcsend
+[ $spikes = 1 ] || { echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints build/ft-pcsend"; exit 0; }
 g++ $flags $(pkg-config --cflags gbm) -o build/ft-enctest spike/ft-enctest.cpp media/irisenc.cpp \
   $(pkg-config --libs gbm) -lpthread
 g++ $flags -o build/ft-quictest spike/ft-quictest.cpp net/selfcert.cpp $quic \
   $(pkg-config --libs openssl) -lpthread
 strip --strip-unneeded build/ft-enctest build/ft-quictest
-echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints build/ft-enctest build/ft-quictest"'
+echo "built build/ft-together build/ft-sharepanel build/ft-peerpanel build/ft-roomvoice build/ft-roompoints build/ft-pcsend build/ft-enctest build/ft-quictest"'

@@ -129,6 +129,8 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `peer_unshare` | `peer` | `peer N unshare` |
 | `peer_control_give` | `peer`, `person` (their place in the room, 0-3) | `peer N give PERSON` |
 | `peer_control_take` | `peer`; optional `person` (everyone without it) | `peer N take [PERSON]` |
+| `peer_pc` | `peer`; optional `windows` (1-4; as many as it had, or 1) | `peer N pc [WINDOWS]` |
+| `peer_unpc` | `peer` | `peer N unpc` |
 | `release_all` | None | `release`, which also stops the fake trackers and the fake peers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ

@@ -22,6 +22,7 @@ Down = Annotated[bool, Field(strict=True)]
 Width = Literal[640, 896, 1280, 1408, 1664, 1920]   # what the Frame's encoder is known to take (peershare.py)
 Height = Annotated[int, Field(strict=True, ge=360, le=1200, multiple_of=8)]
 Person = Annotated[int, Field(strict=True, ge=0, le=3)]
+Windows = Annotated[int, Field(strict=True, ge=1, le=4)]   # a PC's panels in a room (peerpc.py)
 
 
 def register(server, execute):
@@ -84,6 +85,7 @@ def register(server, execute):
 
     register_acts(server, execute)
     register_share(server, execute)
+    register_pc(server, execute)
 
 
 def register_acts(server, execute):
@@ -172,3 +174,21 @@ def register_share(server, execute):
         """The peer takes its test panel back from that person, or from everyone, and says no to
         their ask."""
         return await execute(['peer', str(peer), 'take'] + ([] if person is None else [str(person)]))
+
+
+def register_pc(server, execute):
+    """A peer's split compute PC and its windows in a room (peerpc.py)."""
+    @server.tool()
+    async def peer_pc(peer: Peer, windows: Windows | None = None) -> CallToolResult:
+        """The peer's split compute PC comes to it, and that many of its windows (as many as it
+        had, or 1) are panels in the room, a metre wide, in a row above the peer's own panel:
+        640 by 360, a second of a picture that counts, again and again. Said again it changes
+        how many. No encoder runs for them: the pictures were encoded once. With the peer's
+        own panel that is up to five panels a peer, for a room with more than a Frame decodes
+        at once."""
+        return await execute(['peer', str(peer), 'pc'] + ([] if windows is None else [str(windows)]))
+
+    @server.tool()
+    async def peer_unpc(peer: Peer) -> CallToolResult:
+        """The peer's PC's windows leave the room, and the PC goes."""
+        return await execute(['peer', str(peer), 'unpc'])

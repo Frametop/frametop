@@ -13,22 +13,24 @@
 namespace room {
 
 // The panels a Frame encodes itself (spike T1: three sessions at any size next to SteamVR). The
-// numbers past them are a split compute PC's (M5).
-constexpr int kFramePanels = 3;
+// numbers past them are their person's split compute PC's, which encodes them and hands them
+// to its person's Frame to send (flow/pcpanels.h).
+constexpr int kFramePanels = 3, kPcPanels = 4, kOwnPanels = kFramePanels + kPcPanels;
+static_assert(kOwnPanels <= proto::kPanelNumbers && size_t(proto::kPeople * kOwnPanels) <= proto::kMostPanels, "a room holds all that its people may share");
 
 enum class Shared { kNo, kSame, kChanged };
 
 // Person `who` shares `panel`, or says where it is now. kNo when they may not: it isn't theirs,
-// its number is past what a Frame shares, they aren't in the room, or the room has its fill.
+// its number is past what a person shares, or they aren't in the room. (The room holds all
+// that its people may share: there is no fill to run into.)
 inline Shared SetPanel(proto::Room &room, int who, const proto::Panel &panel) {
-    if (!room.person(who) || panel.owner() != who || panel.number() >= kFramePanels) return Shared::kNo;
+    if (!room.person(who) || panel.owner() != who || panel.number() >= kOwnPanels) return Shared::kNo;
     for (proto::Panel &p : room.panels) {
         if (p.id != panel.id) continue;
         if (proto::SamePanel(p, panel)) return Shared::kSame;
         p = panel;
         return Shared::kChanged;
     }
-    if (room.panels.size() >= proto::kMostPanels) return Shared::kNo;
     room.panels.push_back(panel);
     std::sort(room.panels.begin(), room.panels.end(), [](const proto::Panel &a, const proto::Panel &b) { return a.id < b.id; });
     return Shared::kChanged;

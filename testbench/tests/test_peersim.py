@@ -173,7 +173,36 @@ class RulesTest(unittest.TestCase):
         self.sim.answer('share')
         self.sim.end()
         self.assertTrue(all(child.ended for child in self.started))
-        self.assertIn('share [W H [X Y Z [DEGREES]]] | unshare | give PERSON | take [PERSON] | quit', self.sim.answer('share 1366 768'))
+        self.assertIn('share [W H [X Y Z [DEGREES]]] | unshare | give PERSON | take [PERSON] | pc [COUNT] | unpc | quit', self.sim.answer('share 1366 768'))
+
+    def test_its_pc_is_a_program_of_its_own_and_its_windows_leave_the_room_with_the_peer(self):
+        self.sim.ask = lambda text: self.asked.append(text) or {'here': 'ok 127.0.0.1 47195 Bo', 'sender': 'ok ABCD2345'}.get(text, 'ok')
+        self.assertEqual(self.sim.answer('pc 2'), 'ok')
+        self.assertEqual(self.started[-1].argv, ['/programs/ft-pcsend', '127.0.0.1', '47195', 'ABCD2345', '--loop', str(peersim.PC_LOOP), '--loopback'])
+        self.assertEqual(self.asked, ['here', 'sender', 'share 3 640 360 -1.65 2.5 -2.5 1.000000 0.000000 0.000000 0.000000 1 0 Window 1',
+                                      'share 4 640 360 -0.55 2.5 -2.5 1.000000 0.000000 0.000000 0.000000 1 0 Window 2'])
+        state = json.loads(self.sim.answer('state')[3:])
+        self.assertEqual((state['pc'], state['running']['ft-pcsend']), ({'running': True, 'windows': 2}, True))
+        self.sim.loopback = False
+        self.started[-1].ended = True
+        self.sim.ask = lambda text: self.asked.append(text) or {'here': 'ok 100.64.0.7 47195 Bo', 'sender': 'ok WXYZ6789'}.get(text, 'ok')
+        self.assertEqual(self.sim.answer('pc'), 'ok')
+        self.assertEqual(self.started[-1].argv[1:], ['100.64.0.7', '47195', 'WXYZ6789', '--loop', str(peersim.PC_LOOP)], 'on the tailnet, its PC calls there too')
+        del self.asked[:]
+        for text in ('leave', 'join 100.64.0.1 47193 ABCD2345'):
+            self.sim.answer('pc 2')
+            del self.asked[:]
+            self.assertEqual(self.sim.answer(text), 'ok')
+            self.assertEqual(self.asked, ['unshare 4', 'unshare 3', text], 'its windows are out of the room before it is')
+            self.assertEqual(json.loads(self.sim.answer('state')[3:])['pc'], {'running': True, 'windows': 0}, 'and its PC stays with it')
+        self.assertEqual(self.sim.answer('unpc'), 'ok')
+        self.assertTrue(self.started[-1].ended)
+        self.sim.answer('pc')
+        self.sim.end()
+        self.assertTrue(all(child.ended for child in self.started))
+        for text in ('pc 0', 'pc 5', 'pc x', 'pc 1 2', 'unpc 1'):
+            self.assertTrue(self.sim.answer(text).startswith('error '), text)
+        self.assertTrue(peersim.PC_LOOP.is_file(), 'the loop its PC plays is in the tree')
 
     def test_it_points_and_looks_at_nothing_once_it_leaves_goes_away_or_joins(self):
         for text in ('leave', 'away off', 'join 100.64.0.1 47193 ABCD2345'):
@@ -235,7 +264,7 @@ class FakePeerTest(peerkit.RealRoom):
         self.assertGreater(voices, 10, 'the owner hears the peer hum\n' + self.said())
         self.assertGreater(mouths, 3, "the peer's mouth moves while it hums\n" + self.said())
         state = self.sim.state()
-        self.assertEqual((state['speaks'], state['walked'], state['running']), (220.0, [1.0, 0.0, 0.0], {'ft-together': True, 'ft-avatars': True, 'ft-roomvoice': True, 'ft-sharepanel': False}))
+        self.assertEqual((state['speaks'], state['walked'], state['running']), (220.0, [1.0, 0.0, 0.0], {'ft-together': True, 'ft-avatars': True, 'ft-roomvoice': True, 'ft-sharepanel': False, 'ft-pcsend': False}))
 
         self.assertTrue(self.sim.ask('wear nothing-here').startswith('error'), 'a model its folder has not got')
         self.assertEqual(self.sim.ask('wear'), 'ok')

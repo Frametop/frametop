@@ -3,14 +3,14 @@
 encodes a test picture that says which one it is (media/testpattern.h), two ft-together pass
 it over a loopback link, and ft-peerpanel decodes it and reads it back.
 
-    together/tests/panels-test.py FT-TOGETHER FT-SHAREPANEL FT-PEERPANEL
+    together/tests/panels-test.py FT-TOGETHER FT-SHAREPANEL FT-PEERPANEL FT-PCSEND
 
 It needs the Frame's video devices, and is skipped without them. What ft-together does with
 the pictures is tested with made-up ones in loopback-test.py; this is what only the hardware
 shows: that the pictures decode, whole and in order, in the colours they were drawn in, at
 every size a panel is sent at, that a panel nobody has focused is encoded less often, that
-nothing is encoded while nobody watches, and that a panel becomes a still when the Frame has no
-decoder for it.
+nothing is encoded while nobody watches, that a panel becomes a still when the Frame has no
+decoder for it, and that the loop ft-pcsend plays for a PC's panel decodes round after round.
 
 For that last part the test takes every video session the Frame has left, for about 45
 seconds: nothing else on the Frame can open a decoder or an encoder meanwhile (what runs
@@ -27,6 +27,8 @@ from roomkit import check  # noqa: E402
 
 DEVICES = ["/dev/video-enc0", "/dev/video-dec0", "/dev/dri/renderD128"]
 WHERE = "0 1.5 -2 1 0 0 0 2 0"   # a panel's place in the room: not this test's concern
+LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "pcloop-640x360.bin")   # (record-loop.py made it)
+LOOP_PICTURES = 30
 
 
 def pictures(tool, since=0):
@@ -61,7 +63,7 @@ def true_colours(pics):
     return all(p["light"] >= 228 and p["dark"] <= 28 and abs(p["grey"] - 48) <= 7 for p in pics)
 
 
-def main(together, share, peer):
+def main(together, share, peer, pcsend):
     ends, tools, held = [], [], []
 
     def start(name):
@@ -242,6 +244,21 @@ def main(together, share, peer):
                 print("    (status %s, pictures %s; the encoder said %s; the decoder said %s)" % (status, pics[:3], src.lines[-4:], view.lines[-4:]))
             src.end()
 
+        # a split compute PC's panel, from the program that stands for the PC
+        desk = run([pcsend, "127.0.0.1", str(ada.port), ada.ask("sender")[3:], "--loop", LOOP, "--loopback"])
+        ok = desk.said("panel 6 W 0") and ada.ask("share 3 640 360 %s A window" % WHERE) == "ok" and ben.until(lambda s: 3 in [p["id"] for p in s["panels"]])
+        view = prober(ben, 3, "--frames", str(2 * LOOP_PICTURES + 15))
+        status = view.wait(40)
+        pics = pictures(view)
+        numbers = [p["number"] for p in pics]
+        ok = ok and status == 0 and len(pics) == 2 * LOOP_PICTURES + 15 and {p["size"] for p in pics} == {"640x360"} and true_colours(pics)
+        # (round after round: each picture is the one after, or the loop's first again)
+        ok = ok and max(numbers) == numbers[0] + LOOP_PICTURES - 1 and all(b == a + 1 or b == numbers[0] for a, b in zip(numbers, numbers[1:]))
+        if not check("a PC's panel: the loop ft-pcsend plays crosses its Frame and decodes, round after round, in its colours", ok and numbers.count(numbers[0]) <= 4):
+            print("    (status %s, %d pictures, numbers %s; the PC said %s; the decoder said %s)" % (status, len(pics), numbers, desk.lines[-6:], view.lines[-4:]))
+        desk.end()
+        ada.ask("unshare 3")
+
         # ft-together goes
         src = sharer(ada, 0, "640x360")
         stay = prober(ben, 0, "--seconds", "25")
@@ -265,8 +282,8 @@ def main(together, share, peer):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        sys.exit("usage: panels-test.py FT-TOGETHER FT-SHAREPANEL FT-PEERPANEL")
+    if len(sys.argv) != 5:
+        sys.exit("usage: panels-test.py FT-TOGETHER FT-SHAREPANEL FT-PEERPANEL FT-PCSEND")
     missing = [d for d in DEVICES if not os.path.exists(d)]
     if missing:
         print("SKIPPED: no %s (the Frame's video devices)" % ", ".join(missing))

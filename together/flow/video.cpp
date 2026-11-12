@@ -7,7 +7,7 @@ namespace flow {
 
 // Whether the wearer's panel `number` is in the room now.
 bool Video::Mine(int number) const {
-    return number >= 0 && number < room::kFramePanels && session_.me() >= 0 && session_.room().panel(proto::PanelId(session_.me(), number));
+    return number >= 0 && number < room::kOwnPanels && session_.me() >= 0 && session_.room().panel(proto::PanelId(session_.me(), number));
 }
 
 // After anything that may have changed who watches one of our panels: its source is told
@@ -22,7 +22,7 @@ void Video::Settle(int number, double now) {
 }
 
 void Video::SourceCame(int number) {
-    if (number < 0 || number >= room::kFramePanels) return;
+    if (number < 0 || number >= room::kOwnPanels) return;
     Shared &s = shared_[number];
     Encode(number);
     programs_.Watched(number, s.watched = s.viewers.watched());
@@ -35,7 +35,7 @@ void Video::SourceCame(int number) {
 void Video::SetQuality(const Quality &quality) {
     quality_ = &quality;
     session_.PanelPictures(quality.pictures);
-    for (int number = 0; number < room::kFramePanels; ++number) {
+    for (int number = 0; number < room::kOwnPanels; ++number) {
         Shared &s = shared_[number];
         s.pace.SetCap(quality.bits);
         s.pictures = PicturesFor(std::max(s.viewers.level(), int(proto::kInView)), quality.pictures);
@@ -76,7 +76,7 @@ void Video::Watch(int link, const proto::Watch &watch, double now) {
 }
 
 void Video::Lost(int link, uint32_t tag, double now) {
-    if (tag >= uint32_t(room::kFramePanels)) return;
+    if (tag >= uint32_t(room::kOwnPanels)) return;
     Shared &s = shared_[tag];
     s.viewers.GaveUp(link);
     if (s.pace.GaveUp(now)) programs_.Rate(int(tag), s.pace.bitrate());
@@ -175,7 +175,7 @@ void Video::Tick(double now) {
         if (w.order.WantsKey(now)) w.fresh = true;
         if (w.fresh || now - w.told >= kTellEvery || Told(panel, w, now) != w.said) Tell(panel, w, now);
     }
-    for (int number = 0; number < room::kFramePanels; ++number) {
+    for (int number = 0; number < room::kOwnPanels; ++number) {
         Shared &s = shared_[number];
         if (!Mine(number)) s.viewers = Viewers{};   // not shared any more, or the room was left
         else s.viewers.Keep([this](int link) { return session_.PersonOn(link) >= 0; });

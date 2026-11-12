@@ -267,6 +267,13 @@ std::unique_ptr<QuicLinks> QuicLinks::Open(const Config &config, std::string &er
     const QUIC_REGISTRATION_CONFIG reg = {"ft-together", QUIC_EXECUTION_PROFILE_LOW_LATENCY};
     if (QUIC_FAILED(impl->q->RegistrationOpen(&reg, &impl->registration))) return err = "QUIC didn't start", nullptr;
 
+    QUIC_CREDENTIAL_CONFIG client = {};
+    client.Type = QUIC_CREDENTIAL_TYPE_NONE;
+    client.Flags = QUIC_CREDENTIAL_FLAG_CLIENT | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
+    impl->clientConfig = impl->Configure(client, 0);
+    if (!impl->clientConfig) return err = "QUIC didn't take its settings", nullptr;
+    if (!config.port) return std::unique_ptr<QuicLinks>(new QuicLinks(std::move(impl)));   // it only calls
+
     // The listener's certificate: made new each time, in a folder of our own, gone once loaded.
     const char *run = std::getenv("XDG_RUNTIME_DIR");
     std::string dir = std::string(run && *run ? run : "/tmp") + "/ft-together-XXXXXX";
@@ -282,11 +289,7 @@ std::unique_ptr<QuicLinks> QuicLinks::Open(const Config &config, std::string &er
     }
     unlink(key.c_str()), unlink(cert.c_str()), rmdir(dir.c_str());
     if (!made) return nullptr;
-    QUIC_CREDENTIAL_CONFIG client = {};
-    client.Type = QUIC_CREDENTIAL_TYPE_NONE;
-    client.Flags = QUIC_CREDENTIAL_FLAG_CLIENT | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
-    impl->clientConfig = impl->Configure(client, 0);
-    if (!impl->serverConfig || !impl->clientConfig) return err = "QUIC didn't take its settings", nullptr;
+    if (!impl->serverConfig) return err = "QUIC didn't take its settings", nullptr;
 
     QUIC_ADDR addr = {};
     if (!QuicAddrFromString(config.listen.c_str(), config.port, &addr)) return err = "'" + config.listen + "' isn't an address", nullptr;

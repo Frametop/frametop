@@ -3,8 +3,8 @@
 A fake peer is someone in a Frametop Together room who isn't there. It is Frametop's own programs
 with nobody wearing them: an `ft-together` of its own (the real session code, on a port and a
 socket of its own), `ft-avatars --pretend` standing in for a tracked wearer,
-`ft-roomvoice --hum` for their voice, and `ft-sharepanel --pattern` for a screen they share. Up
-to three run at once, which fills a room of four with
+`ft-roomvoice --hum` for their voice, `ft-sharepanel --pattern` for a screen they share, and
+`ft-pcsend` for their split compute PC. Up to three run at once, which fills a room of four with
 the Frame's wearer. Everything the Frame's own programs do with a real guest they do with a fake
 one: the ask on the Frametop Together page, the links, the poses, the avatar, the voice and its
 mouth, away. See [docs/together.md](../../docs/together.md) for the design and
@@ -29,6 +29,8 @@ mouth, away. See [docs/together.md](../../docs/together.md) for the design and
 ./frame-testbench peer 1 give 0               # gives its panel to the person in place 0, the room's owner
 ./frame-testbench peer 1 take                 # takes it back from everyone
 ./frame-testbench peer 1 unshare
+./frame-testbench peer 1 pc 4                 # its split compute PC comes, with four windows in the room
+./frame-testbench peer 1 unpc
 ./frame-testbench peer 1 state
 ./frame-testbench peer 1 leave                # out of the room, still running
 ./frame-testbench peer 1 stop
@@ -125,6 +127,35 @@ its picture's program runs.
 The peer takes its panel out of the room before it leaves or joins another. While it is away the
 panel stays and its picture keeps counting, where a real Frame's would freeze.
 
+## Its PC
+
+`pc` gives the peer a split compute PC, and puts that PC's windows into the room as panels of
+the peer's: up to four, numbers 3 to 6 of its panels, so their ids are the peer's place times
+eight plus 3 to 6. Each is 640x360 and a metre wide, named "Window 1" to "Window 4", in a row
+above the peer's own panel. With its own panel a peer then has five in the room, and three
+peers fifteen: more than a Frame decodes at once, which is what the decoder budget is for
+([together/README.md](../../together/README.md), "A shared panel's video").
+
+| Command | What the peer does |
+| --- | --- |
+| `pc [WINDOWS]` | Its PC comes, and that many of its windows (1 to 4) are in the room. Without a number: as many as it had, or one. Said again, it changes how many |
+| `unpc` | The windows leave the room, and the PC goes |
+
+The PC is `ft-pcsend`, the program that stands for a PC's sender
+([docs/together.md](../../docs/together.md), "A PC's panels"). It calls the peer's own
+`ft-together` with a one-time code that one made for it, as a real PC does, hears what each
+window is to be encoded at, and sends pictures for the windows someone watches. The peer's
+`ft-together` passes them on to the watchers. The pictures are a loop that was encoded once
+(`together/assets/pcloop-640x360.bin`: a second of the test picture that counts), played again
+and again from its keyframe, so no encoder runs for a PC's windows, however many there are,
+and what a watcher decodes counts up thirty pictures and begins again. The loop plays slower
+where an encoder would encode less often, and is never encoded at another bitrate.
+
+A PC's windows stay where `pc` put them: where someone else puts one isn't taken. Nothing is
+given on them, since a PC's panels take no input yet. The peer takes them out of the room
+before it leaves or joins another, and its PC stays with it. `state` says under `pc` whether
+the PC's program runs and how many windows are in the room.
+
 ## How it works
 
 `peer N start` runs `ft-peer-sim N` as the transient user unit `frame-testbench-peer-N`
@@ -155,12 +186,14 @@ also runs with `--loopback`; the tests use it.
 
 What is real: the session, the links (QUIC between the two `ft-together` on this Frame), the
 room's rules, the pose datagrams, the Opus voice and its mouth shapes, an avatar's file crossing
-a link, the pointers, the asks and grants, the input a grant lets through, and its panel's
-video, encoded by the Frame's encoder and sent as a screen's is. What isn't: the
+a link, the pointers, the asks and grants, the input a grant lets through, its panel's
+video, encoded by the Frame's encoder and sent as a screen's is, and its PC's call, code and
+pictures on their way through the peer's session. What isn't: the
 wearer (a pose that plays, not a tracked head and hands), the voice (a hummed note, with no
 microphone opened and nothing played from the peer's end), the hand and the eyes (a place and a
 direction it is told, not a pointer on a panel it sees or a gaze that was tracked; the body's
-pose doesn't follow either), its panel (a test picture with no desktop behind it), and the
+pose doesn't follow either), its panel (a test picture with no desktop behind it), its PC (a program on this Frame that plays a
+loop, with no window, capture or encoder), and the
 network (both ends are on this Frame, so there is no delay
 or loss). While a peer is away nobody stands
 there: its pretended wearer is ended until it is back, as `ft-avatars --room` tells the room
@@ -176,8 +209,9 @@ file only if it is marked as one to pass on, as for a real wearer
 
 ## What it can't do yet
 
-- Share more than one panel, a floating window, or anything with a desktop behind it. What is
-  done on its panel is counted, not shown in its picture.
+- Share more than one panel of its own, a floating window, or anything with a desktop behind
+  it. What is done on its panel is counted, not shown in its picture.
+- Have its PC's windows moved by someone else, or give them: a PC's panels take no input yet.
 - See a panel: it runs no `ft-peerpanel`, so it points where it is told, not where a picture is.
 - Speak from a recording. It hums.
 - A slow or lossy link: no delay, loss or rate cap between it and the Frame.
@@ -188,7 +222,7 @@ file only if it is marked as one to pass on, as for a real wearer
 `peer_start`, `peer_stop`, `peer_state`, `peer_join`, `peer_leave`, `peer_pose`, `peer_walk`,
 `peer_avatar`, `peer_speak`, `peer_away`, `peer_point`, `peer_look`, `peer_control_ask`,
 `peer_act_move`, `peer_act_button`, `peer_act_scroll`, `peer_act_key`, `peer_put`, `peer_share`,
-`peer_unshare`, `peer_control_give` and `peer_control_take` ([mcp.md](mcp.md)). The tools join
+`peer_unshare`, `peer_control_give`, `peer_control_take`, `peer_pc` and `peer_unpc` ([mcp.md](mcp.md)). The tools join
 only the room open on this Frame and take no host, port, code, socket or folder. A peer gives
 only its own test panel: none gives a panel of the wearer's.
 
@@ -210,7 +244,12 @@ goes away, and the panel goes when it is taken back or the peer leaves. Nobody w
 panel in that run, so no video is encoded. A second run, only where the Frame's video devices
 are, has the owner's `ft-peerpanel` watch it: sixty pictures decode at the size they were sent,
 each saying which one it is and in order, the encoder opens when the watcher comes and closes
-after it has gone (`tests/peerkit.py` has what the real runs share).
+after it has gone (`tests/peerkit.py` has what the real runs share). `tests/test_peerpc.py`
+checks the questions about its PC the same way, and in such a room: the PC calls the peer's
+session and is let in, its windows are the peer's panels 3 to 5 in the owner's room, fewer and
+none when told, and they leave with the peer while the PC stays. A second run, where the
+Frame's video decoder is, has the owner's `ft-peerpanel` watch the fourth window: seventy
+pictures decode, the loop's thirty round after round, and no encoder was opened.
 `tests/test_peerline.py` checks the peer's line to its session against a stand-in. `tests/test_peers.py` checks the client and the
 `peer` commands against stand-ins on the sockets, and once for real: a peer started, let into a
 room, told to wave and stopped. `tests/test_mcp_peers.py` checks each tool's command and what

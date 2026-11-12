@@ -1,5 +1,5 @@
 """The CLI's `peer` commands: a fake peer for Frametop Together (peers.py, docs/peers.md)."""
-from . import peeracts, peers, peershare, peersim, peerwords
+from . import peeracts, peerpc, peers, peershare, peersim, peerwords
 
 
 def hz(text):
@@ -36,6 +36,9 @@ def add_share(does):
     does.add_parser('unshare', help='takes its panel back')
     does.add_parser('give', help='gives its own panel to the person in that place of the room').add_argument('person', type=person)
     does.add_parser('take', help='takes its panel back from them, or from everyone').add_argument('person', type=person, nargs='?')
+    pc = does.add_parser('pc', help='its split compute PC comes, and that many of its windows are panels in the room (as many as it had, or 1)')
+    pc.add_argument('windows', type=int, nargs='?', choices=range(1, peerpc.MOST + 1))
+    does.add_parser('unpc', help="its PC's windows leave the room, and the PC goes")
 
 
 def add_acts(does):
@@ -112,6 +115,8 @@ def dispatch(args):
         return peers.tell(n, 'share %d %d' % args.size + (' %r %r %r %r' % (*args.at, args.turn) if args.at else ''))
     if what in ('give', 'take'):
         return peers.tell(n, what if args.person is None else '%s %d' % (what, args.person))
-    words = {'leave': '', 'unshare': '', 'pose': getattr(args, 'pose', ''), 'wear': getattr(args, 'model', None) or '',
+    if what == 'pc':
+        return peers.tell(n, 'pc' if args.windows is None else 'pc %d' % args.windows)
+    words = {'leave': '', 'unshare': '', 'unpc': '', 'pose': getattr(args, 'pose', ''), 'wear': getattr(args, 'model', None) or '',
              'speak': getattr(args, 'hz', ''), 'away': getattr(args, 'away', '')}
     return peers.tell(n, (what + ' ' + words[what]).strip())

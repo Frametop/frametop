@@ -165,7 +165,8 @@ class CommandsTest(unittest.TestCase):
                  (['peer', '1', 'share', '--size', '640x360', '--at', '-1', '1.5', '-2.5'], ('tell', 1, 'share 640 360 -1.0 1.5 -2.5 0.0')),
                  (['peer', '1', 'share', '--at', '1', '0', '2', '--turn', '-90'], ('tell', 1, 'share 1280 720 1.0 0.0 2.0 -90.0')),
                  (['peer', '1', 'unshare'], ('tell', 1, 'unshare')), (['peer', '1', 'give', '0'], ('tell', 1, 'give 0')), (['peer', '1', 'give', '3'], ('tell', 1, 'give 3')),
-                 (['peer', '1', 'take'], ('tell', 1, 'take')), (['peer', '1', 'take', '0'], ('tell', 1, 'take 0')), (['peer', '3', 'take', '3'], ('tell', 3, 'take 3'))]
+                 (['peer', '1', 'take'], ('tell', 1, 'take')), (['peer', '1', 'take', '0'], ('tell', 1, 'take 0')), (['peer', '3', 'take', '3'], ('tell', 3, 'take 3')),
+                 (['peer', '1', 'pc'], ('tell', 1, 'pc')), (['peer', '2', 'pc', '4'], ('tell', 2, 'pc 4')), (['peer', '1', 'unpc'], ('tell', 1, 'unpc'))]
         for argv, expected in cases:
             with self.subTest(argv=argv):
                 self.assertTrue(peer_cli.dispatch(cli.parser().parse_args(argv))['ok'])
@@ -185,7 +186,8 @@ class CommandsTest(unittest.TestCase):
                      ['peer', '1', 'share', '--size', '1366x768'], ['peer', '1', 'share', '--size', '1280x721'], ['peer', '1', 'share', '--size', '1280x352'],
                      ['peer', '1', 'share', '--size', '1280x1208'], ['peer', '1', 'share', '--size', '1280'], ['peer', '1', 'share', '--size', '1280x720x2'],
                      ['peer', '1', 'share', '--at', '1', '2'], ['peer', '1', 'share', '1280'], ['peer', '1', 'unshare', '0'], ['peer', '1', 'give'],
-                     ['peer', '1', 'give', '4'], ['peer', '1', 'give', '-1'], ['peer', '1', 'take', '4'], ['peer', '1', 'take', 'all']):
+                     ['peer', '1', 'give', '4'], ['peer', '1', 'give', '-1'], ['peer', '1', 'take', '4'], ['peer', '1', 'take', 'all'],
+                     ['peer', '1', 'pc', '0'], ['peer', '1', 'pc', '5'], ['peer', '1', 'pc', '1', '2'], ['peer', '1', 'unpc', '1']):
             with self.subTest(argv=argv), self.assertRaises(SystemExit), mock.patch('sys.stderr'):
                 cli.parser().parse_args(argv)
 

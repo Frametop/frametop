@@ -127,7 +127,7 @@ std::string Session::Leave() {
 // when the panel changed.
 std::string Session::Share(int number, proto::Panel panel) {
     if (mode_ != Mode::kHosting && mode_ != Mode::kJoined) return "you aren't in a room";
-    if (number < 0 || number >= room::kFramePanels) return "a headset shares " + std::to_string(room::kFramePanels) + " panels at most";
+    if (number < 0 || number >= room::kOwnPanels) return "a panel's number is 0 to " + std::to_string(room::kOwnPanels - 1);
     panel.id = proto::PanelId(me_, number), panel.pictures = panelPictures_;
     panel.name = wire::Clean(panel.name, proto::kMostPanelName);
     if (!proto::Fits(panel, proto::kPeople)) return "that isn't a panel: its size, its place or its turn is off";
@@ -157,7 +157,7 @@ void Session::PanelPictures(int aSecond) {
 
 std::string Session::Unshare(int number) {
     if (mode_ != Mode::kHosting && mode_ != Mode::kJoined) return "you aren't in a room";
-    if (number < 0 || number >= room::kFramePanels) return "no such panel";
+    if (number < 0 || number >= room::kOwnPanels) return "no such panel";
     proto::Unpanel u;
     u.panel = proto::PanelId(me_, number);
     if (mode_ == Mode::kHosting) {

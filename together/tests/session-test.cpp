@@ -307,11 +307,11 @@ static void panels() {
     net.tamper = nullptr;
 
     ok = true;
-    for (const char *bad : {"share 3 1920 1080 0 0 0 1 0 0 0 1 0", "share -1 1920 1080 0 0 0 1 0 0 0 1 0", "share 0 100 1080 0 0 0 1 0 0 0 1 0", "share 0 1921 1080 0 0 0 1 0 0 0 1 0",
+    for (const char *bad : {"share 7 1920 1080 0 0 0 1 0 0 0 1 0", "share -1 1920 1080 0 0 0 1 0 0 0 1 0", "share 0 100 1080 0 0 0 1 0 0 0 1 0", "share 0 1921 1080 0 0 0 1 0 0 0 1 0",
                             "share 0 1920 1080 0 0 0 0 0 0 0 1 0", "share 0 1920 1080 500 0 0 1 0 0 0 1 0", "share 0 1920 1080 0 0 0 1 0 0 0 0.01 0", "share 0 1920 1080 0 0 0 1 0 0 0 1 0.2",
-                            "share 0 1920 1080 0 0 0 1 0 0 0 1", "share 0 1920 1080 0 nan 0 1 0 0 0 1 0", "share 0.5 1920 1080 0 0 0 1 0 0 0 1 0", "share", "unshare", "unshare x", "unshare 3"})
+                            "share 0 1920 1080 0 0 0 1 0 0 0 1", "share 0 1920 1080 0 nan 0 1 0 0 0 1 0", "share 0.5 1920 1080 0 0 0 1 0 0 0 1 0", "share", "unshare", "unshare x", "unshare 7"})
         ok = ok && c.ask(bad).rfind("error", 0) == 0;
-    check("a fourth panel, a size no stream has, a turn that isn't one, a place a mile off: errors", ok && c.s->room().panels.size() == 2 && a.s->room().panels.size() == 2);
+    check("an eighth panel, a size no stream has, a turn that isn't one, a place a mile off: errors", ok && c.s->room().panels.size() == 2 && a.s->room().panels.size() == 2);
     ok = c.ask("share 2 1280 720 0 1 -1 1 0 0 0 1 0 A\x1b[31mname") == "ok" && a.s->room().panel(18) && a.s->room().panel(18)->name == "A[31mname" && c.ask("unshare 2") == "ok";
     for (Frame *f : {&a, &b, &c}) ok = ok && f->s->room().panels.size() == 2 && !f->s->room().panel(18);
     check("a name is cleaned on its way out, and a panel taken back is gone from every room", ok && c.ask("unshare 2") == "ok" && c.ask("unshare 0") == "ok");
@@ -355,7 +355,7 @@ static void panels() {
     ok = idle(c) && a.s->room().people.size() == 2 && !a.s->room().panel(8) && a.s->room().panel(9)->at[0] == 0.75f;
     check("a guest who shares a panel as someone else's is dropped, and the room stands", ok);
     ok = join(a, c);
-    c.Send(owners(c), proto::Pack(panel(2, 5)));
+    c.Send(owners(c), proto::Pack(panel(2, room::kOwnPanels)));
     net.pump();
     ok = ok && idle(c) && join(a, c);
     u.panel = 9;
@@ -365,7 +365,7 @@ static void panels() {
     w.panel = 9;
     c.Send(owners(c), proto::Pack(w));   // ...tells Ann of watching Bo's
     net.pump();
-    check("...so is one who shares past a headset's three, takes another's panel back, or tells the wrong Frame what they watch", ok && idle(c) && a.s->room().panels.size() == 2 && join(a, c));
+    check("...so is one who shares past the seven a person may, takes another's panel back, or tells the wrong Frame what they watch", ok && idle(c) && a.s->room().panels.size() == 2 && join(a, c));
     for (int link : c.s->MemberLinks())
         if (c.s->PersonOn(link) == 1) c.Send(link, proto::Pack(panel(2, 0)));   // a panel is the owner's to take, not another guest's
     net.pump();
@@ -516,8 +516,8 @@ static void noise() {
             if (roll() % 8 == 0) net.wait(2);
             const proto::Room &r = a.s->room();
             ok = ok && a.s->mode() == session::Mode::kHosting && r.person(0) && r.people.size() <= 3 && r.people.size() == a.s->MemberLinks().size() + 1 && !a.asking();
-            ok = ok && r.panels.size() <= size_t(room::kFramePanels) * r.people.size();
-            for (const proto::Panel &p : r.panels) ok = ok && r.person(p.owner()) && p.number() < room::kFramePanels;
+            ok = ok && r.panels.size() <= size_t(room::kOwnPanels) * r.people.size();
+            for (const proto::Panel &p : r.panels) ok = ok && r.person(p.owner()) && p.number() < room::kOwnPanels;
             for (Frame *g : {&b, &c})
                 if (g->s->mode() == session::Mode::kJoined) ok = ok && g->s->room().person(g->s->me()) && r.person(g->s->me()) && g->s->room().people.size() <= 3;
         }

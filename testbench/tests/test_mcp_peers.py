@@ -46,7 +46,8 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                   ['peer', '1', 'share', '--size', '1280x720', '--at', '0.0', '-1.0', '2.0', '--turn', '-90.0']),
                  ('peer_unshare', {'peer': 3}, ['peer', '3', 'unshare']), ('peer_control_give', {'peer': 1, 'person': 0}, ['peer', '1', 'give', '0']),
                  ('peer_control_give', {'peer': 1, 'person': 3}, ['peer', '1', 'give', '3']), ('peer_control_take', {'peer': 1}, ['peer', '1', 'take']),
-                 ('peer_control_take', {'peer': 1, 'person': 0}, ['peer', '1', 'take', '0'])]
+                 ('peer_control_take', {'peer': 1, 'person': 0}, ['peer', '1', 'take', '0']), ('peer_pc', {'peer': 1}, ['peer', '1', 'pc']),
+                 ('peer_pc', {'peer': 2, 'windows': 4}, ['peer', '2', 'pc', '4']), ('peer_unpc', {'peer': 3}, ['peer', '3', 'unpc'])]
         for name, args, expected in cases:
             with self.subTest(name=name, args=args):
                 reply = await server.call_tool(name, args)
@@ -74,7 +75,9 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                            ('peer_share', {'peer': 4}), ('peer_unshare', {'peer': 1, 'panel': 0}), ('peer_control_give', {'peer': 1}),
                            ('peer_control_give', {'peer': 1, 'person': 4}), ('peer_control_give', {'peer': 1, 'person': -1}),
                            ('peer_control_give', {'peer': 1, 'person': 0, 'panel': 8}), ('peer_control_take', {'peer': 1, 'person': 4}),
-                           ('peer_control_take', {'peer': 1, 'person': '0'})]:
+                           ('peer_control_take', {'peer': 1, 'person': '0'}), ('peer_pc', {'peer': 1, 'windows': 0}), ('peer_pc', {'peer': 1, 'windows': 5}),
+                           ('peer_pc', {'peer': 1, 'windows': '2'}), ('peer_pc', {'peer': 1, 'windows': 2.0}), ('peer_pc', {'peer': 1, 'windows': True}),
+                           ('peer_pc', {'peer': 4}), ('peer_unpc', {'peer': 1, 'windows': 1})]:
             with self.subTest(name=name, args=args):
                 self.assertTrue((await server.call_tool(name, args)).isError)
         self.assertEqual(len(calls), before)

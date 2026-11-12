@@ -19,7 +19,7 @@
 namespace proto {
 
 constexpr int kPanelNumbers = 8;         // the numbers a person's panels may have
-constexpr size_t kMostPanels = 16;       // in a room at once
+constexpr size_t kMostPanels = 28;       // in a room at once: all that its people may share (room/panels.h)
 constexpr size_t kMostPanelName = 48;
 constexpr int kLeastPanelSide = 128, kMostPanelSide = 4096;   // a stream's pixels a side, even
 constexpr int kPanelPictures = 30, kMostPanelPictures = 60;   // a stream's pictures a second: unless its owner says, and at the most

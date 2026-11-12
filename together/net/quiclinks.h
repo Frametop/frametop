@@ -39,6 +39,7 @@ public:
     struct Config {
         // The address calls are taken on, as a number: this Frame's on the tailnet, or a loopback
         // one. (msquic holds the port on every address, and hands over only what was sent to this one.)
+        // No port: calls aren't taken at all, only made (a PC that sends its panels to a Frame).
         std::string listen;
         uint16_t port = 0;
         // Whether an address may be called. A name is looked up first (lookup.h), and only an

@@ -5,6 +5,10 @@
 // calls). A guest's panel is in the room once the owner has put it there on the guest's word,
 // and so is the avatar a guest has on.
 //
+// A link whose first word is a Sender's isn't a Frame's: it is a split compute PC with panels
+// to send. The session only keeps such a link apart from the room's and passes on what it
+// says (Config::device); who it is and what it may say is flow/pcpanels.h's to check.
+//
 // Everything a link brings is untrusted input, also after its sender was let in: the messages
 // are bounded by their readers (proto/messages.h), and here every message is checked against
 // who sent it and what they may say. A link that says anything else is dropped.
@@ -64,6 +68,9 @@ struct Config {
     // Someone in the room says a message of a kind the session doesn't read itself (control's:
     // flow/control.h). False when it wasn't theirs to say: the link is closed.
     std::function<bool(int link, uint16_t kind, const std::vector<uint8_t> &body, double now)> said;
+    // A link that isn't a Frame's says something, its first word (a Sender) and all after it.
+    // `address` is its far end's. False when it wasn't theirs to say: the link is closed.
+    std::function<bool(int link, const std::string &address, uint16_t kind, const std::vector<uint8_t> &body, double now)> device;
 };
 
 enum class Mode { kIdle, kHosting, kCalling, kJoined };
@@ -110,9 +117,9 @@ public:
     std::string Wear(const proto::Look &look, double now);
     // Asks someone in the room for the file of the avatar they have on.
     std::string Want(int person, const proto::Look &look);
-    // Shares the wearer's panel `number` (0 to room::kFramePanels - 1) with the room, or says
-    // where and how large it is now. The panel's id is set here; a guest's is in room() once
-    // the owner has taken it.
+    // Shares the wearer's panel `number` (0 to room::kOwnPanels - 1: the Frame's own, then
+    // their PC's) with the room, or says where and how large it is now. The panel's id is set
+    // here; a guest's is in room() once the owner has taken it.
     std::string Share(int number, proto::Panel panel);
     std::string Unshare(int number);
     // The pictures a second the wearer's panels have at the most, from now on: the room hears
@@ -123,6 +130,8 @@ public:
     // A framed message to one of the room's people, on the link to them: for what the session
     // carries without reading it (Config::said at the other end).
     std::string Tell(int person, const std::vector<uint8_t> &message);
+    // Ends a link that isn't a Frame's (Config::device), for whoever it was handed to.
+    void Hang(int link);
 
     Mode mode() const { return mode_; }
     int me() const { return me_; }
@@ -143,7 +152,7 @@ public:
 
 private:
     struct Link {
-        enum State { kStranger, kAsking, kMember, kCalledOwner, kCalledPeer };
+        enum State { kStranger, kAsking, kMember, kCalledOwner, kCalledPeer, kDevice };
         State state = kStranger;
         std::string address;
         proto::Parser parser;

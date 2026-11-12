@@ -123,8 +123,10 @@ static void panels() {
     ok = room::SetPanel(r, 0, panel(2, 0)) == Shared::kNo && room::SetPanel(r, 2, panel(0, 0, 9)) == Shared::kNo && r.panel(0)->at[0] == 0;
     check("nobody shares a panel as someone else's, or moves one that is", ok && r.panels.size() == 3);
     check("someone who isn't in the room shares nothing", room::SetPanel(r, 1, panel(1, 0)) == Shared::kNo && room::SetPanel(r, 7, panel(7, 0)) == Shared::kNo);
-    check("a headset shares three panels, and no fourth", room::SetPanel(r, 2, panel(2, room::kFramePanels)) == Shared::kNo && room::SetPanel(r, 2, panel(2, 7)) == Shared::kNo);
-    ok = !room::DropPanel(r, 0, 17) && !room::DropPanel(r, 2, 0) && !room::DropPanel(r, 2, 18) && r.panels.size() == 3;
+    ok = room::kFramePanels == 3 && room::kOwnPanels == 7 && room::SetPanel(r, 2, panel(2, 3)) == Shared::kChanged && room::SetPanel(r, 2, panel(2, 6)) == Shared::kChanged && r.panels.size() == 5;
+    check("someone shares seven panels, three of their headset's and four of their PC's, and no eighth", ok && room::SetPanel(r, 2, panel(2, 7)) == Shared::kNo && r.panels.size() == 5);
+    ok = room::DropPanel(r, 2, 19) && room::DropPanel(r, 2, 22) && r.panels.size() == 3;
+    ok = ok && !room::DropPanel(r, 0, 17) && !room::DropPanel(r, 2, 0) && !room::DropPanel(r, 2, 18) && r.panels.size() == 3;
     check("only its owner takes a panel back", ok && room::DropPanel(r, 2, 17) && r.panels.size() == 2 && !r.panel(17));
     room::SetPanel(r, 2, panel(2, 0));
     ok = room::DropPanelsOf(r, 0) && r.panels.size() == 1 && r.panels[0].id == 16 && !room::DropPanelsOf(r, 0);

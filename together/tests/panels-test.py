@@ -131,9 +131,11 @@ def main(together, share, peer):
         ok = stay.until(lambda lines: len(pictures(stay, mark)) >= 30, 15)
         pics = pictures(stay, mark)[-20:]
         numbers = [p["number"] for p in pics]
-        if not check("a new encoder's pictures go on into the decoder that showed the old one's", ok and -1 not in numbers and jumps(numbers) <= 2 and
+        if not check("a new encoder's pictures go on into the program that showed the old one's", ok and -1 not in numbers and jumps(numbers) <= 2 and
                      numbers[-1] < 2000 and true_colours(pics)):
             print("    (numbers %s; it said %s)" % (numbers, stay.lines[-5:]))
+        print("      (the new encoder's video %s)" % ("began anew: another decoder was opened for it" if stay.said("began anew", 0, mark)
+                                                       else "went on into the same decoder"))
         stay.end()
         src.end()
 

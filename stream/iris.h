@@ -152,6 +152,9 @@ struct Decoder {
     Layout layout{};
     uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
     bool capturing = false, drained = false;
+    // The stream changed while pictures were coming out (another encoder's, say): nothing more
+    // comes out of this decoder. ft-peerpanel opens another one; ft-stream goes on as it did.
+    bool changedAgain = false;
 
     bool Open(const char *dev, int count) {
         fd = open(dev, O_RDWR | O_NONBLOCK | O_CLOEXEC);
@@ -244,7 +247,7 @@ struct Decoder {
             if (e.type == V4L2_EVENT_EOS) drained = true;
         }
         if (changed && !capturing) return SetUpCapture();
-        if (changed) std::printf("decoder: another source change (ignored)\n");
+        if (changed) std::printf("decoder: another source change (ignored)\n"), changedAgain = true;
         return false;
     }
 

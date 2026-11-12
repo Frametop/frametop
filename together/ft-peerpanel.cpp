@@ -13,7 +13,9 @@
 //                    STRIDE" with the ring's three fds, "frame I"
 //
 // How much of the panel its viewer sees goes on to ft-together, so that a panel nobody looks at
-// isn't sent, and so does word that the decoder lost its place and needs a keyframe.
+// isn't sent, and so does word that the decoder lost its place and needs a keyframe. When the
+// panel's video begins anew as another stream (its owner's encoder was started again), the
+// decoder takes no more: another one is opened in its place.
 //
 // The wearer's hand on the panel goes to ft-together's local socket: where they point, for
 // everyone in the room to see, and what they click and type, for the panel's owner, who takes
@@ -109,6 +111,13 @@ void Probe(const Converter &conv, int count) {
                 media::testpattern::Read(rows.data(), width * 4, width), at(0), at(1), at(media::testpattern::kSquares + 1));
 }
 
+// A decoder for the panel's video, in place of whatever `dec` was.
+bool OpenDecoder(Decoder &dec) {
+    dec = Decoder{};
+    dec.toSteamVR = false;
+    return dec.Open("/dev/video-dec0", 6);
+}
+
 int Run(const Args &args) {
     Screens screens{args.fd};
     local::MediaClient together(local::kMostMedia);
@@ -141,8 +150,7 @@ int Run(const Args &args) {
         }
     }
     Decoder dec;
-    dec.toSteamVR = false;
-    if (!dec.Open("/dev/video-dec0", 6) || !conv.Init()) return screens.Say("state lost no decoder"), 1;
+    if (!OpenDecoder(dec) || !conv.Init()) return screens.Say("state lost no decoder"), 1;
     screens.Say("state connecting");
     in.Tell(false);
     std::printf("panel %d: waiting for its pictures\n", args.panel);
@@ -191,7 +199,18 @@ int Run(const Args &args) {
         toRoom.Send(said);
         if (!open) break;   // ft-screens closed its end
 
-        if (dec.Events()) {
+        const bool began = dec.Events();
+        if (dec.changedAgain) {
+            dec.Close();
+            if (!OpenDecoder(dec)) {
+                screens.Say("state lost no decoder");
+                code = 1;
+                break;
+            }
+            in.Lost("its video began anew");
+            continue;
+        }
+        if (began) {
             if (!conv.Setup(dec)) break;
             const int fds[3] = {conv.out[0].fd, conv.out[1].fd, conv.out[2].fd};
             char b[160];

@@ -1733,27 +1733,14 @@ def arrangement(count):
 
 
 def send_layout_scales(layout, count):
-    """Give KWin 6.6 its preferred scale and logical configure size through its host."""
+    """The layout's scale for each screen to ft-screens. It gives KWin 6.6 that as its
+    preferred scale, with a logical configure size, and undoes it on pointer input (panel
+    pixels / scale), which KWin's nested backend doesn't."""
     if backend() != "screens":
         return
     sock = screens_socket()
     for i in range(count):
         sock.ask(f"scale {i + 1} {screen_scale(layout, i):g}")
-
-
-def send_scales(outs):
-    """KWin's scale for each screen, as it is now, to ft-screens: KWin's nested backend
-    doesn't undo its scale on pointer input, so ft-screens does (panel pixels / scale)."""
-    if backend() != "screens":
-        return
-    try:
-        sock = screens_socket()
-        for i, o in enumerate(outs):
-            reply = sock.ask(f"scale {i + 1} {float(o.get('scale', 1)):g}")
-            if not reply.startswith("ok"):
-                log(f"screen {i + 1}: scale: {reply}")
-    except RuntimeError as e:
-        log(f"scale: {e}")
 
 
 def logical_size(o):
@@ -1802,15 +1789,10 @@ def apply_scales():
     # Laid out as you see the screens around you (arrangement), centred on one line, so
     # the pointer and dragged windows cross to the screen you see next to this one.
     outs = outputs(env)
-    if backend() == "screens":
-        for _ in range(9):
-            if not any(abs((outs[i].get("scale") or 1.0) - screen_scale(layout, i)) > 0.01
-                       for i in range(min(count, len(outs)))):
-                break
-            time.sleep(0.05)
-            outs = outputs(env)
-    send_scales(outs)
-    # A configure may still be pending. Use target scales for positions even then.
+    # KWin's scale isn't read back for ft-screens. From 6.6 kscreen-doctor shows a nested
+    # output's stored scale setting, 1 whatever its scale is, and ft-screens would give KWin
+    # that as the scale to have. Positions use the layout's scales for the same reason, and
+    # because a configure may still be pending.
     sizes = []
     for i, o in enumerate(outs):
         if not o.get("size"):

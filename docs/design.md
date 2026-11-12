@@ -37,8 +37,11 @@ preferred scale before logical dimensions, at startup and when scale changes. Sc
 resolutions stay in pixels; configure dimensions divide them by the scale rounded to 120ths.
 They also keep the resulting pixel dimensions divisible by the whole buffer scale KWin 6.2
 requires. ft-floatd sends spares' logical dimensions itself, after enabling and scaling them.
-ft-layout waits briefly for KWin's reported scale, and uses target scales for positioning
-while configure events are pending.
+`kscreen-doctor` doesn't show that scale either: from 6.6 it reports a nested output's stored
+scale setting, which stays 1. ft-layout sends ft-screens the layout's scales and never the
+ones KWin reports, which would put a scaled screen back at 1, and positions screens by the
+layout's scales too. KWin's support information (`qdbus6 org.kde.KWin /KWin
+supportInformation`) shows the scale an output has.
 
 ### Placing and sizing
 

@@ -6,6 +6,7 @@ import os
 import socket
 import struct
 import subprocess
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -46,7 +47,7 @@ class RulesTest(unittest.TestCase):
         self.sent = []
         self.sim.send = self.sent.append
         self.sim.start()
-        self.addCleanup(self.sim.asker.close)
+        self.addCleanup(self.sim.line.close)
 
     def test_it_starts_a_session_of_its_own_and_someone_standing(self):
         together, body = self.started
@@ -123,6 +124,57 @@ class RulesTest(unittest.TestCase):
             self.assertEqual(self.sim.answer('point 3 0.5 0.5 down'), 'ok')
             self.assertEqual(session.recv(64), struct.pack('<BHBHHB', 3, 0, 3, 32768, 32768, 1))
 
+    def test_its_questions_go_to_its_own_session_and_what_comes_unasked_is_its_panels(self):
+        del self.sim.ask
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC) as session:
+            session.bind('\0ft_peer_2_t')
+            session.settimeout(2)
+            asked = []
+
+            def answer():
+                data, who = session.recvfrom(64)
+                asked.append(data)
+                session.sendto(b'\x85\x02' + struct.pack('<BBii', 16, 2, 1, 1), who)
+                session.sendto(b'ok ' + data, who)
+
+            thread = threading.Thread(target=answer)
+            thread.start()
+            self.assertEqual(self.sim.ask('wear Robot'), 'ok wear Robot')
+            thread.join()
+        self.assertEqual(asked, [b'wear Robot'])
+        self.sim.ask = lambda text: 'ok'
+        self.sim.answer('share')
+        self.assertEqual(self.sim.share.state()['shares']['last'], [{'person': 2, 'what': 'button', 'a': 1, 'b': 1}])
+
+    def test_its_panel_is_a_program_of_its_own_and_is_kept_up_and_ended_with_it(self):
+        self.assertEqual(self.sim.answer('share 1920 1080'), 'ok')
+        self.assertEqual(self.started[-1].argv, ['/programs/ft-sharepanel', '--panel', '0', '--size', '1920x1080', '--fps', '30', '--socket', 'ft_peer_2_t',
+                                                 '--pattern'])
+        self.assertEqual(self.asked, ['share 0 1920 1080 0 1.5 -2.5 1.000000 0.000000 0.000000 0.000000 2 0 Test panel'])
+        state = json.loads(self.sim.answer('state')[3:])
+        self.assertEqual((state['shares']['size'], state['shares']['at'], state['running']['ft-sharepanel']), ([1920, 1080], [0.0, 1.5, -2.5], True))
+        del self.asked[:]
+        self.sim.tick()
+        self.assertEqual(self.asked, ['control here', 'inputs', 'moves'], 'its wearer is there, and what its panel is given and where it was put are asked')
+        self.assertEqual(self.sim.answer('away game'), 'ok')
+        self.now += 2
+        del self.asked[:]
+        self.sim.tick()
+        self.assertEqual(self.asked, ['inputs', 'moves'], "away, its wearer isn't there")
+        for text in ('give 0', 'take 0', 'take', 'unshare'):
+            self.assertEqual(self.sim.answer(text), 'ok', text)
+        self.assertEqual(self.asked[2:], ['control give 0 0', 'control take 0 0', 'control take 0', 'unshare 0'])
+        self.assertTrue(self.started[-1].ended)
+        for text in ('leave', 'join 100.64.0.1 47193 ABCD2345'):
+            self.sim.answer('share')
+            del self.asked[:]
+            self.assertEqual(self.sim.answer(text), 'ok')
+            self.assertEqual((self.asked[:], self.started[-1].ended, json.loads(self.sim.answer('state')[3:])['shares']), (['unshare 0', text], True, None), text)
+        self.sim.answer('share')
+        self.sim.end()
+        self.assertTrue(all(child.ended for child in self.started))
+        self.assertIn('share [W H [X Y Z [DEGREES]]] | unshare | give PERSON | take [PERSON] | quit', self.sim.answer('share 1366 768'))
+
     def test_it_points_and_looks_at_nothing_once_it_leaves_goes_away_or_joins(self):
         for text in ('leave', 'away off', 'join 100.64.0.1 47193 ABCD2345'):
             self.sim.answer('point 3 0.5 0.5 down')
@@ -183,7 +235,7 @@ class FakePeerTest(peerkit.RealRoom):
         self.assertGreater(voices, 10, 'the owner hears the peer hum\n' + self.said())
         self.assertGreater(mouths, 3, "the peer's mouth moves while it hums\n" + self.said())
         state = self.sim.state()
-        self.assertEqual((state['speaks'], state['walked'], state['running']), (220.0, [1.0, 0.0, 0.0], {'ft-together': True, 'ft-avatars': True, 'ft-roomvoice': True}))
+        self.assertEqual((state['speaks'], state['walked'], state['running']), (220.0, [1.0, 0.0, 0.0], {'ft-together': True, 'ft-avatars': True, 'ft-roomvoice': True, 'ft-sharepanel': False}))
 
         self.assertTrue(self.sim.ask('wear nothing-here').startswith('error'), 'a model its folder has not got')
         self.assertEqual(self.sim.ask('wear'), 'ok')

@@ -38,7 +38,15 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                  ('peer_act_scroll', {'peer': 1, 'panel': 8, 'right': 2400, 'down': 240}, ['peer', '1', 'act', '8', 'scroll', '--', '2400', '240']),
                  ('peer_act_key', {'peer': 1, 'panel': 8, 'code': 30, 'down': True}, ['peer', '1', 'act', '8', 'key', '30', '1']),
                  ('peer_put', {'peer': 1, 'panel': 8, 'x': -1.0, 'y': 1.5, 'z': -2.0}, ['peer', '1', 'put', '8', '--', '-1.0', '1.5', '-2.0', '0']),
-                 ('peer_put', {'peer': 1, 'panel': 8, 'x': 0.0, 'y': 0.0, 'z': 0.0, 'degrees': -90.0}, ['peer', '1', 'put', '8', '--', '0.0', '0.0', '0.0', '-90.0'])]
+                 ('peer_put', {'peer': 1, 'panel': 8, 'x': 0.0, 'y': 0.0, 'z': 0.0, 'degrees': -90.0}, ['peer', '1', 'put', '8', '--', '0.0', '0.0', '0.0', '-90.0']),
+                 ('peer_share', {'peer': 1}, ['peer', '1', 'share', '--size', '1280x720']),
+                 ('peer_share', {'peer': 2, 'width': 1920, 'height': 1080}, ['peer', '2', 'share', '--size', '1920x1080']),
+                 ('peer_share', {'peer': 1, 'width': 640, 'height': 360, 'x': -1.0}, ['peer', '1', 'share', '--size', '640x360', '--at', '-1.0', '1.5', '-2.5', '--turn', '0']),
+                 ('peer_share', {'peer': 1, 'x': 0.0, 'y': -1.0, 'z': 2.0, 'degrees': -90.0},
+                  ['peer', '1', 'share', '--size', '1280x720', '--at', '0.0', '-1.0', '2.0', '--turn', '-90.0']),
+                 ('peer_unshare', {'peer': 3}, ['peer', '3', 'unshare']), ('peer_control_give', {'peer': 1, 'person': 0}, ['peer', '1', 'give', '0']),
+                 ('peer_control_give', {'peer': 1, 'person': 3}, ['peer', '1', 'give', '3']), ('peer_control_take', {'peer': 1}, ['peer', '1', 'take']),
+                 ('peer_control_take', {'peer': 1, 'person': 0}, ['peer', '1', 'take', '0'])]
         for name, args, expected in cases:
             with self.subTest(name=name, args=args):
                 reply = await server.call_tool(name, args)
@@ -59,7 +67,14 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
                            ('peer_act_button', {'peer': 1, 'panel': 8, 'button': 1, 'down': 1}), ('peer_act_scroll', {'peer': 1, 'panel': 8, 'down': 2401}),
                            ('peer_act_scroll', {'peer': 1, 'panel': 8, 'down': 1.5}), ('peer_act_key', {'peer': 1, 'panel': 8, 'code': 125, 'down': True}),
                            ('peer_act_key', {'peer': 1, 'panel': 8, 'code': 0, 'down': True}), ('peer_put', {'peer': 1, 'panel': 8, 'x': 101.0, 'y': 0.0, 'z': 0.0}),
-                           ('peer_put', {'peer': 1, 'panel': 8, 'x': 0.0, 'y': 0.0}), ('peer_put', {'peer': 1, 'panel': 8, 'x': 0.0, 'y': 0.0, 'z': 0.0, 'degrees': 400.0})]:
+                           ('peer_put', {'peer': 1, 'panel': 8, 'x': 0.0, 'y': 0.0}), ('peer_put', {'peer': 1, 'panel': 8, 'x': 0.0, 'y': 0.0, 'z': 0.0, 'degrees': 400.0}),
+                           ('peer_share', {'peer': 1, 'width': 1366, 'height': 768}), ('peer_share', {'peer': 1, 'width': 1280, 'height': 724}),
+                           ('peer_share', {'peer': 1, 'height': 352}), ('peer_share', {'peer': 1, 'height': 1208}), ('peer_share', {'peer': 1, 'width': '1280'}),
+                           ('peer_share', {'peer': 1, 'x': 101.0}), ('peer_share', {'peer': 1, 'x': 0.0, 'degrees': 361.0}), ('peer_share', {'peer': 1, 'panel': 1}),
+                           ('peer_share', {'peer': 4}), ('peer_unshare', {'peer': 1, 'panel': 0}), ('peer_control_give', {'peer': 1}),
+                           ('peer_control_give', {'peer': 1, 'person': 4}), ('peer_control_give', {'peer': 1, 'person': -1}),
+                           ('peer_control_give', {'peer': 1, 'person': 0, 'panel': 8}), ('peer_control_take', {'peer': 1, 'person': 4}),
+                           ('peer_control_take', {'peer': 1, 'person': '0'})]:
             with self.subTest(name=name, args=args):
                 self.assertTrue((await server.call_tool(name, args)).isError)
         self.assertEqual(len(calls), before)

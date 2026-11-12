@@ -24,14 +24,12 @@ pointer told again each second, the direction a few times a second.
 
 The rules only: what it asks and sends goes through the two functions it is given.
 """
-import json
-import math
 import struct
 
-PANELS = 32            # ids a room's panels may have (together/proto: kPeople * kPanelNumbers)
+from .peerwords import FAR, PANELS, number, told, upright, whole
+
 NO_PANEL = 255         # a pointer on none (proto/pointwire.h)
 MOST_GAZE = 63.5       # degrees either way (proto/posewire.h)
-FAR = 100.0            # metres from the room's middle, as far as a panel goes (proto/panel.h)
 POINT_EVERY_S = 1.0    # a resting hand's pointer is told this often (local/panelhand.h)
 LOOK_EVERY_S = 0.4     # a direction stands for one second (local/gaze.h)
 HAND_EVERY_S = 1.0     # what moves the pointer is said each second (local/gaze.h)
@@ -43,28 +41,9 @@ QUESTIONS = ('point PANEL X Y [down] | point off | look YAW PITCH | look off | a
              'act PANEL button B 0|1 | act PANEL scroll RIGHT DOWN | act PANEL key CODE 0|1 | put PANEL X Y Z [DEGREES]')
 
 
-def number(word, least, most):
-    value = float(word)
-    if not least <= value <= most:   # which a nan isn't
-        raise ValueError
-    return value
-
-
-def whole(word, least, most):
-    value = int(word)
-    if not least <= value <= most:
-        raise ValueError
-    return value
-
-
 def part(of):
     """A part of a picture's side, 0 to 1, as a pointer and a move say it."""
     return round(of * 65535)
-
-
-def told(reply):
-    """What an answer of `ok` and JSON says, or the answer when it is none."""
-    return json.loads(reply[3:]) if reply.startswith('ok {') else {'error': reply}
 
 
 class Acts:
@@ -140,8 +119,8 @@ class Acts:
             return self.use(whole(rest[0], 0, PANELS - 1), *rest[1:])
         if what == 'put' and len(rest) in (4, 5):
             panel, at = whole(rest[0], 0, PANELS - 1), [number(word, -FAR, FAR) for word in rest[1:4]]
-            half = math.radians(number(rest[4], -360, 360) if len(rest) == 5 else 0.0) / 2
-            return self.ask('move %d %g %g %g %.6f 0 %.6f 0' % (panel, *at, math.cos(half), math.sin(half)))
+            turn = upright(number(rest[4], -360, 360) if len(rest) == 5 else 0.0)
+            return self.ask('move %d %g %g %g %.6f 0 %.6f 0' % (panel, *at, turn[0], turn[2]))
         return None
 
     def use(self, panel, what, a, b):

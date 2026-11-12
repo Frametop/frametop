@@ -1,5 +1,5 @@
 """The CLI's `peer` commands: a fake peer for Frametop Together (peers.py, docs/peers.md)."""
-from . import peeracts, peers, peersim
+from . import peeracts, peers, peershare, peersim, peerwords
 
 
 def hz(text):
@@ -12,6 +12,30 @@ def panel(text):
     if not 0 <= int(text) < peeracts.PANELS:
         raise ValueError("a panel's id is 0 to %d" % (peeracts.PANELS - 1))
     return int(text)
+
+
+def size(text):
+    width, height = (int(word) for word in text.split('x'))
+    if width not in peershare.WIDTHS or not peershare.HEIGHTS[0] <= height <= peershare.HEIGHTS[1] or height % 8:
+        raise ValueError('a size is WxH: W one of %s, H a multiple of 8 from %d to %d' % (', '.join(map(str, peershare.WIDTHS)), *peershare.HEIGHTS))
+    return width, height
+
+
+def person(text):
+    if not 0 <= int(text) < peerwords.PEOPLE:
+        raise ValueError("someone's place in a room is 0 to %d" % (peerwords.PEOPLE - 1))
+    return int(text)
+
+
+def add_share(does):
+    """A peer's own test panel in a room (peershare.py)."""
+    share = does.add_parser('share', help='puts a test panel of its own into the room, two metres wide, or moves the one it has')
+    share.add_argument('--size', type=size, default=peershare.SIZE, metavar='WxH', help="its picture's size in pixels (1280x720)")
+    share.add_argument('--at', type=float, nargs=3, metavar=('X', 'Y', 'Z'), help='its middle in the room, in metres (where it was, or a spot of its own)')
+    share.add_argument('--turn', type=float, default=0.0, metavar='DEGREES', help='with --at: turned that much to its left')
+    does.add_parser('unshare', help='takes its panel back')
+    does.add_parser('give', help='gives its own panel to the person in that place of the room').add_argument('person', type=person)
+    does.add_parser('take', help='takes its panel back from them, or from everyone').add_argument('person', type=person, nargs='?')
 
 
 def add_acts(does):
@@ -55,6 +79,7 @@ def add_parser(commands):
     does.add_parser('speak', help='it hums a note of that many Hz, or is quiet').add_argument('hz', type=hz, metavar='HZ|off')
     does.add_parser('away', help='in a game, the headset off, or back').add_argument('away', choices=('game', 'off', 'back'))
     add_acts(does)
+    add_share(does)
 
 
 def dispatch(args):
@@ -81,6 +106,12 @@ def dispatch(args):
         return peers.tell(n, 'act %d %s %s %s' % (args.panel, args.act, *args.numbers))
     if what == 'put':
         return peers.tell(n, 'put %d %r %r %r %r' % (args.panel, args.x, args.y, args.z, args.degrees))
-    words = {'leave': '', 'pose': getattr(args, 'pose', ''), 'wear': getattr(args, 'model', None) or '',
+    if what == 'share':
+        if args.turn and not args.at:
+            raise ValueError('--turn goes with --at')
+        return peers.tell(n, 'share %d %d' % args.size + (' %r %r %r %r' % (*args.at, args.turn) if args.at else ''))
+    if what in ('give', 'take'):
+        return peers.tell(n, what if args.person is None else '%s %d' % (what, args.person))
+    words = {'leave': '', 'unshare': '', 'pose': getattr(args, 'pose', ''), 'wear': getattr(args, 'model', None) or '',
              'speak': getattr(args, 'hz', ''), 'away': getattr(args, 'away', '')}
     return peers.tell(n, (what + ' ' + words[what]).strip())

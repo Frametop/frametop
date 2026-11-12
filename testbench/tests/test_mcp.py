@@ -41,7 +41,8 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             'pointer_state', 'pointer_control', 'overlay_list', 'overlay_measure', 'display_power',
             'peer_start', 'peer_stop', 'peer_state', 'peer_join', 'peer_leave', 'peer_pose', 'peer_walk',
             'peer_avatar', 'peer_speak', 'peer_away', 'peer_point', 'peer_look', 'peer_control_ask',
-            'peer_act_move', 'peer_act_button', 'peer_act_scroll', 'peer_act_key', 'peer_put'})
+            'peer_act_move', 'peer_act_button', 'peer_act_scroll', 'peer_act_key', 'peer_put', 'peer_share', 'peer_unshare',
+            'peer_control_give', 'peer_control_take'})
         for tool in tools:
             self.assertFalse(tool.inputSchema.get('additionalProperties', True))
             self.assertFalse({'host', 'socket', 'command', 'output', 'remote_root'} &

@@ -2,8 +2,9 @@
 
 A fake peer is someone in a Frametop Together room who isn't there. It is Frametop's own programs
 with nobody wearing them: an `ft-together` of its own (the real session code, on a port and a
-socket of its own), `ft-avatars --pretend` standing in for a tracked wearer, and
-`ft-roomvoice --hum` for their voice. Up to three run at once, which fills a room of four with
+socket of its own), `ft-avatars --pretend` standing in for a tracked wearer,
+`ft-roomvoice --hum` for their voice, and `ft-sharepanel --pattern` for a screen they share. Up
+to three run at once, which fills a room of four with
 the Frame's wearer. Everything the Frame's own programs do with a real guest they do with a fake
 one: the ask on the Frametop Together page, the links, the poses, the avatar, the voice and its
 mouth, away. See [docs/together.md](../../docs/together.md) for the design and
@@ -24,6 +25,10 @@ mouth, away. See [docs/together.md](../../docs/together.md) for the design and
 ./frame-testbench peer 1 ask 0                # asks panel 0's owner for it
 ./frame-testbench peer 1 act 0 button 1 1     # on a panel it was given: the left button down
 ./frame-testbench peer 1 put 8 0 1.5 -2 90    # puts panel 8 there in the room, turned 90 degrees left
+./frame-testbench peer 1 share                # a test panel of its own in the room
+./frame-testbench peer 1 give 0               # gives its panel to the person in place 0, the room's owner
+./frame-testbench peer 1 take                 # takes it back from everyone
+./frame-testbench peer 1 unshare
 ./frame-testbench peer 1 state
 ./frame-testbench peer 1 leave                # out of the room, still running
 ./frame-testbench peer 1 stop
@@ -77,7 +82,8 @@ and so is `put` unless the peer owns the room or was given the panel. A negative
 
 **Control is the owner's to give.** `ask` only asks. For a panel of this Frame's, its wearer
 gives it on the Frametop Together page (or `together/ft-room control give NUMBER PERSON`), and
-only while they wear the headset. The testbench has no command and no tool that gives a panel.
+only while they wear the headset. The testbench has no command and no tool that gives a panel
+of yours: `give` gives the peer's own ("Its own panel", below).
 Once a panel of yours is given to a fake peer, its `act` commands move your pointer and type on
 your desktop until you take it back, it leaves, or you take the headset off.
 
@@ -85,6 +91,39 @@ When the peer leaves, goes away or joins a room, its pointer comes off the panel
 stops sharing where it looks. `state` says what it points at (`points`), where it looks
 (`looks`), and what its `ft-together` says of control (`control`: the panels it asked for and
 holds) and of its gaze (`gaze`).
+
+## Its own panel
+
+`share` puts one panel of the peer's own into the room: a test picture that counts, two metres
+wide and flat, named "Test panel". It is the peer's panel number 0, so its id in the room is the
+peer's place times eight.
+
+| Command | What the peer does |
+| --- | --- |
+| `share [--size WxH] [--at X Y Z] [--turn DEGREES]` | Shares the panel, or moves the one it shares. The picture is 1280x720 unless `--size` says: W one of 640, 896, 1280, 1408, 1664 or 1920, H a multiple of 8 from 360 to 1200. `--at` is its middle in the room in metres, and `--turn` a turn to its left; without them it stays where it is, or stands on a spot of the peer's own. Another size takes the panel back and shares a new one |
+| `unshare` | Takes the panel back |
+| `give PERSON` | Gives its panel to the person in that place of the room (0 is the room's owner), asked or not |
+| `take [PERSON]` | Takes it back from them, or from everyone, and says no to their ask |
+
+The picture is made by `ft-sharepanel --pattern`, the program a Frame shares a screen with, fed
+a test picture in place of a screen. It runs this Frame's hardware encoder, and only while
+someone watches the panel; the encoder closes three seconds after the last watcher has gone.
+When this Frame's wearer watches it, the Frame encodes and decodes the same video. The widths
+are the ones the Frame's encoder is known to take: at some others it resets the Frame
+([together/README.md](../../together/README.md), "What the Frame's encoder needs").
+
+While it shares, the peer does what a Frame's own programs do for a shared screen. It says each
+second that its wearer is there (`control here`), which is what lets it give the panel and keeps
+a grant standing; a peer that is away doesn't say it, and what it gave ends, as it does for a
+real wearer. It takes where the others put its panel (`moves`) and tells the room that it stands
+there now. And it takes the input of whoever it gave the panel to (`inputs`). There is no
+desktop behind the panel, so the input goes nowhere: `state` counts it (`shares.inputs`) and
+lists the last sixteen acts (`shares.last`: who, what, and its two numbers), which is how a test
+sees that your hand reached it. `state` also says the panel's size, where it stands and whether
+its picture's program runs.
+
+The peer takes its panel out of the room before it leaves or joins another. While it is away the
+panel stays and its picture keeps counting, where a real Frame's would freeze.
 
 ## How it works
 
@@ -102,8 +141,9 @@ programs were built in (`scripts/in-box`), so it can start and end them. It need
 
 `ft-peer-sim` checks each question before it passes anything on (a pose is one of the seven, a
 walk is within 20 m and a turn within 360 degrees, a note is 50 to 2000 Hz, a model's name has
-no path in it, a panel's id is 0 to 31 and every number of a pointer, a look, an act or a place
-is within what the session takes), and reads nothing a room sends: the programs it starts do, by the session's own
+no path in it, a panel's id is 0 to 31, every number of a pointer, a look, an act or a place
+is within what the session takes, and its own panel's size is one the encoder is known to take),
+and reads nothing a room sends: the programs it starts do, by the session's own
 rules. `stop` asks it to end over its socket, since a signal to the unit doesn't reach a program
 in the container; it then leaves its room and ends its programs. One that doesn't end in 15
 seconds is told with SIGTERM, and the command says so.
@@ -115,11 +155,13 @@ also runs with `--loopback`; the tests use it.
 
 What is real: the session, the links (QUIC between the two `ft-together` on this Frame), the
 room's rules, the pose datagrams, the Opus voice and its mouth shapes, an avatar's file crossing
-a link, the pointers, the asks and grants, and the input a grant lets through. What isn't: the
+a link, the pointers, the asks and grants, the input a grant lets through, and its panel's
+video, encoded by the Frame's encoder and sent as a screen's is. What isn't: the
 wearer (a pose that plays, not a tracked head and hands), the voice (a hummed note, with no
 microphone opened and nothing played from the peer's end), the hand and the eyes (a place and a
 direction it is told, not a pointer on a panel it sees or a gaze that was tracked; the body's
-pose doesn't follow either), and the network (both ends are on this Frame, so there is no delay
+pose doesn't follow either), its panel (a test picture with no desktop behind it), and the
+network (both ends are on this Frame, so there is no delay
 or loss). While a peer is away nobody stands
 there: its pretended wearer is ended until it is back, as `ft-avatars --room` tells the room
 nothing of a wearer who is away.
@@ -134,9 +176,8 @@ file only if it is marked as one to pass on, as for a real wearer
 
 ## What it can't do yet
 
-- Share a panel, so nothing of its own can be asked for, given or moved. A fake peer's panel
-  would run this Frame's hardware decoder, which is held back for now
-  ([docs/together.md](../../docs/together.md), "Open questions").
+- Share more than one panel, a floating window, or anything with a desktop behind it. What is
+  done on its panel is counted, not shown in its picture.
 - See a panel: it runs no `ft-peerpanel`, so it points where it is told, not where a picture is.
 - Speak from a recording. It hums.
 - A slow or lossy link: no delay, loss or rate cap between it and the Frame.
@@ -146,9 +187,10 @@ file only if it is marked as one to pass on, as for a real wearer
 
 `peer_start`, `peer_stop`, `peer_state`, `peer_join`, `peer_leave`, `peer_pose`, `peer_walk`,
 `peer_avatar`, `peer_speak`, `peer_away`, `peer_point`, `peer_look`, `peer_control_ask`,
-`peer_act_move`, `peer_act_button`, `peer_act_scroll`, `peer_act_key` and `peer_put`
-([mcp.md](mcp.md)). The tools join only the room open on this Frame, take no host, port, code,
-socket or folder, and none gives a panel.
+`peer_act_move`, `peer_act_button`, `peer_act_scroll`, `peer_act_key`, `peer_put`, `peer_share`,
+`peer_unshare`, `peer_control_give` and `peer_control_take` ([mcp.md](mcp.md)). The tools join
+only the room open on this Frame and take no host, port, code, socket or folder. A peer gives
+only its own test panel: none gives a panel of the wearer's.
 
 ## Tests
 
@@ -160,7 +202,13 @@ the hand's and the eyes' questions says to the session, with a stand-in for it, 
 room whose owner shares a panel: the owner's programs are told where the peer points, its look
 is in its poses, an act is refused until the owner gave the panel, then reaches the program at
 the owner's desktop in order, a `put` reaches the owner's Frame, and nothing does once the
-panel is taken back (`tests/peerkit.py` has what the two real runs share). `tests/test_peers.py` checks the client and the
+panel is taken back. `tests/test_peershare.py` checks the questions about its own panel the
+same way, and in such a room: the panel is in the owner's room and its picture's program waits
+for a watcher, the owner's acts are refused until the peer gave it and then reach the peer, the
+owner puts it elsewhere and the room hears that it stands there, a grant ends when the peer
+goes away, and the panel goes when it is taken back or the peer leaves. Nobody watches the
+panel in that run, so no video is encoded (`tests/peerkit.py` has what the real runs share).
+`tests/test_peerline.py` checks the peer's line to its session against a stand-in. `tests/test_peers.py` checks the client and the
 `peer` commands against stand-ins on the sockets, and once for real: a peer started, let into a
 room, told to wave and stopped. `tests/test_mcp_peers.py` checks each tool's command and what
 the tools refuse (it needs the MCP SDK, like the other MCP tests). Seeing and hearing a fake

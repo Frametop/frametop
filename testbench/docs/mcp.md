@@ -125,6 +125,10 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `peer_act_scroll` | `peer`, `panel`; optional `right`, `down` (120 a notch, ±2400) | `peer N act PANEL scroll -- RIGHT DOWN` |
 | `peer_act_key` | `peer`, `panel`, `code` (a Linux key code, 1-111), `down` | `peer N act PANEL key CODE 0\|1` |
 | `peer_put` | `peer`, `panel`, `x`, `y`, `z` (metres, ±100); optional `degrees` (±360) | `peer N put PANEL -- X Y Z DEGREES` |
+| `peer_share` | `peer`; optional `width` (640, 896, 1280, 1408, 1664 or 1920), `height` (360-1200, a multiple of 8), `x` (metres, ±100; where it was without it), `y`, `z`, `degrees` | `peer N share --size WxH [--at X Y Z --turn DEGREES]` |
+| `peer_unshare` | `peer` | `peer N unshare` |
+| `peer_control_give` | `peer`, `person` (their place in the room, 0-3) | `peer N give PERSON` |
+| `peer_control_take` | `peer`; optional `person` (everyone without it) | `peer N take [PERSON]` |
 | `release_all` | None | `release`, which also stops the fake trackers and the fake peers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ
@@ -136,6 +140,7 @@ Hand positions are in the head frame, not standing space; see
 [fake eye and hand trackers](fake-trackers.md).
 The `peer_*` tools drive fake peers for Frametop Together; see [fake peers](peers.md).
 A fake peer can ask for control of a panel, and no tool gives it: the panel's owner does.
+`peer_control_give` gives only the peer's own test panel.
 
 ### Controller inputs
 

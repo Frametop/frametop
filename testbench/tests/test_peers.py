@@ -160,20 +160,32 @@ class CommandsTest(unittest.TestCase):
                  (['peer', '1', 'act', '8', 'scroll', '--', '0', '-120'], ('tell', 1, 'act 8 scroll 0 -120')),
                  (['peer', '1', 'act', '8', 'key', '30', '1'], ('tell', 1, 'act 8 key 30 1')),
                  (['peer', '1', 'put', '8', '1', '1.5', '2'], ('tell', 1, 'put 8 1.0 1.5 2.0 0.0')),
-                 (['peer', '1', 'put', '8', '--', '-1', '1.5', '-2', '-90'], ('tell', 1, 'put 8 -1.0 1.5 -2.0 -90.0'))]
+                 (['peer', '1', 'put', '8', '--', '-1', '1.5', '-2', '-90'], ('tell', 1, 'put 8 -1.0 1.5 -2.0 -90.0')),
+                 (['peer', '1', 'share'], ('tell', 1, 'share 1280 720')), (['peer', '2', 'share', '--size', '1920x1080'], ('tell', 2, 'share 1920 1080')),
+                 (['peer', '1', 'share', '--size', '640x360', '--at', '-1', '1.5', '-2.5'], ('tell', 1, 'share 640 360 -1.0 1.5 -2.5 0.0')),
+                 (['peer', '1', 'share', '--at', '1', '0', '2', '--turn', '-90'], ('tell', 1, 'share 1280 720 1.0 0.0 2.0 -90.0')),
+                 (['peer', '1', 'unshare'], ('tell', 1, 'unshare')), (['peer', '1', 'give', '0'], ('tell', 1, 'give 0')), (['peer', '1', 'give', '3'], ('tell', 1, 'give 3')),
+                 (['peer', '1', 'take'], ('tell', 1, 'take')), (['peer', '1', 'take', '0'], ('tell', 1, 'take 0')), (['peer', '3', 'take', '3'], ('tell', 3, 'take 3'))]
         for argv, expected in cases:
             with self.subTest(argv=argv):
                 self.assertTrue(peer_cli.dispatch(cli.parser().parse_args(argv))['ok'])
                 self.assertEqual(calls[-1], expected)
         with self.assertRaisesRegex(ValueError, 'join takes HOST PORT CODE'):
             peer_cli.dispatch(cli.parser().parse_args(['peer', '1', 'join', 'frame', '47193']))
+        with self.assertRaisesRegex(ValueError, '--turn goes with --at'):
+            peer_cli.dispatch(cli.parser().parse_args(['peer', '1', 'share', '--turn', '90']))
+        self.assertEqual(len(calls), len(cases))
 
     def test_what_isnt_a_command_is_refused_by_the_parser(self):
         for argv in (['peer', '0', 'state'], ['peer', '4', 'state'], ['peer', '1'], ['peer', '1', 'pose', 'fly'], ['peer', '1', 'speak', '10'],
                      ['peer', '1', 'speak', 'nan'], ['peer', '1', 'away', 'gone'], ['peer', '1', 'walk', '1', '2'], ['peer', '1', 'point'],
                      ['peer', '1', 'look'], ['peer', '1', 'ask'], ['peer', '1', 'ask', '32'], ['peer', '1', 'ask', '-1'], ['peer', '1', 'ask', 'screen'],
                      ['peer', '1', 'act', '32', 'key', '30', '1'], ['peer', '1', 'act', '8', 'type', '30', '1'], ['peer', '1', 'act', '8', 'key', '30'],
-                     ['peer', '1', 'put', '8', '1', '2'], ['peer', '1', 'put', '32', '1', '2', '3'], ['peer', '1', 'put', '8', '1', '2', 'far']):
+                     ['peer', '1', 'put', '8', '1', '2'], ['peer', '1', 'put', '32', '1', '2', '3'], ['peer', '1', 'put', '8', '1', '2', 'far'],
+                     ['peer', '1', 'share', '--size', '1366x768'], ['peer', '1', 'share', '--size', '1280x721'], ['peer', '1', 'share', '--size', '1280x352'],
+                     ['peer', '1', 'share', '--size', '1280x1208'], ['peer', '1', 'share', '--size', '1280'], ['peer', '1', 'share', '--size', '1280x720x2'],
+                     ['peer', '1', 'share', '--at', '1', '2'], ['peer', '1', 'share', '1280'], ['peer', '1', 'unshare', '0'], ['peer', '1', 'give'],
+                     ['peer', '1', 'give', '4'], ['peer', '1', 'give', '-1'], ['peer', '1', 'take', '4'], ['peer', '1', 'take', 'all']):
             with self.subTest(argv=argv), self.assertRaises(SystemExit), mock.patch('sys.stderr'):
                 cli.parser().parse_args(argv)
 

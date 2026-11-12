@@ -19,6 +19,9 @@ Button = Annotated[int, Field(strict=True, ge=1, le=3)]
 Scroll = Annotated[int, Field(strict=True, ge=-2400, le=2400)]
 Key = Annotated[int, Field(strict=True, ge=1, le=111)]
 Down = Annotated[bool, Field(strict=True)]
+Width = Literal[640, 896, 1280, 1408, 1664, 1920]   # what the Frame's encoder is known to take (peershare.py)
+Height = Annotated[int, Field(strict=True, ge=360, le=1200, multiple_of=8)]
+Person = Annotated[int, Field(strict=True, ge=0, le=3)]
 
 
 def register(server, execute):
@@ -80,6 +83,7 @@ def register(server, execute):
         return await execute(['peer', str(peer), 'away', state])
 
     register_acts(server, execute)
+    register_share(server, execute)
 
 
 def register_acts(server, execute):
@@ -137,3 +141,34 @@ def register_acts(server, execute):
         to its left. Its owner's Frame moves it, if the peer may: it owns the room or was given
         the panel."""
         return await execute(['peer', str(peer), 'put', str(panel), '--', repr(x), repr(y), repr(z), repr(degrees)])
+
+
+def register_share(server, execute):
+    """A peer's own test panel in a room (peershare.py)."""
+    @server.tool()
+    async def peer_share(peer: Peer, width: Width = 1280, height: Height = 720, x: Far | None = None, y: Far = 1.5, z: Far = -2.5,
+                         degrees: Degrees = 0) -> CallToolResult:
+        """The peer puts a test panel of its own into the room: a picture that counts, of that
+        many pixels, two metres wide, its middle at x, y, z in metres and turned to its left.
+        Without x it stays where it was, or stands on a spot of the peer's own. Said again it
+        moves the panel. The picture is encoded on this Frame, only while someone watches."""
+        at = [] if x is None else ['--at', repr(x), repr(y), repr(z), '--turn', repr(degrees)]
+        return await execute(['peer', str(peer), 'share', '--size', '%dx%d' % (width, height)] + at)
+
+    @server.tool()
+    async def peer_unshare(peer: Peer) -> CallToolResult:
+        """The peer takes its test panel out of the room."""
+        return await execute(['peer', str(peer), 'unshare'])
+
+    @server.tool()
+    async def peer_control_give(peer: Peer, person: Person) -> CallToolResult:
+        """The peer gives its own test panel to the person in that place of the room (0 is the
+        room's owner), asked or not. What they then do on it reaches the peer, which has no
+        desktop: peer_state counts it. Never a panel of the wearer's: no tool gives those."""
+        return await execute(['peer', str(peer), 'give', str(person)])
+
+    @server.tool()
+    async def peer_control_take(peer: Peer, person: Person | None = None) -> CallToolResult:
+        """The peer takes its test panel back from that person, or from everyone, and says no to
+        their ask."""
+        return await execute(['peer', str(peer), 'take'] + ([] if person is None else [str(person)]))

@@ -16,7 +16,7 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | The dev box and builds, `ft dev build`, `pack/Containerfile`, CI, `framedrop/build.sh` and the zip, FrameDrop, `get.sh`, `install-release.sh`, `install.sh`, `fast-install`, the models, `uninstall.sh` | G7 Build and release | `G7-release.mmd`, `G7-release.tla` |
 | Frametop Together: its units, a room and who is in it, the links between its people, away, voices and mouths, shared panels, control of a panel and the turn on a desktop, pointers, where people look, moving through the room and moving panels, the avatars people have on, a split compute PC's panels | G9 Frametop Together | `G9-together.mmd`, `G9-together.tla` |
 
-All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `df78bee` (2026-11-12).
+All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `5496ae9` (2026-11-12).
 
 ## Files
 
@@ -426,6 +426,8 @@ The encoder and decoder path of a shared panel runs on the Frame's hardware sinc
 A shared panel's video follows who sees it since `74c2dee`, `94e99d6`, `6e87517` and `67b480e` (the chart's parts "A screen of yours in the room" and "Someone's panel here"): its owner encodes it for the viewer who sees most of it and within the quality they picked, and a viewer's Frame decodes it only while its wearer sees it and the decoder has room, keeping the last picture otherwise. These rules are small sums with no room for a model (`together/flow/attention.h`, `budget.h`, `quality.h`), held by `together/tests/flow-test.cpp`, `video-test.cpp`, `budget-test.cpp` and `quality-test.cpp`, and on the hardware by `tests/panels-test.py`.
 
 A split compute PC's panels are in the chart since `df78bee` (its part "Your split compute PC at this Frame"): the PC calls its person's Frame with a one-time code, is told what to encode, and its pictures go on to the room as that Frame's panels 3 to 6. The link is not one of the room's, so the model of the room and its links doesn't take it in; the rules are held by `together/tests/pcpanels-test.cpp` and, between the real programs, `together/tests/pcsend-test.py`.
+
+The PC's own windows are in the chart since `5496ae9` (its part "The windows of your PC that you share"): `ft-roompanels` has the PC call in, tells it its panels and tells the room, and starts over when the PC says no call stands. A window is given only after a second ask, and a guest's input goes to it through that window's own stream (the arrow from the turn on your desktop into G6). The rules are held by `together/tests/test_roompclink.py`, `test_roompcs.py` and `roompcs-test.py`, `control-test.cpp`, and `screens/tests/peerinput-test.c` and `remote-test.c`; none of it is in the model.
 
 Control is the part of this group where someone else reaches a desktop, and its rules are few: input is taken for a panel only from someone its owner gave it to, only while a program keeps saying the owner wears the headset, from one person at a time, and whatever they hold down is let go when any of that ends. They are checked in the owner's `ft-together` (`flow/control.cpp`, `room/grants.h`, `room/desk.h`), which the chart's legend says, and held by `together/tests/controlrules-test.cpp` (grants and the turn), `control-test.cpp` (several sessions against each other) and `roomcontrol-test.py` (the real programs) rather than by a model.
 

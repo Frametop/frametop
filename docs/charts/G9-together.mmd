@@ -1,5 +1,5 @@
 ---
-title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars, a PC's panels (df78bee, branch dee-193-together)"
+title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars, a PC's panels and its windows (5496ae9, branch dee-193-together)"
 ---
 stateDiagram-v2
   state "Legend" as legend {
@@ -16,7 +16,7 @@ stateDiagram-v2
     lg9: A grant is checked where it is enforced, in the ft-together of the panel's owner. A guest's own refuses the same things first, to say why
     lg10: Control, the turn, pointers, gaze and moving are drawn from the code and its tests. The model is of the room and its links
     lg11: A panel's video (74c2dee, 94e99d6, 6e87517, 67b480e): encoded for the viewer who sees most of it, decoded only where it is seen, within its owner's quality. tests/panels-test.py runs the Frame out of video sessions and through the three qualities on the hardware
-    lg12: A PC's panels (df78bee): the PC encodes, its person's Frame sends on. ft-pcsend stands for the PC with a recorded loop (tests/pcpanels-test.cpp, pcsend-test.py). The sender in the PC's streaming host isn't built
+    lg12: A PC's panels (df78bee, 6501d45, 5496ae9): the PC encodes, its person's Frame sends on. ft-roompanels has the PC call in for the windows it shares. The sender is in the Vibepollo fork (frametop/together, Linux with Hyprland). ft-pcsend stands for the PC with a recorded loop in the tests (pcpanels-test.cpp, pcsend-test.py, roompcs-test.py). A guest's input to a PC's window has only run against stand-ins
   }
   class lg0 teal
   class lg1 blue
@@ -37,6 +37,12 @@ stateDiagram-v2
     b1: A link whose first word is a Sender, not a Hello: not a Frame's, and nobody in the room
     b2: The PC: told what to encode for its four panels (R, F, P, K, W), nothing else of the room
     b3: A panel of the PC's is watched: its pictures come in, are put in order, and go on as this Frame's panel 3 to 6
+  }
+  state "The windows of your PC that you share (roompanels/pcwindows.py, pclink.py, pcshares.py, the fork's /api/frametop/together)" as pw {
+    q0: None shared: the PC isn't asked anything
+    [*] --> q0
+    q1: Calling the PC in: a code from ft-together (sender), and where to call, to the PC's windows instance. Again every 6 s
+    q2: Called in: the PC is told which windows are its panels 3 to 6, and the room each panel at the size the PC encodes it
   }
   state "Together on this Frame (together/run.sh, frametop-together.service, the eight frametop-room-* units PartOf it)" as un {
     u0: Not installed: the installer's optional part
@@ -255,6 +261,14 @@ stateDiagram-v2
   b2 --> b0: its link ends, or it says more on its control stream
   b3 --> b0: its link ends
   b3 --> x2: its pictures take the path of a screen's from here: the same rules, viewers and bitrate
+  q0 --> q1: share 101 to 116: a window of the PC's that stands here as a panel, four of one PC at most
+  q1 --> q1: the PC doesn't answer, or says no (a token without the four routes): state says why under pc
+  q1 --> q2: the PC's link stands at ft-together, and the PC took its panels
+  q2 --> q1: the PC answers 409, no call to a headset stands (it called another), or its link is gone at two looks
+  q2 --> q0: the last window is unshared, its stream ends or it closed on the PC: the PC is told to stop
+  q1 --> q0: the last window is unshared
+  q1 --> b1: the PC calls this Frame with the code
+  q2 --> b3: share K for each window, where its panel stands on this Frame
   x2 --> g2: G2: ft-screens hands the screen's buffers over, and draws it while watched
   y0 --> y1: keeper: remote N peer ID
   y1 --> y2: a keyframe from the owner's link
@@ -283,7 +297,7 @@ stateDiagram-v2
   z3 --> z2: sent
   z2 --> z0: another avatar or none on (wear, every 2 s from ft-avatars --room)
   n0 --> n1: their AskControl (control ask PANEL at their end), 8 words at once and 2 a second a link
-  n1 --> n2: control give NUMBER PERSON: only while someone says the headset is on your head, and you aren't away
+  n1 --> n2: control give NUMBER PERSON: only while someone says the headset is on your head, and you aren't away. A window of your PC (3 to 6) only with the word pc after it: the page's second ask
   n0 --> n2: given unasked, under the same rule
   n1 --> n0: control take (No), or 120 s
   n2 --> n3: control take, away game or away off, 10 s with no control here, the panel unshared, the room left, they left, or someone else is in their place
@@ -298,6 +312,7 @@ stateDiagram-v2
   d3 --> d0: 1.5 s after your last
   d2 --> d0: their grant, their link or the room ends: let go, the last pressed first
   d1 --> g2: G2: ft-screens gives it to the seat, on the desktop's own screens only, never while paused or locked, and keeps what is theirs apart from what is yours
+  d1 --> g6: G6: on a window of your PC, ft-screens gives it to that window's ft-stream (a key as peerkey: your clipboard stays), lets go there before their pointer goes elsewhere, and takes turns with you on every display of that PC
   h0 --> h1: the pointer comes onto the panel moved by your hand, or by your eyes while you share where you look
   h0 --> h2: it comes onto it moved by your eyes, and you don't share where you look
   h1 --> h2: gaze mode, not shared: the room is told once that the pointer is nowhere
@@ -368,6 +383,9 @@ stateDiagram-v2
   class v1 blue
   class v2 blue
   class v3 orange
+  class q0 teal
+  class q1 yellow
+  class q2 blue
   class b0 teal
   class b1 yellow
   class b2 blue

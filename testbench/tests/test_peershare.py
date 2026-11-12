@@ -2,17 +2,22 @@
 ft-together and starts, with stand-ins for both, and one fake peer for real in the room of an
 `ft-together --loopback`: its test panel is in the owner's room, the owner asks for it and is
 given it, what the owner does on it reaches the peer, the owner puts it elsewhere and the room
-hears that it stands there, and it is gone once taken back. Nobody watches the panel here, so
-the hardware encoder is never opened."""
+hears that it stands there, and it is gone once taken back. Nobody watches the panel in that
+run, so the hardware encoder is never opened. Where the Frame's video devices are, a second run
+has the owner's `ft-peerpanel` watch it: the pictures decode, whole and in order."""
+import os
 import struct
+import subprocess
 import unittest
 
 import peerkit
-from frame_testbench import peershare, peerwords
+from frame_testbench import peershare, peersim, peerwords
 
 FLAT = '1.000000 0.000000 0.000000 0.000000'
 SHARED = 'share 0 1280 720 2.4 1.5 -2.5 ' + FLAT + ' 2 0 Test panel'
 NOT_GIVEN = 'error you have no control of that panel'
+WATCHER = peersim.REPO / 'together/build/ft-peerpanel'
+VIDEO = WATCHER.is_file() and all(os.path.exists(device) for device in ('/dev/video-enc0', '/dev/video-dec0', '/dev/dri/renderD128'))
 
 
 class Child:
@@ -256,6 +261,24 @@ class RealShareTest(peerkit.RealRoom):
         self.assertTrue(self.owner.until(lambda s: list(self.panels(s)) == [8]), self.said())
         self.assertEqual(self.sim.ask('leave'), 'ok')
         self.assertTrue(self.sim.until(lambda s: s['shares'] is None and not s['running']['ft-sharepanel']), 'it takes its panel with it when it leaves')
+
+
+    @unittest.skipUnless(VIDEO, "needs the Frame's video devices and ft-peerpanel (together/build.sh)")
+    def test_its_picture_is_encoded_only_while_someone_watches_and_decodes_whole_and_in_order(self):
+        self.join()
+        self.assertEqual(self.sim.ask('share'), 'ok', self.said())
+        self.assertTrue(self.owner.until(lambda s: list(self.panels(s)) == [8] and 'waiting for someone to watch' in self.said()), self.said())
+        self.assertNotIn('watched: encoding', self.said())
+        view = subprocess.run([str(WATCHER), '--panel', '8', '--socket', self.owner_socket, '--probe', '--frames', '60'], capture_output=True, text=True,
+                              timeout=60)
+        pictures = [line.split() for line in view.stdout.splitlines() if line.startswith('picture ')]
+        self.assertEqual((view.returncode, len(pictures), {words[2] for words in pictures}), (0, 60, {'1280x720'}), view.stdout[-1500:] + view.stderr[-1500:])
+        numbers = [int(words[4]) for words in pictures]   # each picture says which one it is (together/media/testpattern.h)
+        self.assertNotIn(-1, numbers)
+        self.assertLessEqual(sum(1 for one, next_ in zip(numbers, numbers[1:]) if next_ != (one + 1) % 65536), 2, numbers)
+        self.assertIn('watched: encoding', self.said())
+        self.assertTrue(self.owner.until(lambda s: 'nobody watches: the encoder is closed' in self.said(), 12), self.said())
+        self.assertEqual(self.sim.ask('unshare'), 'ok')
 
 
 if __name__ == '__main__':

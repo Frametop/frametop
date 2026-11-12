@@ -207,7 +207,10 @@ same way, and in such a room: the panel is in the owner's room and its picture's
 for a watcher, the owner's acts are refused until the peer gave it and then reach the peer, the
 owner puts it elsewhere and the room hears that it stands there, a grant ends when the peer
 goes away, and the panel goes when it is taken back or the peer leaves. Nobody watches the
-panel in that run, so no video is encoded (`tests/peerkit.py` has what the real runs share).
+panel in that run, so no video is encoded. A second run, only where the Frame's video devices
+are, has the owner's `ft-peerpanel` watch it: sixty pictures decode at the size they were sent,
+each saying which one it is and in order, the encoder opens when the watcher comes and closes
+after it has gone (`tests/peerkit.py` has what the real runs share).
 `tests/test_peerline.py` checks the peer's line to its session against a stand-in. `tests/test_peers.py` checks the client and the
 `peer` commands against stand-ins on the sockets, and once for real: a peer started, let into a
 room, told to wave and stopped. `tests/test_mcp_peers.py` checks each tool's command and what

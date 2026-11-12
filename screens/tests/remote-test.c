@@ -80,6 +80,10 @@ static int fake_stream(const char *host, const char *app) {
         m[n] = 0;
         if (!strcmp(m, "focus") || !strcmp(m, "blur") || !strcmp(m, "leave")) note(m, getpid(), host, app);
         else if (!strncmp(m, "move ", 5)) note("move", getpid(), host, app);
+        else if (!strncmp(m, "button ", 7)) note(m[n - 1] == '1' ? "press" : "raise", getpid(), host, app);
+        else if (!strncmp(m, "scroll ", 7)) note("scroll", getpid(), host, app);
+        else if (!strncmp(m, "key ", 4)) note("key", getpid(), host, app);
+        else if (!strncmp(m, "peerkey ", 8)) note("Key", getpid(), host, app);
     }
     note("term", getpid(), host, app);
     usleep(300000);  // its Disconnect Monitor
@@ -127,7 +131,9 @@ struct proc {
     char host[64], app[64];
     long start, term, gone;  // 0: not yet
     bool killed;
-    char said[32];  // f: focus, b: blur, m: move, l: leave, in order
+    // f: focus, b: blur, m: move, l: leave, p and r: a button pressed and raised, s: scroll,
+    // k: key, K: peerkey, in order
+    char said[32];
 };
 static struct proc g_procs[16];
 static int g_nprocs;
@@ -136,6 +142,12 @@ static struct proc *proc_of(int pid) {
     for (int i = 0; i < g_nprocs; ++i)
         if (g_procs[i].pid == pid) return &g_procs[i];
     return NULL;
+}
+
+static const char *spaced(const char *word) {
+    static char s[20];
+    snprintf(s, sizeof s, " %s ", word);
+    return s;
 }
 
 static void read_log(void) {
@@ -152,8 +164,7 @@ static void read_log(void) {
             snprintf(p->host, sizeof p->host, "%s", host), snprintf(p->app, sizeof p->app, "%s", app);
         } else if (p && !strcmp(what, "term")) p->term = t;
         else if (p && (!strcmp(what, "reaped") || !strcmp(what, "killed"))) p->gone = t, p->killed = what[0] == 'k';
-        else if (p && (!strcmp(what, "focus") || !strcmp(what, "blur") || !strcmp(what, "move") || !strcmp(what, "leave")) &&
-                 strlen(p->said) < sizeof p->said - 1)
+        else if (p && strstr(" focus blur move leave press raise scroll key Key ", spaced(what)) && strlen(p->said) < sizeof p->said - 1)
             p->said[strlen(p->said)] = what[0];
     }
     if (f) fclose(f);
@@ -385,9 +396,58 @@ static bool pointer_leaves(void) {
         if (!strcmp(q->app, "display:X")) display = q;
     }
     EXPECT(nine && ten && display);
-    EXPECT(!strcmp(nine->said, "mlmlml"));
+    EXPECT(!strcmp(nine->said, "mlmlmpl"));
     EXPECT(!strcmp(ten->said, "mmlml"));
-    EXPECT(!strcmp(display->said, ""));
+    EXPECT(!strcmp(display->said, "s"));
+    return true;
+}
+
+// Someone else of a Together room on a window of the wearer's PC (peerinput.h): their pointer
+// and keys go to its stream, a key in a word of its own, and only to a display whose stream
+// runs: not to a room's panel or a number that is none. Where the wearer's pointer is and what
+// the wearer holds stay as they were.
+static bool someone_else(void) {
+    start(101, "192.0.2.7", "display:X", 60);
+    cmd("remote 116 peer 9 1280x720 1.5");
+    run(300);
+    int w = 0, h = 0;
+    EXPECT(ft_remote_peer_size(100, &w, &h) && w == 1920 && h == 1080);
+    EXPECT(!ft_remote_peer_size(115, &w, &h) && !ft_remote_peer_size(101, &w, &h) && !ft_remote_peer_size(0, &w, &h));
+    struct ft_event e = {.type = FT_MOTION, .screen = 115, .x = 5, .y = 5};
+    ft_remote_event(&e);  // the wearer's pointer is on the room's panel
+    EXPECT(!ft_remote_held());
+    struct ft_event theirs = {.type = FT_MOTION, .screen = 100, .x = 9, .y = 9};
+    ft_remote_peer_event(&theirs);
+    theirs.type = FT_BUTTON, theirs.button = 0x110, theirs.pressed = true;
+    ft_remote_peer_event(&theirs);  // (a move first: the host's pointer may have been elsewhere)
+    EXPECT(!ft_remote_held());      // theirs isn't the wearer's
+    e.type = FT_BUTTON, e.screen = 100, e.button = 0x110, e.pressed = true;
+    ft_remote_event(&e);  // the wearer presses there: the room's panel hears the pointer left
+    theirs.pressed = false;
+    ft_remote_peer_event(&theirs);
+    EXPECT(ft_remote_held());  // ...and the wearer's isn't theirs
+    theirs.type = FT_SCROLL, theirs.dy = 1;
+    ft_remote_peer_event(&theirs);
+    ft_remote_peer_key(100, 30, true), ft_remote_peer_key(100, 30, false);
+    ft_remote_key(100, 30, true);
+    theirs.screen = 115, ft_remote_peer_event(&theirs), ft_remote_peer_key(115, 30, true);  // a room's panel
+    theirs.screen = 7, ft_remote_peer_event(&theirs), ft_remote_peer_key(7, 30, true);      // no remote screen
+    e.pressed = false;
+    ft_remote_event(&e);
+    EXPECT(!ft_remote_held());
+    start(102, "192.0.2.8", "display:Y", 60);
+    EXPECT(!ft_remote_peer_size(101, &w, &h));  // its stream hasn't started yet
+    run(300);
+    EXPECT(ft_remote_peer_size(101, &w, &h));
+    read_log();
+    const struct proc *nine = NULL, *display = NULL;
+    for (int i = 0; i < g_nprocs; ++i) {
+        if (!strcmp(g_procs[i].app, "peer:9")) nine = &g_procs[i];
+        if (!strcmp(g_procs[i].app, "display:X")) display = &g_procs[i];
+    }
+    EXPECT(nine && display);
+    EXPECT(!strcmp(display->said, "mmpmpmrsKKkmr"));
+    EXPECT(!strcmp(nine->said, "ml"));
     return true;
 }
 
@@ -426,7 +486,7 @@ int main(int argc, char **argv) {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
         {"window closed", window_closed}, {"window retry", window_retry}, {"room panels", room_panels},
-        {"room panel refused", room_panel_refused}, {"pointer leaves", pointer_leaves},
+        {"room panel refused", room_panel_refused}, {"pointer leaves", pointer_leaves}, {"someone else", someone_else},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

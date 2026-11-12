@@ -96,6 +96,19 @@ class Giving(unittest.TestCase):
                                     "peer 2 scroll -240 120"])
         self.assertEqual((d.giver.passed, d.giver.dropped), (7, 0))
 
+    def test_a_window_of_the_pcs_is_the_remote_screen_it_stands_on(self):
+        # ft-roompanels shares a window of the wearer's PC as the remote screen its stream is on
+        # (roompanels/pcshares.py): the act goes there, and ft-screens gives it to that stream
+        d = Desk()
+        d.control, d.panels = control(3, 0), panels([(1, 0, True), (101, 3, True), (102, 4, False)])
+        d.giver.look()
+        d.took()
+        for what, a, b in ((giver.MOVE, 100, 200), (giver.BUTTON, 1, 1), (giver.KEY, 30, 1)):
+            d.giver.act(act(8 + 3, what, a, b))
+        d.giver.act(act(8 + 4, giver.MOVE, 1, 1))     # not told to the room yet: no screen
+        self.assertEqual(d.took(), ["peer 101 move 100 200", "peer 101 button 1 1", "peer 101 key 30 1"])
+        self.assertEqual((d.giver.passed, d.giver.dropped), (3, 1))
+
     def test_whose_place_the_panel_is_in_doesnt_matter(self):
         """A panel's id is its owner's place * 8 + its number, and ft-together passes on only acts for this Frame's."""
         d = Desk()

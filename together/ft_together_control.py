@@ -19,13 +19,16 @@ class Control(QObject):
         everything again."""
         super().__init__()
         self._told, self._do = told, do
+        self._sure = set()   # (number, person): Give it was pressed once for a window of the PC's
 
     def _answers(self):
         return self._told("state") or {}, self._told("control") or {}
 
     @Property("QVariantList", notify=changed)
     def asks(self):
-        return controlpage.asks(*self._answers())
+        rows = controlpage.asks(*self._answers(), self._sure)
+        self._sure &= {(row["number"], row["person"]) for row in rows}   # an ask that went is asked about anew
+        return rows
 
     @Property("QVariantList", notify=changed)
     def given(self):
@@ -41,11 +44,20 @@ class Control(QObject):
 
     @Slot(int, int)
     def give(self, number, person):
-        self._do(f"control give {int(number)} {int(person)}")
+        """Gives it. A window of the PC's only the second time: the first shows the second ask."""
+        pair = (int(number), int(person))
+        if not controlpage.pc(pair[0]):
+            return self._do(f"control give {pair[0]} {pair[1]}")
+        if pair not in self._sure:
+            self._sure.add(pair)
+            return self.changed.emit()
+        self._sure.discard(pair)
+        self._do(f"control give {pair[0]} {pair[1]} pc")
 
     @Slot(int, int)
     def take(self, number, person):
         """Takes it back from them, or says no to their ask."""
+        self._sure.discard((int(number), int(person)))
         self._do(f"control take {int(number)} {int(person)}")
 
     @Slot(int)

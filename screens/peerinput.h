@@ -6,8 +6,9 @@
 #include <string.h>
 #include <linux/input-event-codes.h>
 #include "vr.h"
-// Input from the other people of a Together room, on one of this desktop's own screens
-// (docs/together.md, "Control and moving"). Whose input is taken, for which screen and when
+// Input from the other people of a Together room, on one of this desktop's own screens or on a
+// window of the wearer's PC that stands here as a panel (docs/together.md, "Control and
+// moving"). Whose input is taken, for which screen and when
 // is ft-together's to say (together/flow/control.h). What it took comes here from
 // ft-roominput as "peer ..." on the control socket:
 //
@@ -23,9 +24,16 @@
 // They share the seat with the wearer, so what is kept here is theirs alone: where their
 // pointer is (the wearer's may have moved the seat's since), and what they hold. A release
 // goes to the seat only for what they pressed, so nothing they send lets go of a key or a
-// button the wearer holds, and "letgo" leaves nothing of theirs down. Only the desktop's own
-// screens take any of it: never a remote display (another machine), a floating window's
-// output, Steam or frunner's search (ft_peer_desk, which the compositor answers).
+// button the wearer holds, and "letgo" leaves nothing of theirs down. The desk says which
+// screens take any of it (ft_peer_desk, which the compositor answers): the desktop's own, and
+// another machine's display that a stream brings here, which ft-roominput names only when it
+// is a window of the wearer's PC that the room was given. Never a room's panel, a floating
+// window's output, Steam or frunner's search.
+//
+// A screen's input goes to a seat: the desktop's one, or the other machine's through that
+// display's own stream. What they hold is at one seat, their pointer's. Before their pointer
+// goes to a screen of another seat everything they hold comes up where it went down, and a
+// key goes down only at the seat their pointer is at.
 //
 // One pointer for two people is taken in turns, as ft-together has it (room/desk.h), and here
 // to the event:
@@ -50,11 +58,15 @@
 // What the compositor does for them.
 struct ft_peer_desk {
     void *ctx;
-    // The size in pixels of screen `screen` (from 0). False: not one of the desktop's own.
+    // The size in pixels of screen `screen` (from 0). False: not one that takes their input.
     bool (*size)(void *ctx, int screen, int *width, int *height);
+    // The seat its input goes to: 0 the desktop's (and for no screen, -1), another number for
+    // each display of another machine.
+    int (*seat)(void *ctx, int screen);
     // A motion, a button or a scroll, as if from that screen's panel.
     void (*pointer)(void *ctx, const struct ft_event *e);
-    // A key. False for a press that isn't taken: typing isn't that screen's now.
+    // A key. False for a press that isn't taken: typing isn't that screen's now. A release
+    // comes with the screen their pointer is on.
     bool (*key)(void *ctx, int screen, uint32_t code, bool pressed);
 };
 
@@ -132,9 +144,11 @@ static inline const char *ft_peer_command(struct ft_peer *p, const struct ft_pee
     char what[8], tail;
     if (p->screen >= 0 && !d->size(d->ctx, p->screen, &width, &height)) ft_peer_letgo(p, d), p->screen = -1;  // their screen went
     if (sscanf(words, "%9d %7s %9d %9d %c", &screen, what, &a, &b, &tail) != 4) return usage;
-    if (screen < 1 || !d->size(d->ctx, --screen, &width, &height)) return "error not a screen of this desktop";
+    if (screen < 1 || !d->size(d->ctx, --screen, &width, &height)) return "error not a screen that takes their input";
+    const bool same_seat = d->seat(d->ctx, screen) == d->seat(d->ctx, p->screen);
     if (!strcmp(what, "move")) {
         if (a < 0 || a > FT_PEER_FAR || b < 0 || b > FT_PEER_FAR) return usage;
+        if (!same_seat) ft_peer_letgo(p, d);  // what they hold stays behind, at the seat it went down at
         p->screen = screen, p->x = (a + 0.5) * width / (FT_PEER_FAR + 1.0), p->y = (b + 0.5) * height / (FT_PEER_FAR + 1.0);
         p->pointing = true, p->pointed_at = now;
         ft_peer_point(p, d, FT_MOTION, 0, false, 0, 0);
@@ -166,6 +180,7 @@ static inline const char *ft_peer_command(struct ft_peer *p, const struct ft_pee
         if (b) {
             if (at < p->n_keys) return "ok held already";
             if (p->n_keys == FT_PEER_KEYS) return "error too many keys held";
+            if (!same_seat) return "ok not taken: their pointer is at another machine";
             if (!d->key(d->ctx, screen, (uint32_t)a, true)) return "ok not taken: typing isn't that screen's, or the key is down";
             p->keys[p->n_keys++] = (uint32_t)a;
             return "ok";
@@ -173,7 +188,7 @@ static inline const char *ft_peer_command(struct ft_peer *p, const struct ft_pee
         if (at == p->n_keys) return "ok not held";
         --p->n_keys;
         memmove(&p->keys[at], &p->keys[at + 1], (size_t)(p->n_keys - at) * sizeof p->keys[0]);
-        d->key(d->ctx, screen, (uint32_t)a, false);
+        d->key(d->ctx, p->screen, (uint32_t)a, false);  // where it went down: their pointer's seat
         return "ok";
     }
     return usage;

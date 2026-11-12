@@ -152,7 +152,7 @@ and what a watcher decodes counts up thirty pictures and begins again. The loop 
 where an encoder would encode less often, and is never encoded at another bitrate.
 
 A PC's windows stay where `pc` put them: where someone else puts one isn't taken. Nothing is
-given on them, since a PC's panels take no input yet. The peer takes them out of the room
+given on them: there is no PC behind them to take input. The peer takes them out of the room
 before it leaves or joins another, and its PC stays with it. `state` says under `pc` whether
 the PC's program runs and how many windows are in the room.
 
@@ -211,7 +211,7 @@ file only if it is marked as one to pass on, as for a real wearer
 
 - Share more than one panel of its own, a floating window, or anything with a desktop behind
   it. What is done on its panel is counted, not shown in its picture.
-- Have its PC's windows moved by someone else, or give them: a PC's panels take no input yet.
+- Have its PC's windows moved by someone else, or give them: there is no PC behind them to take input.
 - See a panel: it runs no `ft-peerpanel`, so it points where it is told, not where a picture is.
 - Speak from a recording. It hums.
 - A slow or lossy link: no delay, loss or rate cap between it and the Frame.

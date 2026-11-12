@@ -5,7 +5,12 @@ given one, and every panel in the room with what its viewer can do about it.
 A person's name and a panel's are text a peer chose: they are cut to one short line here, and
 the page shows them as plain text. An ask or a grant that names nobody in the room, or no panel
 of this headset's, is no row.
+
+A screen that is a window of the wearer's PC is given only after a second ask (docs/together.md,
+"Control and moving"): whoever has it clicks and types on that PC.
 """
+
+PC_PANELS = range(3, 7)   # a headset's panel numbers that are windows of its person's PC (room/panels.h)
 
 
 def _int(value):
@@ -38,9 +43,18 @@ def _pairs(state, pairs):
     return found
 
 
-def asks(state, control):
-    """Those who ask to use a screen of this headset's: {"number", "person", "text"}."""
-    return [{"number": number, "person": person, "text": f"{name} asks to use your {panel}"}
+def pc(number):
+    """Whether a panel of this headset's with that number is a window of its person's PC."""
+    return number in PC_PANELS
+
+
+def asks(state, control, sure=()):
+    """Those who ask to use a screen of this headset's: {"number", "person", "text", "second"}.
+    `second`: what the page asks before a window of the PC's is given, for the (number, person)
+    in `sure`, whose Give it was pressed once; "" otherwise."""
+    return [{"number": number, "person": person, "text": f"{name} asks to use your {panel}",
+             "second": f"{panel} is a window of your PC. {name} could click and type on that PC, and paste what is on its clipboard. Give it?"
+             if pc(number) and (number, person) in sure else ""}
             for number, person, name, panel in _pairs(state, control.get("asks"))]
 
 

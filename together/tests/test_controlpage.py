@@ -2,8 +2,8 @@
 """The room's panels on Frametop Settings' Together page (together/controlpage.py,
 ft_together_control.py, RoomPanels.qml), offline: ft-together's `state` and `control` read into
 rows, and the backend and the page driven against the stand-ins of pagekit.py: someone asks for
-a screen, is given it and has it taken back; a panel of theirs asked for; and a jump to a person
-and to a panel. The backend's part needs PySide6, the page's Kirigami too.
+a screen, is given it and has it taken back; a window of the PC's given only after a second
+ask; a panel of theirs asked for; and a jump to a person and to a panel. The backend's part needs PySide6, the page's Kirigami too.
 
     python3 together/tests/test_controlpage.py
 """
@@ -28,8 +28,8 @@ def control(**said):
 class Rules(unittest.TestCase):
     def test_who_asks_and_who_was_given(self):
         said = control(asks=[{"number": 1, "person": 1}, {"number": 0, "person": 2}], given=[{"number": 0, "person": 1}])
-        self.assertEqual(controlpage.asks(STATE, said), [{"number": 1, "person": 1, "text": "ben asks to use your Screen 2"},
-                                                         {"number": 0, "person": 2, "text": "cy asks to use your Screen 1"}])
+        self.assertEqual(controlpage.asks(STATE, said), [{"number": 1, "person": 1, "text": "ben asks to use your Screen 2", "second": ""},
+                                                         {"number": 0, "person": 2, "text": "cy asks to use your Screen 1", "second": ""}])
         self.assertEqual(controlpage.given(STATE, said), [{"number": 0, "person": 1, "text": "ben can use your Screen 1"}])
         self.assertEqual((controlpage.asks(STATE, control()), controlpage.given(STATE, control())), ([], []))
 
@@ -51,6 +51,18 @@ class Rules(unittest.TestCase):
             self.assertEqual([r["what"] for r in controlpage.panels(STATE, said)], ["", "", "", ""])
         for state in ({}, {"people": None, "panels": None}, {"people": [1, "x"], "panels": ["y", {"id": "8"}, {"id": True}, {"owner": 1}]}):
             self.assertEqual((controlpage.asks(state, control()), controlpage.panels(state, control())), ([], []))
+
+    def test_a_window_of_the_pcs_is_asked_about_twice(self):
+        self.assertEqual([n for n in range(-1, 9) if controlpage.pc(n)], [3, 4, 5, 6])
+        state = dict(STATE, panels=[panel(2, "Screen 3"), panel(3, "Notes"), panel(6, "Calc"), panel(11, "Theirs")])
+        said = control(asks=[{"number": 2, "person": 1}, {"number": 3, "person": 1}, {"number": 6, "person": 2}, {"number": 3, "person": 2}])
+        self.assertEqual([r["second"] for r in controlpage.asks(state, said)], ["", "", "", ""])
+        sure = {(2, 1), (3, 1), (6, 1), (3, 0)}     # a screen of the desktop's is never asked about twice, nor a pair nobody pressed
+        rows = controlpage.asks(state, said, sure)
+        self.assertEqual([r["second"] != "" for r in rows], [False, True, False, False])
+        self.assertEqual(rows[1]["second"], "Notes is a window of your PC. ben could click and type on that PC, and paste what is on its clipboard. Give it?")
+        self.assertEqual(rows[1]["text"], "ben asks to use your Notes")
+        self.assertEqual([r["second"] != "" for r in controlpage.asks(state, said, {(6, 2), (3, 2)})], [False, False, True, True])
 
     def test_a_note_while_nothing_can_be_given(self):
         asking = [{"number": 0, "person": 1}]
@@ -87,6 +99,24 @@ class Rules(unittest.TestCase):
         self.assertTrue(text.startswith("ben <b>the</b> bold x") and text.endswith(" asks to use your Panel 0") and "\n" not in text)
 
 
+class Twice(unittest.TestCase):
+    """The backend's part alone, with what ft-together answers held still."""
+
+    def test_a_no_that_didnt_take_starts_the_second_ask_over(self):
+        from ft_together_control import Control
+        state = dict(STATE, panels=[panel(3, "Notes")])
+        said, asked = {"state": state, "control": control(asks=[{"number": 3, "person": 1}])}, []
+        c = Control(said.get, asked.append)
+        c.give(3, 1)
+        self.assertNotEqual(c.asks[0]["second"], "")
+        c.take(3, 1)       # (ft-together still lists the ask)
+        self.assertEqual((c.asks[0]["second"], asked), ("", ["control take 3 1"]))
+        c.give(3, 1)
+        self.assertEqual(asked, ["control take 3 1"], "the next Give it asks again")
+        c.give(3, 1)
+        self.assertEqual(asked, ["control take 3 1", "control give 3 1 pc"])
+
+
 class Page(PageCase):
     def room(self):
         self.install()
@@ -116,6 +146,33 @@ class Page(PageCase):
         c.take(0, 1)       # a no
         self.assertTrue(self.fresh(lambda: c.asks == [] and c.given == []))
         self.assertEqual(self.together.asked, ["control give 0 1", "control give 0 1", "control take 0 1", "control take 0 1"])
+
+    def test_a_window_of_the_pcs_is_given_at_the_second_press(self):
+        c = self.room()
+        self.together.panels = [panel(0, "Screen 1"), panel(3, "Notes"), panel(4, "Calc"), panel(8, "Screen 1")]
+        self.together.control["asks"] = [{"number": 3, "person": 1}, {"number": 4, "person": 1}]
+        self.assertTrue(self.fresh(lambda: [a["second"] for a in c.asks] == ["", ""]))
+        c.give(3, 1)
+        self.assertEqual([a["second"] != "" for a in c.asks], [True, False], "asked a second time at once, and only about that one")
+        self.assertTrue(self.fresh(lambda: len(c.asks) == 2 and c.given == []))
+        self.assertEqual(self.together.asked, [], "nothing is given at the first press")
+        self.assertEqual([a["second"] != "" for a in c.asks], [True, False], "it stands while they ask")
+        c.take(3, 1)       # a no, also to the second ask
+        self.assertTrue(self.fresh(lambda: [a["number"] for a in c.asks] == [4]))
+        self.together.control["asks"] = [{"number": 3, "person": 1}, {"number": 4, "person": 1}]
+        self.assertTrue(self.fresh(lambda: len(c.asks) == 2))
+        self.assertEqual([a["second"] for a in c.asks], ["", ""], "who asks again is asked about again")
+        c.give(4, 1)
+        self.together.control["asks"] = [{"number": 3, "person": 1}]       # they stopped asking for it meanwhile
+        self.assertTrue(self.fresh(lambda: len(c.asks) == 1))
+        self.together.control["asks"] = [{"number": 3, "person": 1}, {"number": 4, "person": 1}]
+        self.assertTrue(self.fresh(lambda: len(c.asks) == 2))
+        self.assertEqual([a["second"] for a in c.asks], ["", ""], "an ask that went and came back starts over")
+        c.give(4, 1)
+        c.give(4, 1)
+        self.assertTrue(self.fresh(lambda: [g["text"] for g in c.given] == ["ben can use your Calc"] and [a["number"] for a in c.asks] == [3]))
+        self.assertEqual(self.together.asked, ["control take 3 1", "control give 4 1 pc"])
+        self.assertEqual(self.said, [])
 
     def test_asking_for_someone_elses(self):
         c = self.room()
@@ -200,7 +257,23 @@ class Page(PageCase):
         self.assertEqual([b.property("visible") for b in people], [False, True])
         people[1].clicked.emit()
         self.assertTrue(self.until(lambda: self.panels.asked == ["go panel 8", "go person 1"]))
-        self.together.panels, self.together.control["asked"] = [], []
+        # a window of the PC's: the page asks a second time, in plain text, and gives it at the second press
+        self.assertEqual([s.property("visible") for s in self.items(root, "askSecond")], [])
+        self.together.panels = [panel(0, "Screen 1"), panel(3, "Notes <b>x</b>"), panel(8, "Screen 1")]
+        self.together.control["asks"] = [{"number": 3, "person": 1}]
+        self.assertTrue(self.until(lambda: found("controlAsks").property("count") == 1))
+        self.assertEqual((one("askSecond").property("visible"), one("giveButton").property("text")), (False, "Give it"))
+        asked = len(self.together.asked)
+        one("giveButton").clicked.emit()
+        self.assertTrue(self.until(lambda: one("askSecond").property("visible")))
+        self.assertEqual(one("askSecond").property("text"),
+                         "Notes <b>x</b> is a window of your PC. ben <i>x</i> could click and type on that PC, and paste what is on its clipboard. Give it?")
+        self.assertIs(self.plain(one("askSecond")), True)
+        self.assertEqual((one("giveButton").property("text"), len(self.together.asked), found("controlGiven").property("count")), ("Yes, give it", asked, 0))
+        one("giveButton").clicked.emit()
+        self.assertTrue(self.until(lambda: found("controlAsks").property("count") == 0 and found("controlGiven").property("count") == 1))
+        self.assertEqual(self.together.asked[asked:], ["control give 3 1 pc"])
+        self.together.panels, self.together.control["asked"], self.together.control["given"] = [], [], []
         self.assertTrue(self.until(lambda: not found("roomPanelRows").property("visible")), "no panels, no asks: no rows")
         self.assertEqual([w for w in warnings if "not placed in the graphics scene" not in w], [])
 

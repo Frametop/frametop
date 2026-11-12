@@ -20,31 +20,44 @@ ColumnLayout {
     Repeater {
         objectName: "controlAsks"
         model: rows.control.asks
-        delegate: RowLayout {
+        delegate: ColumnLayout {
             id: askRow
             required property var modelData
             spacing: Kirigami.Units.smallSpacing
-            Kirigami.Icon {
-                source: "dialog-question"
-                implicitWidth: Kirigami.Units.iconSizes.small
-                implicitHeight: Kirigami.Units.iconSizes.small
+            RowLayout {
+                spacing: Kirigami.Units.smallSpacing
+                Kirigami.Icon {
+                    source: "dialog-question"
+                    implicitWidth: Kirigami.Units.iconSizes.small
+                    implicitHeight: Kirigami.Units.iconSizes.small
+                }
+                Controls.Label {
+                    objectName: "askLabel"
+                    text: askRow.modelData.text
+                    textFormat: Text.PlainText
+                }
+                Controls.Button {
+                    objectName: "giveButton"
+                    // (a window of your PC is given at the second press: askSecond, below)
+                    text: askRow.modelData.second !== "" ? "Yes, give it" : "Give it"
+                    icon.name: "dialog-ok"
+                    onClicked: rows.control.give(askRow.modelData.number, askRow.modelData.person)
+                }
+                Controls.Button {
+                    objectName: "refuseButton"
+                    text: "No"
+                    icon.name: "dialog-cancel"
+                    onClicked: rows.control.take(askRow.modelData.number, askRow.modelData.person)
+                }
             }
             Controls.Label {
-                objectName: "askLabel"
-                text: askRow.modelData.text
+                objectName: "askSecond"
+                Layout.fillWidth: true
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                visible: text !== ""
+                wrapMode: Text.Wrap
+                text: askRow.modelData.second
                 textFormat: Text.PlainText
-            }
-            Controls.Button {
-                objectName: "giveButton"
-                text: "Give it"
-                icon.name: "dialog-ok"
-                onClicked: rows.control.give(askRow.modelData.number, askRow.modelData.person)
-            }
-            Controls.Button {
-                objectName: "refuseButton"
-                text: "No"
-                icon.name: "dialog-cancel"
-                onClicked: rows.control.take(askRow.modelData.number, askRow.modelData.person)
             }
         }
     }
@@ -124,6 +137,7 @@ ColumnLayout {
         opacity: 0.7
         font: Kirigami.Theme.smallFont
         text: "Someone you give a screen can click and type on your desktop and move that screen, for as "
-              + "long as you wear the headset. The room's owner can move any panel."
+              + "long as you wear the headset. With a window of your PC they click and type on that PC. "
+              + "The room's owner can move any panel."
     }
 }

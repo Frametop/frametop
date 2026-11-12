@@ -273,6 +273,10 @@ static void release_relay_buttons(struct server *s, const char *why);
 static void release_seat_buttons(struct server *s, const char *why);
 static void own_hand(struct server *s);
 static const char *peer_command(struct server *s, const char *words);
+static bool peer_at_host(const struct server *s, int screen);
+// Whether a screen (from 0) is a remote one by its number, running or not.
+static bool remote_index(int screen) { return screen >= FT_REMOTE_FIRST - 1; }
+static void own_hand(struct server *s);
 
 // A video (or anything moving over a large area) on a screen you don't look at keeps the
 // full frame rate (see frame_interval): its commits keep redrawing much of it, and keep
@@ -695,7 +699,14 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
     }
     if (ft_remote_is(e->screen)) {
         // Another machine's display: its stream takes the input, and a click or a spin to it
-        // takes the typing there too.
+        // takes the typing there too. That machine has one pointer as well, and someone of a
+        // Together room may be at it through a window of it they were given: the same turns
+        // as on the desktop, below. What the wearer holds there is the wearer's alone, so
+        // anything of theirs with a button down is their hand.
+        if (peer_at_host(s, e->screen)) {
+            if (ft_remote_held() || ft_peer_hand(&s->peer, e, false)) own_hand(s);
+            else if (ft_peer_holds(&s->peer, now_ms())) return;
+        }
         if (e->type == FT_BUTTON && e->pressed) spot_dismiss(s, "click");
         if ((e->type == FT_BUTTON && e->pressed) || e->type == FT_FRONT) {
             set_key_remote(s, e->screen);
@@ -965,7 +976,7 @@ static void keyboard_enter(struct server *s, struct wlr_surface *surface) {
 
 // Every key ft-screens holds comes up, on the focused screen (or with the next focus).
 static void release_keys(struct server *s, const char *why) {
-    ft_peer_keys_gone(&s->peer);  // someone else's in a Together room are among them
+    if (!remote_index(s->peer.screen)) ft_peer_keys_gone(&s->peer);  // someone else's in a Together room are among them
     for (size_t n = s->keyboard.num_keycodes; n && s->keyboard.num_keycodes; --n) {
         const uint32_t code = s->keyboard.keycodes[0];
         send_key(s, code, 0);
@@ -1064,7 +1075,7 @@ static void release_relay_buttons(struct server *s, const char *why) {
 static void release_seat_buttons(struct server *s, const char *why) {
     struct wlr_seat_pointer_state *ps = &s->seat->pointer_state;
     if (!ps->button_count || !ps->focused_surface) return;
-    ft_peer_buttons_gone(&s->peer);  // someone else's in a Together room are among them
+    if (!remote_index(s->peer.screen)) ft_peer_buttons_gone(&s->peer);  // someone else's in a Together room are among them
     while (ps->button_count) {
         const uint32_t code = ps->buttons[0].button;
         const bool last = ps->buttons[0].n_pressed == 1;
@@ -1076,10 +1087,13 @@ static void release_seat_buttons(struct server *s, const char *why) {
 
 // ---------------------------------------------------------------- input from a Together room
 
-// What peerinput.h asks of the desktop. Only its own screens: not a floating window's output,
-// and a remote display never gets here.
+// What peerinput.h asks of the desktop. Its own screens, not a floating window's output; and
+// another machine's display on a stream (remote.h), which ft-roominput names only for a window
+// of the wearer's PC that the room was given. A remote screen's number is never one of the
+// desktop's, also once it has gone: what they held there is never let go on the desktop.
 static bool peer_size(void *ctx, int screen, int *width, int *height) {
     const struct server *s = ctx;
+    if (remote_index(screen)) return ft_remote_peer_size(screen, width, height);
     if (screen < 0 || screen >= s->n_config || !s->screens[screen]) return false;
     *width = s->config[screen].width, *height = s->config[screen].height;
     return true;
@@ -1088,13 +1102,31 @@ static bool peer_size(void *ctx, int screen, int *width, int *height) {
 // Their pointer goes to the seat as the wearer's does, but for where typing goes: their click
 // takes KWin's keyboard focus to its screen (seat_event), not the typing away from Steam,
 // frunner's search or a remote display.
-static void peer_pointer(void *ctx, const struct ft_event *e) { seat_event(ctx, e); }
+static void peer_pointer(void *ctx, const struct ft_event *e) {
+    if (remote_index(e->screen)) ft_remote_peer_event(e);
+    else seat_event(ctx, e);
+}
+
+// Each remote display is a seat of its own: the host takes a release only through the stream
+// the press came through (g_pressed_on in remote.c).
+static int peer_seat(void *ctx, int screen) {
+    (void)ctx;
+    return remote_index(screen) ? screen + 1 : 0;
+}
+
+// Whether someone else's pointer is on a display of the machine that remote screen `screen` is of.
+static bool peer_at_host(const struct server *s, int screen) {
+    const char *theirs = remote_index(s->peer.screen) ? ft_remote_host(s->peer.screen) : NULL, *host = ft_remote_host(screen);
+    return theirs && host && *host && !strcmp(theirs, host);
+}
 
 // Their key goes down only where the wearer's would go now: typing is the desktop's, and on
 // the screen they were given. Not one that is down already (the wearer's, whose release would
-// then be theirs). A release always goes, of a key that is down.
+// then be theirs). A release always goes, of a key that is down. On another machine's display
+// the key goes where that machine's typing is, which is its own to say.
 static bool peer_key(void *ctx, int screen, uint32_t code, bool pressed) {
     struct server *s = ctx;
+    if (remote_index(screen)) return ft_remote_peer_key(screen, code, pressed), true;
     if (!pressed) {
         if (key_held(&s->keyboard, code)) send_key(s, code, 0);
         return true;
@@ -1107,12 +1139,13 @@ static bool peer_key(void *ctx, int screen, uint32_t code, bool pressed) {
 }
 
 static struct ft_peer_desk peer_desk(struct server *s) {
-    return (struct ft_peer_desk){s, peer_size, peer_pointer, peer_key};
+    return (struct ft_peer_desk){s, peer_size, peer_seat, peer_pointer, peer_key};
 }
 
-// The wearer's own hand is on the desktop: a click, a scroll, a drag, a spin to the front, a
-// key. What someone else holds there comes up, and ft-together hears "control own" while it
-// may give a screen to someone (its desk: together/room/desk.h).
+// The wearer's own hand is on the desktop, or on the machine someone else is at through a
+// window of it: a click, a scroll, a drag, a spin to the front, a key. What someone else holds
+// comes up, and ft-together hears "control own" while it may give a screen to someone (its
+// desk: together/room/desk.h).
 static void own_hand(struct server *s) {
     static struct ft_sock_log to = {FT_SOCK_TOGETHER, 0, 0, 0};
     const struct ft_peer_desk desk = peer_desk(s);
@@ -1153,6 +1186,7 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
     }
     // A remote screen has the typing, except for the release of a key the desktop holds.
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote) && (value || !key_held(&s->keyboard, code))) {
+        if (value && peer_at_host(s, s->key_remote)) own_hand(s);
         ft_remote_key(s->key_remote, code, value != 0);
         return (void)snprintf(reply, size, "ok remote");
     }

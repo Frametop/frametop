@@ -1,7 +1,7 @@
 // Input from the other people of a Together room (screens/peerinput.h), against a desk that
 // writes down what it was asked to do: where their pointer goes, what they hold and let go,
-// what isn't a screen of this desktop, whose turn the pointer is, and when the wearer's own
-// hand is told.
+// what isn't a screen that takes it, a window of the wearer's PC with a seat of its own, whose
+// turn the pointer is, and when the wearer's own hand is told.
 #include <assert.h>
 #include "../peerinput.h"
 
@@ -12,7 +12,14 @@ static bool size(void *ctx, int screen, int *width, int *height) {
     (void)ctx;
     if (screen == 0) return *width = 1920, *height = 1080, true;
     if (screen == 1) return *width = 3440, *height = 1440, true;
-    return false;   // 2 and up: a spare, a remote display, nothing
+    if (screen == 100) return *width = 1280, *height = 720, true;    // two windows of the wearer's PC, each on a stream
+    if (screen == 101) return *width = 1920, *height = 1080, true;
+    return false;   // the rest: a spare, a room's panel, nothing
+}
+
+static int seat(void *ctx, int screen) {
+    (void)ctx;
+    return screen >= 100 ? screen + 1 : 0;
 }
 
 static void pointer(void *ctx, const struct ft_event *e) {
@@ -26,15 +33,16 @@ static void pointer(void *ctx, const struct ft_event *e) {
 
 static bool key(void *ctx, int screen, uint32_t code, bool pressed) {
     (void)ctx;
-    if (pressed && screen != g_typing) return false;
+    if (pressed && screen < 100 && screen != g_typing) return false;
     char line[32];
-    snprintf(line, sizeof line, "k%u%s ", code, pressed ? "+" : "-");
+    if (screen >= 100) snprintf(line, sizeof line, "k%d:%u%s ", screen, code, pressed ? "+" : "-");
+    else snprintf(line, sizeof line, "k%u%s ", code, pressed ? "+" : "-");
     strcat(g_log, line);
     return true;
 }
 
 static struct ft_peer g_peer;
-static const struct ft_peer_desk g_desk = {NULL, size, pointer, key};
+static const struct ft_peer_desk g_desk = {NULL, size, seat, pointer, key};
 
 // The reply to "peer <words>" at `now`.
 static const char *at(const char *words, uint32_t now) { return ft_peer_command(&g_peer, &g_desk, words, now); }
@@ -97,8 +105,8 @@ int main(void) {
     assert(error(say("2 key 50 1")) && ok(say("letgo")));
     g_log[0] = 0;
 
-    // Only the desktop's own screens: not a spare, a remote display, or a number that is none.
-    assert(error(say("3 move 1 1")) && error(say("0 move 1 1")) && error(say("-1 move 1 1")) && error(say("101 key 30 1")) && did(""));
+    // Only the screens the desk has for them: not a spare, a room's panel, or a number that is none.
+    assert(error(say("3 move 1 1")) && error(say("0 move 1 1")) && error(say("-1 move 1 1")) && error(say("103 key 30 1")) && error(say("116 move 1 1")) && did(""));
     // What isn't one of these is refused, and nothing is done.
     const char *const bad[] = {"", "1", "1 move", "1 move 1", "1 move 1 1 1", "1 move -1 0", "1 move 0 65536", "1 fly 1 1",
                                "1 button 0 1", "1 button 4 1", "1 button 1 2", "2 scroll 0 0", "2 scroll 2401 0", "2 scroll 0 -2401",
@@ -109,6 +117,36 @@ int main(void) {
     // A button held from one screen to the next comes up on the next, as the wearer's drag does.
     assert(ok(say("2 move 100 100")) && ok(say("2 button 1 1")) && ok(say("1 move 65535 0")) && ok(say("1 button 1 0")));
     assert(did("m1:5,2 b1:5,2:272+ m0:1920,0 b0:1920,0:272- "));
+
+    // A window of the wearer's PC that stands here as a panel: its input goes through its own
+    // stream, a seat apart from the desktop's and from every other window's.
+    assert(ok(say("101 move 32768 32768")) && did("m100:640,360 "));
+    assert(ok(say("101 button 1 1")) && ok(say("101 move 65535 0")) && ok(say("101 button 1 0")) && did("b100:640,360:272+ m100:1280,0 b100:1280,0:272- "));
+    assert(ok(say("101 scroll 0 120")) && did("m100:1280,0 s100:0.00,1.00 "));
+    // A key goes down only at the seat their pointer is at...
+    assert(ok(say("101 key 30 1")) && did("k100:30+ "));
+    assert(!strcmp(say("2 key 31 1"), "ok not taken: their pointer is at another machine") &&
+           !strcmp(say("102 key 31 1"), "ok not taken: their pointer is at another machine") && did("") && g_peer.n_keys == 1);
+    // ...and comes up there, whichever screen its release names.
+    assert(ok(say("2 key 30 0")) && did("k100:30- "));
+    // Before their pointer goes to another seat, what they hold comes up where it went down: on the way to the desktop,
+    assert(ok(say("101 key 29 1")) && ok(say("101 button 1 1")) && did("k100:29+ b100:1280,0:272+ "));
+    assert(ok(say("1 move 0 0")) && did("k100:29- b100:1280,0:272- m0:0,0 ") && !g_peer.buttons && !g_peer.n_keys);
+    assert(!strcmp(say("1 button 1 0"), "ok not held") && !strcmp(say("101 key 29 0"), "ok not held") && did(""));
+    // on the way from it,
+    assert(ok(say("2 move 0 0")) && ok(say("2 key 30 1")) && ok(say("2 button 1 1")) && did("m1:0,0 k30+ b1:0,0:272+ "));
+    assert(ok(say("101 move 0 0")) && did("k30- b1:0,0:272- m100:0,0 "));
+    // and from one window of the PC's to the next.
+    assert(ok(say("101 button 3 1")) && ok(say("102 move 0 65535")) && did("b100:0,0:274+ b100:0,0:274- m101:0,1080 "));
+    // The wearer's own hand lets go of what they hold there, as on the desktop.
+    assert(ok(say("102 key 42 1")) && ok(say("102 button 2 1")) && did("k101:42+ b101:0,1080:273+ "));
+    assert(!ft_peer_own(&g_peer, &g_desk, 1000) && did("k101:42- b101:0,1080:273- "));
+    // A key that went down on the desktop before they ever pointed anywhere is the desktop's
+    // seat's: it comes up when they go to the PC's window, where no key goes down before they do.
+    struct ft_peer first;
+    ft_peer_init(&first);
+    assert(!strcmp(ft_peer_command(&first, &g_desk, "101 key 30 1", 1000), "ok not taken: their pointer is at another machine") && did(""));
+    assert(ok(ft_peer_command(&first, &g_desk, "2 key 30 1", 1000)) && ok(ft_peer_command(&first, &g_desk, "101 move 0 0", 1000)) && did("k30+ k30- m100:0,0 "));
 
     // A screen that goes while they hold a button there: letting go forgets it and asks nothing of the seat.
     assert(ok(say("2 move 100 100")) && ok(say("2 button 1 1")) && ok(say("2 key 30 1")));

@@ -58,15 +58,19 @@ class Together:
         self.asked = []
 
     def _control(self, w):
-        """`control give|take NUMBER PERSON` and `control ask PANEL`, as far as the page says them."""
+        """`control give|take NUMBER PERSON`, `control give NUMBER PERSON pc` for a window of the
+        PC's (numbers 3 to 6) and `control ask PANEL`, as far as the page says them."""
         if w[1] == "ask" and len(w) == 3:
             if not any(p["id"] == int(w[2]) for p in self.panels):
                 return "error no such panel"
             self.control["asked"].append(int(w[2]))
             return "ok"
-        if w[1] not in ("give", "take") or len(w) != 4:
+        said_pc = w[1] == "give" and w[4:] == ["pc"]
+        if w[1] not in ("give", "take") or len(w) != 4 + said_pc:
             return "error what"
         pair = {"number": int(w[2]), "person": int(w[3])}
+        if w[1] == "give" and said_pc != (3 <= pair["number"] <= 6):
+            return f"error panel {w[2]} is your PC's: \"control give {w[2]} {w[3]} pc\" gives it" if not said_pc else f"error panel {w[2]} isn't your PC's"
         if w[1] == "give" and not self.control["there"]:
             return "error nobody says you have the headset on, and control is given only while you are there"
         self.control["asks"] = [a for a in self.control["asks"] if a != pair]

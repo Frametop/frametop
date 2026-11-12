@@ -185,6 +185,26 @@ static void granting() {
                                                                      b.ask("control act 0 fly 1 1").rfind("error control |", 0) == 0 && b.ask("control give 0").rfind("error control |", 0) == 0);
 }
 
+// A panel of the wearer's PC: whoever is given it is at that PC, so it takes saying twice.
+static void pcs() {
+    Table t;
+    Hand &a = t.ha, &b = t.hb;
+    if (!check("three people sit in a room, and one shares a window of their PC", t.sit() && t.a.ask(std::string("share 3") + kScreen) == "ok" && a.ask("control here") == "ok")) return;
+    t.tick(0.1);
+    check("the PC's panel is asked for as any other", b.ask("control ask 3") == "ok" && a.has("\"asks\":[{\"number\":3,\"person\":1}]"));
+    check("given as any other, it isn't: the answer says what gives it", a.ask("control give 3 1").rfind("error panel 3 is your PC's", 0) == 0 &&
+                                                                         a.ask("control give 3 1").find("\"control give 3 1 pc\"") != std::string::npos && a.has("\"given\":[]") &&
+                                                                         b.ask("control act 3 move 1 1") == "error you have no control of that panel");
+    check("said as the PC's, it is given, and their input comes", a.ask("control give 3 1 pc") == "ok" && a.has("\"given\":[{\"number\":3,\"person\":1}]") &&
+                                                                    b.ask("control act 3 key 30 1") == "ok" && a.last(1, proto::kActKey, 30, 1));
+    check("a screen of the Frame's isn't given as the PC's, nor with any other word", a.ask("control give 0 1 pc") == "error panel 0 isn't your PC's" && a.ask("control give 2 1 pc") == "error panel 2 isn't your PC's" &&
+                                                                                     a.ask("control give 3 1 yes").rfind("error control |", 0) == 0 && a.ask("control give 3 1 pc pc").rfind("error control |", 0) == 0 &&
+                                                                                     a.ask("control give 7 1 pc") == "error panel 7 isn't your PC's");
+    check("the PC's last panel takes it too, and one that isn't shared is refused as ever", a.ask("control give 6 1").rfind("error panel 6 is your PC's", 0) == 0 &&
+                                                                                            a.ask("control give 6 1 pc") == "error you don't share that panel");
+    check("it is taken back as any other", a.ask("control take 3 1") == "ok" && a.has("\"given\":[]"));
+}
+
 static void rates() {
     Table t;
     Hand &a = t.ha, &b = t.hb;
@@ -280,6 +300,7 @@ static void gate() {
 
 int main() {
     granting();
+    pcs();
     rates();
     rules();
     gate();

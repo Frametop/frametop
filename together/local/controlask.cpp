@@ -1,6 +1,8 @@
 // Control behind lines of text (controlask.h).
 #include "controlask.h"
 
+#include "../room/panels.h"
+
 #include <cstdlib>
 #include <sstream>
 #include <vector>
@@ -8,7 +10,7 @@
 namespace local {
 namespace {
 
-constexpr const char *kUsage = "error control | control ask PANEL | control give NUMBER PERSON | control take NUMBER [PERSON] | "
+constexpr const char *kUsage = "error control | control ask PANEL | control give NUMBER PERSON [pc] | control take NUMBER [PERSON] | "
                                "control act PANEL move X Y|button B 0|1|scroll RIGHT DOWN|key CODE 0|1 | control own | control here";
 
 // A whole number from `lo` to `hi`, and nothing after it.
@@ -46,7 +48,13 @@ bool ControlAsk(flow::Control &control, const std::string &asked, double now, st
     else if (verb == "own" && w.size() == 2) reply = Said(control.Own(now));
     else if (verb == "here" && w.size() == 2) control.Here(now), reply = "ok";
     else if (verb == "ask" && w.size() == 3 && Whole(w[2], 0, 255, n)) reply = Said(control.Ask(n, now));
-    else if (verb == "give" && w.size() == 4 && Whole(w[2], 0, 255, n) && Whole(w[3], 0, 255, person)) reply = Said(control.Give(n, person, now));
+    else if (verb == "give" && (w.size() == 4 || (w.size() == 5 && w[4] == "pc")) && Whole(w[2], 0, 255, n) && Whole(w[3], 0, 255, person)) {
+        // A panel of the PC's is given only when the asker says it is one: the second ask.
+        const bool pcs = n >= room::kFramePanels && n < room::kOwnPanels;
+        if (pcs && w.size() == 4) reply = "error panel " + w[2] + " is your PC's: whoever has it clicks and types on that PC. \"control give " + w[2] + " " + w[3] + " pc\" gives it";
+        else if (!pcs && w.size() == 5) reply = "error panel " + w[2] + " isn't your PC's";
+        else reply = Said(control.Give(n, person, now));
+    }
     else if (verb == "take" && (w.size() == 3 || w.size() == 4) && Whole(w[2], 0, 255, n) && (w.size() == 3 || Whole(w[3], 0, 255, person))) reply = Said(control.Take(n, person));
     else if (verb == "act" && Act(w, act)) {
         std::vector<proto::Act> go;

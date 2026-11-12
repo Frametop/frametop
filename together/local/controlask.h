@@ -4,6 +4,9 @@
 //   control                      -> ok and flow::Control::State as JSON
 //   control ask PANEL            -> asks the owner of the room's panel PANEL (its id) for it
 //   control give NUMBER PERSON   -> gives your panel NUMBER to the person in place PERSON
+//   control give NUMBER PERSON pc   the same for a panel of your PC's (3 to 6), which is given
+//                                only when said so: whoever holds it clicks and types on that
+//                                PC, so its wearer is asked a second time before this is said
 //   control take NUMBER [PERSON] -> takes it back from them or says no to their ask; from
 //                                   everyone without PERSON
 //   control act PANEL move X Y | button B 0|1 | scroll RIGHT DOWN | key CODE 0|1

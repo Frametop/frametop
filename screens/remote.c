@@ -412,6 +412,43 @@ void ft_remote_pad(int index, const char *msg) {
         say(r, "pad %x %d %d %d %d %d %d", b, lt, rt, lx, ly, rx, ry);
 }
 
+// --- input from someone else of a Together room (remote.h)
+
+static struct remote *peer_stream(int index) {
+    struct remote *r = find(index);
+    return r && !is_peer(r) && r->fd >= 0 ? r : NULL;
+}
+
+bool ft_remote_peer_size(int index, int *width, int *height) {
+    const struct remote *r = peer_stream(index);
+    if (!r) return false;
+    *width = r->have_ring ? r->ring[0].width : r->width, *height = r->have_ring ? r->ring[0].height : r->height;
+    return true;
+}
+
+void ft_remote_peer_event(const struct ft_event *e) {
+    struct remote *r = peer_stream(e->screen);
+    if (!r) return;
+    if (e->type == FT_MOTION || e->type == FT_BUTTON) say(r, "move %.1f %.1f", e->x, e->y);
+    if (e->type == FT_BUTTON) {
+        say(r, "button %u %d", e->button, e->pressed ? 1 : 0);
+        wlr_log(WLR_INFO, "remote %d: someone else's button %u %s at %.0f,%.0f", r->index + 1, e->button, e->pressed ? "down" : "up", e->x, e->y);
+    } else if (e->type == FT_SCROLL) {
+        say(r, "scroll %.3f %.3f", e->dx, e->dy);
+    }
+}
+
+void ft_remote_peer_key(int index, uint32_t code, bool pressed) {
+    struct remote *r = peer_stream(index);
+    if (r) say(r, "peerkey %u %d", code, pressed ? 1 : 0);
+}
+
+bool ft_remote_held(void) {
+    for (int b = 0; b < 8; ++b)
+        if (g_pressed_on[b] >= 0) return true;
+    return false;
+}
+
 void ft_remote_tick(void) {
     static const char *const names[] = {"hidden", "view", "focused"};  // enum ft_attention
     const uint32_t t = now_ms();

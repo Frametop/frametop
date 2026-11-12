@@ -36,7 +36,9 @@ set_caps() {  # only when missing: a rebuild clears them, a reinstall doesn't
     echo "ft-camd has its capabilities"
     return
   fi
-  sudo_run "setcap $caps $bin && getcap $bin"
+  # setcap follows symlinks: a link there would hand the capabilities to whatever it points at.
+  sudo_run "if [ -L $bin ] || [ ! -f $bin ]; then echo 'ft-camd is not a plain file:' $bin >&2; exit 1; fi
+setcap $caps $bin && getcap $bin"
 }
 
 # A left-over binary shouldn't keep its read-any-file powers, but while the Hand Recorder or

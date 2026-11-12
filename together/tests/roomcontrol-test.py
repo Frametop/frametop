@@ -52,6 +52,7 @@ def main():
         ok = ok and all(e.until(lambda s: len(s["people"]) == 3 and roomkit.linked(s)) for e in (ada, ben, cy))
         if not check("three of them are in ada's room", ok):
             return
+        check("each Frame says its wearer's hand moves their pointer", all(e.hand() for e in (ada, ben, cy)))
         who = {p["name"]: p["id"] for p in ada.state()["people"]}
         ok = ada.ask("share 0 " + SCREEN) == "ok" and all(e.until(lambda s: [p["id"] for p in s["panels"]] == [who["ada"] * 8]) for e in (ada, ben, cy))
         check("ada shares a panel", ok)

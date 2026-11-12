@@ -11,7 +11,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/install-lib.sh"
 frame="$root/scripts/frame.sh"
 main=frametop-together.service
-rooms="frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service frametop-room-input.service frametop-room-points.service frametop-room-move.service"
+rooms="frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service frametop-room-input.service frametop-room-points.service frametop-room-move.service frametop-room-gaze.service"
 units="$main $rooms"
 
 states="for u in $units; do echo \"\$u: \$(systemctl --user is-active \$u)\"; done"

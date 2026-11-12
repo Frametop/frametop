@@ -109,7 +109,7 @@ Frametop Settings' Remote access page (`remote/remote_access.py`) serves the des
 
 ## Frametop Together
 
-Frametop Settings' Frametop Together page (`together/ft_together_settings.py`) is where a room shared with other Steam Frames is used: its switch turns Frametop Together on (`frametop-together.service`, an optional part of the install that is off until then), and the page opens a room or joins one with an address and an invite code, shows who asks to come in and who is in the room, mutes your voice, and shares the desktop's screens, three at most. It asks the room's programs once a second while it shows. The part itself, its units and what the page asks: [together/README.md](../together/README.md), "Running it"; the design: [together.md](together.md).
+Frametop Settings' Frametop Together page (`together/ft_together_settings.py`) is where a room shared with other Steam Frames is used: its switch turns Frametop Together on (`frametop-together.service`, an optional part of the install that is off until then), and the page opens a room or joins one with an address and an invite code, shows who asks to come in and who is in the room, mutes your voice, shares where you look if you turn that on, and shares the desktop's screens, three at most. It asks the room's programs once a second while it shows. The part itself, its units and what the page asks: [together/README.md](../together/README.md), "Running it"; the design: [together.md](together.md).
 
 ## Floating windows
 

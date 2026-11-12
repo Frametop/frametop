@@ -3,7 +3,7 @@
 // a network made in the test (fakenet.h), each with a desktop that remembers the input it was
 // given. Asking, giving and taking back; whose input reaches a desktop and whose doesn't; one
 // person at a time; what is let go for whom; a grant that runs out with no word that the
-// wearer is there; and people who say what they may not. No sockets, no clock.
+// wearer is there; people who say what they may not; and an act's gate. No sockets, no clock.
 #include "../flow/control.h"
 #include "../local/controlask.h"
 #include "fakenet.h"
@@ -253,10 +253,36 @@ static void rules() {
     check("the room ends: nothing of it stands anywhere", ok && a.has("\"asks\":[],\"given\":[],\"holder\":-1,\"held\":[],\"asked\":[]") && t.hb.has("\"held\":[],\"asked\":[]"));
 }
 
+// An act's gate (local/controlask.h): what it lets through, in the order it says, is what the
+// panel's owner gets.
+static void gate() {
+    Table t;
+    Hand &a = t.ha, &b = t.hb;
+    if (!check("someone is given a panel", t.sit() && b.ask("control ask 0") == "ok" && a.ask("control here") == "ok" && a.ask("control give 0 1") == "ok")) return;
+    std::vector<proto::Act> held;
+    const local::ActGate moves_wait = [&held](const proto::Act &act, std::vector<proto::Act> &go) {
+        if (act.what == proto::kActMove) return held.push_back(act);
+        go = held, go.push_back(act), held.clear();
+    };
+    const auto said = [&](const std::string &text) {
+        std::string reply = "not control's";
+        local::ControlAsk(b.control, text, t.net.now, reply, moves_wait);
+        t.net.pump();
+        return reply;
+    };
+    check("an act the gate keeps is taken, and nothing is given to the owner for it", said("control act 0 move 100 200") == "ok" && said("control act 0 move 300 400") == "ok" && a.got.empty());
+    bool ok = said("control act 0 button 1 1") == "ok" && a.got.size() == 3 && a.got[0].second.what == proto::kActMove && a.got[0].second.a == 100 && a.got[1].second.a == 300;
+    check("what the gate lets go for the next one reaches the owner, in the gate's order", ok && a.last(1, proto::kActButton, 1, 1));
+    check("the answer is the last one's: what no panel takes is still refused", said("control act 0 move 1 1") == "ok" && said("control act 0 button 9 1") == "error that isn't input a panel takes");
+    check("...and so is an act on a panel that wasn't given, whatever the gate does", said("control act 8 button 1 1") == "error that panel is yours" && said("control act 1 button 1 1") == "error you have no control of that panel");
+    check("with no gate an act goes as it was said", b.ask("control act 0 move 7 8") == "ok" && a.last(1, proto::kActMove, 7, 8));
+}
+
 int main() {
     granting();
     rates();
     rules();
+    gate();
     std::printf(failed ? "FAILED\n" : "all ok\n");
     return failed ? 1 : 0;
 }

@@ -19,10 +19,12 @@
 //   points           -> the asker gets where the others point
 //   move ..., moves  -> someone else's panel put elsewhere, and where the others put this
 //                       Frame's (local/moveask.h, flow/moves.h)
+//   gaze ...         -> whether the wearer shares where they look, and where that is
+//                       (local/gazeask.h)
 //
-// A datagram there that is a pose, a voice or a pointer (local/datagrams.h) is the wearer's
-// own: it goes to everyone in the room, and theirs come back to whoever watches, listens or
-// asked `points`. One that is the wearer's mouth goes out in their poses (local/mouth.h). The shared panels' video comes from
+// A datagram there that is a pose, a voice, a pointer or the wearer's mouth (local/datagrams.h)
+// is the wearer's own: what of it the room is told is local/own.h's to say, and theirs come back
+// to whoever watches, listens or asked `points`. The shared panels' video comes from
 // and goes to this Frame's media programs on a second socket, "@NAME_media" (local/media.h), and
 // between the Frames on the links, a stream a picture (flow/video.h). An avatar's file goes to
 // whoever in the room asks its wearer for it, on a stream too (flow/looks.h).
@@ -47,12 +49,11 @@
 #include "flow/video.h"
 #include "local/controlask.h"
 #include "local/floor.h"
+#include "local/gazeask.h"
 #include "local/inputs.h"
 #include "local/media.h"
-#include "local/mouth.h"
 #include "local/moveask.h"
-#include "local/pointgate.h"
-#include "local/posegate.h"
+#include "local/own.h"
 #include "local/voicegate.h"
 #include "local/wardrobe.h"
 #include "local/watchers.h"
@@ -152,8 +153,7 @@ struct End {
 // What this Frame's own programs are given of the room, and give it (together/local).
 struct Local {
     local::PoseGate gate;
-    local::PoseCount count;
-    local::Mouth mouth;   // the wearer's own, as the program that hears them tells it
+    local::Own own;   // what the room is told of the wearer
     local::Watchers watchers;
     local::VoiceGate voices;
     local::Watchers listeners{local::kVoiceToListener};
@@ -162,7 +162,6 @@ struct Local {
     local::Media media;
     local::Wardrobe wardrobe;
     local::PointGate points;
-    local::PointCount pointCount;
     local::Watchers pointers{local::kPointToWatcher};
     local::Inputs inputs;   // the others' input, to the program that gives it to the desktop
     Local(const std::string &name, int sock) : wardrobe(name), inputs(sock) {}
@@ -254,27 +253,14 @@ std::string MediaState(const End &end, const Local &local) {
     return state + ",\"bitrate\":[" + rates + "],\"viewers\":[" + viewers + "],\"dropped\":" + std::to_string(end.video->dropped()) + "}";
 }
 
-// The wearer's own pose, from one of this Frame's programs, to everyone in the room, with their
-// mouth as the program that hears them has it.
-void Mine(End &end, Local &local, const uint8_t *data, size_t n, double now) {
+// A datagram of the wearer's own, from one of this Frame's programs: what the room is told for
+// it goes to everyone there. False when it is a question.
+bool Mine(End &end, Local &local, const uint8_t *data, size_t n, double now) {
     std::vector<uint8_t> out;
-    if (!end.inRoom() || !local.count.Stamp(data, n, local.mouth, now, out)) return;
-    for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
-}
-
-// The wearer's own voice, from this Frame's program that hears them, to everyone in the room.
-void MyVoice(End &end, const uint8_t *data, size_t n) {
-    proto::Voice voice;
-    if (!end.inRoom() || !proto::ReadVoice(data, n, voice)) return;
-    const std::vector<uint8_t> out(data, data + n);
-    for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
-}
-
-// Where the wearer points, from the program that knows, to everyone in the room.
-void MyPoint(End &end, Local &local, const uint8_t *data, size_t n) {
-    std::vector<uint8_t> out;
-    if (!end.inRoom() || !local.pointCount.Stamp(data, n, out)) return;
-    for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
+    if (!local.own.Take(data, n, now, out)) return false;
+    if (end.inRoom())   // nothing to tell is an empty datagram, which no link sends
+        for (int link : end.session->MemberLinks()) end.links->Datagram(link, out);
+    return true;
 }
 
 // The avatar the wearer has on, from the program that draws them. The room hears of it only if
@@ -286,21 +272,20 @@ std::string Wear(End &end, Local &local, const std::string &name, double now) {
     return whyNot.empty() ? "ok" : "error " + whyNot;
 }
 
-// One datagram from the local socket seen to, if one waits: a question answered, a pose, a
-// voice or a pointer sent on, or the wearer's mouth kept for their poses.
+// One datagram from the local socket seen to, if one waits: a question answered, or something
+// of the wearer's own taken.
 bool Answer(int sock, End &end, Local &local, double now) {
     char text[kMostQuestion + 1];
     sockaddr_un from;
     socklen_t fromLen = sizeof from;
     const ssize_t n = recvfrom(sock, text, sizeof text, MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&from), &fromLen);
     if (n < 0) return false;
-    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(text);
-    if (n > 0 && bytes[0] == proto::kPoseDatagram) return Mine(end, local, bytes, size_t(n), now), true;
-    if (n > 0 && bytes[0] == proto::kVoiceDatagram) return MyVoice(end, bytes, size_t(n)), true;
-    if (n > 0 && bytes[0] == proto::kPointDatagram) return MyPoint(end, local, bytes, size_t(n)), true;
-    if (n > 0 && bytes[0] == local::kMouthToTogether) return local.mouth.Take(bytes, size_t(n), now), true;
+    if (Mine(end, local, reinterpret_cast<const uint8_t *>(text), size_t(n), now)) return true;
     const std::string asked(text, size_t(n));
     std::string reply;
+    // A room is only come into by a question. So here, before each, is where the last room's
+    // floor and the wearer's leave to tell where they look end with it.
+    if (!end.inRoom()) local.floor.Lift(), local.own.gaze().Lift();
     if (size_t(n) > kMostQuestion) reply = "error that is too long";
     else if (!end.session) reply = "error Tailscale isn't running on this headset";
     else if (asked == "watch") reply = local.watchers.Add(from, fromLen, now) ? "ok" : "error too many programs are watching";
@@ -313,9 +298,9 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "looks") reply = "ok " + local.wardrobe.State(end.session->room(), end.session->me());
     else if (asked == "inputs") reply = local.inputs.Add(from, fromLen, now) ? "ok" : "error another program takes the input";
     else if (asked == "points") reply = local.pointers.Add(from, fromLen, now) ? "ok" : "error too many programs ask where people point";
-    else if (local::ControlAsk(*end.control, asked, now, reply) || local::MoveAsk(*end.moves, asked, now, reply)) {}
+    else if (local::ControlAsk(*end.control, asked, now, reply, [&](const proto::Act &act, std::vector<proto::Act> &go) { local.own.Act(act, now, go); }) ||
+             local::MoveAsk(*end.moves, asked, now, reply) || local::GazeAsk(local.own.gaze(), asked, end.inRoom(), now, reply)) {}
     else reply = session::Command(*end.session, asked, now);
-    if (!end.inRoom()) local.floor.Lift();   // the room was left: the next one's floor is its own
     // an asker that doesn't wait for its answer doesn't hold up the loop
     if (fromLen > sizeof(sa_family_t)) sendto(sock, reply.data(), reply.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<sockaddr *>(&from), fromLen);
     return true;
@@ -372,7 +357,6 @@ int main(int argc, char **argv) {
         if (end.session) {
             net::Event e;
             for (int i = 0; i < kMostAtOnce && end.links->Next(e); ++i) Tell(sock, end, local, e, now);
-            if (!end.inRoom()) local.floor.Lift();
         }
         for (int i = 0; i < kMostAtOnce && Answer(sock, end, local, now); ++i) {}
         local.media.Serve(end.video.get(), now);

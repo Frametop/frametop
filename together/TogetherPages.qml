@@ -322,72 +322,11 @@ Item {
                 }
 
                 // --- what the room gets of yours ---
-                Kirigami.Heading {
-                    level: 3
-                    visible: backend.ready && root.inRoom
-                    text: "What you share"
-                }
-                Kirigami.FormLayout {
+                YourShares {
                     Layout.fillWidth: true
                     visible: backend.ready && root.inRoom
-
-                    Controls.Switch {
-                        objectName: "muteSwitch"
-                        Kirigami.FormData.label: "Your voice:"
-                        text: backend.voiceText
-                        enabled: backend.voiceUp
-                        checked: backend.voiceUp && !backend.muted
-                        onToggled: {
-                            backend.setMuted(!checked)
-                            checked = Qt.binding(() => backend.voiceUp && !backend.muted)
-                        }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Your avatar:"
-                        spacing: Kirigami.Units.largeSpacing
-                        Controls.Label {
-                            objectName: "avatarLabel"
-                            Layout.maximumWidth: Kirigami.Units.gridUnit * 18
-                            wrapMode: Text.Wrap
-                            textFormat: Text.PlainText
-                            text: backend.avatarText
-                        }
-                        Controls.Button {
-                            objectName: "allowAvatarButton"
-                            visible: backend.avatarAllow
-                            text: "Let them have it…"
-                            onClicked: allowDialog.open()
-                        }
-                    }
-                    Kirigami.Separator {
-                        Kirigami.FormData.isSection: true
-                        Kirigami.FormData.label: "Your screens"
-                    }
-                    Repeater {
-                        objectName: "shares"
-                        model: backend.shares
-                        delegate: Controls.Switch {
-                            id: shareSwitch
-                            required property var modelData
-                            text: shareSwitch.modelData.title + (shareSwitch.modelData.shared && !shareSwitch.modelData.live ? ": starting…" : "")
-                            enabled: shareSwitch.modelData.can
-                            checked: shareSwitch.modelData.shared
-                            onToggled: {
-                                backend.setShared(shareSwitch.modelData.screen, checked)
-                                checked = Qt.binding(() => shareSwitch.modelData.shared)
-                            }
-                        }
-                    }
-                    Controls.Label {
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
-                        wrapMode: Text.Wrap
-                        opacity: 0.7
-                        font: Kirigami.Theme.smallFont
-                        text: backend.shares.length === 0
-                              ? "The desktop's screens show here while the Frametop desktop runs."
-                              : "Up to three at a time. The others see a shared screen where it stands in your room; "
-                                + "they can click and type on it only once you give it to them."
-                    }
+                    backend: root.backend
+                    onAllowAvatar: allowDialog.open()
                 }
             }
         }

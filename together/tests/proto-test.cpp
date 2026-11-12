@@ -386,12 +386,35 @@ static void poses() {
     ok = ok && std::fabs(q.eyes[2] + 2.5f) < 1e-6 && std::fabs(q.eyeHeight - 1.71f) < 1e-3 && q.mouth[0] == 255 && q.mouth[4] == 17 && q.hand[1].elbow[1] == 1.0f;
     for (int i = 0; i < 4; ++i) ok = ok && std::fabs(q.head[i] - turn[i]) < 1e-4 && std::fabs(q.hand[1].turn[i] - turn[i]) < 1e-4;
     for (int f = 0; f < proto::kFingerTurns; ++f) ok = ok && std::fabs(q.hand[1].finger[f][0] - right.finger[f][0]) < 0.01 && std::fabs(q.hand[1].finger[f][1] - right.finger[f][1]) < 0.01;
-    check("a pose comes back as it went: the head, a hand with its fingers and elbow, the mouth", ok);
+    check("a pose comes back as it went: the head, a hand with its fingers and elbow, the mouth", ok && !q.looks && q.gaze[0] == 0 && q.gaze[1] == 0);
     p.hand[0] = right;
     check("a whole pose fits a datagram four times over", proto::Pack(p).size() == 215 && sent.size() == 123);
     proto::Pose bare;
     const std::vector<uint8_t> small = proto::Pack(bare);
     check("with no hands tracked it is 31 bytes", small.size() == 31 && proto::Read(small.data(), small.size(), q) && !q.hand[0].tracked && !q.hand[1].tracked);
+    // where they look: two bytes more, and only in a pose that says so
+    proto::Pose looking = p;
+    looking.looks = true, looking.gaze[0] = 12.3f, looking.gaze[1] = -7.75f;
+    std::vector<uint8_t> look = proto::Pack(looking);
+    ok = look.size() == 217 && proto::Read(look.data(), look.size(), q) && q.looks && std::fabs(q.gaze[0] - 12.5f) < 1e-6 && std::fabs(q.gaze[1] + 8.0f) < 1e-6;
+    ok = ok && q.hand[0].tracked && q.hand[1].hasElbow && q.mouth[4] == 17 && std::fabs(q.hand[1].wrist[2] + 2.8f) < 1e-6;
+    check("a pose that tells where they look is two bytes longer, and it comes back to the half degree with all the rest", ok);
+    looking.gaze[0] = 400, looking.gaze[1] = -90;
+    look = proto::Pack(looking);
+    ok = proto::Read(look.data(), look.size(), q) && q.looks && q.gaze[0] == 63.5f && q.gaze[1] == -63.5f;
+    looking.gaze[0] = std::numeric_limits<float>::quiet_NaN(), looking.gaze[1] = std::numeric_limits<float>::infinity();
+    look = proto::Pack(looking);
+    ok = ok && proto::Read(look.data(), look.size(), q) && q.looks && q.gaze[0] == 0 && q.gaze[1] == 0;
+    look[26 + proto::kMouthShapes] = 0x80, look[27 + proto::kMouthShapes] = 0x7f;
+    ok = ok && proto::Read(look.data(), look.size(), q) && q.gaze[0] == -63.5f && q.gaze[1] == 63.5f;
+    check("...never further than a byte of half degrees goes, and straight ahead when it isn't a number", ok);
+    looking = bare, looking.looks = true, looking.gaze[0] = 5;
+    look = proto::Pack(looking);
+    ok = look.size() == 33 && proto::Read(look.data(), look.size(), q) && q.looks && q.gaze[0] == 5 && !proto::Read(look.data(), 32, q) && !proto::Read(look.data(), 31, q);
+    look = small, look[25] = proto::kPoseLooks;
+    ok = ok && !proto::Read(look.data(), look.size(), q);
+    look = small, look[25] = 0x80;
+    check("...one that says it tells and doesn't is refused, and so is a flag nobody knows", ok && !proto::Read(look.data(), look.size(), q));
     check("a newer pose is told from an older one across the count's wrap", proto::Newer(3, 65530) && proto::Newer(101, 100) && !proto::Newer(100, 100) && !proto::Newer(65530, 3));
 
     const auto refused = [&](const char *what, void (*spoil)(proto::Pose &)) {
@@ -424,7 +447,7 @@ static void poses() {
         for (int k = 0; k < 3; ++k) ok = ok && std::fabs(q.eyes[k]) <= proto::kFar && std::fabs(q.hand[0].wrist[k]) <= proto::kFar && std::fabs(q.hand[1].elbow[k]) <= proto::kFar;
         double norm = 0;
         for (float v : q.head) norm += double(v) * v;
-        ok = ok && std::fabs(norm - 1) < 1e-3;
+        ok = ok && std::fabs(norm - 1) < 1e-3 && std::fabs(q.gaze[0]) <= proto::kMostGaze && std::fabs(q.gaze[1]) <= proto::kMostGaze && (q.looks || (q.gaze[0] == 0 && q.gaze[1] == 0));
     }
     check("noise and damaged poses are refused or read as a pose within every bound", ok);
 }

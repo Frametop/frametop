@@ -34,7 +34,7 @@ bool Act(const std::vector<std::string> &w, proto::Act &act) {
 
 }  // namespace
 
-bool ControlAsk(flow::Control &control, const std::string &asked, double now, std::string &reply) {
+bool ControlAsk(flow::Control &control, const std::string &asked, double now, std::string &reply, const ActGate &gate) {
     if (asked != "control" && asked.rfind("control ", 0) != 0) return false;
     std::istringstream in(asked);
     std::vector<std::string> w;
@@ -48,7 +48,13 @@ bool ControlAsk(flow::Control &control, const std::string &asked, double now, st
     else if (verb == "ask" && w.size() == 3 && Whole(w[2], 0, 255, n)) reply = Said(control.Ask(n, now));
     else if (verb == "give" && w.size() == 4 && Whole(w[2], 0, 255, n) && Whole(w[3], 0, 255, person)) reply = Said(control.Give(n, person, now));
     else if (verb == "take" && (w.size() == 3 || w.size() == 4) && Whole(w[2], 0, 255, n) && (w.size() == 3 || Whole(w[3], 0, 255, person))) reply = Said(control.Take(n, person));
-    else if (verb == "act" && Act(w, act)) reply = Said(control.Act(act, now));
+    else if (verb == "act" && Act(w, act)) {
+        std::vector<proto::Act> go;
+        if (gate) gate(act, go);
+        else go.push_back(act);
+        reply = "ok";   // one that waits at the gate was taken
+        for (const proto::Act &a : go) reply = Said(control.Act(a, now));
+    }
     else reply = kUsage;
     return true;
 }

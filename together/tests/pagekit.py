@@ -52,6 +52,8 @@ class Together:
         self.looks = {"wear": "", "sent": False, "why": "", "people": []}
         self.panels = []       # the room's panels (panel())
         self.control = {"there": True, "left": 9.5, "asks": [], "given": [], "holder": -1, "held": [], "asked": [], "passed": 0, "dropped": 0}
+        self.gaze = {"shared": False, "fresh": False, "quiet": False}   # None: an ft-together that knows no `gaze`
+        self.gaze_no = ""      # why `gaze on` is refused, when it is
         self.asked = []
 
     def _control(self, w):
@@ -71,7 +73,7 @@ class Together:
         return "ok"
 
     def __call__(self, text):
-        if text not in ("state", "here", "looks", "control"):
+        if text not in ("state", "here", "looks", "control", "gaze"):
             self.asked.append(text)
         if not self.tailscale:
             return "error Tailscale isn't running on this headset"
@@ -80,6 +82,15 @@ class Together:
             return state(self.mode, self.people, self.asks, self.note, panels=self.panels)
         if text == "control":
             return "ok " + json.dumps(self.control)
+        if w[0] == "gaze" and self.gaze is None:
+            return "error what"
+        if text == "gaze":
+            return "ok " + json.dumps(self.gaze)
+        if text in ("gaze on", "gaze off"):
+            if text == "gaze on" and (self.gaze_no or self.mode not in ("hosting", "joined")):
+                return "error " + (self.gaze_no or "you aren't in a room")
+            self.gaze["shared"] = text == "gaze on"
+            return "ok"
         if w[0] == "control":
             return self._control(w)
         if text == "here":

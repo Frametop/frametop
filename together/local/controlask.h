@@ -7,7 +7,9 @@
 //   control take NUMBER [PERSON] -> takes it back from them or says no to their ask; from
 //                                   everyone without PERSON
 //   control act PANEL move X Y | button B 0|1 | scroll RIGHT DOWN | key CODE 0|1
-//                                -> your input on a panel you were given (proto/control.h)
+//                                -> your input on a panel you were given (proto/control.h).
+//                                   What of it goes to the panel's owner, and when, is the
+//                                   gate's to say, when there is one (hush.h)
 //   control own                  -> your own hand is on your desktop: nobody else's input is
 //                                   taken for the next moment
 //   control here                 -> you are there, says the program that knows (ft-roomaway,
@@ -17,11 +19,18 @@
 
 #include "../flow/control.h"
 
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace local {
 
-// Whether `asked` is one of them, and then its answer in `reply`.
-bool ControlAsk(flow::Control &control, const std::string &asked, double now, std::string &reply);
+// An act of the wearer's on its way out: what goes to the panel's owner for it now, in order,
+// is added to the list.
+using ActGate = std::function<void(const proto::Act &, std::vector<proto::Act> &)>;
+
+// Whether `asked` is one of them, and then its answer in `reply`. With no gate every act goes
+// as it was said.
+bool ControlAsk(flow::Control &control, const std::string &asked, double now, std::string &reply, const ActGate &gate = nullptr);
 
 }  // namespace local

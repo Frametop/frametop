@@ -56,6 +56,19 @@ class End:
         reply = self.ask("state")
         return json.loads(reply[3:]) if reply.startswith("ok {") else {"mode": reply, "note": "", "people": [], "panels": [], "asks": [], "codes": 0}
 
+    def hand(self):
+        """From now on this ft-together is told each second that its wearer's hand moves their
+        pointer, as ft-roomgaze tells it while gaze mode is off. Until it is told, a pointer
+        that only moves is kept from the room (local/hush.h)."""
+        def say():
+            client = ftipc.Client(timeout=1.0)
+            while self.proc.poll() is None:
+                client.ask(self.sock, "gaze pointer hand")
+                time.sleep(1.0)
+        said = self.ask("gaze pointer hand")
+        threading.Thread(target=say, daemon=True).start()
+        return said == "ok"
+
     def until(self, what, seconds=5.0):
         """Whether what(state) comes true in time."""
         deadline = time.monotonic() + seconds

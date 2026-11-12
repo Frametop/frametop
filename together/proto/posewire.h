@@ -4,11 +4,14 @@
 // stand, and their mouth's five shapes. The receiver poses a body from it with the solver the
 // sender poses its own with (avatar/pose/bodypose.h), so no bones cross the link.
 //
+// Where they look is in it only while they share that (docs/together.md, "Gaze"): one
+// direction for both eyes, from the way the head faces, in half degrees.
+//
 // A hand's turns belong to no body: `turn` is the frame of the palm and finger[k] the frame of
 // finger bone k, each in the room's directions (which way the bone points, which way its back
 // faces). Each end fits them to the body it draws for that person (avatar/view/handfit.h).
 //
-// About thirty a second, at most 215 bytes, and a late one is worth nothing: `turn` counts
+// About thirty a second, at most 217 bytes, and a late one is worth nothing: `turn` counts
 // them, and the receiver keeps the newest (Newer). A turn is a unit quaternion (w, x, y, z).
 //
 // Header only; the bytes only.
@@ -17,6 +20,7 @@
 #include "bytes.h"
 #include "messages.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -40,7 +44,12 @@ struct Pose {
     float eyeHeight = 1.6f;   // their eyes above the floor when they stand, metres
     HandPose hand[2];         // left, right
     uint8_t mouth[kMouthShapes] = {};   // each shape's weight, 255 whole
+    bool looks = false;       // gaze[] is told: they share where they look
+    float gaze[2] = {};       // to their left, and up, in degrees from the way the head faces
 };
+
+constexpr uint8_t kPoseLooks = 0x08;   // in a pose's flags, beside the hands' two nibbles
+constexpr float kMostGaze = 63.5f;     // degrees either way: what a byte of half degrees holds
 
 // Whether a pose counted `turn` came after one counted `than`: the count wraps.
 inline bool Newer(uint16_t turn, uint16_t than) { return int16_t(uint16_t(turn - than)) > 0; }
@@ -80,8 +89,10 @@ inline std::vector<uint8_t> Pack(const Pose &m) {
         const HandPose &h = m.hand[side];
         if (h.tracked) flags |= uint8_t((1 | (h.fingers ? 2 : 0) | (h.hasElbow ? 4 : 0)) << (4 * side));
     }
-    out.U8(flags);
+    out.U8(m.looks ? flags | kPoseLooks : flags);
     out.Bytes(m.mouth, kMouthShapes);
+    for (int i = 0; m.looks && i < 2; ++i)
+        out.U8(uint8_t(int8_t(std::lround(std::fmin(kMostGaze, std::fmax(-kMostGaze, std::isfinite(m.gaze[i]) ? m.gaze[i] : 0.0f)) * 2))));
     for (const HandPose &h : m.hand) {
         if (!h.tracked) continue;
         for (float v : h.wrist) out.F32(v);
@@ -105,7 +116,9 @@ inline bool Read(const uint8_t *data, size_t n, Pose &m) {
     m.eyeHeight = float(in.U16()) / 1000;
     const uint8_t flags = in.U8();
     in.Take(m.mouth, kMouthShapes);
-    if (!in.ok || m.eyeHeight < 0.5f || m.eyeHeight > 2.5f || (flags & 0x88)) return false;
+    if (!in.ok || m.eyeHeight < 0.5f || m.eyeHeight > 2.5f || (flags & 0x80)) return false;
+    m.looks = flags & kPoseLooks;
+    for (int i = 0; m.looks && i < 2; ++i) m.gaze[i] = float(std::max(-127, int(int8_t(in.U8())))) / 2;
     for (int side = 0; side < 2; ++side) {
         HandPose &h = m.hand[side];
         const int bits = flags >> (4 * side) & 7;

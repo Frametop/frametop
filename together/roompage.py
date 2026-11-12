@@ -164,3 +164,17 @@ def avatar(worn, looks):
     if looks.get("sent"):
         return {"text": f"The others see you as {title}", "allow": False}
     return {"text": f"{abstract}: {str(looks.get('why') or 'your avatar can not be sent')}", "allow": False}
+
+
+def gaze(said):
+    """Where its person looks, for the room: {"can", "shared", "text"}. `said` is ft-together's
+    `gaze` (or None). can: the switch can be used."""
+    if not said or not isinstance(said.get("shared"), bool):
+        return {"can": False, "shared": False, "text": "Frametop Together doesn't say"}
+    if said["shared"]:
+        if said.get("fresh") is True:
+            return {"can": True, "shared": True, "text": "The room sees where you look"}
+        return {"can": True, "shared": True, "text": "On. Nothing is sent now: your eyes aren't followed (is the headset on?)"}
+    if said.get("quiet") is True:
+        return {"can": True, "shared": False, "text": "Not shared. Your pointer follows your eyes, so the others see it only while you click or drag"}
+    return {"can": True, "shared": False, "text": "Not shared"}

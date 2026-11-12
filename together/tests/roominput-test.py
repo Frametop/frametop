@@ -80,6 +80,7 @@ def main():
         ok = ok and ada.ask("open") == "ok" and roomkit.let_in(ada, ben) and ada.until(roomkit.linked) and ben.until(roomkit.linked)
         if not check("ada opens a room and ben comes in", ok):
             return
+        check("ben's Frame says his hand moves his pointer", ben.hand())
         who = {p["name"]: p["id"] for p in ada.state()["people"]}
         panel = who["ada"] * 8
         check("ada shares a screen", ada.ask("share 0 " + SCREEN) == "ok" and ben.until(lambda s: [p["id"] for p in s["panels"]] == [panel]))

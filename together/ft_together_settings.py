@@ -1,6 +1,7 @@
 """Frametop Settings' Together page: turn Frametop Together on, open a room or join someone's,
 let people in, choose what of yours the room gets (your voice, your avatar, your screens), and
-go to someone or to a panel in it. Who may use which screen is ft_together_control.py's part.
+go to someone or to a panel in it. Who may use which screen is ft_together_control.py's part,
+whether the room gets where you look ft_together_gaze.py's.
 
 The page's backend (TogetherPages.qml; settings/ft_settings.py makes it). It only asks: the
 room is ft-together's (@ft_together), the voice ft-roomvoice's, the shared screens
@@ -21,6 +22,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 import ft_together_control  # noqa: E402  (who may use which screen)
+import ft_together_gaze  # noqa: E402  (whether the room gets where you look)
 import roomavatar  # noqa: E402  (the avatar its person has on)
 import roompage  # noqa: E402  (what the answers mean, without Qt)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
@@ -50,6 +52,8 @@ class Backend(QObject):
         self._ipc = ftipc.Worker(self._ipcDone.emit)
         self._control = ft_together_control.Control(self._told, lambda text: self._do(TOGETHER, text))
         self.changed.connect(self._control.changed)
+        self._gaze = ft_together_gaze.Gaze(self._told, lambda text: self._do(TOGETHER, text))
+        self.changed.connect(self._gaze.changed)
         self.poll = QTimer(interval=1000, timeout=self.refresh)
 
     # --- asking ---
@@ -105,6 +109,7 @@ class Backend(QObject):
             self._ask("here", TOGETHER, "here")
             self._ask("looks", TOGETHER, "looks")
             self._ask("control", TOGETHER, "control")
+            self._ask("gaze", TOGETHER, "gaze")
             self._ipc.run(lambda _client: self._worn.look(), self._wears)
             self._ask("voice", VOICE, "state")
             self._ask("panels", PANELS, "state")
@@ -230,6 +235,10 @@ class Backend(QObject):
     @Property(QObject, constant=True)
     def control(self):
         return self._control
+
+    @Property(QObject, constant=True)
+    def gaze(self):
+        return self._gaze
 
     @Slot(str, int)
     def goTo(self, kind, ident):

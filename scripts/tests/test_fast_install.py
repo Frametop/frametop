@@ -93,7 +93,7 @@ class Paths(unittest.TestCase):
         self.assertEqual(rebuilt('avatar/room/client.cpp'), {'avatar', 'screens', 'together'})   # built into ft-roomvoice too
         self.assertEqual(rebuilt('together/net/quiclinks.cpp'), {'together'})
         self.assertEqual(rebuilt('together/build.sh'), {'together'})
-        for path in ('together/ft-roompanels', 'together/roomaway/teller.py', 'together/roominput/giver.py', 'together/ft-roommove', 'together/roommove/grab.py', 'together/tests/voice-test.cpp', 'together/README.md'):
+        for path in ('together/ft-roompanels', 'together/roomaway/teller.py', 'together/roominput/giver.py', 'together/ft-roommove', 'together/roommove/grab.py', 'together/ft-roomgaze', 'together/roomgaze/feeder.py', 'together/tests/voice-test.cpp', 'together/README.md'):
             self.assertEqual(rebuilt(path), set())
         self.assertIn('together', openvr)
 
@@ -165,6 +165,8 @@ class Paths(unittest.TestCase):
                                           roots), {'together', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-move.service', ['python3', '/r/0.1/together/ft-roommove'],
                                           roots), {'together', 'conf', 'input'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-gaze.service', ['python3', '/r/0.1/together/ft-roomgaze'],
+                                          roots), {'together', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-points.service',
                                           ['/r/0.1/scripts/in-box', '/r/0.1/together/build/ft-roompoints'],
                                           roots), {'together'})

@@ -67,19 +67,20 @@ static void gate() {
 static void count() {
     local::PoseCount c;
     const local::Mouth shut;
+    const local::Gaze none;
     std::vector<uint8_t> out;
     const std::vector<uint8_t> mine = pose(555, 0.5f);
     proto::Pose a, b;
-    bool ok = c.Stamp(mine.data(), mine.size(), shut, 0, out) && proto::Read(out.data(), out.size(), a) && c.Stamp(mine.data(), mine.size(), shut, 0, out) &&
+    bool ok = c.Stamp(mine.data(), mine.size(), shut, none, 0, out) && proto::Read(out.data(), out.size(), a) && c.Stamp(mine.data(), mine.size(), shut, none, 0, out) &&
               proto::Read(out.data(), out.size(), b);
     check("this Frame's own poses go out with ft-together's count, one more each time", ok && a.turn == 1 && b.turn == 2 && a.eyes[0] == 0.5f && b.eyes[1] == 1.6f);
     std::vector<uint8_t> bad = mine;
     bad.push_back(0);
     out.clear();
-    check("what isn't a pose doesn't go out", !c.Stamp(bad.data(), bad.size(), shut, 0, out) && !c.Stamp(nullptr, 0, shut, 0, out) && out.empty());
+    check("what isn't a pose doesn't go out", !c.Stamp(bad.data(), bad.size(), shut, none, 0, out) && !c.Stamp(nullptr, 0, shut, none, 0, out) && out.empty());
     local::PoseGate g;
     ok = true;
-    for (int i = 0; i < 70000 && ok; ++i) ok = c.Stamp(mine.data(), mine.size(), shut, 0, out) && g.Take(1, out.data(), out.size(), i / 30.0);
+    for (int i = 0; i < 70000 && ok; ++i) ok = c.Stamp(mine.data(), mine.size(), shut, none, 0, out) && g.Take(1, out.data(), out.size(), i / 30.0);
     check("...and the far end takes every one of seventy thousand, round the count and on", ok);
 }
 
@@ -87,7 +88,7 @@ static void count() {
 static std::string sent(local::PoseCount &c, const local::Mouth &m, const std::vector<uint8_t> &mine, double now) {
     std::vector<uint8_t> out;
     proto::Pose p;
-    if (!c.Stamp(mine.data(), mine.size(), m, now, out) || !proto::Read(out.data(), out.size(), p)) return "none";
+    if (!c.Stamp(mine.data(), mine.size(), m, local::Gaze(), now, out) || !proto::Read(out.data(), out.size(), p)) return "none";
     std::string said;
     for (uint8_t w : p.mouth) said += (said.empty() ? "" : ",") + std::to_string(w);
     return said;

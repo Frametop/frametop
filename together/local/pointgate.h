@@ -42,9 +42,12 @@ public:
     bool Stamp(const uint8_t *data, size_t n, std::vector<uint8_t> &out) {
         proto::Point point;
         if (!proto::Read(data, n, point)) return false;
-        point.count = ++count_;
-        out = proto::Pack(point);
+        out = Stamp(point);
         return true;
+    }
+    std::vector<uint8_t> Stamp(proto::Point point) {
+        point.count = ++count_;
+        return proto::Pack(point);
     }
 
 private:

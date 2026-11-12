@@ -128,7 +128,7 @@ std::string Session::Leave() {
 std::string Session::Share(int number, proto::Panel panel) {
     if (mode_ != Mode::kHosting && mode_ != Mode::kJoined) return "you aren't in a room";
     if (number < 0 || number >= room::kFramePanels) return "a headset shares " + std::to_string(room::kFramePanels) + " panels at most";
-    panel.id = proto::PanelId(me_, number);
+    panel.id = proto::PanelId(me_, number), panel.pictures = panelPictures_;
     panel.name = wire::Clean(panel.name, proto::kMostPanelName);
     if (!proto::Fits(panel, proto::kPeople)) return "that isn't a panel: its size, its place or its turn is off";
     if (mode_ == Mode::kHosting) {
@@ -140,6 +140,19 @@ std::string Session::Share(int number, proto::Panel panel) {
     asked_[panel.id] = panel;
     links_.Send(LinkOf(room_.owner), proto::Pack(panel));
     return "";
+}
+
+void Session::PanelPictures(int aSecond) {
+    if (aSecond < 1 || aSecond > proto::kMostPanelPictures || aSecond == panelPictures_) return;
+    panelPictures_ = uint8_t(aSecond);
+    if (mode_ == Mode::kHosting) {   // the owner's are in the room at once
+        bool changed = false;
+        for (proto::Panel &p : room_.panels)
+            if (p.owner() == me_) p.pictures = panelPictures_, changed = true;
+        if (changed) Changed();
+    }
+    // (a guest's: the owner is told of each again)
+    for (auto &[id, panel] : asked_) panel.pictures = panelPictures_, links_.Send(LinkOf(room_.owner), proto::Pack(panel));
 }
 
 std::string Session::Unshare(int number) {

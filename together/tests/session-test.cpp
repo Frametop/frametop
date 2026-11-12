@@ -286,7 +286,7 @@ static void panels() {
     const std::string screen = "share 0 2560 1440 0 1.4 -1.5 1 0 0 0 1.6 1.8 Screen 1";
     bool ok = a.ask(screen).rfind("error you aren't", 0) == 0 && a.ask("unshare 0").rfind("error", 0) == 0 && a.ask("open") == "ok" && join(a, b) && join(a, c);
     check("nobody shares a panel outside a room", ok);
-    ok = a.ask(screen) == "ok" && a.has("\"panels\":[{\"id\":0,\"owner\":0,\"number\":0,\"name\":\"Screen 1\",\"size\":[2560,1440],\"at\":[0,1.4,-1.5],\"turn\":[1,0,0,0],\"metres\":1.6,\"curve\":1.8}]");
+    ok = a.ask(screen) == "ok" && a.has("\"panels\":[{\"id\":0,\"owner\":0,\"number\":0,\"name\":\"Screen 1\",\"size\":[2560,1440],\"pictures\":30,\"at\":[0,1.4,-1.5],\"turn\":[1,0,0,0],\"metres\":1.6,\"curve\":1.8}]");
     for (Frame *f : {&b, &c}) ok = ok && f->s->room().panels.size() == 1 && f->s->room().panel(0) && f->s->room().panel(0)->name == "Screen 1" && f->s->room().panel(0)->width == 2560;
     check("the owner shares a screen, and it is in everyone's room where the owner put it", ok);
     ok = b.ask("share 1 1920 1080 0.5 1.2 -1 0.7071068 0 0.7071068 0 1.2 0 Bo's window") == "ok";

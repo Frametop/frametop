@@ -20,7 +20,7 @@ from .carrying import Carrying
 
 SLOTS = 3                               # the panels a Frame shares at most (screens/share.h)
 REMOTE_FIRST, REMOTE_LAST = 101, 116    # ft-screens' remote screens (screens/remote.h)
-FPS = 30
+FPS = 60                                # a shared screen's pictures a second at the most: what High has (flow/quality.h)
 MOST_WIDE, MOST_HIGH = 1920, 1200       # a shared screen's video, at most
 # The encoder's sizes. Across, only multiples of 128: any other width resets the Frame as the
 # encoder starts (media/irisenc.h, kWidthStep, which refuses them). Down, multiples of 8, as

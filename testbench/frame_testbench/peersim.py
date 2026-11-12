@@ -80,7 +80,8 @@ class Sim:
                                      ((n - 2) * 2.4, 1.5, -2.5), clock)
 
     def start(self):
-        env = dict(os.environ, FT_AVATARS_DIR=str(self.models)) if self.models else None
+        # (Balanced, whatever the frametop.conf of the wearer beside it has: what it sends is its own)
+        env = dict(os.environ, FT_TOGETHER_QUALITY='balanced', **({'FT_AVATARS_DIR': str(self.models)} if self.models else {}))
         argv = [str(self.programs['ft-together']), '--port', str(self.port), '--socket', self.socket, '--name', self.name]
         self.together = self.spawn(argv + (['--loopback'] if self.loopback else []), env=env)
         self.stand()

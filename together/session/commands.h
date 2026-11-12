@@ -25,8 +25,8 @@ std::string Command(Session &session, const std::string &text, double now);
 
 // {"mode":"idle|hosting|calling|joined","note":TEXT,"me":N,"owner":N,
 //  "people":[{"id":N,"name":TEXT,"login":TEXT,"away":N,"linked":BOOL,"spot":[X,Y,Z,YAW]}],
-//  "panels":[{"id":N,"owner":N,"number":N,"name":TEXT,"size":[W,H],"at":[X,Y,Z],
-//             "turn":[W,X,Y,Z],"metres":N,"curve":N}],
+//  "panels":[{"id":N,"owner":N,"number":N,"name":TEXT,"size":[W,H],"pictures":N,
+//             "at":[X,Y,Z],"turn":[W,X,Y,Z],"metres":N,"curve":N}],
 //  "asks":[{"id":N,"name":TEXT,"login":TEXT,"address":TEXT}],"codes":N}
 std::string State(const Session &session);
 

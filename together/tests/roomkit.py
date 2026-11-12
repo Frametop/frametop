@@ -46,6 +46,8 @@ class End:
         self.port = port or free_port()
         self.sock = sock or "ft_together_test_%d_%s" % (os.getpid(), name)
         self.client = ftipc.Client(timeout=2.0)
+        env = dict(os.environ if env is None else env)
+        env.setdefault("FT_TOGETHER_QUALITY", "balanced")   # (not what the frametop.conf of whoever runs the test has)
         self.proc = subprocess.Popen([program, "--loopback", "--name", name, "--port", str(self.port), "--socket", self.sock],
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
 

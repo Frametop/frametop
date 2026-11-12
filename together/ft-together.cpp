@@ -21,6 +21,7 @@
 //                       Frame's (local/moveask.h, flow/moves.h)
 //   gaze ...         -> whether the wearer shares where they look, and where that is
 //                       (local/gazeask.h)
+//   quality [NAME]   -> how good the video of the wearer's panels may get (local/qualityask.h)
 //
 // A datagram there that is a pose, a voice, a pointer or the wearer's mouth (local/datagrams.h)
 // is the wearer's own: what of it the room is told is local/own.h's to say, and theirs come back
@@ -55,6 +56,7 @@
 #include "local/media.h"
 #include "local/moveask.h"
 #include "local/own.h"
+#include "local/qualityask.h"
 #include "local/voicegate.h"
 #include "local/wardrobe.h"
 #include "local/watchers.h"
@@ -188,6 +190,7 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, Local &local, 
     end.session = std::make_unique<session::Session>(*end.links, tailnet, config);
     end.wires = std::make_unique<StreamWires>(*end.links);
     end.video = std::make_unique<flow::Video>(*end.session, *end.wires, local.media);
+    end.video->SetQuality(local::QualityKept());
     end.looks = std::make_unique<flow::Looks>(*end.session, *end.wires, local.wardrobe);
     end.control = std::make_unique<flow::Control>(*end.session, local.inputs);
     end.moves = std::make_unique<flow::Moves>(*end.session, [&end](int number, int person, double now) { return end.control->Granted(number, person, now); },
@@ -307,7 +310,8 @@ bool Answer(int sock, End &end, Local &local, double now) {
     else if (asked == "inputs") reply = local.inputs.Add(from, fromLen, now) ? "ok" : "error another program takes the input";
     else if (asked == "points") reply = local.pointers.Add(from, fromLen, now) ? "ok" : "error too many programs ask where people point";
     else if (local::ControlAsk(*end.control, asked, now, reply, [&](const proto::Act &act, std::vector<proto::Act> &go) { local.own.Act(act, now, go); }) ||
-             local::MoveAsk(*end.moves, asked, now, reply) || local::GazeAsk(local.own.gaze(), asked, end.inRoom(), now, reply)) {}
+             local::MoveAsk(*end.moves, asked, now, reply) || local::GazeAsk(local.own.gaze(), asked, end.inRoom(), now, reply) ||
+             local::QualityAsk(*end.video, asked, reply)) {}
     else reply = session::Command(*end.session, asked, now);
     // an asker that doesn't wait for its answer doesn't hold up the loop
     if (fromLen > sizeof(sa_family_t)) sendto(sock, reply.data(), reply.size(), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<sockaddr *>(&from), fromLen);

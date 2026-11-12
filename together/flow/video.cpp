@@ -15,7 +15,7 @@ bool Video::Mine(int number) const {
 // keyframe when someone waits for one.
 void Video::Settle(int number, double now) {
     Shared &s = shared_[number];
-    const int pictures = PicturesFor(s.viewers.level(), kBalancedPictures);
+    const int pictures = PicturesFor(s.viewers.level(), quality_->pictures);
     if (pictures > 0 && pictures != s.pictures) programs_.Pictures(number, s.pictures = pictures);
     if (s.viewers.watched() != s.watched) programs_.Watched(number, s.watched = s.viewers.watched());
     if (s.viewers.WantsKey(now)) programs_.Key(number);
@@ -24,9 +24,31 @@ void Video::Settle(int number, double now) {
 void Video::SourceCame(int number) {
     if (number < 0 || number >= room::kFramePanels) return;
     Shared &s = shared_[number];
-    programs_.Rate(number, s.pace.bitrate());
-    programs_.Pictures(number, s.pictures);
+    Encode(number);
     programs_.Watched(number, s.watched = s.viewers.watched());
+}
+
+// Every panel of the wearer's has it at once: its bitrate comes down to the new cap or may climb
+// to it, its encoder is set for the new pictures a second, and the room hears of those, so that
+// whoever shows the panel knows what its decoder is to be good for. A panel nobody watches is
+// set as one in view, for when someone does.
+void Video::SetQuality(const Quality &quality) {
+    quality_ = &quality;
+    session_.PanelPictures(quality.pictures);
+    for (int number = 0; number < room::kFramePanels; ++number) {
+        Shared &s = shared_[number];
+        s.pace.SetCap(quality.bits);
+        s.pictures = PicturesFor(std::max(s.viewers.level(), int(proto::kInView)), quality.pictures);
+        Encode(number);
+    }
+}
+
+// What the program that encodes panel `number` is to encode at, said to it.
+void Video::Encode(int number) {
+    const Shared &s = shared_[number];
+    programs_.Rate(number, s.pace.bitrate());
+    programs_.Full(number, quality_->pictures);
+    programs_.Pictures(number, s.pictures);
 }
 
 void Video::Unit(int number, bool key, const uint8_t *unit, size_t n, double now) {
@@ -78,10 +100,16 @@ void Video::Frame(int link, const uint8_t *data, size_t n, double now) {
     for (const Order::Frame &f : pass) programs_.Show(head.panel, f.key, f.unit);
 }
 
+// What a panel shown here costs the Frame's decoder, by what the room has of it now.
+int Video::Cost(uint8_t panel) const {
+    const proto::Panel *shown = session_.room().panel(panel);
+    return shown ? Budget::Load(shown->width, shown->height, shown->pictures) : 0;
+}
+
 // After anything that may have changed which of the panels shown here decode: their programs
 // are told. One that is to decode begins at a keyframe, and nothing more is shown of a still.
 void Video::Decoders(double now) {
-    for (const auto &[panel, w] : watching_) budget_.Sees(panel, w.seen.Told(now), now);
+    for (const auto &[panel, w] : watching_) budget_.Costs(panel, Cost(panel)), budget_.Sees(panel, w.seen.Told(now), now);
     for (const Budget::Word &word : budget_.Settle(now)) {
         programs_.Decode(word.panel, word.decode);
         Watching &w = watching_[word.panel];
@@ -101,8 +129,7 @@ void Video::Tell(uint8_t panel, Watching &w, double now) {
 
 void Video::SinkCame(uint8_t panel, double now) {
     Watching &w = watching_[panel] = Watching{};
-    const proto::Panel *shown = session_.room().panel(panel);
-    budget_.Came(panel, shown ? Budget::Load(shown->width, shown->height, kBalancedPictures) : 0);
+    budget_.Came(panel, Cost(panel));
     Decoders(now);
     Tell(panel, w, now);
 }

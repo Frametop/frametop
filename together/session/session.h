@@ -115,6 +115,9 @@ public:
     // the owner has taken it.
     std::string Share(int number, proto::Panel panel);
     std::string Unshare(int number);
+    // The pictures a second the wearer's panels have at the most, from now on: the room hears
+    // it with each of them. Like away it is the wearer's own, in a room or not.
+    void PanelPictures(int aSecond);
     // Tells a panel's owner what the wearer has of it.
     std::string Watch(const proto::Watch &watch);
     // A framed message to one of the room's people, on the link to them: for what the session
@@ -178,6 +181,7 @@ private:
     int me_ = -1;
     uint8_t away_ = 0;
     proto::Look look_;
+    uint8_t panelPictures_ = proto::kPanelPictures;
     double lookSaid_ = -1e9;   // when a guest last told the owner what it has on
     proto::Room room_;
     room::Invites invites_;

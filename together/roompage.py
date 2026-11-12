@@ -11,6 +11,13 @@ import re
 PORT = 47193   # ft-together's own, unless it was started with another
 SHARES = 3     # the screens a Frame shares at most (roompanels/keeper.py)
 AWAY = {0: "", 1: "in a game", 2: "headset off", 3: "headset off"}
+# What the video of its person's screens may have (together/flow/quality.h): ft-together's name
+# for each, the page's, and what it gets a screen.
+QUALITIES = (
+    ("low", "Low", "Each screen gets up to 1 Mbit/s and 15 pictures a second: for slow links"),
+    ("balanced", "Balanced", "Each screen gets up to 3 Mbit/s and 30 pictures a second"),
+    ("high", "High", "Each screen gets up to 8 Mbit/s and 60 pictures a second: sharper and smoother, and more work for everyone's headset"),
+)
 HOST = re.compile(r"[A-Za-z0-9]([A-Za-z0-9._-]{0,251}[A-Za-z0-9.])?")
 CODE = re.compile(r"[A-Za-z0-9-]{4,32}")
 
@@ -178,3 +185,14 @@ def gaze(said):
     if said.get("quiet") is True:
         return {"can": True, "shared": False, "text": "Not shared. Your pointer follows your eyes, so the others see it only while you click or drag"}
     return {"can": True, "shared": False, "text": "Not shared"}
+
+
+def quality(reply):
+    """How good the video of its person's screens may get: {"can", "index", "text"}. `reply` is
+    ft-together's answer to `quality` (or None). index: the one of QUALITIES it has. can: another
+    can be picked."""
+    name = reply[3:] if isinstance(reply, str) and reply.startswith("ok ") else None
+    for index, (known, _title, text) in enumerate(QUALITIES):
+        if name == known:
+            return {"can": True, "index": index, "text": text}
+    return {"can": False, "index": 1, "text": "Frametop Together doesn't say"}

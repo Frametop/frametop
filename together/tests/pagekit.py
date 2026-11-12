@@ -1,5 +1,5 @@
 """What the tests of Frametop Settings' Together page share (test_roompage.py,
-test_roomavatar.py, test_controlpage.py): stand-ins that answer as ft-together, ft-roomvoice and ft-roompanels do, as
+test_roomavatar.py, test_controlpage.py, test_gazepage.py, test_qualitypage.py): stand-ins that answer as ft-together, ft-roomvoice and ft-roompanels do, as
 far as the page asks them, and the page's backend set up over them.
 """
 import json
@@ -54,6 +54,7 @@ class Together:
         self.control = {"there": True, "left": 9.5, "asks": [], "given": [], "holder": -1, "held": [], "asked": [], "passed": 0, "dropped": 0}
         self.gaze = {"shared": False, "fresh": False, "quiet": False}   # None: an ft-together that knows no `gaze`
         self.gaze_no = ""      # why `gaze on` is refused, when it is
+        self.quality = "balanced"   # None: an ft-together that knows no `quality`
         self.asked = []
 
     def _control(self, w):
@@ -73,7 +74,7 @@ class Together:
         return "ok"
 
     def __call__(self, text):
-        if text not in ("state", "here", "looks", "control", "gaze"):
+        if text not in ("state", "here", "looks", "control", "gaze", "quality"):
             self.asked.append(text)
         if not self.tailscale:
             return "error Tailscale isn't running on this headset"
@@ -91,6 +92,11 @@ class Together:
                 return "error " + (self.gaze_no or "you aren't in a room")
             self.gaze["shared"] = text == "gaze on"
             return "ok"
+        if w[0] == "quality" and self.quality is not None:
+            if len(w) == 2 and w[1] not in ("low", "balanced", "high"):
+                return "error quality low|balanced|high"
+            self.quality = w[1] if len(w) == 2 else self.quality
+            return "ok " + self.quality
         if w[0] == "control":
             return self._control(w)
         if text == "here":
@@ -179,7 +185,7 @@ class PageCase(unittest.TestCase):
         page.host_command = lambda *cmd: (self.host.append(cmd), self.systemctl)[1]
         self.addCleanup(setattr, page, "host_command", old)
         self.systemctl = ["true"]
-        self.b = page.Backend(units=str(self.units), sockets=names, worn=roomavatar.Worn(conf=str(self.conf), folder=str(self.avatars)))
+        self.b = page.Backend(units=str(self.units), sockets=names, worn=roomavatar.Worn(conf=str(self.conf), folder=str(self.avatars)), conf=str(self.conf))
         self.said = []
         self.b.message.connect(lambda text, bad: self.said.append((text, bad)))
 

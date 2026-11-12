@@ -196,6 +196,28 @@ def main(together, share, peer):
         stay.end()
         src.end()
 
+        # how good its owner lets the video get: the encoder is opened again for other pictures a second
+        src = sharer(ada, 0, "640x360", fps=60)
+        stay = prober(ben, 0, "--seconds", "60")
+        ok = stay.until(lambda lines: len(pictures(stay)) >= 20, 15)
+        check("a program that may make 60 pictures a second: at Balanced its encoder is set for 30", ok and src.said("set for 30 pictures a second", 1))
+        for name, full in (("high", 60), ("low", 15), ("balanced", 30)):
+            mark = len(src.lines)
+            ok = ada.ask("quality " + name) == "ok " + name and src.said("watched: encoding at", 5, mark) and src.said("set for %d pictures a second" % full, 0, mark)
+            ok = ok and ben.until(lambda s: [p["pictures"] for p in s["panels"]] == [full], 3)
+            time.sleep(0.5)   # (past what the old encoder made)
+            at = len(stay.lines)
+            began = time.monotonic()
+            ok = ok and stay.until(lambda lines: len(pictures(stay, at)) >= 2 * full, 15)
+            took = time.monotonic() - began
+            pics = pictures(stay, at)
+            numbers = [p["number"] for p in pics]
+            if not check("its owner picks %s: the encoder opens again for %d pictures a second, and they come at that rate, whole and in order" % (name.capitalize(), full),
+                         ok and -1 not in numbers and jumps(numbers) <= 2 and true_colours(pics) and 1.3 <= took <= 3.6):
+                print("    (%d pictures took %.1f s: %s; the encoder said %s)" % (len(numbers), took, numbers[:8], src.lines[mark:][:6]))
+        stay.end()
+        src.end()
+
         # a size the encoder isn't given (media/irisenc.h: it reset the Frame, twice): refused by
         # the program before the device is touched, which encsize-test.cpp says without the Frame
         ok = ada.ask("share 0 1366 768 %s Test" % WHERE) == "ok"

@@ -110,7 +110,7 @@ std::string State(const Session &session) {
     for (size_t i = 0; i < room.panels.size(); ++i) {
         const proto::Panel &p = room.panels[i];
         out << (i ? "," : "") << "{\"id\":" << int(p.id) << ",\"owner\":" << p.owner() << ",\"number\":" << p.number() << ",\"name\":" << Quoted(p.name) << ",\"size\":[" << p.width << ","
-            << p.height << "],\"at\":[" << p.at[0] << "," << p.at[1] << "," << p.at[2] << "],\"turn\":[" << p.turn[0] << "," << p.turn[1] << "," << p.turn[2] << "," << p.turn[3]
+            << p.height << "],\"pictures\":" << int(p.pictures) << ",\"at\":[" << p.at[0] << "," << p.at[1] << "," << p.at[2] << "],\"turn\":[" << p.turn[0] << "," << p.turn[1] << "," << p.turn[2] << "," << p.turn[3]
             << "],\"metres\":" << p.metres << ",\"curve\":" << p.curve << "}";
     }
     out << "],\"asks\":[";

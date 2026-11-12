@@ -52,7 +52,7 @@ class RulesTest(unittest.TestCase):
     def test_it_starts_a_session_of_its_own_and_someone_standing(self):
         together, body = self.started
         self.assertEqual(together.argv, ['/programs/ft-together', '--port', '47195', '--socket', 'ft_peer_2_t', '--name', 'Bo', '--loopback'])
-        self.assertEqual(together.env['FT_AVATARS_DIR'], '/models')
+        self.assertEqual((together.env['FT_AVATARS_DIR'], together.env['FT_TOGETHER_QUALITY']), ('/models', 'balanced'))
         self.assertEqual(body.argv, ['/programs/ft-avatars', '--pretend', 'stand', '--together', 'ft_peer_2_t', '--walked', '0,0,0'])
 
     def test_a_pose_or_a_walk_puts_another_wearer_in_the_first_ones_place(self):

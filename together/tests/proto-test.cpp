@@ -50,7 +50,7 @@ static proto::Room room3() {
 
 // A turn goes as 16 bits a part, so it comes back near what it was.
 static bool same(const proto::Panel &a, const proto::Panel &b) {
-    bool ok = a.id == b.id && a.width == b.width && a.height == b.height && a.metres == b.metres && a.curve == b.curve && a.name == b.name && !std::memcmp(a.at, b.at, sizeof a.at);
+    bool ok = a.id == b.id && a.width == b.width && a.height == b.height && a.pictures == b.pictures && a.metres == b.metres && a.curve == b.curve && a.name == b.name && !std::memcmp(a.at, b.at, sizeof a.at);
     for (int i = 0; i < 4; ++i) ok = ok && std::fabs(a.turn[i] - b.turn[i]) < 1e-4;
     return ok;
 }
@@ -183,6 +183,10 @@ static void panels() {
     double norm = 0;
     for (float v : p2.turn) norm += double(v) * v;
     check("a panel comes back as it went, its turn a unit one again", ok && std::fabs(norm - 1) < 1e-6);
+    p.pictures = 1;
+    ok = proto::Read(body(proto::Pack(p)), p2) && p2.pictures == 1;
+    p.pictures = 60;
+    check("...with as few pictures a second as it says, or as many", ok && proto::Read(body(proto::Pack(p)), p2) && p2.pictures == 60 && !proto::SamePanel(p, r.panels[1]));
     p.name = std::string(60, 'n') + "\n";
     check("its name is cleaned and cut on the way out", proto::Read(body(proto::Pack(p)), p2) && p2.name == std::string(proto::kMostPanelName, 'n'));
 
@@ -197,6 +201,8 @@ static void panels() {
     refused("...one too small to be a stream", [](proto::Panel &x) { x.width = 64; });
     refused("...or too large", [](proto::Panel &x) { x.height = 4098; });
     refused("...or with an odd side", [](proto::Panel &x) { x.width = 1281; });
+    refused("...with no pictures in a second", [](proto::Panel &x) { x.pictures = 0; });
+    refused("...or more than a stream has", [](proto::Panel &x) { x.pictures = 61; });
     refused("...a mile away", [](proto::Panel &x) { x.at[2] = -1609; });
     refused("...or nowhere", [](proto::Panel &x) { x.at[0] = std::numeric_limits<float>::quiet_NaN(); });
     refused("...with a turn that isn't one", [](proto::Panel &x) { x.turn[0] = x.turn[2] = 0; });

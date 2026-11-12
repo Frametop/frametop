@@ -9,7 +9,8 @@
 // second; and it is handed on in order (framegate.h). What a viewer here sees of each panel is
 // told to the panel's owner, again every second, so a link that came late or came back learns it.
 // A panel is encoded for the one who sees most of it, and a viewer who stops seeing it goes on
-// getting it for a few seconds (attention.h). Of the panels shown here, only as many decode as
+// getting it for a few seconds (attention.h); how good it gets at the most is its owner's to
+// pick, for all of their panels at once (quality.h). Of the panels shown here, only as many decode as
 // the Frame's decoder has room for, the ones the wearer sees most of first; the others are
 // stills, and their owners hear that nobody sees them here (budget.h).
 //
@@ -24,6 +25,7 @@
 #include "budget.h"
 #include "framegate.h"
 #include "pace.h"
+#include "quality.h"
 #include "sendgate.h"
 
 #include <map>
@@ -46,6 +48,7 @@ public:
     virtual ~Programs() = default;
     // To the one that encodes this Frame's panel `number`:
     virtual void Rate(int number, int bitrate) = 0;       // bits a second from now on
+    virtual void Full(int number, int aSecond) = 0;       // the pictures a second its encoder is to be set for: the most Pictures says
     virtual void Pictures(int number, int aSecond) = 0;   // pictures a second from now on, at most
     virtual void Key(int number) = 0;                     // the next picture is to be a keyframe
     virtual void Watched(int number, bool watched) = 0;   // whether anyone watches: if not, nothing need be encoded
@@ -57,8 +60,6 @@ public:
 
 class Video {
 public:
-    static constexpr int kBalanced = 3'000'000;   // the cap until the owner picks another (bits a second)
-    static constexpr int kBalancedPictures = 30;  // ...and its pictures a second, for a panel someone has focused
     static constexpr double kTellEvery = 1;       // seconds between a viewer's words to a panel's owner
     static constexpr double kPicturesASecond = 120, kPicturesAtOnce = 30;   // taken of one panel
 
@@ -76,6 +77,10 @@ public:
     // The sink says it has a decoder now or none any more, or that the hardware gave it none.
     void SinkDecodes(uint8_t panel, bool has, double now);
     void SinkRefused(uint8_t panel, double now);
+
+    // What the wearer lets the video of their panels have from now on (Balanced until then).
+    void SetQuality(const Quality &quality);
+    const Quality &quality() const { return *quality_; }
 
     // From the links. Watch is the session's word that a member watches a panel of ours.
     void Watch(int link, const proto::Watch &watch, double now);
@@ -95,10 +100,10 @@ public:
 private:
     struct Shared {
         Viewers viewers;
-        Pace pace{kBalanced};
+        Pace pace{kBalanced.bits};
         uint32_t count = 0;
         bool watched = false;   // as the source was last told
-        int pictures = PicturesFor(proto::kInView, kBalancedPictures);   // ...and its pictures a second
+        int pictures = PicturesFor(proto::kInView, kBalanced.pictures);   // ...and its pictures a second
     };
     struct Watching {
         Order order;
@@ -111,6 +116,8 @@ private:
 
     bool Mine(int number) const;
     void Settle(int number, double now);
+    void Encode(int number);
+    int Cost(uint8_t panel) const;
     void Decoders(double now);
     int Told(uint8_t panel, const Watching &w, double now) const;
     void Tell(uint8_t panel, Watching &w, double now);
@@ -118,6 +125,7 @@ private:
     session::Session &session_;
     Wires &wires_;
     Programs &programs_;
+    const Quality *quality_ = &kBalanced;
     Shared shared_[room::kFramePanels];
     std::map<uint8_t, Watching> watching_;
     Budget budget_;

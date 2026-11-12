@@ -23,6 +23,7 @@ struct Frame : session::Links, session::Tailnet {
     bool onTailnet = true;
     std::unique_ptr<session::Session> s;
     std::vector<std::string> called;   // every host it called
+    size_t messages = 0;               // ...and how many messages it sent
     std::vector<std::pair<int, proto::Watch>> watches;   // what the room's people said they have of its panels, and on which link
     std::function<void(int link, const proto::Watch &watch, double now)> onWatch;   // ...told here too, when set
     std::vector<std::pair<int, proto::Want>> wants;      // the avatars' files its people asked it for, and on which link
@@ -177,6 +178,7 @@ inline int Frame::Call(const std::string &host, uint16_t p) {
 }
 
 inline void Frame::Send(int link, const std::vector<uint8_t> &message) {
+    ++messages;
     const auto it = net.far.find({this, link});
     if (it != net.far.end()) net.queue.push_back({it->second, Net::Event::kBytes, "", message});
     else net.heard[link].insert(net.heard[link].end(), message.begin(), message.end());

@@ -1,6 +1,7 @@
 // What the room gets of yours, on Frametop Settings' Together page (TogetherPages.qml uses it):
-// your voice, your avatar, where you look and your screens. Backend: the page's own, and its
-// `gaze` (ft_together_gaze.py) for where you look.
+// your voice, your avatar, where you look and your screens. Backend: the page's own, its
+// `gaze` (ft_together_gaze.py) for where you look, and its `quality` (ft_together_quality.py)
+// for how good the video of your screens may get.
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
@@ -10,6 +11,7 @@ ColumnLayout {
     id: shares
     required property QtObject backend
     readonly property QtObject gaze: backend.gaze
+    readonly property QtObject quality: backend.quality
     // "Let them have it…" was pressed: the page asks whether its person means it.
     signal allowAvatar()
     spacing: Kirigami.Units.smallSpacing
@@ -96,6 +98,25 @@ ColumnLayout {
                   ? "The desktop's screens show here while the Frametop desktop runs."
                   : "Up to three at a time. The others see a shared screen where it stands in your room; "
                     + "they can click and type on it only once you give it to them."
+        }
+        Controls.ComboBox {
+            objectName: "qualityBox"
+            Kirigami.FormData.label: "Their video:"
+            model: shares.quality.names
+            enabled: shares.quality.can
+            currentIndex: shares.quality.index
+            onActivated: index => {
+                shares.quality.setIndex(index)
+                currentIndex = Qt.binding(() => shares.quality.index)
+            }
+        }
+        Controls.Label {
+            objectName: "qualityNote"
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            wrapMode: Text.Wrap
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+            text: shares.quality.text + ". That is the most it uses: it gets less by itself on a slow link, and while nobody looks straight at the screen."
         }
     }
 }

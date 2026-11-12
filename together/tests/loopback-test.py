@@ -281,11 +281,11 @@ def main(program, root):
 
         # its video: from the program that encodes it, over the links, to the programs that show it
         src = Program(ada, b"S", 0)
-        got = src.messages(5, 3)   # (it comes at once: the seconds are for a Frame that is busy)
-        hello = [(b"P", b"\x0a"), (b"R", struct.pack("<I", 2000000)), (b"W", b"\0")]
+        got = src.messages(5, 4)   # (it comes at once: the seconds are for a Frame that is busy)
+        hello = [(b"F", b"\x1e"), (b"P", b"\x0a"), (b"R", struct.pack("<I", 2000000)), (b"W", b"\0")]
         if sorted(got) != hello:
             print("      got:", got)
-        check("a program that encodes a panel is told the bitrate, the pictures a second for a panel in view, and that nobody watches", sorted(got) == hello)
+        check("a program that encodes a panel is told the bitrate, the pictures a second its encoder is set for and those for a panel in view, and that nobody watches", sorted(got) == hello)
         src.ignore = b"R"   # (from here on the bitrate follows how the pictures fare, which isn't this test's to say)
         view = Program(ben, b"V", 0)
         got = src.messages(5, 2)
@@ -334,6 +334,39 @@ def main(program, root):
         view.send(b"A", b"\2\0")
         check("...and focused, all of it", src.messages(2, 1) == [(b"P", b"\x1e")] and json.loads(ada.ask("media")[3:])["pictures"] == [30, 10, 10])
 
+        # how good its owner lets the video get
+        def says(pictures):
+            return all(e.until(lambda s: {p["id"]: p["pictures"] for p in s["panels"]} == pictures, 3) for e in (ada, ben, cy))
+
+        ok = ada.ask("quality") == "ok balanced" and ada.ask("quality best") == "error quality low|balanced|high" and ada.ask("quality  low").startswith("error")
+        ok = ok and ada.ask("quality ") == "error quality low|balanced|high" and ada.ask("qualityhigh").startswith("error") and "quality low" not in ada.ask("qualityhigh")
+        check("the video has Balanced until its owner picks, and only one of the three is picked", ok and ada.ask("quality") == "ok balanced" and says({0: 30, bens: 30}))
+        ok = ada.ask("quality high") == "ok high" and ada.ask("quality") == "ok high"
+        got = src.messages(2, 2)
+        if got != [(b"F", b"\x3c"), (b"P", b"\x3c")]:
+            print("      got:", got)
+        media = json.loads(ada.ask("media")[3:])
+        check("High: the encoder is to be set for 60 pictures a second, and makes them for the one who has the panel focused",
+              ok and got == [(b"F", b"\x3c"), (b"P", b"\x3c")] and media["pictures"] == [60, 20, 20] and media["bitrate"][1] == 2000000)
+        check("...and everyone's room says so of its owner's panels, and of nobody else's", says({0: 60, bens: 30}))
+        check("a guest picks: the same, through the owner", ben.ask("quality low") == "ok low" and says({0: 60, bens: 15}))
+        ok = ada.ask("quality low") == "ok low"
+        got = src.messages(2, 2)
+        media = json.loads(ada.ask("media")[3:])
+        check("Low: fewer pictures, and the bitrate comes down to its cap at once",
+              ok and got == [(b"F", b"\x0f"), (b"P", b"\x0f")] and media["pictures"] == [15, 5, 5] and media["bitrate"][1] == 1000000 and media["bitrate"][0] <= 1000000 and
+              says({0: 15, bens: 15}))
+        ok = ada.ask("quality balanced") == "ok balanced" and ben.ask("quality balanced") == "ok balanced"
+        got = src.messages(2, 2)
+        check("Balanced again: the bitrate may climb from where it is", ok and got == [(b"F", b"\x1e"), (b"P", b"\x1e")] and
+              json.loads(ada.ask("media")[3:])["bitrate"][1] == 1000000 and says({0: 30, bens: 30}))
+        for name, kept, has in (("eve", "high", "ok high"), ("flo", "best", "ok balanced")):
+            home[name] = Home(root, name)
+            home[name].env["FT_TOGETHER_QUALITY"] = kept
+            other = start(name)
+            ok = other.until(lambda s: s["mode"] == "idle") and other.ask("quality") == has
+            check("an ft-together starts with the quality frametop.conf has" if kept == "high" else "...or with Balanced when that isn't one", ok and other.end()[0] == 0)
+
         # a program that doesn't take its pictures
         lazy = Program(cy, b"V", 0)
         lazy.ignore = b"D"
@@ -354,9 +387,9 @@ def main(program, root):
 
         # programs that say what they may not
         twin = Program(ada, b"S", 0)
-        got = twin.messages(1, 3)
+        got = twin.messages(1, 4)
         check("a second program for the same panel takes the first one's place, and is told what the first was",
-              src.let_go() and sorted(kind for kind, _ in got) == [b"P", b"R", b"W"] and (b"P", b"\x1e") in got and (b"W", b"\1") in got)
+              src.let_go() and sorted(kind for kind, _ in got) == [b"F", b"P", b"R", b"W"] and (b"F", b"\x1e") in got and (b"P", b"\x1e") in got and (b"W", b"\1") in got)
         twin.ignore = b"R"
         wrong = [Program(ada, b"S", 3), Program(ada, b"V", 32), Program(ada, b"X", 0), Program(ben), Program(ben), Program(ben, b"V", bens), Program(ada, b"S", 1),
                  Program(cy, b"V", 0), Program(ada, b"S", 2)]

@@ -1,7 +1,8 @@
 """Frametop Settings' Together page: turn Frametop Together on, open a room or join someone's,
 let people in, choose what of yours the room gets (your voice, your avatar, your screens), and
 go to someone or to a panel in it. Who may use which screen is ft_together_control.py's part,
-whether the room gets where you look ft_together_gaze.py's.
+whether the room gets where you look ft_together_gaze.py's, how good the video of your screens
+may get ft_together_quality.py's.
 
 The page's backend (TogetherPages.qml; settings/ft_settings.py makes it). It only asks: the
 room is ft-together's (@ft_together), the voice ft-roomvoice's, the shared screens
@@ -20,9 +21,11 @@ from PySide6.QtGui import QGuiApplication
 
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
+import ft_conf  # noqa: E402  (frametop.conf)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 import ft_together_control  # noqa: E402  (who may use which screen)
 import ft_together_gaze  # noqa: E402  (whether the room gets where you look)
+import ft_together_quality  # noqa: E402  (how good the video of your screens may get)
 import roomavatar  # noqa: E402  (the avatar its person has on)
 import roompage  # noqa: E402  (what the answers mean, without Qt)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
@@ -38,9 +41,10 @@ class Backend(QObject):
     message = Signal(str, bool)
     _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
-    def __init__(self, units=None, sockets=None, worn=None):
+    def __init__(self, units=None, sockets=None, worn=None, conf=None):
         super().__init__()
         self._units = units or UNITS
+        self._conf = conf or ft_conf.PATH
         self._worn = worn or roomavatar.Worn()
         self._avatar = None    # what its file says of the avatar its person has on
         self._allowing = None  # the ft-model-import running
@@ -54,6 +58,9 @@ class Backend(QObject):
         self.changed.connect(self._control.changed)
         self._gaze = ft_together_gaze.Gaze(self._told, lambda text: self._do(TOGETHER, text))
         self.changed.connect(self._gaze.changed)
+        self._quality = ft_together_quality.Quality(lambda: self._answers.get("quality", (None, ""))[0],
+                                                    lambda text, done: self._do(TOGETHER, text, done), self._keep)
+        self.changed.connect(self._quality.changed)
         self.poll = QTimer(interval=1000, timeout=self.refresh)
 
     # --- asking ---
@@ -110,6 +117,7 @@ class Backend(QObject):
             self._ask("looks", TOGETHER, "looks")
             self._ask("control", TOGETHER, "control")
             self._ask("gaze", TOGETHER, "gaze")
+            self._ask("quality", TOGETHER, "quality")
             self._ipc.run(lambda _client: self._worn.look(), self._wears)
             self._ask("voice", VOICE, "state")
             self._ask("panels", PANELS, "state")
@@ -239,6 +247,17 @@ class Backend(QObject):
     @Property(QObject, constant=True)
     def gaze(self):
         return self._gaze
+
+    @Property(QObject, constant=True)
+    def quality(self):
+        return self._quality
+
+    def _keep(self, name):
+        """The quality its person picked, for the next time ft-together starts."""
+        try:
+            ft_conf.set_value("TOGETHER_QUALITY", name, self._conf)
+        except (OSError, ValueError) as e:
+            self.message.emit(f"Couldn't save the setting: {e}", True)
 
     @Slot(str, int)
     def goTo(self, kind, ident):

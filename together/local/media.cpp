@@ -151,10 +151,15 @@ void Media::Rate(int number, int bitrate) {
     Flush(*c);
 }
 
-void Media::Pictures(int number, int aSecond) {
+void Media::Full(int number, int aSecond) { Count(number, kMediaFull, aSecond); }
+
+void Media::Pictures(int number, int aSecond) { Count(number, kMediaPictures, aSecond); }
+
+// One of the words that are a number of pictures a second, to a source.
+void Media::Count(int number, uint8_t kind, int aSecond) {
     Client *c = Find(Role::kSource, number);
     if (!c || !Room(*c, 6)) return;
-    PutMedia(c->out, kMediaPictures, uint8_t(std::clamp(aSecond, 1, 255)));
+    PutMedia(c->out, kind, uint8_t(std::clamp(aSecond, 1, 255)));
     Flush(*c);
 }
 

@@ -52,6 +52,10 @@ public:
         panels_[panel].load = load;
     }
     void Went(uint8_t panel) { panels_.erase(panel); }
+    // What the panel costs now: its owner may change its size or its pictures a second.
+    void Costs(uint8_t panel, int load) {
+        if (const auto it = panels_.find(panel); it != panels_.end()) it->second.load = load;
+    }
 
     // How much the wearer sees of the panel at `now` (proto::kHidden, kInView or kFocused).
     void Sees(uint8_t panel, int level, double now) {

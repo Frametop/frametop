@@ -147,6 +147,10 @@ test-c:
       together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
       -o build/tests/together-video-test
     run together/tests/video-test.cpp build/tests/together-video-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/quality-test.cpp together/flow/video.cpp \
+      together/session/session.cpp together/session/wearer.cpp together/session/commands.cpp together/proto/messages.cpp \
+      -o build/tests/together-quality-test
+    run together/tests/quality-test.cpp build/tests/together-quality-test
     # the sizes the Frame's encoder is given (one it isn't resets the Frame): against /dev/null
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/encsize-test.cpp together/media/irisenc.cpp \
       -o build/tests/together-encsize-test

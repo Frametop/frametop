@@ -44,6 +44,7 @@ public:
     std::string State() const;
 
     void Rate(int number, int bitrate) override;
+    void Full(int number, int aSecond) override;
     void Pictures(int number, int aSecond) override;
     void Key(int number) override;
     void Watched(int number, bool watched) override;
@@ -67,6 +68,7 @@ private:
     void Handle(Client &c, uint8_t kind, const std::vector<uint8_t> &body, flow::Video &video, double now);
     Client *Find(Role role, int which);
     bool Room(Client &c, size_t more);
+    void Count(int number, uint8_t kind, int aSecond);
     void Flush(Client &c);
 
     int listen_ = -1;

@@ -3,8 +3,9 @@
 // (screens/share.c, media/screenfeed.h), or are a test picture (--pattern). They go through the
 // Frame's hardware encoder (media/irisenc.h) and, encoded, to ft-together's media socket
 // (local/mediawire.h), which sends them to whoever watches the panel and says back what to
-// encode: at how many bits and pictures a second (--fps at the most, fewer while nobody has
-// the panel focused), when a keyframe is needed, and whether anyone watches.
+// encode: at how many bits and pictures a second (what the panel's owner lets it have, --fps at
+// the most, and fewer while nobody has the panel focused), when a keyframe is needed, and whether
+// anyone watches.
 // While nobody does, nothing is drawn or encoded, and after a few seconds the encoder is closed.
 //
 //   ft-sharepanel --panel K --size WxH [--fps F] [--socket NAME] (--fd N | --pattern)
@@ -67,7 +68,8 @@ bool Read(int argc, char **argv, Args &a) {
 
 // What ft-together last said to encode.
 struct Asked {
-    int bitrate = 2000000, pictures = 0;   // (pictures: --fps until it says)
+    int bitrate = 2000000;
+    int full = 0, pictures = 0;   // a second: what the encoder is set for, and what it is given (--fps until it says)
     bool watched = false, key = false;
     double keyAt = 0, unwatchedAt = 0;
 };
@@ -109,11 +111,17 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
 
     media::PanelEncoder enc;
     Asked asked;
-    asked.pictures = args.fps;
+    asked.full = asked.pictures = args.fps;
     Counts n;
     bool skipToKey = false;
     double retryAt = 0, reportAt = Now() + kReport;
     int code = 0;
+    const auto shut = [&] {
+        Hand(enc, together, asked, skipToKey, n);
+        feed.End();
+        enc.Close();
+        asked.key = false;
+    };
     while (!g_stop) {
         double now = Now();
         double wait = 1;
@@ -136,8 +144,14 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
             if (kind == local::kMediaRate && body.size() == 4) {
                 asked.bitrate = std::clamp(int(local::MediaU32(body.data())), 100000, 50000000);
                 enc.Bitrate(asked.bitrate);
+            } else if (kind == local::kMediaFull && body.size() == 1) {
+                const int full = std::clamp(int(body[0]), 1, args.fps);
+                if (full == asked.full) continue;
+                asked.full = full;
+                std::printf("the encoder is to be set for %d pictures a second\n", full);
+                if (enc.open()) shut();   // (it opens again below, and begins with a keyframe)
             } else if (kind == local::kMediaPictures && body.size() == 1) {
-                const int pictures = std::clamp(int(body[0]), 1, args.fps);
+                const int pictures = std::clamp(int(body[0]), 1, asked.full);
                 if (pictures != asked.pictures) {
                     feed.AtMost(asked.pictures = pictures);
                     std::printf("at most %d pictures a second\n", pictures);
@@ -155,8 +169,8 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
 
         if (asked.watched && !enc.open() && now >= retryAt) {
             std::string err;
-            if (enc.Open(args.width, args.height, args.fps, asked.bitrate, err) && feed.Begin(enc.pictures(), err)) {
-                std::printf("watched: encoding at %d kbit/s\n", asked.bitrate / 1000);
+            if (enc.Open(args.width, args.height, asked.full, asked.bitrate, err) && feed.Begin(enc.pictures(), err)) {
+                std::printf("watched: encoding at %d kbit/s, set for %d pictures a second\n", asked.bitrate / 1000, asked.full);
                 state("live");
                 skipToKey = false;
             } else {
@@ -167,10 +181,7 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
             }
         }
         if (enc.open() && !asked.watched && now - asked.unwatchedAt >= kLinger) {
-            Hand(enc, together, asked, skipToKey, n);
-            feed.End();
-            enc.Close();
-            asked.key = false;
+            shut();
             std::printf("nobody watches: the encoder is closed\n");
             state("idle");
         }

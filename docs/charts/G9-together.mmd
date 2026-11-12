@@ -1,5 +1,5 @@
 ---
-title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars (67b480e, branch dee-193-together)"
+title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars, a PC's panels (df78bee, branch dee-193-together)"
 ---
 stateDiagram-v2
   state "Legend" as legend {
@@ -16,6 +16,7 @@ stateDiagram-v2
     lg9: A grant is checked where it is enforced, in the ft-together of the panel's owner. A guest's own refuses the same things first, to say why
     lg10: Control, the turn, pointers, gaze and moving are drawn from the code and its tests. The model is of the room and its links
     lg11: A panel's video (74c2dee, 94e99d6, 6e87517, 67b480e): encoded for the viewer who sees most of it, decoded only where it is seen, within its owner's quality. tests/panels-test.py runs the Frame out of video sessions and through the three qualities on the hardware
+    lg12: A PC's panels (df78bee): the PC encodes, its person's Frame sends on. ft-pcsend stands for the PC with a recorded loop (tests/pcpanels-test.cpp, pcsend-test.py). The sender in the PC's streaming host isn't built
   }
   class lg0 teal
   class lg1 blue
@@ -29,6 +30,14 @@ stateDiagram-v2
   class lg9 legendNote
   class lg10 legendNote
   class lg11 legendNote
+  class lg12 legendNote
+  state "Your split compute PC at this Frame (flow/pcpanels.h, proto/sender.h, session.cpp Link kDevice)" as pc {
+    b0: No PC here. sender makes a code for one: eight characters, once, ten minutes
+    [*] --> b0
+    b1: A link whose first word is a Sender, not a Hello: not a Frame's, and nobody in the room
+    b2: The PC: told what to encode for its four panels (R, F, P, K, W), nothing else of the room
+    b3: A panel of the PC's is watched: its pictures come in, are put in order, and go on as this Frame's panel 3 to 6
+  }
   state "Together on this Frame (together/run.sh, frametop-together.service, the eight frametop-room-* units PartOf it)" as un {
     u0: Not installed: the installer's optional part
     [*] --> u0
@@ -237,6 +246,15 @@ stateDiagram-v2
   x1 --> x0: unshare N, the room left, or ft-roompanels ends
   x2 --> x0: unshare N, the room left, or ft-roompanels ends
   x4 --> x0: unshare N, the room left, or ft-roompanels ends
+  b0 --> b1: a call from the PC, with the code whoever asked sender handed it
+  b1 --> b0: refused and hung up on: another version, an address the tailnet doesn't know, a code that isn't good (five wrong from an address in ten minutes: not heard)
+  b1 --> b2: taken. A PC that was here before is hung up on: one PC a Frame
+  b2 --> b3: share K for K 3 to 6, and someone watches it: W 1 and K to the PC
+  b3 --> b2: nobody watches it any more, it is taken back, or the room ends: W 0. The PC's link stays for the next room
+  b3 --> b3: a gap in its pictures that doesn't fill in 0.3 s: K. A picture that isn't one, of a number that isn't the PC's, or past 120 a second is dropped
+  b2 --> b0: its link ends, or it says more on its control stream
+  b3 --> b0: its link ends
+  b3 --> x2: its pictures take the path of a screen's from here: the same rules, viewers and bitrate
   x2 --> g2: G2: ft-screens hands the screen's buffers over, and draws it while watched
   y0 --> y1: keeper: remote N peer ID
   y1 --> y2: a keyframe from the owner's link
@@ -350,6 +368,10 @@ stateDiagram-v2
   class v1 blue
   class v2 blue
   class v3 orange
+  class b0 teal
+  class b1 yellow
+  class b2 blue
+  class b3 blue
   class x0 teal
   class x1 yellow
   class x2 blue

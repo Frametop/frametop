@@ -6,11 +6,13 @@
 #include "feed.h"
 #include "testpattern.h"
 
+#include <algorithm>
+
 namespace media {
 
 class PatternFeed : public Feed {
 public:
-    explicit PatternFeed(int fps) : every_(1.0 / fps) {}
+    explicit PatternFeed(int fps) : fps_(fps), every_(1.0 / fps) {}
 
     int fd() const override { return -1; }
     bool Serve() override { return true; }
@@ -20,6 +22,7 @@ public:
     }
     void End() override {}
     void Fresh() override {}
+    void AtMost(int aSecond) override { every_ = 1.0 / std::clamp(aSecond, 1, fps_); }
     double Wait(double now) const override { return next_ > now ? next_ - now : 0; }
     bool Draw(Pictures &pictures, int into, double now) override {
         if (now < next_) return false;
@@ -40,6 +43,7 @@ public:
     }
 
 private:
+    int fps_;
     double every_, next_ = 0;
     int frame_ = 0;
     int was_[Pictures::kCount] = {-1, -1, -1, -1};

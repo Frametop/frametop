@@ -281,10 +281,11 @@ def main(program, root):
 
         # its video: from the program that encodes it, over the links, to the programs that show it
         src = Program(ada, b"S", 0)
-        got = src.messages(5, 2)   # (it comes at once: the seconds are for a Frame that is busy)
-        if sorted(got) != [(b"R", struct.pack("<I", 2000000)), (b"W", b"\0")]:
+        got = src.messages(5, 3)   # (it comes at once: the seconds are for a Frame that is busy)
+        hello = [(b"P", b"\x0a"), (b"R", struct.pack("<I", 2000000)), (b"W", b"\0")]
+        if sorted(got) != hello:
             print("      got:", got)
-        check("a program that encodes a panel is told the bitrate, and that nobody watches", sorted(got) == [(b"R", struct.pack("<I", 2000000)), (b"W", b"\0")])
+        check("a program that encodes a panel is told the bitrate, the pictures a second for a panel in view, and that nobody watches", sorted(got) == hello)
         src.ignore = b"R"   # (from here on the bitrate follows how the pictures fare, which isn't this test's to say)
         view = Program(ben, b"V", 0)
         got = src.messages(5, 2)
@@ -302,16 +303,29 @@ def main(program, root):
         check("a picture of a megabyte crosses whole", crosses(src, [view, late], [os.urandom(1 << 20)]))
         media = json.loads(ada.ask("media")[3:]), json.loads(ben.ask("media")[3:])
         check("ft-together says which panels have a program, and who watches", media[0]["sources"] == [0] and media[0]["viewers"] == [2, 0, 0] and media[0]["sinks"] == [] and
-              media[1]["sinks"] == [0] and media[1]["sources"] == [] and media[1]["dropped"] == 0 and len(media[0]["bitrate"]) == 3)
+              media[1]["sinks"] == [0] and media[1]["sources"] == [] and media[1]["dropped"] == 0 and len(media[0]["bitrate"]) == 3 and
+              media[0]["pictures"] == [10, 10, 10])
 
         src.messages(0.2)
         view.send(b"A", b"\0\0")
         late.close()
-        ok = src.messages(3, 1) == [(b"W", b"\0")]
+        hidden = time.monotonic()
+        ok = src.messages(1.5) == []
+        still = os.urandom(700)
+        src.unit(still)
+        check("one hides the panel and the other's program goes: the one who hid it still gets it", ok and view.messages(2, 1) == [(b"U", b"\0" + still)])
+        ok = src.messages(6, 1) == [(b"W", b"\0")] and 2.5 <= time.monotonic() - hidden <= 5
         src.unit(os.urandom(5000), key=True)
-        check("one hides the panel and the other's program goes: the encoder hears nobody watches, and nothing is sent", ok and view.messages(0.5) == [])
+        check("...for three seconds: then the encoder hears nobody watches, and nothing is sent", ok and view.messages(0.5) == [])
         view.send(b"A", b"\2\0")
-        check("looking again: watched, and a keyframe is asked for", sorted(src.messages(2, 2)) == [(b"K", b""), (b"W", b"\1")])
+        got = sorted(src.messages(2, 3))
+        if got != [(b"K", b""), (b"P", b"\x1e"), (b"W", b"\1")]:
+            print("      got:", got)
+        check("focused again: watched, at the full rate, and a keyframe is asked for", got == [(b"K", b""), (b"P", b"\x1e"), (b"W", b"\1")])
+        view.send(b"A", b"\1\0")
+        check("only in view: a third of the rate", src.messages(2, 1) == [(b"P", b"\x0a")])
+        view.send(b"A", b"\2\0")
+        check("...and focused, all of it", src.messages(2, 1) == [(b"P", b"\x1e")] and json.loads(ada.ask("media")[3:])["pictures"] == [30, 10, 10])
 
         # a program that doesn't take its pictures
         lazy = Program(cy, b"V", 0)
@@ -323,7 +337,9 @@ def main(program, root):
 
         # programs that say what they may not
         twin = Program(ada, b"S", 0)
-        check("a second program for the same panel takes the first one's place", src.let_go() and sorted(kind for kind, _ in twin.messages(1, 2)) == [b"R", b"W"])
+        got = twin.messages(1, 3)
+        check("a second program for the same panel takes the first one's place, and is told what the first was",
+              src.let_go() and sorted(kind for kind, _ in got) == [b"P", b"R", b"W"] and (b"P", b"\x1e") in got and (b"W", b"\1") in got)
         twin.ignore = b"R"
         wrong = [Program(ada, b"S", 3), Program(ada, b"V", 32), Program(ada, b"X", 0), Program(ben), Program(ben), Program(ben, b"V", bens), Program(ada, b"S", 1)]
         wrong[3].sock.sendall(bytes(4))                               # a message of no length

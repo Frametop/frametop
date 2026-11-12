@@ -26,6 +26,9 @@ public:
     // began to watch after pictures were let go with Skip).
     virtual void Fresh() = 0;
 
+    // At most that many pictures a second are wanted from now on, of the stream's own rate at
+    // the most: the newest when its turn comes.
+    virtual void AtMost(int aSecond) = 0;
     // Seconds from `now` until it may have a picture, at most.
     virtual double Wait(double now) const = 0;
     // Draws its newest picture into picture `into`, if it has one that wasn't drawn yet.

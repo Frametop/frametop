@@ -44,6 +44,7 @@ public:
     std::string State() const;
 
     void Rate(int number, int bitrate) override;
+    void Pictures(int number, int aSecond) override;
     void Key(int number) override;
     void Watched(int number, bool watched) override;
     void Show(uint8_t panel, bool key, const std::vector<uint8_t> &unit) override;

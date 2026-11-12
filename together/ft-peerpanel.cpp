@@ -19,12 +19,13 @@
 // everyone in the room to see, and what they click and type, for the panel's owner, who takes
 // it only from someone the panel was given to (local/panelhand.h).
 //
-//   ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--frames N] [--seconds S])
+//   ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--view] [--frames N] [--seconds S])
 //
 // --panel: the panel's id in the room. --probe: no ft-screens; every picture decoded is read
 // back as ft-sharepanel --pattern's test picture (media/testpattern.h) and a line printed:
-// "picture <count> <W>x<H> number <n> light <v> dark <v> grey <v>". It ends when ft-together or
-// ft-screens goes; ft-screens starts it again.
+// "picture <count> <W>x<H> number <n> light <v> dark <v> grey <v>". The probe has the panel
+// focused, or with --view only in view. It ends when ft-together or ft-screens goes; ft-screens
+// starts it again.
 #include "local/handsend.h"
 #include "local/mediaclient.h"
 #include "media/testpattern.h"
@@ -41,7 +42,7 @@ constexpr int64_t kStuckNs = 1'000'000'000;   // the decoder took nothing for th
 
 struct Args {
     int panel = -1, fd = -1, frames = 0, seconds = 0;
-    bool probe = false;
+    bool probe = false, view = false;
     std::string socket = FT_SOCK_TOGETHER;
 };
 
@@ -50,6 +51,7 @@ bool ReadArgs(int argc, char **argv, Args &a) {
         const std::string k = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : nullptr;
         if (k == "--probe") a.probe = true;
+        else if (k == "--view") a.view = true;
         else if (k == "--panel" && v) a.panel = std::atoi(v), ++i;
         else if (k == "--fd" && v) a.fd = std::atoi(v), ++i;
         else if (k == "--frames" && v) a.frames = std::atoi(v), ++i;
@@ -57,7 +59,7 @@ bool ReadArgs(int argc, char **argv, Args &a) {
         else if (k == "--socket" && v && *v) a.socket = v, ++i;
         else return false;
     }
-    return a.panel >= 0 && a.panel <= 255 && (a.probe != (a.fd >= 0));
+    return a.panel >= 0 && a.panel <= 255 && (a.probe != (a.fd >= 0)) && (a.probe || !a.view);
 }
 
 // ft-screens' end, or nobody's (--probe).
@@ -123,7 +125,7 @@ int Run(const Args &args) {
     local::HandSender toRoom(args.socket);
     local::PanelHand::Out said;
     if (args.probe) {
-        in.level = 2;
+        in.level = args.view ? 1 : 2;
     } else {
         // ft-screens' first word: what SteamVR imports.
         pollfd p = {screens.fd, POLLIN, 0};
@@ -267,7 +269,7 @@ int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     Args args;
     if (!ReadArgs(argc, argv, args)) {
-        std::fprintf(stderr, "usage: ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--frames N] [--seconds S])\n");
+        std::fprintf(stderr, "usage: ft-peerpanel --panel ID [--socket NAME] (--fd N | --probe [--view] [--frames N] [--seconds S])\n");
         return 2;
     }
     // ft-screens blocks SIGTERM for its own loop, and a child inherits that.

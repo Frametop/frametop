@@ -4,8 +4,9 @@
 // socket pair as its fd 3, so a stalled encoder holds up nothing here. It hears of each of the
 // screen's buffers once, as DMA-BUFs, and then "frame ID" when one holds a new picture; that
 // buffer is kept as it is until it says "done". One picture is out at a time, and at most the
-// stream's rate of them: what KWin draws meanwhile waits, and only the newest goes. While
-// nobody watches the panel (it says "want 0") nothing goes at all. The words are in
+// stream's rate of them: what KWin draws meanwhile waits, and only the newest goes. The program
+// may ask for fewer ("rate N": nobody has the panel focused). While nobody watches the panel
+// (it says "want 0") nothing goes at all. The words are in
 // together/media/screenfeed.h.
 //
 // Commands (on @ft_screens, from ft-roompanels):
@@ -55,6 +56,7 @@ struct told {
 struct share {
     bool used;
     int index, slot, width, height, fps;
+    int rate;   // pictures a second the program asked for last, fps at most
     pid_t pid;  // ft-sharepanel, 0 when not running
     int fd;     // our end of its socket, -1 when not connected
     struct wl_event_source *source;
@@ -162,7 +164,7 @@ static unsigned id_of(struct share *s, void *buffer) {
 static void pump(struct share *s) {
     if (!s->wanted || !s->fresh || s->out || s->fd < 0) return;
     const uint32_t t = now_ms();
-    if (s->sent_ms && t - s->sent_ms + 2 < 1000u / (unsigned)s->fps) return;  // (the tick sends it)
+    if (s->sent_ms && t - s->sent_ms + 2 < 1000u / (unsigned)s->rate) return;  // (the tick sends it)
     void *buffer = g_buffers->current(g_buffers_data, s->index);
     if (!buffer) return;
     const unsigned id = id_of(s, buffer);
@@ -178,7 +180,11 @@ static void pump(struct share *s) {
 
 static void message(struct share *s, const char *msg) {
     unsigned id;
-    if (strcmp(msg, "want 1") == 0) {
+    int rate;
+    if (sscanf(msg, "rate %d", &rate) == 1) {
+        s->rate = rate < 1 ? 1 : rate > s->fps ? s->fps : rate;
+        pump(s);  // (a picture that waited for its turn at the old rate)
+    } else if (strcmp(msg, "want 1") == 0) {
         s->wanted = s->fresh = true;  // the picture as it is now, whether or not it has had it
         s->sent_ms = 0;
         pump(s);
@@ -220,6 +226,7 @@ static void log_path(const struct share *s, char *out, size_t size) {
 static bool start_program(struct share *s) {
     s->restart_at = s->quit_at = 0;
     s->started_ms = now_ms();
+    s->rate = s->fps;  // until it asks for fewer
     snprintf(s->state, sizeof s->state, "lost");
     if (!*g_program) return false;
     char log[PATH_MAX], slot[8], size[32], fps[8];
@@ -383,7 +390,7 @@ bool ft_share_command(const char *cmd, char *reply, int size) {
         if (!s) return snprintf(reply, size, "error an old ft-sharepanel is still ending: ask again"), true;
         *s = (struct share){.used = true, .index = index, .fd = -1};
     }
-    s->slot = slot, s->width = width, s->height = height, s->fps = fps;
+    s->slot = slot, s->width = width, s->height = height, s->fps = s->rate = fps;
     char log[PATH_MAX];
     log_path(s, log, sizeof log);
     const int f = open(log, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);  // a fresh log

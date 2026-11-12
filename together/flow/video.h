@@ -8,6 +8,8 @@
 // panel that is in the room and that a program here shows, within what a panel may send in a
 // second; and it is handed on in order (framegate.h). What a viewer here sees of each panel is
 // told to the panel's owner, again every second, so a link that came late or came back learns it.
+// A panel is encoded for the one who sees most of it, and a viewer who stops seeing it goes on
+// getting it for a few seconds (attention.h).
 //
 // The rules only. The links and this Frame's programs are handed in (net/, local/media.h), so
 // two of these can be run against each other in a test.
@@ -16,6 +18,7 @@
 #include "../room/allowance.h"
 #include "../room/panels.h"
 #include "../session/session.h"
+#include "attention.h"
 #include "framegate.h"
 #include "pace.h"
 #include "sendgate.h"
@@ -40,6 +43,7 @@ public:
     virtual ~Programs() = default;
     // To the one that encodes this Frame's panel `number`:
     virtual void Rate(int number, int bitrate) = 0;       // bits a second from now on
+    virtual void Pictures(int number, int aSecond) = 0;   // pictures a second from now on, at most
     virtual void Key(int number) = 0;                     // the next picture is to be a keyframe
     virtual void Watched(int number, bool watched) = 0;   // whether anyone watches: if not, nothing need be encoded
     // To the one that shows panel `panel`: the next picture to decode.
@@ -49,6 +53,7 @@ public:
 class Video {
 public:
     static constexpr int kBalanced = 3'000'000;   // the cap until the owner picks another (bits a second)
+    static constexpr int kBalancedPictures = 30;  // ...and its pictures a second, for a panel someone has focused
     static constexpr double kTellEvery = 1;       // seconds between a viewer's words to a panel's owner
     static constexpr double kPicturesASecond = 120, kPicturesAtOnce = 30;   // taken of one panel
 
@@ -61,7 +66,7 @@ public:
     void SinkCame(uint8_t panel, double now);
     void SinkWent(uint8_t panel);
     // What the sink's panel has of its viewer: proto::kHidden, kInView or kFocused, and whether
-    // its decoder needs a keyframe to go on.
+    // its decoder needs a keyframe to go on. Hidden holds a few seconds later (attention.h).
     void Attention(uint8_t panel, int level, bool fresh, double now);
 
     // From the links. Watch is the session's word that a member watches a panel of ours.
@@ -74,6 +79,7 @@ public:
     size_t dropped() const { return dropped_; }   // pictures from a link that weren't taken
     // Of the wearer's panel `number`: what its source is asked to encode at, and how many watch.
     int bitrate(int number) const { return shared_[number].pace.bitrate(); }
+    int pictures(int number) const { return shared_[number].pictures; }
     size_t viewers(int number) const { return shared_[number].viewers.count(); }
 
 private:
@@ -82,11 +88,13 @@ private:
         Pace pace{kBalanced};
         uint32_t count = 0;
         bool watched = false;   // as the source was last told
+        int pictures = PicturesFor(proto::kInView, kBalancedPictures);   // ...and its pictures a second
     };
     struct Watching {
         Order order;
         room::Allowance allowance{kPicturesASecond, kPicturesAtOnce};
-        int level = proto::kInView;
+        Seen seen;
+        int said = -1;          // the level the owner was last told
         bool fresh = true;      // the owner hasn't been told yet that a keyframe is needed
         double told = -1e9;
     };

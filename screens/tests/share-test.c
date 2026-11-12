@@ -3,7 +3,9 @@
 // nobody watches; and a program that ends, or keeps a picture, is started again. The real
 // share.c runs with made-up buffers; this program is also the ft-sharepanel it starts
 // ($FT_SHAREPANEL): it notes what it's told and answers as the real one does (--fps 7: it never
-// says "done"). SIGUSR1 makes it say nobody watches, SIGUSR2 that someone does again.
+// says "done"; --fps 41, 43 and 9: it asks for 10, 0 and 500 pictures a second; --fps 45: for
+// 10, the first time it is started only). SIGUSR1 makes it say nobody watches, SIGUSR2 that
+// someone does again.
 // Built by `just test-c` (justfile): share.c with -DFT_SHARE_STUCK_MS=500, so a kept picture is
 // noticed soon.
 #define _GNU_SOURCE
@@ -46,11 +48,24 @@ static void on_signal(int s) {
 
 static void tell(const char *msg) { send(3, msg, strlen(msg), MSG_NOSIGNAL); }
 
+// How often the log says a program was started with that --fps.
+static int count_starts(int fps) {
+    FILE *f = fopen(g_log, "r");
+    char line[128];
+    int n = 0, pid, slot, its;
+    while (f && fgets(line, sizeof line, f)) n += sscanf(line, "start %d %d %d", &pid, &slot, &its) == 3 && its == fps;
+    if (f) fclose(f);
+    return n;
+}
+
 static int fake_program(char **argv) {
     const int slot = atoi(argv[2]), fps = atoi(argv[6]);
     signal(SIGTERM, on_signal), signal(SIGUSR1, on_signal), signal(SIGUSR2, on_signal);
     note("start", getpid(), slot, fps);
     tell("state idle");
+    if (fps == 41 || (fps == 45 && count_starts(45) == 1)) tell("rate 10");
+    if (fps == 43) tell("rate 0");
+    if (fps == 9) tell("rate 500");
     tell("want 1");
     while (!g_term) {
         if (g_off) g_off = 0, tell("want 0"), note("off", getpid(), 0, 0);
@@ -276,6 +291,49 @@ static bool rate(void) {
     return true;
 }
 
+// Pictures drawn every 10 ms for a second or so: how many of them went, but for the first and
+// the last.
+static int went(long *took) {
+    read_log();
+    const int before = count("frame");
+    const long began = ms();
+    for (int i = 0; i < 100; ++i) present(0, i % 2), run(10);
+    *took = ms() - began;
+    present(0, 2);
+    run(1100);
+    read_log();
+    return count("frame") - before - 1;
+}
+
+// A program that asks for fewer pictures than the stream's rate gets that many, at least one a
+// second and never more than the stream's; one started again gets the stream's rate until it asks.
+static bool fewer(void) {
+    long took;
+    g_current[0] = &g_bufs[0];
+    SAYS(ask("share 1 start 0 1280x720 41"), "ok");
+    run(300);
+    int frames = went(&took);
+    EXPECT(frames >= took / 100 - 2 && frames <= took / 100 + 2);
+    EXPECT(last("frame")->a == last("buffer")->a);  // the last one drawn does go
+    SAYS(ask("share 1 start 0 1280x720 43"), "ok");
+    run(1000);
+    frames = went(&took);
+    EXPECT(frames >= took / 1000 - 1 && frames <= took / 1000 + 1);
+    SAYS(ask("share 1 start 0 1280x720 9"), "ok");
+    run(1000);
+    frames = went(&took);
+    EXPECT(frames >= took * 9 / 1000 - 2 && frames <= took * 9 / 1000 + 2);
+    SAYS(ask("share 1 start 0 1280x720 45"), "ok");
+    run(1000);
+    frames = went(&took);
+    EXPECT(frames >= took / 100 - 2 && frames <= took / 100 + 2);
+    kill(last("start")->pid, SIGKILL);  // started again, it asks for nothing
+    run(2500);
+    frames = went(&took);
+    EXPECT(frames >= took * 45 / 1000 - 12 && frames <= took * 45 / 1000 + 2);
+    return true;
+}
+
 // A program that keeps a picture gets no other, and is ended and started again.
 static bool kept(void) {
     g_current[0] = &g_bufs[0];
@@ -376,7 +434,7 @@ int main(int argc, char **argv) {
     unsetenv("FT_TOGETHER_SOCKET");
     snprintf(g_log, sizeof g_log, "%s/events.log", dir);
     const struct { const char *name; scenario s; } all[] = {
-        {"commands", commands}, {"pictures", pictures},   {"rate", rate}, {"a picture kept", kept},
+        {"commands", commands}, {"pictures", pictures},   {"rate", rate}, {"fewer", fewer}, {"a picture kept", kept},
         {"watched", watched},   {"forgotten", forgotten}, {"died", died},
     };
     int failed = 0;

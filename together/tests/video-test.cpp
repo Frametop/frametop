@@ -2,7 +2,8 @@
 // on the network made in the test (fakenet.h), each with its video rules, a wire for pictures
 // that the test can lose, hold back and refuse, and programs that only remember what they were
 // told. Who gets a picture and when, what a viewer shows and in what order, the keyframes asked
-// for, the bitrate, and the pictures nobody may send.
+// for, the bitrate, how often a panel is encoded for those who see it, and the pictures nobody
+// may send.
 #include "../flow/video.h"
 #include "fakenet.h"
 
@@ -32,7 +33,7 @@ struct Seat : flow::Wires, flow::Programs {
     flow::Video video;
 
     // the programs: what they were last told, and how often
-    std::map<int, int> rate, keys;
+    std::map<int, int> rate, keys, pictures, pictureWords;
     std::map<int, bool> watched;
     std::vector<Shown> shown;
 
@@ -63,6 +64,7 @@ struct Seat : flow::Wires, flow::Programs {
         return true;
     }
     void Rate(int number, int bitrate) override { rate[number] = bitrate; }
+    void Pictures(int number, int aSecond) override { pictures[number] = aSecond, ++pictureWords[number]; }
     void Key(int number) override { ++keys[number]; }
     void Watched(int number, bool w) override { watched[number] = w; }
     void Show(uint8_t panel, bool key, const Unit &unit) override { shown.push_back({panel, key, unit}); }
@@ -118,6 +120,7 @@ static void watching() {
 
     sa.video.SourceCame(0);
     check("a source is told its bitrate, and that nobody watches", sa.rate[0] == flow::Pace::kStart && sa.watched.count(0) && !sa.watched[0]);
+    check("...and how often to encode once someone does: as for a panel in view", sa.pictures[0] == 10 && sa.pictureWords[0] == 1);
     sa.unit(0, true);
     check("a picture of a panel that isn't shared goes nowhere", sa.sent == 0);
     bool ok = t.a.ask(std::string("share 0") + kScreen) == "ok";
@@ -229,11 +232,17 @@ static void order() {
     check("...and goes on from it: the one it held is old by then", sb.since(4, pa) == (std::vector<Unit>{k2, d6}) && d5 != k2);
 
     // what the viewer has of the panel
-    const size_t n = sb.shown.size();
+    size_t n = sb.shown.size();
     sb.video.Attention(pa, proto::kHidden, false, t.net.now);
     t.net.pump();
+    const Unit d7 = sa.unit(0, false);
+    t.tick(2.9);
+    const Unit d8 = sa.unit(0, false);
+    check("a viewer who stops seeing the panel gets it for three seconds more", sb.since(n, pa) == (std::vector<Unit>{d7, d8}) && sa.watched[0] && sa.video.viewers(0) == 1);
+    t.tick(0.2);
+    n = sb.shown.size();
     sa.unit(0, false);
-    check("a viewer who can't see the panel gets none of it, and with nobody watching the source hears so", sb.shown.size() == n && !sa.watched[0] && sa.video.viewers(0) == 0);
+    check("...and then none of it, and with nobody watching the source hears so", sb.shown.size() == n && !sa.watched[0] && sa.video.viewers(0) == 0);
     sb.video.Attention(pa, 7, false, t.net.now);
     sb.video.Attention(proto::PanelId(t.a.s->me(), 2), proto::kFocused, false, t.net.now);
     t.net.pump();
@@ -275,6 +284,73 @@ static void order() {
     t.net.pump();
     sa.unit(0, true);
     check("the program that shows a panel goes: its owner is told nobody looks", !sa.watched[0] && sb.since(n + 2, pa).empty());
+}
+
+// How often a panel is encoded, by what its viewers see of it.
+static void tiers() {
+    Table t;
+    Seat &sa = t.sa, &sb = t.sb, &sc = t.sc;
+    if (!check("three people sit in a room", t.sit() && t.a.ask(std::string("share 0") + kScreen) == "ok")) return;
+    const uint8_t pa = proto::PanelId(t.a.s->me(), 0);
+    const int focused = flow::Video::kBalancedPictures, view = flow::PicturesFor(proto::kInView, focused);
+    const auto level = [&](Seat &s, int l) {
+        s.video.Attention(pa, l, false, t.net.now);
+        t.net.pump();
+    };
+    sa.video.SourceCame(0);
+    sb.video.SinkCame(pa, t.net.now);
+    t.net.pump();
+    sa.unit(0, true);
+    check("a panel someone has in view is encoded at a third of its rate", view == 10 && sa.pictures[0] == view && sa.video.pictures(0) == view && sa.pictureWords[0] == 1);
+    level(sb, proto::kFocused);
+    check("focused by someone, at its full rate", focused == 30 && sa.pictures[0] == focused && sa.pictureWords[0] == 2);
+    sc.video.SinkCame(pa, t.net.now);
+    t.net.pump();
+    level(sc, proto::kInView);
+    for (int i = 0; i < 3; ++i) t.tick(1.01);
+    check("...whoever else only has it in view, and however often they say so", sa.pictures[0] == focused && sa.pictureWords[0] == 2);
+    level(sb, proto::kInView);
+    check("nobody has it focused any more: a third again", sa.pictures[0] == view && sa.pictureWords[0] == 3);
+    level(sc, proto::kFocused);
+    const int keys = sa.keys[0];
+    sa.unit(0, true);
+    const size_t nb = sb.shown.size(), nc = sc.shown.size();
+    level(sc, proto::kHidden);
+    const Unit d1 = sa.unit(0, false);
+    check("the one who had it focused stops seeing it: they count as having it in view meanwhile", sa.pictures[0] == view && sa.pictureWords[0] == 5 && sc.since(nc, pa) == std::vector<Unit>{d1});
+    t.tick(2);
+    level(sc, proto::kInView);
+    t.tick(2);
+    const Unit d2 = sa.unit(0, false);
+    check("looking back within three seconds, they never lost their place: no keyframe is asked for",
+          sa.keys[0] == keys && sc.since(nc, pa) == (std::vector<Unit>{d1, d2}) && sb.since(nb, pa) == (std::vector<Unit>{d1, d2}) && sa.video.viewers(0) == 2);
+
+    level(sc, proto::kHidden);
+    level(sb, proto::kHidden);
+    const size_t told = t.a.watches.size();
+    t.tick(1.01);
+    bool ok = t.a.watches.size() == told + 2 && t.a.watches.back().second.level == proto::kInView && sa.watched[0];
+    t.tick(1.01), t.tick(1.01);
+    check("both stop seeing it: for three seconds they say they have it in view, then that they don't", ok && t.a.watches.back().second.level == proto::kHidden && !sa.watched[0] && sa.video.viewers(0) == 0);
+    check("...and nothing more is said about how often to encode what nobody watches", sa.pictures[0] == view && sa.pictureWords[0] == 5);
+    const size_t words = t.a.watches.size();
+    t.tick(0.5);
+    check("that they don't is said the moment it holds, and then every second as before", t.a.watches.size() == words);
+    level(sb, proto::kFocused);
+    check("focused again: watched again, at the full rate, from a keyframe", sa.watched[0] && sa.pictures[0] == focused && sa.pictureWords[0] == 6 && sa.keys[0] == keys + 1);
+
+    sa.video.SourceCame(0);
+    check("a source that comes while someone has its panel focused is told the full rate", sa.pictures[0] == focused && sa.pictureWords[0] == 7 && sa.watched[0]);
+    sb.video.SinkWent(pa);
+    t.net.pump();
+    check("a program that goes takes its viewer with it at once", !sa.watched[0] && sa.video.viewers(0) == 0);
+    level(sc, proto::kFocused);
+    ok = sa.watched[0] && sa.pictures[0] == focused;
+    sb.video.SinkCame(pa, t.net.now);
+    t.net.pump();
+    ok = ok && t.c.ask("leave") == "ok";
+    t.tick(0.1);
+    check("the one who had it focused leaves the room: a third for the one who stays", ok && sa.video.viewers(0) == 1 && sa.pictures[0] == view);
 }
 
 static void rules() {
@@ -374,6 +450,7 @@ static void rules() {
 int main() {
     watching();
     order();
+    tiers();
     rules();
     std::printf(failed ? "FAILED\n" : "all ok\n");
     return failed ? 1 : 0;

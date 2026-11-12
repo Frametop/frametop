@@ -8,7 +8,8 @@ it over a loopback link, and ft-peerpanel decodes it and reads it back.
 It needs the Frame's video devices, and is skipped without them. What ft-together does with
 the pictures is tested with made-up ones in loopback-test.py; this is what only the hardware
 shows: that the pictures decode, whole and in order, in the colours they were drawn in, at
-every size a panel is sent at, and that nothing is encoded while nobody watches.
+every size a panel is sent at, that a panel nobody has focused is encoded less often, and that
+nothing is encoded while nobody watches.
 """
 import json
 import os
@@ -107,11 +108,22 @@ def main(together, share, peer):
         if not check("no picture was drawn in between", ok and 0 < (numbers[0] - last) % 65536 < 40):
             print("    (the last one seen was %d, the first one now %s)" % (last, numbers[:1]))
 
+        # someone who only has the panel in view
+        mark = len(src.lines)
+        glance = prober(ben, 0, "--view", "--seconds", "6")
+        status = glance.wait(40)
+        numbers = [p["number"] for p in pictures(glance)]
+        check("a viewer who only has the panel in view: it is encoded at a third of its rate", src.said("at most 10 pictures a second", 1, mark))
+        if not check("...and that many pictures come, whole and in order", status == 0 and 30 <= len(numbers) <= 75 and -1 not in numbers and jumps(numbers) <= 2):
+            print("    (status %s, %d pictures in 6 s: %s)" % (status, len(numbers), numbers))
+
         # the one who shares starts its program again, as ft-screens does when it ends
+        mark = len(src.lines)
         stay = prober(ben, 0, "--seconds", "25")
         ok = stay.until(lambda lines: len(pictures(stay)) >= 20, 15)
         media = json.loads(ada.ask("media")[3:]), json.loads(ben.ask("media")[3:])
         check("ft-together says who encodes, who watches and who shows", ok and media[0]["sources"] == [0] and media[0]["viewers"][0] == 1 and media[1]["sinks"] == [0])
+        check("focused, the panel is encoded at its full rate again", media[0]["pictures"][0] == 30 and src.said("at most 30 pictures a second", 1, mark))
         check("the encoding program ends when told to", src.end() == 0)
         mark = len(stay.lines)
         time.sleep(0.5)

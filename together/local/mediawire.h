@@ -9,6 +9,7 @@
 //   'U' u8 flags (1: a keyframe), the encoded picture
 // It is told, whenever one changes:
 //   'R' u32 the bits a second to encode at
+//   'P' u8  the pictures a second to encode, at most (fewer while nobody has the panel focused)
 //   'K'     the next picture is to be a keyframe
 //   'W' u8  whether anyone watches the panel (1) or not (0): if not, nothing need be encoded
 //
@@ -29,7 +30,7 @@
 
 namespace local {
 
-constexpr uint8_t kMediaSource = 'S', kMediaSink = 'V', kMediaUnit = 'U', kMediaRate = 'R', kMediaKey = 'K', kMediaWatched = 'W', kMediaAttention = 'A';
+constexpr uint8_t kMediaSource = 'S', kMediaSink = 'V', kMediaUnit = 'U', kMediaRate = 'R', kMediaPictures = 'P', kMediaKey = 'K', kMediaWatched = 'W', kMediaAttention = 'A';
 constexpr size_t kMostMediaUnit = 1u << 20;              // an encoded picture (proto::kMostFrame)
 constexpr size_t kMostMedia = 2 + kMostMediaUnit;        // a message after its length: what it is, flags, a picture
 

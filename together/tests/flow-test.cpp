@@ -1,5 +1,7 @@
 // How a shared panel's video flows (together/flow, proto/framewire.h): who gets the next
-// picture, the order a viewer decodes them in, the bitrate, and a picture's bytes on its stream.
+// picture, the order a viewer decodes them in, the bitrate, how often it is encoded for those
+// who see it, and a picture's bytes on its stream.
+#include "../flow/attention.h"
 #include "../flow/framegate.h"
 #include "../flow/pace.h"
 #include "../flow/sendgate.h"
@@ -20,13 +22,13 @@ static void viewers() {
     flow::Viewers v;
     check("a panel nobody watches goes to nobody, and asks for no keyframe", !v.watched() && v.For(true).empty() && v.For(false).empty() && !v.WantsKey(0));
 
-    v.Watch(1, true, false);
+    v.Watch(1, 1, false);
     check("someone who begins to watch is waiting for a keyframe", v.watched() && v.waiting() == 1 && v.For(false).empty());
     check("...so one is asked for, once", v.WantsKey(1) && !v.WantsKey(1.01));
     check("the keyframe goes to them, and what follows it too", v.For(true) == Links{1} && v.For(false) == Links{1} && v.waiting() == 0);
     check("nobody waits: no keyframe is asked for", !v.WantsKey(5));
 
-    v.Watch(2, true, false);
+    v.Watch(2, 1, false);
     check("a second viewer waits while the first goes on", v.For(false) == Links{1} && v.waiting() == 1);
     check("their keyframe goes to both: the panel is encoded once", v.WantsKey(6) && v.For(true) == (Links{1, 2}) && v.For(false) == (Links{1, 2}));
 
@@ -35,26 +37,60 @@ static void viewers() {
     check("...which isn't asked for within half a second of the last one", !v.WantsKey(6.2) && !v.WantsKey(6.49) && v.WantsKey(6.5));
     check("...and puts them back in step", v.For(true) == (Links{1, 2}) && v.waiting() == 0);
 
-    v.Watch(1, true, true);
+    v.Watch(1, 1, true);
     check("a viewer whose decoder lost its place waits again", v.For(false) == Links{2} && v.waiting() == 1);
     int asked = 0;
     for (int i = 0; i < 1000; ++i) {
-        v.Watch(1 + i % 2, true, true);
+        v.Watch(1 + i % 2, 1, true);
         asked += v.WantsKey(8 + i * 0.001);
     }
     check("however often they ask, the encoder is asked twice a second", asked == 2);
     v.For(true);
 
-    v.Watch(1, true, false);
+    v.Watch(1, 1, false);
     check("saying again that you watch changes nothing", v.For(false) == (Links{1, 2}));
-    v.Watch(1, false, false);
-    check("one who looks away gets nothing", v.For(false) == Links{2} && v.For(true) == Links{2});
-    v.Watch(1, true, false);
+    check("the panel is seen as much as the one who sees most of it does", v.level() == 1);
+    v.Watch(2, 2, false);
+    check("...which is the one who has it focused", v.level() == 2 && v.For(false) == (Links{1, 2}));
+    v.Watch(1, 0, false);
+    check("one who looks away gets nothing", v.For(false) == Links{2} && v.For(true) == Links{2} && v.level() == 2);
+    v.Watch(1, 1, false);
     check("...and waits for a keyframe when they look again", v.For(false) == Links{2} && v.waiting() == 1);
+    v.Watch(2, 1, false);
+    check("one who sees less of it than before stays in step", v.level() == 1 && v.For(false) == Links{2});
+    v.Watch(1, 2, false), v.Gone(1);
+    check("...and what the panel is seen as falls back when the one who saw most goes", v.level() == 1);
     v.Gone(1), v.Gone(2), v.Gone(3);
-    check("when the last viewer is gone the panel isn't watched", !v.watched() && !v.WantsKey(100));
+    check("when the last viewer is gone the panel isn't watched", !v.watched() && !v.WantsKey(100) && v.level() == 0);
     v.GaveUp(7);
     check("a picture given up on a link that doesn't watch is nothing", !v.watched());
+}
+
+static void attention() {
+    using flow::PicturesFor;
+    const int hidden = proto::kHidden, view = proto::kInView, focused = proto::kFocused;
+    check("a focused panel is encoded at its full rate, one in view at a third, one nobody sees not at all",
+          PicturesFor(focused, 30) == 30 && PicturesFor(view, 30) == 10 && PicturesFor(hidden, 30) == 0 && PicturesFor(view, 60) == 20 && PicturesFor(focused, 60) == 60);
+    check("...at five a second at the least, and never more than the full rate",
+          PicturesFor(view, 15) == 5 && PicturesFor(view, 9) == 5 && PicturesFor(view, 14) == 5 && PicturesFor(view, 18) == 6 && PicturesFor(view, 3) == 3 && PicturesFor(focused, 3) == 3);
+
+    flow::Seen seen;
+    check("a panel that has just come counts as in view", seen.Told(0) == view);
+    seen.Set(focused, 1);
+    check("what its viewer has of it is told as it is", seen.Told(1) == focused);
+    seen.Set(view, 2);
+    check("...down as well as up", seen.Told(2) == view && seen.Told(500) == view);
+    seen.Set(hidden, 10);
+    check("out of view, it counts as in view for three seconds more", seen.Told(10) == view && seen.Told(12.99) == view);
+    check("...and then as hidden", seen.Told(13) == hidden && seen.Told(1000) == hidden);
+    seen.Set(hidden, 12.5);
+    check("saying again that it is hidden starts nothing over", seen.Told(13) == hidden);
+    seen.Set(focused, 14), seen.Set(hidden, 20);
+    check("seen again and hidden again, the three seconds count from then", seen.Told(22.9) == view && seen.Told(23.1) == hidden);
+    seen.Set(view, 21);
+    check("one that comes back into view within them was never hidden", seen.Told(21) == view && seen.Told(30) == view);
+    seen.Set(focused, 31), seen.Set(hidden, 32);
+    check("a focused panel that goes out of view counts as in view meanwhile, not as focused", seen.Told(32.5) == view);
 }
 
 static flow::Order::Frame frame(uint32_t number, bool key = false) {
@@ -189,6 +225,7 @@ static void framewire() {
 
 int main() {
     viewers();
+    attention();
     order();
     pace();
     idle();

@@ -16,6 +16,8 @@
 //                      again and sends the screen's picture as it is now. "want 1" again: the
 //                      picture as it is now, once more
 //   done <id>          the frame was read (or wasn't wanted)
+//   rate <n>           at most n frames a second from now on, of the stream's own rate at the
+//                      most (what this program was started with)
 //   state <words>      for ft-screens' log
 #pragma once
 
@@ -34,6 +36,7 @@ public:
     bool Begin(const Pictures &pictures, std::string &err) override;
     void End() override;
     void Fresh() override;
+    void AtMost(int aSecond) override { Say("rate " + std::to_string(aSecond)); }
     double Wait(double) const override { return pending_ ? 0 : 1; }
     bool Draw(Pictures &pictures, int into, double now) override;
     void Skip(double now) override;

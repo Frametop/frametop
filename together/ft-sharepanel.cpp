@@ -3,7 +3,8 @@
 // (screens/share.c, media/screenfeed.h), or are a test picture (--pattern). They go through the
 // Frame's hardware encoder (media/irisenc.h) and, encoded, to ft-together's media socket
 // (local/mediawire.h), which sends them to whoever watches the panel and says back what to
-// encode: at how many bits a second, when a keyframe is needed, and whether anyone watches.
+// encode: at how many bits and pictures a second (--fps at the most, fewer while nobody has
+// the panel focused), when a keyframe is needed, and whether anyone watches.
 // While nobody does, nothing is drawn or encoded, and after a few seconds the encoder is closed.
 //
 //   ft-sharepanel --panel K --size WxH [--fps F] [--socket NAME] (--fd N | --pattern)
@@ -66,7 +67,7 @@ bool Read(int argc, char **argv, Args &a) {
 
 // What ft-together last said to encode.
 struct Asked {
-    int bitrate = 2000000;
+    int bitrate = 2000000, pictures = 0;   // (pictures: --fps until it says)
     bool watched = false, key = false;
     double keyAt = 0, unwatchedAt = 0;
 };
@@ -108,6 +109,7 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
 
     media::PanelEncoder enc;
     Asked asked;
+    asked.pictures = args.fps;
     Counts n;
     bool skipToKey = false;
     double retryAt = 0, reportAt = Now() + kReport;
@@ -134,6 +136,12 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
             if (kind == local::kMediaRate && body.size() == 4) {
                 asked.bitrate = std::clamp(int(local::MediaU32(body.data())), 100000, 50000000);
                 enc.Bitrate(asked.bitrate);
+            } else if (kind == local::kMediaPictures && body.size() == 1) {
+                const int pictures = std::clamp(int(body[0]), 1, args.fps);
+                if (pictures != asked.pictures) {
+                    feed.AtMost(asked.pictures = pictures);
+                    std::printf("at most %d pictures a second\n", pictures);
+                }
             } else if (kind == local::kMediaKey) {
                 if (!asked.key) asked.key = true, asked.keyAt = now;
             } else if (kind == local::kMediaWatched && body.size() == 1) {
@@ -184,8 +192,9 @@ int Run(const Args &args, media::Feed &feed, const std::function<void(const std:
         }
         if (now >= reportAt) {
             if (n.pictures || n.units || n.dropped)
-                std::printf("%s: %d pictures in, %d out (%d keyframes, %d dropped), %.0f kbit/s of %d asked\n", asked.watched ? "watched" : "idle",
-                            n.pictures, n.units, n.keys, n.dropped, double(n.bytes) * 8 / 1000 / kReport, asked.bitrate / 1000);
+                std::printf("%s: %d pictures in, %d out (%d keyframes, %d dropped), %.0f kbit/s of %d asked, at most %d pictures a second\n",
+                            asked.watched ? "watched" : "idle", n.pictures, n.units, n.keys, n.dropped, double(n.bytes) * 8 / 1000 / kReport,
+                            asked.bitrate / 1000, asked.pictures);
             n = Counts{}, reportAt = now + kReport;
         }
     }

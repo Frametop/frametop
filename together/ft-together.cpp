@@ -247,15 +247,17 @@ void Tell(int sock, End &end, Local &local, const net::Event &e, double now) {
     }
 }
 
-// How the shared panels' video goes: {"sources":[...],"sinks":[...],"bitrate":[...],"viewers":[...],"dropped":N}.
+// How the shared panels' video goes: {"sources":[...],"sinks":[...],"bitrate":[...],"pictures":[...],"viewers":[...],"dropped":N}.
 std::string MediaState(const End &end, const Local &local) {
-    std::string state = local.media.State(), rates, viewers;
+    std::string state = local.media.State(), rates, pictures, viewers;
     for (int number = 0; number < room::kFramePanels; ++number) {
         rates += (number ? "," : "") + std::to_string(end.video->bitrate(number));
+        pictures += (number ? "," : "") + std::to_string(end.video->pictures(number));
         viewers += (number ? "," : "") + std::to_string(end.video->viewers(number));
     }
     state.pop_back();
-    return state + ",\"bitrate\":[" + rates + "],\"viewers\":[" + viewers + "],\"dropped\":" + std::to_string(end.video->dropped()) + "}";
+    return state + ",\"bitrate\":[" + rates + "],\"pictures\":[" + pictures + "],\"viewers\":[" + viewers + "],\"dropped\":" +
+           std::to_string(end.video->dropped()) + "}";
 }
 
 // A datagram of the wearer's own, from one of this Frame's programs: what the room is told for

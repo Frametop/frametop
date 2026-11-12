@@ -11,9 +11,12 @@ bool Video::Mine(int number) const {
 }
 
 // After anything that may have changed who watches one of our panels: its source is told
-// whether anyone does, and asked for a keyframe when someone waits for one.
+// whether anyone does and how often to encode for the one who sees most of it, and asked for a
+// keyframe when someone waits for one.
 void Video::Settle(int number, double now) {
     Shared &s = shared_[number];
+    const int pictures = PicturesFor(s.viewers.level(), kBalancedPictures);
+    if (pictures > 0 && pictures != s.pictures) programs_.Pictures(number, s.pictures = pictures);
     if (s.viewers.watched() != s.watched) programs_.Watched(number, s.watched = s.viewers.watched());
     if (s.viewers.WantsKey(now)) programs_.Key(number);
 }
@@ -22,6 +25,7 @@ void Video::SourceCame(int number) {
     if (number < 0 || number >= room::kFramePanels) return;
     Shared &s = shared_[number];
     programs_.Rate(number, s.pace.bitrate());
+    programs_.Pictures(number, s.pictures);
     programs_.Watched(number, s.watched = s.viewers.watched());
 }
 
@@ -45,7 +49,7 @@ void Video::Unit(int number, bool key, const uint8_t *unit, size_t n, double now
 void Video::Watch(int link, const proto::Watch &watch, double now) {
     const int number = watch.panel % proto::kPanelNumbers;
     if (watch.panel / proto::kPanelNumbers != session_.me() || !Mine(number)) return;
-    shared_[number].viewers.Watch(link, watch.level != proto::kHidden, watch.fresh);
+    shared_[number].viewers.Watch(link, watch.level, watch.fresh);
     Settle(number, now);
 }
 
@@ -76,9 +80,9 @@ void Video::Frame(int link, const uint8_t *data, size_t n, double now) {
 
 void Video::Tell(uint8_t panel, Watching &w, double now) {
     proto::Watch watch;
-    watch.panel = panel, watch.level = uint8_t(w.level), watch.fresh = w.fresh;
+    watch.panel = panel, watch.level = uint8_t(w.seen.Told(now)), watch.fresh = w.fresh;
     if (!session_.Watch(watch).empty()) return;   // no link to its owner yet: said again at the next Tick
-    w.fresh = false, w.told = now;
+    w.fresh = false, w.told = now, w.said = watch.level;
 }
 
 void Video::SinkCame(uint8_t panel, double now) {
@@ -98,14 +102,14 @@ void Video::Attention(uint8_t panel, int level, bool fresh, double now) {
     if (it == watching_.end() || level < proto::kHidden || level > proto::kFocused) return;
     Watching &w = it->second;
     if (fresh) w.fresh = true, w.order.Reset();
-    w.level = level;
+    w.seen.Set(level, now);
     Tell(panel, w, now);
 }
 
 void Video::Tick(double now) {
     for (auto &[panel, w] : watching_) {
         if (w.order.WantsKey(now)) w.fresh = true;
-        if (w.fresh || now - w.told >= kTellEvery) Tell(panel, w, now);
+        if (w.fresh || now - w.told >= kTellEvery || w.seen.Told(now) != w.said) Tell(panel, w, now);
     }
     for (int number = 0; number < room::kFramePanels; ++number) {
         Shared &s = shared_[number];

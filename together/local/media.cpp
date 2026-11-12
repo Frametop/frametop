@@ -3,6 +3,7 @@
 
 #include "../../conf/ftsock.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <unistd.h>
 
@@ -140,6 +141,13 @@ void Media::Rate(int number, int bitrate) {
     Client *c = Find(Role::kSource, number);
     if (!c || !Room(*c, 9)) return;
     PutMediaRate(c->out, uint32_t(bitrate));
+    Flush(*c);
+}
+
+void Media::Pictures(int number, int aSecond) {
+    Client *c = Find(Role::kSource, number);
+    if (!c || !Room(*c, 6)) return;
+    PutMedia(c->out, kMediaPictures, uint8_t(std::clamp(aSecond, 1, 255)));
     Flush(*c);
 }
 

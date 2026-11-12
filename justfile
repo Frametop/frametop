@@ -155,6 +155,8 @@ test-c:
     # where the wearer looks on its way out: shared only when they say so, and the pointer that keeps quiet while their eyes move it
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/gaze-test.cpp together/local/gazeask.cpp -o build/tests/together-gaze-test
     run together/tests/gaze-test.cpp build/tests/together-gaze-test
+    g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/glance-test.cpp -o build/tests/together-glance-test
+    run together/tests/glance-test.cpp build/tests/together-glance-test
     # the wearer's hand on someone else's panel: ft-screens' words into what ft-together takes
     g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/panelhand-test.cpp -o build/tests/together-panelhand-test
     run together/tests/panelhand-test.cpp build/tests/together-panelhand-test

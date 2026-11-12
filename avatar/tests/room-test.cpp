@@ -72,6 +72,15 @@ static void poses() {
     check("a body is posed from them as from the wearer", is.hand[1].tracked && is.hand[1].fingers && is.hand[1].turn.AngleTo(was.hand[1].turn) < 1e-3 &&
                                                             is.hand[1].finger[4].AngleTo(was.hand[1].finger[4]) < 0.03 && !is.hand[0].tracked);
 
+    seen.looks = true, seen.gaze[0] = 9;
+    check("a wearer's pose says nothing of where they look: that is ft-together's to say", !roomwire::ToRoom(seen, mine).looks && roomwire::ToRoom(seen, mine).gaze[0] == 0 && !back.looks && !is.looks);
+    seen.looks = false;
+    read.looks = true, read.gaze[0] = 12.5f, read.gaze[1] = -7;
+    const wearer::Seen aside = roomwire::FromRoom(read, mine);
+    const bodypose::Input looking = wearer::Pose(aside, fit, 0);
+    check("where someone looks comes with them when the room is told it, as they said it", aside.looks && aside.gaze[0] == 12.5 && aside.gaze[1] == -7 && looking.looks && looking.gaze[0] == 12.5 &&
+                                                                                          looking.gaze[1] == -7);
+
     // the room's owner stands at its middle facing -z; a guest is on the spot 0.9 m to their right, and
     // stood at (2, 2) of their own floor facing a quarter turn left when they came in
     const Floor owner = roomfloor::Lay(0, 0, 0, 0, 0, 0), guest = roomfloor::Lay(0.9, 0, 0, 2, 2, bodypose::kPi / 2);

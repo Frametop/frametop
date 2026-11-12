@@ -18,6 +18,8 @@
 //   to ft-together     a pointer datagram as it goes on a link (proto/pointwire.h: its first
 //                      byte is proto::kPointDatagram, 3): where you point now. It isn't answered.
 //   to who asks `points`  kPointToWatcher, whose it is, then that person's pointer datagram
+//   to who asks `points`  kGlanceToWatcher, whose it is, then a pointer datagram that says where
+//                      on a panel that person looks, while they share it (glances.h)
 //   to who asks `inputs`  kInputToTaker, whose it is, then an act's body (proto/control.h):
 //                      input someone may give this Frame's desktop now (inputs.h)
 #pragma once
@@ -34,6 +36,7 @@ constexpr uint8_t kVoiceToListener = 0x82;
 constexpr uint8_t kMouthToTogether = 0x83;
 constexpr uint8_t kPointToWatcher = 0x84;
 constexpr uint8_t kInputToTaker = 0x85;
+constexpr uint8_t kGlanceToWatcher = 0x86;
 constexpr size_t kMouthBytes = 1 + proto::kMouthShapes;
 
 }  // namespace local

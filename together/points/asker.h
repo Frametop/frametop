@@ -1,6 +1,7 @@
 // ft-roompoints' socket: one datagram socket, bound to a name of its own, that asks ft-together
 // for the others' pointers (`points`: it sends them for five seconds after each ask) and
-// ft-roompanels which panel here shows each of the room's (`panels`), and takes what comes.
+// ft-roompanels which panel here shows each of the room's (`panels`), and takes what comes:
+// with the pointers, where the others look.
 // What comes from anyone else is a question to this program, kept for its loop.
 //
 // Nothing here waits. An ft-roompanels that stops answering is a room with no panels here.
@@ -39,8 +40,9 @@ public:
     Asker &operator=(const Asker &) = delete;
     ~Asker() { Close(); }
 
-    // Every pass of the loop: asks what is due, and gives what came to `marks` and `keys`.
-    void Tick(double now, Marks &marks, PanelKeys &keys);
+    // Every pass of the loop: asks what is due, and gives what came to `marks` (where the
+    // others point), `glances` (where they look) and `keys`.
+    void Tick(double now, Marks &marks, Marks &glances, PanelKeys &keys);
 
     bool Next(Question &out);
     void Reply(const Question &to, const std::string &text);

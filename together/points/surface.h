@@ -1,5 +1,5 @@
 // Where a point of a panel's picture is on the panel as SteamVR shows it, and how large a
-// pointer's mark is there.
+// pointer's mark is there, or the mark of where someone looks.
 //
 // A panel is an overlay `metres` wide, as tall as its picture's shape makes it, flat or bent
 // into a cylinder toward its front with its centre line where the flat one was. OpenVR's
@@ -51,5 +51,9 @@ inline Place Then(const Place &a, const Place &b) {
 // A mark's width on a panel `metres` wide: a small part of it, never too small to see from
 // across a room nor large enough to hide what is pointed at.
 inline double MarkMetres(double metres) { return std::clamp(metres * 0.012, 0.012, 0.04); }
+
+// The width of the mark of where someone looks: several pointers wide, as an eye tracker is
+// only so sure, and never a large part of the panel.
+inline double GlanceMetres(double metres) { return std::clamp(metres * 0.06, 0.06, 0.18); }
 
 }  // namespace points

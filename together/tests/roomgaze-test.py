@@ -9,6 +9,7 @@ The rules are tested without a clock or a link in gaze-test.cpp and test_roomgaz
 what only the real programs show.
 """
 import json
+import math
 import os
 import struct
 import sys
@@ -108,6 +109,17 @@ def main():
     def near(got, yaw, pitch):
         return bool(got) and all(g is not None and abs(g[0] - yaw) <= 0.5 and abs(g[1] - pitch) <= 0.5 for g in got)
 
+    def glanced(seconds=0.5):
+        """Where ada's end was told ben looks in that time, as his body says where he is: [(panel, x, y)], x and
+        y as parts of the picture."""
+        points.got(b"\x86", 0.05)
+        deadline = time.monotonic() + seconds
+        got = []
+        while time.monotonic() < deadline:
+            body.send(pose(0.5))
+            got += [(who, ) + struct.unpack("<BHBHHB", data)[2:5] for who, data in points.got(b"\x86", 0.1)]
+        return [(who, panel, x / 65535, y / 65535) for who, panel, x, y in got]
+
     def pointed(seconds=0.4):
         """Where ada's end was told ben points in that time: [(panel, x, y, pressed)]."""
         return [struct.unpack("<BHBHHB", data)[2:] for _, data in points.got(b"\x84", seconds)]
@@ -133,15 +145,26 @@ def main():
         got = looks(1.5)
         check("ben's poses reach ada's end with no gaze, and the gaze service was asked nothing", len(got) >= 5 and set(got) == {None} and gazed.asked == [])
         check("...whatever his own programs' poses claim", ben.ask("gaze say 20 5") == "error you don't share where you look" and set(looks()) == {None})
+        check("...and ada's programs are told nothing of where he looks", glanced() == [])
 
         # shared
         check("ben shares where he looks: it is told", ben.ask("gaze on") == "ok" and tool.said("where you look is shared, and told"))
         check("...and reaches ada's end in his poses", until(lambda: near(looks(0.3), 10, -5)) and gaze()["shared"] and gaze()["fresh"])
         check("the gaze service is asked to keep running, and for where he looks", "wake 3" in gazed.asked and gazed.asked.count("status") >= 2)
+        # his eyes are at (0.5, 1.6, 0) and the panel's middle 2 m ahead at (0, 1.5, -2), 2 m wide: 10 degrees left and 5 down
+        across = 0.5 + (0.5 - 2 * math.tan(math.radians(10))) / 2
+        down = 0.5 - (0.1 - 2 * math.tan(math.radians(5)) / math.cos(math.radians(10))) / 1.125
+        got = glanced()
+        check("ada's programs that asked for the pointers are told where on her panel he looks, a few times a second",
+              3 <= len(got) <= 7 and all(g[:2] == (who["ben"], panel) and abs(g[2] - across) < 0.01 and abs(g[3] - down) < 0.01 for g in got))
         check("ada's own poses have none: she shares nothing", not gaze(ada)["shared"])
+        points.got(b"\x86", 0.05)
         gazed.last = [-20.0, 15.0, 0.0, 0.0]
         seen = looks(0.5)
         check("he looks elsewhere: it follows, smoothed", until(lambda: near(looks(0.3), -20, 15)) and any(g is not None and -19 < g[0] < 9 for g in seen))
+        went = [(person, data[3]) for person, data in points.got(b"\x86", 0.2)]   # all they were told as he looked there
+        check("...past the panel's edge: they are told he looks at none, once",
+              went[-1:] == [(who["ben"], 255)] and [p for _, p in went].count(255) == 1 and glanced(0.3) == [])
         gazed.age = 3.0
         check("the gaze service has nothing new: a second later his poses have no gaze", until(lambda: set(looks(0.3)) == {None}) and not gaze()["fresh"]
               and tool.said("where you look is shared, and the gaze service has no direction"))
@@ -164,6 +187,7 @@ def main():
         lines = len(tool.lines)
         check("ben stops sharing: no gaze goes out", ben.ask("gaze off") == "ok" and tool.said("where you look isn't shared", since=lines) and until(lambda: set(looks(0.3)) == {None}))
         check("...and his pointer is quiet", gaze() == {"shared": False, "fresh": False, "quiet": True})
+        check("...and ada's programs are told no more of where he looks", glanced(0.3) == [])
         asked = len(gazed.asked)
         body.send(point(panel, 3000, 4000))
         check("a pointer that only moves tells the room it is nowhere, once", pointed() == [(255, 0, 0, 0)])

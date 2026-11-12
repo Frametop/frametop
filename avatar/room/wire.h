@@ -28,7 +28,8 @@ inline Turn Of(const float q[4]) { return Turn{q[0], q[1], q[2], q[3]}.unit(); }
 }  // namespace detail
 
 // The wearer as the room is told. `floor`: theirs in the room. The count (`turn`) is left 0:
-// ft-together counts what it sends.
+// ft-together counts what it sends. Where they look isn't said here either: ft-together says
+// it, and only while they share it.
 inline proto::Pose ToRoom(const wearer::Seen &s, const roomfloor::Floor &floor) {
     const Turn turned = roomfloor::Turned(floor);
     proto::Pose p;
@@ -55,6 +56,7 @@ inline wearer::Seen FromRoom(const proto::Pose &p, const roomfloor::Floor &floor
     s.eyes = roomfloor::FromRoom(floor, detail::At(p.eyes));
     s.head = turned * detail::Of(p.head);
     s.eyeHeight = p.eyeHeight;
+    s.looks = p.looks, s.gaze[0] = p.gaze[0], s.gaze[1] = p.gaze[1];   // from the way the head faces: the same on any floor
     for (int side = 0; side < 2; ++side) {
         const proto::HandPose &h = p.hand[side];
         if (!h.tracked) continue;

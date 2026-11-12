@@ -1,7 +1,8 @@
 // The pose solver (avatar/pose/bodypose.h) on a made-up skeleton: the body stands where its
 // wearer does at their size, every bone keeps its length whatever is asked of it, the hands
 // reach the wrists, the trunk leans, sits and turns after the head, tracking that comes and
-// goes moves an arm across without a jump, and nothing that isn't a number gets in or out.
+// goes moves an arm across without a jump, the eyes turn to where the wearer looks, and nothing
+// that isn't a number gets in or out.
 #include "../pose/bodypose.h"
 #include "person.h"
 
@@ -322,6 +323,40 @@ static void holds_up() {
     check("a body with its bones in one place, or far apart, still gives numbers", finite);
 }
 
+static void looks() {
+    const Body b = person();
+    Solver solver(b);
+    Input in = standing(b);
+    Pose ahead, p;
+    solver.Solve(in, ahead);
+    in.looks = true, in.gaze[0] = 10, in.gaze[1] = 5;
+    check("someone who looks aside is posed", solver.Solve(in, p) && sound(b, p));
+    const double l = 10 * kPi / 180, u = 5 * kPi / 180;
+    check("their eyes turn to where they look: to their left, and up",
+          far(p.turn[kLeftEye] * Vec{0, 0, -1}, {-std::sin(l) * std::cos(u), std::sin(u), -std::cos(l) * std::cos(u)}) < 1e-9 && p.turn[kRightEye].AngleTo(p.turn[kLeftEye]) < 1e-12);
+    check("...level: an eye doesn't roll", std::fabs((p.turn[kLeftEye] * Vec{1, 0, 0}).y) < 1e-12);
+    bool rest = true;
+    for (int r = 0; r < kRoles; ++r) rest = rest && far(p.at[r], ahead.at[r]) < 1e-12 && (r == kLeftEye || r == kRightEye || p.turn[r].AngleTo(ahead.turn[r]) < 1e-12);
+    check("...in their sockets, and nothing else moves: not the head, not the jaw", rest);
+    in.head = yaw(40) * nod(20);
+    check("in a head that is turned, they turn from the way it faces", solver.Solve(in, p) && sound(b, p) && p.turn[kLeftEye].AngleTo(in.head * yaw(10) * nod(-5)) < 1e-9 &&
+                                                                          p.turn[kRightEye].AngleTo(p.turn[kLeftEye]) < 1e-12 && p.turn[kJaw].AngleTo(in.head) < 1e-12);
+    in.gaze[0] = 60, in.gaze[1] = -60;
+    check("an eye turns only as far as eyes do", solver.Solve(in, p) && p.turn[kLeftEye].AngleTo(in.head * yaw(kEyeAside) * nod(kEyeUp)) < 1e-9);
+    in.gaze[0] = -60, in.gaze[1] = 60;
+    check("...either way", solver.Solve(in, p) && p.turn[kRightEye].AngleTo(in.head * yaw(-kEyeAside) * nod(-kEyeUp)) < 1e-9);
+    in.gaze[0] = -kEyeAside, in.gaze[1] = -kEyeUp;
+    check("...and that far", solver.Solve(in, p) && p.turn[kRightEye].AngleTo(in.head * yaw(-kEyeAside) * nod(kEyeUp)) < 1e-9);
+    in.looks = false;
+    check("when where they look isn't known, the eyes look where the head faces", solver.Solve(in, p) && p.turn[kLeftEye].AngleTo(in.head) < 1e-12 && p.turn[kRightEye].AngleTo(in.head) < 1e-12);
+    in.gaze[0] = std::nan("");
+    check("...whatever is in its place", solver.Solve(in, p) && sound(b, p));
+    in.looks = true;
+    Pose kept = p;
+    kept.scale = 7;
+    check("a look that isn't a number is no pose", !solver.Solve(in, kept) && kept.scale == 7 && (in.gaze[0] = 1, in.gaze[1] = HUGE_VAL, !solver.Solve(in, kept)) && kept.scale == 7);
+}
+
 static void stature() {
     Stature s;
     check("someone who has only sat stands a short adult's height", s.eyeHeight() == 1.45);
@@ -344,6 +379,7 @@ int main() {
     turns();
     comes_and_goes();
     holds_up();
+    looks();
     stature();
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed != 0;

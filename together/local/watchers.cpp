@@ -18,10 +18,10 @@ bool Watchers::Add(const sockaddr_un &from, socklen_t len, double now) {
     return true;
 }
 
-size_t Watchers::Send(int sock, int person, const uint8_t *datagram, size_t n, double now) {
+size_t Watchers::SendAs(uint8_t kind, int sock, int person, const uint8_t *datagram, size_t n, double now) {
     if (watching_.empty()) return 0;
     std::vector<uint8_t> out(n + 2);
-    out[0] = kind_, out[1] = uint8_t(person);
+    out[0] = kind, out[1] = uint8_t(person);
     std::memcpy(out.data() + 2, datagram, n);
     size_t missed = 0;
     for (size_t i = 0; i < watching_.size();) {

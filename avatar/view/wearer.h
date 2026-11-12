@@ -22,6 +22,8 @@ struct Seen {
     double eyeHeight = 1.6;    // their eyes above the floor when they stand
     bool has[2] = {};          // left, right: the hand is tracked
     handfit::Frames hand[2];
+    bool looks = false;        // gaze[] is known: someone else's, who shares it (the room's poses say)
+    double gaze[2] = {};       // where they look: degrees to their left, and up, from the way the head faces
 };
 
 // The wearer for the pose solver, their hands fitted to a body's (`fit`: that body's). `dt`:
@@ -29,6 +31,7 @@ struct Seen {
 inline bodypose::Input Pose(const Seen &s, const handfit::Fit &fit, double dt) {
     bodypose::Input in;
     in.eyes = s.eyes, in.head = s.head, in.eyeHeight = s.eyeHeight, in.dt = dt;
+    in.looks = s.looks, in.gaze[0] = s.gaze[0], in.gaze[1] = s.gaze[1];
     for (int side = 0; side < 2; ++side)
         if (s.has[side]) fit.Of(s.hand[side], in.hand[side]);
     return in;

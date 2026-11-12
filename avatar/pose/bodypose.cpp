@@ -71,6 +71,7 @@ void Solver::Place(int role, Pose &p) const {
 bool Solver::Solve(const Input &in, Pose &out) {
     if (!in.eyes.finite() || !in.head.finite() || !std::isfinite(in.floor) || !std::isfinite(in.eyeHeight) || !std::isfinite(in.dt)) return false;
     if (!Numbers(in.hand[0]) || !Numbers(in.hand[1])) return false;
+    if (in.looks && (!std::isfinite(in.gaze[0]) || !std::isfinite(in.gaze[1]))) return false;
     Pose p;
     p.scale = eyes_.y > 0.2 ? Clamp(in.eyeHeight / eyes_.y, 0.2, 5) : 1;
     const Turn head = in.head.unit();
@@ -92,7 +93,9 @@ bool Solver::Solve(const Input &in, Pose &out) {
 
     Trunk(in, p, Wrap(headYaw - yaw_));
     for (int side = 0; side < 2; ++side) SolveArm(side, in, p), SolveLeg(side, in, p);
-    for (int r : {kLeftEye, kRightEye, kJaw}) p.turn[r] = head, Place(r, p);
+    // up first, then aside, as the head would: that is the way a gaze is told (proto/posewire.h)
+    const Turn eye = in.looks ? head * Yaw(Clamp(in.gaze[0], -kEyeAside, kEyeAside) * kPi / 180) * Turn::About({1, 0, 0}, Clamp(in.gaze[1], -kEyeUp, kEyeUp) * kPi / 180) : head;
+    for (int r : {kLeftEye, kRightEye, kJaw}) p.turn[r] = r == kJaw ? head : eye, Place(r, p);
     for (int r = 0; r < kHead; ++r)   // a trunk bone the body lacks goes where its parent carries it
         if (!present_[r]) Place(r, p);
     fresh_ = false;

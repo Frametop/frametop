@@ -2,11 +2,12 @@
 """ft-roompoints at one of three real ft-together on this machine's loopback, with a stand-in for
 its Frame's ft-roompanels: where the other two point comes to it as theirs, on the panel this
 Frame shows, and goes when they point away, fall silent, or the panel isn't shown here any more.
-It runs with --probe: nothing is drawn, and what would be is read from its `state`.
+Where one of them looks, once they share it, comes as a second mark of theirs. It runs with --probe: nothing is drawn, and what would be is read from its `state`.
 
     roompoints-test.py FT-TOGETHER FT-ROOMPOINTS
 """
 import json
+import math
 import os
 import sys
 import time
@@ -16,9 +17,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import roomkit  # noqa: E402
 from fakescreens import serve  # noqa: E402
-from roomkit import Watcher, check, point  # noqa: E402
+from roomkit import Watcher, check, point, pose  # noqa: E402
 
 SCREEN = "1920 1080 0 1.5 -2 1 0 0 0 2 0 Screen"
+BEHIND = "1920 1080 0 1.5 -3 1 0 0 0 2 0 Screen"   # a metre behind it
 
 
 class Panels:
@@ -51,10 +53,13 @@ def main():
 
     def state():
         reply = ada.client.ask(name, "state") or "none"
-        return json.loads(reply[3:]) if reply.startswith("ok {") else {"panels": -1, "heard": -1, "marks": [], "why": reply}
+        return json.loads(reply[3:]) if reply.startswith("ok {") else {"panels": -1, "heard": -1, "marks": [], "looks": [], "why": reply}
 
     def marks():
         return {m["person"]: m for m in state()["marks"]}
+
+    def looks():
+        return {m["person"]: m for m in state()["looks"]}
 
     def until(what, seconds=5.0):
         deadline = time.monotonic() + seconds
@@ -77,11 +82,11 @@ def main():
         check("each Frame says its wearer's hand moves their pointer", all(e.hand() for e in (ada, ben, cy)))
         who = {p["name"]: p["id"] for p in ada.state()["people"]}
         mine, bens, other = who["ada"] * 8, who["ben"] * 8, who["cy"] * 8 + 1
-        ok = ada.ask("share 0 " + SCREEN) == "ok" and ben.ask("share 0 " + SCREEN) == "ok"
+        ok = ada.ask("share 0 " + SCREEN) == "ok" and ben.ask("share 0 " + BEHIND) == "ok"
         check("ada and ben each share a panel", ok and ada.until(lambda s: sorted(p["id"] for p in s["panels"]) == sorted([mine, bens])))
 
         points = tool()
-        check("ft-roompoints starts with no panel known and nobody pointing", until(lambda: state() == {"panels": 0, "heard": 0, "marks": []}))
+        check("ft-roompoints starts with no panel known and nobody pointing or looking", until(lambda: state() == {"panels": 0, "heard": 0, "marks": [], "looks": []}))
         second = roomkit.Tool(argv)
         check("a second one is told it runs already, and ends", second.wait(5) == 1 and second.said("already running", 1))
         check("it answers nothing but its own questions", ada.client.ask(name, "draw 1 2") == "error state|quit")
@@ -110,6 +115,46 @@ def main():
         own.send(point(bens, 100, 100))
         time.sleep(0.4)
         check("ada's own pointer is no mark at ada's", who["ada"] not in marks() and state()["heard"] == 3)
+
+        # where ben looks: his body's poses say where he is, and his ft-together where he looks from there
+        def stands(x, seconds=0.4, look=None):
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                if look:
+                    ben.ask("gaze say %s" % look)
+                hand.send(pose(x))
+                time.sleep(0.03)
+
+        hand.send(point(mine, 32768, 32768))
+        stands(0.5)
+        check("ben's poses come, and nothing is drawn of where he looks: he doesn't share it", looks() == {})
+        ok = ben.ask("gaze on") == "ok"
+        stands(0.5, look="0 0")
+        m = looks().get(who["ben"], {})
+        check("he shares it, and looks ahead: a second mark of his, on the nearer of the panels in front of him",
+              ok and list(looks()) == [who["ben"]] and (m["panel"], m["key"], m["pressed"], m["drawn"]) == (mine, "frametop.screen.1", False, True))
+        # his eyes are at (0.5, 1.6, 0): a quarter of its width right of the panel's middle, and 0.1 m over it
+        check("...where his look meets its picture", ok and abs(m["x"] - 0.75) < 2e-3 and abs(m["y"] - (0.5 - 0.1 / 1.125)) < 2e-3)
+        check("...beside where he points, which stays", abs(marks().get(who["ben"], {}).get("x", 0) - 0.5) < 1e-3 and state()["heard"] == 4)
+        stands(-0.25, look="0 0")
+        check("it moves when he does", abs(looks().get(who["ben"], {}).get("x", 0) - 0.375) < 2e-3)
+        stands(1.6, look="14 0")   # from right of both, to his left: past the nearer one's edge
+        m = looks().get(who["ben"], {})
+        check("he looks past its edge, at the one behind it: the mark is there",
+              (m.get("panel"), m.get("key"), m.get("drawn")) == (bens, "frametop.remote.116", True) and abs(m["x"] - (0.5 + (1.6 - 3 * math.tan(math.radians(14))) / 2)) < 2e-3)
+        stands(1.6, 0.3, look="-30 0")
+        check("he looks at no panel: the mark goes at once", looks() == {})
+        stands(-0.25, look="0 0")
+        said = time.monotonic()
+        ok = who["ben"] in looks()
+        gone = until(lambda: who["ben"] not in looks(), 4.0)
+        took = time.monotonic() - said
+        check("his poses stop: the mark stands a moment, then goes (%.1f s)" % took, ok and gone and 0.5 < took < 2.5)
+        stands(-0.25, look="0 0")
+        ok = who["ben"] in looks() and ben.ask("gaze off") == "ok"
+        stands(-0.25, 0.3)
+        check("he stops sharing it: the mark goes at once", ok and looks() == {})
+        hand.send(point(mine, 32768, 32768))
 
         hers.send(point(other, 500, 500))
         check("pointing at a panel this Frame doesn't show is told, and not drawn",

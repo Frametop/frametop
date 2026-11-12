@@ -37,7 +37,7 @@ void Asker::Ask(const sockaddr_un &to, socklen_t len, const char *text) {
     sendto(sock_, text, std::strlen(text), MSG_DONTWAIT | MSG_NOSIGNAL, reinterpret_cast<const sockaddr *>(&to), len);
 }
 
-void Asker::Tick(double now, Marks &marks, PanelKeys &keys) {
+void Asker::Tick(double now, Marks &marks, Marks &glances, PanelKeys &keys) {
     if (sock_ < 0) return;
     uint8_t buf[2048];
     for (int i = 0; i < 256; ++i) {
@@ -46,7 +46,9 @@ void Asker::Tick(double now, Marks &marks, PanelKeys &keys) {
         const ssize_t n = recvfrom(sock_, buf, sizeof buf, MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&q.from), &q.fromLen);
         if (n < 0) break;
         if (q.fromLen == togetherLen_ && !std::memcmp(&q.from, &together_, togetherLen_)) {
-            pointsIn_ += marks.Take(buf, size_t(n), now);   // anything else is its "ok", or that there is no room
+            // anything else is its "ok", or that there is no room
+            if (marks.Take(buf, size_t(n), now)) ++pointsIn_;
+            else glances.Take(buf, size_t(n), now);
         } else if (q.fromLen == panelsLen_ && !std::memcmp(&q.from, &panels_, panelsLen_)) {
             if (keys.Read(std::string(reinterpret_cast<const char *>(buf), size_t(n)))) panelsHeard_ = now;
         } else if (questions_.size() < kMostQuestions) {

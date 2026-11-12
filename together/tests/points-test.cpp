@@ -1,7 +1,7 @@
 // The rules of drawing where the others point (together/points): which word of a pointer
 // stands and for how long (marks.h), which of ft-screens' panels shows each of the room's
 // (panelkeys.h), where a point of a picture is on a flat or a bent panel (surface.h), and the
-// mark's picture (dotimage.h). No sockets, no SteamVR.
+// marks' pictures (dotimage.h); and the same for where the others look. No sockets, no SteamVR.
 #include "../points/dotimage.h"
 #include "../points/marks.h"
 #include "../points/panelkeys.h"
@@ -74,6 +74,16 @@ static void marks() {
     check("a text is refused", !bad.Take(reinterpret_cast<const uint8_t *>("ok"), 2, 1) && !bad.Take(nullptr, 0, 1));
     check("...and none of them left a mark", !bad.At(1, 1).shown && !bad.At(0, 1).shown);
     check("asked of a place nobody can have, nobody points", !m.At(-1, 20).shown && !m.At(proto::kPeople, 20).shown);
+
+    // where they look: the same word with another first byte, kept apart and gone sooner
+    Marks looks(local::kGlanceToWatcher, Marks::kGlanceSilentS);
+    d = told(1, 9, 16384, 49151, 0);
+    check("a pointer's word is no word of where someone looks", !looks.Take(d.data(), d.size(), 1) && !looks.At(1, 1).shown);
+    d[0] = local::kGlanceToWatcher;
+    check("...nor the other way round", !bad.Take(d.data(), d.size(), 1) && !bad.At(1, 1).shown);
+    check("where someone looks is kept as where they point is", looks.Take(d.data(), d.size(), 1) && looks.At(1, 1.5).shown && looks.At(1, 1.5).panel == 9 && near(looks.At(1, 1.5).x, 16384 / 65535.0) &&
+                                                                 near(looks.At(1, 1.5).y, 49151 / 65535.0));
+    check("...and stands a second after its last word, no longer", looks.At(1, 1 + Marks::kGlanceSilentS).shown && !looks.At(1, 1 + Marks::kGlanceSilentS + 0.01).shown && Marks::kGlanceSilentS == 1.0);
 }
 
 static void keys() {
@@ -169,6 +179,8 @@ static void surface() {
     check("a mark is a small part of its panel's width", near(MarkMetres(2), 0.024));
     check("...never too small to see", near(MarkMetres(0.2), 0.012));
     check("...nor so large it hides what is pointed at", near(MarkMetres(20), 0.04));
+    check("the mark of where someone looks is several pointers wide", near(GlanceMetres(2), 0.12));
+    check("...within bounds of its own", near(GlanceMetres(0.2), 0.06) && near(GlanceMetres(20), 0.18));
 }
 
 static const uint8_t *pixel(const std::vector<uint8_t> &px, int x, int y) { return &px[(size_t(y) * kDotPixels + size_t(x)) * 4]; }
@@ -197,10 +209,26 @@ static void image() {
     const std::vector<uint8_t> other = DotImage(orange, false);
     const uint8_t *theirs = pixel(other, mid + 16, mid);
     check("someone else's is their colour", theirs[0] == 240 && theirs[1] == 148 && theirs[2] == 51);
+    const std::vector<uint8_t> look = GlanceImage(teal), others = GlanceImage(orange);
+    const uint8_t *middle = pixel(look, mid, mid), *half = pixel(look, mid + 16, mid), *out = pixel(look, mid + 29, mid);
+    check("where someone looks is a picture of the same size, clear at its corners", look.size() == ring.size() && pixel(look, 0, 0)[3] == 0 && pixel(look, kDotPixels - 1, kDotPixels - 1)[3] == 0);
+    check("...faint even at its middle: what is looked at shows through", middle[3] == 102);
+    check("...fading out to its rim", half[3] == 73 && out[3] == 10 && pixel(look, mid + 31, mid)[3] == 0);
+    bool whole = true, round = true;
+    for (int y = 0; y < kDotPixels; ++y)
+        for (int x = 0; x < kDotPixels; ++x) {
+            const uint8_t *a = pixel(look, x, y), *b = pixel(look, kDotPixels - 1 - x, y), *c = pixel(look, x, kDotPixels - 1 - y), *e = pixel(look, y, x);
+            whole = whole && (a[3] == 0 || (a[0] == 41 && a[1] == 168 && a[2] == 184));
+            for (int k = 0; k < 4; ++k) round = round && a[k] == b[k] && a[k] == c[k] && a[k] == e[k];
+        }
+    check("...its person's colour all through, with no rim or edge", whole && middle[0] == 41 && out[1] == 168);
+    check("...round", round);
+    check("...and someone else's is theirs", pixel(others, mid, mid)[0] == 240 && pixel(others, mid, mid)[1] == 148 && pixel(others, mid, mid)[2] == 51);
     const float wild[3] = {7, -3, 0.5f};
     const std::vector<uint8_t> held = DotImage(wild, true);
     const uint8_t *w = pixel(held, mid, mid);
-    check("a colour out of range is held in it", w[0] == 255 && w[1] == 0 && w[2] == 128);
+    const std::vector<uint8_t> wide = GlanceImage(wild);
+    check("a colour out of range is held in it", w[0] == 255 && w[1] == 0 && w[2] == 128 && pixel(wide, mid, mid)[0] == 255 && pixel(wide, mid, mid)[1] == 0 && pixel(wide, mid, mid)[2] == 128);
 }
 
 int main() {

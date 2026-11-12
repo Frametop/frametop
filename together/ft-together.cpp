@@ -50,6 +50,7 @@
 #include "local/controlask.h"
 #include "local/floor.h"
 #include "local/gazeask.h"
+#include "local/glances.h"
 #include "local/inputs.h"
 #include "local/media.h"
 #include "local/moveask.h"
@@ -163,6 +164,7 @@ struct Local {
     local::Wardrobe wardrobe;
     local::PointGate points;
     local::Watchers pointers{local::kPointToWatcher};
+    local::Glances glances;   // where on the room's panels the others look, for the same programs
     local::Inputs inputs;   // the others' input, to the program that gives it to the desktop
     Local(const std::string &name, int sock) : wardrobe(name), inputs(sock) {}
 };
@@ -196,7 +198,8 @@ bool Start(const Args &args, session::Tailnet &tailnet, End &end, Local &local, 
 }
 
 // A datagram from a link: a pose from someone in the room goes to this Frame's watchers, their
-// voice to its listeners, where they point to who asked for that, and anything else is dropped.
+// voice to its listeners, where they point to who asked for that, as does where on a panel
+// their pose says they look, and anything else is dropped.
 void Datagram(int sock, const End &end, Local &local, const net::Event &e, double now) {
     const int person = end.session->PersonOn(e.link);
     if (person < 0 || e.bytes.empty()) return;
@@ -209,6 +212,8 @@ void Datagram(int sock, const End &end, Local &local, const net::Event &e, doubl
     } else if (proto::Pose pose; local.gate.Take(e.link, data, n, now, pose)) {
         local.whereabouts.Saw(person, pose, now);
         local.watchers.Send(sock, person, data, n, now);
+        if (std::vector<uint8_t> glance; local.glances.Saw(person, pose, end.session->room().panels, now, glance))
+            local.pointers.SendAs(local::kGlanceToWatcher, sock, person, glance.data(), glance.size(), now);
     }
 }
 

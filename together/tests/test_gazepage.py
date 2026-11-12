@@ -102,6 +102,7 @@ class Page(PageCase):
         self.assertFalse(switch.property("checked"))
         self.assertIn("only while you click or drag", switch.property("text"))
         self.assertIn("never a picture of your eyes", found("gazeNote").property("text"))
+        self.assertIn("a faint mark on the panel you look at", found("gazeNote").property("text"))
         switch.toggle()
         switch.toggled.emit()
         self.assertTrue(self.until(lambda: self.together.asked == ["gaze on"] and self.b.gaze.shared and switch.property("checked")))

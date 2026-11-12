@@ -158,6 +158,10 @@ static void watchers() {
     check("it gets a pose as 0x81, whose it is, and the pose", got.size() == p.size() + 2 && uint8_t(got[0]) == local::kPoseToWatcher && got[1] == 2 &&
                                                                     got.substr(2) == std::string(p.begin(), p.end()) && next(b).empty());
     check("a second one gets them too", w.Add(at[1], len[1], 1) && (w.Send(from, 0, p.data(), p.size(), 1.5), !next(a).empty() && !next(b).empty()));
+    w.SendAs(local::kGlanceToWatcher, from, 3, p.data(), 4, 1.6);
+    const std::string other = next(a);
+    check("something else for the same watchers goes as the kind it is said to be", other.size() == 6 && uint8_t(other[0]) == local::kGlanceToWatcher && other[1] == 3 &&
+                                                                                      other.substr(2) == std::string(p.begin(), p.begin() + 4) && next(b) == other);
 
     sockaddr_un none{};
     none.sun_family = AF_UNIX;

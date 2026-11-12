@@ -36,7 +36,10 @@ bool Make(const std::string &key, vr::VROverlayHandle_t &out) {
 }  // namespace
 
 Dots::Dots() {
-    for (int place = 0; place < proto::kPeople; ++place) mark_[place][0] = mark_[place][1] = vr::k_ulOverlayHandleInvalid, showing_[place] = -1;
+    for (int place = 0; place < proto::kPeople; ++place) {
+        for (vr::VROverlayHandle_t &mark : mark_[place]) mark = vr::k_ulOverlayHandleInvalid;
+        showing_[place][kPointing] = showing_[place][kLooking] = -1;
+    }
 }
 
 bool Dots::Up(double now) {
@@ -48,17 +51,18 @@ bool Dots::Up(double now) {
     if (err != vr::VRInitError_None) return false;   // SteamVR isn't running: tried again later
     up_ = true;
     for (int place = 0; place < proto::kPeople; ++place)
-        for (int held = 0; held < 2; ++held) {
+        for (int picture = 0; picture < kPictures; ++picture) {
             // Each picture is given once: SteamVR never gives back what SetOverlayRaw takes
             // (screens/overlaytex.h), so there is one overlay for each, not one whose picture changes.
-            const std::string key = "frametop.roompoint." + std::to_string(place + 1) + (held ? ".held" : "");
-            std::vector<uint8_t> px = DotImage(abstract::Colour(place), held != 0);
-            vr::VROverlayHandle_t &mark = mark_[place][held];
+            static const char *const kEnd[kPictures] = {"", ".held", ".look"};
+            const std::string key = "frametop.roompoint." + std::to_string(place + 1) + kEnd[picture];
+            std::vector<uint8_t> px = picture == 2 ? GlanceImage(abstract::Colour(place)) : DotImage(abstract::Colour(place), picture == 1);
+            vr::VROverlayHandle_t &mark = mark_[place][picture];
             if (!Make(key, mark) || vr::VROverlay()->SetOverlayRaw(mark, px.data(), kDotPixels, kDotPixels, 4) != vr::VROverlayError_None) {
                 std::fprintf(stderr, "ft-roompoints: SteamVR gave no overlay for %s\n", key.c_str());
                 return Down(), false;
             }
-            vr::VROverlay()->SetOverlaySortOrder(mark, kSortOrder);
+            vr::VROverlay()->SetOverlaySortOrder(mark, picture == 2 ? kLookSortOrder : kSortOrder);
         }
     std::printf("ft-roompoints: drawing in SteamVR\n");
     return true;
@@ -71,7 +75,7 @@ void Dots::Down() {
             if (mark != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(mark);
             mark = vr::k_ulOverlayHandleInvalid;
         }
-        showing_[place] = -1;
+        showing_[place][kPointing] = showing_[place][kLooking] = -1;
     }
     panels_.clear();
     vr::VR_Shutdown();
@@ -110,18 +114,18 @@ Dots::Panel *Dots::Find(const std::string &key, double now) {
     return &p;
 }
 
-bool Dots::Show(int place, const PanelKey &panel, const Mark &mark, double now) {
+bool Dots::Show(Which which, int place, const PanelKey &panel, const Mark &mark, double now) {
     if (place < 0 || place >= proto::kPeople || !Up(now)) return false;
     vr::IVROverlay *ov = vr::VROverlay();
     const Panel *p = Find(panel.key, now);
     vr::VROverlayTransformType type = vr::VROverlayTransform_Invalid;
-    if (!p || p->metres <= 0 || !ov->IsOverlayVisible(p->handle) || ov->GetOverlayTransformType(p->handle, &type) != vr::VROverlayError_None) return Hide(place), false;
+    if (!p || p->metres <= 0 || !ov->IsOverlayVisible(p->handle) || ov->GetOverlayTransformType(p->handle, &type) != vr::VROverlayError_None) return Hide(which, place), false;
 
     Surface surface;
     surface.metres = p->metres, surface.curvature = p->curvature, surface.width = panel.width, surface.height = panel.height;
     const Place on = On(surface, mark.x, mark.y, kLiftM);
-    const int held = mark.pressed ? 1 : 0;
-    const vr::VROverlayHandle_t dot = mark_[place][held];
+    const int picture = which == kLooking ? 2 : mark.pressed ? 1 : 0;
+    const vr::VROverlayHandle_t dot = mark_[place][picture];
     vr::HmdMatrix34_t at = {};
     vr::EVROverlayError err = vr::VROverlayError_InvalidParameter;
     if (type == vr::VROverlayTransform_Absolute) {
@@ -137,20 +141,21 @@ bool Dots::Show(int place, const PanelKey &panel, const Mark &mark, double now) 
             err = ov->SetOverlayTransformTrackedDeviceRelative(dot, device, &to);
         }
     }
-    if (err != vr::VROverlayError_None) return Hide(place), false;
-    ov->SetOverlayWidthInMeters(dot, float(MarkMetres(p->metres)));
-    if (showing_[place] != held) {
+    if (err != vr::VROverlayError_None) return Hide(which, place), false;
+    ov->SetOverlayWidthInMeters(dot, float(which == kLooking ? GlanceMetres(p->metres) : MarkMetres(p->metres)));
+    int &showing = showing_[place][which];
+    if (showing != picture) {
         ov->ShowOverlay(dot);
-        if (showing_[place] >= 0) ov->HideOverlay(mark_[place][showing_[place]]);
-        showing_[place] = held;
+        if (showing >= 0) ov->HideOverlay(mark_[place][showing]);
+        showing = picture;
     }
     return true;
 }
 
-void Dots::Hide(int place) {
-    if (!up_ || place < 0 || place >= proto::kPeople || showing_[place] < 0) return;
-    vr::VROverlay()->HideOverlay(mark_[place][showing_[place]]);
-    showing_[place] = -1;
+void Dots::Hide(Which which, int place) {
+    if (!up_ || place < 0 || place >= proto::kPeople || showing_[place][which] < 0) return;
+    vr::VROverlay()->HideOverlay(mark_[place][showing_[place][which]]);
+    showing_[place][which] = -1;
 }
 
 }  // namespace points

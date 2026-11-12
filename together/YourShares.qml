@@ -66,7 +66,7 @@ ColumnLayout {
             wrapMode: Text.Wrap
             opacity: 0.7
             font: Kirigami.Theme.smallFont
-            text: "Off until you turn it on, and for this room only. Only a direction leaves this headset, never a picture of your eyes."
+            text: "Off until you turn it on, and for this room only. Only a direction leaves this headset, never a picture of your eyes. The others see your avatar's eyes turn, and a faint mark on the panel you look at."
         }
         Kirigami.Separator {
             Kirigami.FormData.isSection: true

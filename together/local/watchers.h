@@ -9,7 +9,9 @@
 //
 // sent to the address it asked from. One that stops asking, or is gone, stops being sent to.
 // One Watchers is those who asked for one kind. The others' pointers (`points`, pointgate.h)
-// and the input they may give this Frame's desktop (`inputs`, inputs.h) go out the same way.
+// and the input they may give this Frame's desktop (`inputs`, inputs.h) go out the same way,
+// and those who asked for the pointers get where the others look as a kind of its own
+// (glances.h).
 #pragma once
 
 #include "datagrams.h"
@@ -35,7 +37,9 @@ public:
     bool Add(const sockaddr_un &from, socklen_t len, double now);
     // A person's datagram to everyone who watches, from the socket `sock`. Nobody is waited
     // for: a watcher whose queue is full misses this one. How many missed it comes back.
-    size_t Send(int sock, int person, const uint8_t *datagram, size_t n, double now);
+    size_t Send(int sock, int person, const uint8_t *datagram, size_t n, double now) { return SendAs(kind_, sock, person, datagram, n, now); }
+    // The same, as another kind than the one they asked for by name.
+    size_t SendAs(uint8_t kind, int sock, int person, const uint8_t *datagram, size_t n, double now);
     // A word of ft-together's own to everyone who watches, as an answer they didn't ask for
     // (the floor when it moved: they read it as they read the answer to `floor`).
     void Tell(int sock, const std::string &text, double now) const;

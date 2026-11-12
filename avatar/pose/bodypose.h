@@ -4,6 +4,7 @@
 // spine leans when the head comes down looking down, the arms reach the wrists with two bones
 // each, an arm with no tracked hand hangs, and the legs stand under the hips with the knees
 // bending as the head comes down (and the feet out in front the lower it gets, as on a chair).
+// The eyes turn in the head to where the wearer looks, when that is known.
 //
 // A bone has a place and a turn from its rest (bodyfile.h: a body's bones have no rest turn).
 // The body is scaled so its eyes stand as high as its wearer's.
@@ -36,6 +37,8 @@ struct Input {
     double floor = 0;        // its height in the room
     double eyeHeight = 1.6;  // the wearer's eyes above the floor when they stand (Stature)
     double dt = 0;           // seconds since the pose before; 0: this pose stands alone
+    bool looks = false;      // gaze[] is known
+    double gaze[2] = {};     // where they look: degrees to their left, and up, from the way the head faces
 };
 
 struct Pose {
@@ -48,6 +51,7 @@ struct Pose {
 constexpr double kTrunkDeadZone = 15 * kPi / 180;   // the head turns this far before the trunk follows
 constexpr double kTrunkMaxTwist = 75 * kPi / 180;   // ...and the trunk is never further behind it
 constexpr double kReach = 0.999;                    // of a limb's length: it never locks straight
+constexpr double kEyeAside = 30, kEyeUp = 20;       // degrees: an eye turns no further in its socket, either way
 
 class Solver {
 public:

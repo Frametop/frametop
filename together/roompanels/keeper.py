@@ -2,7 +2,7 @@
 sees"): every panel the others share stands as a panel of ft-screens' here, where the room says;
 and every screen this Frame's person shares is in the room where it stands here, with ft-screens
 sending its pictures to an ft-sharepanel. What becomes of a panel that someone other than its
-owner moves is carrying.py's.
+owner moves is carrying.py's, and the windows of its person's PC are pcshares.py's.
 
 The rules only. Its questions go out through two functions it is given, each a text in and the
 answer or None back: `together` (ft-together's local socket) and `screens` (ft-screens'). So the
@@ -86,9 +86,11 @@ def _listed(reply, parts):
 
 
 class Keeper:
-    def __init__(self, together, screens, now, fly=lambda ident: None):
-        """`fly(ident)`: takes this Frame's person to the room's panel `ident` (carrying.py)."""
-        self.together, self.screens, self.now = together, screens, now
+    def __init__(self, together, screens, now, fly=lambda ident: None, pcs=None):
+        """`fly(ident)`: takes this Frame's person to the room's panel `ident` (carrying.py).
+        `pcs`: the windows of its person's PC in the room (pcshares.PcShares), where there is
+        a PC to ask: the remote screens that are shared are its."""
+        self.together, self.screens, self.now, self.pcs = together, screens, now, pcs
         self.carrying = Carrying(together, screens, now, fly)
         self.wishes = {}     # screen number -> slot: what this Frame's person shares
         self.told = {}       # slot -> the "share" the room has from us
@@ -105,6 +107,8 @@ class Keeper:
     def share(self, number):
         if not self.in_room:
             return "error not in a room"
+        if self.pcs and number >= REMOTE_FIRST:
+            return self.pcs.share(number)
         if number in self.wishes:
             return f"ok {self.wishes[number]}"
         sizes = self._sizes()
@@ -119,6 +123,8 @@ class Keeper:
         return f"ok {free[0]}"
 
     def unshare(self, number):
+        if self.pcs and number >= REMOTE_FIRST:
+            return self.pcs.unshare(number)
         if number not in self.wishes:
             return f"error screen {number} isn't shared"
         slot = self.wishes.pop(number)
@@ -129,17 +135,20 @@ class Keeper:
         return "ok"
 
     def state(self):
+        pc = self.pcs.state() if self.pcs else {"shares": [], "windows": [], "pc": ""}
         return json.dumps({
             "room": self.in_room, "floor": self.floor,
-            "shares": [{"screen": n, "panel": k, "told": k in self.told} for n, k in sorted(self.wishes.items())],
-            "panels": [{"id": i, "screen": s[0], "placed": s[1] is not None} for i, s in sorted(self.shown.items())]})
+            "shares": [{"screen": n, "panel": k, "told": k in self.told} for n, k in sorted(self.wishes.items())] + pc["shares"],
+            "panels": [{"id": i, "screen": s[0], "placed": s[1] is not None} for i, s in sorted(self.shown.items())],
+            "windows": pc["windows"], "pc": pc["pc"]})
 
     def panels(self):
         """What ft-roompoints asks, to draw where the others point: "ok COUNT ID:SCREEN:WxH ...",
         the screen here that shows each of the room's panels, and its picture's shape. This
         Frame's own shared screens are as large as the desktop has them (the panel here is the
         screen, not its video); the others' panels are the remote screens they stand on."""
-        entries = [f"{ident}:{number}:{size[0]}x{size[1]}" for ident, (number, size) in sorted(self.mine.items())]
+        mine = {**self.mine, **(self.pcs.mine if self.pcs else {})}
+        entries = [f"{ident}:{number}:{size[0]}x{size[1]}" for ident, (number, size) in sorted(mine.items())]
         entries += [f"{ident}:{s[0]}:{s[1]['size'][0]}x{s[1]['size'][1]}" for ident, s in sorted(self.shown.items()) if s[1] is not None]
         return " ".join(["ok", str(len(entries))] + entries)
 
@@ -156,8 +165,11 @@ class Keeper:
         self.floor = self._floor(room)
         self._others(room)
         if self.floor is not None:
-            self.carrying.brought(self.floor, {slot: number for number, slot in self.wishes.items() if slot in self.told})
+            told = {slot: number for number, slot in self.wishes.items() if slot in self.told}
+            self.carrying.brought(self.floor, {**told, **(self.pcs.brought() if self.pcs else {})})
         self._mine(room)
+        if self.pcs:
+            self.pcs.tick(room, self.floor)
 
     def _room(self):
         """The room's state; {} when this Frame is in none; None when ft-together said nothing
@@ -186,6 +198,8 @@ class Keeper:
         self.in_room, self.floor, self._floorless = False, None, None
         self.wishes.clear(), self.told.clear(), self.shown.clear(), self.mine.clear()
         self.carrying.only(())
+        if self.pcs:
+            self.pcs.leave()
         if self.tidy:
             return
         remotes, shares = self._remotes(), self._shares()
@@ -285,7 +299,7 @@ class Keeper:
             if self.wishes.get(number) != slot:
                 self.screens(f"share {number} stop")
         for panel in room.get("panels", []):
-            if panel["owner"] == room.get("me") and panel["number"] not in self.wishes.values():
+            if panel["owner"] == room.get("me") and panel["number"] < SLOTS and panel["number"] not in self.wishes.values():
                 self.together(f"unshare {panel['number']}")   # an earlier ft-roompanels' share
         for number, slot in sorted(self.wishes.items()):
             if number not in sizes:

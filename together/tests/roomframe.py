@@ -27,9 +27,10 @@ class Frame:
         self.lock = serve(self.screens, self.name + "_screens")
         self.tool = None
 
-    def keep(self):
+    def keep(self, layout="/nowhere/layout.json", hosts="/nowhere/hosts"):
+        """Runs its ft-roompanels: with no saved layout and no PC's token, unless a test has them."""
         self.tool = roomkit.Tool([sys.executable, str(HERE.parent / "ft-roompanels"), "--socket", self.name + "_panels",
-                                  "--together", self.end.sock, "--screens", self.name + "_screens"])
+                                  "--together", self.end.sock, "--screens", self.name + "_screens", "--layout", layout, "--hosts", hosts])
 
     def ask(self, text):
         return self.end.client.ask(self.name + "_panels", text) or "none"

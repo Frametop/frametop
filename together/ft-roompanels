@@ -7,9 +7,13 @@ roompanels/keeper.py; this is the loop and the socket around them.
 
 Questions, one datagram each on @ft_roompanels:
 
-  share N      screen N of this desktop goes into the room -> "ok K" (your panel K)
+  share N      screen N of this desktop goes into the room -> "ok K" (your panel K). N from
+               101 is a window of your PC's that stands here as a panel: the PC sends it
+               itself (roompanels/pcshares.py, roompanels/pclink.py)
   unshare N    and is taken back
-  state        -> "ok " and {"room", "floor", "shares", "panels"} as JSON
+  state        -> "ok " and {"room", "floor", "shares", "panels", "windows", "pc"} as JSON:
+               "windows" are the PC windows there are to share, "pc" what keeps the PC from
+               sending ("" when nothing does)
   panels       -> "ok COUNT ID:SCREEN:WxH ...": the screen here that shows each of the room's
                   panels, and its picture's shape (ft-roompoints asks)
 
@@ -28,23 +32,44 @@ Frame's floor lies in the room now:
   --socket NAME     its own socket's name (ft_roompanels)
   --together NAME   ft-together's (ft_together)
   --screens NAME    ft-screens' (ft_screens)
+  --layout FILE     the saved layout, for the PC windows in it (~/.config/frametop-layout.json)
+  --hosts DIR       the tokens and pins of the PCs' APIs (conf/ft_hostapi.py has the default)
 """
 
+import os
 import select
 import signal
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "conf"))
 sys.path.insert(0, str(HERE))
+import ft_hostapi  # noqa: E402  (questions to a PC's streaming host)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
-from roompanels import gliding, moving  # noqa: E402
+from roompanels import gliding, moving, pclink, pcwindows  # noqa: E402
 from roompanels.keeper import Keeper  # noqa: E402
+from roompanels.pcshares import PcShares  # noqa: E402
 
 IN_ROOM, IDLE = 0.25, 1.0   # seconds between looks
+PC_WAIT = 4.0               # seconds a PC has to answer one question
+
+
+def ask_pc(pc, path, body):
+    """One POST to the streaming host of the PC `pc` (address, its windows instance's port)."""
+    return ft_hostapi.post_json(pc[0], path, body, timeout=PC_WAIT, port=pc[1])
+
+
+def keep_pc(link, ended):
+    """The PC's side on a thread of its own, since the PC is waited on: a look every while."""
+    while not ended.wait(pclink.STEP):
+        try:
+            link.step()
+        except Exception as e:   # noqa: BLE001  (whatever a look trips on, the next one is still due)
+            print(f"the PC's side: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
 
 
 def answer(keeper, mover, glide, text):
@@ -64,7 +89,8 @@ def answer(keeper, mover, glide, text):
 
 
 def main():
-    names = {"--socket": "ft_roompanels", "--together": "ft_together", "--screens": "ft_screens"}
+    names = {"--socket": "ft_roompanels", "--together": "ft_together", "--screens": "ft_screens",
+             "--layout": os.path.expanduser("~/.config/frametop-layout.json"), "--hosts": ft_hostapi.TOKEN_DIR}
     words = sys.argv[1:]
     while len(words) >= 2 and words[0] in names:
         names[words[0]], words = words[1], words[2:]
@@ -80,13 +106,20 @@ def main():
     ask_together, ask_screens = (lambda text: together.ask(names["--together"], text)), (lambda text: screens.ask(names["--screens"], text))
     mover = moving.Mover(ask_together, ask_screens)
     glide = gliding.Glide(mover, time.monotonic)
-    keeper = Keeper(ask_together, ask_screens, time.monotonic, glide.to_panel)
+    ft_hostapi.TOKEN_DIR = names["--hosts"]
+    pc_together = ftipc.Client(timeout=0.5)   # (the PC's thread's own: a Client is one thread's)
+    link = pclink.PcLink(lambda text: pc_together.ask(names["--together"], text), ask_pc, time.monotonic)
+    pcs = PcShares(ask_together, ask_screens, pcwindows.reader(names["--layout"]), link)
+    keeper = Keeper(ask_together, ask_screens, time.monotonic, glide.to_panel, pcs)
+    ended = threading.Event()
+    pc_thread = threading.Thread(target=keep_pc, args=(link, ended), daemon=True)
+    pc_thread.start()
 
-    def ended(*_):
+    def stop(*_):
         raise SystemExit(0)
 
-    signal.signal(signal.SIGTERM, ended)
-    signal.signal(signal.SIGINT, ended)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     was, look = None, 0.0
     try:
         while True:
@@ -107,6 +140,10 @@ def main():
                 pass   # an asker that went before its answer
     finally:
         keeper.end()
+        ended.set()
+        pc_thread.join(PC_WAIT)
+        if not pc_thread.is_alive():
+            link.step()   # the PC is told that nothing is shared any more
 
 
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ ColumnLayout {
             delegate: Controls.Switch {
                 id: shareSwitch
                 required property var modelData
-                text: shareSwitch.modelData.title + (shareSwitch.modelData.shared && !shareSwitch.modelData.live ? ": starting…" : "")
+                text: shareSwitch.modelData.title + (shareSwitch.modelData.shared && !shareSwitch.modelData.live ? ": " + shareSwitch.modelData.wait : "")
                 enabled: shareSwitch.modelData.can
                 checked: shareSwitch.modelData.shared
                 onToggled: {
@@ -97,7 +97,8 @@ ColumnLayout {
             text: shares.backend.shares.length === 0
                   ? "The desktop's screens show here while the Frametop desktop runs."
                   : "Up to three at a time. The others see a shared screen where it stands in your room; "
-                    + "they can click and type on it only once you give it to them."
+                    + "they can click and type on it only once you give it to them. Windows of your PC "
+                    + "that stand here as panels can be shared as well, up to four: your PC sends them itself."
         }
         Controls.ComboBox {
             objectName: "qualityBox"

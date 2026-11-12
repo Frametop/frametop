@@ -233,6 +233,8 @@ test-c:
         run together/tests/roompanels-test.py python3 together/tests/roompanels-test.py build/tests/ft-together
         # ...and panels moved by someone other than their owner
         run together/tests/roomcarry-test.py python3 together/tests/roomcarry-test.py build/tests/ft-together
+        # ...and the windows of a PC shared as the room's panels, the PC a stand-in that runs ft-pcsend
+        run together/tests/roompcs-test.py python3 together/tests/roompcs-test.py build/tests/ft-together build/tests/ft-pcsend
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/ft-roomvoice.cpp together/voice/codec.cpp \
           together/voice/voices.cpp together/voice/sender.cpp together/voice/player.cpp together/voice/headask.cpp together/voice/pulse.cpp \
           avatar/room/client.cpp avatar/room/people.cpp $(pkg-config --cflags --libs opus libpulse-simple) -lpthread -o build/tests/ft-roomvoice
@@ -261,7 +263,7 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
         run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,pcsend-test.py,pcfeed-test.py,roompanels-test.py,roomcarry-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,pcsend-test.py,pcfeed-test.py,roompanels-test.py,roomcarry-test.py,roompcs-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

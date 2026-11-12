@@ -10,6 +10,8 @@ import re
 
 PORT = 47193   # ft-together's own, unless it was started with another
 SHARES = 3     # the screens a Frame shares at most (roompanels/keeper.py)
+PC_SHARES = 4  # ...and the windows of its person's PC (roompanels/pcshares.py)
+PC_FIRST = 101  # from here on a screen's number is a PC window's panel (ft-screens' remote screens)
 AWAY = {0: "", 1: "in a game", 2: "headset off", 3: "headset off"}
 # What the video of its person's screens may have (together/flow/quality.h): ft-together's name
 # for each, the page's, and what it gets a screen.
@@ -143,13 +145,29 @@ def asks(state):
             for a in state.get("asks") or [] if isinstance(a, dict)]
 
 
+def _line(text, most=60):
+    """A line of text another program sent, for a row: what prints of it, on one line."""
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())[:most] if isinstance(text, str) else ""
+
+
 def shares(found, panels):
-    """A row per screen of the desktop: {"screen", "title", "shared", "live", "can"}; `found` is
-    screens(), `panels` ft-roompanels' state (or None when it doesn't answer)."""
-    mine = {s.get("screen"): bool(s.get("told")) for s in (panels or {}).get("shares") or [] if isinstance(s, dict)}
-    full = len(mine) >= SHARES
-    return [{"screen": n, "title": f"Screen {n} ({size.replace('x', ' × ')})", "shared": n in mine, "live": mine.get(n, False),
-             "can": panels is not None and (n in mine or not full)} for n, size in found]
+    """A row per screen of the desktop, then one per window of its person's PC that stands here
+    as a panel: {"screen", "title", "shared", "live", "can", "wait"}; `found` is screens(),
+    `panels` ft-roompanels' state (or None when it doesn't answer). wait: what a shared one
+    that the room doesn't have yet is waiting for."""
+    state = panels or {}
+    mine = {s.get("screen"): bool(s.get("told")) for s in state.get("shares") or [] if isinstance(s, dict) and type(s.get("screen")) is int}
+    full = sum(1 for n in mine if n < PC_FIRST) >= SHARES
+    rows = [{"screen": n, "title": f"Screen {n} ({size.replace('x', ' × ')})", "shared": n in mine, "live": mine.get(n, False),
+             "can": panels is not None and (n in mine or not full), "wait": "starting…"} for n, size in found]
+    full = sum(1 for n in mine if n >= PC_FIRST) >= PC_SHARES
+    held = _line(state.get("pc"), 120)
+    for w in state.get("windows") or []:
+        n = w.get("screen") if isinstance(w, dict) else None
+        if type(n) is int and n >= PC_FIRST:
+            rows.append({"screen": n, "title": f"{_line(w.get('name')) or 'A window'} (your PC's window)", "shared": n in mine, "live": mine.get(n, False),
+                         "can": n in mine or not full, "wait": held or "calling your PC…"})
+    return rows
 
 
 def avatar(worn, looks):

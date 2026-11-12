@@ -103,6 +103,32 @@ class Rules(unittest.TestCase):
         self.assertEqual([r["can"] for r in full], [True, True, True, False])   # three are shared: no fourth
         self.assertEqual([r["can"] for r in roompage.shares(found, None)], [False] * 4)   # ft-roompanels isn't there
         self.assertEqual(roompage.shares([], {"shares": []}), [])
+        self.assertEqual({r["wait"] for r in rows}, {"starting…"})
+
+    def test_the_windows_of_its_pc_to_share(self):
+        found = [(1, "3440x1440")]
+        windows = [{"screen": 101, "name": "Calculator"}, {"screen": 102, "name": "a\nb\x00 <b> " + "x" * 80}, {"screen": 103, "name": ""}]
+        state = {"shares": [{"screen": 1, "panel": 0, "told": True}, {"screen": 101, "panel": 3, "told": True}, {"screen": 102, "panel": 4, "told": False}],
+                 "windows": windows, "pc": ""}
+        rows = roompage.shares(found, state)
+        self.assertEqual([(r["screen"], r["shared"], r["live"], r["can"]) for r in rows],
+                         [(1, True, True, True), (101, True, True, True), (102, True, False, True), (103, False, False, True)])
+        self.assertEqual([r["title"] for r in rows[1:]], ["Calculator (your PC's window)", "a b <b> " + "x" * 52 + " (your PC's window)", "A window (your PC's window)"])
+        self.assertEqual(rows[2]["wait"], "calling your PC…")
+        held = roompage.shares(found, dict(state, pc="the PC says: Forbidden\n" + "y" * 200))
+        self.assertEqual(held[2]["wait"], "the PC says: Forbidden " + "y" * 97)
+        # the desktop's three and the PC's four are counted apart
+        many = [{"screen": n, "name": f"W{n}"} for n in range(101, 106)]
+        took = [{"screen": n, "panel": n - 98, "told": True} for n in range(101, 105)]
+        full = roompage.shares([(1, "1920x1080"), (2, "1920x1080")], {"shares": took, "windows": many, "pc": ""})
+        self.assertEqual([r["can"] for r in full], [True, True, True, True, True, True, False])
+        three = [{"screen": n, "panel": n - 1, "told": True} for n in (1, 2, 3)]
+        full = roompage.shares([(n, "1920x1080") for n in (1, 2, 3, 4)], {"shares": three, "windows": many[:1], "pc": ""})
+        self.assertEqual([r["can"] for r in full], [True, True, True, False, True])
+        # what doesn't read as a window is no row
+        for bad in ("windows", [3], [{"screen": "101", "name": "x"}], [{"screen": 5, "name": "x"}], [{"name": "x"}], [{"screen": True}]):
+            self.assertEqual(roompage.shares([], {"shares": [], "windows": bad, "pc": 7}), [], bad)
+        self.assertEqual(roompage.shares([], {"shares": [{"screen": "1"}, 4], "windows": many[:1]})[0]["shared"], False)
 
 
 class Page(PageCase):
@@ -191,6 +217,15 @@ class Page(PageCase):
         self.b.setShared(2, False)
         self.assertTrue(self.fresh(lambda: not any(s["shared"] for s in self.b.shares)))
         self.assertEqual(self.panels.asked, ["share 2", "share 7", "unshare 2"])
+
+    def test_a_window_of_the_pcs_is_shared_like_a_screen(self):
+        self.install()
+        self.together.mode, self.together.people = "hosting", [ADA]
+        self.panels.windows = [{"screen": 101, "name": "Calculator"}]
+        self.assertTrue(self.fresh(lambda: [(s["screen"], s["title"], s["shared"]) for s in self.b.shares][2:] == [(101, "Calculator (your PC's window)", False)]))
+        self.b.setShared(101, True)
+        self.assertTrue(self.fresh(lambda: [(s["screen"], s["shared"], s["live"]) for s in self.b.shares][2:] == [(101, True, True)]))
+        self.assertEqual(self.panels.asked, ["share 101"])
 
     def test_the_page(self):
         """The page itself over a room with someone asking, people in it and a shared screen: it

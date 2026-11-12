@@ -142,17 +142,18 @@ class Voice:
 class Panels:
     def __init__(self):
         self.shared, self.asked = {}, []
+        self.windows = []    # the windows of its person's PC there are to share
 
     def __call__(self, text):
         if text == "state":
-            return "ok " + json.dumps({"room": True, "floor": None, "panels": [],
+            return "ok " + json.dumps({"room": True, "floor": None, "panels": [], "windows": self.windows, "pc": "",
                                        "shares": [{"screen": n, "panel": k, "told": True} for n, k in sorted(self.shared.items())]})
         self.asked.append(text)
         if text.startswith("go "):
             return "ok" if text in ("go person 1", "go panel 8") else "error no head pose (is the headset on?)"
         verb, number = text.split()
         if verb == "share":
-            if int(number) > 2:
+            if int(number) > 2 and int(number) not in [w["screen"] for w in self.windows]:
                 return f"error screen {number} isn't one of this desktop's screens"
             self.shared[int(number)] = len(self.shared)
         else:

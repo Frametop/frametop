@@ -14,9 +14,9 @@ Read the matching group's `.mmd` and model before you answer a question or chang
 | ft-screens' screens and panels and when they show, visibility modes, conceal, ft-layout and profiles, floating windows, the dashboard, remote access over VNC | G2 Desktop and panels | `G2-desktop.mmd`, `G2-desktop.tla` |
 | The testbench, its input proxy and fake trackers, the verify skills and their lease, the fake-worn guard, the Hand and Eye Recorders and their upload, report.sh, doctor.sh, the logs, the tour | G8 Verify, data and diagnostics | `G8-verify.mmd`, `G8-verify.tla`, `G8-verify-Guard.tla` |
 | The dev box and builds, `ft dev build`, `pack/Containerfile`, CI, `framedrop/build.sh` and the zip, FrameDrop, `get.sh`, `install-release.sh`, `install.sh`, `fast-install`, the models, `uninstall.sh` | G7 Build and release | `G7-release.mmd`, `G7-release.tla` |
-| Frametop Together: its units, a room and who is in it, the links between its people, away, voices and mouths, shared panels, the avatars people have on | G9 Frametop Together | `G9-together.mmd`, `G9-together.tla` |
+| Frametop Together: its units, a room and who is in it, the links between its people, away, voices and mouths, shared panels, control of a panel and the turn on a desktop, pointers, where people look, moving through the room and moving panels, the avatars people have on | G9 Frametop Together | `G9-together.mmd`, `G9-together.tla` |
 
-All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `6e78c20` (2026-11-11).
+All nine groups are charted. G9 lives on the branch `dee-193-together` until Frametop Together is merged, and was drawn from the code at `cda8438` (2026-11-11).
 
 ## Files
 
@@ -394,15 +394,15 @@ Design choices in these fixes (Daenon can override each):
 
 ## G9 Frametop Together
 
-Covers the five Together units and their switch, the session's modes on one Frame, a link at the owner's end and a guest's links to the owner and to the other guests, away, the voice and the mouth it moves, a screen shared with the room and someone's panel shown here, the avatar someone has on and the one you send. [docs/together.md](../together.md) has the decisions, and [together/README.md](../../together/README.md) the rules the chart's arrows name.
+Covers the nine Together units and their switch, the session's modes on one Frame, a link at the owner's end and a guest's links to the owner and to the other guests, away, the voice and the mouth it moves, a screen shared with the room and someone's panel shown here, the avatar someone has on and the one you send. And what came with pointers, grants and moving: a panel of yours asked for, given and taken back, whose turn it is on your desktop, your hand on someone's panel and when it is kept quiet, where you look and when the room gets it, the others' marks on a panel, moving yourself through the room, and someone's panel in your hand. [docs/together.md](../together.md) has the decisions, and [together/README.md](../../together/README.md) the rules the chart's arrows name.
 
 Model: `G9-together.tla` (module `G9Together`): who is in a room, by the owner's count and by each guest's, and the links between them. One owner and two guests. A link has two ends that each hear of its loss in their own time, and messages on a link keep their order. The wearers and the network may do anything at any time, within a config's counts. Configs: `Room` (the code: three calls to the owner, one link the network breaks), `Full` (a room with one place for a guest, four calls), `Reopen` (the owner opens a second room after the first), `Live` (a smaller room under fairness: left alone, it settles), `PreFix` (the code before `6e78c20`).
 
-Not modelled: tailscaled's answers (everyone here is on the tailnet), versions, the limit on wrong codes and on strangers, away, panels, avatars, voice, and time. A wait that runs out can do so whenever nothing is on its way on that link. The parts of the chart outside the session and its links are drawn from the code and its tests alone.
+Not modelled: tailscaled's answers (everyone here is on the tailnet), versions, the limit on wrong codes and on strangers, away, panels, control and the turn, pointers, gaze, moving, avatars, voice, and time. A wait that runs out can do so whenever nothing is on its way on that link. The parts of the chart outside the session and its links are drawn from the code and its tests alone.
 
 The rules: nobody is in a room the owner didn't let them into (InByAcceptOnly), a headset is in the room once (OnceInRoom), a place has one person (OneEachSeat), nobody has two links to one person (OneLinkEach), a guest holds a link to another only if the room lists them there (PeerIsListed), the owner's member links are the room's people (MemberIsListed), a guest's copy of the room is the owner's, now or earlier (CopyIsOwners), and once nothing is on its way everyone agrees who is in the room and each two of them have one whole link (Settled). Settles is the liveness rule: the room gets quiet again and again.
 
-Results at `6e78c20`:
+Results at `6e78c20`. The model and the session's rules for who is in a room have not changed since: the session now hands a member's messages it doesn't read to whoever does (control, moves), and closes the link of a member who says one they may not, which the model has as any word they may not say.
 
 | Config | Rule | Result |
 | --- | --- | --- |
@@ -421,7 +421,9 @@ Fixed bugs:
 
 The model's shortest path to T1: `Open -> Invite -> Join -> GuestLeave -> Join -> DeliverO -> Invite -> Answer -> DeliverO -> Answer`. PreFix holds Settled all the same: the double listing went once the old link's end was heard.
 
-The encoder and decoder path of a shared panel has not run on the Frame's hardware (the chart's red legend box): the first run of its test coincided with a hard reset of the Frame on 2026-11-10, and it waits for the maintainer's word.
+The encoder and decoder path of a shared panel runs on the Frame's hardware since `bd03df2`, `acdef52` and `ce5299d` (the chart's green legend box). Given pictures at a width that isn't a multiple of 128, the Frame's encoder reset the Frame, twice on 2026-11-11; it also read past buffers that were only as long as the picture, and encoded each new buffer's first picture black. The encoder now refuses such a width before it opens the device, `tests/panels-test.py` holds all three on the hardware, and [together/README.md](../../together/README.md) ("What the Frame's encoder needs") has the rules. A reset on 2026-11-10 during the first run of that test was not pinned down.
+
+Control is the part of this group where someone else reaches a desktop, and its rules are few: input is taken for a panel only from someone its owner gave it to, only while a program keeps saying the owner wears the headset, from one person at a time, and whatever they hold down is let go when any of that ends. They are checked in the owner's `ft-together` (`flow/control.cpp`, `room/grants.h`, `room/desk.h`), which the chart's legend says, and held by `together/tests/controlrules-test.cpp` (grants and the turn), `control-test.cpp` (several sessions against each other) and `roomcontrol-test.py` (the real programs) rather than by a model.
 
 ## Running a check
 

@@ -1,5 +1,5 @@
 ---
-title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, avatars (6e78c20, branch dee-193-together)"
+title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars (cda8438, branch dee-193-together)"
 ---
 stateDiagram-v2
   state "Legend" as legend {
@@ -10,9 +10,11 @@ stateDiagram-v2
     lg3: Ended or held back by a rule, or a wait that ran out
     lg4: Fixed T1 (6e78c20): a headset let in again while the owner still held its old link was in the room twice. TLC took 10 steps to it (PreFix, rule OnceInRoom)
     lg5: G9Together.tla: the nine rules hold in Room (719,774 states), Full (1,126,402) and Reopen (266,158), and a room always settles (Live, 14,237)
-    lg6: Not run on the Frame's hardware yet: the encoder and decoder path of a shared panel (the hard reset of 2026-11-10)
+    lg6: Fixed (bd03df2, acdef52, ce5299d): a shared panel's video on the Frame's encoder. A width that isn't a multiple of 128 reset the Frame, twice. tests/panels-test.py passes on the hardware
     lg7: Everything a link brings is untrusted, also after its sender was let in: a link that says what it may not is closed
     lg8: Another group: arrows into it are what G9 reads or drives there
+    lg9: A grant is checked where it is enforced, in the ft-together of the panel's owner. A guest's own refuses the same things first, to say why
+    lg10: Control, the turn, pointers, gaze and moving are drawn from the code and its tests. The model is of the room and its links
   }
   class lg0 teal
   class lg1 blue
@@ -20,10 +22,12 @@ stateDiagram-v2
   class lg3 orange
   class lg4 fixed
   class lg5 fixed
-  class lg6 bugLegend
+  class lg6 fixed
   class lg7 legendNote
   class lg8 xgroup
-  state "Together on this Frame (together/run.sh, frametop-together.service, the four frametop-room-* units PartOf it)" as un {
+  class lg9 legendNote
+  class lg10 legendNote
+  state "Together on this Frame (together/run.sh, frametop-together.service, the eight frametop-room-* units PartOf it)" as un {
     u0: Not installed: the installer's optional part
     [*] --> u0
     u1: Installed, off: no unit runs, nothing listens
@@ -98,9 +102,60 @@ stateDiagram-v2
     z2: On and marked: the room lists it (an owner's at once, a guest's told every 2 s until it does)
     z3: Its file goes to who asked: 3 at once, then one in 30 s a link
   }
+  state "A panel of yours and someone in the room (flow/control.cpp, room/grants.h: your ft-together decides)" as ct {
+    n0: Not theirs: no ask, no grant
+    [*] --> n0
+    n1: Asked: a row on the Together page with Give it and No, 120 s
+    n2: Given, a lease: their input on it is taken while the last control here is under 10 s old. They are told every 3 s how long it stands
+    n3: Ended: they are told at once, and what they held down on your desktop is let go
+  }
+  state "The turn on your desktop (room/desk.h, local/inputs.h, ft-roominput giver.py, screens/peerinput.h)" as ds {
+    d0: Nobody's: the next input under a grant takes it
+    [*] --> d0
+    d1: Theirs: each act goes to ft-roominput and on to the seat (peer SCREEN ...). Anyone else's is dropped
+    d2: Theirs, with something down: 8 buttons and keys at most, 60 s at most
+    d3: Yours: your own hand is on the desktop (control own from ft-screens, twice a second at most)
+  }
+  state "Your hand on someone's panel (ft-peerpanel, local/panelhand.h, local/hush.h, control.cpp Act)" as hd {
+    h0: Off it: the room was told once that you point at nothing
+    [*] --> h0
+    h1: On it, shown: a pointer datagram with each move (60 a second at most) and once a second at rest
+    h2: On it, kept quiet: your eyes move it and you don't share where you look. The last move waits, and goes before a click or a scroll there
+    h3: A button held: the moves go to the room and to the owner, so a drag is seen and given
+  }
+  state "Where you look, for the room (local/gaze.h, gazeask.h, ft-roomgaze feeder.py)" as gz {
+    q0: Not shared: nothing of your eyes leaves the Frame, and the gaze service is asked nothing
+    [*] --> q0
+    q1: Shared, nothing fresh: ft-roomgaze reads the gaze service five times a second
+    q2: Shared and fresh: each pose of yours carries the direction, in half degrees, 63.5 at most each way
+  }
+  state "The others' marks on a panel here (ft-roompoints: points/marks.h, dots.h, local/glances.h)" as mk {
+    r0: No mark of theirs. SteamVR is joined only once one is wanted
+    [*] --> r0
+    r1: A ring where they point, in their place's colour
+    r2: A disc while they hold a button
+    r3: A glow where they look, under the pointers' marks
+  }
+  state "You in the room (roompanels/moving.py, gliding.py, ft-roommove puller.py, grab.py)" as mv {
+    t0: Where your floor lies: walking in your own room needs nothing
+    [*] --> t0
+    t1: The room in both hands: where the hands are is asked sixty times a second (reach)
+    t2: Flying to a panel: 0.4 s, slow at both ends
+    t3: A move: shift DX DZ DEGREES to ft-screens, then floor move to ft-together
+    t4: Refused: the headset off for go and step, further than a kilometre, or the floor won't move and the shift is undone
+  }
+  state "Someone's panel in your hand (roompanels/carrying.py, flow/moves.h, local/moveask.h)" as cr {
+    j0: Where the room has it
+    [*] --> j0
+    j1: In your hand, and you may: move told to its owner at each look, four a second
+    j2: Waited for, a second: the owner's Frame puts its screen there and tells the room
+    j3: In your hand, and you may not: nothing is sent
+    j4: Put where the room has it, as large and as bent as its owner has it
+  }
   state "Other groups" as og {
     g1: G1 Lifecycle and presence
     g2: G2 Desktop and panels
+    g4: G4 Gaze
     g5: G5 Hands
     g6: G6 Remote displays
   }
@@ -110,10 +165,17 @@ stateDiagram-v2
   aw --> vo: away off closes the microphone
   se --> sh: only in a room
   se --> lk: the room lists what each has on
+  se --> ct: only in a room, for a panel of yours that is in it
+  aw --> ct: control here each second while worn and not in a game (ft-roomaway). Away ends every grant at once
+  ct --> ds: only input under a grant that stands
+  hd --> ct: your acts reach its owner only for a panel they gave you (Holds: their last word, 30 s at most), 200 a second at most
+  gz --> hd: what moves your pointer, said each second (gaze pointer eyes or hand). Not said for 5 s, it counts as your eyes
+  se --> mv: your floor in the room (floor, floor move)
+  cr --> sh: on the owner's Frame: the word is taken from the room's owner or a grant's holder (flow/moves.h), and ft-roompanels puts the screen there (moves, pose)
   u0 --> u1: the installer's Together part, or together/run.sh install
   u1 --> u2: the Settings switch, or run.sh on: enable --now
   u2 --> u3: tailscaled says who this Frame is (Start, net/tailnet.cpp)
-  u3 --> u1: the switch off: SIGTERM leaves the room first, the four units stop with it
+  u3 --> u1: the switch off: SIGTERM leaves the room first, the eight units stop with it
   u3 --> u2: it ends otherwise: Restart=on-failure, 3 s
   m0 --> m1: open (Open): you stand on the owner's spot
   m0 --> m2: join HOST PORT CODE (Join)
@@ -155,7 +217,7 @@ stateDiagram-v2
   v2 --> v1: told again within 0.5 s
   v2 --> v0: not told for 0.5 s: the poses carry a shut mouth
   v2 --> g5: G5: the hands in the same pose come from hand tracking
-  x0 --> x1: share N: Share to the room (a guest's goes through the owner), ft-screens share N start
+  x0 --> x1: share N: Share to the room (a guest's goes through the owner), ft-screens share N start, the video at a width that is a multiple of 128 (keeper.py stream_size)
   x1 --> x2: a Watch from a member who has it in view
   x2 --> x3: someone begins, lost their place, or a picture to them was given up
   x3 --> x2: the keyframe puts everyone in step
@@ -183,6 +245,65 @@ stateDiagram-v2
   z2 --> z3: a Want for exactly that file from someone in the room
   z3 --> z2: sent
   z2 --> z0: another avatar or none on (wear, every 2 s from ft-avatars --room)
+  n0 --> n1: their AskControl (control ask PANEL at their end), 8 words at once and 2 a second a link
+  n1 --> n2: control give NUMBER PERSON: only while someone says the headset is on your head, and you aren't away
+  n0 --> n2: given unasked, under the same rule
+  n1 --> n0: control take (No), or 120 s
+  n2 --> n3: control take, away game or away off, 10 s with no control here, the panel unshared, the room left, they left, or someone else is in their place
+  n3 --> n0: to be asked for or given again
+  d0 --> d1: an act for a panel of yours that is in the room, from someone whose grant stands (a key only 1 to 111, not 99)
+  d1 --> d2: a button or a key goes down that isn't down
+  d2 --> d1: it comes up, or was down 60 s and is let go for them
+  d1 --> d0: 1.5 s after their last input
+  d0 --> d3: control own
+  d1 --> d3: control own
+  d2 --> d3: control own: what they hold is let go first, the last pressed first
+  d3 --> d0: 1.5 s after your last
+  d2 --> d0: their grant, their link or the room ends: let go, the last pressed first
+  d1 --> g2: G2: ft-screens gives it to the seat, on the desktop's own screens only, never while paused or locked, and keeps what is theirs apart from what is yours
+  h0 --> h1: the pointer comes onto the panel moved by your hand, or by your eyes while you share where you look
+  h0 --> h2: it comes onto it moved by your eyes, and you don't share where you look
+  h1 --> h2: gaze mode, not shared: the room is told once that the pointer is nowhere
+  h2 --> h1: the hand's pointer, or gaze on
+  h1 --> h3: a button down
+  h2 --> h3: a button down: the move that waited goes first
+  h3 --> h1: up
+  h3 --> h2: up, or 3 s after its last word: the room is told the pointer is nowhere
+  h1 --> h0: leave (SteamVR's word, or the pointer turns up on another screen): buttons come up
+  h2 --> h0: leave
+  h3 --> h0: leave: buttons come up
+  q0 --> q1: gaze on (the page's switch, or ft-room gaze on): in a room only
+  q1 --> q2: gaze say YAW PITCH: a direction under 0.5 s old from a service that runs, smoothed over 0.3 s
+  q2 --> q1: nothing told for 1 s: away, the service idles, or its direction is old
+  q1 --> q0: gaze off, or the room left
+  q2 --> q0: gaze off, or the room left
+  q1 --> g4: G4: ft-gazed is kept awake (wake 3) and its status read, whatever gaze mode says
+  r0 --> r1: their pointer on a panel this Frame shows (0x84, to who asked points)
+  r1 --> r2: pressed
+  r2 --> r1: let go
+  r1 --> r0: they point at nothing, or 2.5 s after the last word
+  r2 --> r0: they point at nothing, or 2.5 s after the last word
+  r0 --> r3: a pose of theirs came with a gaze that meets a panel first, from in front (glancesums.h, 0x86 ten a second at most)
+  r3 --> r0: they look at no panel or stop sharing, or 1 s after the last word
+  t0 --> t1: both grips down, in a room, both controllers tracked (grips.py on SteamVR's web socket)
+  t1 --> t0: either grip let go, a controller not tracked, or a game has the controllers
+  t1 --> t3: pull DX DZ DEGREES, for a move of 2 mm or 0.15 degrees and more. Hands that jumped 0.5 m or an eighth of a turn move nothing
+  t0 --> t3: go X Z DEGREES, go person N, go panel ID or step, from the page, a key or ft-room
+  t0 --> t2: fly panel ID
+  t2 --> t3: each step of the way, sixty a second
+  t3 --> t0: ok X Z DEGREES: the new floor
+  t3 --> t4: no
+  t4 --> t0: nothing moved
+  t3 --> g2: G2: ft-screens shifts every screen that isn't pinned or dragged, and shift back puts them where they stood when the room is left
+  j0 --> j1: you take hold of it and ft-together takes the move: it was given to you, or the room is yours
+  j0 --> j3: you take hold of it and ft-together says you may not move that panel
+  j1 --> j2: the last move told
+  j2 --> j0: the room came round
+  j2 --> j4: it didn't: the owner's Frame didn't take it there
+  j3 --> j4: it rests, or 2 s in your hand
+  j3 --> t2: pulled more than 30 cm nearer your head: you fly to where it reads well
+  j0 --> j4: the room has it elsewhere (its owner or someone who may moved it), or you made it larger, smaller or bent it
+  j4 --> j0: there
   class u0 teal
   class u1 teal
   class u2 yellow
@@ -228,7 +349,37 @@ stateDiagram-v2
   class z1 orange
   class z2 blue
   class z3 blue
+  class n0 teal
+  class n1 yellow
+  class n2 blue
+  class n3 orange
+  class d0 teal
+  class d1 blue
+  class d2 blue
+  class d3 orange
+  class h0 teal
+  class h1 blue
+  class h2 orange
+  class h3 blue
+  class q0 teal
+  class q1 yellow
+  class q2 blue
+  class r0 teal
+  class r1 blue
+  class r2 blue
+  class r3 blue
+  class t0 teal
+  class t1 blue
+  class t2 yellow
+  class t3 yellow
+  class t4 orange
+  class j0 teal
+  class j1 blue
+  class j2 yellow
+  class j3 orange
+  class j4 yellow
   class g1 xgroup
   class g2 xgroup
+  class g4 xgroup
   class g5 xgroup
   class g6 xgroup

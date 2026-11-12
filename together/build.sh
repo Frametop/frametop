@@ -11,8 +11,9 @@
 #                                 theirs, each from where their head is (Opus, PulseAudio)
 #   together/build/ft-roompoints  draws where the others point, on the panels they point at
 #                                 (SteamVR overlays)
-#   together/build/ft-pcsend      a split compute PC's end, with canned pictures: what the tests
-#                                 and the fake peer have for a PC (it isn't installed)
+#   together/build/ft-pcsend      a split compute PC's end, here with canned pictures: what the
+#                                 tests and the fake peer have for a PC (it isn't installed on a
+#                                 Frame; the PC's streaming host runs its own build with --feed)
 # ft-roompanels, which keeps the two panel programs in step with the room, is a script
 # (together/ft-roompanels).
 # and with --spikes, the programs that measured what the design stands on:

@@ -232,11 +232,12 @@ class Watcher:
 
 
 class Tool:
-    """A program whose printed lines are read as they come."""
+    """A program whose printed lines are read as they come. With `stdin=subprocess.PIPE` it can
+    be handed bytes (proc.stdin.buffer)."""
 
-    def __init__(self, argv, env=None):
+    def __init__(self, argv, env=None, stdin=None):
         self.lines = []
-        self.proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+        self.proc = subprocess.Popen(argv, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
 

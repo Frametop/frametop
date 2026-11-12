@@ -226,6 +226,8 @@ test-c:
           together/net/quicframes.cpp together/net/quicfiles.cpp together/net/lookup.cpp together/net/tailnet.cpp together/net/selfcert.cpp \
           together/proto/messages.cpp -o build/tests/ft-pcsend $quic
         run together/tests/pcsend-test.py python3 together/tests/pcsend-test.py build/tests/ft-together build/tests/ft-pcsend
+        # ...and with a streaming host's pictures, which the test hands it
+        run together/tests/pcfeed-test.py python3 together/tests/pcfeed-test.py build/tests/ft-together build/tests/ft-pcsend
         # ft-roompanels between two of them, each with a stand-in ft-screens. (panels-test.py, the
         # video through the hardware encoder and decoder, is run by hand: together/README.md.)
         run together/tests/roompanels-test.py python3 together/tests/roompanels-test.py build/tests/ft-together
@@ -259,7 +261,7 @@ test-c:
         g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined together/tests/handwords.cpp -o build/tests/together-handwords
         run together/tests/panelhand-test.py python3 together/tests/panelhand-test.py build/tests/ft-together build/tests/together-handwords
     else
-        echo "together/tests/{links-test.cpp,loopback-test.py,pcsend-test.py,roompanels-test.py,roomcarry-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
+        echo "together/tests/{links-test.cpp,loopback-test.py,pcsend-test.py,pcfeed-test.py,roompanels-test.py,roomcarry-test.py,roomvoice-test.py,roomaway-test.py,roomcontrol-test.py,roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)"
     fi
     for t in pointer/tests/*-test.cpp; do
         n=$(basename "$t" .cpp)

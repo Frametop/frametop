@@ -842,9 +842,30 @@ bool ControllerAt(int side, const double palm[3], const vr::TrackedDevicePose_t 
         g_controllersAt = now;
         g_controllers[0].clear(), g_controllers[1].clear();
         for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
-            if (vr::VRSystem()->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller) continue;
-            const auto role = vr::VRSystem()->GetControllerRoleForTrackedDeviceIndex(i);
-            if (role != vr::TrackedControllerRole_LeftHand && role != vr::TrackedControllerRole_RightHand) continue;
+            if (vr::VRSystem()->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller)
+                continue;
+
+            // Ignore FrameHands' virtual pointer.
+            // It follows the tracked hand and must not cause
+            // the hand's visual overlay to disappear.
+            char controllerType[64] = {};
+            vr::VRSystem()->GetStringTrackedDeviceProperty(
+                i,
+                vr::Prop_ControllerType_String,
+                controllerType,
+                sizeof(controllerType)
+            );
+
+            if (std::strcmp(controllerType, "fh_pointer") == 0)
+                continue;
+
+            const auto role =
+                vr::VRSystem()->GetControllerRoleForTrackedDeviceIndex(i);
+
+            if (role != vr::TrackedControllerRole_LeftHand &&
+                role != vr::TrackedControllerRole_RightHand)
+                continue;
+
             g_controllers[role == vr::TrackedControllerRole_RightHand].push_back(i);
         }
     }

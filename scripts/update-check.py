@@ -277,13 +277,7 @@ def check_host():
         report("ok", "KWin", "has --output-count (one output per screen)")
     else:
         report("FAIL", "KWin", "no --output-count option: the desktop gets one screen at most")
-    # The session turns these built-in effects off by id (blurEnabled, contrastEnabled in kwinrc).
-    gone = [e for e in ("blur", "contrast") if b"KWin::%s_factory" % e.encode() not in kwin]
-    if not gone:
-        report("ok", "KWin effects", "blur and contrast, which the desktop turns off, keep their ids")
-    else:
-        report("warn", "KWin effects", f"no built-in {', '.join(gone)} effect: renamed? The desktop's "
-               "kwinrc may no longer turn it off (session/frametop-session.sh)")
+    report(*kwin_effects(kwin))
     check_kwin_host_protocols()
 
     # Frunner (frunner/ft_frunner.py) runs on the host's Python: GdkPixbuf's SVG loader
@@ -395,6 +389,22 @@ def check_host():
             report("ok", "backlight", "ft-powerd can turn the displays off")
         else:
             report("FAIL", "backlight", f"{BACKLIGHT} isn't writable, so ft-powerd can't turn the displays off")
+
+
+def kwin_effects(kwin):
+    """(state, label, detail) for the built-in effects the session turns off by id (blurEnabled,
+    contrastEnabled in kwinrc), from kwin_wayland's bytes. KWin 6.6.2 has no contrast effect of
+    its own (it keeps blur and the background contrast protocol, and has no ContrastEffect
+    class), so only a missing blur means an effect the kwinrc keys no longer reach."""
+    blur, contrast = (b"KWin::%s_factory" % e in kwin for e in (b"blur", b"contrast"))
+    if not blur:
+        gone = "blur" if contrast else "blur, contrast"
+        return ("warn", "KWin effects", f"no built-in {gone} effect: renamed? The desktop's "
+                "kwinrc may no longer turn it off (session/frametop-session.sh)")
+    if contrast:
+        return ("ok", "KWin effects", "blur and contrast, which the desktop turns off, keep their ids")
+    return ("ok", "KWin effects", "blur, which the desktop turns off, keeps its id; this KWin has no "
+            "contrast effect of its own (as in KWin 6.6)")
 
 
 def host_protocol_names(blob):

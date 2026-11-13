@@ -29,7 +29,7 @@ test-python:
         'scripts/tests/test_app_imports.py' \
         'scripts/tests/test_uninstall.py' 'scripts/tests/test_get.py' 'scripts/tests/test_install_lib.py' \
         'scripts/tests/test_conf_readers.py' 'scripts/tests/test_install_interrupt.py' 'scripts/tests/test_install_keyboard.py' \
-        'scripts/tests/test_install_once.py' 'docs/tests/*.py' || status=1
+        'scripts/tests/test_install_once.py' 'scripts/tests/test_update_check.py' 'docs/tests/*.py' || status=1
     pytest -q session/tests || status=1
     # test_accessibility.py needs the host's AT-SPI and PyGObject, test_notifyfwd.py and
     # test_gtksettings.py the host's dbus-daemon and PyGObject

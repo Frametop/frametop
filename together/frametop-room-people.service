@@ -7,10 +7,12 @@ PartOf=frametop-together.service
 
 [Service]
 # ft-avatars is the mirror's program too, so only the one started with --room is cleaned up.
-# Without SteamVR it ends at once and is tried again.
+# Without SteamVR it ends at once and is tried again. It also ends when SteamVR quits, and
+# that is no failure: so it is started again whatever it ended with, and is there when
+# SteamVR is back. Turning Together off stops it, and that stays stopped.
 ExecStartPre=-/usr/bin/pkill -f "ft-avatars --room( |$$)"
 ExecStart=@REPO@/scripts/in-box @REPO@/screens/build/ft-avatars --room --status 60
 ExecStopPost=-/usr/bin/pkill -f "ft-avatars --room( |$$)"
-Restart=on-failure
+Restart=always
 RestartSec=10
 TimeoutStopSec=5

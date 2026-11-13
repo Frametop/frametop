@@ -57,6 +57,13 @@ class Units(unittest.TestCase):
                     self.assertRegex(line, r"^-/usr/bin/pkill (-x %s|-f \"%s --room\( \|\$\$\)\")$" % (re.escape(program), re.escape(program)))
                     self.assertEqual("-f" in line.split(), program == "ft-avatars")
 
+    def test_the_people_come_back_after_steamvr(self):
+        """ft-avatars ends without an error when SteamVR quits (avatar/room/room.cpp), so its unit
+        starts it again whatever it ended with. The others stay up through SteamVR going."""
+        for unit in ROOMS:
+            with self.subTest(unit):
+                self.assertEqual(keys(unit, "Restart"), ["always" if unit == "frametop-room-people.service" else "on-failure"])
+
     def test_the_installers_name_them_all(self):
         run = (HERE / "run.sh").read_text()
         named = re.search(r'^main=(\S+)\nrooms="([^"]+)"', run, re.M)

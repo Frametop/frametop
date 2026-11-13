@@ -67,7 +67,7 @@ have podman && check "podman ps" podman ps --format '{{.Names}}'
 have distrobox && check "distrobox list" distrobox list
 have systemctl && check "systemctl --user" systemctl --user is-system-running
 have systemctl && check "user units visible" systemctl --user is-enabled frametop-input-relay.service
-have python3 && check "python3 gi Gtk 4" python3 -c 'import gi; gi.require_version("Gtk","4.0"); gi.require_version("Adw","1"); from gi.repository import Gtk, Adw; print(Gtk.get_major_version(), Gtk.get_minor_version())'
+have python3 && check "python3 gi Gtk 4" python3 -c 'import gi; gi.require_version("Gtk","4.0"); from gi.repository import Gtk; print(Gtk.get_major_version(), Gtk.get_minor_version())'
 
 section "escape to the host (needed if this is a container)"
 # A transient user unit runs in the host's user manager, outside any container.

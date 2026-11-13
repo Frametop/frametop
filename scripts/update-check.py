@@ -964,21 +964,23 @@ def check_eye_rate():
                " (steamvr.gazeDepEyeToHeadEnable on" + (", set by Frametop)" if os.path.exists(EYE_RATE_MARK) else ")"))
 
 
-def check_dashpatch():
-    """pointer/dashpatch: the treadmill moves SteamVR's windows only with the patch in SteamVR's
-    dashboard. It wraps UndockedOverlay.startFloatingWindowMove, found by name, and needs the
-    dashboard's debugger on 127.0.0.1:8089 (from SteamVR's start)."""
-    if systemctl("is-enabled", "frametop-dashpatch") != "enabled":
-        return
-    label = "dashboard patch"
-    # treadmill-move.js wraps the first; ft-dashpatch's SteamVR watch reads the rest (Gamepad mode
-    # and the theater game, for ft-screens), and the gamepad pill's click uses the last line's
-    markers = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
-               "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
-               "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput", "m_unSteamInputAppID",
-               "PushInputFocus", "window.Dashboard=", "hideDashboard"}
-    missing = set(markers)
-    for root, _, files in os.walk(DASHBOARD_JS):
+# What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;
+# ft-dashpatch's SteamVR watch reads the rest (Gamepad mode and the theater game, for ft-screens),
+# and the gamepad pill's click uses the last line's.
+DASHBOARD_MARKERS = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
+                     "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
+                     "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput",
+                     "m_unSteamInputAppID", "PushInputFocus", "window.Dashboard="}
+# ...and the pill closes the dashboard with either of these: the first up to SteamVR 2.18, the
+# second from 2.19 (SteamOS 0.5).
+DASHBOARD_CLOSERS = {"hideDashboard", "showOrHideDashboardOrFrameInternal"}
+
+
+def dashboard_missing(folder):
+    """The names pointer/dashpatch needs that no .js file under folder has. Of the two ways to
+    close the dashboard one is enough: both are named only when neither is there."""
+    missing = DASHBOARD_MARKERS | DASHBOARD_CLOSERS
+    for root, _, files in os.walk(folder):
         for name in files:
             if name.endswith(".js") and missing:
                 try:
@@ -987,6 +989,19 @@ def check_dashpatch():
                     missing = {m for m in missing if m not in text}
                 except OSError:
                     pass
+    if not DASHBOARD_CLOSERS <= missing:
+        missing -= DASHBOARD_CLOSERS
+    return missing
+
+
+def check_dashpatch():
+    """pointer/dashpatch: the treadmill moves SteamVR's windows only with the patch in SteamVR's
+    dashboard. It wraps UndockedOverlay.startFloatingWindowMove, found by name, and needs the
+    dashboard's debugger on 127.0.0.1:8089 (from SteamVR's start)."""
+    if systemctl("is-enabled", "frametop-dashpatch") != "enabled":
+        return
+    label = "dashboard patch"
+    missing = dashboard_missing(DASHBOARD_JS)
     if "startFloatingWindowMove" in missing:
         report("FAIL", label, "SteamVR's dashboard has no startFloatingWindowMove any more, so the 3D mouse "
                "(a treadmill) can't move SteamVR's windows; pointer/dashpatch/treadmill-move.js needs updating")

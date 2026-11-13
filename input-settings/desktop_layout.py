@@ -18,7 +18,10 @@ import xml.etree.ElementTree as ET
 
 CONFIG_DIR = os.path.expanduser("~/.config/frametop")
 KXKBRC = os.path.join(CONFIG_DIR, "kxkbrc")
-RULES_XML = ("/run/host/usr/share/X11/xkb/rules/evdev.xml", "/usr/share/X11/xkb/rules/evdev.xml")
+# The host's by its real folder first: on SteamOS 0.5 /usr/share/X11/xkb is a link to
+# /usr/share/xkeyboard-config-2, which a container follows into its own copy, not the host's.
+RULES_XML = ("/run/host/usr/share/xkeyboard-config-2/rules/evdev.xml",
+             "/run/host/usr/share/X11/xkb/rules/evdev.xml", "/usr/share/X11/xkb/rules/evdev.xml")
 GROUP = "Layout"
 LISTS = ("LayoutList", "VariantList", "DisplayNames")  # kept in step, one entry per layout
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # what env(1) takes as NAME=VALUE, not an option

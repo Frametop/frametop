@@ -175,14 +175,23 @@ STEAMVR_STATE = """(() => {
 })()""" % GAMEPAD_KEY
 # The gamepad pill's click: frametop.gamepad's page takes SteamVR's input focus, and the dashboard
 # closes, which puts SteamVR's controllers in Gamepad mode for it (SteamVR's own pill does the same
-# for a tab that isn't in front, HandleEnterGamepadModeButtonClick).
+# for a tab that isn't in front, HandleEnterGamepadModeButtonClick). Closing it: up to SteamVR 2.18
+# the dashboard has hideDashboard. From 2.19 (SteamOS 0.5) it takes a request instead, the one its
+# own pill's HideDashboard makes (dashboard_visibility_action 3, and the rest as SteamVR fills it in),
+# which with no VRLink peer goes straight to the dashboard here.
 GAMEPAD_PUSH = """(() => {
   let page = null;
   for (const fr of window.FrameStore.frames) for (const p of fr.pages || []) if (p.summonOverlayKey == '%s') page = p;
   if (!page || !page.inputFocus) return 'no frametop.gamepad page (ft-screens not running?)';
   page.inputFocus.PushInputFocus();
-  if (window.Dashboard && window.Dashboard.hideDashboard) window.Dashboard.hideDashboard('Frametop gamepad mode');
-  return 'focus on frametop.gamepad (panel ' + page.mainPanelSGID + '), dashboard closed';
+  const focus = 'focus on frametop.gamepad (panel ' + page.mainPanelSGID + ')';
+  const d = window.Dashboard, reason = 'Frametop gamepad mode';
+  if (d && d.hideDashboard) d.hideDashboard(reason);
+  else if (d && d.showOrHideDashboardOrFrameInternal)
+    d.showOrHideDashboardOrFrameInternal({dashboard_visibility_action: 3, vrlink_request_split: 0,
+                                          relatch_dashboard: {condition: 0, deadzone: 8}, reason: reason});
+  else return focus + ', but the dashboard stays open: this SteamVR has neither way to close it';
+  return focus + ', dashboard closed';
 })()""" % GAMEPAD_KEY
 DASHPATCH = "\0ft_dashpatch"
 

@@ -71,8 +71,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402  (plain GTK 4: SteamOS 0.5 has no libadwaita)
 
 REPO = Path(__file__).resolve().parents[2]
 HELPER = REPO / "gaze" / "build" / "ft-gaze"
@@ -120,6 +119,7 @@ from gazecal import (DEFAULT_MODEL, MODELS, Correction, Fixation, LiveCorrection
 from ft_store import StoreError  # noqa: E402  (gazecal put conf/ on the path)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 from fitcheck import FitCheck  # noqa: E402
+from snappen import Canvas  # noqa: E402  (beside this file: drawing without python-cairo)
 
 
 # --- Gaze from ft-gaze ----------------------------------------------------------------
@@ -395,7 +395,7 @@ workspace.windowList().forEach(function (w) {
 
 # --- The window -----------------------------------------------------------------------
 
-class Probe(Adw.ApplicationWindow):
+class Probe(Gtk.ApplicationWindow):
     def __init__(self, app, screen):
         super().__init__(application=app, title="Frametop gaze probe")
         STATE.mkdir(parents=True, exist_ok=True)
@@ -491,8 +491,7 @@ class Probe(Adw.ApplicationWindow):
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-        self.area = Gtk.DrawingArea(hexpand=True, vexpand=True)
-        self.area.set_draw_func(self.draw)
+        self.area = Canvas(self.draw, hexpand=True, vexpand=True)
         # Any button is the trigger, except the right one, which opens the menu.
         click = Gtk.GestureClick(button=0)
         click.connect("pressed", self.on_click)
@@ -508,7 +507,8 @@ class Probe(Adw.ApplicationWindow):
         self.panel = self.build_panel()
         overlay.add_overlay(self.panel)
         overlay.add_overlay(self.build_toolbar())
-        self.set_content(overlay)
+        self.set_decorated(False)   # no title bar of its own, as before: KWin gives none either
+        self.set_child(overlay)
 
     # --- The context menu (right-click, the Menu key, or Shift+F10) ---
 
@@ -2846,10 +2846,12 @@ def main():
     ap.add_argument("--source", choices=SOURCES,
                     help="gaze source to start with (default: own if our tracker is running, else mmap2)")
     args, rest = ap.parse_known_args()
-    app = Adw.Application(application_id="dev.frametop.GazeProbe", flags=Gio.ApplicationFlags.NON_UNIQUE)
+    app = Gtk.Application(application_id="dev.frametop.GazeProbe", flags=Gio.ApplicationFlags.NON_UNIQUE)
     windows = []
 
     def activate(a):
+        # Dark panel and menus, as with libadwaita on the headset.
+        Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
         win = Probe(a, args.screen)
         if args.source:
             win.w_source.set_selected(SOURCES.index(args.source))

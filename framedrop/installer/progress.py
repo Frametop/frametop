@@ -32,9 +32,9 @@ from pathlib import Path
 
 import gi
 
+# Plain GTK 4: SteamOS 0.5 has no libadwaita on the host.
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 HERE = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parent
 DRY_RUN = "--dry-run" in sys.argv[2:]
@@ -277,7 +277,7 @@ def keypad_row(entry, *extra):
     return row, keypad
 
 
-class Window(Adw.ApplicationWindow):
+class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Frametop")
         self.set_default_size(900, 860 if "SteamAppId" in os.environ else 640)
@@ -293,9 +293,8 @@ class Window(Adw.ApplicationWindow):
                            margin_top=18, margin_bottom=18, margin_start=18, margin_end=18)
         self.box.append(self.status)
         self.box.append(self.detail)
-        view = Adw.ToolbarView(content=self.box)
-        view.add_top_bar(Adw.HeaderBar())
-        self.set_content(view)
+        self.set_titlebar(Gtk.HeaderBar())
+        self.set_child(self.box)
         self.connect("close-request", self.closing)
 
         if unit_state() == "activating":
@@ -548,9 +547,11 @@ class Window(Adw.ApplicationWindow):
 
 
 def main():
-    app = Adw.Application(application_id="io.github.deejanuz.FrametopInstall")
+    app = Gtk.Application(application_id="io.github.deejanuz.FrametopInstall")
 
     def activate(a):
+        # Dark, as it was with libadwaita on the headset: a white window is glaring in VR.
+        Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
         # Played again while the window is open: show that one.
         win = a.get_active_window() or Window(a)
         win.present()

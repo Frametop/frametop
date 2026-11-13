@@ -13,7 +13,7 @@ It uses Valve's SteamOS Devkit path: pair once with the headset's devkit service
 `probe/probe.sh`, started as a Devkit Game, recorded:
 
 - Devkit titles run on the host, not in a container, as user `steamos`, from a process tree that Steam's reaper owns. This held even with the compat tool set to `SteamLinuxRuntime_4-arm64`: Steam recorded the mapping and still ran it on the host.
-- On the host, everything the installer needs works: git, curl to GitHub, podman (sees the `dev` container), `systemctl --user`, `systemd-run --user`, and GTK 4 with libadwaita.
+- On the host, everything the installer needs works: git, curl to GitHub, podman (sees the `dev` container), `systemctl --user`, `systemd-run --user`, and GTK 4 (plain: SteamOS 0.5 has no libadwaita on the host).
 - A GTK window opens in gamescope (an X11 window on `:1`, drawn through gamescope's Vulkan WSI).
 - Steam puts its overlay in `LD_PRELOAD` and Steam runtime paths in `LD_LIBRARY_PATH` and `PATH`. Every host tool prints a preload error unless they're cleared.
 - Inside the Steam Linux Runtime 4 container (started by hand with its `run` script), there's no git, podman, systemctl, or GTK, but `flatpak-spawn --host` runs commands on the host.
@@ -25,7 +25,7 @@ It uses Valve's SteamOS Devkit path: pair once with the headset's devkit service
 `installer/frametop-install.sh` is the start command.
 
 1. In the container, it starts itself again on the host with `flatpak-spawn --host`.
-2. It clears Steam's preload and library paths, and opens `installer/progress.py` (GTK 4 and libadwaita).
+2. It clears Steam's preload and library paths, and opens `installer/progress.py` (plain GTK 4).
 3. The window asks which optional parts to install: voice dictation (on by default), hand tracking (on by default), the Hand Recorder (on by default; a release's zip only, since a clone builds it with `hands/rec/install.sh`), our own eye tracker (on by default), and the Bluetooth fixes. All but voice dictation need sudo, so it asks for your SteamOS password and checks it with `sudo -v`. If your user has no password (SteamOS starts without one), it says how to set one and leaves those out.
 4. It runs the zip's `install-release.sh --yes` (a test zip: `get.sh --yes`) in a transient user service, `frametop-framedrop-install`. The service is used because Steam ends the title's whole process tree when it's quit, and starts it with an OOM score of 900. Opened from a VR desktop (the zip unpacked by hand), it still uses the user's real bus and runtime folder for the service.
 5. It follows the service's log, shows the steps as a progress bar, and reports the result. Closing it leaves the install running. Playing the title again reattaches.

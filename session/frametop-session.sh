@@ -236,9 +236,10 @@ exec /usr/bin/kwin_wayland_wrapper --width $width --height $height --output-coun
   --no-lockscreen --inputmethod $textinput "\$@"
 EOF
 chmod +x "$runtime/bin/kwin_wayland_wrapper"
-# systemctl --user and systemd-run --user in a terminal here: the user's systemd is on the
-# real runtime folder and bus, not this desktop's (session/ft-userbus, DEE-327).
-for tool in systemctl systemd-run; do ln -s "$here/ft-userbus" "$runtime/bin/$tool"; done
+# systemctl --user, systemd-run --user and podman (so distrobox too) in a terminal here: the
+# user's systemd and containers are on the real runtime folder and bus, with the user's own
+# config, not this desktop's (session/ft-userbus, DEE-327 and issue 98).
+for tool in systemctl systemd-run podman; do ln -s "$here/ft-userbus" "$runtime/bin/$tool"; done
 export PATH=$runtime/bin:$PATH
 
 # Keep the host compositor's Wayland socket reachable after moving XDG_RUNTIME_DIR.

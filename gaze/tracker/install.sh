@@ -23,13 +23,13 @@ case ${1:-install} in
   install)
     [ "$FRAME_RELEASE" = 1 ] || "$root/gaze/tracker/build.sh"
     ids=$(on_frame 'echo "$(id -u):$(id -g)"')
-    fill_template "$root/gaze/tracker/$unit" | sed "s|@UID@|${ids%:*}|g; s|@GID@|${ids#*:}|g" |
-      on_frame "cat > /tmp/$unit"
+    # Root fills the template in itself: a copy staged in /tmp could be rewritten before root
+    # installs it.
     sudo_run "set -e
 install -D -m 0755 -o root -g root $src/build/ft-eyegrab /etc/frametop/ft-eyegrab
-install -D -m 0644 -o root -g root /tmp/$unit /etc/systemd/system/$unit
+sed 's|@REPO@|$FRAME_REPO|g; s|@UID@|${ids%:*}|g; s|@GID@|${ids#*:}|g' $src/$unit >/etc/systemd/system/$unit
+chmod 0644 /etc/systemd/system/$unit
 install -D -m 0644 -o root -g root $src/atomic-update.conf /etc/atomic-update.conf.d/frametop-eyegrab.conf
-rm -f /tmp/$unit
 systemctl daemon-reload
 systemctl enable $unit
 systemctl restart $unit

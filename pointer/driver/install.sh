@@ -27,7 +27,8 @@ case ${1:-install} in
     # driver is left alone.
     # A registry an earlier install made in the desktop's config folder (see steamvr above) has
     # no SteamVR in it, and hid SteamVR from OpenVR programs started in the desktop
-    # (VRInitError_Init_InstallationNotFound): it goes.
+    # (VRInitError_Init_InstallationNotFound): it goes. Where the desktop links that folder to
+    # the user's (session/vr-links.sh), the file there is SteamVR's own and stays.
     # vrpathreg runs 'xdg-open vrmonitor://driverinstalled' for SteamVR's desktop monitor, which
     # the Frame doesn't have, so the desktop said "could not read file": a stand-in takes it.
     "$frame" --host "set -e; test -f $src/build/driver_ft_pointer.so
@@ -41,7 +42,7 @@ else
   echo 'installed; restart SteamVR to load it'
 fi
 stray=\$HOME/.config/frametop/openvr/openvrpaths.vrpath
-if grep -qs '\"jsonid\" : \"vrpathreg\"' \$stray && grep -qsE '\"runtime\"[[:space:]]*:[[:space:]]*null' \$stray; then
+if [ ! -L \$HOME/.config/frametop/openvr ] && grep -qs '\"jsonid\" : \"vrpathreg\"' \$stray && grep -qsE '\"runtime\"[[:space:]]*:[[:space:]]*null' \$stray; then
   rm -f \$stray; rmdir \$HOME/.config/frametop/openvr 2>/dev/null || true
   echo 'removed a SteamVR path registry an earlier install left in ~/.config/frametop/openvr'
 fi

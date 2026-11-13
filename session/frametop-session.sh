@@ -254,6 +254,9 @@ export XDG_RUNTIME_DIR=$runtime
 export XDG_CONFIG_HOME=$HOME/.config/frametop
 export XDG_STATE_HOME=$HOME/.local/state/frametop
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+# OpenXR and OpenVR programs started here still find SteamVR, which they look up under the
+# config folder (session/vr-links.sh, issue 78).
+"$here/vr-links.sh" "$XDG_CONFIG_HOME" || true
 
 # Title bar buttons for apps that draw their own (session/ft-gtksettings): Firefox and
 # Chromium read GTK's button layout from the Settings portal here, where nothing on SteamOS

@@ -79,7 +79,9 @@ PACKAGES = {
                            "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
                            "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
                            "Steam field, and its lasers, controller tips and fingertips press keys",
-    "kwin": "clicks near the far edge of a screen whose scale isn't 1; every screen comes back "
+    "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "
+            "its scale a minute after the desktop starts (KWin's support information shows it; "
+            "kscreen-doctor shows 1 from 6.6); every screen comes back "
             "after a desktop restart; floating a window; no blur behind the taskbar's menus; "
             "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
             "logout watcher ends it: if it no longer crashes, the watcher can go); a layout "

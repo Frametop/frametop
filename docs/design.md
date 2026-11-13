@@ -40,8 +40,13 @@ whole buffer scale KWin 6.2 requires. KWin 6.2.5 makes no such object: it keeps 
 configure's pixels and the scale `kscreen-doctor` sets, and would make any later configure
 that size times its scale, so there ft-screens configures a screen in pixels and never again
 for a scale change, as before. ft-floatd sends spares' logical dimensions itself, after enabling and scaling them.
-ft-layout waits briefly for KWin's reported scale, and uses target scales for positioning
-while configure events are pending.
+`kscreen-doctor` doesn't show that scale either: from 6.6 it reports a nested output's stored
+scale setting, which stays 1. ft-layout sends ft-screens the layout's scales and never the
+ones KWin reports, which would put a scaled screen back at 1, and positions screens by the
+layout's scales too. ft-floatd and `ft-layout remote-view` also take screens' scales from the
+layout (`kwin_scales` in `layout/ft_layout.py`), so a window floated off a screen at 200% floats
+at 200%. KWin's support information (`qdbus6 org.kde.KWin /KWin supportInformation`) shows the
+scale an output has.
 
 ### Placing and sizing
 

@@ -2158,7 +2158,9 @@ def arrangement(count):
 
 
 def send_layout_scales(layout, count):
-    """Give KWin 6.6 its preferred scale and logical configure size through its host."""
+    """The layout's scale for each screen to ft-screens. It gives KWin 6.6 that as its
+    preferred scale, with a logical configure size, and undoes it on pointer input (panel
+    pixels / scale), which KWin's nested backend doesn't."""
     if backend() != "screens":
         return
     sock = screens_socket()
@@ -2166,28 +2168,21 @@ def send_layout_scales(layout, count):
         sock.ask(f"scale {i + 1} {screen_scale(layout, i):g}")
 
 
-def send_scales(outs):
-    """KWin's scale for each screen, as it is now, to ft-screens: KWin's nested backend
-    doesn't undo its scale on pointer input, so ft-screens does (panel pixels / scale).
-    None in outs skips that screen."""
+def kwin_scales(layout=None):
+    """Each screen's scale in KWin, by output name (WL-0, ...): with ft-screens, the layout's,
+    which send_layout_scales gives KWin. Read these, not kscreen-doctor's: from 6.6 it shows a
+    nested output's stored scale setting, 1 whatever its scale is. Empty with gamescope."""
     if backend() != "screens":
-        return
-    try:
-        sock = screens_socket()
-        for i, o in enumerate(outs):
-            if o is None:
-                continue
-            reply = sock.ask(f"scale {i + 1} {float(o.get('scale', 1)):g}")
-            if not reply.startswith("ok"):
-                log(f"screen {i + 1}: scale: {reply}")
-    except RuntimeError as e:
-        log(f"scale: {e}")
+        return {}
+    layout = layout or load_layout()
+    return {f"WL-{i}": screen_scale(layout, i) for i in range(screen_count(layout))}
 
 
-def logical_size(o):
+def logical_size(o, scale=None):
     """An output's size in logical units. kscreen's "size" is in pixels (already turned for a
-    rotation); positions are logical, the pixels divided by the scale (KWin rounds up)."""
-    s = float(o.get("scale", 1))
+    rotation); positions are logical, the pixels divided by the scale (KWin rounds up): this
+    one, or kscreen's."""
+    s = scale or float(o.get("scale", 1))
     return (math.ceil(o["size"]["width"] / s - 1e-6), math.ceil(o["size"]["height"] / s - 1e-6))
 
 
@@ -2230,18 +2225,10 @@ def apply_scales():
     # Laid out as you see the screens around you (arrangement), centred on one line, so
     # the pointer and dragged windows cross to the screen you see next to this one.
     outs = outputs(env)
-    if backend() == "screens":
-        for _ in range(9):
-            if not any(abs((outs[i].get("scale") or 1.0) - screen_scale(layout, i)) > 0.01
-                       for i in range(min(count, len(outs)))):
-                break
-            time.sleep(0.05)
-            outs = outputs(env)
-    # A screen KWin hasn't reported its new scale for yet gets none: on a KWin that takes its
-    # scale from ft-screens (6.6), the old one would put that back. The next follow sends it.
-    send_scales([None if i < count and abs((o.get("scale") or 1.0) - screen_scale(layout, i)) > 0.01 else o
-                 for i, o in enumerate(outs)])
-    # A configure may still be pending. Use target scales for positions even then.
+    # KWin's scale isn't read back for ft-screens. From 6.6 kscreen-doctor shows a nested
+    # output's stored scale setting, 1 whatever its scale is, and ft-screens would give KWin
+    # that as the scale to have. Positions use the layout's scales for the same reason, and
+    # because a configure may still be pending.
     sizes = []
     for i, o in enumerate(outs):
         if not o.get("size"):
@@ -2293,7 +2280,8 @@ def remote_view():
     outs = [o for o in outputs(env) if o.get("enabled", True) and o.get("size") and o.get("pos")]
     if not outs:
         raise RuntimeError("the Frametop desktop has no screens yet")
-    rects = [(o["pos"]["x"], o["pos"]["y"], *logical_size(o)) for o in outs]
+    scales = kwin_scales()
+    rects = [(o["pos"]["x"], o["pos"]["y"], *logical_size(o, scales.get(o.get("name")))) for o in outs]
     left, top = min(r[0] for r in rects), min(r[1] for r in rects)
     right, bottom = max(r[0] + r[2] for r in rects), max(r[1] + r[3] for r in rects)
     p = next((i for i, o in enumerate(outs) if o.get("priority") == 1), 0)

@@ -174,20 +174,25 @@ def output_rects():
         data = json.loads(kscreen("-j") or "{}")
     except ValueError:
         return {}
+    scales = ft_layout.kwin_scales()  # the screens' (kscreen-doctor shows 1 from KWin 6.6)
     out = {}
     for o in data.get("outputs", []):
-        pos, size, scale = o.get("pos") or {}, o.get("size") or {}, float(o.get("scale", 1)) or 1.0
+        pos, size = o.get("pos") or {}, o.get("size") or {}
+        scale = scales.get(o.get("name")) or float(o.get("scale", 1)) or 1.0
         if o.get("name") and size:
             out[o["name"]] = (pos.get("x", 0), pos.get("y", 0), size.get("width", 0) / scale, size.get("height", 0) / scale)
     return out
 
 
 def output_scales():
+    """Each output's scale in KWin: a screen's from the layout (ft_layout.kwin_scales), so a
+    window floated off a screen at 200% floats at 200%; a spare's as kscreen-doctor shows it."""
     try:
         data = json.loads(kscreen("-j") or "{}")
     except ValueError:
-        return {}
-    return {o["name"]: float(o.get("scale", 1)) for o in data.get("outputs", []) if o.get("name")}
+        data = {}
+    shown = {o["name"]: float(o.get("scale", 1)) for o in data.get("outputs", []) if o.get("name")}
+    return {**shown, **ft_layout.kwin_scales()}
 
 
 def facing_axes(pt, eye):

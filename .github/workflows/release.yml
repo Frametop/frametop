@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build curl unzip pkg-config \
-            libjsoncpp-dev libgbm-dev libdrm-dev libegl1-mesa-dev libgles2-mesa-dev
+            libgbm-dev libdrm-dev libegl1-mesa-dev libgles2-mesa-dev
       - name: Fetch pinned OpenVR ARM64 API library
         run: |
           mkdir -p build/openvr

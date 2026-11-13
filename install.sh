@@ -76,9 +76,15 @@ done
 stage=$HOME/.local/share/framehands/app.new.$$
 [[ ! -e $stage && ! -L $stage ]] || fail 'temporary install path already exists'
 mkdir -m 700 "$stage"
-mkdir -p "$stage/hands/build" "$stage/hands/camd" "$stage/renderer/build" "$stage/renderer/assets" "$stage/pointer/build" "$stage/pointer/driver/fh_pointer/bin/linuxarm64" "$stage/config" "$stage/services"
+mkdir -p "$stage/hands/build" "$stage/hands/camd" "$stage/renderer/build" "$stage/renderer/assets" "$stage/pointer/build" "$stage/pointer/driver/fh_pointer/bin/linuxarm64" "$stage/config" "$stage/services" "$stage/licenses"
 cp -a "$source_dir/hands/build/fh-camd" "$source_dir/hands/build/fh-hands" "$stage/hands/build/"
 cp -a "$source_dir/hands/camd/LICENSE.FrameEyeCameraFeed" "$stage/hands/camd/"
+if [[ -f $source_dir/licenses/jsoncpp-LICENSE ]]; then
+  cp -a "$source_dir/licenses/jsoncpp-LICENSE" "$stage/licenses/"
+else
+  cp -a "$source_dir/hands/build/jsoncpp/src/jsoncpp-89e2973c754a9c02a49974d839779b151e95afd6/LICENSE" \
+    "$stage/licenses/jsoncpp-LICENSE"
+fi
 cp -a "$source_dir/hands/models" "$stage/hands/"
 cp -a "$source_dir/renderer/build/framehands-view" "$stage/renderer/build/"
 cp -a "$source_dir/renderer/assets/hands" "$stage/renderer/assets/"

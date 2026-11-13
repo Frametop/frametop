@@ -4,6 +4,7 @@
 #include "../include/fh_shm.hpp"
 
 #include <cstdio>
+#include <cstddef>
 #include <cstdlib>
 #include <string>
 

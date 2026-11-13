@@ -7,6 +7,7 @@
 #include <sys/un.h>
 
 #define FT_SOCK_HANDVIEW "framehands_view"
+#define FT_SOCK_POINTER "framehands_pointer"
 
 static inline socklen_t ft_sock_addr(const char *name, struct sockaddr_un *addr) {
     const size_t n = strlen(name);

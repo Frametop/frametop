@@ -24,6 +24,7 @@ openvr_fetch() {  # openvr_fetch <header> <sha256>
   mv "$f.part" "$f"
 }
 openvr_fetch openvr.h 1e6ed57199896cc1f7c5484e50fa18955e97be15be690beb28d998c877ead7fd
+openvr_fetch openvr_driver.h 1036efe998d63e82d1d3db2b32a2f58df4a8eeaf5280f50aaf28220ff60a40ab
 
 openvr_lib=${OPENVR_LIB:-$openvr_steamvr}
 openvr_rpath=$openvr_steamvr

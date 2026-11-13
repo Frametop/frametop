@@ -1,0 +1,290 @@
+{
+	"action_manifest_version": 0,
+	"alias_info": {},
+	"app_key": "openvr.component.vrcompositor",
+	"category": "steamvr_input",
+	"controller_type": "fh_pointer",
+	"description": "",
+	"name": "framehands pointer: dashboard laser mouse",
+	"options": {},
+	"simulated_actions": [],
+	"bindings": {
+		"/actions/lasermouse": {
+			"sources": [
+				{
+					"path": "/user/hand/left/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/leftclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/left/input/b",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/rightclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/left/input/x",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/middleclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/left/input/joystick",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/back"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/leftclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/b",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/rightclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/x",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/middleclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/joystick",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/back"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/leftclick"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/b",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/rightclick"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/x",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/middleclick"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/joystick",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/back"
+						}
+					}
+				}
+			],
+			"poses": [
+				{
+					"output": "/actions/lasermouse/in/Pointer",
+					"path": "/user/hand/left/pose/raw"
+				},
+				{
+					"output": "/actions/lasermouse/in/Pointer",
+					"path": "/user/hand/right/pose/raw"
+				},
+				{
+					"output": "/actions/lasermouse/in/Pointer",
+					"path": "/user/treadmill/pose/raw"
+				}
+			]
+		},
+		"/actions/scroll_discrete": {
+			"sources": [
+				{
+					"path": "/user/hand/left/input/joystick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_discrete/in/scroll"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/joystick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_discrete/in/scroll"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/joystick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_discrete/in/scroll"
+						}
+					}
+				}
+			]
+		},
+		"/actions/scroll_smooth": {
+			"sources": [
+				{
+					"path": "/user/hand/left/input/joystick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_smooth/in/scroll"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/joystick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_smooth/in/scroll"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/joystick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_smooth/in/scroll"
+						}
+					}
+				}
+			]
+		},
+		"/actions/system": {
+			"sources": [
+				{
+					"path": "/user/hand/left/input/system",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/system/in/ToggleDashboard"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/system",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/system/in/ToggleDashboard"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/system",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/system/in/ToggleDashboard"
+						}
+					}
+				}
+			]
+		},
+		"/actions/lasermouse_secondary": {
+			"sources": [
+				{
+					"path": "/user/hand/left/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/left/input/a",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/a",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/treadmill/input/a",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				}
+			]
+		}
+	}
+}

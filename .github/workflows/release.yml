@@ -29,8 +29,8 @@ jobs:
         run: bash scripts/build.sh
       - name: Check binary architecture and external libraries
         run: |
-          file hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view
-          for bin in hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view; do
+          file hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view pointer/build/fh-input pointer/build/driver_fh_pointer.so
+          for bin in hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view pointer/build/fh-input pointer/build/driver_fh_pointer.so; do
             readelf -h "$bin" | grep -q AArch64
           done
           ! ldd renderer/build/framehands-view | grep -q 'not found'

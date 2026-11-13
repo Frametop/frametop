@@ -29,5 +29,5 @@ jobs:
           OPENVR_LIB: ${{ github.workspace }}/build/openvr
         run: |
           python3 -m unittest discover -s tests -v
-          for script in install.sh uninstall.sh renderer/build.sh scripts/build.sh scripts/package.sh hands/models.sh; do bash -n "$script"; done
+          for script in install.sh uninstall.sh renderer/build.sh pointer/build.sh scripts/build.sh scripts/package.sh hands/models.sh; do bash -n "$script"; done
           bash scripts/build.sh

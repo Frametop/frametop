@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 checks = {
     "Steam Frame architecture": platform.machine() == "aarch64",
     "SteamVR OpenVR ARM64 API": Path("/opt/steamvr/bin/linuxarm64/libopenvr_api.so").is_file(),
+    "SteamVR driver registration": Path("/opt/steamvr/bin/linuxarm64/vrpathreg").is_file(),
     "XRService camera calibration": Path("/persist/xrservice.json").is_file(),
     "device camera calibration": Path("/persist/device_config.json").is_file(),
     "v4l2 dequeue tracepoint": Path("/sys/kernel/tracing/events/v4l2/v4l2_dqbuf/format").is_file(),
@@ -17,4 +18,5 @@ for name, ok in checks.items():
 if any(not ok for ok in checks.values()):
     print("Retest fh-camd camera attachment and calibration before using FrameHands.")
 print("Retest the OpenVR DMA-BUF hand overlay and Room View detection on the headset after a SteamVR update.")
+print("Retest the FrameHands driver role handoff, dashboard ray, pinch press/release, and physical controllers after a SteamVR update.")
 sys.exit(0 if all(checks.values()) else 1)

@@ -15,7 +15,7 @@ cd <repo-folder>
 ~/.local/bin/framehands doctor
 ```
 
-The installer checks ARM64 SteamOS, SteamVR, and the Frame's camera calibration files. If binaries are not in the checkout, it downloads the latest release archive from that checkout's GitHub origin and verifies its SHA256SUMS. It copies only the tracker binaries, models, renderer, CLI, and FrameHands service files into `~/.local/share/framehands/app`. It creates a private config file at `~/.config/framehands/config` if none exists. It asks for `sudo setcap` once for the camera broker's existing `cap_sys_ptrace`, `cap_perfmon`, and `cap_dac_read_search` requirements; the broker drops those capabilities after attaching to XRService. No system packages or immutable-root changes are made on the headset.
+The installer checks ARM64 SteamOS, SteamVR, and the Frame's camera calibration files. If binaries are not in the checkout, it downloads the latest release archive from that checkout's GitHub origin and verifies its SHA256SUMS. It copies only the tracker binaries, models, renderer, dashboard input driver and helper, CLI, and FrameHands service files into `~/.local/share/framehands/app`. It creates a private config file at `~/.config/framehands/config` if none exists. It asks for `sudo setcap` once for the camera broker's existing `cap_sys_ptrace`, `cap_perfmon`, and `cap_dac_read_search` requirements; the broker drops those capabilities after attaching to XRService. No system packages or immutable-root changes are made on the headset.
 
 If Frametop hand services are currently running, installation stops with an explanation. It does not stop or alter Frametop or SteamVR services. Stop those Frametop services yourself before retrying, when safe to do so.
 
@@ -36,16 +36,20 @@ framehands logs        Show the last 100 FrameHands journal lines
 framehands doctor      Check installation, permissions, libraries and services
 ```
 
-Config is `~/.config/framehands/config`. `TRACKING=0` disables tracking; `RENDER=0` disables the overlay; `AUTO_START=0` prevents SteamVR startup. Run `framehands restart` after changing tracker or renderer settings, and `framehands sync` after changing startup settings. `HANDS_MODEL=latest` uses the pinned fine-tuned model, with bundled MediaPipe ncnn models as a fallback; `stock` selects stock explicitly. `HANDS_VIEW_MODEL` accepts `asset`, `babylon`, `mrtk3`, `godot`, `mrtk2`, `robot`, and `capsules`. `HANDS_VIEW_STYLE` accepts `ghost` or `solid`. The tracker also accepts its original camera settings such as `HANDS_CAMERAS`, `HANDS_CPUS`, and `HANDS_BRIGHT`. `PERFORMANCE=balanced` keeps the original three-thread, full-accuracy behavior; `quality` uses four threads; `power` uses two threads and stock INT8 models, which reduce accuracy. The default disables the optional recording buffer.
+Config is `~/.config/framehands/config`. `TRACKING=0` disables tracking; `RENDER=0` disables the overlay; `AUTO_START=0` prevents SteamVR startup. Run `framehands restart` after changing tracker or renderer settings, and `framehands sync` after changing startup or input settings. `HANDS_MODEL=latest` uses the pinned fine-tuned model, with bundled MediaPipe ncnn models as a fallback; `stock` selects stock explicitly. `HANDS_VIEW_MODEL` accepts `asset`, `babylon`, `mrtk3`, `godot`, `mrtk2`, `robot`, and `capsules`. `HANDS_VIEW_STYLE` accepts `ghost` or `solid`. The tracker also accepts its original camera settings such as `HANDS_CAMERAS`, `HANDS_CPUS`, and `HANDS_BRIGHT`. `PERFORMANCE=balanced` keeps the original three-thread, full-accuracy behavior; `quality` uses four threads; `power` uses two threads and stock INT8 models, which reduce accuracy. The default disables the optional recording buffer.
 
-`DEBUG=1` increases service status logging and logs gesture transitions. `GESTURE_INPUT=0` and `CONTROLLER_EMULATION=0` are reserved configuration switches. The current standalone release publishes gesture data but does **not** send pinch clicks, ray events, or controller input into SteamVR. It does not expose native SteamVR skeletal input to games. Games must integrate the shared tracking data themselves; the visual overlay does not imply game input support. The renderer uses SteamVR's OpenVR overlay and DMA-BUF import interface already used by the original Frametop hand view. Room View detection is best effort, and a SteamVR update may change the private camera or shared-texture behavior.
+`DEBUG=1` increases service status logging and logs gesture transitions. `GESTURE_INPUT=0` keeps dashboard hand input off by default. Set `GESTURE_INPUT=1` and run `framehands sync` after restarting SteamVR normally to load the installed driver. A raised bare hand then aims a dashboard ray; an index pinch clicks, and holding the pinch holds the trigger for dragging. The helper hides its pointer when the dashboard closes, tracking goes stale, or a physical controller on that side moves or is near the hand. The driver releases buttons and its hand role if the helper stops. `CONTROLLER_EMULATION=0` remains reserved. FrameHands does not expose native SteamVR skeletal input or game controller input to games. Games must integrate the shared tracking data themselves; the visual overlay does not imply game input support. The renderer uses SteamVR's OpenVR overlay and DMA-BUF import interface already used by the original Frametop hand view. Room View detection is best effort, and a SteamVR update may change the private camera or shared-texture behavior.
 
 ## Verification on the headset
+
+### Dashboard pinch input
+
+The installer registers the isolated `fh_pointer` SteamVR driver. SteamVR loads drivers at startup, so restart SteamVR normally after installation, when nobody is using the headset. Enable input in `~/.config/framehands/config` with `GESTURE_INPUT=1`, then run `~/.local/bin/framehands sync`. Raise a bare hand in front of the headset while the dashboard is open; the hand ray should appear. An index pinch presses the dashboard trigger, a short pinch clicks, and holding it can drag. The service is `framehands-input.service`. Physical controllers on that side take precedence when moving or near the tracked hand. Closing the dashboard or losing tracking releases the trigger and hides the virtual pointer. This input is limited to the SteamVR dashboard; games receive no synthesized controller or skeletal input. The interaction needs a headset test before it can be claimed to work on a Frame.
 
 Only test with nobody wearing the headset, following the original project's testbench and safety guidance if it is available. Without that setup, observe without forcing poses:
 
 ```bash
-systemctl --user status steamvr.service framehands-camd.service framehands-track.service framehands-view.service
+systemctl --user status steamvr.service framehands-camd.service framehands-track.service framehands-view.service framehands-input.service
 framehands doctor
 framehands status
 framehands gestures
@@ -53,7 +57,7 @@ framehands logs
 getcap ~/.local/share/framehands/app/hands/build/fh-camd
 ```
 
-Success means all three FrameHands services are active while SteamVR is running, `doctor` reports no service or permission errors, `status` reports the left and right hands when both are in the cameras' view, `gestures` updates on pinch and grip, and both posed overlays appear in the headset. Stop SteamVR normally and verify all three FrameHands units stop. No hardware verification has been performed as part of this refactor.
+Success means the three default FrameHands services are active while SteamVR is running, `doctor` reports no service or permission errors, `status` reports the left and right hands when both are in the cameras' view, `gestures` updates on pinch and grip, and both posed overlays appear in the headset. Stop SteamVR normally and verify all enabled FrameHands units stop. No hardware verification has been performed as part of this refactor.
 
 If the broker fails, check the camera calibration files and capabilities. If the tracker fails, check `framehands logs` for a camera-ring heartbeat or model error. If rendering fails, check for a missing SteamVR OpenVR interface or GPU library with `framehands doctor` and the renderer's journal. The installer requires a published release; a clone without one cannot install prebuilt binaries.
 
@@ -71,7 +75,7 @@ CI proves ARM64 compilation and offline tests, not compatibility with every Stea
 ./uninstall.sh --models --config
 ```
 
-The uninstaller stops and disables only FrameHands units, removes its camera binary's capabilities, its app folder and CLI symlink, and preserves config by default. It does not remove Podman containers, SteamVR, Frametop, desktop files, or other users' files.
+The uninstaller stops and disables only FrameHands units, removes its camera binary's capabilities, its app folder and CLI symlink, and preserves config by default. It unregisters only the FrameHands SteamVR input driver. It does not remove Podman containers, SteamVR, Frametop, desktop files, or other users' files.
 
 ## Attribution and licenses
 

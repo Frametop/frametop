@@ -13,7 +13,7 @@ import time
 ROOT = Path(__file__).resolve().parent
 CONFIG = Path.home() / ".config/framehands/config"
 RUN = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{getattr(os, 'getuid', lambda: 0)()}")) / "framehands"
-UNITS = ("framehands-camd.service", "framehands-track.service", "framehands-view.service")
+UNITS = ("framehands-camd.service", "framehands-track.service", "framehands-view.service", "framehands-input.service")
 
 
 def config():
@@ -55,7 +55,8 @@ def selected():
     cfg = config()
     if cfg.get("TRACKING", "1") == "0":
         return ()
-    return UNITS[:2] + (UNITS[2],) if cfg.get("RENDER", "1") != "0" else UNITS[:2]
+    return (UNITS[:2] + ((UNITS[2],) if cfg.get("RENDER", "1") != "0" else ()) +
+            ((UNITS[3],) if cfg.get("GESTURE_INPUT", "0") == "1" else ()))
 
 
 def tracker_args():
@@ -138,7 +139,9 @@ def doctor():
         issues.append("SteamVR ARM64 OpenVR library is missing")
     for name, path in (("camera broker", ROOT / "hands/build/fh-camd"),
                        ("tracker", ROOT / "hands/build/fh-hands"),
-                       ("renderer", ROOT / "renderer/build/framehands-view")):
+                       ("renderer", ROOT / "renderer/build/framehands-view"),
+                       ("dashboard input", ROOT / "pointer/build/fh-input"),
+                       ("SteamVR input driver", ROOT / "pointer/driver/fh_pointer/bin/linuxarm64/driver_fh_pointer.so")):
         if not path.is_file():
             issues.append(f"{name} binary missing: {path}")
     if shutil.which("getcap") and (ROOT / "hands/build/fh-camd").exists():
@@ -169,7 +172,7 @@ def doctor():
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="framehands")
     parser.add_argument("command", choices=("start", "stop", "restart", "status", "enable", "disable",
-                                            "gestures", "logs", "doctor", "sync", "run-tracker", "run-camd", "run-view"))
+                                            "gestures", "logs", "doctor", "sync", "run-tracker", "run-camd", "run-view", "run-input"))
     args = parser.parse_args(argv)
     cmd = args.command
     try:
@@ -183,6 +186,9 @@ def main(argv=None):
         elif cmd == "run-view":
             binary = str(ROOT / "renderer/build/framehands-view")
             os.execv(binary, (binary, "--status", "10" if config().get("DEBUG", "0") == "1" else "60"))
+        elif cmd == "run-input":
+            binary = str(ROOT / "pointer/build/fh-input")
+            os.execv(binary, (binary,))
         elif cmd == "enable":
             set_config("TRACKING", "1")
             set_config("AUTO_START", "1")

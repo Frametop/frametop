@@ -1,0 +1,15 @@
+[Unit]
+Description=FrameHands SteamVR dashboard hand input
+After=steamvr.service framehands-track.service
+Requisite=steamvr.service
+Wants=framehands-track.service
+PartOf=steamvr.service
+
+[Service]
+ExecStart=@ROOT@/framehands run-input
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5
+
+[Install]
+WantedBy=steamvr.service

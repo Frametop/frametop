@@ -1,0 +1,51 @@
+{
+	"jsonid": "input_profile",
+	"controller_type": "fh_pointer",
+	"device_class": "TrackedDeviceClass_Controller",
+	"resource_root": "fh_pointer",
+	"driver_name": "fh_pointer",
+	"input_bindingui_mode": "controller_handed",
+	"should_show_binding_errors": true,
+	"input_source": {
+		"/input/trigger": {
+			"type": "button",
+			"click": true
+		},
+		"/input/b": {
+			"type": "button",
+			"click": true
+		},
+		"/input/x": {
+			"type": "button",
+			"click": true
+		},
+		"/input/system": {
+			"type": "button",
+			"click": true
+		},
+		"/input/joystick": {
+			"type": "joystick",
+			"click": true
+		},
+		"/pose/raw": {
+			"type": "pose"
+		},
+		"/pose/tip": {
+			"type": "pose"
+		},
+		"/input/a": {
+			"type": "button",
+			"click": true
+		}
+	},
+	"default_bindings": [
+		{
+			"app_key": "openvr.component.vrcompositor",
+			"binding_url": "fh_pointer_vrcompositor.json"
+		},
+		{
+			"app_key": "steam.client",
+			"binding_url": "fh_pointer_steam.json"
+		}
+	]
+}

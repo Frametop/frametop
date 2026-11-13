@@ -20,22 +20,24 @@ grep -qi steamos /etc/os-release || fail 'SteamOS was not detected'
   fail 'Steam Frame camera calibration files are missing'
 command -v systemctl >/dev/null || fail 'systemd user services are required'
 command -v getcap >/dev/null || fail 'getcap is required to verify camera capabilities'
+reg=/opt/steamvr/bin/linuxarm64/vrpathreg
+[[ -x $reg ]] || fail 'SteamVR driver registration tool is missing'
 if [[ $(id -u) != 0 ]]; then command -v sudo >/dev/null || fail 'sudo is required to set camera capabilities'; fi
 [[ ! -L $app ]] || fail 'FrameHands app path is a symlink; refusing to replace it'
-for unit in framehands-camd.service framehands-track.service framehands-view.service; do
+for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do
   file=$units/$unit
   if [[ -f $file ]] && ! grep -Fq "$app/" "$file"; then
     fail "$file exists and does not belong to this FrameHands install"
   fi
 done
-for unit in frametop-camd.service frametop-hands.service frametop-handview.service; do
+for unit in frametop-camd.service frametop-hands.service frametop-handview.service frametop-pointer.service; do
   if systemctl --user is-active --quiet "$unit"; then
     fail "$unit is running. Stop Frametop hand tracking before installing FrameHands; it will not be changed."
   fi
 done
 
 source_dir=$root
-if [[ ! -x $root/hands/build/fh-camd || ! -x $root/hands/build/fh-hands || ! -x $root/renderer/build/framehands-view ]]; then
+if [[ ! -x $root/hands/build/fh-camd || ! -x $root/hands/build/fh-hands || ! -x $root/renderer/build/framehands-view || ! -x $root/pointer/build/fh-input || ! -f $root/pointer/build/driver_fh_pointer.so ]]; then
   command -v git >/dev/null || fail 'prebuilt binaries are missing; install from a FrameHands release archive'
   remote=$(git -C "$root" remote get-url origin 2>/dev/null || true)
   case $remote in
@@ -63,9 +65,10 @@ if [[ ! -x $root/hands/build/fh-camd || ! -x $root/hands/build/fh-hands || ! -x 
   source_dir=$tmp/release
 fi
 
-for bin in hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view; do
+for bin in hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view pointer/build/fh-input; do
   [[ -x $source_dir/$bin ]] || fail "$bin is missing from the release"
 done
+[[ -f $source_dir/pointer/build/driver_fh_pointer.so ]] || fail 'the SteamVR input driver is missing'
 [[ -f $source_dir/hands/models/student/hand.ncnn.bin ]] ||
   fail 'the pinned fine-tuned models are missing from the release'
 [[ -f $source_dir/hands/models/ncnn/hand.ncnn.bin ]] || fail 'the stock fallback model is missing'
@@ -73,12 +76,15 @@ done
 stage=$HOME/.local/share/framehands/app.new.$$
 [[ ! -e $stage && ! -L $stage ]] || fail 'temporary install path already exists'
 mkdir -m 700 "$stage"
-mkdir -p "$stage/hands/build" "$stage/hands/camd" "$stage/renderer/build" "$stage/renderer/assets" "$stage/config" "$stage/services"
+mkdir -p "$stage/hands/build" "$stage/hands/camd" "$stage/renderer/build" "$stage/renderer/assets" "$stage/pointer/build" "$stage/pointer/driver/fh_pointer/bin/linuxarm64" "$stage/config" "$stage/services"
 cp -a "$source_dir/hands/build/fh-camd" "$source_dir/hands/build/fh-hands" "$stage/hands/build/"
 cp -a "$source_dir/hands/camd/LICENSE.FrameEyeCameraFeed" "$stage/hands/camd/"
 cp -a "$source_dir/hands/models" "$stage/hands/"
 cp -a "$source_dir/renderer/build/framehands-view" "$stage/renderer/build/"
 cp -a "$source_dir/renderer/assets/hands" "$stage/renderer/assets/"
+cp -a "$source_dir/pointer/build/fh-input" "$stage/pointer/build/"
+cp -a "$source_dir/pointer/driver/fh_pointer/". "$stage/pointer/driver/fh_pointer/"
+cp -a "$source_dir/pointer/build/driver_fh_pointer.so" "$stage/pointer/driver/fh_pointer/bin/linuxarm64/"
 cp -a "$source_dir/config/default.conf" "$stage/config/"
 cp -a "$source_dir/services/". "$stage/services/"
 cp -a "$source_dir/framehands" "$stage/framehands"
@@ -101,29 +107,38 @@ fi
 getcap "$stage/hands/build/fh-camd" | grep -q cap_sys_ptrace || fail 'camera capabilities were not applied'
 
 # From here, only FrameHands units are changed. A failed upgrade restores the old app.
-systemctl --user stop framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
+systemctl --user stop framehands-input.service framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
 old=$HOME/.local/share/framehands/app.old.$$
 if [[ -e $app ]]; then mv "$app" "$old"; fi
 mv "$stage" "$app"
-for unit in framehands-camd.service framehands-track.service framehands-view.service; do
+for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do
   sed "s|@ROOT@|$app|g" "$app/services/$unit" > "$units/$unit"
 done
 ln -sfn "$app/framehands" "$HOME/.local/bin/framehands"
 systemctl --user daemon-reload
-if ! "$app/framehands" sync; then
+mkdir -p "$tmp/no-open"
+printf '#!/bin/sh\nexit 0\n' > "$tmp/no-open/xdg-open"
+chmod 755 "$tmp/no-open/xdg-open"
+register_driver() {
+  env PATH="$tmp/no-open:$PATH" XDG_CONFIG_HOME="$HOME/.config" \
+    LD_LIBRARY_PATH=/opt/steamvr/bin/linuxarm64 "$reg" adddriver "$app/pointer/driver/fh_pointer"
+}
+if ! register_driver || ! "$app/framehands" sync; then
   echo 'FrameHands install: service activation failed; restoring the previous install' >&2
-  systemctl --user stop framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
+  systemctl --user stop framehands-input.service framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
   rm -rf -- "$app"
   if [[ -d $old ]]; then
     mv "$old" "$app"
-    for unit in framehands-camd.service framehands-track.service framehands-view.service; do
+    for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do
       sed "s|@ROOT@|$app|g" "$app/services/$unit" > "$units/$unit"
     done
     ln -sfn "$app/framehands" "$HOME/.local/bin/framehands"
     systemctl --user daemon-reload
     "$app/framehands" sync || true
   else
-    for unit in framehands-camd.service framehands-track.service framehands-view.service; do rm -f "$units/$unit"; done
+    env XDG_CONFIG_HOME="$HOME/.config" LD_LIBRARY_PATH=/opt/steamvr/bin/linuxarm64 \
+      "$reg" removedriver "$app/pointer/driver/fh_pointer" 2>/dev/null || true
+    for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do rm -f "$units/$unit"; done
     rm -f "$HOME/.local/bin/framehands"
     systemctl --user daemon-reload
   fi
@@ -136,4 +151,4 @@ if [[ -d $old ]]; then
   fi
   rm -rf "$old"
 fi
-echo 'FrameHands installed. Launch SteamVR, then run: ~/.local/bin/framehands status'
+echo 'FrameHands installed. Restart SteamVR normally to load its input driver, then run: ~/.local/bin/framehands status'

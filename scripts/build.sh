@@ -7,3 +7,4 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 make -C "$root/hands" check
 make -C "$root/hands" all
 bash "$root/renderer/build.sh"
+bash "$root/pointer/build.sh"

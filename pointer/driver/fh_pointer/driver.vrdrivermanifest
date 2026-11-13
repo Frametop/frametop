@@ -1,0 +1,7 @@
+{
+	"alwaysActivate": true,
+	"name": "fh_pointer",
+	"directory": "",
+	"resourceOnly": false,
+	"hmd_presence": []
+}

@@ -738,10 +738,12 @@ Item {
                     onToggled: backend.setVrKeyboardPersist(checked)
                 }
                 Controls.Label {
+                    objectName: "keyboardsConnected"
                     Kirigami.FormData.label: "Keyboards connected:"
                     text: kpage.keyboards.length ? kpage.keyboards.map(d => d.name).join(", ") : "none"
                 }
                 Controls.Label {
+                    objectName: "keyedPointers"
                     visible: kpage.keyedPointers.length > 0
                     text: "Not counted, because its role is 3D pointer: " + kpage.keyedPointers.map(d => d.name).join(", ")
                           + ". If that is a keyboard with a touchpad, set its role to Keyboard + 3D pointer on the "

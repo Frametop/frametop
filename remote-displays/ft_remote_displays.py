@@ -7,14 +7,18 @@ the dev container:
   - Hosts: computers running Vibepollo, found on the network (they announce _nvstream._tcp
     over mDNS; avahi-browse on the host) or typed in. You sign in once with the host's Web UI
     user name and password: Frametop asks it for an API token that can do only what it needs
-    (SCOPES), keeps that in ~/.local/share/frametop-stream/hosts/ADDRESS.token, readable only
-    by you, and forgets the password. The Web UI's certificate is self-signed, so the one seen
-    then is pinned (ADDRESS.pin, its public key's SHA-256): ft-stream and later sign-ins
-    refuse another. Whether each host answers on its Web UI port is checked now and then.
+    (conf/ft_hostsignin.py), keeps that in ~/.local/share/frametop-stream/hosts/ADDRESS.token,
+    readable only by you, and forgets the password. The Web UI's certificate is self-signed, so
+    the one seen then is pinned (ADDRESS.pin, its public key's SHA-256): ft-stream and later
+    sign-ins refuse another. Whether each host answers on its Web UI port is checked now and then.
     Plain Sunshine (a Mac: host/macos runs one instance per display, each on its own port) has
     no tokens: the login is kept in memory only until the displays picked right after signing
     in are paired with it (ft-layout remote add --login), then forgotten. Adding more later
     signs in again.
+  - App windows, per host: the switch signs in to the Vibepollo on it that shares its apps'
+    windows (a Windows PC's own, a Linux PC's second one in its Hyprland session), keeps that
+    one's token (ADDRESS-PORT.token) and sets the host's "windows" port in the layout, which is
+    what frunner and ft-layout window go by (docs/remote-displays.md, "PC app windows").
   - Displays: a host's existing monitor, or a virtual one at any size, each its own stream
     (ft-layout remote add pairs a client for it). Each one connects and disconnects on its
     own, or all of a host's at once; a disconnected one keeps its place and settings.
@@ -28,15 +32,11 @@ Save as profile keeps it). Anything that touches the streams runs layout/ft-layo
 host; the streams' state comes from ft-screens (@ft_screens: "remotes", "remote N info").
 Frametop Settings (settings/ft_settings.py) makes it, the first time its page opens.
 """
-import base64
 import concurrent.futures
-import hashlib
 import html
-import http.client
 import json
 import os
 import re
-import ssl
 import subprocess
 import sys
 import threading
@@ -47,50 +47,22 @@ from PySide6.QtCore import Property, QObject, QProcess, Qt, QTimer, Signal, Slot
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
-sys.path.insert(0, LAYOUT_DIR)
+sys.path[:0] = [LAYOUT_DIR, os.path.join(HERE, "..", "conf")]
 import ft_layout  # noqa: E402
-import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+import ft_hostapi  # noqa: E402  (where a host's token is kept; conf/)
+import ft_hostsignin  # noqa: E402  (the sign-ins that get one)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 FT_SCREENS = "\0ft_screens"
-TOKEN_DIR = os.path.expanduser("~/.local/share/frametop-stream/hosts")  # each host's API token (ft-stream)
-WEB_UI_PORT = 47990  # Vibepollo's Web UI, where ft-stream pairs and lists monitors
 # A Mac's Sunshine instances, one per display (host/macos): HTTP ports 47989 + 100*N.
 SUNSHINE_PORTS = [47989 + 100 * k for k in range(8)]
 STREAM_RATES = [30, 60, 72, 90, 120]
-# What Frametop's API token may do: pair its displays' clients (submit their PINs), list the
-# clients and set their permissions, and list the host's monitors.
-SCOPES = [{"path": "/api/pin", "methods": ["POST"]}, {"path": "/api/clients/list", "methods": ["GET"]},
-          {"path": "/api/clients/update", "methods": ["POST"]}, {"path": "/api/display-devices", "methods": ["GET"]}]
 # A host's name: a Mac's is often "Name's MacBook" (straight or curly apostrophe). It goes to
 # ft-layout as an argument and into the layout and panel labels, never through a shell.
 NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._'’-]{0,39}"
 RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
-
-
-def token_path(address):
-    return os.path.join(TOKEN_DIR, f"{address}.token")
-
-
-def pin_path(address):
-    return os.path.join(TOKEN_DIR, f"{address}.pin")
-
-
-def write_private(path, text):
-    os.makedirs(TOKEN_DIR, mode=0o700, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text + "\n")
-
-
-def spki_pin(der):
-    """A certificate's public key pin as curl takes it (CURLOPT_PINNEDPUBLICKEY)."""
-    pem = subprocess.run(["openssl", "x509", "-inform", "der", "-pubkey", "-noout"], input=der,
-                         capture_output=True, check=True).stdout
-    key = subprocess.run(["openssl", "pkey", "-pubin", "-outform", "der"], input=pem,
-                         capture_output=True, check=True).stdout
-    return "sha256//" + base64.b64encode(hashlib.sha256(key).digest()).decode()
 
 
 def parse_avahi(text):
@@ -125,6 +97,8 @@ class Backend(QObject):
     hostsFound = Signal("QVariantList")  # computers on the network: [{name, address, dongle, added}]
     signedIn = Signal(str, bool, str)  # a host's name, whether it worked, what went wrong
     _signInDone = Signal(str, str, str, str, str, str, str)  # name, address, dongle, token, pin, kind, error
+    appWindowsSet = Signal(str, bool, str)  # a host's name, whether it worked, what went wrong
+    _appWindowsDone = Signal(str, str, int, str, str, str)  # name, address, port, token, pin, error
     _reached = Signal(str, bool)  # a host's address, whether its Web UI answered
     _ipcDone = Signal(object, object)  # a callback and its answer, from the ftipc worker
 
@@ -144,6 +118,7 @@ class Backend(QObject):
         self._logins = {}   # Sunshine host address -> "USER\nPASSWORD\n", until its displays are paired
         self._reached.connect(self._host_reached, Qt.QueuedConnection)
         self._signInDone.connect(self._sign_in_done, Qt.QueuedConnection)
+        self._appWindowsDone.connect(self._app_windows_done, Qt.QueuedConnection)
         self.poll = QTimer(interval=2000, timeout=self._check)
         self.poll.start()
         self.ping = QTimer(interval=15000, timeout=self._ping_hosts)
@@ -257,10 +232,12 @@ class Backend(QObject):
             address = h.get("address", "")
             sunshine = h.get("kind") == "sunshine"
             out.append({"name": h.get("name", ""), "address": address, "kind": h.get("kind", "vibepollo"),
-                        "hasToken": address in self._logins if sunshine else os.path.exists(token_path(address)),
+                        "hasToken": address in self._logins if sunshine
+                        else os.path.exists(ft_hostapi.token_path(address)),
                         "online": self._online.get(address), "route": h.get("route", "auto"),
                         "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
                         "input": bool(h.get("input")), "clipboard": bool(h.get("clipboard")),
+                        "appWindows": isinstance(h.get("windows"), dict),
                         "displays": displays})
         return out
 
@@ -297,69 +274,20 @@ class Backend(QObject):
             return self.signedIn.emit(name, False, f"There's already a host called {name}")
 
         def work():
-            known = None
             try:
-                with open(pin_path(address)) as f:
-                    known = f.read().strip() or None
-            except OSError:
-                pass
-            error = ""
-            for target in ([dongle] if dongle else []) + [address]:
-                try:
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE  # self-signed: pinned below
-                    conn = http.client.HTTPSConnection(target, WEB_UI_PORT, timeout=15, context=ctx)
-                    conn.connect()
-                    pin = spki_pin(conn.sock.getpeercert(binary_form=True))
-                    if known and pin != known:
-                        conn.close()
-                        return self._signInDone.emit(name, address, dongle, "", "", "", "Its certificate isn't the "
-                                                     "one seen when it was added. If Vibepollo or Sunshine was "
-                                                     "installed again, remove the host and add it again.")
-                    basic = {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
-                    conn.request("POST", "/api/token", json.dumps({"scopes": SCOPES}),
-                                 {**basic, "Content-Type": "application/json"})
-                    r = conn.getresponse()
-                    text = r.read().decode(errors="replace")
-                    # No tokens: plain Sunshine, which answers a POST to a path it doesn't have with a
-                    # bare 400 "Bad Request", before any login check (404 elsewhere). The login works if
-                    # it lists clients.
-                    try:
-                        bare = r.status == 400 and json.loads(text).get("error") == "Bad Request"
-                    except (ValueError, AttributeError):
-                        bare = False
-                    if r.status == 404 or bare:
-                        conn.request("GET", "/api/clients/list", headers=basic)
-                        r = conn.getresponse()
-                        r.read()
-                        conn.close()
-                        if r.status == 401:
-                            return self._signInDone.emit(name, address, dongle, "", "", "", "Wrong user name or password")
-                        if r.status != 200:
-                            return self._signInDone.emit(name, address, dongle, "", "", "",
-                                                         f"It didn't take the login ({r.status})")
-                        self._logins[address] = f"{user}\n{password}\n"
-                        return self._signInDone.emit(name, address, dongle, "", pin, "sunshine", "")
-                    conn.close()
-                    if r.status == 401:
-                        return self._signInDone.emit(name, address, dongle, "", "", "", "Wrong user name or password")
-                    token = json.loads(text).get("token") if r.status == 200 else None
-                    if not token:
-                        return self._signInDone.emit(name, address, dongle, "", "", "",
-                                                     f"It didn't make a token ({r.status} {text[:120]})")
-                    return self._signInDone.emit(name, address, dongle, token, pin, "vibepollo", "")
-                except (OSError, ValueError, ssl.SSLError, http.client.HTTPException,
-                        subprocess.SubprocessError) as e:
-                    error = str(e) or type(e).__name__
-            self._signInDone.emit(name, address, dongle, "", "", "", f"Couldn't reach it: {error}")
+                token, pin, kind = ft_hostsignin.sign_in(([dongle] if dongle else []) + [address], user, password,
+                                                         known=ft_hostapi.first_word(ft_hostapi.pin_path(address)))
+            except ft_hostsignin.SignInError as e:
+                return self._signInDone.emit(name, address, dongle, "", "", "", str(e))
+            if kind == "sunshine":
+                self._logins[address] = f"{user}\n{password}\n"
+            self._signInDone.emit(name, address, dongle, token, pin, kind, "")
         threading.Thread(target=work, daemon=True).start()
 
     def _sign_in_done(self, name, address, dongle, token, pin, kind, error):
         if error:
             return self.signedIn.emit(name, False, error)
-        if token:
-            write_private(token_path(address), token)
-        write_private(pin_path(address), pin)
+        ft_hostsignin.keep(address, token, pin)
         layout = ft_layout.load_layout()
         host = next((h for h in layout.setdefault("hosts", []) if h.get("address") == address), None)
         if host is None:
@@ -397,11 +325,7 @@ class Backend(QObject):
         if not self._save(layout):
             return
         if not any(h.get("address") == host.get("address") for h in layout["hosts"]):
-            for path in (token_path(host.get("address", "")), pin_path(host.get("address", ""))):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+            ft_hostsignin.forget(host.get("address", ""))
         self.changed.emit()
 
     @Slot(str, bool)
@@ -435,6 +359,44 @@ class Backend(QObject):
         """Share copied text with the host both ways (its streams pick it up within 3 s)."""
         self._run(f"{'Sharing' if on else 'Not sharing'} the clipboard with {name}",
                   "remote", "host", name, f"clipboard={'on' if on else 'off'}")
+
+    @Slot(str, str, str)
+    def appWindowsOn(self, name, user, password):
+        """Signs in to the Vibepollo on the host that shares its app windows, with that one's
+        Web UI login, and turns them on (answer: appWindowsSet). The token it gives is that
+        instance's own; the password isn't kept."""
+        host = next((h for h in ft_layout.load_layout().get("hosts", []) if h.get("name") == name), None)
+        if host is None or not host.get("address"):
+            return self.appWindowsSet.emit(name, False, f"There's no host called {name}")
+        address = host["address"]
+
+        def known(port):
+            """The pin its Web UI must have: its own from an earlier sign-in, or on the port the
+            displays use, the one seen when the host was added."""
+            own = ft_hostapi.first_word(ft_hostapi.own_token_path(address, port)[:-len(".token")] + ".pin")
+            return own or (ft_hostapi.first_word(ft_hostapi.pin_path(address))
+                           if port == ft_hostapi.GAMESTREAM_PORT else "")
+
+        def work():
+            try:
+                port, token, pin = ft_hostsignin.app_windows(host.get("direct", []) + [address], user, password, known)
+            except ft_hostsignin.SignInError as e:
+                return self._appWindowsDone.emit(name, address, 0, "", "", str(e))
+            self._appWindowsDone.emit(name, address, port, token, pin, "")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _app_windows_done(self, name, address, port, token, pin, error):
+        if error:
+            return self.appWindowsSet.emit(name, False, error)
+        ft_hostsignin.keep(address, token, pin, port)
+        self._run(f"Turning on {name}'s app windows", "remote", "host", name, f"windows={port}")
+        self.appWindowsSet.emit(name, True, "")
+
+    @Slot(str)
+    def appWindowsOff(self, name):
+        """Its apps and windows leave the launcher. Window panels that are open stay until
+        closed, so its token stays too."""
+        self._run(f"Turning off {name}'s app windows", "remote", "host", name, "windows=off")
 
     @Slot(str, str)
     def setDirect(self, name, text):

@@ -36,11 +36,14 @@ def token_path(address, port=0):
     """ADDRESS.token, or with `port` ADDRESS-PORT.token when there is one: an instance's own (a
     host's Frametop windows: a Linux PC's second instance on 48989, or a Windows PC's only one,
     on 47989, whose window routes ADDRESS.token may not reach)."""
-    if port:
-        own = os.path.join(TOKEN_DIR, f"{address}-{port}.token")
-        if os.path.exists(own):
-            return own
+    if port and os.path.exists(own_token_path(address, port)):
+        return own_token_path(address, port)
     return os.path.join(TOKEN_DIR, f"{address}.token")
+
+
+def own_token_path(address, port):
+    """Where the token of the instance on `port` goes, whether or not there is one."""
+    return os.path.join(TOKEN_DIR, f"{address}-{port}.token")
 
 
 def pin_path(address, port=0):
@@ -52,7 +55,8 @@ def web_ui_port(address, port=0):
     return port + 1 if token_path(address, port) != token_path(address) else WEB_UI_PORT
 
 
-def _first_word(path):
+def first_word(path):
+    """The first word in the file (a token, a pin), or "" when there is none."""
     try:
         with open(path) as f:
             words = f.read().split()
@@ -77,10 +81,10 @@ def request(address, method, path, body=None, timeout=2.0, connect=None, token_a
     """(HTTP status, JSON answer or None): status 0 when there's no token, no answer or a wrong
     key. connect(address, port, timeout) -> an unconnected HTTPSConnection, for tests."""
     key = token_address or address
-    token = _first_word(token_path(key, port))
+    token = first_word(token_path(key, port))
     if not token:
         return 0, None
-    known = _first_word(pin_path(key, port))
+    known = first_word(pin_path(key, port))
     if connect is None:
         ctx = ssl.create_default_context()
         ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE  # self-signed: pinned below

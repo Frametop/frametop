@@ -156,6 +156,7 @@ struct Audio {
 };
 Audio g_audio;
 std::string g_host;  // the host's own address, whichever way the stream goes (Route)
+std::string g_pin;   // the pin kept with the token this stream uses (WebApi::Load), or none
 
 int AudioInit(int, const POPUS_MULTISTREAM_CONFIGURATION opus, void *, int) {
     int err = 0;
@@ -578,7 +579,9 @@ struct SharedClipboard {
     std::thread thread;
 
     ~SharedClipboard() { Close(); }
-    void Open(Client *c, const std::string &address) {
+    // ownPin: the pin kept with this stream's token. An instance with a token of its own (a
+    // host's Frametop windows) may have a certificate of its own too; else the host's pin.
+    void Open(Client *c, const std::string &address, const std::string &ownPin) {
         client = c, host = address;
         const char *run = std::getenv("XDG_RUNTIME_DIR");
         state = clipboard::StateFile(run, hostinput::RelayId(address));
@@ -589,7 +592,8 @@ struct SharedClipboard {
         }
         wayland = std::string(run) + "/frametop/wayland-0";  // session/frametop-session.sh
         std::ifstream p(KeyDir("hosts") + "/" + address + ".pin");
-        if (!(p >> pin)) pin.clear();
+        if (!ownPin.empty()) pin = ownPin;
+        else if (!(p >> pin)) pin.clear();
         char exe[4096];
         const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
         clip = n > 0 ? std::string(exe, size_t(n)) : "ft-stream";
@@ -1129,7 +1133,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
     g_audio.Claim(g_host, MonoNs());
     g_mic.name = "Remote display microphone: " + g_host;
     if (!g_windowApp) g_hostin.Open(g_host);
-    g_clip.Open(&client, g_host);
+    g_clip.Open(&client, g_host, g_pin);
     LiSetFrametopHostInputCallback(HostInputRecord);
     if (LiStartConnection(&client.server.serverInfo, &cfg, &cl, &dr, &ar, nullptr, 0, nullptr, 0) != 0)
         return viewer.Send("state lost can't connect"), g_clip.Close(), 1;
@@ -1324,6 +1328,7 @@ int main(int argc, char **argv) {
     const bool haveToken =
         login ? api.LoadLogin(host, port, stdin) : api.Load(host, tokenFile, tokenFile == shared ? 0 : port);
     if (login && !haveToken) return std::fprintf(stderr, "--login: no user name and password on stdin\n"), 2;
+    g_pin = api.pin;
     if (cmd == "monitors") {
         if (!haveToken) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
         nlohmann::json r;

@@ -206,5 +206,5 @@ Moved to [reference-features.md](reference-features.md#remote-desktop-over-vnc).
 ## Limits
 
 - A controller button can't show hidden screens; a mapped mouse or keyboard button can.
-- KWin's cursor isn't drawn on the screens, because KWin draws it as a host cursor, which ft-screens doesn't render. The 3D mouse's dot and SteamVR's laser dot show where you're pointing.
+- KWin's cursor isn't drawn on the screens, because KWin draws it as a host cursor, which ft-screens doesn't render. The 3D mouse's dot and SteamVR's laser dot show where you're pointing. Input that reaches KWin without them moves a cursor you can't see: Deskflow's (it comes through libei) or a remote desktop's. `DESKTOP_CURSOR=1` in `~/.config/frametop.conf` has KWin draw the cursor into the screens' pictures itself (`KWIN_FORCE_SW_CURSOR`, after a desktop restart); it then also shows under the 3D mouse's dot.
 - The old gamescope backend (`BACKEND=gamescope`) still works, but it gives every screen the same resolution, at most 1920×1080 pixels' worth, and arranging screens borrows the pointer for a few seconds.

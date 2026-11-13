@@ -172,7 +172,7 @@ Moved to [design-session.md](design-session.md#steamos-updates).
 ## Open questions
 
 - A controller button that shows the screens during a game. Games own the controllers, so this needs SteamVR input actions for ft-screens.
-- Drawing KWin's cursor on the screens.
+- Drawing KWin's cursor on the screens by default. `DESKTOP_CURSOR=1` has KWin draw it itself, for input that isn't the 3D mouse or a laser (Deskflow), but then it shows under the 3D mouse's dot too; ft-screens drawing it only while the 3D mouse and the lasers are away is not built.
 - Frame pacing and GPU cost with several busy screens haven't been measured.
 - Whether the screen-jump fix (`screens/universefix.h`) catches every screen jump after walking away. It was built from vrserver's logs, not a logged repro of a jump; the tracking watch's lines and the fix's `universe` lines in `~/.local/state/frametop/screens.log` show the next one. A recenter saved per tracking world can also differ from a universe's own standing (the Room Setup origin) when tracking comes back in a new tracking world; screens follow that like any recenter.
 - Real standby on a stand, with rendering and tracking paused, not just the backlight off. SteamVR has no call for it, and its activity level follows the proximity sensor.

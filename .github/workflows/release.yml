@@ -1,106 +1,55 @@
-# Build Frametop's release on Depot's arm64 runners (the Frame is aarch64): the image from
-# pack/Containerfile, the test gate inside it, then Frametop.zip (framedrop/build.sh), the
-# image with its installer: FrameDrop installs it from a PC, or you unpack it on the headset
-# and run Frametop/frametop-install.sh, or get.sh --release downloads it (pack/README.md,
-# Releases). It's about 1.1 GB, under GitHub's 2 GB a file.
-#
-# A v* tag makes a draft GitHub release with the zip, its FrameDrop manifest, its
-# frametop-release.json, and SHA256SUMS (a prerelease when the tag has a "-", like
-# v0.3.0-exp.1). Nothing is public until someone publishes the draft. A manual run keeps the
-# zip as the run's artifact for a week.
-#
-# podman, as on the Frame: the zip holds podman save's archive, which the headset loads with
-# podman. Not on pushes or pull requests: Depot's runners are paid, and a fork's pull request
-# would run on them. Actions are pinned to commit SHAs (the version in the comment).
-name: release
-
+name: ARM64 release
 on:
   push:
-    tags: ["v*"]
+    tags: ['v*']
   workflow_dispatch:
-
 permissions:
-  contents: write  # the draft release
-
-concurrency:
-  group: release-${{ github.ref }}
-
+  contents: write
 jobs:
-  release:
-    runs-on: depot-ubuntu-24.04-arm-4
+  build:
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
-    env:
-      FT_ENGINE: podman
     steps:
-      # actions/checkout@v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: version
+      # actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install ARM64 build dependencies
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then v=${GITHUB_REF_NAME#v}; else v=0.0.0-ci.${GITHUB_SHA::7}; fi
-          echo "VERSION=$v" >> "$GITHUB_ENV"
-          echo "FT_IMAGE=localhost/frametop:$v" >> "$GITHUB_ENV"
-
-      - name: build the image
-        run: ./ft dev build
-
-      # The unit gate: Python (strict), C, and shell, inside the image, so what passes here is
-      # what the zip installs.
-      - name: test (python, c, bash)
-        run: ./ft dev test
-
-      - name: smoke (what a release installs from the image)
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl unzip pkg-config \
+            libjsoncpp-dev libgbm-dev libdrm-dev libegl1-mesa-dev libgles2-mesa-dev
+      - name: Fetch pinned OpenVR ARM64 API library
         run: |
-          podman run --rm --entrypoint sh "$FT_IMAGE" -c '
-            set -e
-            for p in ft-screens ft-spotpanel ft-pointer ft-powerd ft-gaze ft-gazepanel ft-stream ft-eyegrab whisper-server; do
-              test -x /opt/frametop/bin/$p
-            done
-            test -f /src/frametop/pointer/driver/build/driver_ft_pointer.so
-            test -x /src/frametop/hands/build/ft-camd
-            test -x /src/frametop/hands/build/ft-hands
-            test -x /src/frametop/hands/rec/build/ft-handpanel
-            test -x /src/frametop/layout/countdown/build/ft-reset-timer
-            /src/frametop/hands/models.sh check
-            test -x /src/frametop/pack/build/distrobox/install
-            /src/frametop/gaze/tracker/build/venv/bin/python -c "import numpy, cv2, ncnn"
-            /src/frametop/voice/build/venv/bin/python -c "import numpy, sentencepiece, sherpa_onnx"
-            python3 -c "import PySide6, huggingface_hub"
-            command -v zstd >/dev/null'
-
-      # The FrameDrop manifest names the zip's URL in this repo's release (a fork's, in a fork).
-      - name: Frametop.zip
+          mkdir -p build/openvr
+          curl -fL https://raw.githubusercontent.com/ValveSoftware/openvr/0924064316de3effbcd1acf1e309182a2deb1c05/bin/linuxarm64/libopenvr_api.so \
+            -o build/openvr/libopenvr_api.so
+          echo 'cc3671d24dd23fb61494e8a8327cf4fe7f638a60508ff7225984a03f2f5947e9  build/openvr/libopenvr_api.so' | sha256sum -c
+      - name: Build and run offline tests
+        env:
+          OPENVR_LIB: ${{ github.workspace }}/build/openvr
+        run: bash scripts/build.sh
+      - name: Check binary architecture and external libraries
         run: |
-          url=()
-          [ "$GITHUB_REF_TYPE" = tag ] &&
-            url=("https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Frametop.zip")
-          framedrop/build.sh --image "$FT_IMAGE" --version "$VERSION" --commit "$GITHUB_SHA" "${url[@]}"
-
-      - name: keep the zip (manual runs)
+          file hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view
+          for bin in hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-view; do
+            readelf -h "$bin" | grep -q AArch64
+          done
+          ! ldd renderer/build/framehands-view | grep -q 'not found'
+          ! ldd hands/build/fh-hands | grep -q 'not found'
+      - name: Package release
+        run: bash scripts/package.sh dist
+      - name: Upload workflow artifact
         if: github.ref_type != 'tag'
-        # actions/upload-artifact@v7.0.2
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        # actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Frametop-${{ env.VERSION }}
-          path: framedrop/build/
-          retention-days: 7
-
-      - name: draft release (tags)
+          name: framehands-aarch64
+          path: dist/
+      - name: Create draft release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pre=() notes=pack/release-notes.md
-          if [[ $VERSION == *-* ]]; then
-            pre=(--prerelease)
-            # get.sh --release asks for a channel and offers stable first: an experimental
-            # release's install line names its channel.
-            notes=$RUNNER_TEMP/release-notes.md
-            sed 's/bash -s -- --release`/bash -s -- --release --experimental`/' pack/release-notes.md >"$notes"
-            grep -q -- '--release --experimental`' "$notes" ||
-              echo "::warning::pack/release-notes.md has no get.sh --release line to mark experimental"
-          fi
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag "${pre[@]}" \
-            --title "Frametop $VERSION" --notes-file "$notes" --generate-notes \
-            framedrop/build/Frametop.zip framedrop/build/frametop.framedrop.json \
-            framedrop/build/frametop-release.json framedrop/build/SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "FrameHands $GITHUB_REF_NAME" \
+            --notes 'Standalone Steam Frame hand tracking. Hardware verification is required.' \
+            dist/framehands-aarch64.tar.gz dist/SHA256SUMS

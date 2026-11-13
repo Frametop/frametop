@@ -1,23 +1,17 @@
-// ft-hands: hands in 3D from ft-camd's ring, published for Frametop's ft-screens (the hand
-// cutouts), and pinches and grips for the pointer. It started as a port of frame-hands'
+// fh-hands: hands in 3D from fh-camd's ring, published for the standalone
+// SteamVR overlay and external readers. It started as a port of frame-hands'
 // Python prototype: the same scheduling, with the models on a few threads.
 //
-//   ft-hands [--seconds N] [--threads N] [--int8] [--status S] [--models DIR] [--nice N]
+//   fh-hands [--seconds N] [--threads N] [--int8] [--status S] [--models DIR] [--nice N]
 //            [--no-publish] [--no-gestures] [--record DIR] [--sides auto|0|1] [--cams auto|mono|color|all] ...
 //            (--help lists them all)
 //
-// Parked (hand interaction in VR games): while run_dir/park exists (/run/user/UID/frametop-hands/park;
-// the input relay makes it when Frametop pauses for a game and removes it when the dashboard opens or
-// Frametop resumes), ft-hands processes no frames: the models stay loaded, the hands file says no
+// Parked: while run_dir/park exists (/run/user/UID/framehands/park),
+// fh-hands processes no frames: the models stay loaded, the hands file says no
 // hands, and a gesture down ends, as lost. It writes "0" to run_dir/hands-want every second, so
-// ft-camd stops copying the mono cameras' frames meanwhile (it copies again 3 s after the last
+// fh-camd stops copying the mono cameras' frames meanwhile (it copies again 3 s after the last
 // write). Unparked, it tracks again from a palm search (about 200 ms). Not while recording.
-// The testbench (testbench/, a development tool that never ships) parks it the same way while it
-// publishes fake hands: through $XDG_RUNTIME_DIR/frametop-testbench/hands, which it touches every
-// second. One older than 3 s doesn't count, so a crashed testbench lets go by itself.
-//
-// --no-gestures: hands for the cutouts only. No pinch or grip detection, so nothing reaches
-// the pointer and a closing hand doesn't raise the rate; the gestures file is removed.
+// --no-gestures: no pinch or grip detection; the gestures file is removed.
 //
 // Which cameras (--cams, HANDS_CAMERAS): the four mono IR cameras light the hands with their
 // own IR and track well in dim rooms, but in bright light (a sunny room, a window behind the
@@ -26,42 +20,42 @@
 // and grainy in a dim room, clear in a lit one. auto (the default) picks by how bright the
 // colour cameras' frames are: at HANDS_BRIGHT_ON (mean luma) or over for 2 s, it tracks with
 // HANDS_BRIGHT (all: every camera, so hands low at the sides stay in the side cameras; or
-// color); under HANDS_BRIGHT_OFF for 2 s, with the mono cameras again. ft-camd runs the colour
-// cameras at 2 fps, enough to tell the light, until ft-hands asks for 30
-// (/run/user/UID/frametop-hands/color-fps). The colour frames' capture times are on their
+// color); under HANDS_BRIGHT_OFF for 2 s, with the mono cameras again. fh-camd runs the colour
+// cameras at 2 fps, enough to tell the light, until fh-hands asks for 30
+// (/run/user/UID/framehands/color-fps). The colour frames' capture times are on their
 // own clock, so they're placed on the mono cameras' by when they were dequeued, less the
 // mono cameras' measured delay.
 //
 // Which side camera is which (--sides, HANDS_SWAP_SIDES): the names come from XRService's log
-// (cameras_from_xrservice_log) and ft-camd matches each camera's buffers exactly (VIDIOC_QUERYBUF),
+// (cameras_from_xrservice_log) and fh-camd matches each camera's buffers exactly (VIDIOC_QUERYBUF),
 // so they should be right; before 2026-10-05 they were often swapped. auto (the default) still
 // tells from the hands it tracks (track/sides.h): once it's sure, it exchanges the two
 // cameras if they're backwards (the tracked views move with their images), and checks once
 // more. 0 and 1 force the naming (1: exchanged; --swap-sides is --sides 1); it still checks,
 // and if the hands disagree it warns and publishes what the hands say as the truth ("swapped"),
-// so recordings are labelled right while tracking keeps the forced names. The decision is published in /run/user/UID/frametop-hands/sides.json (see
+// so recordings are labelled right while tracking keeps the forced names. The decision is published in /run/user/UID/framehands/sides.json (see
 // write_sides below) and, for recordings, in DIR/sides.json. --record-only can't tell (it tracks
 // nothing): under auto it records the ring's names as they are.
 //
-// Settings in ~/.config/frametop.conf (FT_<name> in the environment overrides them, and
+// Settings in ~/.config/framehands/config (FH_<name> in the environment overrides them, and
 // options override both): HANDS_SWAP_SIDES (auto, 0 or 1), HANDS_CPUS (as --cpus),
 // HANDS_CAMERAS, HANDS_BRIGHT, HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT (which
 // colour camera is passthrough_left: color_video0 or color_video3), HANDS_COLOR_CROP
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
-// stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
+// stock, or a version's name under models/versions/), HANDS_MODELS (as --models: a folder with palm.ncnn.*
 // and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
 // begin on a sharp dip of the thumb-index distance, PinchParams::dip), HANDS_PINCH_FIST_CURL (1.2; 0 off:
 // no pinch begins while the index and middle are curled under this, PinchParams::fist_curl).
 //
-// Flags (track/flagbuf.h; HANDS_FLAG_BUFFER, default 1): ft-hands keeps the last HANDS_FLAG_SECONDS
+// Flags (track/flagbuf.h; HANDS_FLAG_BUFFER, default 1): fh-hands keeps the last HANDS_FLAG_SECONDS
 // (12) of hand crops and its output in RAM (at most HANDS_FLAG_MB, 80, of crops HANDS_FLAG_CROP, 224
-// px, a side), and `ft-handsctl flag [note]` writes them and the next 2 s to a folder for frame-hands'
+// px, a side), and a flag request writes them and the next 2 s to a folder for frame-hands'
 // offline tools. The request is run_dir/flag (key=value lines: dir, note, said_unix, flag_unix),
 // checked 4 times a second and removed when taken; the folder's manifest.json is written last.
-#include "../../conf/ft_conf.h"
+#include "../../config/ft_conf.h"
 #include "flagbuf.h"
 #include "io.h"
 #include "pinch.h"
@@ -154,17 +148,17 @@ const char *camera_for_pipe(int node) {
     return nullptr;
 }
 
-// A setting from ~/.config/frametop.conf (docs/config.md), or FT_<key> from the environment; "" if unset.
+// A setting from ~/.config/framehands/config (config/ft_conf.h), or FH_<key> from the environment; "" if unset.
 std::string setting(const std::string &key) { return ft_conf::Setting(key.c_str(), ""); }
 
 // A number setting into v: unset leaves it, and a value that isn't a number (atof's 0 before)
-// warns and leaves it too (docs/config.md). True when it was set.
+// warns and leaves it too (config/ft_conf.h). True when it was set.
 bool setting_number(const std::string &key, double &v) {
     const std::string t = setting(key);
     double x;
     if (t.empty()) return false;
     if (!ft_conf_number(t.c_str(), &x)) {
-        std::fprintf(stderr, "frametop.conf: %s=%s isn't a number; using %g\n", key.c_str(), t.c_str(), v);
+        std::fprintf(stderr, "framehands/config: %s=%s isn't a number; using %g\n", key.c_str(), t.c_str(), v);
         return false;
     }
     v = x;
@@ -183,11 +177,11 @@ std::vector<int> parse_cpus(const char *p) {
     return out;
 }
 
-// Where SIGUSR1 puts recordings: $XDG_DATA_HOME/frametop/hands (~/.local/share/...).
+// Where SIGUSR1 puts optional diagnostic recordings: $XDG_DATA_HOME/framehands/hands.
 std::string recordings_dir() {
     const char *data = std::getenv("XDG_DATA_HOME"), *home = std::getenv("HOME");
     std::string dir = data && *data ? data : std::string(home ? home : "") + "/.local/share";
-    for (const char *part : {"/frametop", "/hands"}) mkdir((dir += part).c_str(), 0700);
+    for (const char *part : {"/framehands", "/hands"}) mkdir((dir += part).c_str(), 0700);
     return dir;
 }
 
@@ -210,7 +204,7 @@ bool parse_cams(const std::string &s, Cams &out) {
 }
 
 // How bright it is, for auto (see the top): the colour frames' mean luma, smoothed over about
-// a second, with hysteresis and a 2 s hold each way. No colour frames for 3 s (ft-camd paused
+// a second, with hysteresis and a 2 s hold each way. No colour frames for 3 s (fh-camd paused
 // them, or has none) reads as dim.
 struct Lighting {
     double on = 40, off = 25;
@@ -309,7 +303,7 @@ int main(int argc, char **argv) {
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
     // the flag buffer (see the top)
-    bool flag_on = setting("HANDS_FLAG_BUFFER") != "0";
+    bool flag_on = setting("HANDS_FLAG_BUFFER") == "1";
     FlagConfig flag_cfg;
     if (setting_number("HANDS_FLAG_SECONDS", flag_cfg.before_s)) flag_cfg.before_s = std::clamp(flag_cfg.before_s, 1.0, 60.0);
     if (double crop = flag_cfg.crop_px; setting_number("HANDS_FLAG_CROP", crop)) flag_cfg.crop_px = int(std::clamp(crop, 64.0, 512.0));
@@ -367,12 +361,12 @@ int main(int argc, char **argv) {
                         "          [--no-gestures] (hands for the cutouts only: no pinches or grips)\n"
                         "          [--record DIR] [--record-for S] [--record-hz N] [--record-only] [--cpus 5,6,7]\n"
                         "          [--sides auto|0|1] (auto: tell from the hands which side camera is which; 1: exchange them,\n"
-                        "          as --swap-sides; 0: as ft-camd names them)\n"
-                        "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
+                        "          as --swap-sides; 0: as fh-camd names them)\n"
+                        "          [--keep-presence P] (0.5) [--ring PATH] (fh-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
                         "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
-                        "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
+                        "          [--flag-buffer 0|1] (1: keep the last seconds for a flag request; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
                         "          [--pinch-begin M] (0.020) [--pinch-end M] (0.045) [--pinch-triangulated] [--pinch-palm-down MAX] (1: off)\n"
@@ -384,13 +378,13 @@ int main(int argc, char **argv) {
                         "Recording saves every frame set (at most N a second with --record-hz) for S seconds (120) to DIR/sets.bin,\n"
                         "for ft-handreplay; SIGUSR1\n"
                         "starts one in ~/.local/share/frametop/hands/rec-<time>. --record-only records without tracking, so it\n"
-                        "can run beside a tracking ft-hands. With ft-camd --with-dark, recordings also get each\n"
+                        "can run beside a tracking fh-hands. With fh-camd --with-dark, recordings also get each\n"
                         "camera's newest dark frame, as <name>_dk; with --with-color, the color cameras' as color_video<N>.\n"
                         "auto picks the cameras by the light (see the top of track/main.cpp).\n"
-                        "Settings in ~/.config/frametop.conf: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
+                        "Settings in ~/.config/framehands/config: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
                         "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR,\n"
                         "HANDS_PINCH_DIP=0|1, HANDS_PINCH_FIST_CURL, HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB\n"
-                        "(FT_<name> overrides).\n",
+                        "(FH_<name> overrides).\n",
                         argv[0]);
             return a == "--help" ? 0 : 1;
         }
@@ -429,7 +423,7 @@ int main(int argc, char **argv) {
     std::unique_ptr<Recorder> rec;
     uint64_t rec_start = 0, rec_next_ns = 0;   // rec_next_ns: --record-hz's next set, capture clock
     // The side cameras (see the top). names_swapped: slam_left's and slam_right's ring cameras
-    // are exchanged from ft-camd's naming. truth: whether ft-camd's naming is backwards, once known.
+    // are exchanged from fh-camd's naming. truth: whether fh-camd's naming is backwards, once known.
     bool names_swapped = sides_mode == "1";
     std::optional<bool> truth;
     std::string decided_by, sides_state = "deciding", decision_evidence;
@@ -460,7 +454,7 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
         return true;
     };
-    // HANDS_MODEL (Input Settings' Hands page, models/catalog.py): latest (models/student, which
+    // HANDS_MODEL: latest (models/student, which
     // hands/models.sh keeps current), stock (models/ncnn), or a downloaded version (models/versions/NAME).
     // None of the fine-tuned ones has 8-bit files, so --int8 always takes the stock ones.
     auto has_models = [](const std::string &dir) {
@@ -476,8 +470,8 @@ int main(int argc, char **argv) {
         } else if (name_ok && pick != "latest") {
             if (!int8 && has_models(model_root + "versions/" + pick)) models = model_root + "versions/" + pick;
             else if (!int8)
-                std::fprintf(stderr, "HANDS_MODEL=%s isn't downloaded (Frametop Input Settings > Hands, or "
-                             "models/ft-models fetch hands %s): using the latest\n", pick.c_str(), pick.c_str());
+                std::fprintf(stderr, "HANDS_MODEL=%s isn't downloaded (run hands/models.sh fetch): "
+                             "using the latest\n", pick.c_str());
         } else if (!pick.empty() && pick != "latest") {
             std::fprintf(stderr, "HANDS_MODEL=%s isn't a model name: using the latest\n", pick.c_str());
         }
@@ -489,17 +483,17 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "%s\n", err.c_str());
         return 1;
     }
-    if (!ring.alive()) return std::fprintf(stderr, "ft-camd isn't running (no heartbeat)\n"), 1;
+    if (!ring.alive()) return std::fprintf(stderr, "fh-camd isn't running (no heartbeat)\n"), 1;
     // so a reader can't take an earlier run's file for this one's
     if (publish && !gestures_on) unlink((run_dir() + "/gestures").c_str());
 
     std::map<std::string, int> index;   // mono calibration name -> ring camera
     std::map<std::string, int> color;   // colour calibration name (color_video<N>) -> ring camera
-    // Recorded as they are with each set: "<name>_dk" (ft-camd --with-dark) and "color_video<N>"
+    // Recorded as they are with each set: "<name>_dk" (fh-camd --with-dark) and "color_video<N>"
     // (--with-color). Recorded names hold 15 characters, so "upper_right_dark" wouldn't fit.
     std::map<std::string, int> dark;
     std::map<std::string, Camera> used;
-    // ft-camd's cameras by XRService's numbering, else by capture pipe (see camera_for_pipe);
+    // fh-camd's cameras by XRService's numbering, else by capture pipe (see camera_for_pipe);
     // ft-ringplay's (no device) by the name it gives
     const std::map<int, std::string> by_log = cameras_from_xrservice_log();
     const char *named_by = by_log.empty() ? "capture pipe" : "XRService's log";
@@ -535,7 +529,7 @@ int main(int argc, char **argv) {
         }
     }
     cams_json = "{\"named_by\": " + json_str(named_by) + ", \"cameras\": {" + cams_json + "}}";
-    // ft-camd tells the side cameras' buffers apart by XRService's allocation order, which
+    // fh-camd tells the side cameras' buffers apart by XRService's allocation order, which
     // some XRService restarts reverse (see the top).
     const bool have_sides = index.count("slam_left") && index.count("slam_right");
     std::map<std::string, uint64_t> last;       // per camera: the frame last used
@@ -555,7 +549,7 @@ int main(int argc, char **argv) {
     bool checking = track && have_sides && side_check.usable();
     int side_round = 0;   // auto: 0 deciding, then each check after a decision
     if (!track && sides_mode == "auto" && have_sides)
-        std::printf("side cameras: as ft-camd names them (--record-only can't tell; the recording's sides.json says so)\n");
+        std::printf("side cameras: as fh-camd names them (--record-only can't tell; the recording's sides.json says so)\n");
     // The colour pair, calibrated (see the top), unless only the mono cameras are wanted.
     if (color.size() == 2 && (automatic || fixed != Cams::Mono)) {
         const std::string left = color.count(color_left) ? color_left : color.begin()->first;
@@ -574,7 +568,7 @@ int main(int argc, char **argv) {
         color.clear();
     }
     if (color.empty() && (automatic || fixed != Cams::Mono)) {
-        if (!automatic) std::printf("no colour cameras (ft-camd --with-color): tracking with the mono ones\n");
+        if (!automatic) std::printf("no colour cameras (fh-camd --with-color): tracking with the mono ones\n");
         fixed = Cams::Mono;
     }
     const bool switching = automatic && !color.empty();
@@ -696,17 +690,17 @@ int main(int argc, char **argv) {
     // to place the colour frames, whose capture clock is their own (see the top).
     double mono_delay_ns = -1;
     const std::string want_file = run_dir() + "/color-fps";
-    // A reader that needs the full rate writes it to want-hz and keeps the file fresh: ft-screens,
+    // A reader that needs the full rate writes it to want-hz and keeps the file fresh.
     // while a hand is near one of its panels (a poke's latency at 15 Hz doubles). Older than 1 s
     // (by its mtime), it lapses. Checked 5 times a second.
     const std::string want_hz_file = run_dir() + "/want-hz";
     double want_hz = 0;
     uint64_t t_want_hz = 0;
-    // The side cameras' naming, for the hand recorder and other tools (hands/rec/session.py
-    // reads it): written by a tracking, publishing ft-hands at the start, on every change and
-    // every 2 s, and removed when it exits. swapped: ft-camd's naming is backwards (null: not
-    // known yet); names_swapped: whether this ft-hands exchanged them; ring_ino: the ring file's
-    // inode (a new ft-camd makes a new one, and the decision is only good for that run).
+    // The side cameras' naming for external readers and diagnostic recordings: written
+    // by the publishing tracker at the start, on every change and
+    // every 2 s, and removed when it exits. swapped: fh-camd's naming is backwards (null: not
+    // known yet); names_swapped: whether this fh-hands exchanged them; ring_ino: the ring file's
+    // inode (a new fh-camd makes a new one, and the decision is only good for that run).
     const std::string sides_file = run_dir() + "/sides.json";
     const bool write_sides_file = publish && track;
     struct stat ring_st{};
@@ -816,11 +810,11 @@ int main(int argc, char **argv) {
         return n ? sum / n : -1;
     };
 
-    // Parking (see "Parked" at the top): run_dir/park says so; ft-camd hears it through hands-want.
+    // Parking (see "Parked" at the top): run_dir/park says so; fh-camd hears it through hands-want.
     const std::string park_file = run_dir() + "/park", hands_want_file = run_dir() + "/hands-want";
     const char *xdg_run = std::getenv("XDG_RUNTIME_DIR");
     const std::string testbench_file = (xdg_run && *xdg_run ? std::string(xdg_run) : "/run/user/" + std::to_string(getuid())) +
-                                       "/frametop-testbench/hands";
+                                       "/framehands-testbench/hands";
     auto testbench_fresh = [&] {
         struct stat st;
         timespec now;
@@ -849,7 +843,7 @@ int main(int argc, char **argv) {
                       light.level, ambient());
         FlagRequest req;
         req.dir = dir;
-        req.fields = "\"source\": \"ft-hands\", \"flag_unix\": " + num("flag_unix") + ", \"note\": " + json_string(kv["note"], true) +
+        req.fields = "\"source\": \"fh-hands\", \"flag_unix\": " + num("flag_unix") + ", \"note\": " + json_string(kv["note"], true) +
                      ", \"said_unix\": " + num("said_unix") + ", \"models\": " + json_string(models) +
                      ", \"sides\": {\"names_swapped\": " + json_bool(names_swapped) + ", \"swapped\": " + json_bool(truth) +
                      "}, \"light\": " + light_json + ", \"parked\": " + (parked ? "true" : "false");
@@ -882,7 +876,7 @@ int main(int argc, char **argv) {
             }
         }
         if (!ring.alive()) {
-            std::fprintf(stderr, "ft-camd stopped\n");
+            std::fprintf(stderr, "fh-camd stopped\n");
             exit_code = 2;
             break;
         }
@@ -914,7 +908,7 @@ int main(int argc, char **argv) {
             }
         }
         if (parked) {
-            if (mono_ns() - t_hands_want > 1'000'000'000ull) {  // fresh, so ft-camd keeps idling
+            if (mono_ns() - t_hands_want > 1'000'000'000ull) {  // fresh, so fh-camd keeps idling
                 t_hands_want = mono_ns();
                 write_file(hands_want_file, "0\n");
             }
@@ -935,7 +929,7 @@ int main(int argc, char **argv) {
             std::snprintf(why, sizeof why, "colour frames at %.0f, ambient IR %.1f", light.level, ambient());
             switch_to(light.bright ? bright_cams : Cams::Mono, why);
         }
-        // Ask ft-camd for the colour cameras' full rate while tracking or recording with them.
+        // Ask fh-camd for the colour cameras' full rate while tracking or recording with them.
         const bool want_color = !color.empty() && (mode != Cams::Mono || rec || g_record);
         if (!color.empty() && now0 - t_want > 1'000'000'000) {
             t_want = now0;
@@ -1227,7 +1221,7 @@ int main(int argc, char **argv) {
         grip.release(int64_t(mono_ns()));
         gestures.write(pinch, grip, mono_ns(), &middle);
     }
-    // ft-camd stopped: a new one comes when XRService moves the cameras (a colour module hot plug)
+    // fh-camd stopped: a new one comes when XRService moves the cameras (a colour module hot plug)
     // or restarts. Wait for it here and start again on its cameras, rather than exit and wait out
     // the unit's RestartSec as well. Its ring is a new file (camd.c unlinks the old one).
     if (exit_code == 2 && publish && track && !g_stop) {
@@ -1242,7 +1236,7 @@ int main(int argc, char **argv) {
                 next.open(ring_path.c_str(), e))
                 next_ino = st.st_ino;
             if (next_ino != ring_st.st_ino && next.alive()) {
-                std::printf("ft-camd is back: starting again on its cameras\n");
+                std::printf("fh-camd is back: starting again on its cameras\n");
                 std::fflush(stdout);
                 execv("/proc/self/exe", argv);
                 std::perror("execv /proc/self/exe");

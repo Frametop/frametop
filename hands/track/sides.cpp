@@ -157,7 +157,7 @@ std::vector<Seen> SideCheck::probe(const Nets &nets, Pool &pool, const std::map<
     std::vector<std::function<void()>> run;
     for (Job &j : jobs) run.push_back([&nets, &images, &j] { j.lm = nets.landmarks(images.at(j.cam), j.roi); });
     pool.run(run);
-    static const bool debug = std::getenv("FT_SIDES_DEBUG") != nullptr;
+    static const bool debug = std::getenv("FH_SIDES_DEBUG") != nullptr;
     std::vector<Seen> out;
     probes += int(jobs.size());
     for (int way = 1; way < 2; ++way) {   // the best look

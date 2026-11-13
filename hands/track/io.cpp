@@ -39,7 +39,7 @@ bool Ring::open(const char *path, std::string &err) {
     map_ = static_cast<const uint8_t *>(m);
     hdr_ = reinterpret_cast<const fh_ring_hdr_t *>(map_);
     if (std::memcmp(hdr_->magic, FH_RING_MAGIC, 8) || hdr_->version != FH_RING_VERSION || hdr_->file_bytes > len_)
-        return err = std::string(path) + " is not an ft-camd ring", false;
+        return err = std::string(path) + " is not an fh-camd ring", false;
     return true;
 }
 
@@ -114,7 +114,7 @@ void put(fh_capsule_t *caps, uint32_t &n, V3 a, V3 b, double ra, double rb) {
 }  // namespace
 
 std::string run_dir() {
-    const std::string dir = "/run/user/" + std::to_string(getuid()) + "/frametop-hands";
+    const std::string dir = "/run/user/" + std::to_string(getuid()) + "/framehands";
     mkdir(dir.c_str(), 0700);
     return dir;
 }
@@ -186,7 +186,7 @@ void Publisher::write(const std::vector<const Hand *> &in, uint64_t capture_ns) 
         if (k >= hands.size()) continue;
         const Hand &h = *hands[k];
         // the fitted skeleton's points when there is one (fingers keep their length), else the
-        // filtered landmarks (ft-hands --skeleton 0)
+        // filtered landmarks (fh-hands --skeleton 0)
         const V3 *pts = h.fit.valid ? h.fit.pts : h.smooth;
         o.id = uint32_t(h.id);
         o.flags = (h.right() ? FH_HAND_RIGHT : 0) | (h.nviews >= 2 ? FH_HAND_STEREO : 0);

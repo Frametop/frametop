@@ -1,12 +1,12 @@
 /*
- * ft-camd - publish the headset's IR camera frames to unprivileged trackers.
+ * fh-camd - publish the headset's IR camera frames to unprivileged trackers.
  *
  * Privileged only while it sets up:
  *   1. finds the mono tracking cameras and XRService's buffer queues (xrcams.c),
  *   2. borrows those buffers read-only with pidfd_getfd,
  *   3. opens the v4l2_dqbuf tracepoint (tp.c).
  * Then it gives up its privileges for good, creates the frame ring in the
- * user's runtime folder (/run/user/UID/frametop-hands/cam-ring, fhring.h), learns
+ * user's runtime folder (/run/user/UID/framehands/cam-ring, fhring.h), learns
  * which buffer holds which V4L2 index, and copies each complete bright frame
  * into the ring. It exits when XRService exits, reallocates its buffers or moves
  * a camera to another device (SILENT_S);
@@ -15,17 +15,17 @@
  * XRService itself runs as the same user. The privileges are needed only
  * because ptrace_scope=1 limits pidfd_getfd to CAP_SYS_PTRACE, and the
  * tracepoints need CAP_PERFMON and CAP_DAC_READ_SEARCH (their format files are
- * root-only). They come from file capabilities (hands/run.sh install sets
- * them, and ft-camd then runs as a user service), or from starting it with
+ * root-only). They come from file capabilities (install.sh sets
+ * them, and fh-camd then runs as a user service), or from starting it with
  * sudo (it then drops to the user who ran sudo). Nothing is read from the
  * ring's readers.
  *
- * Build: hands/build.sh (it runs on the host: linked statically)
+ * Build: scripts/build.sh on native ARM64 Linux (linked statically)
  */
 
 #define _GNU_SOURCE
 
-#include "../../conf/ft_conf.h"
+#include "../../config/ft_conf.h"
 #include "fhring.h"
 #include "tp.h"
 #include "xrcams.h"
@@ -73,7 +73,7 @@
  * A mono camera that has delivered frames and then stays silent for SILENT_S while another
  * keeps going: XRService has moved it to another device. Unplugging or plugging in the colour
  * module does that (the side pair goes between video9/13 and video0/3, seen 2026-10-12): the
- * old device just stops, nothing gets reallocated, and ft-camd would publish two dead cameras
+ * old device just stops, nothing gets reallocated, and fh-camd would publish two dead cameras
  * for as long as it runs. It exits instead (status 4), so systemd starts it on the new devices.
  * The cameras all stop together when the headset is taken off; that isn't this. Nor is one that
  * starts later than the others when it goes back on (seen 2026-10-13: video13 just behind, then
@@ -87,7 +87,7 @@
  * and every probe for a fresh one syncs a whole buffer's cache, so a color camera looks
  * at no more than COLOR_PROBES buffers a frame. One that keeps going stale (on 2026-09-30
  * it did while the headset was worn, never while it lay unused) is paused for
- * COLOR_PAUSE_S, doubling each time up to COLOR_PAUSE_MAX_S, then learned again; ft-camd
+ * COLOR_PAUSE_S, doubling each time up to COLOR_PAUSE_MAX_S, then learned again; fh-camd
  * doesn't exit over it.
  */
 #define COLOR_PROBES       4
@@ -133,7 +133,7 @@ typedef struct {
     unsigned        out_w, out_h;       /* image size in the ring                     */
     uint64_t        last_pub_ns;        /* --color-fps pacing                         */
     uint64_t        paced, seams;       /* color frames skipped: pacing, the half-size copy */
-    uint64_t        idled;              /* mono frames skipped while ft-hands is parked (hands_want) */
+    uint64_t        idled;              /* mono frames skipped while fh-hands is parked (hands_want) */
     uint64_t        paused_until;       /* color: going stale, left alone until then  */
     unsigned        pause_s;            /* ... for this long the next time            */
     uint64_t        pauses;
@@ -165,12 +165,12 @@ static unsigned    opt_color_scale = 2; /* ... at 1/N size */
 static double      opt_color_fps = 30;  /* ... at most this often */
 static double      opt_color_idle = 2;  /* ... and this often while no reader asks for more */
 /*
- * The color rate readers ask for (see color_want): ft-hands tracks with the color cameras
+ * The color rate readers ask for (see color_want): fh-hands tracks with the color cameras
  * only in bright light, and otherwise needs just their brightness now and then, which
  * saves most of the decoding (about 11% of a core at 30 fps).
  */
 static double      color_fps = 2;
-static bool        hands_parked = false;  /* ft-hands is parked: the mono frames aren't copied (hands_want) */
+static bool        hands_parked = false;  /* fh-hands is parked: the mono frames aren't copied (hands_want) */
 static double      opt_status = 10.0;
 
 static volatile sig_atomic_t stop;
@@ -783,7 +783,7 @@ static void on_frame(cam_t *c, int64_t index, uint32_t seq, uint64_t ts, uint64_
 
     if (found < 0 && !fresh(cur, c->samp[slot], &nchanged)) {
         buf_sync(c->fd[slot], DMA_BUF_SYNC_END);
-        if (c->color && getenv("FT_CAMD_DEBUG")) {
+        if (c->color && getenv("FH_CAMD_DEBUG")) {
             /* which candidate buffers changed since this camera last looked, whole and tail */
             static uint64_t d[NSAMP];
             fprintf(stderr, "stale %s t %.3f index %lld seq %u slot %d changed %d:", c->slug, evtime / 1e9,
@@ -991,7 +991,7 @@ static char ring_dir[64], ring_file[96];
 
 /*
  * The color rate readers want: a number of frames a second in ring_dir/color-fps, which
- * ft-hands rewrites every second while it tracks with the color cameras. A file newer than
+ * fh-hands rewrites every second while it tracks with the color cameras. A file newer than
  * 3 s holds (up to --color-fps); otherwise the color cameras run at --color-idle.
  */
 static void color_want(void)
@@ -1024,9 +1024,9 @@ static void color_want(void)
 }
 
 /*
- * Whether ft-hands is parked (hand interaction in VR games, hands/track/main.cpp "Parked"): it writes
+ * Whether fh-hands is parked (hand interaction in VR games, hands/track/main.cpp "Parked"): it writes
  * "0" to ring_dir/hands-want every second while parked. A file newer than 3 s saying 0 stops the mono
- * frames' copies; anything else (no file, a stale one: ft-hands gone) copies them as usual, so other
+ * frames' copies; anything else (no file, a stale one: fh-hands gone) copies them as usual, so other
  * readers of the ring (the hand recorder, ft-cutouts) are never starved by a parked tracker that died.
  */
 static void hands_want(void)
@@ -1056,7 +1056,7 @@ static void hands_want(void)
     }
 }
 
-/* A setting from ~/.config/frametop.conf (docs/config.md), or FT_<key> from the environment; "" if unset. */
+/* A setting from ~/.config/framehands/config (config/ft_conf.h), or FH_<key> from the environment; "" if unset. */
 static void setting(const char *key, char *out, size_t n)
 {
     ft_conf_setting(key, out, n);
@@ -1065,7 +1065,7 @@ static void setting(const char *key, char *out, size_t n)
 /* Created once privileges are gone, as the user, in a folder only the user can write. */
 static uint8_t *ring_create(size_t *len_out)
 {
-    snprintf(ring_dir, sizeof(ring_dir), "/run/user/%d/frametop-hands", (int)getuid());
+    snprintf(ring_dir, sizeof(ring_dir), "/run/user/%d/framehands", (int)getuid());
     snprintf(ring_file, sizeof(ring_file), "/run/user/%d/" FH_RING_NAME, (int)getuid());
 
     if (mkdir(ring_dir, 0700) < 0 && errno != EEXIST)
@@ -1150,7 +1150,7 @@ static uint8_t *ring_create(size_t *len_out)
 static void target_user(uid_t *uid, gid_t *gid)
 {
     if (!getenv("SUDO_UID") || !getenv("SUDO_GID"))
-        die("started as root without sudo: ft-camd drops to the user who ran sudo once set up");
+        die("started as root without sudo: fh-camd drops to the user who ran sudo once set up");
 
     *uid = (uid_t)atoi(getenv("SUDO_UID"));
     *gid = (gid_t)atoi(getenv("SUDO_GID"));
@@ -1170,7 +1170,7 @@ static void drop_root(uid_t uid, gid_t gid)
     prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
 }
 
-/* Started as the user with file capabilities (hands/run.sh install): are they all there? */
+/* Started as the user with file capabilities (install.sh): are they all there? */
 static bool have_caps(void)
 {
     struct __user_cap_header_struct h = { _LINUX_CAPABILITY_VERSION_3, 0 };
@@ -1243,17 +1243,17 @@ static void on_signal(int sig)
 static void usage(const char *argv0)
 {
     printf("Usage: %s [options]\n"
-           "It needs its file capabilities (hands/run.sh install sets them) or sudo.\n"
+           "It needs its file capabilities (install.sh sets them) or sudo.\n"
            "  --sensor S     only cameras whose sensor name contains S (default: all mono cameras)\n"
            "  --dark R       a frame dimmer than R x the camera's recent brightest is dark (default 0.4)\n"
            "  --with-dark    also publish the dark frames, as extra ring cameras flagged FH_CAM_DARK\n"
            "  --with-color   also publish the Arcturus color cameras' luma, flagged FH_CAM_COLOR\n"
            "  --color-scale N  ... at 1/N size (default 2: 986x1232)\n"
            "  --color-fps F  ... at most F frames a second (default 30; they run at 60), as readers ask\n"
-           "                 in /run/user/UID/frametop-hands/color-fps (ft-hands does when it tracks with them)\n"
+           "                 in /run/user/UID/framehands/color-fps (fh-hands does when it tracks with them)\n"
            "  --color-idle F ... and F a second while no reader asks (default 2: enough to tell the light)\n"
            "  --status S     print a status line every S seconds, 0 for never (default 10)\n"
-           "HANDS_CAMERAS=mono in ~/.config/frametop.conf (or FT_HANDS_CAMERAS) turns --with-color off.\n"
+           "HANDS_CAMERAS=mono in ~/.config/framehands/config (or FH_HANDS_CAMERAS) turns --with-color off.\n"
            "Frames go to /run/user/UID/" FH_RING_NAME " (layout in fhring.h).\n", argv0);
 }
 
@@ -1298,7 +1298,7 @@ int main(int argc, char **argv)
     if (root)
         target_user(&uid, &gid);
     else if (!have_caps())
-        die("no privileges to borrow XRService's buffers: run hands/run.sh install (it sets ft-camd's "
+        die("no privileges to borrow XRService's buffers: rerun install.sh (it sets fh-camd's "
             "capabilities; a rebuild clears them), or start it with sudo");
 
     char err[512];
@@ -1396,7 +1396,7 @@ int main(int argc, char **argv)
         const cam_t *silent = silent_camera(now);
         if (silent) {
             fprintf(stderr, "%s (video%d): no frames for %.1f s while the others run: XRService has moved "
-                    "the cameras (colour module unplugged or plugged in?); exiting so ft-camd starts on the "
+                    "the cameras (colour module unplugged or plugged in?); exiting so fh-camd starts on the "
                     "new devices\n", silent->slug, silent->cam->node,
                     (double)(now - silent->last_event_ns) / 1e9);
             rc = 4;
@@ -1408,7 +1408,7 @@ int main(int argc, char **argv)
             const cam_t *moved = format_moved();
             if (moved) {
                 fprintf(stderr, "%s (video%d): its node has another format now: XRService has moved the "
-                        "cameras (colour module plugged in or unplugged?); exiting so ft-camd starts on the "
+                        "cameras (colour module plugged in or unplugged?); exiting so fh-camd starts on the "
                         "new devices\n", moved->slug, moved->cam->node);
                 rc = 4;
                 break;

@@ -1,5 +1,0 @@
-#!/bin/bash
-# ft-layout on the Frame host (see ft_layout.py). Works from a terminal or a menu entry
-# inside the Frametop desktop too: its session has a private XDG_RUNTIME_DIR.
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-exec python3 "$(dirname "$(readlink -f "$0")")/ft_layout.py" "$@"

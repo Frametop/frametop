@@ -1,6 +1,6 @@
 // Flagging tracking failures (frame-hands notes/flag-failures.md has the plan and the format): a
 // rolling buffer, in RAM, of what's needed to relabel and diagnose the last few seconds of
-// tracking, and on a flag (`ft-handsctl flag [note]`, or a voice command through it), the buffer
+// tracking, and on a flag request in the private runtime folder, the buffer
 // and the next couple of seconds written to a folder for the offline tools (frame-hands'
 // train/flags).
 //
@@ -9,7 +9,7 @@
 // with room to spare), downscaled to at most `crop_px`; with the crop's place in the image, so
 // labels made on it lift back to the full image and triangulate. A view the tracker lost is still
 // cropped where it was for `ghost_s` (a "ghost"), so the teacher can say whether the hand was there.
-// And ft-hands' output for the set (its hands and gestures, as JSON) and each view's crop and
+// And fh-hands' output for the set (its hands and gestures, as JSON) and each view's crop and
 // landmarks. Nothing is written until a flag.
 //
 // The crops live in fixed slots of one arena (`max_bytes`), taken and given back through a free
@@ -71,7 +71,7 @@ public:
     ~FlagBuffer();   // waits for the writer
     const FlagConfig &config() const { return cfg_; }
 
-    // The manifest's static parts, set once: the cameras (cameras_json) and ft-hands' settings
+    // The manifest's static parts, set once: the cameras (cameras_json) and fh-hands' settings
     // (a JSON object).
     void set_static(const std::string &cameras_json, const std::string &settings_json) {
         cameras_json_ = cameras_json, settings_json_ = settings_json;

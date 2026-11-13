@@ -1,9 +1,9 @@
-// Reading a file ft-hands rewrites in place under a sequence lock (fh_hands.h, fh_gestures.h): the
-// one reader for ft-screens (screens/handcut.cpp) and the pointer helper (pointer/helper/handsin.h).
+// Reading a file fh-hands rewrites in place under a sequence lock (fh_hands.h, fh_gestures.h): the
+// used by FrameHands' overlay renderer and available to external consumers.
 // C++, header-only, no OpenVR.
 //
 // The file is mapped read-only. At most once a `recheck` (a second) it's looked up again: a file
-// that's gone, another one at that path (ft-hands made a new one) or one of another size (a later
+// that's gone, another one at that path (fh-hands made a new one) or one of another size (a later
 // version) is mapped again, and `opens` counts the mappings, so a reader can start over. It must
 // be the user's own and not a symlink. A read copies the file (read seq, copy, read seq again; the
 // copy counts only if both are the same even number, with up to 3 tries) and zero-fills `out`
@@ -23,8 +23,8 @@
 
 namespace fh {
 
-// The folder ft-hands publishes in: /run/user/UID/frametop-hands.
-inline std::string RuntimeDir() { return "/run/user/" + std::to_string(getuid()) + "/frametop-hands"; }
+// The folder fh-hands publishes in: /run/user/UID/framehands.
+inline std::string RuntimeDir() { return "/run/user/" + std::to_string(getuid()) + "/framehands"; }
 
 class ShmFile {
 public:

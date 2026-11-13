@@ -1,6 +1,5 @@
-# Hand tracking, built into build/ (hands/build.sh runs this in the dev container):
-#   make          ft-camd (camd/: runs on the host, so linked statically) and ft-hands (track/)
-#   make tools    ft-handreplay and ft-ringplay, for recordings
+# Hand tracking, built natively for aarch64 into build/:
+#   make          fh-camd (the camera broker) and fh-hands (the tracker)
 #   make check    builds and runs the C++ unit tests (tests/sides_test.cpp, tests/skeleton_test.cpp,
 #                 tests/pinch_test.cpp, tests/flagbuf_test.cpp)
 # The first build fetches ncnn's source (release NCNN_TAG, commit e54f7b1f88434e1d844ea0551b880a1cfb079ce1)
@@ -12,29 +11,24 @@ NCNN_SHA256 = 754659d6fe65545cf2ef4483ffb84526fea631f8764c44b150f1601d0fb4004b
 NCNN     ?= build/ncnn/install
 CFLAGS   ?= -O2 -g -Wall -Wextra -Wno-unused-parameter
 CXXFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -Wno-psabi
-CXXFLAGS += -std=c++17 -fopenmp -I$(NCNN)/include/ncnn
-LDLIBS    = $(NCNN)/lib/libncnn.a -ljsoncpp -fopenmp -lpthread
-# The standalone Hand Recorder's release build passes LDFLAGS=-static (it runs on the host).
-LDFLAGS  ?=
+CXXFLAGS += -std=c++17 -fopenmp -I$(NCNN)/include/ncnn $(shell pkg-config --cflags jsoncpp)
+LDLIBS    = $(NCNN)/lib/libncnn.a $(shell pkg-config --variable=libdir jsoncpp)/libjsoncpp.a -fopenmp -lpthread
+# Runs directly on SteamOS, without the build host's C++/jsoncpp libraries.
+LDFLAGS  ?= -static
 
 CAMD  = camd/camd.c camd/tp.c camd/xrcams.c
 TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp
-HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h ../conf/ft_conf.h
+HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h ../config/ft_conf.h
 
-all: build/ft-camd build/ft-hands
-tools: build/ft-handreplay build/ft-ringplay
+all: build/fh-camd build/fh-hands
 
-build/ft-camd: $(CAMD) camd/tp.h camd/xrcams.h camd/fhring.h ../conf/ft_conf.h
+build/fh-camd: $(CAMD) camd/tp.h camd/xrcams.h camd/fhring.h ../config/ft_conf.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -static -o $@ $(CAMD) -lm
 
-build/ft-hands: track/main.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
+build/fh-hands: track/main.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ track/main.cpp $(TRACK) $(LDLIBS)
-
-build/ft-handreplay: track/replay.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
-	@mkdir -p build
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ track/replay.cpp $(TRACK) $(LDLIBS)
 
 build/sides-test: tests/sides_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
@@ -52,15 +46,21 @@ build/flagbuf-test: tests/flagbuf_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/flagbuf_test.cpp $(TRACK) $(LDLIBS)
 
-check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test
+build/shm-test: tests/shm_test.cpp include/fh_shm.hpp
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ tests/shm_test.cpp
+
+build/xrcams-test: tests/xrcams_test.c camd/xrcams.c camd/xrcams.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ tests/xrcams_test.c
+
+check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/shm-test build/xrcams-test
 	build/sides-test
 	build/skeleton-test
 	build/pinch-test
 	build/flagbuf-test
-
-build/ft-ringplay: track/ringplay.cpp track/record.h camd/fhring.h
-	@mkdir -p build
-	$(CXX) $(CXXFLAGS) -o $@ track/ringplay.cpp
+	build/shm-test
+	build/xrcams-test
 
 # ncnn as frame-hands built it (the models were converted and quantized for it), minus its tools
 build/ncnn/install/lib/libncnn.a:
@@ -75,6 +75,6 @@ build/ncnn/install/lib/libncnn.a:
 	cmake --build build/ncnn/build --target install > build/ncnn/build.log
 
 clean:
-	rm -f build/ft-camd build/ft-hands build/ft-handreplay build/ft-ringplay build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test
+	rm -f build/fh-camd build/fh-hands build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/shm-test build/xrcams-test
 
-.PHONY: all tools check clean
+.PHONY: all check clean

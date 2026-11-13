@@ -1,12 +1,12 @@
 /*
- * fh_hands - the tracked-hands file ft-hands publishes for ft-screens' hand cutouts
- * (/run/user/UID/frametop-hands/hands, directory mode 0700), rewritten in place
+ * fh_hands - the tracked-hands file fh-hands publishes for the overlay and external readers
+ * (/run/user/UID/framehands/hands, directory mode 0700), rewritten in place
  * under a sequence lock: read seq, copy, read seq again; use the copy only if
  * both reads are the same even number.
  *
  * Positions are metres in the head frame at capture time, which is OpenVR's HMD
  * frame (+x right, +y up, -z forward). Turn them into the room with the HMD pose
- * at capture_ns (CLOCK_MONOTONIC). Writer: ft-hands (hands/track/io.cpp).
+ * at capture_ns (CLOCK_MONOTONIC). Writer: fh-hands (hands/track/io.cpp).
  *
  * Version 2 appends a skeleton per hand (fh_hand_fit_t) after version 1's fh_hands_t, which is
  * unchanged: a version 1 reader that maps sizeof(fh_hands_t) and checks the magic keeps

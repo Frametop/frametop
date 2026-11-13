@@ -1,0 +1,14 @@
+[Unit]
+Description=FrameHands SteamVR overlay
+After=steamvr.service framehands-track.service
+Requisite=steamvr.service
+PartOf=steamvr.service
+
+[Service]
+ExecStart=@ROOT@/framehands run-view
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5
+
+[Install]
+WantedBy=steamvr.service

@@ -1,8 +1,8 @@
 /*
- * fh_gestures - hand gestures ft-hands publishes for input (the pointer helper): look at
+ * fh_gestures - hand gestures fh-hands publishes for input (the pointer helper): look at
  * something and pinch to click it, or close the hand (a grip) to press and drag it (the
  * Vision Pro model, with the eye tracker doing the looking).
- * /run/user/UID/frametop-hands/gestures, next to the hands
+ * /run/user/UID/framehands/gestures, next to the hands
  * file, with the same sequence lock (read seq, copy, read seq again; use the copy only if
  * both reads are the same even number) and the same frame: metres in the head frame at
  * capture time, OpenVR's HMD frame (+x right, +y up, -z forward).

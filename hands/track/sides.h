@@ -1,4 +1,4 @@
-// Are the side cameras' images under the right names? ft-camd tells slam_left's buffers from
+// Are the side cameras' images under the right names? fh-camd tells slam_left's buffers from
 // slam_right's only by the order XRService allocated them, and some XRService starts reverse
 // that order: then each side camera's images carry the other's name, every hand is seen by one
 // camera only, at the wrong depth, and the cutouts land beside the hands.
@@ -24,7 +24,7 @@
 // like the tracker's, and the test above votes on it: finding a hand there proves nothing by
 // itself. It doesn't depend on how the tracker paired the views up.
 //
-// FT_SIDES_DEBUG=1 in the environment prints each probe's crop and what it found (stderr).
+// FH_SIDES_DEBUG=1 in the environment prints each probe's crop and what it found (stderr).
 //
 // Upper-camera pairs with a side camera count too (the upper pair's own naming was checked
 // stable: tools/check_sides.py --pair upper). Two upper views alone say nothing.

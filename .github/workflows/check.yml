@@ -1,39 +1,33 @@
-# The test gate, run by hand (Actions > check > Run workflow), on GitHub's own arm64 runner
-# (free for public repositories; the Frame is aarch64): the image from pack/Containerfile, then
-# `./ft dev test` inside it, the same gate release.yml runs before it builds a release. Nothing is
-# built or published: release.yml (Depot, on v* tags) still makes the releases.
-#
-# Manual only (Daenon, 2026-11-01): no push or pull request starts it. Read-only: no secrets, no
-# write permission. A newer run on the same branch cancels the one before it. Actions are pinned
-# to commit SHAs (the version in the comment).
 name: check
-
 on:
+  pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: check-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   test:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-22.04-arm
     timeout-minutes: 90
-    env:
-      FT_ENGINE: podman
-      FT_IMAGE: localhost/frametop:check
     steps:
-      # actions/checkout@v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-
-      - name: build the image
-        run: ./ft dev build
-
-      # Python (strict, ruff first), C, keyboard, shell, testbench and fast-install: `just test`.
-      - name: test
-        run: ./ft dev test
+      - name: Install ARM64 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl unzip pkg-config \
+            libjsoncpp-dev libgbm-dev libdrm-dev libegl1-mesa-dev libgles2-mesa-dev
+      - name: Fetch pinned OpenVR ARM64 API library
+        run: |
+          mkdir -p build/openvr
+          curl -fL https://raw.githubusercontent.com/ValveSoftware/openvr/0924064316de3effbcd1acf1e309182a2deb1c05/bin/linuxarm64/libopenvr_api.so \
+            -o build/openvr/libopenvr_api.so
+          echo 'cc3671d24dd23fb61494e8a8327cf4fe7f638a60508ff7225984a03f2f5947e9  build/openvr/libopenvr_api.so' | sha256sum -c
+      - name: Build and test
+        env:
+          OPENVR_LIB: ${{ github.workspace }}/build/openvr
+        run: |
+          python3 -m unittest discover -s tests -v
+          for script in install.sh uninstall.sh renderer/build.sh scripts/build.sh scripts/package.sh hands/models.sh; do bash -n "$script"; done
+          bash scripts/build.sh

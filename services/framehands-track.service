@@ -1,0 +1,15 @@
+[Unit]
+Description=FrameHands hand tracker
+After=steamvr.service framehands-camd.service
+Requisite=steamvr.service
+Wants=framehands-camd.service
+PartOf=steamvr.service
+
+[Service]
+ExecStart=@ROOT@/framehands run-tracker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+
+[Install]
+WantedBy=steamvr.service

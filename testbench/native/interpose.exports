@@ -1,4 +1,0 @@
-{
-  global: dlopen; frame_real_dlopen;
-  local: *;
-};

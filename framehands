@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""FrameHands service and shared-memory CLI. Uses only the Python standard library."""
+import argparse
+import os
+from pathlib import Path
+import platform
+import shutil
+import struct
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent
+CONFIG = Path.home() / ".config/framehands/config"
+RUN = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{getattr(os, 'getuid', lambda: 0)()}")) / "framehands"
+UNITS = ("framehands-camd.service", "framehands-track.service", "framehands-view.service")
+
+
+def config():
+    data = {}
+    if CONFIG.exists():
+        for line in CONFIG.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                data[key] = value.strip().strip("'\"")
+    return data
+
+
+def set_config(key, value):
+    CONFIG.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lines = CONFIG.read_text().splitlines() if CONFIG.exists() else []
+    lines = [line for line in lines if not line.startswith(key + "=")]
+    lines.append(f"{key}={value}")
+    temp = CONFIG.with_suffix(".tmp")
+    temp.write_text("\n".join(lines) + "\n")
+    temp.chmod(0o600)
+    temp.replace(CONFIG)
+
+
+def ctl(*args, check=False):
+    return subprocess.run(("systemctl", "--user", *args), text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=check)
+
+
+def active(unit):
+    return ctl("is-active", "--quiet", unit).returncode == 0
+
+
+def enabled(unit):
+    return ctl("is-enabled", "--quiet", unit).returncode == 0
+
+
+def selected():
+    cfg = config()
+    if cfg.get("TRACKING", "1") == "0":
+        return ()
+    return UNITS[:2] + (UNITS[2],) if cfg.get("RENDER", "1") != "0" else UNITS[:2]
+
+
+def tracker_args():
+    preset = config().get("PERFORMANCE", "balanced")
+    debug = config().get("DEBUG", "0") == "1"
+    status = ("--status", "10" if debug else "60")
+    gesture = ("--gesture-log",) if debug else ()
+    if preset == "quality":
+        return ("--threads", "4", *status, *gesture)
+    if preset == "power":
+        return ("--threads", "2", "--int8", *status, *gesture)
+    if preset != "balanced":
+        raise RuntimeError(f"unknown PERFORMANCE preset: {preset}")
+    return (*status, *gesture)
+
+
+def sync_enabled():
+    wanted = selected() if config().get("AUTO_START", "1") != "0" else ()
+    for unit in UNITS:
+        cmd = "enable" if unit in wanted else "disable"
+        result = ctl(cmd, unit)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or f"systemctl {cmd} {unit} failed")
+
+
+def shared(path, magic, size):
+    try:
+        with path.open("rb") as stream:
+            first = stream.read(size)
+            stream.seek(16)
+            seq = struct.unpack("<Q", stream.read(8))[0]
+        if len(first) < size or first[:8] != magic or seq & 1 or seq != struct.unpack_from("<Q", first, 16)[0]:
+            return None
+        return first
+    except (OSError, struct.error):
+        return None
+
+
+def hands():
+    data = shared(RUN / "hands", b"FHHANDS1", 64 + 2 * 272)
+    if not data:
+        return "no fresh hand data"
+    capture = struct.unpack_from("<Q", data, 24)[0]
+    count = struct.unpack_from("<I", data, 40)[0]
+    if time.monotonic_ns() - capture > 1_000_000_000 or count > 2:
+        return "hand data stale"
+    sides = []
+    for i in range(count):
+        flags = struct.unpack_from("<I", data, 64 + i * 272 + 4)[0]
+        sides.append("right" if flags & 1 else "left")
+    return ", ".join(sides) if sides else "no hands visible"
+
+
+def gestures():
+    data = shared(RUN / "gestures", b"FHGEST01", 64 + 6 * 64)
+    if not data:
+        print("No gesture data. Start tracking and check framehands doctor.")
+        return 1
+    capture = struct.unpack_from("<Q", data, 24)[0]
+    if time.monotonic_ns() - capture > 1_000_000_000:
+        print("Gesture data is stale.")
+        return 1
+    for kind, base in (("pinch", 64), ("grip", 192), ("middle pinch", 320)):
+        for side, offset in (("left", 0), ("right", 64)):
+            flags, hand_id, begins, ends = struct.unpack_from("<IIII", data, base + offset)
+            strength = struct.unpack_from("<f", data, base + offset + 36)[0]
+            print(f"{side} {kind}: {'held' if flags & 2 else 'up'} "
+                  f"(tracked={bool(flags & 1)}, strength={strength:.2f}, begins={begins}, ends={ends}, hand={hand_id})")
+    return 0
+
+
+def doctor():
+    issues = []
+    if platform.machine() != "aarch64":
+        issues.append("requires aarch64 Steam Frame hardware")
+    release = Path("/etc/os-release").read_text() if Path("/etc/os-release").exists() else ""
+    if "steamos" not in release.lower():
+        issues.append("SteamOS was not detected")
+    if not Path("/opt/steamvr/bin/linuxarm64/libopenvr_api.so").exists():
+        issues.append("SteamVR ARM64 OpenVR library is missing")
+    for name, path in (("camera broker", ROOT / "hands/build/fh-camd"),
+                       ("tracker", ROOT / "hands/build/fh-hands"),
+                       ("renderer", ROOT / "renderer/build/framehands-view")):
+        if not path.is_file():
+            issues.append(f"{name} binary missing: {path}")
+    if shutil.which("getcap") and (ROOT / "hands/build/fh-camd").exists():
+        cap = subprocess.run(("getcap", str(ROOT / "hands/build/fh-camd")), capture_output=True, text=True).stdout
+        for needed in ("cap_sys_ptrace", "cap_perfmon", "cap_dac_read_search"):
+            if needed not in cap:
+                issues.append(f"camera broker lacks {needed}")
+    if shutil.which("ldd"):
+        for path in (ROOT / "hands/build/fh-hands", ROOT / "renderer/build/framehands-view"):
+            if path.exists():
+                deps = subprocess.run(("ldd", str(path)), capture_output=True, text=True)
+                if "not found" in deps.stdout:
+                    issues.append(f"runtime library missing for {path.name}: {deps.stdout.strip()}")
+    if not active("steamvr.service"):
+        issues.append("SteamVR is not running; launch it to test tracking")
+    if active("steamvr.service"):
+        for unit in selected():
+            if not active(unit):
+                issues.append(f"{unit} is not running; inspect framehands logs")
+    print("FrameHands:", hands())
+    for issue in issues:
+        print("-", issue)
+    if not issues:
+        print("No configuration or service problem detected.")
+    return 1 if issues else 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="framehands")
+    parser.add_argument("command", choices=("start", "stop", "restart", "status", "enable", "disable",
+                                            "gestures", "logs", "doctor", "sync", "run-tracker", "run-camd", "run-view"))
+    args = parser.parse_args(argv)
+    cmd = args.command
+    try:
+        if cmd == "run-camd":
+            if config().get("DEBUG", "0") == "1":
+                os.environ["FH_CAMD_DEBUG"] = "1"
+            binary = str(ROOT / "hands/build/fh-camd")
+            os.execv(binary, (binary, "--status", "10" if config().get("DEBUG", "0") == "1" else "60"))
+        elif cmd == "run-tracker":
+            os.execv(str(ROOT / "hands/build/fh-hands"), (str(ROOT / "hands/build/fh-hands"), *tracker_args()))
+        elif cmd == "run-view":
+            binary = str(ROOT / "renderer/build/framehands-view")
+            os.execv(binary, (binary, "--status", "10" if config().get("DEBUG", "0") == "1" else "60"))
+        elif cmd == "enable":
+            set_config("TRACKING", "1")
+            set_config("AUTO_START", "1")
+            sync_enabled()
+            if active("steamvr.service"):
+                ctl("start", *selected(), check=True)
+            print("FrameHands will start with SteamVR.")
+        elif cmd == "disable":
+            set_config("AUTO_START", "0")
+            sync_enabled()
+            ctl("stop", *reversed(UNITS), check=True)
+            print("FrameHands disabled.")
+        elif cmd == "sync":
+            sync_enabled()
+            unused = tuple(unit for unit in UNITS if unit not in selected())
+            if unused:
+                ctl("stop", *reversed(unused), check=True)
+            if active("steamvr.service") and config().get("AUTO_START", "1") != "0" and selected():
+                ctl("start", *selected(), check=True)
+        elif cmd in ("start", "restart"):
+            if not active("steamvr.service"):
+                raise RuntimeError("SteamVR is not running")
+            units = selected()
+            if not units:
+                raise RuntimeError("TRACKING=0 in ~/.config/framehands/config")
+            if cmd == "restart":
+                ctl("stop", *reversed(UNITS), check=True)
+                ctl("start", *units, check=True)
+            else:
+                ctl("start", *units, check=True)
+            print("FrameHands services:", ", ".join(units))
+        elif cmd == "stop":
+            ctl("stop", *reversed(UNITS), check=True)
+        elif cmd == "status":
+            print("SteamVR:", "running" if active("steamvr.service") else "stopped")
+            for unit in UNITS:
+                print(f"{unit}: {'running' if active(unit) else 'stopped'}, {'enabled' if enabled(unit) else 'disabled'}")
+            print("Hands:", hands())
+        elif cmd == "gestures":
+            return gestures()
+        elif cmd == "logs":
+            return subprocess.call(("journalctl", "--user", *sum((("-u", u) for u in UNITS), ()),
+                                    "--no-pager", "-n", "100"))
+        elif cmd == "doctor":
+            return doctor()
+    except (OSError, subprocess.CalledProcessError, RuntimeError) as exc:
+        print(f"framehands: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

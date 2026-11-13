@@ -1,0 +1,5 @@
+*.sh text eol=lf
+install.sh text eol=lf
+uninstall.sh text eol=lf
+framehands text eol=lf
+hands/Makefile text eol=lf

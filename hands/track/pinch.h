@@ -69,7 +69,7 @@ struct PinchParams {
     // The fist guard (HANDS_PINCH_FIST_CURL; 0 turns it off): no pinch begins while the index and the
     // middle finger are both curled, each tip nearer the wrist than fist_curl times its knuckle (Grip's
     // curl measure). A fist puts the thumb tip on the curled index: in the held-out flags a median 28.5 mm
-    // from it and under 20 mm on 22% of fist frames, and live ft-hands read 96% of fist frames as pinched
+    // from it and under 20 mm on 22% of fist frames, and live fh-hands read 96% of fist frames as pinched
     // (frame-hands notes/taps.md, "Fists are partly a gesture-rule problem"). A close held back so has to
     // open past end_m before a pinch can begin: a held fist's curls flicker over the line for a frame now
     // and then. A pinch already down carries on: a drag's other fingers curling around it don't end it.
@@ -209,7 +209,7 @@ private:
     int64_t open_ns_[2] = {0, 0};   // the side's hand was last seen open then
 };
 
-// Writes /run/user/UID/frametop-hands/gestures.
+// Writes /run/user/UID/framehands/gestures.
 class GesturePublisher {
 public:
     // middle: the middle pinches (fh_gestures v3), or none (written as zero).

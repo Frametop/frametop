@@ -1,0 +1,16 @@
+[Unit]
+Description=FrameHands camera broker
+After=steamvr.service
+Requisite=steamvr.service
+PartOf=steamvr.service
+StartLimitIntervalSec=30
+StartLimitBurst=12
+
+[Service]
+ExecStart=@ROOT@/framehands run-camd
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+
+[Install]
+WantedBy=steamvr.service

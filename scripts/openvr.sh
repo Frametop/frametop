@@ -1,13 +1,12 @@
-# Sourced by the build scripts, in the build container, from a component's folder: the
-# OpenVR header and API library Frametop builds against. Sets OPENVR_CFLAGS and OPENVR_LIBS.
+# Sourced by renderer/build.sh on ARM64 Linux: pinned OpenVR overlay API.
 #
 # Headers: the pinned public SDK, fetched once into build/include and checked by sha256.
 # The headers SteamVR ships on the Frame (in its samples) are 2.1.0, which predates
-# interfaces Frametop uses (IVRIPCResourceManagerClient, the eye tracking API) and has no
+# interfaces the hand overlay uses (IVRIPCResourceManagerClient) and has no
 # public tag to pin; the Frame's runtime supports this SDK's interface versions.
 # Library: SteamVR's own libopenvr_api by default. OPENVR_LIB names another folder with a
-# libopenvr_api.so to link (the image uses the SDK's copy, since it has no SteamVR); the
-# programs still look in SteamVR's folder first, so on the Frame they load SteamVR's.
+# libopenvr_api.so to link (CI uses the pinned SDK copy); the binary looks in
+# SteamVR's folder first on the Frame.
 openvr_tag=v2.15.6
 openvr_commit=0924064316de3effbcd1acf1e309182a2deb1c05   # the commit v2.15.6 names
 openvr_steamvr=/opt/steamvr/bin/linuxarm64
@@ -25,7 +24,6 @@ openvr_fetch() {  # openvr_fetch <header> <sha256>
   mv "$f.part" "$f"
 }
 openvr_fetch openvr.h 1e6ed57199896cc1f7c5484e50fa18955e97be15be690beb28d998c877ead7fd
-openvr_fetch openvr_driver.h 1036efe998d63e82d1d3db2b32a2f58df4a8eeaf5280f50aaf28220ff60a40ab
 
 openvr_lib=${OPENVR_LIB:-$openvr_steamvr}
 openvr_rpath=$openvr_steamvr

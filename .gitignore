@@ -1,20 +1,12 @@
 build/
-target/
-.env
-.env.*
-captures/
+dist/
 __pycache__/
-frametop-report-*.txt
-# Eye-camera recordings (biometric) never go in the repo: they live in
-# ~/.local/share/frametop/eyes/captures. These catch strays (frame dumps, a lab venv).
+*.pyc
 *.raw
 *.pgm
+*.dump
+.env
+.env.*
 .venv/
-.frame-job.d/
-# frame-job settings are each machine's own (a .frame-job.example shows one); without frame-job,
-# run the command directly (AGENTS.md)
-.frame-job
-# the hand models' data: the build makes it (screens/tools/hand-asset.py --cpp)
-screens/handasset.cpp
-# eye net versions picked in Input Settings (models/catalog.py downloads them; CC BY-NC 4.0)
-gaze/tracker/models/
+hands/models/student/
+hands/models/versions/

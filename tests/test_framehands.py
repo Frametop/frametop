@@ -85,5 +85,17 @@ class FrameHandsTest(unittest.TestCase):
             self.assertNotIn("desktop", unit)
 
 
+    def test_dashboard_stays_enabled_when_tracking_is_off(self):
+        from types import SimpleNamespace
+        actions = []
+        def fake_ctl(*args, **_kwargs):
+            actions.append(args)
+            return SimpleNamespace(returncode=0, stderr="")
+        with patch.object(cli, "config", return_value={"TRACKING": "0", "AUTO_START": "0"}),              patch.object(cli, "ctl", side_effect=fake_ctl):
+            cli.sync_enabled()
+        self.assertIn(("enable", cli.DASHBOARD_UNIT), actions)
+        self.assertIn(("disable", cli.UNITS[1]), actions)
+
+
 if __name__ == "__main__":
     unittest.main()

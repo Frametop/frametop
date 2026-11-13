@@ -14,7 +14,7 @@ extern "C" {
 }
 
 struct PinchParams {
-    double begin_m = 0.020;   // thumb and index tips closer than this: the pinch begins
+    double begin_m = 0.025;   // allow slightly imperfect contact (tunable with HANDS_PINCH_BEGIN)
     // further apart than this: it ends (the gap keeps it from flickering). 0.045 since 2026-10-14
     // (0.035 before): taps and pinches let go while still held (user, 2026-10-11, gaze + hands: ends
     // came at 4-6 cm); these four were the headset's HANDS_PINCH_* settings since, now everyone's.

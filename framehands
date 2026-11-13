@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 CONFIG = Path.home() / ".config/framehands/config"
 RUN = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{getattr(os, 'getuid', lambda: 0)()}")) / "framehands"
 UNITS = ("framehands-camd.service", "framehands-track.service", "framehands-view.service", "framehands-input.service")
+DASHBOARD_UNIT = "framehands-dashboard.service"
 
 
 def config():
@@ -75,8 +76,9 @@ def tracker_args():
 
 def sync_enabled():
     wanted = selected() if config().get("AUTO_START", "1") != "0" else ()
-    for unit in UNITS:
-        cmd = "enable" if unit in wanted else "disable"
+    # Dashboard remains available even when tracking/autostart is switched off.
+    for unit in (*UNITS, DASHBOARD_UNIT):
+        cmd = "enable" if (unit == DASHBOARD_UNIT or unit in wanted) else "disable"
         result = ctl(cmd, unit)
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or f"systemctl {cmd} {unit} failed")
@@ -144,6 +146,8 @@ def doctor():
                        ("SteamVR input driver", ROOT / "pointer/driver/fh_pointer/bin/linuxarm64/driver_fh_pointer.so")):
         if not path.is_file():
             issues.append(f"{name} binary missing: {path}")
+    if not (ROOT / "dashboard/build/framehands-dashboard").is_file():
+        issues.append("dashboard controller binary missing")
     if shutil.which("getcap") and (ROOT / "hands/build/fh-camd").exists():
         cap = subprocess.run(("getcap", str(ROOT / "hands/build/fh-camd")), capture_output=True, text=True).stdout
         for needed in ("cap_sys_ptrace", "cap_perfmon", "cap_dac_read_search"):
@@ -172,7 +176,7 @@ def doctor():
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="framehands")
     parser.add_argument("command", choices=("start", "stop", "restart", "status", "enable", "disable",
-                                            "gestures", "logs", "doctor", "sync", "run-tracker", "run-camd", "run-view", "run-input"))
+                                            "gestures", "logs", "doctor", "sync", "run-tracker", "run-camd", "run-view", "run-input", "run-dashboard"))
     args = parser.parse_args(argv)
     cmd = args.command
     try:
@@ -189,12 +193,16 @@ def main(argv=None):
         elif cmd == "run-input":
             binary = str(ROOT / "pointer/build/fh-input")
             os.execv(binary, (binary,))
+        elif cmd == "run-dashboard":
+            binary = str(ROOT / "dashboard/build/framehands-dashboard")
+            os.execv(binary, (binary,))
         elif cmd == "enable":
             set_config("TRACKING", "1")
             set_config("AUTO_START", "1")
             sync_enabled()
             if active("steamvr.service"):
                 ctl("start", *selected(), check=True)
+                ctl("start", DASHBOARD_UNIT, check=True)
             print("FrameHands will start with SteamVR.")
         elif cmd == "disable":
             set_config("AUTO_START", "0")
@@ -206,8 +214,10 @@ def main(argv=None):
             unused = tuple(unit for unit in UNITS if unit not in selected())
             if unused:
                 ctl("stop", *reversed(unused), check=True)
-            if active("steamvr.service") and config().get("AUTO_START", "1") != "0" and selected():
-                ctl("start", *selected(), check=True)
+            if active("steamvr.service"):
+                ctl("start", DASHBOARD_UNIT, check=True)
+                if config().get("AUTO_START", "1") != "0" and selected():
+                    ctl("start", *selected(), check=True)
         elif cmd in ("start", "restart"):
             if not active("steamvr.service"):
                 raise RuntimeError("SteamVR is not running")
@@ -224,13 +234,13 @@ def main(argv=None):
             ctl("stop", *reversed(UNITS), check=True)
         elif cmd == "status":
             print("SteamVR:", "running" if active("steamvr.service") else "stopped")
-            for unit in UNITS:
+            for unit in (*UNITS, DASHBOARD_UNIT):
                 print(f"{unit}: {'running' if active(unit) else 'stopped'}, {'enabled' if enabled(unit) else 'disabled'}")
             print("Hands:", hands())
         elif cmd == "gestures":
             return gestures()
         elif cmd == "logs":
-            return subprocess.call(("journalctl", "--user", *sum((("-u", u) for u in UNITS), ()),
+            return subprocess.call(("journalctl", "--user", *sum((("-u", u) for u in (*UNITS, DASHBOARD_UNIT)), ()),
                                     "--no-pager", "-n", "100"))
         elif cmd == "doctor":
             return doctor()

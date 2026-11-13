@@ -92,9 +92,9 @@ struct Fit {
 
 struct Params {
     // the filter on the fitted pose: like the One Euro on the points (tracker.cpp), cutoffs in Hz
-    double pos_min = 2.0, pos_beta = 30.0;   // palm centre: + beta per m/s
-    double rot_min = 2.0, rot_beta = 10.0;   // palm rotation: + beta per rad/s
-    double ang_min = 2.0, ang_beta = 3.0;    // a finger's joint angles: + beta per rad/s of that finger
+    double pos_min = 1.7, pos_beta = 34.0;   // slightly steadier still palm
+    double rot_min = 1.8, rot_beta = 12.0;   // less rotational shimmer
+    double ang_min = 1.8, ang_beta = 3.3;    // reduce finger jitter, retain quick pinches
     double d_cutoff = 1.5;                   // for the speeds themselves
     double warm = 1;                         // 1: also start each chain from last frame's pose
     double glitch = 0.015;                   // m: a chain fitting worse than this moves the filter less

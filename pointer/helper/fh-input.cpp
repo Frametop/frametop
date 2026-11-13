@@ -24,6 +24,32 @@ V operator-(V a, V b) { return {a.x-b.x, a.y-b.y, a.z-b.z}; }
 V operator+(V a, V b) { return {a.x+b.x, a.y+b.y, a.z+b.z}; }
 V operator*(V a, double k) { return {a.x*k, a.y*k, a.z*k}; }
 double Length(V a) { return std::sqrt(a.x*a.x+a.y*a.y+a.z*a.z); }
+// Adaptively smooth the dashboard pointer. Small movements are steadied;
+// fast deliberate motion raises the cut-off to keep the ray responsive.
+struct AimSmoother {
+    V origin{}, direction{};
+    double originSpeed = 0, directionSpeed = 0;
+    int64_t last = 0;
+    static double Alpha(double hz, double dt) { return 1.0 - std::exp(-2.0 * M_PI * hz * dt); }
+    static V Smooth(V raw, V filtered, double &speed, double dt, double gain) {
+        const V delta = raw - filtered;
+        speed += (Length(delta) / dt - speed) * Alpha(1.5, dt);
+        return filtered + delta * Alpha(std::clamp(2.5 + gain * speed, 2.5, 40.0), dt);
+    }
+    void Reset() { last = 0; originSpeed = directionSpeed = 0; }
+    void Step(V p, V d, int64_t now) {
+        if (!last || now <= last || now - last > 250'000'000ll) {
+            origin = p; direction = d; originSpeed = directionSpeed = 0;
+        } else {
+            const double dt = std::clamp((now - last) / 1e9, 0.002, 0.10);
+            origin = Smooth(p, origin, originSpeed, dt, 25.0);
+            direction = Smooth(d, direction, directionSpeed, dt, 12.0);
+            const double n = Length(direction);
+            direction = n > 1e-6 ? direction * (1.0 / n) : d;
+        }
+        last = now;
+    }
+};
 V Point(const float p[3]) { return {p[0], p[1], p[2]}; }
 V Local(const vr::HmdMatrix34_t &m, V p) {
     return {m.m[0][3]+m.m[0][0]*p.x+m.m[0][1]*p.y+m.m[0][2]*p.z,
@@ -71,6 +97,8 @@ int main() {
     if (fd < 0) return std::perror("fh-input socket"), 1;
     handcut::Hands hands;
     Controller controllers[vr::k_unMaxTrackedDeviceCount]{};
+    AimSmoother aim;
+    const bool smoothPointer = handcut::Setting("HANDS_POINTER_SMOOTH", "1") != "0";
     int owner = -1;
     bool showing = false, pressed = false, initialized[2]{};
     uint32_t begins[2]{};
@@ -106,6 +134,7 @@ int main() {
             }
         }
         if (pick != owner || pick < 0) {
+            aim.Reset();  // never interpolate a ray between different hands
             if (pressed) Send(fd, "btn trigger 0"), pressed = false;
             if (showing) Send(fd, "hide"), showing = false;
             owner = pick;
@@ -121,9 +150,12 @@ int main() {
             if (distance > 0.15) {
                 dir = dir * (1.0/distance);
                 const V origin = knuckle + dir*0.03;
+                if (smoothPointer) aim.Step(origin, dir, now);
+                const V p = smoothPointer ? aim.origin : origin;
+                const V d = smoothPointer ? aim.direction : dir;
                 char pose[160];
-                std::snprintf(pose, sizeof pose, "pose %.5f %.5f %.5f %.3f %.3f", origin.x, origin.y, origin.z,
-                              std::atan2(-dir.x,-dir.z)*180/M_PI, std::asin(std::clamp(dir.y,-1.0,1.0))*180/M_PI);
+                std::snprintf(pose, sizeof pose, "pose %.5f %.5f %.5f %.3f %.3f", p.x, p.y, p.z,
+                              std::atan2(-d.x,-d.z)*180/M_PI, std::asin(std::clamp(d.y,-1.0,1.0))*180/M_PI);
                 Send(fd, pose);
                 if (!showing) {
                     Send(fd, owner ? "role right" : "role left");

@@ -20,7 +20,7 @@ if (( purge_models && ! yes )); then
   read -r -p 'Delete cached FrameHands models? [y/N] ' answer || answer=
   [[ $answer == y || $answer == Y ]] || purge_models=0
 fi
-for unit in framehands-input.service framehands-view.service framehands-track.service framehands-camd.service; do
+for unit in framehands-dashboard.service framehands-input.service framehands-view.service framehands-track.service framehands-camd.service; do
   file=$units/$unit
   if [[ -f $file ]] && grep -Fq "$app/" "$file"; then
     systemctl --user disable --now "$unit" 2>/dev/null || true
@@ -28,6 +28,9 @@ for unit in framehands-input.service framehands-view.service framehands-track.se
   fi
 done
 systemctl --user daemon-reload 2>/dev/null || true
+if [[ -x $app/dashboard/build/framehands-dashboard ]]; then
+  "$app/dashboard/build/framehands-dashboard" --unregister 2>/dev/null || true
+fi
 reg=/opt/steamvr/bin/linuxarm64/vrpathreg
 if [[ -x $reg && -f $app/pointer/driver/fh_pointer/driver.vrdrivermanifest ]]; then
   env XDG_CONFIG_HOME="$HOME/.config" LD_LIBRARY_PATH=/opt/steamvr/bin/linuxarm64 \

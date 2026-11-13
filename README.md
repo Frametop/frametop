@@ -80,3 +80,31 @@ The uninstaller stops and disables only FrameHands units, removes its camera bin
 ## Attribution and licenses
 
 FrameHands retains Frametop's camera broker, tracker, and hand renderer. Frametop is copyright (c) 2026 DeeJanuz, under the repository's MIT `LICENSE`. The camera feed notice is in `hands/camd/LICENSE.FrameEyeCameraFeed`; bundled stock MediaPipe/ncnn models have notices in `hands/models/NOTICE`. The release includes the pinned JsonCpp source license in `licenses/jsoncpp-LICENSE`. Fine-tuned models are downloaded from `DeeJanuz/frametop-hands-models` at the pinned commit in `hands/models.pin`; their `LICENSE` and `NOTICE` are distributed with the release. Rendered hand assets and their licenses are under `renderer/assets/hands/` in the source tree.
+
+## SteamVR dashboard control and steadier pointer
+
+FrameHands now installs a small **FrameHands** SteamVR dashboard overlay (no desktop or
+browser required). Open SteamVR's dashboard and select the FrameHands tab; on
+Steam Frame builds that expose registered overlay applications under **+**, it
+can also be launched from that menu. Click the large ON/OFF panel to enable or
+disable tracking. The dashboard app runs separately from the tracker so it does
+not shut itself down when tracking is disabled. **Note:** disabling tracking also
+removes the hand-pointer ray; to turn it back on without SSH, you need another
+working SteamVR input device (for example a physical controller). As a fallback,
+run `~/.local/bin/framehands enable` through SSH or a terminal.
+
+The tracker uses slightly stronger adaptive palm and finger filtering, and the
+dashboard pointer has its own adaptive low-pass filtering: it steadies while
+your hand is relatively still and responds more quickly when you make deliberate
+movements. The index pinch begins at 25 mm instead of 20 mm by default. You can
+set `HANDS_POINTER_SMOOTH=0` to turn off ray filtering, or adjust
+`HANDS_PINCH_BEGIN=0.025` in `~/.config/framehands/config` (try 0.028
+if contact is still missed) and run `framehands restart` to apply it. Optional
+`HANDS_PINCH_DIP=1` can catch additional quick taps near contact, but may create
+accidental clicks; it is deliberately off by default. These thresholds affect
+gesture classification, not camera or model accuracy. Hardware validation and
+personal calibration are still recommended.
+
+After publishing an ARM64 release, update the Frame using `git pull` and
+`./install.sh` from a source-only checkout, then restart SteamVR normally. The
+installer registers the overlay with SteamVR on its next launch.

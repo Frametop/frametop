@@ -295,7 +295,9 @@ int main(int argc, char **argv) {
     auto num = [&](const char *key, double &v, double lo, double hi) {
         if (setting_number(key, v)) v = std::clamp(v, lo, hi);
     };
+    num("HANDS_PINCH_BEGIN", pinch_params.begin_m, 0.012, 0.035);
     num("HANDS_PINCH_END", pinch_params.end_m, 0.025, 0.08);
+    pinch_params.begin_m = std::min(pinch_params.begin_m, pinch_params.end_m - 0.008);
     num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
     num("HANDS_PINCH_DRAG_OPEN_S", pinch_params.drag_open_s, 0.0, 1.0);
     num("HANDS_GRIP_TAKEOVER_S", pinch_params.grip_takeover_s, 0.0, 1.0);

@@ -24,7 +24,7 @@ reg=/opt/steamvr/bin/linuxarm64/vrpathreg
 [[ -x $reg ]] || fail 'SteamVR driver registration tool is missing'
 if [[ $(id -u) != 0 ]]; then command -v sudo >/dev/null || fail 'sudo is required to set camera capabilities'; fi
 [[ ! -L $app ]] || fail 'FrameHands app path is a symlink; refusing to replace it'
-for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do
+for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service framehands-dashboard.service; do
   file=$units/$unit
   if [[ -f $file ]] && ! grep -Fq "$app/" "$file"; then
     fail "$file exists and does not belong to this FrameHands install"
@@ -37,7 +37,7 @@ for unit in frametop-camd.service frametop-hands.service frametop-handview.servi
 done
 
 source_dir=$root
-if [[ ! -x $root/hands/build/fh-camd || ! -x $root/hands/build/fh-hands || ! -x $root/renderer/build/framehands-view || ! -x $root/pointer/build/fh-input || ! -f $root/pointer/build/driver_fh_pointer.so ]]; then
+if [[ ! -x $root/hands/build/fh-camd || ! -x $root/hands/build/fh-hands || ! -x $root/renderer/build/framehands-view || ! -x $root/pointer/build/fh-input || ! -f $root/pointer/build/driver_fh_pointer.so || ! -x $root/dashboard/build/framehands-dashboard ]]; then
   command -v git >/dev/null || fail 'prebuilt binaries are missing; install from a FrameHands release archive'
   remote=$(git -C "$root" remote get-url origin 2>/dev/null || true)
   case $remote in
@@ -69,6 +69,7 @@ for bin in hands/build/fh-camd hands/build/fh-hands renderer/build/framehands-vi
   [[ -x $source_dir/$bin ]] || fail "$bin is missing from the release"
 done
 [[ -f $source_dir/pointer/build/driver_fh_pointer.so ]] || fail 'the SteamVR input driver is missing'
+[[ -x $source_dir/dashboard/build/framehands-dashboard ]] || fail 'the dashboard controller is missing'
 [[ -f $source_dir/hands/models/student/hand.ncnn.bin ]] ||
   fail 'the pinned fine-tuned models are missing from the release'
 [[ -f $source_dir/hands/models/ncnn/hand.ncnn.bin ]] || fail 'the stock fallback model is missing'
@@ -76,7 +77,7 @@ done
 stage=$HOME/.local/share/framehands/app.new.$$
 [[ ! -e $stage && ! -L $stage ]] || fail 'temporary install path already exists'
 mkdir -m 700 "$stage"
-mkdir -p "$stage/hands/build" "$stage/hands/camd" "$stage/renderer/build" "$stage/renderer/assets" "$stage/pointer/build" "$stage/pointer/driver/fh_pointer/bin/linuxarm64" "$stage/config" "$stage/services" "$stage/licenses"
+mkdir -p "$stage/hands/build" "$stage/hands/camd" "$stage/renderer/build" "$stage/renderer/assets" "$stage/pointer/build" "$stage/pointer/driver/fh_pointer/bin/linuxarm64" "$stage/config" "$stage/services" "$stage/licenses" "$stage/dashboard/build"
 cp -a "$source_dir/hands/build/fh-camd" "$source_dir/hands/build/fh-hands" "$stage/hands/build/"
 cp -a "$source_dir/hands/camd/LICENSE.FrameEyeCameraFeed" "$stage/hands/camd/"
 if [[ -f $source_dir/licenses/jsoncpp-LICENSE ]]; then
@@ -87,6 +88,7 @@ else
 fi
 cp -a "$source_dir/hands/models" "$stage/hands/"
 cp -a "$source_dir/renderer/build/framehands-view" "$stage/renderer/build/"
+cp -a "$source_dir/dashboard/build/framehands-dashboard" "$stage/dashboard/build/"
 cp -a "$source_dir/renderer/assets/hands" "$stage/renderer/assets/"
 cp -a "$source_dir/pointer/build/fh-input" "$stage/pointer/build/"
 cp -a "$source_dir/pointer/driver/fh_pointer/". "$stage/pointer/driver/fh_pointer/"
@@ -113,11 +115,31 @@ fi
 getcap "$stage/hands/build/fh-camd" | grep -q cap_sys_ptrace || fail 'camera capabilities were not applied'
 
 # From here, only FrameHands units are changed. A failed upgrade restores the old app.
-systemctl --user stop framehands-input.service framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
+systemctl --user stop framehands-dashboard.service framehands-input.service framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
 old=$HOME/.local/share/framehands/app.old.$$
 if [[ -e $app ]]; then mv "$app" "$old"; fi
+mkdir -p "$stage/dashboard"
+# SteamVR's ARM64 application launcher requires binary_path_linux_arm.
+# This app can be launched from SteamVR's overlay app menu as well as its own tab.
+cat > "$stage/dashboard/launch.sh" <<EOF
+#!/bin/sh
+exec "$app/framehands" run-dashboard
+EOF
+chmod 755 "$stage/dashboard/launch.sh"
+FRAMEHANDS_APP="$app" FRAMEHANDS_STAGE="$stage" python3 - <<'PYMANIFEST'
+import json, os
+from pathlib import Path
+app = Path(os.environ['FRAMEHANDS_APP'])
+manifest = {'source': 'builtin', 'applications': [{
+    'app_key': 'framehands.dashboard', 'launch_type': 'binary',
+    'binary_path_linux_arm': str(app / 'dashboard/launch.sh'),
+    'binary_path_linux': str(app / 'dashboard/launch.sh'),
+    'is_dashboard_overlay': True,
+    'strings': {'en_us': {'name': 'FrameHands', 'description': 'Hand tracking controls'}}}]}
+(Path(os.environ['FRAMEHANDS_STAGE']) / 'dashboard/framehands.vrmanifest').write_text(json.dumps(manifest, indent=2) + '\n')
+PYMANIFEST
 mv "$stage" "$app"
-for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do
+for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service framehands-dashboard.service; do
   sed "s|@ROOT@|$app|g" "$app/services/$unit" > "$units/$unit"
 done
 ln -sfn "$app/framehands" "$HOME/.local/bin/framehands"
@@ -131,12 +153,16 @@ register_driver() {
 }
 if ! register_driver || ! "$app/framehands" sync; then
   echo 'FrameHands install: service activation failed; restoring the previous install' >&2
-  systemctl --user stop framehands-input.service framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
+  systemctl --user stop framehands-dashboard.service framehands-input.service framehands-view.service framehands-track.service framehands-camd.service 2>/dev/null || true
   rm -rf -- "$app"
   if [[ -d $old ]]; then
     mv "$old" "$app"
-    for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do
-      sed "s|@ROOT@|$app|g" "$app/services/$unit" > "$units/$unit"
+    for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service framehands-dashboard.service; do
+      if [[ -f $app/services/$unit ]]; then
+        sed "s|@ROOT@|$app|g" "$app/services/$unit" > "$units/$unit"
+      else
+        rm -f "$units/$unit"
+      fi
     done
     ln -sfn "$app/framehands" "$HOME/.local/bin/framehands"
     systemctl --user daemon-reload
@@ -144,7 +170,7 @@ if ! register_driver || ! "$app/framehands" sync; then
   else
     env XDG_CONFIG_HOME="$HOME/.config" LD_LIBRARY_PATH=/opt/steamvr/bin/linuxarm64 \
       "$reg" removedriver "$app/pointer/driver/fh_pointer" 2>/dev/null || true
-    for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service; do rm -f "$units/$unit"; done
+    for unit in framehands-camd.service framehands-track.service framehands-view.service framehands-input.service framehands-dashboard.service; do rm -f "$units/$unit"; done
     rm -f "$HOME/.local/bin/framehands"
     systemctl --user daemon-reload
   fi

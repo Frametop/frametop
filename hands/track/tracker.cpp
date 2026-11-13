@@ -19,8 +19,8 @@ constexpr double kFastSpeed = 0.25;    // m/s
 constexpr double kSearchInterval = 0.2;
 // One Euro filter on the published landmarks: still hands are smoothed hard (tracking
 // noise is a few mm per frame), fast ones barely, so they don't lag.
-constexpr double kMinCutoff = 2.0;     // Hz, a still hand
-constexpr double kBeta = 30.0;         // Hz more per m/s of palm speed
+constexpr double kMinCutoff = 1.7;     // Hz, steadier fingers while stationary
+constexpr double kBeta = 35.0;         // responds quickly when deliberately moving
 constexpr double kSpeedCutoff = 1.5;   // Hz, for the palm speed itself
 // With one view, the hand's distance from the camera comes from how big it looks, which
 // is off by 10-30% and wanders ~10% between frames. Its direction is exact. So a hand that

@@ -37,6 +37,8 @@ class Scales(unittest.TestCase):
         self.assertEqual(self.m.mode_size(o), (2160, 3840))
 
     def apply(self, backend="screens", updates=True):
+        """apply_scales with kscreen-doctor showing the new scale once it's asked for (updates,
+        KWin up to 6.5) or 1 throughout (KWin 6.6: a nested output's stored setting)."""
         self.layout["screens"][1]["scale"] = 1
         old = [{"id": 1, "name": "WL-0", "enabled": True, "scale": 1, "priority": 1,
                 "size": {"width": 3840, "height": 2160}, "pos": {"x": 0, "y": 0}},
@@ -50,7 +52,7 @@ class Scales(unittest.TestCase):
         def outputs(env):
             calls.append(env)
             events.append("outputs")
-            return new if updates and len(calls) >= 4 else old
+            return new if updates and len(calls) >= 2 else old
 
         def doctor(args, **kwargs):
             events.append(args)
@@ -69,30 +71,43 @@ class Scales(unittest.TestCase):
             result = self.m.apply_scales()
         return result, events, calls, sleep
 
-    def test_host_scale_before_doctor_and_poll_until_updated(self):
+    def test_host_scale_before_doctor(self):
         result, events, calls, sleep = self.apply()
         doctor_index = next(i for i, e in enumerate(events) if isinstance(e, list))
         self.assertLess(events.index("scale 1 2"), doctor_index)
         self.assertIn("output.1.scale.2", result)
         self.assertIn("output.2.position.1920,0", result)
-        self.assertEqual(len(calls), 4)
-        self.assertEqual(sleep.call_count, 2)
-        self.assertEqual([e for e in events if isinstance(e, str) and e.startswith("scale 1")],
-                         ["scale 1 2", "scale 1 2"])
+        self.assertEqual(len(calls), 2)  # before kscreen-doctor's changes, and after
+        sleep.assert_not_called()
 
-    def test_positions_use_target_scale_even_when_poll_times_out(self):
-        result, _, calls, sleep = self.apply(updates=False)
-        self.assertIn("output.2.position.1920,0", result)
-        self.assertEqual(len(calls), 11)  # initial query plus ten convergence queries
-        self.assertEqual(sleep.call_count, 9)
+    def test_host_keeps_layout_scale_whatever_kscreen_shows(self):
+        # "scale 1 1" from the 1 that KWin 6.6 shows would put a 200% screen back at 100%.
+        for updates in (True, False):
+            with self.subTest(updates=updates):
+                result, events, calls, sleep = self.apply(updates=updates)
+                self.assertEqual([e for e in events if isinstance(e, str) and e.startswith("scale ")],
+                                 ["scale 1 2", "scale 2 1"])
+                self.assertIn("output.2.position.1920,0", result)  # by the layout's scale too
+                self.assertEqual(len(calls), 2)
+                sleep.assert_not_called()
 
-    def test_timed_out_poll_sends_no_stale_scale(self):
-        _, events, _, _ = self.apply(updates=False)
-        # Only the layout's scale: KWin's old one would put that back on a KWin 6.6.
-        self.assertEqual([e for e in events if isinstance(e, str) and e.startswith("scale 1")], ["scale 1 2"])
-        self.assertIn("scale 2 1", events)
+    def test_kwin_scales_are_the_layouts(self):
+        with patch.object(self.m, "backend", return_value="screens"):
+            self.assertEqual(self.m.kwin_scales(self.layout), {"WL-0": 2.0, "WL-1": 1.5})
+        with patch.object(self.m, "backend", return_value="gamescope"):
+            self.assertEqual(self.m.kwin_scales(self.layout), {})
 
-    def test_gamescope_does_not_notify_host_or_poll(self):
+    def test_remote_view_by_layout_scale(self):
+        # KWin 6.6 shows a 200% screen as 3840x2160 at scale 1: logically it is 1920x1080.
+        shown = [{"id": 1, "name": "WL-0", "enabled": True, "scale": 1, "priority": 1,
+                  "size": {"width": 3840, "height": 2160}, "pos": {"x": 0, "y": 0}}]
+        with patch.object(self.m, "backend", return_value="screens"), \
+             patch.object(self.m, "nested_env", return_value={"WAYLAND_DISPLAY": "test"}), \
+             patch.object(self.m, "load_layout", return_value={"screens": self.layout["screens"][:1]}), \
+             patch.object(self.m, "outputs", return_value=shown):
+            self.assertEqual(self.m.remote_view(), "0 0 1920 1080 1920 1080")
+
+    def test_gamescope_does_not_notify_host(self):
         _, events, calls, sleep = self.apply(backend="gamescope")
         self.assertFalse(any(isinstance(e, str) and e.startswith("scale ") for e in events))
         self.assertEqual(len(calls), 2)

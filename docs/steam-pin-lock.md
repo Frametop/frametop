@@ -146,6 +146,13 @@ PIN is not disk encryption or a Linux login boundary.
    state can authorize content. Determine how an observer restarting in an
    unlocked session can safely recover; absent reliable proof, require another
    Steam lock/unlock rather than guessing.
+   One recovery was tried and is not in this tree (PR 95, commit 8200793,
+   2026-11-09): accepting an inactive lock from a fresh, well-formed snapshot
+   with loaded PIN settings, with no lock seen first. On a cold boot the
+   wearer then saw Frametop before Steam's PIN screen: the guard logged
+   unlocked 0.9 s before Steam reported its lock (2026-11-11). Loaded settings
+   and an inactive lock are therefore not proof at startup, and the observer
+   here still requires a lock it has seen.
 2. Verify the independent security gate, not ordinary hide/pause. Start denied
    before displaying any sensitive texture or accepting input. Normal
    visibility, profiles, resume and manual startup must not override it.

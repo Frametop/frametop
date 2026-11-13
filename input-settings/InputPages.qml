@@ -387,7 +387,9 @@ Item {
                 wrapMode: Text.Wrap
                 opacity: 0.7
                 text: "Move or press a device to see which row it is. 3D pointer: grabbed, drives the SteamVR pointer. "
-                      + "Pass through: left alone, but its key combinations (Keyboard page) work. Ignore: left alone."
+                      + "Pass through: left alone, but its key combinations (Keyboard page) work. "
+                      + "Keyboard + 3D pointer, for a keyboard with a touchpad: the keys pass through, the touchpad "
+                      + "drives the pointer. Ignore: left alone."
             }
         }
     }
@@ -712,6 +714,12 @@ Item {
             // A program's uinput keyboard (a remote desktop's, say) doesn't count.
             property var keyboards: backend.devices.filter(d => d.connected && (d.role === "passthrough" || d.role === "combo")
                                                                 && d.kinds.indexOf("keyboard") >= 0 && !d.uinput)
+            // 3D pointer devices with keys as well as a mouse: a keyboard with a touchpad among them
+            // types nothing and isn't counted above until its role is Keyboard + 3D pointer (issue 68).
+            // A mouse with keys for its extra buttons looks the same from here, so this only asks.
+            property var keyedPointers: backend.devices.filter(d => d.connected && d.role === "pointer" && !d.uinput
+                                                                    && d.kinds.indexOf("keyboard") >= 0
+                                                                    && d.kinds.indexOf("mouse") >= 0)
 
             Kirigami.FormLayout {
                 Controls.ComboBox {
@@ -732,6 +740,15 @@ Item {
                 Controls.Label {
                     Kirigami.FormData.label: "Keyboards connected:"
                     text: kpage.keyboards.length ? kpage.keyboards.map(d => d.name).join(", ") : "none"
+                }
+                Controls.Label {
+                    visible: kpage.keyedPointers.length > 0
+                    text: "Not counted, because its role is 3D pointer: " + kpage.keyedPointers.map(d => d.name).join(", ")
+                          + ". If that is a keyboard with a touchpad, set its role to Keyboard + 3D pointer on the "
+                          + "Devices page: its keys then type, and the touchpad still drives the pointer."
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 24
                 }
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Desktop layout" }
                 Controls.ComboBox {

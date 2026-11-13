@@ -40,8 +40,13 @@ whole buffer scale KWin 6.2 requires. KWin 6.2.5 makes no such object: it keeps 
 configure's pixels and the scale `kscreen-doctor` sets, and would make any later configure
 that size times its scale, so there ft-screens configures a screen in pixels and never again
 for a scale change, as before. ft-floatd sends spares' logical dimensions itself, after enabling and scaling them.
-ft-layout waits briefly for KWin's reported scale, and uses target scales for positioning
-while configure events are pending.
+`kscreen-doctor` doesn't show that scale either: from 6.6 it reports a nested output's stored
+scale setting, which stays 1. ft-layout sends ft-screens the layout's scales and never the
+ones KWin reports, which would put a scaled screen back at 1, and positions screens by the
+layout's scales too. ft-floatd and `ft-layout remote-view` also take screens' scales from the
+layout (`kwin_scales` in `layout/ft_layout.py`), so a window floated off a screen at 200% floats
+at 200%. KWin's support information (`qdbus6 org.kde.KWin /KWin supportInformation`) shows the
+scale an output has.
 
 ### Placing and sizing
 
@@ -167,7 +172,7 @@ Moved to [design-session.md](design-session.md#steamos-updates).
 ## Open questions
 
 - A controller button that shows the screens during a game. Games own the controllers, so this needs SteamVR input actions for ft-screens.
-- Drawing KWin's cursor on the screens.
+- Drawing KWin's cursor on the screens by default. `DESKTOP_CURSOR=1` has KWin draw it itself, for input that isn't the 3D mouse or a laser (Deskflow), but then it shows under the 3D mouse's dot too; ft-screens drawing it only while the 3D mouse and the lasers are away is not built.
 - Frame pacing and GPU cost with several busy screens haven't been measured.
 - Whether the screen-jump fix (`screens/universefix.h`) catches every screen jump after walking away. It was built from vrserver's logs, not a logged repro of a jump; the tracking watch's lines and the fix's `universe` lines in `~/.local/state/frametop/screens.log` show the next one. A recenter saved per tracking world can also differ from a universe's own standing (the Room Setup origin) when tracking comes back in a new tracking world; screens follow that like any recenter.
 - Real standby on a stand, with rendering and tracking paused, not just the backlight off. SteamVR has no call for it, and its activity level follows the proximity sensor.

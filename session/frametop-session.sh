@@ -39,7 +39,7 @@ done
 
 conf=$HOME/.config/frametop.conf
 BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=16 FLOAT_MARGIN=300
-NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin
+NOTIFY_FORWARD=auto FIREFOX_TITLEBAR=kwin DESKTOP_CURSOR=0
 STEAM_PIN_LOCK=0
 # The file is shell, sourced, but only when every line is in its grammar (docs/config.md). A line
 # outside it (a value with a space or $(...) in it, "KEY = value") is one bash runs as a command:
@@ -236,9 +236,10 @@ exec /usr/bin/kwin_wayland_wrapper --width $width --height $height --output-coun
   --no-lockscreen --inputmethod $textinput "\$@"
 EOF
 chmod +x "$runtime/bin/kwin_wayland_wrapper"
-# systemctl --user and systemd-run --user in a terminal here: the user's systemd is on the
-# real runtime folder and bus, not this desktop's (session/ft-userbus, DEE-327).
-for tool in systemctl systemd-run; do ln -s "$here/ft-userbus" "$runtime/bin/$tool"; done
+# systemctl --user, systemd-run --user and podman (so distrobox too) in a terminal here: the
+# user's systemd and containers are on the real runtime folder and bus, with the user's own
+# config, not this desktop's (session/ft-userbus, DEE-327 and issue 98).
+for tool in systemctl systemd-run podman; do ln -s "$here/ft-userbus" "$runtime/bin/$tool"; done
 export PATH=$runtime/bin:$PATH
 
 # Keep the host compositor's Wayland socket reachable after moving XDG_RUNTIME_DIR.
@@ -253,6 +254,9 @@ export XDG_RUNTIME_DIR=$runtime
 export XDG_CONFIG_HOME=$HOME/.config/frametop
 export XDG_STATE_HOME=$HOME/.local/state/frametop
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME"
+# OpenXR and OpenVR programs started here still find SteamVR, which they look up under the
+# config folder (session/vr-links.sh, issue 78).
+"$here/vr-links.sh" "$XDG_CONFIG_HOME" || true
 
 # Title bar buttons for apps that draw their own (session/ft-gtksettings): Firefox and
 # Chromium read GTK's button layout from the Settings portal here, where nothing on SteamOS
@@ -299,6 +303,12 @@ export XDG_DATA_DIRS=$runtime/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share
 cursor_theme=$(kreadconfig6 --file kcminputrc --group Mouse --key cursorTheme)
 cursor_size=$(kreadconfig6 --file kcminputrc --group Mouse --key cursorSize)
 export XCURSOR_THEME=${cursor_theme:-breeze_cursors} XCURSOR_SIZE=${cursor_size:-24}
+# KWin hands its cursor to the compositor it runs in to draw, and ft-screens doesn't draw it:
+# the 3D mouse's dot and the lasers show where you point. Input that reaches KWin another
+# way moves a cursor nobody sees: Deskflow's, which comes through libei (issue 76), or a
+# remote desktop's. DESKTOP_CURSOR=1 has KWin draw its cursor into the screens' pictures
+# itself, so it shows wherever it is, under the 3D mouse's dot too.
+[ "$DESKTOP_CURSOR" != 1 ] || export KWIN_FORCE_SW_CURSOR=1
 
 # Remote desktop over VNC: session/remote-desktop.sh captures the desktop with
 # krdp on 127.0.0.1, and session/vnc-bridge.sh re-serves its primary screen over VNC. krdpserver runs from the container, so KWin can't

@@ -181,6 +181,74 @@ Item {
         ]
     }
 
+    // A host's app windows: a sign-in to the Vibepollo on it that shares them, which is its
+    // own on Windows and a second one in the Hyprland session on Linux. Frametop keeps that
+    // one's token; the host's apps and windows then show in the launcher.
+    Kirigami.PromptDialog {
+        id: windowsDialog
+        objectName: "windowsDialog"
+        title: "App windows on " + hostName
+        standardButtons: Kirigami.Dialog.NoButton
+        property string hostName: ""
+        property bool working: false
+        property string error: ""
+        readonly property bool ok: windowsUser.text !== "" && windowsPassword.text !== "" && !working
+        function openFor(h) {
+            hostName = h.name; error = ""; working = false; windowsPassword.text = ""
+            open()
+            windowsUser.forceActiveFocus()
+        }
+        function accept() {
+            if (!ok) return
+            working = true; error = ""
+            backend.appWindowsOn(hostName, windowsUser.text, windowsPassword.text)
+        }
+        Connections {
+            target: backend
+            function onAppWindowsSet(name, ok, why) {
+                if (!windowsDialog.working || name !== windowsDialog.hostName) return
+                windowsDialog.working = false
+                if (!ok) {
+                    windowsDialog.error = why
+                    return
+                }
+                windowsPassword.text = ""
+                windowsDialog.close()
+                root.showPassiveNotification(name + "'s apps and windows are in the launcher (Meta+Space)")
+            }
+        }
+        ColumnLayout {
+            Controls.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Its apps and open windows show in the launcher (Meta+Space), and each one opens as a panel of its own. Sign in with the Web UI user name and password of the Vibepollo that shares them: on a Windows PC, the one its displays use; on a Linux PC (Hyprland), the one you made there with vibepollo-frametop-windows setup. Frametop keeps a token for its windows. The password isn't kept."
+            }
+            Kirigami.FormLayout {
+                Layout.fillWidth: true
+                Controls.TextField { id: windowsUser; objectName: "windowsUser"; Kirigami.FormData.label: "User name:" }
+                Controls.TextField {
+                    id: windowsPassword
+                    objectName: "windowsPassword"
+                    Kirigami.FormData.label: "Password:"
+                    echoMode: TextInput.Password
+                    onAccepted: windowsDialog.accept()
+                }
+            }
+            Controls.BusyIndicator { visible: windowsDialog.working; running: visible; Layout.alignment: Qt.AlignHCenter }
+            Controls.Label {
+                visible: windowsDialog.error !== ""
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: Kirigami.Theme.negativeTextColor
+                text: windowsDialog.error
+            }
+        }
+        customFooterActions: [
+            Kirigami.Action { text: "Turn on"; icon.name: "go-next"; enabled: windowsDialog.ok; onTriggered: windowsDialog.accept() },
+            Kirigami.Action { text: "Cancel"; icon.name: "dialog-cancel"; onTriggered: { windowsPassword.text = ""; windowsDialog.close() } }
+        ]
+    }
+
     // A host's displays to add: its monitors as they are (all of them ticked, but the ones
     // already added), and on Vibepollo, a virtual one at any size. A monitor is known by its
     // key: what it streams, and a Sunshine instance's port.
@@ -484,8 +552,8 @@ Item {
                                 checked: hostCard.modelData.mic
                                 onToggled: backend.setMic(hostCard.modelData.name, checked)
                                 Controls.ToolTip.text: "Apps on it can record the Frame's microphone while its displays stream: "
-                                                       + "pick \"Microphone (Steam Streaming Microphone)\". Windows only for now, "
-                                                       + "with Frametop's build of Vibepollo."
+                                                       + "pick \"Microphone (Steam Streaming Microphone)\" on Windows, "
+                                                       + "\"Frametop Microphone\" on Linux. Needs Frametop's build of Vibepollo."
                                 Controls.ToolTip.visible: hovered
                             }
                             // Its own keyboard and mouse, lent while the headset is worn. Only
@@ -497,8 +565,31 @@ Item {
                                 onToggled: backend.setInput(hostCard.modelData.name, checked)
                                 Controls.ToolTip.text: "While you wear the headset and its displays stream, its keyboard and mouse "
                                                        + "work in Frametop, and stop working on the computer. Take the headset off, "
-                                                       + "or press both Shifts and Escape on it, to give them back. Linux only "
-                                                       + "for now, with Frametop's build of Vibepollo."
+                                                       + "or press both Shifts and Escape on it, to give them back. Needs "
+                                                       + "Frametop's build of Vibepollo, with host input turned on there."
+                                Controls.ToolTip.visible: hovered
+                            }
+                            // Its apps' windows as panels of their own, and in the launcher.
+                            // Turning it on signs in to the Vibepollo that shares them, so
+                            // the switch stays as it was until that works.
+                            Controls.Switch {
+                                id: appWindows
+                                objectName: "appWindows"
+                                visible: !hostCard.sunshine
+                                text: "Show its apps and windows in the launcher"
+                                checked: hostCard.modelData.appWindows
+                                onToggled: {
+                                    if (checked) {
+                                        checked = Qt.binding(() => hostCard.modelData.appWindows)
+                                        windowsDialog.openFor(hostCard.modelData)
+                                    } else {
+                                        backend.appWindowsOff(hostCard.modelData.name)
+                                    }
+                                }
+                                Controls.ToolTip.text: "The launcher (Meta+Space) lists this computer's apps and open windows, "
+                                                       + "and each one opens as a panel of its own while the window leaves "
+                                                       + "its monitors. Needs Frametop's build of Vibepollo: on Windows as it "
+                                                       + "is, on Linux with Hyprland and vibepollo-frametop-windows setup."
                                 Controls.ToolTip.visible: hovered
                             }
                             // Copied text and images both ways, at the moments typing changes

@@ -168,7 +168,8 @@ bool WebApi::Load(const std::string &host, const std::string &file, int port) {
     // Web UI next to it, as LoadLogin's.
     base = "https://" + host + ":" + std::to_string((port ? port : kGameStreamPort) + 1);
     // The Web UI's public key as Remote Displays saw it when signing in (HOST.pin next to
-    // HOST.token): another one is refused. Without one, any (a host from make-frametop-token).
+    // HOST.token, HOST-PORT.pin next to an instance's own): another one is refused. Without
+    // one, any (a host from make-frametop-token).
     const std::string pinFile = file.size() > 6 && file.compare(file.size() - 6, 6, ".token") == 0
                                     ? file.substr(0, file.size() - 6) + ".pin" : "";
     std::ifstream p(pinFile);
@@ -184,8 +185,8 @@ bool WebApi::LoadLogin(const std::string &host, int port, FILE *in) {
     login = std::string(user) + ":" + pass;
     std::memset(pass, 0, sizeof pass);
     base = "https://" + host + ":" + std::to_string((port ? port : kGameStreamPort) + 1);
-    // Every instance on a host shares the Web UI certificate Remote Displays pinned (the Mac's
-    // host setup gives them one), so one pin per address.
+    // A login is for a host without tokens (a Mac): its instances share the Web UI certificate
+    // Remote Displays pinned (the Mac's host setup gives them one), so the host's pin.
     std::ifstream p(KeyDir("hosts") + "/" + host + ".pin");
     if (!(p >> pin)) pin.clear();
     return true;

@@ -1,6 +1,6 @@
 # Host input: a computer's keyboard and mouse in Frametop (design notes)
 
-Status: Linux hosts built (2026-10-27), with Frametop's Vibepollo build; see "Linux hosts". Windows and the Mac are planned, and the spikes below come first for them. Pausing the streams when the headset comes off isn't built yet: only the keyboard and mouse go back.
+Status: Linux hosts built (2026-10-27), with Frametop's Vibepollo build; see "Linux hosts". Windows hosts are built in the fork too (2026-10-29, `src/platform/windows/frametop_hostin.cpp`), off until the PC's owner sets `frametop_host_input = enabled` in `sunshine.conf`, and not yet run against a real headset session. The Mac is planned. Pausing the streams when the headset comes off isn't built yet: only the keyboard and mouse go back.
 
 The idea: while you wear the headset and a computer's displays stream into Frametop ([remote displays](remote-displays.md)), that computer's own keyboard and mouse work as if they were paired to the Frame. The mouse drives the 3D mouse, and the keys type wherever typing goes in Frametop. Take the headset off and the computer gets its keyboard and mouse back, and its streams stop. Put it back on and the streams come back, and the keyboard and mouse go back to Frametop. It's what a Mac's keyboard and trackpad do for an Apple Vision Pro with Mac Virtual Display.
 
@@ -87,7 +87,7 @@ A capture thread in `sunshine.exe` (the service starts it in the console session
 - `WH_KEYBOARD_LL` and `WH_MOUSE_LL` hooks take the hardware's events (returning 1) and skip injected ones. Volume and media keys pass.
 - Raw Input (`RIDEV_INPUTSINK`) gives the mouse's counts, since a low-level hook only sees the pointer's accelerated, clamped position.
 - The hooks belong to one desktop, so the thread follows the input desktop as `syncThreadDesktop` does for injection. On the secure desktop and the lock screen input stays on the PC (`released secure`).
-- A setting in `sunshine.conf` turns it off on that PC.
+- It is off until the PC's owner turns it on: `frametop_host_input = enabled` in `sunshine.conf`. Until then a client asking is told `released off`. The fork's `windows-frametop-host-input.md` (in its docs) is the owner's guide.
 
 ## macOS: Frametop Bridge
 
@@ -115,7 +115,7 @@ Built first (2026-10-27), for a Hyprland host (oma7). Wayland gives no global in
 - When the kernel drops a device's events (`SYN_DROPPED`), it catches up from the device's key state (`EVIOCGKEY`): keys that came up meanwhile come up on the Frame, ones that went down stay on the computer, and the device stays taken. (`dropped` is still a reason in the protocol, from older hosts.)
 - It lets go 1.5 s after the last lease, when the stream ends, when the client loses its mouse or keyboard permission, when the client's control stream falls behind (`overflow`), when Vibepollo stops reading from it (`stalled`), or when Vibepollo stops (`closed`).
 
-The fork's host side (`src/frametop_hostin*.cpp`) gives the lease to one client at a time (another gets `released busy`), only on an encrypted control stream and only to a client allowed both mouse and keyboard. Windows and macOS hosts answer `released unsupported`.
+The fork's host side (`src/frametop_hostin*.cpp`) gives the lease to one client at a time (another gets `released busy`), only on an encrypted control stream and only to a client allowed both mouse and keyboard. A Windows host with the setting off answers `released off`, and macOS hosts answer `released unsupported`.
 
 The protocol as built: `0x3005` is version 1, then engage (1) with a u32 sequence and a u16 lease in ms, release (2) or drop (3). `0x3004` is version 1, then one record: events (1: kind, 1 keyboard or 2 mouse, a u16 count, then evdev type u16, code u16, value s32 each, little-endian; a report ends with 0 0 0; a mouse record carries `BTN_MOUSE` to `BTN_TASK` and relative motion, a keyboard record the other keys), state (2: engaged 0 or 1, then the reason), or hello (3: kinds, then the host's name). State and hello come on every change and once a second. Reasons: `lease`, `host`, `escape`, `busy`, `permission`, `overflow`, `dropped`, `stalled`, `closed`, `off`, `service`, `unsupported`.
 

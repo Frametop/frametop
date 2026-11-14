@@ -130,6 +130,7 @@
 #include "levelpin.h"
 #include "barhit.h"
 #include "posemath.h"
+#include "roomshift.h"
 #include "layoutgrab.h"
 #include "../conf/ftsock.h"
 #include "vrcmd.h"
@@ -7098,6 +7099,51 @@ void FollowUniverse(const universefix::Switch &sw) {
                 moved.c_str(), kept.empty() ? "" : "; now belong to the new one, not moved:", kept.c_str());
 }
 
+// "shift DX DZ YAW": you moved yourself through a shared room (together/roompanels/moving.py),
+// so everything that stands in it moves on your floor instead: turned YAW degrees to the left
+// about the way up through the floor's middle, then moved DX and DZ metres (roomshift.h). As
+// FollowUniverse moves them, but all of them: a panel on its way, a spin's panels and its
+// axis, the front slot's home and the parked places go along. What rides a device or a laser
+// stays with it, and so with you. "shift back" undoes every shift so far: you left the room.
+roomshift::Shift g_shifted;   // the sum of them
+
+void ShiftRoom(const roomshift::Shift &by, char *reply, int size) {
+    const Mat j = roomshift::Pose<Mat>(by);
+    int moved = 0;
+    for (auto &[i, s] : g_screens) {
+        if (s.pinned != kNone || s.drag != Drag::None) continue;
+        const auto m = g_grabMoves.find(i);
+        if (m != g_grabMoves.end()) m->second.from = Mul(j, m->second.from), m->second.to = Mul(j, m->second.to), m->second.lastSet = Mul(j, m->second.lastSet);
+        const auto b = g_spin.base.find(i);
+        if (b != g_spin.base.end()) b->second = Mul(j, b->second);
+        if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
+        SetAbsolute(s, Mul(j, s.pose), s.universe);
+        ++moved;
+    }
+    const Mat axis = Mul(j, Translation(g_spin.cx, 0, g_spin.cz));
+    g_spin.cx = axis.m[0][3], g_spin.cz = axis.m[2][3];
+    if (g_front.panel >= 0) g_front.home = Mul(j, g_front.home);
+    for (auto &[i, k] : g_parked)
+        if (k.pinned == kNone) k.pose = Mul(j, k.pose);
+    // (a layout button's carry meanwhile: what goes with it goes on from where this put it)
+    for (auto &[i, rel] : g_layoutGrab.rel)
+        if (const auto it = g_screens.find(i); it != g_screens.end() && it->second.drag == Drag::None)
+            g_layoutGrab.Take(i, it->second.pose);
+    g_shifted = roomshift::Then(g_shifted, by);
+    if (moved) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are now
+    std::snprintf(reply, size, "ok %d", moved);
+}
+
+void ShiftCommand(vrcmd::Verb verb, const vrcmd::Cmd &c, char *reply, int size) {
+    if (verb == vrcmd::ShiftBack) {
+        ShiftRoom(roomshift::Back(g_shifted), reply, size);
+        g_shifted = {};   // exactly
+        return;
+    }
+    if (!vrcmd::ShiftOk(c)) return (void)std::snprintf(reply, size, "error shift <dx> <dz> <degrees> | shift back");
+    ShiftRoom({c.x, c.z, c.yaw * M_PI / 180}, reply, size);
+}
+
 // ---------------------------------------------------------------- the layout button
 // The layout button, the outermost left of a screen's bar (user, 2026-11-14: "when you grab it, it
 // grabs your entire Frametop layout and moves it ... interactable with the laser pinch underneath a
@@ -7739,6 +7785,21 @@ static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                       std::atan2(m.m[0][2], m.m[2][2]) * 180 / M_PI);
         return;
     }
+    case vrcmd::Reach: {
+        // Where both hand controllers are on the floor, for the program that pulls you through a
+        // shared room by them (together/ft-roommove). In a game they are the game's.
+        if (g_gameRunning) return (void)std::snprintf(reply, size, "error a game has the controllers");
+        Mat hand[2];
+        const char *side[2] = {"left", "right"};
+        for (int i = 0; i < 2; ++i) {
+            const vr::TrackedDeviceIndex_t dev = HandDevice(side[i]);
+            if (!IsHandController(dev) || !DevicePose(dev, &hand[i]))
+                return (void)std::snprintf(reply, size, "error no %s controller tracked", side[i]);
+        }
+        std::snprintf(reply, size, "ok %.4f %.4f %.4f %.4f %.4f %.4f", hand[0].m[0][3], hand[0].m[1][3], hand[0].m[2][3],
+                      hand[1].m[0][3], hand[1].m[1][3], hand[1].m[2][3]);
+        return;
+    }
     case vrcmd::GamepadPill: {
         std::snprintf(reply, size, "ok over %d shown %d pad %d ours %d lasers %d hover %d", g_pill.target + 1, g_pill.shown + 1,
                       g_pill.pad + 1, PadMine() ? 1 : 0, g_pill.lasers ? 1 : 0, g_pill.hover ? 1 : 0);
@@ -8297,6 +8358,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //                     [12 numbers: device->screen, when pinned]"   (pin: none|left|right|head)
 //   screens       -> "ok <count> <index>:<pixels w>x<h>:<metres> ..."
 //   head          -> "ok x y z yaw"
+//   reach         -> "ok lx ly lz rx ry rz"   where the left and the right hand controller are
+//                    (metres, as head); an error while either isn't tracked or a game runs
 //   universe      -> "ok <id> room|temporary|unknown"   SteamVR's universe now (universefix.h)
 //   visibility always|dashboard|gesture|toggle
 //   wrist <degrees>           a pinned screen shows while you see its front within this
@@ -8322,6 +8385,10 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //                             susan) -> "ok <degrees turned>"
 //   spin to <N>               ...the short way, so panel N comes to straight ahead and gets
 //                             typing -> "ok <degrees>", "error pinned", "error not in the room"
+//   shift <dx> <dz> <degrees>  every panel in the room moves on the floor: turned that much to
+//                             the left about the floor's middle, then moved that many metres
+//                             (you moved yourself through a shared room) -> "ok <panels moved>"
+//   shift back                every shift so far undone (you left the room) -> "ok <panels moved>"
 //   front <N>                 panel N gets typing and its window becomes KWin's active one,
 //                             where it is (as when a spin brings it to the front)
 //   wallpaper on|off          stereo wallpaper (wallimage.h): on reads Display Settings' left.ppm and
@@ -8376,6 +8443,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     case vrcmd::CutoutsGroup: return CutoutsCommand(verb, parsed, cmd, reply, size);
     case vrcmd::FloatGroup: return FloatCommand(verb, parsed, cmd, reply, size);
     case vrcmd::SpinGroup:
+        if (verb != vrcmd::Spin) return ShiftCommand(verb, parsed, reply, size);
         SpinCommand(cmd + 5, reply, size);
         return;
     case vrcmd::NoGroup: break;

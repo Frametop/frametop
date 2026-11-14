@@ -1,0 +1,97 @@
+#!/usr/bin/python3
+"""ft-roommove: pulls you through a Together room by the air (docs/together.md, "Moving
+yourself"). Close both grips and move your hands: the room comes along, as if you held it.
+Hands apart turn it too. It reads the grips from SteamVR's web socket (roommove/grips.py),
+which takes them from nobody, asks ft-screens where the hands are (`reach`) and ft-roompanels
+for each pull (`pull`, roompanels/moving.py). The rules are in roommove/; this is the loop and
+the sockets around them.
+
+Questions on its own socket: `state` -> "ok" and JSON (`room`: this Frame is in one, `both`:
+both grips are down, `held`: the room is in hand, `pulls` made and `refused`), and `quit`.
+
+  --socket NAME     its own socket (ft_roommove)
+  --together NAME   ft-together's (ft_together)
+  --screens NAME    ft-screens' (ft_screens)
+  --panels NAME     ft-roompanels' (ft_roompanels)
+  --probe           no SteamVR: the grips are as `grips 0|1 0|1` on its socket last said
+"""
+
+import os
+import select
+import signal
+import socket
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "conf"))
+sys.path.insert(0, str(HERE.parent / "input"))
+sys.path.insert(0, str(HERE))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+import vrws  # noqa: E402  (SteamVR's web socket)
+from roommove.grips import Told, VrGrips  # noqa: E402
+from roommove.puller import Puller  # noqa: E402
+
+
+def main():
+    names = {"--socket": "ft_roommove", "--together": "ft_together", "--screens": "ft_screens", "--panels": "ft_roompanels"}
+    words = sys.argv[1:]
+    probe = "--probe" in words
+    words = [w for w in words if w != "--probe"]
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
+    if words:
+        sys.exit(__doc__.strip())
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    try:
+        server.bind(ftipc.address(names["--socket"]))
+    except OSError:
+        sys.exit("ft-roommove runs already (its socket is taken)")
+    server.setblocking(False)
+    asker = ftipc.Client(timeout=0.3)
+    grips = Told() if probe else VrGrips(vrws, f"frametop_roommove_{os.getpid()}")
+    puller = Puller(*(lambda text, to=to: asker.ask(names[to], text) for to in ("--together", "--screens", "--panels")), grips)
+
+    def answer(text):
+        w = text.split()
+        if text == "state":
+            return puller.state()
+        if probe and len(w) == 3 and w[0] == "grips" and all(v in ("0", "1") for v in w[1:]):
+            grips.both = w[1:] == ["1", "1"]
+            return "ok"
+        return "error state | quit"
+
+    def ended(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, ended)
+    signal.signal(signal.SIGINT, ended)
+    was = None
+    try:
+        while True:
+            puller.look(time.monotonic())
+            if puller.in_room != was:
+                was = puller.in_room
+                print("in a room: both grips pull you through it" if was else "not in a room", flush=True)
+            fds = [server] + ([grips.fileno()] if grips.fileno() is not None else [])
+            if server not in select.select(fds, [], [], puller.wait(time.monotonic()))[0]:
+                continue
+            while True:
+                try:
+                    data, who = server.recvfrom(256)
+                except OSError:
+                    break
+                text = data.decode("utf-8", "replace").strip()
+                try:
+                    server.sendto(("ok" if text == "quit" else answer(text)).encode(), who)
+                except OSError:
+                    pass       # whoever asked is gone
+                if text == "quit":
+                    return
+    finally:
+        puller.end()
+
+
+if __name__ == "__main__":
+    main()

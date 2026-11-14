@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <cstring>
 
 using namespace vrcmd;
@@ -26,7 +27,7 @@ int main() {
     struct { const char *cmd; Verb verb; } lines[] = {
         {"place 1 0.5 1.2 -2 10 -5 0", Place}, {"width 2 1.6", Width}, {"curve 1 on", CurveOnOff},
         {"curve 1 off", CurveOnOff}, {"curve 1 2.5", Curve}, {"pin all head", Pin}, {"unpin 3", Unpin},
-        {"get 1", Get}, {"screens", Screens}, {"universe", Universe}, {"head", Head},
+        {"get 1", Get}, {"screens", Screens}, {"universe", Universe}, {"head", Head}, {"reach", Reach},
         {"visibility auto", Visibility}, {"wrist 0.8", Wrist}, {"gesture left 0.5", Gesture},
         {"gamepadpill", GamepadPill}, {"concealed", Concealed}, {"conceal 2", ConcealReveal},
         {"reveal all", ConcealReveal}, {"hide", HideShowToggle}, {"show", HideShowToggle},
@@ -41,6 +42,7 @@ int main() {
         {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry toggle", CarryToggle}, {"carry take 5", CarryTake},
         {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up},
         {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02 7", Pulled}, {"spin 30", Spin},
+        {"shift 0.25 -1.5 30", Shift}, {"shift back", ShiftBack},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;
@@ -90,11 +92,21 @@ int main() {
     check("curve with a long word: %7s stops at 7, so not off", V("curve 1 offoffoff") == Unknown);
     check("pin with one word is no pin", V("pin all") == Unknown);
     check("head is a prefix: headset is head", V("headset") == Head);
+    check("reach is the whole word", V("reach") == Reach && V("reaches") == Unknown && V("reach 1") == Unknown && GroupOf(Reach) == ReadoutGroup);
     check("screens and state are prefixes", V("screens please") == Screens && V("statex") == State);
     check("concealed before conceal", V("concealed 2") == Concealed);
     check("hide, show, toggle are prefixes", V("hidex") == HideShowToggle && V("toggled") == HideShowToggle);
     check("hold needs its two numbers", V("hold 1 2") == Hold && V("hold") == Unknown);
     check("spindistance is no spin; spin needs its space", V("spindistance x") == Unknown && V("spin") == Unknown);
+    c = {};
+    check("shift 0.25 -1.5 30: across, along, degrees", Parse("shift 0.25 -1.5 30", c) == Shift && near(c.x, 0.25) && near(c.z, -1.5) && near(c.yaw, 30) && ShiftOk(c));
+    check("shift needs its three numbers and no more", V("shift 1 2") == Unknown && V("shift 1 2 3 4") == Unknown && V("shift a b c") == Unknown && V("shift") == Unknown);
+    check("shift back is exact", V("shift back") == ShiftBack && V("shift back 1") == Unknown && V("shift backwards") == Unknown);
+    bool refused = true;
+    for (const char *bad : {"shift nan 0 0", "shift 0 inf 0", "shift 0 0 nan", "shift 5001 0 0", "shift 0 -5001 0", "shift 0 0 361", "shift 0 0 -361"})
+        refused &= Parse(bad, c) == Shift && !ShiftOk(c);
+    check("a shift too far, more than a turn, or of no number is refused", refused);
+    check("...and one at the limits is taken", Parse("shift 5000 -5000 -360", c) == Shift && ShiftOk(c));
     check("steamvrmode with too few numbers is no steamvr list", V("steamvrmode 1 2") == Unknown);
     check("handsetting needs both words (and is no \"hands\" either)", V("handsetting KEY") == Unknown);
     check("hands needs three", V("hands hand controller") == Unknown);
@@ -116,6 +128,6 @@ int main() {
     check("groups: helper words, hand features, cutouts, floating, spin",
           GroupOf(Hands) == HelperWordGroup && GroupOf(SpinDistance) == HelperWordGroup &&
               GroupOf(GrabThat) == HandFeatureGroup && GroupOf(Cutouts) == CutoutsGroup && GroupOf(Up) == FloatGroup &&
-              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup);
+              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup && GroupOf(Shift) == SpinGroup && GroupOf(ShiftBack) == SpinGroup);
     return failed ? 1 : 0;
 }

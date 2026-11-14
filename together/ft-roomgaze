@@ -1,0 +1,64 @@
+#!/usr/bin/python3
+"""ft-roomgaze: where you look, for a Together room, when you share it (docs/together.md,
+"Gaze"). While ft-together runs, it tells it each second whether your eyes move your pointer
+(the pointer helper knows: gaze mode), so that a pointer that follows your eyes isn't shown to
+the room unless you share where you look. While you do share it, in a room and with the headset
+on, it keeps the gaze service running and tells ft-together where you look five times a second:
+a smoothed direction, and nothing else. No picture of an eye is read here or anywhere on the
+way. The rules are in roomgaze/feeder.py; this is the loop around them.
+
+  --together NAME   ft-together's socket (ft_together)
+  --helper NAME     the pointer helper's (ft_pointer_helper)
+  --gazed NAME      the gaze service's (ft_gazed)
+"""
+
+import signal
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "conf"))
+sys.path.insert(0, str(HERE))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+from roomgaze.feeder import Feeder  # noqa: E402
+
+
+def said(feeder):
+    """What it is doing, in a line."""
+    if not feeder.running:
+        return "no ft-together"
+    pointer = {"eyes": "your eyes move the pointer", "hand": "your hand moves the pointer", None: "nobody says what moves the pointer"}[feeder.pointer]
+    if not feeder.shared:
+        return pointer + "; where you look isn't shared"
+    if not feeder.feeding:
+        return pointer + "; where you look is shared, and you aren't there"
+    return pointer + "; where you look is shared, " + ("and told" if feeder.told else "and the gaze service has no direction")
+
+
+def main():
+    names = {"--together": "ft_together", "--helper": "ft_pointer_helper", "--gazed": "ft_gazed"}
+    words = sys.argv[1:]
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
+    if words:
+        sys.exit(__doc__.strip())
+    clients = {flag: ftipc.Client(timeout=0.3) for flag in names}
+    feeder = Feeder(*(lambda text, flag=flag: clients[flag].ask(names[flag], text) for flag in ("--together", "--helper", "--gazed")), time.monotonic)
+
+    def ended(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, ended)
+    signal.signal(signal.SIGINT, ended)
+    was = None
+    while True:
+        wait = feeder.tick()
+        if said(feeder) != was:
+            was = said(feeder)
+            print(was, flush=True)
+        time.sleep(wait)
+
+
+if __name__ == "__main__":
+    main()

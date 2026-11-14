@@ -11,10 +11,12 @@ class CliTests(unittest.TestCase):
     def setUp(self):
         # worn and release write and clear the fake-worn flag: a temp runtime dir, never this
         # machine's (a run under way keeps its flag), and no real guard unit.
-        from frame_testbench import hostinput
+        from frame_testbench import hostinput, peers
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         for patch in (mock.patch.dict('os.environ', {'XDG_RUNTIME_DIR': tmp.name}),
+                      # release stops the fake peers: never this machine's
+                      mock.patch.object(peers, 'stop_all', mock.Mock(return_value={'stopped': []})),
                       # a guard that took the locks and wrote the flag naming itself
                       mock.patch.object(hostinput, 'start_guard',
                                         mock.Mock(side_effect=lambda socket=None: hostinput.set_flag(False, 1.0))),

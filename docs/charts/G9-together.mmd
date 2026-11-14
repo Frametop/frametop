@@ -1,0 +1,448 @@
+---
+title: "G9 Frametop Together: the units, a room and its links, away, voices, shared panels, control, pointers, gaze, moving, avatars, a PC's panels and its windows (5496ae9, branch dee-193-together)"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    direction LR
+    lg0: Off, idle, or nothing held
+    lg1: Live: in a room, a link whole, open, shown
+    lg2: Between: calling, asking, waiting, on its way
+    lg3: Ended or held back by a rule, or a wait that ran out
+    lg4: Fixed T1 (6e78c20): a headset let in again while the owner still held its old link was in the room twice. TLC took 10 steps to it (PreFix, rule OnceInRoom)
+    lg5: G9Together.tla: the nine rules hold in Room (719,774 states), Full (1,126,402) and Reopen (266,158), and a room always settles (Live, 14,237)
+    lg6: Fixed (bd03df2, acdef52, ce5299d): a shared panel's video on the Frame's encoder. A width that isn't a multiple of 128 reset the Frame, twice. tests/panels-test.py passes on the hardware
+    lg7: Everything a link brings is untrusted, also after its sender was let in: a link that says what it may not is closed
+    lg8: Another group: arrows into it are what G9 reads or drives there
+    lg9: A grant is checked where it is enforced, in the ft-together of the panel's owner. A guest's own refuses the same things first, to say why
+    lg10: Control, the turn, pointers, gaze and moving are drawn from the code and its tests. The model is of the room and its links
+    lg11: A panel's video (74c2dee, 94e99d6, 6e87517, 67b480e): encoded for the viewer who sees most of it, decoded only where it is seen, within its owner's quality. tests/panels-test.py runs the Frame out of video sessions and through the three qualities on the hardware
+    lg12: A PC's panels (df78bee, 6501d45, 5496ae9): the PC encodes, its person's Frame sends on. ft-roompanels has the PC call in for the windows it shares. The sender is in the Vibepollo fork (frametop/together, Linux with Hyprland). ft-pcsend stands for the PC with a recorded loop in the tests (pcpanels-test.cpp, pcsend-test.py, roompcs-test.py). A guest's input to a PC's window has only run against stand-ins
+  }
+  class lg0 teal
+  class lg1 blue
+  class lg2 yellow
+  class lg3 orange
+  class lg4 fixed
+  class lg5 fixed
+  class lg6 fixed
+  class lg7 legendNote
+  class lg8 xgroup
+  class lg9 legendNote
+  class lg10 legendNote
+  class lg11 legendNote
+  class lg12 legendNote
+  state "Your split compute PC at this Frame (flow/pcpanels.h, proto/sender.h, session.cpp Link kDevice)" as pc {
+    b0: No PC here. sender makes a code for one: eight characters, once, ten minutes
+    [*] --> b0
+    b1: A link whose first word is a Sender, not a Hello: not a Frame's, and nobody in the room
+    b2: The PC: told what to encode for its four panels (R, F, P, K, W), nothing else of the room
+    b3: A panel of the PC's is watched: its pictures come in, are put in order, and go on as this Frame's panel 3 to 6
+  }
+  state "The windows of your PC that you share (roompanels/pcwindows.py, pclink.py, pcshares.py, the fork's /api/frametop/together)" as pw {
+    q0: None shared: the PC isn't asked anything
+    [*] --> q0
+    q1: Calling the PC in: a code from ft-together (sender), and where to call, to the PC's windows instance. Again every 6 s
+    q2: Called in: the PC is told which windows are its panels 3 to 6, and the room each panel at the size the PC encodes it
+  }
+  state "Together on this Frame (together/run.sh, frametop-together.service, the eight frametop-room-* units PartOf it)" as un {
+    u0: Not installed: the installer's optional part
+    [*] --> u0
+    u1: Installed, off: no unit runs, nothing listens
+    u2: On: ft-together waits for Tailscale, looks every 3 s
+    u3: On: takes calls on the tailnet address (port 47193), the room programs beside it
+  }
+  state "The session on one Frame (session.h Mode, G9Together.tla)" as se {
+    m0: Idle: no room
+    [*] --> m0
+    m1: Hosting: its room is the room
+    m2: Calling a room's owner with a code
+    m3: Joined: holds the room as its owner last told it
+  }
+  state "A link at the owner's end (session.cpp Link::State)" as lo {
+    o0: Stranger: 10 s to say Hello, 8 at once
+    [*] --> o0
+    o1: Asking: the code was good, a card on the Together page, 120 s
+    o2: Member: a person of the room
+    o3: Refused or closed: told why, the link ends
+  }
+  state "A guest's links (session.cpp OnHello, Knocked, Mesh, OnRoom)" as lg {
+    c0: Called the owner: Hello sent, 10 s
+    [*] --> c0
+    c1: The owner's Hello came: waits for the answer, 130 s
+    c2: Member: the link to the room's owner
+    p0: Called another guest: the lower address calls, 10 s
+    p1: Member: a link to another guest, for poses, voice, panels, avatars
+    w0: Stranger: another guest calls
+    w1: Waiting: their Hello came, the room doesn't list them yet, 10 s
+    p2: Closed: the room no longer lists them there, or the wait ran out. Called again 3 s on
+  }
+  state "Away (ft-roomaway teller.py, session SetAway)" as aw {
+    a0: Here: worn, not paused
+    [*] --> a0
+    a1: In a game: Frametop paused. The voice stays, shared screens stand still
+    a2: Headset off: the microphone closed, nothing played
+  }
+  state "Your voice and mouth (ft-roomvoice sender.cpp, mouthsay.h, local/mouth.h)" as vo {
+    v0: Microphone closed: no room, muted, or the headset off
+    [*] --> v0
+    v1: Open: Opus each 20 ms to every member link, the mouth's five shapes to ft-together
+    v2: Mouth in each pose sent, held 0.5 s after it was last told
+    v3: Failed to open: tried again
+  }
+  state "A screen of yours in the room (ft-roompanels keeper.py, screens/share.c, ft-sharepanel)" as sh {
+    x0: Not shared
+    [*] --> x0
+    x1: In the room, nobody watches: no pictures asked for, the encoder closed after 3 s
+    x4: Watched, in view at the most: a third of its pictures a second, five at the least
+    x2: Watched, focused by someone: all the pictures its owner's quality gives it. Encoded once for everyone, a stream a picture
+    x5: The encoder opens again for another quality's pictures a second, and begins with a keyframe
+    x3: A viewer waits for a keyframe: asked of the encoder, twice a second at most
+  }
+  state "Someone's panel here (keeper.py _others, remote.c peer, ft-peerpanel, flow/video.h)" as pe {
+    y0: In the room, no screen for it here yet
+    [*] --> y0
+    y1: A remote screen (116 down), ft-peerpanel has a decoder and waits for a keyframe
+    y2: In step: pictures in order, decoded, shown where the room has it
+    y3: Lost its place: held pictures, nothing passed for 0.3 s
+    y4: Out of your view for 3 s: its decoder given up, the last picture stays, its owner hears hidden
+    y5: A still: seen, but without a decoder. The last picture stays, and its owner hears that nobody sees it here
+  }
+  state "The avatar someone has on (flow/looks.h, local/wardrobe.h, avatar/room/sentbody.h)" as lk {
+    k0: None listed: the abstract figure
+    [*] --> k0
+    k1: Listed: the room has its file's size and SHA-256, no file here
+    k2: Asked for on the link to its wearer: awaited, to that size
+    k3: Kept: the size and the hash are the room's (runtime folder, 4 at most, never parsed here)
+    k4: Drawn: the strict reader took it, a body, marked as one to pass on
+    k5: Refused, said once: the abstract figure stays
+  }
+  state "Your avatar for the others (wardrobe.cpp Wear, roomavatar.py, ft-model-import --allow-share)" as wr {
+    z0: None on (AVATAR_MODEL empty): the others see the abstract figure
+    [*] --> z0
+    z1: On, not marked: it stays on this headset, the Together page asks
+    z2: On and marked: the room lists it (an owner's at once, a guest's told every 2 s until it does)
+    z3: Its file goes to who asked: 3 at once, then one in 30 s a link
+  }
+  state "A panel of yours and someone in the room (flow/control.cpp, room/grants.h: your ft-together decides)" as ct {
+    n0: Not theirs: no ask, no grant
+    [*] --> n0
+    n1: Asked: a row on the Together page with Give it and No, 120 s
+    n2: Given, a lease: their input on it is taken while the last control here is under 10 s old. They are told every 3 s how long it stands
+    n3: Ended: they are told at once, and what they held down on your desktop is let go
+  }
+  state "The turn on your desktop (room/desk.h, local/inputs.h, ft-roominput giver.py, screens/peerinput.h)" as ds {
+    d0: Nobody's: the next input under a grant takes it
+    [*] --> d0
+    d1: Theirs: each act goes to ft-roominput and on to the seat (peer SCREEN ...). Anyone else's is dropped
+    d2: Theirs, with something down: 8 buttons and keys at most, 60 s at most
+    d3: Yours: your own hand is on the desktop (control own from ft-screens, twice a second at most)
+  }
+  state "Your hand on someone's panel (ft-peerpanel, local/panelhand.h, local/hush.h, control.cpp Act)" as hd {
+    h0: Off it: the room was told once that you point at nothing
+    [*] --> h0
+    h1: On it, shown: a pointer datagram with each move (60 a second at most) and once a second at rest
+    h2: On it, kept quiet: your eyes move it and you don't share where you look. The last move waits, and goes before a click or a scroll there
+    h3: A button held: the moves go to the room and to the owner, so a drag is seen and given
+  }
+  state "Where you look, for the room (local/gaze.h, gazeask.h, ft-roomgaze feeder.py)" as gz {
+    q0: Not shared: nothing of your eyes leaves the Frame, and the gaze service is asked nothing
+    [*] --> q0
+    q1: Shared, nothing fresh: ft-roomgaze reads the gaze service five times a second
+    q2: Shared and fresh: each pose of yours carries the direction, in half degrees, 63.5 at most each way
+  }
+  state "The others' marks on a panel here (ft-roompoints: points/marks.h, dots.h, local/glances.h)" as mk {
+    r0: No mark of theirs. SteamVR is joined only once one is wanted
+    [*] --> r0
+    r1: A ring where they point, in their place's colour
+    r2: A disc while they hold a button
+    r3: A glow where they look, under the pointers' marks
+  }
+  state "You in the room (roompanels/moving.py, gliding.py, ft-roommove puller.py, grab.py)" as mv {
+    t0: Where your floor lies: walking in your own room needs nothing
+    [*] --> t0
+    t1: The room in both hands: where the hands are is asked sixty times a second (reach)
+    t2: Flying to a panel: 0.4 s, slow at both ends
+    t3: A move: shift DX DZ DEGREES to ft-screens, then floor move to ft-together
+    t4: Refused: the headset off for go and step, further than a kilometre, or the floor won't move and the shift is undone
+  }
+  state "Someone's panel in your hand (roompanels/carrying.py, flow/moves.h, local/moveask.h)" as cr {
+    j0: Where the room has it
+    [*] --> j0
+    j1: In your hand, and you may: move told to its owner at each look, four a second
+    j2: Waited for, a second: the owner's Frame puts its screen there and tells the room
+    j3: In your hand, and you may not: nothing is sent
+    j4: Put where the room has it, as large and as bent as its owner has it
+  }
+  state "Other groups" as og {
+    g1: G1 Lifecycle and presence
+    g2: G2 Desktop and panels
+    g4: G4 Gaze
+    g5: G5 Hands
+    g6: G6 Remote displays
+  }
+  un --> se: ft-together holds the session
+  se --> lo: an owner's links
+  se --> lg: a guest's links
+  aw --> vo: away off closes the microphone
+  se --> sh: only in a room
+  se --> lk: the room lists what each has on
+  se --> ct: only in a room, for a panel of yours that is in it
+  aw --> ct: control here each second while worn and not in a game (ft-roomaway). Away ends every grant at once
+  ct --> ds: only input under a grant that stands
+  hd --> ct: your acts reach its owner only for a panel they gave you (Holds: their last word, 30 s at most), 200 a second at most
+  gz --> hd: what moves your pointer, said each second (gaze pointer eyes or hand). Not said for 5 s, it counts as your eyes
+  se --> mv: your floor in the room (floor, floor move)
+  cr --> sh: on the owner's Frame: the word is taken from the room's owner or a grant's holder (flow/moves.h), and ft-roompanels puts the screen there (moves, pose)
+  u0 --> u1: the installer's Together part, or together/run.sh install
+  u1 --> u2: the Settings switch, or run.sh on: enable --now
+  u2 --> u3: tailscaled says who this Frame is (Start, net/tailnet.cpp)
+  u3 --> u1: the switch off: SIGTERM leaves the room first, the eight units stop with it
+  u3 --> u2: it ends otherwise: Restart=on-failure, 3 s
+  m0 --> m1: open (Open): you stand on the owner's spot
+  m0 --> m2: join HOST PORT CODE (Join)
+  m2 --> m3: Welcome: your place and the room
+  m2 --> m0: Refuse, no answer in time, the link down, or leave
+  m3 --> m0: leave, the owner's Leave, the link to the owner lost, or taken out of the room
+  m1 --> m0: leave: Leave to every member, the room ends for everyone
+  m1 --> o0: someone calls
+  o0 --> o1: Hello with a code that works once, for ten minutes (Asked, invites.h)
+  o0 --> o3: no room open, the room full, a bad code, another version, or 10 s
+  o1 --> o2: accept (Answer): a place, Room to the others, Welcome to them
+  o1 --> o3: decline, or 120 s with no answer
+  o2 --> o3: their Leave, the link down, or a word they may not say: Remove, Room to the others
+  o2 --> o3: (fixed T1 6e78c20) the same headset is let in again: its old link closed and its old place out first
+  m2 --> c0: Call
+  c0 --> c1: the owner's Hello: the code was good
+  c1 --> c2: Welcome
+  c2 --> p0: Mesh: each guest the room lists with a higher address and no link yet
+  p0 --> p1: their Hello, of this room
+  p0 --> p2: Refuse, another room, or 10 s
+  w0 --> w1: Hello of this room (OnHello)
+  w0 --> p2: not in a room, or another room: Refuse
+  w1 --> p1: Knocked: the room lists someone at that address who has no link yet
+  w1 --> p2: 10 s
+  p1 --> p2: Room no longer lists them there (OnRoom), their Leave, or the link down
+  p2 --> p0: Tick: Mesh again, 3 s after the last call
+  c2 --> m0: Room without your place, Leave, or the link down: End
+  a0 --> a1: the relay says paused (pause ?), asked each second in a room
+  a1 --> a0: not paused
+  a0 --> a2: the pointer helper says not worn (gaze ? headset)
+  a1 --> a2: not worn: the headset off wins over a game
+  a2 --> a0: worn again
+  a0 --> g1: G1: the worn answer and the pause are read there
+  v0 --> v1: in a room, unmuted, not away off
+  v1 --> v0: mute, the room left, or away off: the mouth is told shut once
+  v0 --> v3: the microphone can't be opened
+  v3 --> v0: the next try
+  v1 --> v2: 0x83 and five weights as they change
+  v2 --> v1: told again within 0.5 s
+  v2 --> v0: not told for 0.5 s: the poses carry a shut mouth
+  v2 --> g5: G5: the hands in the same pose come from hand tracking
+  x0 --> x1: share N: Share to the room (a guest's goes through the owner), ft-screens share N start, the video at a width that is a multiple of 128 (keeper.py stream_size)
+  x1 --> x4: a Watch from a member who has it in view
+  x4 --> x2: someone has it focused (flow/attention.h, the P word to the encoder)
+  x2 --> x4: nobody has it focused any more
+  x4 --> x1: nobody watches any more: each viewer says hidden 3 s after it left their view, or that it is a still there
+  x2 --> x5: quality NAME, or the box on the Together page (kept in frametop.conf): Low 1 Mbit/s and 15, Balanced 3 and 30, High 8 and 60. The room is told the panel's pictures a second
+  x4 --> x5: quality NAME
+  x5 --> x2: open again (the F word). The bitrate is at the new cap at once if it was above, and climbs to a higher one by 15% each 5 clean seconds
+  x2 --> x3: someone begins, lost their place, or a picture to them was given up
+  x3 --> x2: the keyframe puts everyone in step
+  x2 --> x1: its last viewer's program went
+  x1 --> x0: unshare N, the room left, or ft-roompanels ends
+  x2 --> x0: unshare N, the room left, or ft-roompanels ends
+  x4 --> x0: unshare N, the room left, or ft-roompanels ends
+  b0 --> b1: a call from the PC, with the code whoever asked sender handed it
+  b1 --> b0: refused and hung up on: another version, an address the tailnet doesn't know, a code that isn't good (five wrong from an address in ten minutes: not heard)
+  b1 --> b2: taken. A PC that was here before is hung up on: one PC a Frame
+  b2 --> b3: share K for K 3 to 6, and someone watches it: W 1 and K to the PC
+  b3 --> b2: nobody watches it any more, it is taken back, or the room ends: W 0. The PC's link stays for the next room
+  b3 --> b3: a gap in its pictures that doesn't fill in 0.3 s: K. A picture that isn't one, of a number that isn't the PC's, or past 120 a second is dropped
+  b2 --> b0: its link ends, or it says more on its control stream
+  b3 --> b0: its link ends
+  b3 --> x2: its pictures take the path of a screen's from here: the same rules, viewers and bitrate
+  q0 --> q1: share 101 to 116: a window of the PC's that stands here as a panel, four of one PC at most
+  q1 --> q1: the PC doesn't answer, or says no (a token without the four routes): state says why under pc
+  q1 --> q2: the PC's link stands at ft-together, and the PC took its panels
+  q2 --> q1: the PC answers 409, no call to a headset stands (it called another), or its link is gone at two looks
+  q2 --> q0: the last window is unshared, its stream ends or it closed on the PC: the PC is told to stop
+  q1 --> q0: the last window is unshared
+  q1 --> b1: the PC calls this Frame with the code
+  q2 --> b3: share K for each window, where its panel stands on this Frame
+  x2 --> g2: G2: ft-screens hands the screen's buffers over, and draws it while watched
+  y0 --> y1: keeper: remote N peer ID
+  y1 --> y2: a keyframe from the owner's link
+  y2 --> y3: pictures overtook one another and the gap didn't fill
+  y3 --> y1: Watch says the decoder needs a keyframe
+  y2 --> y4: out of your view for 3 s (flow/attention.h Seen): told to decode no more
+  y4 --> y1: in view again, and the budget has a decoder for it
+  y2 --> y5: its decoder goes to a panel you see more of (flow/budget.h): 6 at once and a third of the Frame's decode load at the most, a panel costing its size times the pictures a second the room says it has
+  y1 --> y5: the hardware gives no decoder: no more are tried for 10 s, then one more at a time
+  y4 --> y5: in view again, and no decoder for it
+  y5 --> y1: room for it again: a panel went out of view or costs less, or it takes the place of one you see less of
+  y2 --> y0: the panel left the room or changed size, or the room was left
+  y1 --> g6: G6: a peer's panel is a remote screen, numbered down from 116
+  k0 --> k1: Room: their Look
+  k1 --> k2: Want (looks.cpp), 6 Looks and Wants at once and 1 a second a link
+  k2 --> k3: the stream's bytes are that size and hash, from the one who has it on
+  k2 --> k1: it didn't come: asked again after 30 s and its time at 64 KB a second
+  k3 --> k4: ft-avatars --room: looks each second, sentbody reads the file
+  k3 --> k5: not a whole avatar, no body, or not marked
+  k4 --> k0: they take it off, leave, or the room ends: the file goes
+  k5 --> k0: they take it off, leave, or the room ends
+  z0 --> z1: an avatar from a glTF or FBX, or a VRM whose licence forbids passing it on
+  z0 --> z2: a VRM whose licence allows it, or a model imported with --may-share
+  z1 --> z2: Let them have it, and yes: ft-model-import --allow-share (never for a VRM that forbids it)
+  z2 --> z3: a Want for exactly that file from someone in the room
+  z3 --> z2: sent
+  z2 --> z0: another avatar or none on (wear, every 2 s from ft-avatars --room)
+  n0 --> n1: their AskControl (control ask PANEL at their end), 8 words at once and 2 a second a link
+  n1 --> n2: control give NUMBER PERSON: only while someone says the headset is on your head, and you aren't away. A window of your PC (3 to 6) only with the word pc after it: the page's second ask
+  n0 --> n2: given unasked, under the same rule
+  n1 --> n0: control take (No), or 120 s
+  n2 --> n3: control take, away game or away off, 10 s with no control here, the panel unshared, the room left, they left, or someone else is in their place
+  n3 --> n0: to be asked for or given again
+  d0 --> d1: an act for a panel of yours that is in the room, from someone whose grant stands (a key only 1 to 111, not 99)
+  d1 --> d2: a button or a key goes down that isn't down
+  d2 --> d1: it comes up, or was down 60 s and is let go for them
+  d1 --> d0: 1.5 s after their last input
+  d0 --> d3: control own
+  d1 --> d3: control own
+  d2 --> d3: control own: what they hold is let go first, the last pressed first
+  d3 --> d0: 1.5 s after your last
+  d2 --> d0: their grant, their link or the room ends: let go, the last pressed first
+  d1 --> g2: G2: ft-screens gives it to the seat, on the desktop's own screens only, never while paused or locked, and keeps what is theirs apart from what is yours
+  d1 --> g6: G6: on a window of your PC, ft-screens gives it to that window's ft-stream (a key as peerkey: your clipboard stays), lets go there before their pointer goes elsewhere, and takes turns with you on every display of that PC
+  h0 --> h1: the pointer comes onto the panel moved by your hand, or by your eyes while you share where you look
+  h0 --> h2: it comes onto it moved by your eyes, and you don't share where you look
+  h1 --> h2: gaze mode, not shared: the room is told once that the pointer is nowhere
+  h2 --> h1: the hand's pointer, or gaze on
+  h1 --> h3: a button down
+  h2 --> h3: a button down: the move that waited goes first
+  h3 --> h1: up
+  h3 --> h2: up, or 3 s after its last word: the room is told the pointer is nowhere
+  h1 --> h0: leave (SteamVR's word, or the pointer turns up on another screen): buttons come up
+  h2 --> h0: leave
+  h3 --> h0: leave: buttons come up
+  q0 --> q1: gaze on (the page's switch, or ft-room gaze on): in a room only
+  q1 --> q2: gaze say YAW PITCH: a direction under 0.5 s old from a service that runs, smoothed over 0.3 s
+  q2 --> q1: nothing told for 1 s: away, the service idles, or its direction is old
+  q1 --> q0: gaze off, or the room left
+  q2 --> q0: gaze off, or the room left
+  q1 --> g4: G4: ft-gazed is kept awake (wake 3) and its status read, whatever gaze mode says
+  r0 --> r1: their pointer on a panel this Frame shows (0x84, to who asked points)
+  r1 --> r2: pressed
+  r2 --> r1: let go
+  r1 --> r0: they point at nothing, or 2.5 s after the last word
+  r2 --> r0: they point at nothing, or 2.5 s after the last word
+  r0 --> r3: a pose of theirs came with a gaze that meets a panel first, from in front (glancesums.h, 0x86 ten a second at most)
+  r3 --> r0: they look at no panel or stop sharing, or 1 s after the last word
+  t0 --> t1: both grips down, in a room, both controllers tracked (grips.py on SteamVR's web socket)
+  t1 --> t0: either grip let go, a controller not tracked, or a game has the controllers
+  t1 --> t3: pull DX DZ DEGREES, for a move of 2 mm or 0.15 degrees and more. Hands that jumped 0.5 m or an eighth of a turn move nothing
+  t0 --> t3: go X Z DEGREES, go person N, go panel ID or step, from the page, a key or ft-room
+  t0 --> t2: fly panel ID
+  t2 --> t3: each step of the way, sixty a second
+  t3 --> t0: ok X Z DEGREES: the new floor
+  t3 --> t4: no
+  t4 --> t0: nothing moved
+  t3 --> g2: G2: ft-screens shifts every screen that isn't pinned or dragged, and shift back puts them where they stood when the room is left
+  j0 --> j1: you take hold of it and ft-together takes the move: it was given to you, or the room is yours
+  j0 --> j3: you take hold of it and ft-together says you may not move that panel
+  j1 --> j2: the last move told
+  j2 --> j0: the room came round
+  j2 --> j4: it didn't: the owner's Frame didn't take it there
+  j3 --> j4: it rests, or 2 s in your hand
+  j3 --> t2: pulled more than 30 cm nearer your head: you fly to where it reads well
+  j0 --> j4: the room has it elsewhere (its owner or someone who may moved it), or you made it larger, smaller or bent it
+  j4 --> j0: there
+  class u0 teal
+  class u1 teal
+  class u2 yellow
+  class u3 blue
+  class m0 teal
+  class m1 blue
+  class m2 yellow
+  class m3 blue
+  class o0 yellow
+  class o1 yellow
+  class o2 blue
+  class o3 orange
+  class c0 yellow
+  class c1 yellow
+  class c2 blue
+  class p0 yellow
+  class p1 blue
+  class w0 yellow
+  class w1 yellow
+  class p2 orange
+  class a0 blue
+  class a1 orange
+  class a2 teal
+  class v0 teal
+  class v1 blue
+  class v2 blue
+  class v3 orange
+  class q0 teal
+  class q1 yellow
+  class q2 blue
+  class b0 teal
+  class b1 yellow
+  class b2 blue
+  class b3 blue
+  class x0 teal
+  class x1 yellow
+  class x2 blue
+  class x3 yellow
+  class x4 blue
+  class x5 yellow
+  class y0 teal
+  class y1 yellow
+  class y2 blue
+  class y3 orange
+  class y4 teal
+  class y5 orange
+  class k0 teal
+  class k1 yellow
+  class k2 yellow
+  class k3 yellow
+  class k4 blue
+  class k5 orange
+  class z0 teal
+  class z1 orange
+  class z2 blue
+  class z3 blue
+  class n0 teal
+  class n1 yellow
+  class n2 blue
+  class n3 orange
+  class d0 teal
+  class d1 blue
+  class d2 blue
+  class d3 orange
+  class h0 teal
+  class h1 blue
+  class h2 orange
+  class h3 blue
+  class q0 teal
+  class q1 yellow
+  class q2 blue
+  class r0 teal
+  class r1 blue
+  class r2 blue
+  class r3 blue
+  class t0 teal
+  class t1 blue
+  class t2 yellow
+  class t3 yellow
+  class t4 orange
+  class j0 teal
+  class j1 blue
+  class j2 yellow
+  class j3 orange
+  class j4 yellow
+  class g1 xgroup
+  class g2 xgroup
+  class g4 xgroup
+  class g5 xgroup
+  class g6 xgroup

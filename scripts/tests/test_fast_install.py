@@ -79,8 +79,23 @@ class Paths(unittest.TestCase):
         openvr = rebuilt('scripts/openvr.sh')
         self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)
         self.assertFalse({'voice', 'hands', 'gaze/tracker'} & openvr)
-        self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec'})
+        self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec', 'avatar'})
         self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown'})   # its include line
+        self.assertEqual(rebuilt('avatar/modelfile.cpp'), {'avatar', 'screens', 'together'})   # built into ft-handview and ft-together too
+        self.assertEqual(rebuilt('avatar/import/main.cpp'), {'avatar'})
+        for path in ('avatar/bodyfile.cpp', 'avatar/pose/bodypose.cpp', 'avatar/view/bodygpu.cpp', 'avatar/face/micear.cpp', 'avatar/face/face.h'):   # ft-avatars is built with ft-handview
+            self.assertEqual(rebuilt(path), {'avatar', 'screens'})
+        self.assertEqual(rebuilt('avatar/ftmodel.py'), set())
+        self.assertEqual(rebuilt('avatar/tests/test_import.py'), set())
+        self.assertEqual(rebuilt('scripts/modeldeps.sh'), {'avatar'})
+        for path in ('avatar/room/room.cpp', 'avatar/abstract/abstract.cpp'):   # a shared room's people, in ft-avatars
+            self.assertEqual(rebuilt(path), {'avatar', 'screens'})
+        self.assertEqual(rebuilt('avatar/room/client.cpp'), {'avatar', 'screens', 'together'})   # built into ft-roomvoice too
+        self.assertEqual(rebuilt('together/net/quiclinks.cpp'), {'together'})
+        self.assertEqual(rebuilt('together/build.sh'), {'together'})
+        for path in ('together/ft-roompanels', 'together/roomaway/teller.py', 'together/roominput/giver.py', 'together/ft-roommove', 'together/roommove/grab.py', 'together/ft-roomgaze', 'together/roomgaze/feeder.py', 'together/tests/voice-test.cpp', 'together/README.md'):
+            self.assertEqual(rebuilt(path), set())
+        self.assertIn('together', openvr)
 
     def test_included_headers_are_build_inputs(self):
         # DEE-329: a header another component's sources include, found from the include lines.
@@ -144,6 +159,20 @@ class Paths(unittest.TestCase):
                                           roots), {'gaze', 'models', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-keyboard.service', ['--data-dir', '/r/0.1/keyboard'],
                                           roots), {'keyboard'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-away.service', ['python3', '/r/0.1/together/ft-roomaway'],
+                                          roots), {'together', 'conf'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-input.service', ['python3', '/r/0.1/together/ft-roominput'],
+                                          roots), {'together', 'conf'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-move.service', ['python3', '/r/0.1/together/ft-roommove'],
+                                          roots), {'together', 'conf', 'input'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-gaze.service', ['python3', '/r/0.1/together/ft-roomgaze'],
+                                          roots), {'together', 'conf'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-points.service',
+                                          ['/r/0.1/scripts/in-box', '/r/0.1/together/build/ft-roompoints'],
+                                          roots), {'together'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-room-people.service',
+                                          ['/r/0.1/scripts/in-box', '/r/0.1/screens/build/ft-avatars', '--room'],
+                                          roots), {'screens'})
             desktop = fi.dirs_used(tree, fi.DESKTOP, ['/r/current/session/../input/ft-textinput'], roots)
             self.assertIn('input/ft-textinput', desktop)   # that file only, not all of input/
             self.assertNotIn('input', desktop)

@@ -10,6 +10,8 @@ sections by group, with a search field; each section is one page from one area:
     ft_display_settings.py and DisplayPages.qml)
   - remote: Remote displays (remote-displays/: ft_remote_displays.py and RemoteDisplayPages.qml)
   - access: Remote access over VNC (remote/: remote_access.py and RemoteAccessPages.qml)
+  - avatar: Appearance, the hand model your hands are drawn with (avatar/: ft_avatar_settings.py
+    and AvatarPages.qml)
 An area's backend and pages are made the first time one of its sections opens, so a section
 nobody opens costs nothing (its backend's polling never starts).
 

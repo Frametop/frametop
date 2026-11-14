@@ -1,0 +1,162 @@
+# Avatars and hand models
+
+How you look in Frametop: the hands ft-handview draws for you today, and the avatar other people will see in a shared room ([docs/together.md](../docs/together.md), "Avatars and hands"). This folder has the model file, the importer that writes it, the solver that poses a body from a headset's wearer, the program that draws bodies (yours in a mirror, and the other people in a shared room), and Frametop Settings' Appearance page.
+
+| File | What |
+|---|---|
+| `modelfile.h`, `modelfile.cpp` | Frametop's own model file (`.ftmodel`): the format, a strict reader and a writer for its hands. No GPU, SteamVR or network code |
+| `bodyfile.h`, `bodyfile.cpp` | The same for an avatar's body in that file: its skeleton, mesh, materials, pictures and face shapes |
+| `modelbytes.h` | Reading and writing the file's numbers, for both |
+| `vec.h` | A point in three dimensions, for the importer and the solver |
+| `pose/` | The pose solver (`bodypose.h`): a body's 55 bones from the wearer's head and hands. Sums only, no tracking, GPU or SteamVR code |
+| `face/` | An avatar's face while it is worn: when its eyes blink and how its mouth moves with a voice (`face.h`, sums only), the microphone it hears you by (`micear.h`), and the two together for the avatar you wear yourself (`ownface.h`). Built into `ft-avatars` |
+| `abstract/` | The body someone has in a shared room when no avatar of theirs is drawn: a head with a visor and two hands in the colour of their place, made in code as a whole valid body, so it is posed and drawn as an imported one is |
+| `room/` | The other people in a shared room, for `ft-avatars --room`: your floor laid in the room (`floor.h`), a wearer as the pose the room is told and back (`wire.h`), who is in the room and their newest poses (`people.h`), the program's end of ft-together's socket (`client.h`, which `ft-roomvoice` uses too, for the room's voices), a person posed in their body (`figure.h`) on the sheet they are drawn on (`billboard.h`), their face (`roomface.h`: the mouth their pose tells, and blinks made here), the loop that draws them and tells the room of you (`room.h`), a pretended person for tests (`pretend.h`) and a picture of one (`roompicture.h`) |
+| `view/` | `ft-avatars`: bodies drawn with GLES 2, in pictures, in the mirror that shows you the avatar you wear, and below you when you look down (an experiment). It is built by `screens/build.sh` into `screens/build/`, because it wears the hands ft-handview draws and shows its mirror the way ft-handview shows them (`screens/vroutput.h`) |
+| `import/` | `ft-model-import`: a VRM, glTF, GLB or FBX model into a `.ftmodel` (`build.sh` builds it into `avatar/build/`) |
+| `sharemark.h` | The mark that lets a model be passed on, set in a file that was imported without it (`ft-model-import --allow-share`) |
+| `ftmodel.py` | The same file read in Python, for the tests and the Settings page |
+| `hand_models.py`, `avatar_models.py`, `ft_avatar_settings.py`, `AvatarPages.qml` | Frametop Settings' Appearance page: the hand models with their pictures, the look, import and remove, and your avatars: which one you wear, and the mirror |
+| `tests/` | `modelfile-test.cpp` and `bodyfile-test.cpp` (the readers against damaged files, in `just test-c`), `sharemark-test.cpp` and `test_allow_share.py` (a file marked as one to pass on is otherwise the file it was; a VRM's licence still decides; a file that isn't a whole model is refused and left alone), `test_import.py` (the importer on made-up hands and the bundled ones), `test_import_body.py` (on a made-up whole person), `bodypose-test.cpp` (the solver on a made-up skeleton, `person.h`) and `bodyview-test.cpp` (the drawing's sums: the mesh, the hands fitted to a body's, the demo wearer, the views, the mirror's glass and what each eye sees in it, the square your own body is drawn on, a tracked wearer) and `face-test.cpp` (the blinks, and the mouth on made-up voices), all in `just test-c`, `test_avatars_picture.py` (the built `ft-avatars` on a made-up person, from the file to the pixels of a sheet, a thumb, the mirror and the body below), `test_appearance.py` (the page's backend). For shared rooms: `abstract-test.cpp` (the abstract body is a valid one, in every place's colour, and poses), `room-test.cpp` (floors, a pose over the wire onto another floor, sheets, who is drawn and when, where their avatars' files are, a person posed and seen by both eyes, ), `sentbody-test.cpp` (a sent avatar's file read: marked or refused, and cut short or changed anywhere), `roomface-test.cpp` (a face from a pose's mouth, never past whole, and its own blinks) and `roomclient-test.cpp` (the client against a made-up ft-together, on a made-up clock, with the voices it passes on, the avatar it names and the ones it asks about), in `just test-c`, and `test_room_picture.py` (the built `ft-avatars`: a person's picture in each place's colour, facing the way they face, in an avatar they sent, its mouth opened by their pose, and what the room's modes refuse) |
+
+## The model file
+
+One format on disk, for three reasons: the programs that draw (ft-handview now, the avatar renderer later) carry no glTF or FBX code; reducing and bone matching happen once, at import; and when avatars are sent between people, the file a stranger sends is read by one small reader that trusts nothing, never by the importers.
+
+The layout is in `modelfile.h`. In short: `FTMD`, a version, then chunks, each a four-letter tag, a size and a payload. `INFO` holds the name, licence, author and source format as text, and whether the model may be sent to other people. `HAND` holds one hand: a skinned mesh on WebXR's 25 hand joints with their bind positions, positions and normals quantized, four joints and weights a vertex. A reader skips chunks it doesn't know: ft-handview reads the hands of an avatar's file and never looks at its body.
+
+An avatar's file has three more kinds of chunk, laid out in `bodyfile.h`. `BODY` holds the skeleton and the mesh: where each of VRM's 55 humanoid bones is in the rest pose (a body may lack the ones a person can do without, such as the toes, the jaw or a second chest bone), then the vertices with a place in a picture and four bones and weights each, the triangles, the parts they are drawn in, and each part's material (a colour, a picture, how it is see-through, whether it has two sides, and whether it is shaded as a cartoon, lit, or not at all). `TEXR` holds one picture as plain RGBA. `SHAP` holds one face shape, as how far it moves each vertex it moves: five mouth shapes (aa, ih, ou, ee, oh) and three blinks. A body stands on y = 0 with its hips over the origin, faces -z, and has its right hand toward +x, in metres. The file also says where the wearer's eyes are, which is what the avatar is scaled by to fit you.
+
+The readers check every count, size, index and number before using it, and refuse the whole file on the first one that is wrong. Limits: 20,000 vertices and 40,000 triangles a hand; 65,535 vertices, 60,000 triangles, 32 parts and materials, 24 pictures of at most 2048 pixels a side and 32 MB in all, and 16 shapes a body; 64 MB a file, 64 chunks, 96 bytes of text a field with no control characters. `modelfile-test.cpp` and `bodyfile-test.cpp` break each rule on its own, cut the file at every byte and change every byte, under the address and undefined-behaviour sanitizers.
+
+A model's name is its file's name: `NAME.ftmodel`, with NAME lower-case letters, digits, `-` and `_`, at most 31. Your models are in `~/.local/share/frametop/avatars` (`$XDG_DATA_HOME`; `FT_AVATARS_DIR` names another folder).
+
+## The importer
+
+```
+avatar/build/ft-model-import FILE [--name NAME] [--to DIR] [--side left|right] [--may-share] [--check]
+avatar/build/ft-model-import --allow-share MODEL.ftmodel
+```
+
+It reads a VRM (0.x or 1.0), glTF or GLB with cgltf, or an FBX with ufbx, in the rest pose. It takes the model's hands, which become the hands ft-handview draws for you, and, when the model is a whole person, its body. A model whose hands can be told but whose body can't is a hand model, and the import says why it has no body (`nobody`). An avatar whose hands have no finger bones keeps the hands Frametop comes with. `import/main.cpp` has the options and what it prints: a fact a line, which the Settings page reads, or `error` and the reason.
+
+**Finding the hand bones** (`import/handbones.cpp`). A VRM names its humanoid bones, so those are used. Otherwise the bones' names are split into words and matched: a hand is a bone the mesh moves with whose name says hand or wrist and a side, and each finger a chain under it named for that finger. That reads rigs named as Mixamo, Unity, Blender and Unreal name them, and the flat skeletons of the WebXR and Babylon hands. A thumb has three or four bones; a finger three, four or five (with or without a metacarpal and a tip). Nothing is guessed: a skeleton whose bones can't be told is refused, with the bone that is missing or the count that doesn't fit, and nothing is written. A file with one hand gets the other mirrored.
+
+**Cutting the hand out** (`import/handpart.cpp`). The mesh the hand's bones move is kept, and the forearm's as far as 4 cm behind the wrist. Each vertex's weights move onto WebXR's 25 joints (a bone under the hand that isn't one of them, such as a twist or a palm bone, gives its weight to the joint above it; the forearm's share goes to the wrist). A missing metacarpal goes a third of the way from the wrist to the knuckle, and a missing tip where the mesh that follows the last bone ends. A hand whose palm isn't a person's size (the wrist's distances to the four knuckles add up to 30 to 45 cm) is scaled to one, so a model in centimetres or a giant's hand comes out the right size; ft-handview then fits it to your own hand as it does the bundled ones. A hand with more than 6,000 triangles is reduced to that with meshoptimizer (the bundled hands have 1,800 to 3,000).
+
+**Finding the body's bones** (`import/bodybones.cpp`). A VRM's humanoid names them. Otherwise they are found by name and by where they hang: the hips, the head under them, the spine as the bones between the two, an arm as the bones above each hand, a leg as the bones above each foot. The fingers are the ones the hand was found with. A body needs hips, a spine, a head, and both arms and legs down to the hands and feet. One that lacks any of them is not imported as a body, and the bones that are missing are named.
+
+**Cutting the body** (`import/bodypart.cpp`). Every mesh the skeleton moves is kept. A bone that isn't a humanoid's (hair, a skirt, a twist bone) gives its weight to the humanoid bone it hangs from, so hair and cloth move with the head and the hips and stay rigid. VRM 1.0's constraints are read for the one case that matters to how a body looks: a helper bone that hangs beside a limb and aims along it (VRoid's sleeves and shorts hang from these) belongs to the limb's bone, when it sits where that bone does. A bone that copies a turn from somewhere else (a robot arm on a backpack that mirrors the wearer's) can't be a bone of the body, whose bones each turn about their own place, so it stays rigid on what it hangs from. The body is turned so that its right is +x, moved so that its hips are over the origin, and stood on the floor: the lowest point of what the feet move, so a stand or a long dress doesn't lift it. A body with more than 20,000 triangles is reduced to that with meshoptimizer. The reduction keeps the seams between materials and between places in a picture, and leaves alone every vertex a face shape moves.
+
+**Its look** (`import/bodylook.cpp`, `gltflook.cpp`, `fbxlook.cpp`). Of a material, the importer takes the base colour, its picture, how it is see-through, whether it has two sides and whether it is unlit; a VRM's MToon materials are marked as cartoon shaded. Materials that come out the same become one, and the parts are ordered so that what is see-through is drawn last. PNG and JPEG pictures are decoded with stb_image, made no larger than 2048 pixels a side, and then the largest are halved until all of them fit in 16 MB. A picture that can't be read leaves its material its colour, and the import says how many couldn't. An FBX says less: its colour or its picture, and a picture with see-through pixels makes its material cut out along them. A body with more than 32 materials or 24 pictures is not imported as a body.
+
+**Face shapes** (`import/shapenames.cpp`, `gltfvrm.cpp`). A VRM's expressions name the mouth shapes and the blinks (0.x `blendShapeGroups`, 1.0 `expressions`). In other files the shapes' own names are matched: VRChat's (`vrc.v_aa`), VRoid's (`Fcl_MTH_A`, `Fcl_EYE_Close_L`), plain ones (`aa`, `blink_left`) and MMD's Japanese ones. An avatar without them still imports, and its face stays still.
+
+**Licences.** A VRM says whether it may be redistributed (0.x `licenseName`, 1.0 `allowRedistribution`), and the importer writes that into the file; `--may-share` can't override it. A glTF or FBX can't say, so it is marked as not to be sent unless `--may-share` is given. A file without the mark stays on your Frame, and the people you share a room with see the abstract figure. Settings imports without the mark and asks in a room, on the Together page, before the model you have on is first sent. A yes runs `ft-model-import --allow-share` on the model's file (`sharemark.h`): the file is read whole by the strict readers, the mark is set, and every other chunk is written back byte for byte, beside the file and renamed over it. It is refused for a file that isn't a whole model, and for a model that came from a VRM whose licence said no. To take the mark off again, import the model again.
+
+**Untrusted files.** The file you import is a download. The readers cap the file's size, the nodes, vertices, triangles, materials and pictures, and check every index and number. The only other files they open are ones in the model's own folder: a glTF's buffer, and a picture the model names. A name with a folder in it has the folder dropped (an FBX holds the path on the machine that wrote it), and a glTF's picture named with a folder, `..`, a scheme or an escape is not opened. The pictures read are capped too: 64 of them, each halved to 2048 pixels a side as it is read, and to 512 once the ones read take 96 MB. `test_import.py` and `test_import_body.py` feed it truncated and randomly damaged files and glTFs whose numbers lie. Before bodies were read, the same ran under the sanitizers on 9,000 damaged files and 6,000 glTFs with changed structure; with bodies, on 2,400 damaged files and 2,400 glTFs with changed numbers (2026-11-10). Nothing was found.
+
+## Posing a body
+
+A headset knows where its wearer's head is and, while they are tracked, the hands. `pose/bodypose.cpp` makes up the rest (the design decision is upper-body IK, [docs/together.md](../docs/together.md)):
+
+- **The head** is where the wearer's eyes put it. The body is scaled so that its eyes stand as high as the wearer's do (`Stature`: the highest the head has stayed, and never less than a short adult's, so someone who has only sat gets a body that sits).
+- **The eyes** look where the head faces. For someone in a room who shares where they look, they turn the way their pose says, 30 degrees aside and 20 up or down at most (`kEyeAside`, `kEyeUp`), on a body that has eye bones. A direction that isn't numbers is refused with the rest.
+- **The trunk** hangs from the head. It turns after the head once the head has turned 15 degrees from it, never lags more than 75, and takes about a third of a second to follow. When the head comes down while looking down, the spine leans; when it comes down level, the knees bend.
+- **An arm** reaches a tracked wrist with two bones, the elbow down and out (or where the tracker says it is). The forearm takes half of the hand's twist. An arm whose hand isn't tracked hangs, and it moves between the two over about a tenth of a second.
+- **The legs** stand under the hips. The lower the hips, the further forward the feet, so a seated wearer's body sits.
+- **The fingers** take the tracked hand's turns (`view/handfit.cpp` fits the tracker's hand to the body's own finger bones). What is fitted is the frame of the palm and of each finger bone (`handfit::Frames`), which belongs to no body: that is what a shared room is told, so each Frame fits it to the body it draws.
+
+The same solver poses your own body and the people you share a room with. It refuses input that isn't numbers and never produces any: `bodypose-test.cpp` runs it on thousands of random inputs under the sanitizers.
+
+## Drawing a body
+
+```
+screens/build/ft-avatars --mirror MODEL [--height PX] [--seconds S] [--status S] [--no-voice] [--below] [--below-from DEGREES]
+screens/build/ft-avatars --snapshot OUT.png MODEL [--pose NAME] [--at SECONDS] [--size PX] [--shape NAME=WEIGHT]...
+screens/build/ft-avatars --mirror-snapshot OUT.png MODEL [the same]
+screens/build/ft-avatars --below-snapshot OUT.png MODEL [the same]
+screens/build/ft-avatars --thumb OUT.png MODEL [--size PX]
+screens/build/ft-avatars --poses
+screens/build/ft-avatars --hear SECONDS
+screens/build/ft-avatars --room [--together SOCKET] [--size PX] [--seconds S] [--status S]
+screens/build/ft-avatars --room-snapshot OUT.png [--place N] [--pose NAME] [--at SECONDS] [--away METRES] [--round DEGREES] [--size PX] [--model FILE] [--mouth VOWEL=WEIGHT]...
+screens/build/ft-avatars --pretend POSE [--together SOCKET] [--walked RIGHT,BACK,DEGREES] [--seconds S] [--status S]
+```
+
+`ft-avatars` draws a model file's body on the GPU (`view/bodygpu.cpp`): the mesh is skinned in the vertex shader by the pose's 55 matrices, the face shapes move the vertices before that (`view/bodymesh.cpp`), and each part is drawn with its material's look: lit, in two tones for a cartoon material, or in its own colours; solid, cut out or see-through.
+
+With no headset on it makes pictures (`view/picture.cpp`). `--snapshot` poses the body as a made-up wearer (`view/demo.cpp`: stand, wave, reach, type, sit, lean, look; `rest` is the file's own pose) and writes a sheet of four views, which is how an import is checked by eye. `--thumb` writes the one picture Settings shows. `--mirror-snapshot` writes what the mirror would show that wearer, both eyes' views side by side, and `--below-snapshot` what that wearer would see of their own body looking down. `--room-snapshot` writes someone in a shared room as you would see them (below). The offscreen picture itself is `view/canvas.cpp`.
+
+## The mirror
+
+`ft-avatars --mirror MODEL` stands a sheet of glass in the room, 1.1 m wide and 2 m tall, on the floor 1.4 m ahead of where you look when it starts, and shows you the avatar in it. It is how you see the body you wear: posed from your head and your tracked hands by the same solver that will pose you for other people.
+
+- **The wearer** (`view/wearer.h`) is your headset's pose, the two eyes' places, and the hands the hand tracker shows (ft-hands' shared files, read as ft-handview reads them). How tall you stand is learned from the highest your eyes have been, so the body's legs are the right length once you have stood up straight.
+- **The glass** (`view/mirror.h`) shows the room turned over through its plane, as a window onto that room: each eye's view is drawn through the glass's rectangle from where that eye really is. The two views go side by side into one overlay (`VROverlayFlags_SideBySide_Parallel`), so what is in the mirror has depth behind the glass and moves as your head does. Nothing on your side of the glass is drawn twice: the near plane is the glass.
+- **Drawing** (`view/mirrorview.cpp`, `view/live.cpp`): 45 times a second, half the displays' rate, into buffers SteamVR reads with no copy (`screens/vroutput.h`, three of them: the one shown, the one before it, the one being drawn), and only while the glass is within 80 degrees of where your head looks. It sorts under Frametop's panels, so a panel in front of the glass covers it.
+
+It runs while the mirror is wanted and no longer: the Appearance page starts it and tells it to quit, and it also ends with SteamVR. Commands, one datagram each on `@ft_avatars`: `state` (the last status line: whether it is shown, draws a second, the CPU a draw takes, whether the microphone is heard, the body below), `model PATH` (another model file's body from now on), `place` (the glass stands in front of you again), `below on` and `below off` (your own body below you, next section) and `quit`. A model file that can't be worn ends it before anything starts.
+
+Cost, 2026-11-10, a 528 by 960 picture an eye, the headset off the head (SteamVR gives a head pose about half the time then, so it drew 21 times a second, not 45): 0.55-0.69 ms of CPU a draw, a buffer up about 11 ms after its draw, 2.4-3.1% of one core in all with the microphone heard. In the headset it is still to be measured (`HEADSET-TESTS.md`).
+
+```
+echo -n state | socat -t 1 - ABSTRACT-SENDTO:ft_avatars,bind=
+```
+
+The avatar you wear is `AVATAR_MODEL` in `~/.config/frametop.conf`: the name of one of your models that has a body, or nothing. The Appearance page lists them with their pictures (`ft-avatars --thumb`, kept in `~/.cache/frametop/avatar-thumbs` until the model's file changes). Wearing one also picks its hands (`HANDS_VIEW_MODEL`), which you can change again; a model you import that turns out to be a whole avatar is worn at once; removing the one you wear takes the mirror away. Nobody else sees your avatar yet: in a shared room the others see the abstract one until avatars are sent (later in M3).
+
+## People in a shared room
+
+`ft-avatars --room` runs beside `ft-together` ([together/README.md](../together/README.md)) and does three things: it tells ft-together which avatar you have on, and while you are in a room it tells the room where you are and draws the others.
+
+- **Your floor** (`room/floor.h`). You track yourself on your own floor, and the room has its owner's directions. When you come in, your floor is laid in the room so that where you stand is the spot the room gave you. ft-together keeps that for all of your programs; `room/client.cpp` says it if nobody has, and asks otherwise.
+- **You, told** (`room/wire.h`). Thirty times a second, while the headset tracks: your eyes, your head's turn, how tall you stand, and each tracked hand as its wrist and the frames of its palm and finger bones, all in the room's directions. No body is sent with it.
+- **Your avatar, named.** Every other second it tells ft-together the model you have on (`AVATAR_MODEL`, as `wear NAME`). ft-together decides whether its file may go to the others ([together/README.md](../together/README.md), "The avatars people have on").
+- **The others** (`room/people.h`, `room/figure.h`). ft-together passes each person's poses on. Each is posed by the solver above in their body: the avatar they have on once its file came, and until then, or when they have none on, the abstract body in the colour of their place, teal, orange, purple or pink. Someone whose poses stop for a second isn't drawn, so nobody stands frozen in the room.
+- **Their avatars** (`room/sentbody.h`). Every second it asks ft-together where the others' avatar files are kept (`looks`). Such a file is a stranger's: ft-together checked that it is the file the room named, and nothing of what is in it. It is read by the model file's strict readers and by nothing else (`modelfile.cpp`, `bodyfile.cpp`: every count, index and number is checked before use), and drawn only if it is a whole avatar whose file says its owner lets peers have it. A file that is refused is said once on stderr, and its wearer stays in the abstract body. The file is read and put on the GPU in the drawing loop, so a large avatar that arrives holds up a few draws.
+- **Their faces** (`room/roomface.h`). A pose carries its sender's mouth as the weights of the five vowel shapes, which their own Frame makes of their voice ([together/README.md](../together/README.md), "Voices on a Frame"). Someone drawn in their avatar has their mouth set to those before each draw, and their eyes blink by a clock of their own here, each person at different moments. When their pose says where they look, which it does only while they share that, their eyes turn that way ("The eyes", above); your own body's eyes never do. Whatever a pose's five bytes say, the mouth is never opened past whole. The abstract body has no face.
+- **Drawn on a sheet** (`room/billboard.h`, `view/windowview.cpp`). A person is drawn as your own body below you is: a sheet stands where they are, upright and turned to face you, no bigger than what is drawn of them needs, and each eye gets its view of the body through that sheet as a window, the two side by side. So they have depth of their own. Each person is one SteamVR overlay with its own buffers (`view/sheet.cpp`), 768 pixels a side an eye unless `--size` says otherwise, drawn as often as their poses come and only while they are within 80 degrees of where your head looks.
+
+Outside a room it draws nothing and sleeps. Commands, one datagram each on `@ft_avatars_room`: `state` (the last status line: the room, who you are in it, how many are shown and how many of them in their own avatar, draws and poses a second, the CPU it takes) and `quit`.
+
+What it doesn't do yet: people's sheets sort under the panels, so a panel behind someone draws over them where they overlap; there is nothing between two poses, so a link that drops some shows it; a hand that isn't tracked hangs at the abstract body's side, where no arm is drawn to explain it; and a face has its mouth and its blinks only, with nothing of where the eyes look.
+
+**Without a headset.** `--room-snapshot` writes a picture of the person at a place (0 to 3), as a demo wearer whose pose went the whole way a real one's does: told in the room's directions, packed, read, fitted on another floor, and drawn on their sheet for a pair of eyes `--away` metres in front of them (`--round` walks those eyes around them). With `--model FILE` they are drawn in that file as an avatar they sent, by the same rules: a file that would be refused in a room ends in an error that says why. `--mouth aa=1` (any of the five vowels, 0 to 1) puts that mouth in the pose they tell. `--pretend POSE` is a person who isn't there: it tells an ft-together the pose of a demo wearer thirty times a second, with no GPU or SteamVR. With a second `ft-together` that joined a room, that is a fake peer: the others see someone on their spot, or wherever `--walked` says they have walked to since they came in (metres to their right and back, and degrees turned).
+
+Cost, 2026-11-10, one pretended person, the headset off the head: 27 draws a second, 30 poses a second in and 27 out, 3.5% of one core in all. In the headset, and with three people, it is still to be measured (`HEADSET-TESTS.md`).
+
+## Your own body
+
+`--below`, or `below on` to a standing mirror, also draws the avatar's body where your own is, so you see it when you look down. It is an experiment (spike T5 in [docs/together.md](../docs/together.md)): the Appearance page has it as a switch marked experimental, off each time Settings starts, and it runs only while the mirror does.
+
+An overlay is a flat picture, and a body isn't. So the picture is drawn the way the mirror's is (`view/below.h`): a level square, 1.6 m a side, lies half a metre under your eyes, and each eye gets the body as it sees it through that square as a window, the two side by side. Seen from where it was drawn for, every part of the body is then in its true place at its true depth, above the square or under it.
+
+- **It is fixed in the room, not to your head.** SteamVR places a room-fixed overlay afresh every frame from the newest head pose, so turning your head can't make the body slide, however late the picture is. What does trail is moving your head: the square is put under your eyes again at each draw (45 a second), and between draws the picture is the one for where your eyes were. That is the question the spike asks in the headset.
+- **The head is folded away** (`below::Fold`): your eyes are inside it. Its vertices, and those of a hand the hand tracker is showing (ft-handview draws your hands, with the same model), collapse to the neck and the wrist.
+- **It is drawn only while you look down** more than 12 degrees (`--below-from DEGREES` to try another angle; -90 draws it always), and its buffers are made the first time it is wanted (`view/sheet.cpp` is the overlay and its three buffers, the same for the mirror and for each person in a shared room; `view/stage.cpp` is what they all stand on: SteamVR, the GPU context and the program bodies are drawn with).
+
+What the trial can't do, by its making: it sorts under every panel and the mirror, so a panel far behind your arm still draws over the arm where they overlap; what is more than 58 degrees from straight down (hands held out far ahead) is cut at the square's edge; and each eye's picture is 1024 pixels a side, about twice the mirror's pixels, whose cost in the headset is still to be measured.
+
+## The face
+
+An avatar with face shapes in its file (VRM's mouth shapes aa, ih, ou, ee, oh and its blinks) has a face that moves while you wear it.
+
+- **The eyes** blink every two to six and a half seconds, now and then twice (`face::Blink`). It is a timer, not your own eyelids: gaze stays off unless you turn it on, and that is M4.
+- **The mouth** moves with your voice (`face::Mouth`). How loud you are over the room's own noise opens it: the noise is taken to be the quietest the microphone has been in the last three seconds, so a fan doesn't move the mouth and a murmur opens it a little. Where the sound's energy lies picks the shape: three bands (around 350, 850 and 2300 Hz) are compared, a high band that keeps up with the middle one is a spread mouth (ih, ee), a strong middle band is a wide one (aa), and a strong low band a round one (oh, ou). That is rough on purpose: a mouth that moves with speech, not one to read lips from.
+- **The microphone** (`micear.h`) is the session's default source, which on the Frame runs through echo cancelling, recorded mono at 16 kHz in a thread of its own while the mirror is up (it shows in the mixer as "Avatar mouth"). What it hears is boiled down to the mouth's five weights as it comes and then forgotten: nothing is written down or sent. `--no-voice` starts the mirror without it, and with no microphone the mouth stays shut and the eyes still blink.
+
+`ft-avatars --hear SECONDS` prints what the mouth makes of the microphone four times a second (how loud, the room's noise, the five weights), to check a microphone or the tuning. In a shared room the mouth is worked out the same way by the program that has the microphone there, `ft-roomvoice`, and the five weights go out with your pose; blinks are made where they are drawn ("People in a shared room").
+
+## Other people's code
+
+Fetched at build time by `scripts/modeldeps.sh` and `scripts/stb.sh`, each file at a pinned commit and checked by its sha256, and built into `ft-model-import` only:
+
+| Library | For | Version | Licence |
+|---|---|---|---|
+| [cgltf](https://github.com/jkuhlmann/cgltf) | glTF, GLB, VRM | 1.15 | MIT |
+| [ufbx](https://github.com/ufbx/ufbx) | FBX | 0.23.1 | MIT or public domain |
+| [meshoptimizer](https://github.com/zeux/meshoptimizer) | Reducing a mesh (its simplifier only) | 1.3 | MIT |
+| [stb_image](https://github.com/nothings/stb) | Decoding a model's PNG and JPEG pictures | 2.30 | MIT or public domain |
+
+jsoncpp, from the container's packages, reads the VRM extension's JSON.

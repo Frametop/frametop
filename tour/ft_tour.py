@@ -428,6 +428,9 @@ def pages(f, keys):
                           "which eye tracker", "settings:gaze"],
                  ["Hands", "When hand tracking runs, the hand model, the three ways to use your hands, and every "
                            "gesture on or off", "settings:hands"],
+                 ["Appearance", "The hands Frametop draws for you: pick a model, or import your own from a VRM, "
+                                "glTF or FBX file. A whole avatar you import can be worn, and a mirror shows "
+                                "you in it", "settings:appearance"],
                  ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
                            "commands", "settings:voice"],
                  "System",
@@ -436,7 +439,10 @@ def pages(f, keys):
                  ["Power", "Turning the displays off when the headset is unused, and staying awake on the charger",
                   "settings:power"],
                  ["Remote access", "See and use the Frametop desktop from another computer on your tailnet, over VNC",
-                  "settings:remote-access"]],
+                  "settings:remote-access"],
+                 ["Frametop Together", "A room shared with other Steam Frames on your tailnet: open one or join "
+                                       "someone's, let people in, and choose which of your screens they see",
+                  "settings:together"]],
         "actions": [], "clips": []})
 
     more = {"id": "more", "title": "And more", "icon": "help-about",

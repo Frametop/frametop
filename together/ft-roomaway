@@ -1,0 +1,54 @@
+#!/usr/bin/python3
+"""ft-roomaway: tells a Together room whether this Frame's wearer is there (docs/together.md,
+"Away"). While ft-together runs, it asks the pointer helper whether the headset is worn and the
+input relay whether Frametop is paused for a game (once a second in a room, every other second
+outside one), and says `away off`, `away game` or `away back` to ft-together when that has it
+otherwise. In a room, while the helper says the headset is worn and no game is on, it also says
+`control here`, which lets what the wearer gave of their desktop stand (together/README.md,
+"Control of a shared panel"). The rules are in roomaway/teller.py; this is the loop around them.
+
+  --together NAME   ft-together's socket (ft_together)
+  --helper NAME     the pointer helper's (ft_pointer_helper)
+  --relay NAME      the input relay's (frametop_relay)
+"""
+
+import signal
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "conf"))
+sys.path.insert(0, str(HERE))
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+from roomaway.teller import Teller  # noqa: E402
+
+IN_ROOM, IDLE = 1.0, 2.0   # seconds between looks
+
+
+def main():
+    names = {"--together": "ft_together", "--helper": "ft_pointer_helper", "--relay": "frametop_relay"}
+    words = sys.argv[1:]
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
+    if words:
+        sys.exit(__doc__.strip())
+    clients = {flag: ftipc.Client(timeout=0.3) for flag in names}
+    teller = Teller(*(lambda text, flag=flag: clients[flag].ask(names[flag], text) for flag in ("--together", "--helper", "--relay")), time.monotonic)
+
+    def ended(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, ended)
+    signal.signal(signal.SIGINT, ended)
+    was = None
+    while True:
+        teller.tick()
+        if (teller.in_room, teller.told) != was:
+            was = (teller.in_room, teller.told)
+            print(("in a room" if teller.in_room else "in no room") + (": " + teller.told if teller.told else ""), flush=True)
+        time.sleep(IN_ROOM if teller.in_room else IDLE)
+
+
+if __name__ == "__main__":
+    main()

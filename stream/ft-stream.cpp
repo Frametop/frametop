@@ -38,6 +38,9 @@
 //     button CODE 1|0       a linux BTN_* code, pressed or released
 //     scroll DX DY          wheel notches (positive DY: down)
 //     key CODE 1|0          a linux KEY_* code, pressed or released
+//     peerkey CODE 1|0      the same from someone else of a Together room who was given this
+//                           window (screens/peerinput.h). Typing didn't come here for the
+//                           wearer, so the shared clipboard stays where it is
 //     focus                 typing went to this screen (a click or a spin to it): the shared
 //                           clipboard sends the desktop's text
 //     blur                  typing went to another screen: the keys held here come up,
@@ -1166,6 +1169,8 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
                 if (x != 0) LiSendHighResHScrollEvent(short(x * 120));
             } else if (std::sscanf(msg.c_str(), "key %u %d", &c, &down) == 2) {
                 if (down) g_clip.Focus();  // typing came back without a click (an older ft-screens says no "focus")
+                keys.Send(c, down != 0);
+            } else if (std::sscanf(msg.c_str(), "peerkey %u %d", &c, &down) == 2) {
                 keys.Send(c, down != 0);
             } else if (msg == "focus") {
                 g_clip.Focus();

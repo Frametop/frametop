@@ -18,7 +18,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import Field
 
-from . import controller_inputs, transport
+from . import controller_inputs, peer_tools, transport
 
 Number = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 Vector = tuple[Number, Number, Number]
@@ -404,8 +404,10 @@ def create_server(config: Config, *, runner=run_cli):
     @server.tool()
     async def release_all() -> CallToolResult:
         """Clear controller inputs, release all pose, worn and HMD button overrides, and stop the
-        fake eye and hand trackers. Does not change compositor policy."""
+        fake eye and hand trackers and every fake peer. Does not change compositor policy."""
         return await execute(['release'])
+
+    peer_tools.register(server, execute)
 
     return server
 

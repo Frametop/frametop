@@ -18,10 +18,10 @@ Every Frametop setting is in one app, Frametop Settings (`settings/`), in the Pl
 
 - Screens: Screens, Layout & profiles, Visibility & pins (not with the gamescope backend), and Remote displays.
 - Input: Devices, Buttons, Controllers, Keyboard, Commands, Pointer, Ignored panels, and Bluetooth.
-- Eyes, hands & voice: Gaze, Hands, and Voice.
-- System: Game optimization, Power, and Remote access.
+- Eyes, hands & voice: Gaze, Hands, Appearance, and Voice.
+- System: Game optimization, Power, Remote access, and Frametop Together.
 
-Below the sections are Controls guide and Frametop Tour. The sidebar always shows, so the window is at least 34 grid units wide. `settings/sections.py` lists the sections; `settings/ft-settings SECTION` (or `FT_SETTINGS_PAGE=SECTION`) opens the app on one, as the Tour's buttons do. The pages come from four areas, each with its own backend and pages file, which load the first time one of their sections opens, so a section that's never opened costs nothing:
+Below the sections are Controls guide and Frametop Tour. The sidebar always shows, so the window is at least 34 grid units wide. `settings/sections.py` lists the sections; `settings/ft-settings SECTION` (or `FT_SETTINGS_PAGE=SECTION`) opens the app on one, as the Tour's buttons do. The pages come from six areas, each with its own backend and pages file, which load the first time one of their sections opens, so a section that's never opened costs nothing:
 
 | Area | Sections | Backend and pages |
 | --- | --- | --- |
@@ -29,6 +29,8 @@ Below the sections are Controls guide and Frametop Tour. The sidebar always show
 | Display | Screens, Layout & profiles, Visibility & pins, Power | `display-settings/ft_display_settings.py`, `display-settings/DisplayPages.qml` |
 | Remote displays | Remote displays | `remote-displays/ft_remote_displays.py`, `remote-displays/RemoteDisplayPages.qml` |
 | Remote access | Remote access | `remote/remote_access.py`, `remote/RemoteAccessPages.qml` |
+| Avatar | Appearance | `avatar/ft_avatar_settings.py`, `avatar/AvatarPages.qml` |
+| Together | Frametop Together | `together/ft_together_settings.py`, `together/TogetherPages.qml` |
 
 `settings/install.sh` (run by `install.sh`) installs its menu entry, and removes the entries of the four apps it replaced: Frametop Input Settings, Frametop Display Settings, Frametop Remote Displays and Frametop Remote Access. Its launcher hands podman the real `XDG_RUNTIME_DIR` and user bus and gives the app the session's Wayland socket, because the desktop session runs on a private D-Bus and podman fails on it. Profiles leave Frametop Settings out, as they left Display Settings out: profiles are saved from it, so it would open itself again. A profile saved before with one of the old apps open skips it.
 
@@ -104,6 +106,10 @@ On a Mac, `host/macos/frametop-host-setup.sh` (or `Setup Frametop host.command`)
 ## Remote access
 
 Frametop Settings' Remote access page (`remote/remote_access.py`) serves the desktop's primary screen over VNC on the tailnet (`REMOTE` in `~/.config/frametop.conf`; the README's [Known limitations](../README.md#known-limitations) has what it needs). Its switch writes `REMOTE` and starts or stops it now with `session/remote-ctl.sh` on the host; in a desktop that started with it off, it turns on at the next restart. The page shows the state and the tailnet address with a copy button, and the VNC password (`~/.config/frametop-remote/vnc-password`) hidden until you show it, with copy and Change…, which makes a new random one (8 letters and digits, VNC's limit) and restarts a running server. It checks the state every 5 seconds while it shows, and not at all otherwise.
+
+## Frametop Together
+
+Frametop Settings' Frametop Together page (`together/ft_together_settings.py`) is where a room shared with other Steam Frames is used: its switch turns Frametop Together on (`frametop-together.service`, an optional part of the install that is off until then), and the page opens a room or joins one with an address and an invite code, shows who asks to come in and who is in the room, mutes your voice, shares where you look if you turn that on, and shares the desktop's screens, three at most. It asks the room's programs once a second while it shows. The part itself, its units and what the page asks: [together/README.md](../together/README.md), "Running it"; the design: [together.md](together.md).
 
 ## Floating windows
 

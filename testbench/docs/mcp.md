@@ -110,7 +110,28 @@ You can also launch `.venv/bin/python -m frame_testbench.mcp_server`. The venv's
 | `overlay_list` | None | `pointer overlays` |
 | `overlay_measure` | `overlay`: an overlay key | `pointer measure -- KEY` |
 | `display_power` | `state`: `status`, `on`, or `off` | `power STATE` |
-| `release_all` | None | `release`, which also stops the fake trackers |
+| `peer_start` | `peer` (1-3); optional `name` | `peer N start [--name NAME]` |
+| `peer_stop`, `peer_state`, `peer_join`, `peer_leave` | `peer` | `peer N stop`, `state`, `join` (the room open on this Frame), `leave` |
+| `peer_pose` | `peer`, `pose`: `stand`, `wave`, `reach`, `type`, `sit`, `lean`, or `look` | `peer N pose NAME` |
+| `peer_walk` | `peer`, `right`, `back` (metres, ±20); optional `degrees` (±360) | `peer N walk -- RIGHT BACK DEGREES` |
+| `peer_avatar` | `peer`; optional `model` (a name in the avatars folder; none without it) | `peer N wear [MODEL]` |
+| `peer_speak` | `peer`; optional `hz` (50-2000; quiet without it) | `peer N speak HZ` or `speak off` |
+| `peer_away` | `peer`, `state`: `game`, `off`, or `back` | `peer N away STATE` |
+| `peer_point` | `peer`; optional `panel` (its id, 0-31; off without it), `x`, `y` (0-1 across and down the picture, 0.5 each), `down` | `peer N point PANEL X Y [--down]` or `point off` |
+| `peer_look` | `peer`; optional `yaw` (degrees to its left, ±63.5; off without it), `pitch` (up) | `peer N look -- YAW PITCH` or `look off` |
+| `peer_control_ask` | `peer`, `panel` | `peer N ask PANEL` |
+| `peer_act_move` | `peer`, `panel`, `x`, `y` (0-1) | `peer N act PANEL move X Y` |
+| `peer_act_button` | `peer`, `panel`, `button` (1 left, 2 right, 3 middle), `down` | `peer N act PANEL button B 0\|1` |
+| `peer_act_scroll` | `peer`, `panel`; optional `right`, `down` (120 a notch, ±2400) | `peer N act PANEL scroll -- RIGHT DOWN` |
+| `peer_act_key` | `peer`, `panel`, `code` (a Linux key code, 1-111), `down` | `peer N act PANEL key CODE 0\|1` |
+| `peer_put` | `peer`, `panel`, `x`, `y`, `z` (metres, ±100); optional `degrees` (±360) | `peer N put PANEL -- X Y Z DEGREES` |
+| `peer_share` | `peer`; optional `width` (640, 896, 1280, 1408, 1664 or 1920), `height` (360-1200, a multiple of 8), `x` (metres, ±100; where it was without it), `y`, `z`, `degrees` | `peer N share --size WxH [--at X Y Z --turn DEGREES]` |
+| `peer_unshare` | `peer` | `peer N unshare` |
+| `peer_control_give` | `peer`, `person` (their place in the room, 0-3) | `peer N give PERSON` |
+| `peer_control_take` | `peer`; optional `person` (everyone without it) | `peer N take [PERSON]` |
+| `peer_pc` | `peer`; optional `windows` (1-4; as many as it had, or 1) | `peer N pc [WINDOWS]` |
+| `peer_unpc` | `peer` | `peer N unpc` |
+| `release_all` | None | `release`, which also stops the fake trackers and the fake peers |
 
 `side` is `left` or `right`. Position and translation are three-element XYZ
 arrays in meters. Rotation is `[yaw, pitch, roll]` in degrees. All numbers must
@@ -119,6 +140,9 @@ are `[0, 0, 0]`. Space is `standing` by default, or `raw`. Moves require a prior
 pose set for that device and follow the existing CLI's coordinate conventions.
 Hand positions are in the head frame, not standing space; see
 [fake eye and hand trackers](fake-trackers.md).
+The `peer_*` tools drive fake peers for Frametop Together; see [fake peers](peers.md).
+A fake peer can ask for control of a panel, and no tool gives it: the panel's owner does.
+`peer_control_give` gives only the peer's own test panel.
 
 ### Controller inputs
 

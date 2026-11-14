@@ -46,11 +46,14 @@ Kirigami.ApplicationWindow {
         pageStack.push(page)
     }
 
-    readonly property var loaders: ({ input: inputArea, display: displayArea, remote: remoteArea, access: accessArea })
+    readonly property var loaders: ({ input: inputArea, display: displayArea, remote: remoteArea, access: accessArea,
+                                      avatar: avatarArea, together: togetherArea })
     Loader { id: inputArea }
     Loader { id: displayArea }
     Loader { id: remoteArea }
     Loader { id: accessArea }
+    Loader { id: avatarArea }
+    Loader { id: togetherArea }
 
     Connections {
         target: settings

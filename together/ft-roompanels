@@ -1,0 +1,150 @@
+#!/usr/bin/python3
+"""ft-roompanels: the panels of a Together room on this Frame (docs/together.md, "What a guest
+sees"). While ft-together says this Frame is in a room, it keeps the others' shared panels
+standing here as panels of ft-screens' (each fed by an ft-peerpanel), and this Frame's shared
+screens in the room where they stand here (each read by an ft-sharepanel). The rules are in
+roompanels/keeper.py; this is the loop and the socket around them.
+
+Questions, one datagram each on @ft_roompanels:
+
+  share N      screen N of this desktop goes into the room -> "ok K" (your panel K). N from
+               101 is a window of your PC's that stands here as a panel: the PC sends it
+               itself (roompanels/pcshares.py, roompanels/pclink.py)
+  unshare N    and is taken back
+  state        -> "ok " and {"room", "floor", "shares", "panels", "windows", "pc"} as JSON:
+               "windows" are the PC windows there are to share, "pc" what keeps the PC from
+               sending ("" when nothing does)
+  panels       -> "ok COUNT ID:SCREEN:WxH ...": the screen here that shows each of the room's
+                  panels, and its picture's shape (ft-roompoints asks)
+
+and to move through the room (roompanels/moving.py), each -> "ok X Z DEGREES", where this
+Frame's floor lies in the room now:
+
+  go X Z DEGREES        to stand at X, Z of the room, facing DEGREES to the left of its -z
+  go person N           to in front of the person at place N, facing them
+  go panel ID           to where the room's panel ID reads well, facing it
+  pull DX DZ DEGREES    the room pulled past by that much on your own floor
+  step FORWARD RIGHT DEGREES   that many metres the way you face and to your right, then
+                        turned that far to the left where you stand
+  fly panel ID          as "go panel ID", but flown there in a moment and not in one jump
+                        (roompanels/gliding.py) -> "ok"
+
+  --socket NAME     its own socket's name (ft_roompanels)
+  --together NAME   ft-together's (ft_together)
+  --screens NAME    ft-screens' (ft_screens)
+  --layout FILE     the saved layout, for the PC windows in it (~/.config/frametop-layout.json)
+  --hosts DIR       the tokens and pins of the PCs' APIs (conf/ft_hostapi.py has the default)
+"""
+
+import os
+import select
+import signal
+import socket
+import sys
+import threading
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "conf"))
+sys.path.insert(0, str(HERE))
+import ft_hostapi  # noqa: E402  (questions to a PC's streaming host)
+import ftipc  # noqa: E402  (questions to the datagram sockets)
+from roompanels import gliding, moving, pclink, pcwindows  # noqa: E402
+from roompanels.keeper import Keeper  # noqa: E402
+from roompanels.pcshares import PcShares  # noqa: E402
+
+IN_ROOM, IDLE = 0.25, 1.0   # seconds between looks
+PC_WAIT = 4.0               # seconds a PC has to answer one question
+
+
+def ask_pc(pc, path, body):
+    """One POST to the streaming host of the PC `pc` (address, its windows instance's port)."""
+    return ft_hostapi.post_json(pc[0], path, body, timeout=PC_WAIT, port=pc[1])
+
+
+def keep_pc(link, ended):
+    """The PC's side on a thread of its own, since the PC is waited on: a look every while."""
+    while not ended.wait(pclink.STEP):
+        try:
+            link.step()
+        except Exception as e:   # noqa: BLE001  (whatever a look trips on, the next one is still due)
+            print(f"the PC's side: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def answer(keeper, mover, glide, text):
+    words = text.split()
+    moved = moving.answer(mover, words)
+    if moved is not None:
+        return moved
+    if len(words) == 3 and words[:2] == ["fly", "panel"] and words[2].isdigit() and len(words[2]) < 4:
+        return glide.to_panel(int(words[2]))
+    if words == ["state"]:
+        return "ok " + keeper.state()
+    if words == ["panels"]:
+        return keeper.panels()
+    if len(words) == 2 and words[0] in ("share", "unshare") and words[1].isdigit() and len(words[1]) < 4:
+        return (keeper.share if words[0] == "share" else keeper.unshare)(int(words[1]))
+    return "error share N | unshare N | state | panels | go ... | pull DX DZ DEGREES | step FORWARD RIGHT DEGREES | fly panel ID"
+
+
+def main():
+    names = {"--socket": "ft_roompanels", "--together": "ft_together", "--screens": "ft_screens",
+             "--layout": os.path.expanduser("~/.config/frametop-layout.json"), "--hosts": ft_hostapi.TOKEN_DIR}
+    words = sys.argv[1:]
+    while len(words) >= 2 and words[0] in names:
+        names[words[0]], words = words[1], words[2:]
+    if words:
+        sys.exit(__doc__.strip())
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    try:
+        sock.bind(ftipc.address(names["--socket"]))
+    except OSError:
+        sys.exit("ft-roompanels is running already")
+    sock.setblocking(False)
+    together, screens = ftipc.Client(timeout=0.5), ftipc.Client(timeout=0.5)
+    ask_together, ask_screens = (lambda text: together.ask(names["--together"], text)), (lambda text: screens.ask(names["--screens"], text))
+    mover = moving.Mover(ask_together, ask_screens)
+    glide = gliding.Glide(mover, time.monotonic)
+    ft_hostapi.TOKEN_DIR = names["--hosts"]
+    pc_together = ftipc.Client(timeout=0.5)   # (the PC's thread's own: a Client is one thread's)
+    link = pclink.PcLink(lambda text: pc_together.ask(names["--together"], text), ask_pc, time.monotonic)
+    pcs = PcShares(ask_together, ask_screens, pcwindows.reader(names["--layout"]), link)
+    keeper = Keeper(ask_together, ask_screens, time.monotonic, glide.to_panel, pcs)
+    ended = threading.Event()
+    pc_thread = threading.Thread(target=keep_pc, args=(link, ended), daemon=True)
+    pc_thread.start()
+
+    def stop(*_):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    was, look = None, 0.0
+    try:
+        while True:
+            if time.monotonic() >= look:
+                keeper.tick()
+                if keeper.in_room != was:
+                    was = keeper.in_room
+                    print("in a room" if was else "in no room", flush=True)
+                look = time.monotonic() + (IN_ROOM if keeper.in_room else IDLE)
+            glide.step()
+            left = max(0.0, look - time.monotonic())
+            if not select.select([sock], [], [], min(left, gliding.STEP) if glide.going else left)[0]:
+                continue
+            try:
+                data, who = sock.recvfrom(256)
+                sock.sendto(answer(keeper, mover, glide, data.decode("utf-8", "replace")).encode(), who)
+            except OSError:
+                pass   # an asker that went before its answer
+    finally:
+        keeper.end()
+        ended.set()
+        pc_thread.join(PC_WAIT)
+        if not pc_thread.is_alive():
+            link.step()   # the PC is told that nothing is shared any more
+
+
+if __name__ == "__main__":
+    main()

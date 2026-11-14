@@ -81,9 +81,11 @@
 #include "screen-scale.h"
 #include "controller-click.h"
 #include "remote.h"
+#include "share.h"
 #include "../conf/ft_pinlock.h"
 #include "logfile.h"
 #include "relay-buttons.h"
+#include "peerinput.h"
 #include "held-keys.h"
 #include "rendernode.h"
 
@@ -164,6 +166,7 @@ struct server {
     struct ft_relay_buttons relay_buttons;  // the input relay's mouse buttons held on the seat
     int relay_remote[8];  // ...and those held on a remote screen: its index + 1 (0: none), by BTN_LEFT + n
     struct ft_controller_click controller_click;
+    struct ft_peer peer;  // input from the other people of a Together room, on the same seat (peerinput.h)
     pid_t child;
     // Where typing goes: the screens after a click on one, Steam after a click on another
     // panel. The input relay grabs the keyboards while it's the screens (see keys_update).
@@ -247,6 +250,7 @@ static void spot_dismiss(struct server *s, const char *why) {
 static void buffer_destroyed(struct wl_listener *l, void *data) {
     struct tracked_buffer *t = wl_container_of(l, t, destroy);
     ft_vr_forget(t->buffer);
+    ft_share_forget(t->buffer);
     wl_list_remove(&t->destroy.link);
     wl_list_remove(&t->link);
     free(t);
@@ -267,6 +271,12 @@ static void track_buffer(struct server *s, struct wlr_buffer *buffer) {
 static bool relay_can_press(struct server *s);
 static void release_relay_buttons(struct server *s, const char *why);
 static void release_seat_buttons(struct server *s, const char *why);
+static void own_hand(struct server *s);
+static const char *peer_command(struct server *s, const char *words);
+static bool peer_at_host(const struct server *s, int screen);
+// Whether a screen (from 0) is a remote one by its number, running or not.
+static bool remote_index(int screen) { return screen >= FT_REMOTE_FIRST - 1; }
+static void own_hand(struct server *s);
 
 // A video (or anything moving over a large area) on a screen you don't look at keeps the
 // full frame rate (see frame_interval): its commits keep redrawing much of it, and keep
@@ -448,19 +458,36 @@ static void screen_commit(struct wl_listener *l, void *data) {
     present(sc, buffer);
 }
 
+// A buffer's DMA-BUF, as vr.h and share.h take it (its fds stay the buffer's).
+static bool describe(void *buffer, struct ft_dmabuf *b) {
+    struct wlr_dmabuf_attributes a;
+    if (!wlr_buffer_get_dmabuf(buffer, &a)) return false;
+    *b = (struct ft_dmabuf){.width = a.width, .height = a.height, .format = a.format, .modifier = a.modifier,
+                            .n_planes = a.n_planes};
+    for (int i = 0; i < a.n_planes && i < 4; ++i) {
+        b->offset[i] = a.offset[i];
+        b->stride[i] = a.stride[i];
+        b->fd[i] = a.fd[i];
+    }
+    return true;
+}
+
+// The share tap's (share.h) look at the buffers: what is on a desktop screen's panel. Not a
+// spare output's: a floating window's picture is a part of its buffer.
+static void *shared_buffer(void *data, int index) {
+    const struct server *s = data;
+    return index >= 0 && index < s->n_config && s->screens[index] ? s->screens[index]->held : NULL;
+}
+static void keep_buffer(void *buffer) { wlr_buffer_lock(buffer); }
+static void release_buffer(void *buffer) { wlr_buffer_unlock(buffer); }
+static const struct ft_share_buffers share_buffers = {shared_buffer, describe, keep_buffer, release_buffer};
+
 // Put a buffer (locked once, for us to let go of) on the screen's panel.
 static void present(struct screen *sc, struct wlr_buffer *buffer) {
-    struct wlr_dmabuf_attributes a;
-    if (!wlr_buffer_get_dmabuf(buffer, &a)) {
+    struct ft_dmabuf b;
+    if (!describe(buffer, &b)) {
         wlr_buffer_unlock(buffer);
         return;
-    }
-    struct ft_dmabuf b = {.width = a.width, .height = a.height, .format = a.format, .modifier = a.modifier,
-                          .n_planes = a.n_planes};
-    for (int i = 0; i < a.n_planes && i < 4; ++i) {
-        b.offset[i] = a.offset[i];
-        b.stride[i] = a.stride[i];
-        b.fd[i] = a.fd[i];
     }
     track_buffer(sc->server, buffer);
     if (!ft_vr_screen_present(sc->index, buffer, &b)) {
@@ -474,6 +501,7 @@ static void present(struct screen *sc, struct wlr_buffer *buffer) {
     if (sc->held) wlr_buffer_unlock(sc->held);
     sc->held = buffer;
     wlr_buffer_unlock(buffer);
+    ft_share_presented(sc->index);
 }
 
 static void keyboard_enter(struct server *s, struct wlr_surface *surface);
@@ -589,44 +617,11 @@ static void set_key_remote(struct server *s, int index) {
     if (index >= 0) ft_remote_focus(index);
 }
 
-static void handle_vr_event(const struct ft_event *e, void *data) {
-    if (e->type != FT_QUIT && !ft_pin_allowed()) return;
-    struct server *s = data;
-    if (e->type == FT_QUIT) {
-        wl_display_terminate(s->display);
-        return;
-    }
-    if (ft_remote_is(e->screen)) {
-        // Another machine's display: its stream takes the input, and a click or a spin to it
-        // takes the typing there too.
-        if (e->type == FT_BUTTON && e->pressed) spot_dismiss(s, "click");
-        if ((e->type == FT_BUTTON && e->pressed) || e->type == FT_FRONT) {
-            set_key_remote(s, e->screen);
-            s->keys_clicked = true;
-        }
-        ft_remote_event(e);
-        return;
-    }
-    if (e->screen < 0 || e->screen >= MAX_SCREENS || !s->screens[e->screen]) return;
-    struct ft_event filtered = *e;
-    if (e->screen < s->n_config &&
-        !ft_controller_click_filter(&s->controller_click, &filtered, s->scale[e->screen])) return;
-    e = &filtered;
-    if (e->screen < 0 || e->screen >= MAX_SCREENS || !s->screens[e->screen]) return;
+// A pointer event on one of the desktop's screens or floating windows, to the seat: the
+// wearer's (handle_vr_event), or someone else's in a Together room (peer_pointer).
+static void seat_event(struct server *s, const struct ft_event *e) {
     struct screen *sc = s->screens[e->screen];
     struct wlr_surface *surface = sc->toplevel->base->surface;
-    if (e->type == FT_FRONT) {
-        // A spin brought this panel to the front: typing goes to it, as after a click there,
-        // and ft-floatd makes its window (or the top one on a screen) KWin's active window.
-        keyboard_enter(s, surface);
-        s->keys_clicked = true;
-        set_key_remote(s, -1);
-        if (s->beside) return;
-        char msg[32];
-        snprintf(msg, sizeof msg, "front %d", e->screen + 1);
-        float_send(s, msg);
-        return;
-    }
     const uint32_t t = now_ms();
     const double x = e->x / s->scale[e->screen], y = e->y / s->scale[e->screen];  // KWin's units
     switch (e->type) {
@@ -657,11 +652,6 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
                 wlr_seat_pointer_notify_button(s->seat, t, e->button,
                                                e->pressed ? WL_POINTER_BUTTON_STATE_PRESSED
                                                           : WL_POINTER_BUTTON_STATE_RELEASED);
-                if (e->pressed) {
-                    spot_dismiss(s, "click");
-                    s->keys_clicked = true;
-                    set_key_remote(s, -1);
-                }
             }
             break;
         case FT_SCROLL:
@@ -698,6 +688,63 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
             break;
     }
     wlr_seat_pointer_notify_frame(s->seat);
+}
+
+static void handle_vr_event(const struct ft_event *e, void *data) {
+    if (e->type != FT_QUIT && !ft_pin_allowed()) return;
+    struct server *s = data;
+    if (e->type == FT_QUIT) {
+        wl_display_terminate(s->display);
+        return;
+    }
+    if (ft_remote_is(e->screen)) {
+        // Another machine's display: its stream takes the input, and a click or a spin to it
+        // takes the typing there too. That machine has one pointer as well, and someone of a
+        // Together room may be at it through a window of it they were given: the same turns
+        // as on the desktop, below. What the wearer holds there is the wearer's alone, so
+        // anything of theirs with a button down is their hand.
+        if (peer_at_host(s, e->screen)) {
+            if (ft_remote_held() || ft_peer_hand(&s->peer, e, false)) own_hand(s);
+            else if (ft_peer_holds(&s->peer, now_ms())) return;
+        }
+        if (e->type == FT_BUTTON && e->pressed) spot_dismiss(s, "click");
+        if ((e->type == FT_BUTTON && e->pressed) || e->type == FT_FRONT) {
+            set_key_remote(s, e->screen);
+            s->keys_clicked = true;
+        }
+        ft_remote_event(e);
+        return;
+    }
+    if (e->screen < 0 || e->screen >= MAX_SCREENS || !s->screens[e->screen]) return;
+    if (e->type == FT_MOTION || e->type == FT_BUTTON || e->type == FT_SCROLL) ft_remote_pointer_away();
+    struct ft_event filtered = *e;
+    if (e->screen < s->n_config &&
+        !ft_controller_click_filter(&s->controller_click, &filtered, s->scale[e->screen])) return;
+    e = &filtered;
+    if (e->screen < 0 || e->screen >= MAX_SCREENS || !s->screens[e->screen]) return;
+    // The pointer and the keyboard are one seat's, and in a Together room someone else may be
+    // at them (peerinput.h): the wearer's hand takes them back, and their pointer only resting
+    // on a screen moves nothing meanwhile.
+    if (ft_peer_hand(&s->peer, e, s->seat->pointer_state.button_count > 0)) own_hand(s);
+    else if (ft_peer_holds(&s->peer, now_ms())) return;
+    if (e->type == FT_FRONT) {
+        // A spin brought this panel to the front: typing goes to it, as after a click there,
+        // and ft-floatd makes its window (or the top one on a screen) KWin's active window.
+        keyboard_enter(s, s->screens[e->screen]->toplevel->base->surface);
+        s->keys_clicked = true;
+        set_key_remote(s, -1);
+        if (s->beside) return;
+        char msg[32];
+        snprintf(msg, sizeof msg, "front %d", e->screen + 1);
+        float_send(s, msg);
+        return;
+    }
+    seat_event(s, e);
+    if (e->type == FT_BUTTON && e->pressed) {  // the wearer's click: typing goes to this screen
+        spot_dismiss(s, "click");
+        s->keys_clicked = true;
+        set_key_remote(s, -1);
+    }
 }
 
 // Tell the input relay where typing goes, and whether the screens show, on a change and every
@@ -756,10 +803,12 @@ static void keys_update(struct server *s) {
 // full where you look (ft_vr_screen_attention) and for a video, lower for the rest of what
 // you see, and about once a second for what you don't (hidden, behind you, paused for a VR
 // game). A screen nothing changes on costs nothing at any rate: KWin commits only when
-// something on it moved. A remote viewer ("watch") sees every screen at full rate.
+// something on it moved. A remote viewer ("watch") sees every screen at full rate, and a
+// screen someone in a Together room watches (share.h) is drawn as one in view at the least.
 static uint32_t frame_interval(struct server *s, struct screen *sc, uint32_t t) {
     if ((int32_t)(s->watch_until - t) > 0) return 0;
     enum ft_attention a = ft_vr_screen_attention(sc->index);
+    if (a == FT_HIDDEN && ft_share_wanted(sc->index)) a = FT_IN_VIEW;
     if (a == FT_IN_VIEW && (int32_t)(sc->video_until - t) > 0) a = FT_FOCUSED;
     if (a != FT_FOCUSED && t - s->typed_ms < 1500 &&
         s->seat->keyboard_state.focused_surface == sc->toplevel->base->surface)
@@ -837,8 +886,10 @@ static int tick(int fd, uint32_t mask, void *data) {
     }
     ft_vr_poll(handle_vr_event, s);
     ft_remote_tick();
+    ft_share_tick();
     if (s->relay_buttons.held && !relay_can_press(s))
         release_relay_buttons(s, ft_vr_paused() ? "paused" : "its screen hid");
+    if ((s->peer.buttons || s->peer.n_keys) && ft_vr_paused()) peer_command(s, "letgo");
     if (++s->ticks % 9 == 0) keys_update(s);
     if (s->ticks % 450 == 0) ft_log_check(s->log_path, FT_LOG_CAP, FT_LOG_KEEP);
     if (s->kb_close_at && s->ticks >= s->kb_close_at) {
@@ -870,7 +921,7 @@ static int child_exited(int sig, void *data) {
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
-        if (ft_remote_child(pid, status)) {
+        if (ft_remote_child(pid, status) || ft_share_child(pid, status)) {
             continue;
         } else if (pid == s->child) {
             wlr_log(WLR_INFO, "session exited");
@@ -925,6 +976,7 @@ static void keyboard_enter(struct server *s, struct wlr_surface *surface) {
 
 // Every key ft-screens holds comes up, on the focused screen (or with the next focus).
 static void release_keys(struct server *s, const char *why) {
+    if (!remote_index(s->peer.screen)) ft_peer_keys_gone(&s->peer);  // someone else's in a Together room are among them
     for (size_t n = s->keyboard.num_keycodes; n && s->keyboard.num_keycodes; --n) {
         const uint32_t code = s->keyboard.keycodes[0];
         send_key(s, code, 0);
@@ -996,6 +1048,7 @@ static void relay_button(struct server *s, uint32_t code, bool pressed, char *re
             return (void)snprintf(reply, size, "ok");
         }
     }
+    if (pressed && relay_can_press(s)) own_hand(s);
     if (!ft_relay_button(&s->relay_buttons, code, pressed, relay_can_press(s)))
         return (void)snprintf(reply, size, pressed ? "ok no pointer, or held" : "ok not held");
     wlr_seat_pointer_notify_button(s->seat, now_ms(), code,
@@ -1022,6 +1075,7 @@ static void release_relay_buttons(struct server *s, const char *why) {
 static void release_seat_buttons(struct server *s, const char *why) {
     struct wlr_seat_pointer_state *ps = &s->seat->pointer_state;
     if (!ps->button_count || !ps->focused_surface) return;
+    if (!remote_index(s->peer.screen)) ft_peer_buttons_gone(&s->peer);  // someone else's in a Together room are among them
     while (ps->button_count) {
         const uint32_t code = ps->buttons[0].button;
         const bool last = ps->buttons[0].n_pressed == 1;
@@ -1029,6 +1083,81 @@ static void release_seat_buttons(struct server *s, const char *why) {
         if (last) wlr_log(WLR_INFO, "button %u released (%s)", code, why);
     }
     wlr_seat_pointer_notify_frame(s->seat);
+}
+
+// ---------------------------------------------------------------- input from a Together room
+
+// What peerinput.h asks of the desktop. Its own screens, not a floating window's output; and
+// another machine's display on a stream (remote.h), which ft-roominput names only for a window
+// of the wearer's PC that the room was given. A remote screen's number is never one of the
+// desktop's, also once it has gone: what they held there is never let go on the desktop.
+static bool peer_size(void *ctx, int screen, int *width, int *height) {
+    const struct server *s = ctx;
+    if (remote_index(screen)) return ft_remote_peer_size(screen, width, height);
+    if (screen < 0 || screen >= s->n_config || !s->screens[screen]) return false;
+    *width = s->config[screen].width, *height = s->config[screen].height;
+    return true;
+}
+
+// Their pointer goes to the seat as the wearer's does, but for where typing goes: their click
+// takes KWin's keyboard focus to its screen (seat_event), not the typing away from Steam,
+// frunner's search or a remote display.
+static void peer_pointer(void *ctx, const struct ft_event *e) {
+    if (remote_index(e->screen)) ft_remote_peer_event(e);
+    else seat_event(ctx, e);
+}
+
+// Each remote display is a seat of its own: the host takes a release only through the stream
+// the press came through (g_pressed_on in remote.c).
+static int peer_seat(void *ctx, int screen) {
+    (void)ctx;
+    return remote_index(screen) ? screen + 1 : 0;
+}
+
+// Whether someone else's pointer is on a display of the machine that remote screen `screen` is of.
+static bool peer_at_host(const struct server *s, int screen) {
+    const char *theirs = remote_index(s->peer.screen) ? ft_remote_host(s->peer.screen) : NULL, *host = ft_remote_host(screen);
+    return theirs && host && *host && !strcmp(theirs, host);
+}
+
+// Their key goes down only where the wearer's would go now: typing is the desktop's, and on
+// the screen they were given. Not one that is down already (the wearer's, whose release would
+// then be theirs). A release always goes, of a key that is down. On another machine's display
+// the key goes where that machine's typing is, which is its own to say.
+static bool peer_key(void *ctx, int screen, uint32_t code, bool pressed) {
+    struct server *s = ctx;
+    if (remote_index(screen)) return ft_remote_peer_key(screen, code, pressed), true;
+    if (!pressed) {
+        if (key_held(&s->keyboard, code)) send_key(s, code, 0);
+        return true;
+    }
+    if (!s->keys_desktop || spot_open(s) || (s->key_remote >= 0 && ft_remote_is(s->key_remote))) return false;
+    if (screen < 0 || screen >= s->n_config || !s->screens[screen] || key_held(&s->keyboard, code) ||
+        s->seat->keyboard_state.focused_surface != s->screens[screen]->toplevel->base->surface) return false;
+    send_key(s, code, 1);
+    return true;
+}
+
+static struct ft_peer_desk peer_desk(struct server *s) {
+    return (struct ft_peer_desk){s, peer_size, peer_seat, peer_pointer, peer_key};
+}
+
+// The wearer's own hand is on the desktop, or on the machine someone else is at through a
+// window of it: a click, a scroll, a drag, a spin to the front, a key. What someone else holds
+// comes up, and ft-together hears "control own" while it may give a screen to someone (its
+// desk: together/room/desk.h).
+static void own_hand(struct server *s) {
+    static struct ft_sock_log to = {FT_SOCK_TOGETHER, 0, 0, 0};
+    const struct ft_peer_desk desk = peer_desk(s);
+    if (ft_peer_own(&s->peer, &desk, now_ms())) sock_send(s, &to, "control own");
+}
+
+// "peer ..." from ft-roominput: what ft-together passed on of the others' input (peerinput.h).
+// Nothing of it while everything is paused, but letting go.
+static const char *peer_command(struct server *s, const char *words) {
+    const struct ft_peer_desk desk = peer_desk(s);
+    if (ft_vr_paused() && strcmp(words, "letgo")) return "error paused";
+    return ft_peer_command(&s->peer, &desk, words, now_ms());
 }
 
 // Keys from the input relay (physical keyboards): "key <evdev code> <1 press|0 release>".
@@ -1057,6 +1186,7 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
     }
     // A remote screen has the typing, except for the release of a key the desktop holds.
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote) && (value || !key_held(&s->keyboard, code))) {
+        if (value && peer_at_host(s, s->key_remote)) own_hand(s);
         ft_remote_key(s->key_remote, code, value != 0);
         return (void)snprintf(reply, size, "ok remote");
     }
@@ -1064,6 +1194,7 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
         if (!s->seat->keyboard_state.focused_surface) return (void)snprintf(reply, size, "ok no focus");
         if (!s->keys_desktop) return (void)snprintf(reply, size, "ok typing goes to Steam");
     }
+    if (value) own_hand(s);
     send_key(s, code, value);
     snprintf(reply, size, "ok");
 }
@@ -1150,7 +1281,8 @@ static void keys_state(struct server *s, char *reply, int size) {
 // "toplevels" (-> "ok <count>" and a line per KWin window: "<screen> <w>x<h> <commits>
 // <title>"), "input <screen> move|down|up|leave [x y [left|right|middle]]" (pointer input
 // as if from that panel, x and y in its pixels; for tests, mostly with --no-vr),
-// "key <code> <value>", "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
+// "key <code> <value>", "peer ..." (input from the others in a Together room, from ft-roominput:
+// peerinput.h), "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
 // SteamVR's Gamepad mode is for), "vrkeyboard show|hide|toggle|close" (Full Keyboard,
 // from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
 // "frunner on|off" (frunner's search has the typing; see spot_open), "keys" (what's held:
@@ -1168,7 +1300,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
         // Drop input, not the running session's layout/float metadata. Ordinary
         // show/resume commands cannot clear the separate OpenVR security gate.
         if (s->vr && !ft_pin_allowed() &&
-            (!strncmp(buf, "input ", 6) || !strncmp(buf, "key ", 4) || !strncmp(buf, "pad ", 4) ||
+            (!strncmp(buf, "input ", 6) || !strncmp(buf, "key ", 4) || !strncmp(buf, "pad ", 4) || !strncmp(buf, "peer ", 5) ||
              !strncmp(buf, "wheel ", 6) || !strncmp(buf, "hwheel ", 7) || !strncmp(buf, "vrkeyboard ", 11) || !strcmp(buf, "frunner on"))) {
             const char *locked = "error Steam PIN locked";
             if (len > offsetof(struct sockaddr_un, sun_path))
@@ -1265,6 +1397,8 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             handle_key(s, code, value, reply, sizeof reply);
             len = sizeof from;
             continue;  // no reply: keys are fire-and-forget
+        } else if (strncmp(buf, "peer ", 5) == 0) {
+            snprintf(reply, sizeof reply, "%s", peer_command(s, buf + 5));
         } else if (strncmp(buf, "vrkeyboard ", 11) == 0) {
             keyboard_command(s, buf + 11, reply, sizeof reply);
         } else if (strcmp(buf, "fullkb 0") == 0 || strcmp(buf, "fullkb 1") == 0) {
@@ -1371,7 +1505,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                      "%s fullkb=%s typing=%s focused_screen=%d pointer_screen=%d", vr,
                      !fullkb(s) ? "off" : s->fullkb_open ? (s->fullkb_auto ? "open-auto" : "open") : "closed",
                      typing_target(s), focused_screen(s) + 1, s->pointer_focus ? s->pointer_focus->index + 1 : 0);
-        } else if (!ft_remote_command(buf, reply, sizeof reply)) {
+        } else if (!ft_remote_command(buf, reply, sizeof reply) && !ft_share_command(buf, reply, sizeof reply)) {
             ft_vr_command(buf, reply, sizeof reply);
         }
         if (len > offsetof(struct sockaddr_un, sun_path))
@@ -1470,6 +1604,7 @@ int main(int argc, char **argv) {
     s.controller_click.threshold = 32;
     for (int i = 0; i < MAX_SCREENS; ++i) s.scale[i] = 1;
     s.key_remote = -1;
+    ft_peer_init(&s.peer);
     s.rate[FT_FOCUSED] = 0, s.rate[FT_IN_VIEW] = 15, s.rate[FT_HIDDEN] = 1;
     s.period_ns = 1000000000LL / 90;
     s.phase_ms = 1;
@@ -1539,6 +1674,7 @@ int main(int argc, char **argv) {
     s.display = wl_display_create();
     s.loop = wl_display_get_event_loop(s.display);
     ft_remote_init(s.loop, s.vr);
+    ft_share_init(s.loop, &share_buffers, &s);
     wl_list_init(&s.buffers);
     struct wlr_compositor *comp = wlr_compositor_create(s.display, 6, NULL);
     s.new_surface.notify = surface_watch_new;
@@ -1629,6 +1765,7 @@ int main(int argc, char **argv) {
     // remote panel's texture that was already gone (SIGBUS, 2026-10-07).
     ft_vr_shutdown();
     ft_remote_shutdown();
+    ft_share_shutdown();
     if (s.child > 0) kill(s.child, SIGTERM);
     wl_display_destroy_clients(s.display);
     // wlroots asserts that nothing still listens to its globals when they go.

@@ -19,7 +19,12 @@ UNITS = [("power/frametop-power.service", None), ("pointer/helper/frametop-point
          ("gaze/frametop-gaze.service", None), ("voice/frametop-voice.service", None),
          ("voice/frametop-voice-whisper.service", None), ("hands/frametop-camd.service", None),
          ("hands/frametop-hands.service", None), ("screens/frametop-handview.service", None),
-         ("session/frametop-autostart.service", None), ("input/frametop-input-relay.service", None)]
+         ("session/frametop-autostart.service", None), ("input/frametop-input-relay.service", None),
+         ("together/frametop-together.service", None), ("together/frametop-room-people.service", None),
+         ("together/frametop-room-panels.service", None), ("together/frametop-room-voice.service", None),
+         ("together/frametop-room-away.service", None), ("together/frametop-room-input.service", None),
+         ("together/frametop-room-points.service", None), ("together/frametop-room-move.service", None),
+         ("together/frametop-room-gaze.service", None)]
 ENTRIES = [("gaze/bench/ft-gazebench.desktop", "frametop-gazebench.desktop"),
            ("gaze/rec/ft-eyerec.desktop", "frametop-eyerec.desktop"),
            ("hands/rec/ft-handrec.desktop", "frametop-handrec.desktop"),
@@ -31,7 +36,7 @@ ENTRIES = [("gaze/bench/ft-gazebench.desktop", "frametop-gazebench.desktop"),
 USERS = ["power/run.sh", "pointer/helper/run.sh", "keyboard/run.sh", "pointer/dashpatch/run.sh", "gaze/run.sh",
          "voice/run.sh", "hands/run.sh", "desktops.sh", "gaze/bench/install.sh", "gaze/rec/install.sh",
          "hands/rec/install.sh", "gaze/probe/install.sh", "display-settings/install.sh", "tour/install.sh",
-         "settings/install.sh", "menu/install.sh"]
+         "settings/install.sh", "menu/install.sh", "together/run.sh"]
 
 STUB = '#!/bin/sh\nprintf "%s %s\\n" "$(basename "$0")" "$*" >>"$STUB_LOG"\n'
 REFUSE = '#!/bin/sh\necho "$(basename "$0") is not for tests" >&2\nexit 99\n'

@@ -53,7 +53,7 @@ release" to ft-screens; Ctrl+Alt+Shift+Esc by default), desktopless_toggle = des
 (ft-layout desktopless toggle, docs/desktopless.md; Meta+Shift+D by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
-ft-layout, ft-float, ft-steam and ft-voice need no path), keys:CODES = tap that key combination
+ft-layout, ft-float, ft-steam, ft-voice and ft-room need no path), keys:CODES = tap that key combination
 where typing goes, all its keys down in order, then up, on the press ("keys:125+32" is Meta+D:
 evdev codes as in key_bindings, at most KEYS_MAX; a desktop shortcut from a controller button),
 key = pass through as a key, none).
@@ -452,9 +452,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 FT_STEAM = os.path.join(REPO, "steam", "ft-steam")
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
-# Commands ("command:CMD") find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice) on
+# Commands ("command:CMD") find Frametop's own tools (ft-layout, ft-float, ft-steam, ft-voice, ft-room) on
 # their PATH.
-COMMAND_PATH = ":".join([os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice")]
+COMMAND_PATH = ":".join([os.path.join(REPO, d) for d in ("layout", "float", "steam", "voice", "together")]
                         + [os.environ.get("PATH", "/usr/local/bin:/usr/bin")])
 DEFAULT_BUTTONS = {BTN_LEFT: "left", BTN_RIGHT: "right", BTN_MIDDLE: "middle",
                    BTN_SIDE: "back", BTN_EXTRA: "back"}

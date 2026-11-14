@@ -156,10 +156,10 @@ class InstallOnce(unittest.TestCase):
 
     def test_release_asks_everything_first_then_the_password_once(self):
         self.release()
-        # voice, hands, Hand Recorder, gaze, eye tracker, Eye Recorder, Bluetooth, restart
-        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n"])
+        # voice, hands, Hand Recorder, gaze, eye tracker, Eye Recorder, Together, Bluetooth, restart
+        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "n", "y", "n"])
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(PROMPT.findall(out)), 8, out)
+        self.assertEqual(len(PROMPT.findall(out)), 9, out)
         self.assert_questions_first(out)
         for part in ("hand tracking: file capabilities", "our eye tracker: its frame grabber", "the Bluetooth fixes:"):
             self.assertIn(part, out)
@@ -177,24 +177,24 @@ class InstallOnce(unittest.TestCase):
     def test_no_part_that_needs_sudo_means_no_password(self):
         self.release()
         # hands yes, but this release's ft-camd has its capabilities already; no tracker, no Bluetooth
-        code, out = self.run_install(["y", "y", "y", "y", "n", "n", "n"], FAKE_CAPS="1")
+        code, out = self.run_install(["y", "y", "y", "y", "n", "n", "n", "n"], FAKE_CAPS="1")
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(PROMPT.findall(out)), 7, out)   # no Eye Recorder: no eye tracker
+        self.assertEqual(len(PROMPT.findall(out)), 8, out)   # no Eye Recorder: no eye tracker
         self.assertNotIn("These need your password", out)
         self.assertEqual(self.sudo_calls(), [])
         self.assertNotIn("gaze/tracker/install.sh", self.steps())
         self.assertIn("Install ours later with: gaze/tracker/install.sh", out)
 
     def test_a_clone_counts_hand_tracking_and_offers_no_recorders(self):
-        code, out = self.run_install(["y", "y", "y", "n", "n", "n"], FAKE_CAPS="1")
+        code, out = self.run_install(["y", "y", "y", "n", "n", "n", "n"], FAKE_CAPS="1")
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(PROMPT.findall(out)), 6, out)   # voice, hands, gaze, tracker, Bluetooth, restart
+        self.assertEqual(len(PROMPT.findall(out)), 7, out)   # voice, hands, gaze, tracker, Together, Bluetooth, restart
         self.assertIn("hand tracking: file capabilities", out)   # a clone's build clears them
         self.assertEqual(len(self.asked()), 1, self.entries())
 
     def test_a_refused_password_skips_those_parts(self):
         self.release()
-        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n", "y"], FAKE_SUDO="deny")
+        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "n", "y", "n", "y"], FAKE_SUDO="deny")
         self.assertEqual(code, 0, out)
         self.assert_questions_first(out)
         steps = self.steps()
@@ -207,14 +207,14 @@ class InstallOnce(unittest.TestCase):
 
     def test_a_refused_password_can_stop_the_install(self):
         self.release()
-        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n", "n"], FAKE_SUDO="deny")
+        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "n", "y", "n", "n"], FAKE_SUDO="deny")
         self.assertEqual(code, 1, out)
         self.assertEqual(self.steps(), [])
         self.assertIn("Run the same command again", out)
 
     def test_no_password_on_the_user(self):
         self.release()
-        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n", "y"], FAKE_PASSWD="NP")
+        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "n", "y", "n", "y"], FAKE_PASSWD="NP")
         self.assertEqual(code, 0, out)
         self.assertIn("Your user has no password", out)
         self.assertEqual(self.asked(), [])
@@ -222,7 +222,7 @@ class InstallOnce(unittest.TestCase):
             self.assertNotIn(rel, self.steps())
 
     def test_the_keep_alive_refreshes_and_ends_with_the_install(self):
-        code, out = self.run_install(["n", "y", "n", "n", "n"], FRAMETOP_SUDO_REFRESH="1", FAKE_STEP_SLEEP="2.5")
+        code, out = self.run_install(["n", "y", "n", "n", "n", "n"], FRAMETOP_SUDO_REFRESH="1", FAKE_STEP_SLEEP="2.5")
         self.assertEqual(code, 0, out)
         calls = self.sudo_calls()
         self.assertGreaterEqual(calls.count("-n -v"), 1, calls)
@@ -231,7 +231,7 @@ class InstallOnce(unittest.TestCase):
         self.assertEqual(self.sudo_calls(), calls, "the keep-alive outlived the install")
 
     def test_a_failed_step_still_ends_the_keep_alive(self):
-        code, out = self.run_install(["n", "y", "y", "n", "n", "n"], FAKE_FAIL="gaze/run.sh",
+        code, out = self.run_install(["n", "y", "y", "n", "n", "n", "n"], FAKE_FAIL="gaze/run.sh",
                                      FRAMETOP_SUDO_REFRESH="1")
         self.assertEqual(code, 1, out)
         self.assertIn("Run the same command again", out)
@@ -272,18 +272,18 @@ class InstallOnce(unittest.TestCase):
 
     def test_the_old_tracker_setting_is_asked_up_front(self):
         self.conf.write_text("POINTER=1\nGAZE_TRACKER=steam\n")
-        # voice, hands, gaze, tracker, use ours, Bluetooth, restart
-        code, out = self.run_install(["n", "n", "y", "y", "y", "n", "n"])
+        # voice, hands, gaze, tracker, use ours, Together, Bluetooth, restart
+        code, out = self.run_install(["n", "n", "y", "y", "y", "n", "n", "n"])
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(PROMPT.findall(out)), 7, out)
+        self.assertEqual(len(PROMPT.findall(out)), 8, out)
         self.assert_questions_first(out)
         self.assertIn("GAZE_TRACKER=auto", self.conf.read_text())
 
     def test_a_keyboard_of_your_own_is_asked_about_up_front(self):
-        # keyboard (keep mine), voice, hands, gaze, Bluetooth, restart
-        code, out = self.run_install(["n", "n", "n", "n", "n", "n"], FAKE_OWN_KEYBOARD="1")
+        # keyboard (keep mine), voice, hands, gaze, Together, Bluetooth, restart
+        code, out = self.run_install(["n", "n", "n", "n", "n", "n", "n"], FAKE_OWN_KEYBOARD="1")
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(PROMPT.findall(out)), 6, out)
+        self.assertEqual(len(PROMPT.findall(out)), 7, out)
         self.assert_questions_first(out)
         self.assertLess(out.index("Use Frametop's copy of it instead?"), out.index("Install voice dictation?"))
         self.assertIn("Frametop's keyboard: skipped", out)
@@ -291,14 +291,40 @@ class InstallOnce(unittest.TestCase):
         self.assertNotIn("keyboard/build.sh", self.steps())
 
     def test_without_one_the_keyboard_installs_unasked(self):
-        code, out = self.run_install(["n", "n", "n", "n", "n"])
+        code, out = self.run_install(["n", "n", "n", "n", "n", "n"])
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(PROMPT.findall(out)), 5, out)
+        self.assertEqual(len(PROMPT.findall(out)), 6, out)
         self.assertNotIn("Use Frametop's copy of it instead?", out)
         self.assertIn("keyboard/run.sh", self.steps())
 
+    def test_together_is_asked_up_front_and_installed_at_its_step(self):
+        # voice, hands, gaze, Together, Bluetooth, restart
+        code, out = self.run_install(["n", "n", "n", "y", "n", "n"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(PROMPT.findall(out)), 6, out)
+        self.assert_questions_first(out)
+        self.assertIn("together/run.sh", self.steps())
+        self.assertNotIn("These need your password", out)   # its units are the user's own
+
+    def test_together_stays_out_unless_picked_and_yes_keeps_one_that_is_there(self):
+        code, out = self.run_install(args=["--yes"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("together/run.sh", self.steps())
+        unit = self.home / ".config/systemd/user/frametop-together.service"
+        unit.parent.mkdir(parents=True)
+        unit.write_text(f"[Service]\nExecStart={self.root}/together/run.sh run\n")
+        self.log.write_text("")
+        code, out = self.run_install(args=["--yes"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("together/run.sh", self.steps())
+        self.log.write_text("")
+        code, out = self.run_install(args=["--yes", "--no-together"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("together/run.sh", self.steps())
+        self.assertIn("skipped (--no-together)", out)
+
     def test_restart_is_asked_first_and_done_last(self):
-        code, out = self.run_install(["n", "n", "n", "y", "y"])   # ..., Bluetooth, restart
+        code, out = self.run_install(["n", "n", "n", "n", "y", "y"])   # ..., Together, Bluetooth, restart
         self.assertEqual(code, 0, out)
         self.assertIn("Restarting SteamVR, as you picked at the start.", out)
         self.assertGreater(out.index("Restarting SteamVR"), out.index("STEP "))
@@ -308,8 +334,8 @@ class InstallOnce(unittest.TestCase):
 
     def test_hand_tracking_that_needs_no_sudo_stays_when_sudo_refuses(self):
         self.release()
-        # hands, no recorder, gaze, tracker, no Eye Recorder, Bluetooth, no restart; go on without
-        code, out = self.run_install(["n", "y", "n", "y", "y", "n", "y", "n", "y"], FAKE_SUDO="deny", FAKE_CAPS="1")
+        # hands, no recorder, gaze, tracker, no Eye Recorder, no Together, Bluetooth, no restart; go on without
+        code, out = self.run_install(["n", "y", "n", "y", "y", "n", "n", "y", "n", "y"], FAKE_SUDO="deny", FAKE_CAPS="1")
         self.assertEqual(code, 0, out)
         steps = self.steps()
         self.assertIn("hands/run.sh", steps)
@@ -318,7 +344,7 @@ class InstallOnce(unittest.TestCase):
 
     def test_nopasswd_needs_no_password_on_the_user(self):
         self.release()
-        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "y", "n"], FAKE_SUDO="nopasswd", FAKE_PASSWD="NP")
+        code, out = self.run_install(["y", "y", "y", "y", "y", "y", "n", "y", "n"], FAKE_SUDO="nopasswd", FAKE_PASSWD="NP")
         self.assertEqual(code, 0, out)
         self.assertNotIn("Your user has no password", out)
         self.assertEqual(self.asked(), [])
@@ -332,7 +358,7 @@ class InstallOnce(unittest.TestCase):
                 self.assertLess(time.monotonic(), deadline, "hands/run.sh never ran")
                 time.sleep(0.05)
             p.send_signal(signal.SIGTERM)
-        code, out = self.run_install(["n", "y", "n", "n", "n"], during=stop_at_hands,
+        code, out = self.run_install(["n", "y", "n", "n", "n", "n"], during=stop_at_hands,
                                      FRAMETOP_SUDO_REFRESH="1", FAKE_STEP_SLEEP="2.5")
         self.assertEqual(code, 143, out)
         self.assertIn("Run the same command again", out)

@@ -222,7 +222,7 @@ Full-motion video can still reach the encoder's limit. Sunshine forces VideoTool
 
 ### PC app windows (split compute, DEE-345)
 
-A single app window on a PC can be a panel of its own. The host runs a second Vibepollo inside the user's desktop session: the "Frametop windows" instance. Its port is its own (48989 on oma7), and so are its API token (`ADDRESS-PORT.token` next to `ADDRESS.token`, as ft-stream and `conf/ft_hostapi.py` read it) and its clients. The machine instance keeps streaming whole displays as before.
+A single app window on a PC can be a panel of its own. The host runs a second Vibepollo inside the user's desktop session: the "Frametop windows" instance. Its port is its own (48989 on oma7), and so are its API token (`ADDRESS-PORT.token` next to `ADDRESS.token`, as ft-stream and `conf/ft_hostapi.py` read it) and its clients. The machine instance keeps streaming whole displays as before. To share its windows with a Frametop Together room, the windows instance's token must also be allowed the four routes under `/api/frametop/together` ([together.md](together.md), "A PC's panels"). The tokens made so far aren't, so a PC's owner makes a new one first.
 
 **Linux, Hyprland (built 2026-11-07, fork branch `frametop/windows`).** The instance starts with `VIBEPOLLO_SESSION_BACKEND=hyprland-wlr` and `capture = wlr`. Its display list is Hyprland's outputs, headless ones included, so the display role streams any of them (`hyprland_wlr_backend_t` in `display_backend.cpp`). Opening a window (`POST /api/frametop/windows/open`, in `hyprland_windows.cpp`) does four things:
 

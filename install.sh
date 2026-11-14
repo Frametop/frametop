@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install everything on the Steam Frame: the build container, Frametop (multi-screen
 # desktop, input relay, universal 3D mouse, settings app), and optionally voice dictation,
-# hand tracking, gaze mode, our own eye tracker for it, and the Bluetooth fixes. Run it on the
+# hand tracking, gaze mode, our own eye tracker for it, Frametop Together, and the Bluetooth fixes. Run it on the
 # headset in a terminal, from this repo. It's safe to re-run, for example after `git pull`.
 # (It also works from a PC over SSH; see "Developing from a PC" in the README.)
 # In a release (pack/install-release.sh), the programs come built from its image: this installs the
@@ -10,10 +10,12 @@
 # question that needs it says so), and then installs without asking anything else.
 #
 # Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
-#                    [--no-eye-recorder] [--no-keyboard] [--no-bluetooth | --bluetooth]
+#                    [--no-eye-recorder] [--no-keyboard] [--no-together | --together]
+#                    [--no-bluetooth | --bluetooth]
 #   --yes           don't ask; installs voice dictation, gaze mode and the Eye Recorder, and hand
 #                   tracking, the Hand Recorder and our eye tracker if sudo can run without a
-#                   password prompt; skips the Bluetooth fixes and the SteamVR restart
+#                   password prompt; skips the Bluetooth fixes and the SteamVR restart, and
+#                   Frametop Together unless it's installed already
 #   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 320 MB)
 #   --no-hands      don't offer hand tracking or the Hand Recorder
 #   --no-hand-recorder  don't offer the Hand Recorder (a release's; a clone builds it with
@@ -24,6 +26,8 @@
 #   --no-keyboard   don't install Frametop's keyboard (Full Keyboard): for a Full Keyboard you
 #                   install and start yourself. Without it, a Full Keyboard of its own
 #                   (framekeyboard-autostart.service) makes the install ask which to use
+#   --no-together   don't offer Frametop Together (a room shared with other Steam Frames)
+#   --together      install Frametop Together without asking (it stays off until you turn it on)
 #   --no-bluetooth  don't offer the Bluetooth fixes
 #   --bluetooth     install the Bluetooth fixes without asking (with --yes: if sudo can run
 #                   without a password prompt)
@@ -32,7 +36,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
 
-assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 hands=1 hand_recorder=1 keyboard=1 voice=1
+assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 hands=1 hand_recorder=1 keyboard=1 together=1 voice=1
 for arg in "$@"; do
   case $arg in
     --yes) assume_yes=1 ;;
@@ -44,7 +48,9 @@ for arg in "$@"; do
     --no-hands) hands=0 hand_recorder=0 ;;
     --no-hand-recorder) hand_recorder=0 ;;
     --no-keyboard) keyboard=0 ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+    --no-together) together=0 ;;
+    --together) together=2 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -303,6 +309,17 @@ if [ "$FRAME_RELEASE" = 1 ]; then
   fi
 fi
 
+# Frametop Together (together/README.md): installed, it is off until its switch in Frametop
+# Settings turns it on. An install that has it already keeps it, also with --yes.
+do_together=0 together_skip="skipped. Install later with: together/run.sh install"
+together_default=n
+on_frame '[ -f ~/.config/systemd/user/frametop-together.service ]' && together_default=y
+if [ "$together" = 0 ]; then
+  together_skip="skipped (--no-together). Install later with: together/run.sh install"
+elif [ "$together" = 2 ] || ask "Install Frametop Together? See each other, talk, and share screens with up to three other Steam Frames. It needs Tailscale on this headset, and stays off until you turn it on in Frametop Settings." $together_default; then
+  do_together=1
+fi
+
 do_bt=0 bt_skip="skipped. Install later with: setup/bluetooth/install.sh install"
 if [ "$bluetooth" = 2 ] && [ "$assume_yes" = 1 ] && ! sudo_quiet; then
   bt_skip="skipped: they need your password (sudo), and --yes doesn't ask. Install later with: setup/bluetooth/install.sh install"
@@ -338,7 +355,7 @@ if [ "${#sudo_parts[@]}" -gt 0 ]; then
   sudo_once
 fi
 
-step "1/12 distrobox (container tool, installed in your home folder)"
+step "1/13 distrobox (container tool, installed in your home folder)"
 if on_frame 'test -x ~/.local/bin/distrobox'; then
   echo "already installed: $(on_frame '~/.local/bin/distrobox version | head -1')"
 elif [ "$FRAME_RELEASE" = 1 ]; then
@@ -359,30 +376,30 @@ cd ~/dev/src/distrobox && ./install --prefix ~/.local'
 fi
 
 if [ "$FRAME_RELEASE" = 1 ]; then
-  step "2/12 Frametop's container (from this release's image)"
+  step "2/13 Frametop's container (from this release's image)"
   "$root/pack/release-box.sh"
 else
-  step "2/12 build container (Fedora 44 'dev', about 1-2 GB the first time)"
+  step "2/13 build container (Fedora 44 'dev', about 1-2 GB the first time)"
   "$root/setup/dev-container.sh"
 fi
 
-step "3/12 input relay (keeps Bluetooth mice working in SteamVR, device roles, button maps)"
+step "3/13 input relay (keeps Bluetooth mice working in SteamVR, device roles, button maps)"
 "$root/desktops.sh" relay install
 
-step "4/12 3D mouse: SteamVR driver"
+step "4/13 3D mouse: SteamVR driver"
 build "$root/pointer/driver/build.sh"
 "$root/pointer/driver/install.sh" install
 
-step "5/12 3D mouse: pointer helper service, and the dashboard patch that lets it move SteamVR's windows"
+step "5/13 3D mouse: pointer helper service, and the dashboard patch that lets it move SteamVR's windows"
 build "$root/pointer/helper/build.sh"
 "$root/pointer/helper/run.sh" install
 "$root/pointer/dashpatch/run.sh" install
 
-step "6/12 power service (turns the displays off while the headset isn't used, even on a stand)"
+step "6/13 power service (turns the displays off while the headset isn't used, even on a stand)"
 build "$root/power/build.sh"
 "$root/power/run.sh" install
 
-step "7/12 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Settings, and the Tour"
+step "7/13 multi-screen desktop (ft-screens), its keyboard (Full Keyboard), Frametop Settings, and the Tour"
 build "$root/screens/build.sh"
 build "$root/layout/countdown/build.sh"  # visible three-second reset countdown
 build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Settings > Remote displays)
@@ -420,7 +437,7 @@ on_frame "sed -i 's/^POINTER=0/POINTER=1/' ~/.config/frametop.conf; grep -q '^PO
 echo "the launcher's Desktop entry now opens the multi-screen desktop; 3D mouse on (POINTER=1 in ~/.config/frametop.conf)"
 "$root/scripts/conf-migrate.sh"
 
-step "8/12 voice dictation (optional: speak, and it's typed where you type; nothing leaves the headset)"
+step "8/13 voice dictation (optional: speak, and it's typed where you type; nothing leaves the headset)"
 voice_units="frametop-voice.service frametop-voice-whisper.service"
 if [ "$do_voice" = 1 ]; then
   build "$root/voice/build.sh"
@@ -435,7 +452,7 @@ fi
 
 # Installed, hand tracking runs with the Frametop desktop (HANDS_MODE=frametop), unless the
 # settings already pick always.
-step "9/12 hand tracking (optional, experimental: your hands work the screens; it uses a lot of the headset's CPU)"
+step "9/13 hand tracking (optional, experimental: your hands work the screens; it uses a lot of the headset's CPU)"
 hand_units="frametop-camd.service frametop-hands.service frametop-handview.service"
 hands_done=0
 if [ "$do_hands" = 1 ]; then
@@ -473,14 +490,14 @@ elif [ -n "$rec_hands_skip" ]; then
   echo "$rec_hands_skip"
 fi
 
-step "10/12 gaze mode (optional, experimental: the pointer goes where you look)"
+step "10/13 gaze mode (optional, experimental: the pointer goes where you look)"
 if [ "$do_gaze" = 1 ]; then
   "$root/gaze/run.sh" install
 else
   echo "skipped. Install later with: gaze/run.sh install"
 fi
 
-step "11/12 our own eye tracker for gaze mode (recommended: more accurate than SteamVR's)"
+step "11/13 our own eye tracker for gaze mode (recommended: more accurate than SteamVR's)"
 if [ "$do_tracker" = 1 ]; then
   if "$root/gaze/tracker/install.sh" install; then
     if [ "$tracker_ours" = 1 ]; then
@@ -510,7 +527,19 @@ elif [ -n "$rec_eyes_skip" ]; then
   echo "$rec_eyes_skip"
 fi
 
-step "12/12 Bluetooth fixes (optional; they let LE mice and keyboards like the Swiftpoint Z3 reconnect)"
+step "12/13 Frametop Together (optional, experimental: a room shared with other Steam Frames on your tailnet)"
+together_units="frametop-together.service frametop-room-people.service frametop-room-panels.service frametop-room-voice.service frametop-room-away.service frametop-room-input.service frametop-room-points.service frametop-room-move.service frametop-room-gaze.service"
+if [ "$do_together" = 1 ]; then
+  if ! "$root/together/run.sh" install; then
+    echo "Frametop Together: not installed (above). Try again later with: together/run.sh install"
+    drop_other_folder "Frametop Together" "together/run.sh install" $together_units
+  fi
+else
+  echo "$together_skip"
+  drop_other_folder "Frametop Together" "together/run.sh install" $together_units
+fi
+
+step "13/13 Bluetooth fixes (optional; they let LE mice and keyboards like the Swiftpoint Z3 reconnect)"
 if [ "$do_bt" = 1 ]; then
   "$root/setup/bluetooth/install.sh" install
 else

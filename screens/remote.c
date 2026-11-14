@@ -1,11 +1,12 @@
 // Remote screens: displays of other machines as panels of their own (docs/remote-displays.md).
 // Each is streamed by its own ft-stream process (stream/ft-stream.cpp, GPLv3, a separate
 // program so this one stays MIT), started here with one end of a SOCK_SEQPACKET socket pair
-// as its fd 3. ft-stream decodes into a ring of three RGBA buffers and hands their dmabufs
+// as its fd 3 (child.h). ft-stream decodes into a ring of three RGBA buffers and hands their dmabufs
 // over once; then "frame I" says buffer I holds a new picture. It goes to the panel through
 // ft_vr_screen_present, like a KWin buffer, and the buffer shown before it goes back
 // ("release"). The panel's pointer input, the keys typed while it has the keyboard, and how
-// much of it you see ("attention") go the other way; the protocol is in ft-stream.cpp.
+// much of it you see ("attention") go the other way; the protocol is in ft-stream.cpp. A
+// room's panel also hears "leave" when the pointer has left it (pointer_on, below).
 //
 // Commands (on @ft_screens, from ft-layout):
 //   remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]
@@ -14,6 +15,12 @@
 //       the stream's size and rate (kbit/s 0: ft-stream picks), the panel's width until the
 //       layout says, and the panel's name. Again with the same settings: nothing changes;
 //       with others, the stream starts over.
+//   remote <N> peer <panel> <W>x<H> <metres> [label]
+//       (from ft-roompanels) remote screen N shows a panel someone shares in a Together room
+//       (docs/together.md): its id there, its video's size, and the panel's width and name
+//       here. Its program is ft-peerpanel (together/ft-peerpanel.cpp), which speaks ft-stream's
+//       words and takes the video from ft-together; its client is "peer-<panel>", and it has
+//       no host: nothing of a host's queue below holds for it.
 //   remote <N> stop
 //   remotes  -> "ok <count> <N>:<client>:<state>:<W>x<H> ..."   (state: queued, starting,
 //               connecting, live, lost)
@@ -27,13 +34,14 @@
 #define _GNU_SOURCE
 #include "remote.h"
 
+#include "child.h"
+
 #include <drm_fourcc.h>
 #include <errno.h>
 #include <linux/input-event-codes.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
-#include <spawn.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,8 +53,6 @@
 
 #define WLR_USE_UNSTABLE
 #include <wlr/util/log.h>
-
-extern char **environ;
 
 struct remote {
     bool used;
@@ -77,7 +83,8 @@ struct remote {
 static struct remote g_remotes[FT_REMOTE_MAX];
 static struct wl_event_loop *g_loop;
 static bool g_vr;
-static char g_stream[PATH_MAX];  // ft-stream (found at start: a rebuild replaces our own file)
+// ft-stream and ft-peerpanel (found at start: a rebuild replaces our own file)
+static char g_stream[PATH_MAX], g_peerpanel[PATH_MAX];
 // Which remote screen each mouse button (BTN_LEFT + n) went down on, -1 none. Vibepollo takes a
 // button's release only from the client that pressed it (mouse_press_owner in its input.cpp),
 // so a window carried onto another of the host's displays is dropped through the stream it was
@@ -217,19 +224,8 @@ static int readable(int fd, uint32_t mask, void *data) {
     return 0;
 }
 
-// <repo>/screens/build/ft-screens -> <repo>/stream/build/ft-stream, or $FT_STREAM.
-static bool stream_path(char *out, size_t size) {
-    const char *env = getenv("FT_STREAM");
-    if (env && *env) return snprintf(out, size, "%s", env) < (int)size;
-    char exe[PATH_MAX];
-    if (!realpath("/proc/self/exe", exe)) return false;  // gone already: ft-screens was rebuilt
-    for (int up = 0; up < 3; ++up) {
-        char *slash = strrchr(exe, '/');
-        if (!slash) return false;
-        *slash = 0;
-    }
-    return snprintf(out, size, "%s/stream/build/ft-stream", exe) < (int)size;
-}
+// A panel of a Together room (the "peer" command): ft-peerpanel brings its pictures.
+static bool is_peer(const struct remote *r) { return !strncmp(r->app, "peer:", 5); }
 
 static void log_path(const struct remote *r, char *out, size_t size) {
     const char *runtime = getenv("XDG_RUNTIME_DIR");
@@ -241,49 +237,24 @@ static bool start_stream(struct remote *r) {
     r->quit_at = 0;
     r->started_ms = now_ms();
     snprintf(r->state, sizeof r->state, "lost");
-    char *exe = g_stream, log[PATH_MAX];
+    char *exe = is_peer(r) ? g_peerpanel : g_stream, log[PATH_MAX];
     if (!*exe) return false;
     log_path(r, log, sizeof log);
-    int sv[2];
-    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv) != 0) return false;
-    if (sv[1] == 3) {  // dup2 onto itself would keep close-on-exec
-        const int moved = fcntl(sv[1], F_DUPFD_CLOEXEC, 10);
-        close(sv[1]);
-        sv[1] = moved;
-    }
     char size[32], fps[16], bitrate[16];
     snprintf(size, sizeof size, "%dx%d", r->width, r->height);
     snprintf(fps, sizeof fps, "%d", r->fps);
     snprintf(bitrate, sizeof bitrate, "%d", r->bitrate);
-    char *argv[] = {exe,  "stream", r->host,  "--id", r->client, "--fd",      "3",     "--app", r->app,
-                    "--size", size, "--fps", fps,     "--bitrate", bitrate, NULL};
-    posix_spawn_file_actions_t io;
-    posix_spawn_file_actions_init(&io);
-    posix_spawn_file_actions_addopen(&io, 0, "/dev/null", O_RDONLY, 0);
-    posix_spawn_file_actions_addopen(&io, 1, log, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0600);
-    posix_spawn_file_actions_adddup2(&io, 1, 2);
-    posix_spawn_file_actions_adddup2(&io, sv[1], 3);
-    // Not our event loop's blocked signals (SIGTERM, SIGINT, SIGCHLD go to its signalfd): with
-    // SIGTERM blocked, ft-stream heard neither kill nor its death signal.
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    sigset_t none;
-    sigemptyset(&none);
-    posix_spawnattr_setsigmask(&attr, &none);
-    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK);
-    pid_t pid;
-    const int rc = posix_spawn(&pid, exe, &io, &attr, argv, environ);
-    posix_spawnattr_destroy(&attr);
-    posix_spawn_file_actions_destroy(&io);
-    close(sv[1]);
-    if (rc != 0) {
-        wlr_log(WLR_ERROR, "remote %d: can't run %s: %s", r->index + 1, exe, strerror(rc));
-        close(sv[0]);
+    char *stream[] = {exe,  "stream", r->host,  "--id", r->client, "--fd",      "3",     "--app", r->app,
+                      "--size", size, "--fps", fps,     "--bitrate", bitrate, NULL};
+    // The room's ft-together, when it isn't the usual one (tests).
+    char *room = getenv("FT_TOGETHER_SOCKET");
+    char *peer[] = {exe, "--panel", r->app + 5, "--fd", "3", room && *room ? "--socket" : NULL, room, NULL};
+    r->fd = ft_child_spawn(is_peer(r) ? peer : stream, log, &r->pid);
+    if (r->fd < 0) {
+        wlr_log(WLR_ERROR, "remote %d: can't run %s: %s", r->index + 1, exe, strerror(errno));
+        r->pid = 0;
         return false;
     }
-    r->pid = pid;
-    r->fd = sv[0];
-    fcntl(r->fd, F_SETFL, O_NONBLOCK);
     r->source = wl_event_loop_add_fd(g_loop, r->fd, WL_EVENT_READABLE, readable, r);
     r->attention = -1;
     snprintf(r->state, sizeof r->state, "starting");
@@ -294,8 +265,8 @@ static bool start_stream(struct remote *r) {
     int at = snprintf(msg, sizeof msg, "modifiers");
     for (int k = 0; k < n && at < (int)sizeof msg - 20; ++k) at += snprintf(msg + at, sizeof msg - at, " %llx", (unsigned long long)mods[k]);
     send(r->fd, msg, (size_t)at, MSG_NOSIGNAL | MSG_DONTWAIT);
-    wlr_log(WLR_INFO, "remote %d: started ft-stream (pid %d) for %s on %s, %s at %d fps (log %s)", r->index + 1, pid,
-            r->app, r->host, size, r->fps, log);
+    wlr_log(WLR_INFO, "remote %d: started %s (pid %d) for %s on %s, %s at %d fps (log %s)", r->index + 1,
+            is_peer(r) ? "ft-peerpanel" : "ft-stream", r->pid, r->app, *r->host ? r->host : "the room", size, r->fps, log);
     return true;
 }
 
@@ -319,12 +290,14 @@ static bool leaving(const struct remote *o) { return o->pid != 0 && (o->fd < 0 |
 // while one of the host's, or an old one of this display's, is on its way out: a stop and a
 // start (ft-layout's route change, Connected off and on) had the new stream connecting while
 // the old one released its Remote Monitor, two ft-streams for one display.
+// A room's panel has no host: it waits only for an old program of its own screen.
 static bool host_busy(const struct remote *r) {
     for (int i = 0; i < FT_REMOTE_MAX; ++i) {
         const struct remote *o = &g_remotes[i];
         if (o == r || o->pid == 0) continue;
-        if (leaving(o) && (o->index == r->index || !strcmp(o->host, r->host))) return true;
-        if (!o->used || strcmp(o->host, r->host) != 0) continue;
+        const bool host = *r->host && !strcmp(o->host, r->host);
+        if (leaving(o) && (o->index == r->index || host)) return true;
+        if (!o->used || !host) continue;
         const bool starting = !strncmp(o->state, "starting", 8) || !strncmp(o->state, "connecting", 10);
         if (starting && now_ms() - o->started_ms < 20000) return true;
     }
@@ -334,7 +307,8 @@ static bool host_busy(const struct remote *r) {
 void ft_remote_init(struct wl_event_loop *loop, bool vr) {
     g_loop = loop;
     g_vr = vr;
-    if (!stream_path(g_stream, sizeof g_stream)) g_stream[0] = 0;
+    if (!ft_child_path("FT_STREAM", "stream", "ft-stream", g_stream, sizeof g_stream)) g_stream[0] = 0;
+    if (!ft_child_path("FT_PEERPANEL", "together", "ft-peerpanel", g_peerpanel, sizeof g_peerpanel)) g_peerpanel[0] = 0;
     for (int i = 0; i < FT_REMOTE_MAX; ++i) g_remotes[i].fd = -1, g_remotes[i].shown = -1;
 }
 
@@ -359,9 +333,29 @@ const char *ft_remote_app(int index) {
     return r ? r->app : NULL;
 }
 
+// The remote screen the pointer is on (its index), -1 none. A room's panel hears when the
+// pointer has left it ("leave"), because the others in the room see where it points
+// (together/local/panelhand.h). SteamVR's own word for that doesn't always come (a 3D mouse or
+// a gaze that moves on says none), so the pointer turning up anywhere else counts too.
+static int g_pointer_on = -1;
+
+static void pointer_on(int index) {
+    if (g_pointer_on == index) return;
+    struct remote *was = find(g_pointer_on);
+    if (was && is_peer(was)) say(was, "leave");
+    g_pointer_on = index;
+}
+
+void ft_remote_pointer_away(void) { pointer_on(-1); }
+
 void ft_remote_event(const struct ft_event *e) {
     struct remote *r = find(e->screen);
     if (!r) return;
+    if (e->type == FT_LEAVE) {
+        if (g_pointer_on == r->index) pointer_on(-1);
+        return;
+    }
+    if (e->type == FT_MOTION || e->type == FT_BUTTON || e->type == FT_SCROLL) pointer_on(r->index);
     const int w = r->have_ring ? r->ring[0].width : r->width, h = r->have_ring ? r->ring[0].height : r->height;
     switch (e->type) {
         case FT_MOTION:
@@ -416,6 +410,43 @@ void ft_remote_pad(int index, const char *msg) {
     if (strcmp(msg, "pad off") == 0) say(r, "pad off");
     else if (sscanf(msg, "pad %x %d %d %d %d %d %d", &b, &lt, &rt, &lx, &ly, &rx, &ry) == 7)
         say(r, "pad %x %d %d %d %d %d %d", b, lt, rt, lx, ly, rx, ry);
+}
+
+// --- input from someone else of a Together room (remote.h)
+
+static struct remote *peer_stream(int index) {
+    struct remote *r = find(index);
+    return r && !is_peer(r) && r->fd >= 0 ? r : NULL;
+}
+
+bool ft_remote_peer_size(int index, int *width, int *height) {
+    const struct remote *r = peer_stream(index);
+    if (!r) return false;
+    *width = r->have_ring ? r->ring[0].width : r->width, *height = r->have_ring ? r->ring[0].height : r->height;
+    return true;
+}
+
+void ft_remote_peer_event(const struct ft_event *e) {
+    struct remote *r = peer_stream(e->screen);
+    if (!r) return;
+    if (e->type == FT_MOTION || e->type == FT_BUTTON) say(r, "move %.1f %.1f", e->x, e->y);
+    if (e->type == FT_BUTTON) {
+        say(r, "button %u %d", e->button, e->pressed ? 1 : 0);
+        wlr_log(WLR_INFO, "remote %d: someone else's button %u %s at %.0f,%.0f", r->index + 1, e->button, e->pressed ? "down" : "up", e->x, e->y);
+    } else if (e->type == FT_SCROLL) {
+        say(r, "scroll %.3f %.3f", e->dx, e->dy);
+    }
+}
+
+void ft_remote_peer_key(int index, uint32_t code, bool pressed) {
+    struct remote *r = peer_stream(index);
+    if (r) say(r, "peerkey %u %d", code, pressed ? 1 : 0);
+}
+
+bool ft_remote_held(void) {
+    for (int b = 0; b < 8; ++b)
+        if (g_pressed_on[b] >= 0) return true;
+    return false;
 }
 
 void ft_remote_tick(void) {
@@ -523,18 +554,26 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
         if (!r) return snprintf(reply, size, "error no remote screen %d", number), true;
         return snprintf(reply, size, "ok %s", r->state), true;
     }
-    if (strcmp(word, "start") != 0) return snprintf(reply, size, "error remote <N> start|stop|info"), true;
+    const bool peer = strcmp(word, "peer") == 0;
+    if (strcmp(word, "start") != 0 && !peer) return snprintf(reply, size, "error remote <N> start|peer|stop|info"), true;
     if (!g_vr) return snprintf(reply, size, "error no SteamVR (--no-vr)"), true;
     struct remote c = {0};
-    int label_at = 0;
+    int label_at = 0, panel = -1;
     bool restored = false;  // its panel is back where it was before a stop (vr.cpp, Parked)
-    if (sscanf(cmd, "remote %*d start %63s %63s %191s %dx%d %d %d %lf %n", c.client, c.host, c.app, &c.width, &c.height,
-               &c.fps, &c.bitrate, &c.metres, &label_at) != 8)
+    if (peer) {
+        if (sscanf(cmd, "remote %*d peer %d %dx%d %lf %n", &panel, &c.width, &c.height, &c.metres, &label_at) != 4 ||
+            panel < 0 || panel > 255)
+            return snprintf(reply, size, "error remote <N> peer <panel> <W>x<H> <metres> [label]"), true;
+        snprintf(c.client, sizeof c.client, "peer-%d", panel);
+        snprintf(c.app, sizeof c.app, "peer:%d", panel);
+    } else if (sscanf(cmd, "remote %*d start %63s %63s %191s %dx%d %d %d %lf %n", c.client, c.host, c.app, &c.width,
+                      &c.height, &c.fps, &c.bitrate, &c.metres, &label_at) != 8) {
         return snprintf(reply, size, "error remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]"), true;
-    if (!plain(c.client, "._-") || !plain(c.host, ".:-") || !plain(c.app, "{}._:-"))
+    } else if (!plain(c.client, "._-") || !plain(c.host, ".:-") || !plain(c.app, "{}._:-") || !strncmp(c.app, "peer:", 5)) {
         return snprintf(reply, size, "error client, host or app has other characters"), true;
-    if (c.width < 64 || c.height < 64 || c.width > 8192 || c.height > 8192 || c.fps < 1 || c.fps > 240 ||
-        c.bitrate < 0 || c.bitrate > 500000 || !(c.metres >= 0.15 && c.metres <= 20))
+    }
+    const bool rate = peer || (c.fps >= 1 && c.fps <= 240 && c.bitrate >= 0 && c.bitrate <= 500000);   // a room's panel has its sender's
+    if (c.width < 64 || c.height < 64 || c.width > 8192 || c.height > 8192 || !rate || !(c.metres >= 0.15 && c.metres <= 20))
         return snprintf(reply, size, "error size, fps, bitrate or width out of range"), true;
     snprintf(c.label, sizeof c.label, "%s", label_at && cmd[label_at] ? cmd + label_at : c.client);
     const bool same = r && !strcmp(r->client, c.client) && !strcmp(r->host, c.host) && !strcmp(r->app, c.app) &&
@@ -555,7 +594,8 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
     memcpy(r->app, c.app, sizeof r->app);
     memcpy(r->label, c.label, sizeof r->label);
     r->width = c.width, r->height = c.height, r->fps = c.fps, r->bitrate = c.bitrate, r->metres = c.metres;
-    if (!*g_stream) return snprintf(reply, size, "error no ft-stream next to ft-screens (or $FT_STREAM)"), true;
+    if (peer && !*g_peerpanel) return snprintf(reply, size, "error no ft-peerpanel (together/build, or $FT_PEERPANEL)"), true;
+    if (!peer && !*g_stream) return snprintf(reply, size, "error no ft-stream next to ft-screens (or $FT_STREAM)"), true;
     char log[PATH_MAX];
     log_path(r, log, sizeof log);
     const int f = open(log, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);  // a fresh log

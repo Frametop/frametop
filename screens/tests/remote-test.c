@@ -2,9 +2,12 @@
 // operation at a time. The real remote.c runs with SteamVR stubbed; this program is also the
 // ft-stream it starts ($FT_STREAM): it says it's live, and asked to end it takes 300 ms to go
 // (Disconnect Monitor), or with the app "hang" it ignores SIGTERM. It notes the "focus" and
-// "blur" it's told (the shared clipboard's moments). With the app window:0x1 the host has no
+// "blur" it's told (the shared clipboard's moments), and each "move" and "leave" (the pointer
+// coming onto its panel and going). With the app window:0x1 the host has no
 // such window, with window:0x2 it's full: either way it says why and ends. window:0x3 goes live
 // and ends 100 ms later (its window closed on the host). It connects to nothing.
+// And it is the ft-peerpanel remote.c starts for a panel of a Together room ($FT_PEERPANEL):
+// the same, with "room" (or the room's socket it was given) for its host.
 // Built by `just test-c` (justfile): remote.c with -DFT_REMOTE_QUIT_MS=600, so the SIGKILL comes soon.
 #define _GNU_SOURCE
 #include <limits.h>
@@ -47,8 +50,7 @@ static void note(const char *what, int pid, const char *host, const char *app) {
 static volatile sig_atomic_t g_term;
 static void on_term(int s) { (void)s, g_term = 1; }
 
-static int fake_stream(char **argv) {
-    const char *host = argv[2], *app = argv[8];
+static int fake_stream(const char *host, const char *app) {
     note("start", getpid(), host, app);
     if (!strncmp(app, "window:", 7)) {  // as ft-stream does when the host's open fails
         const char *why = !strcmp(app, "window:0x1") ? "state lost 404 no window 0x1" : "state lost 503 at most 4 windows";
@@ -76,7 +78,12 @@ static int fake_stream(char **argv) {
             continue;
         }
         m[n] = 0;
-        if (!strcmp(m, "focus") || !strcmp(m, "blur")) note(m, getpid(), host, app);
+        if (!strcmp(m, "focus") || !strcmp(m, "blur") || !strcmp(m, "leave")) note(m, getpid(), host, app);
+        else if (!strncmp(m, "move ", 5)) note("move", getpid(), host, app);
+        else if (!strncmp(m, "button ", 7)) note(m[n - 1] == '1' ? "press" : "raise", getpid(), host, app);
+        else if (!strncmp(m, "scroll ", 7)) note("scroll", getpid(), host, app);
+        else if (!strncmp(m, "key ", 4)) note("key", getpid(), host, app);
+        else if (!strncmp(m, "peerkey ", 8)) note("Key", getpid(), host, app);
     }
     note("term", getpid(), host, app);
     usleep(300000);  // its Disconnect Monitor
@@ -124,7 +131,9 @@ struct proc {
     char host[64], app[64];
     long start, term, gone;  // 0: not yet
     bool killed;
-    char said[32];  // f: focus, b: blur, in order
+    // f: focus, b: blur, m: move, l: leave, p and r: a button pressed and raised, s: scroll,
+    // k: key, K: peerkey, in order
+    char said[32];
 };
 static struct proc g_procs[16];
 static int g_nprocs;
@@ -133,6 +142,12 @@ static struct proc *proc_of(int pid) {
     for (int i = 0; i < g_nprocs; ++i)
         if (g_procs[i].pid == pid) return &g_procs[i];
     return NULL;
+}
+
+static const char *spaced(const char *word) {
+    static char s[20];
+    snprintf(s, sizeof s, " %s ", word);
+    return s;
 }
 
 static void read_log(void) {
@@ -149,7 +164,7 @@ static void read_log(void) {
             snprintf(p->host, sizeof p->host, "%s", host), snprintf(p->app, sizeof p->app, "%s", app);
         } else if (p && !strcmp(what, "term")) p->term = t;
         else if (p && (!strcmp(what, "reaped") || !strcmp(what, "killed"))) p->gone = t, p->killed = what[0] == 'k';
-        else if (p && (!strcmp(what, "focus") || !strcmp(what, "blur")) && strlen(p->said) < sizeof p->said - 1)
+        else if (p && strstr(" focus blur move leave press raise scroll key Key ", spaced(what)) && strlen(p->said) < sizeof p->said - 1)
             p->said[strlen(p->said)] = what[0];
     }
     if (f) fclose(f);
@@ -290,6 +305,152 @@ static bool window_closed(void) {
     return true;
 }
 
+// A panel of a Together room: ft-peerpanel is told its panel, and the room's socket when that
+// isn't the usual one. It waits for an old program of its own screen, and for nothing else:
+// not another room panel's, not a host's queue.
+static bool room_panels(void) {
+    char reply[256] = "";
+    cmd("remote 116 peer 9 1280x720 1.5 Screen 2");
+    start(101, "192.0.2.7", "hang", 60);
+    run(300);
+    EXPECT(ft_remote_is(115) && ft_remote_command("remotes", reply, sizeof reply) &&
+           !strcmp(reply, "ok 2 116:peer-9:live:1280x720 101:frame:live:1920x1080"));
+    cmd("remote 116 peer 9 1280x720 1.5 Screen 2");   // the same again: nothing starts over
+    cmd("remote 101 stop");                           // it hangs on its way out, for FT_REMOTE_QUIT_MS
+    cmd("remote 116 stop");
+    setenv("FT_TOGETHER_SOCKET", "ft_together_test", 1);
+    cmd("remote 115 peer 10 1920x804 2.0");
+    cmd("remote 116 peer 9 1920x1080 1.5 Screen 2");
+    run(1200);
+    read_log();
+    EXPECT(g_nprocs == 4);
+    const struct proc *first = NULL, *other = NULL, *again = NULL;
+    for (int i = 0; i < g_nprocs; ++i) {
+        const struct proc *q = &g_procs[i];
+        if (!strcmp(q->app, "peer:9") && !strcmp(q->host, "room")) first = q;
+        if (!strcmp(q->app, "peer:10") && !strcmp(q->host, "ft_together_test")) other = q;
+        if (!strcmp(q->app, "peer:9") && !strcmp(q->host, "ft_together_test")) again = q;
+    }
+    EXPECT(first && other && again);
+    EXPECT(first->term && first->gone && !first->killed);
+    EXPECT(other->start < first->gone);    // another panel doesn't wait for it
+    EXPECT(again->start >= first->gone);   // its own screen's next program does
+    EXPECT(ft_remote_command("remotes", reply, sizeof reply) && !strcmp(reply, "ok 2 115:peer-10:live:1920x804 116:peer-9:live:1920x1080"));
+    return true;
+}
+
+// What isn't a room's panel is refused, and an app can't be said to be one.
+static bool room_panel_refused(void) {
+    const char *bad[] = {"remote 116 peer x 1280x720 1.5", "remote 116 peer 9 1280x720", "remote 116 peer -1 1280x720 1.5",
+                         "remote 116 peer 256 1280x720 1.5", "remote 116 peer 9 32x720 1.5", "remote 116 peer 9 1280x720 0.01",
+                         "remote 117 peer 9 1280x720 1.5", "remote 116 start frame 192.0.2.7 peer:9 1920x1080 60 0 1.0"};
+    for (size_t i = 0; i < sizeof bad / sizeof *bad; ++i) {
+        char reply[256] = "";
+        EXPECT(ft_remote_command(bad[i], reply, sizeof reply) && !strncmp(reply, "error", 5));
+    }
+    run(200);
+    read_log();
+    EXPECT(g_nprocs == 0 && !ft_remote_is(115));
+    return true;
+}
+
+// The pointer leaving a room's panel is told to its program, once: by the leave itself, by the
+// pointer turning up on another remote screen, and by its turning up on a screen of the
+// desktop's. A remote display's stream is told of no leave.
+static bool pointer_leaves(void) {
+    cmd("remote 116 peer 9 1280x720 1.5");
+    cmd("remote 115 peer 10 1280x720 1.5");
+    start(101, "192.0.2.7", "display:X", 60);
+    run(300);
+    struct ft_event e = {.type = FT_MOTION, .screen = 115, .x = 5, .y = 5};
+    ft_remote_event(&e);  // onto panel 9
+    e.type = FT_LEAVE;
+    ft_remote_event(&e);  // and off it
+    ft_remote_event(&e);  // (said twice: told once)
+    e.type = FT_MOTION;
+    ft_remote_event(&e);  // onto it again
+    e.screen = 114;
+    ft_remote_event(&e);  // onto panel 10: 9 hears it left
+    e.type = FT_LEAVE, e.screen = 115;
+    ft_remote_event(&e);  // a late leave from 9: nothing, the pointer is on 10
+    e.type = FT_MOTION, e.screen = 114;
+    ft_remote_event(&e);  // ...where it still is
+    e.type = FT_SCROLL, e.screen = 100, e.dy = 1;
+    ft_remote_event(&e);  // onto the remote display: 10 hears it left
+    e.type = FT_LEAVE;
+    ft_remote_event(&e);  // off the remote display: its stream isn't told
+    e.type = FT_MOTION, e.screen = 114;
+    ft_remote_event(&e);  // back onto panel 10
+    e.type = FT_BUTTON, e.screen = 115, e.button = 0x110, e.pressed = true;
+    ft_remote_event(&e);  // a click on 9 (a move, then the button): 10 hears it left
+    ft_remote_pointer_away();  // onto a screen of the desktop's
+    ft_remote_pointer_away();
+    run(300);
+    read_log();
+    EXPECT(g_nprocs == 3);
+    const struct proc *nine = NULL, *ten = NULL, *display = NULL;
+    for (int i = 0; i < g_nprocs; ++i) {
+        const struct proc *q = &g_procs[i];
+        if (!strcmp(q->app, "peer:9")) nine = q;
+        if (!strcmp(q->app, "peer:10")) ten = q;
+        if (!strcmp(q->app, "display:X")) display = q;
+    }
+    EXPECT(nine && ten && display);
+    EXPECT(!strcmp(nine->said, "mlmlmpl"));
+    EXPECT(!strcmp(ten->said, "mmlml"));
+    EXPECT(!strcmp(display->said, "s"));
+    return true;
+}
+
+// Someone else of a Together room on a window of the wearer's PC (peerinput.h): their pointer
+// and keys go to its stream, a key in a word of its own, and only to a display whose stream
+// runs: not to a room's panel or a number that is none. Where the wearer's pointer is and what
+// the wearer holds stay as they were.
+static bool someone_else(void) {
+    start(101, "192.0.2.7", "display:X", 60);
+    cmd("remote 116 peer 9 1280x720 1.5");
+    run(300);
+    int w = 0, h = 0;
+    EXPECT(ft_remote_peer_size(100, &w, &h) && w == 1920 && h == 1080);
+    EXPECT(!ft_remote_peer_size(115, &w, &h) && !ft_remote_peer_size(101, &w, &h) && !ft_remote_peer_size(0, &w, &h));
+    struct ft_event e = {.type = FT_MOTION, .screen = 115, .x = 5, .y = 5};
+    ft_remote_event(&e);  // the wearer's pointer is on the room's panel
+    EXPECT(!ft_remote_held());
+    struct ft_event theirs = {.type = FT_MOTION, .screen = 100, .x = 9, .y = 9};
+    ft_remote_peer_event(&theirs);
+    theirs.type = FT_BUTTON, theirs.button = 0x110, theirs.pressed = true;
+    ft_remote_peer_event(&theirs);  // (a move first: the host's pointer may have been elsewhere)
+    EXPECT(!ft_remote_held());      // theirs isn't the wearer's
+    e.type = FT_BUTTON, e.screen = 100, e.button = 0x110, e.pressed = true;
+    ft_remote_event(&e);  // the wearer presses there: the room's panel hears the pointer left
+    theirs.pressed = false;
+    ft_remote_peer_event(&theirs);
+    EXPECT(ft_remote_held());  // ...and the wearer's isn't theirs
+    theirs.type = FT_SCROLL, theirs.dy = 1;
+    ft_remote_peer_event(&theirs);
+    ft_remote_peer_key(100, 30, true), ft_remote_peer_key(100, 30, false);
+    ft_remote_key(100, 30, true);
+    theirs.screen = 115, ft_remote_peer_event(&theirs), ft_remote_peer_key(115, 30, true);  // a room's panel
+    theirs.screen = 7, ft_remote_peer_event(&theirs), ft_remote_peer_key(7, 30, true);      // no remote screen
+    e.pressed = false;
+    ft_remote_event(&e);
+    EXPECT(!ft_remote_held());
+    start(102, "192.0.2.8", "display:Y", 60);
+    EXPECT(!ft_remote_peer_size(101, &w, &h));  // its stream hasn't started yet
+    run(300);
+    EXPECT(ft_remote_peer_size(101, &w, &h));
+    read_log();
+    const struct proc *nine = NULL, *display = NULL;
+    for (int i = 0; i < g_nprocs; ++i) {
+        if (!strcmp(g_procs[i].app, "peer:9")) nine = &g_procs[i];
+        if (!strcmp(g_procs[i].app, "display:X")) display = &g_procs[i];
+    }
+    EXPECT(nine && display);
+    EXPECT(!strcmp(display->said, "mmpmpmrsKKkmr"));
+    EXPECT(!strcmp(nine->said, "ml"));
+    return true;
+}
+
 // A window panel's stream that ended: tried again after 0.2 s, not 2 s (the host's 404 then
 // takes the panel). A display's waits the usual 2 s.
 static bool window_retry(void) {
@@ -303,7 +464,13 @@ static bool window_retry(void) {
 int main(int argc, char **argv) {
     if (argc > 8 && !strcmp(argv[1], "stream")) {
         snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
-        return fake_stream(argv);
+        return fake_stream(argv[2], argv[8]);
+    }
+    if (argc > 4 && !strcmp(argv[1], "--panel") && !strcmp(argv[3], "--fd") && !strcmp(argv[4], "3")) {
+        char app[64];
+        snprintf(app, sizeof app, "peer:%s", argv[2]);
+        snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
+        return fake_stream(argc == 7 && !strcmp(argv[5], "--socket") ? argv[6] : argc == 5 ? "room" : "odd", app);
     }
     char dir[] = "/tmp/remote-test-XXXXXX", self[PATH_MAX];
     if (!mkdtemp(dir)) return perror("mkdtemp"), 2;
@@ -311,12 +478,15 @@ int main(int argc, char **argv) {
     if (n <= 0) return perror("readlink"), 2;
     self[n] = 0;
     setenv("FT_STREAM", self, 1);
+    setenv("FT_PEERPANEL", self, 1);
+    unsetenv("FT_TOGETHER_SOCKET");
     setenv("XDG_RUNTIME_DIR", dir, 1);  // ft-stream's logs
     snprintf(g_log, sizeof g_log, "%s/events.log", dir);
     const struct { const char *name; scenario s; } all[] = {
         {"stop then start", stop_start}, {"new settings", new_settings}, {"same host", same_host},
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
-        {"window closed", window_closed}, {"window retry", window_retry},
+        {"window closed", window_closed}, {"window retry", window_retry}, {"room panels", room_panels},
+        {"room panel refused", room_panel_refused}, {"pointer leaves", pointer_leaves}, {"someone else", someone_else},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

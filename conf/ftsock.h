@@ -28,6 +28,13 @@
 #define FT_SOCK_GAZEPANEL "ft_gazepanel"       /* the gaze checks' panel (gaze/panel/) */
 #define FT_SOCK_HANDVIEW "ft_handview"         /* ft-handview (screens/handview.cpp) */
 #define FT_SOCK_HANDPANEL "ft_handpanel"       /* the hand recorder's panel (hands/rec/panel/) */
+#define FT_SOCK_AVATARS "ft_avatars"           /* ft-avatars' mirror (avatar/view/live.cpp) */
+#define FT_SOCK_AVATARS_ROOM "ft_avatars_room" /* ft-avatars' people of a shared room (avatar/room/room.cpp) */
+#define FT_SOCK_TOGETHER "ft_together"         /* ft-together (together/ft-together.cpp) */
+#define FT_SOCK_TOGETHER_MEDIA FT_SOCK_TOGETHER "_media" /* ...and its media programs', a stream socket (together/local/media.h) */
+#define FT_SOCK_ROOMVOICE "ft_roomvoice"       /* ft-roomvoice (together/ft-roomvoice.cpp) */
+#define FT_SOCK_ROOMPANELS "ft_roompanels"     /* ft-roompanels (together/ft-roompanels) */
+#define FT_SOCK_ROOMPOINTS "ft_roompoints"     /* ft-roompoints (together/ft-roompoints.cpp) */
 #define FT_SOCK_FRUNNER "ft_frunner"           /* frunner (frunner/) */
 #define FT_SOCK_SPOTPANEL "ft_spotpanel"       /* frunner's panel (frunner/ft-spotpanel.cpp) */
 #define FT_SOCK_DASHPATCH "ft_dashpatch"       /* ft-dashpatch (pointer/dashpatch/) */

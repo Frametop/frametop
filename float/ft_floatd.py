@@ -85,6 +85,7 @@ from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/conf
 import ft_store  # noqa: E402  (conf/, on the path from ft_layout)
 import ft_apps  # noqa: E402  (Launch as Standalone)
 import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
+from ft_desktopapps import DesktopAppInfo  # noqa: E402  (GioUnix's or Gio's; conf/ too)
 
 SERVICE = IFACE = "org.frametop.Float"
 PATH = "/Float"
@@ -355,14 +356,14 @@ def _desktop_name(app, cls):
     file whose name, or its last dotted part, is that name; the program a desktop file runs
     (Flatpak's --command=, else the Exec's own), by its name."""
     try:
-        if app and Gio.DesktopAppInfo.new(app + ".desktop"):
+        if app and DesktopAppInfo.new(app + ".desktop"):
             return app
     except TypeError:  # PyGObject raises for the NULL a missing desktop file returns
         pass
     names = {n.lower() for n in (app, cls) if n}
     if not names:
         return ""
-    infos = [i for i in Gio.AppInfo.get_all() if isinstance(i, Gio.DesktopAppInfo) and i.get_id()]
+    infos = [i for i in Gio.AppInfo.get_all() if isinstance(i, DesktopAppInfo) and i.get_id()]
     for info in infos:
         wm = info.get_startup_wm_class()
         if wm and wm.lower() in names:
@@ -1016,7 +1017,7 @@ class Daemon:
         if app:
             app = app.removesuffix(".desktop")
             try:
-                info = Gio.DesktopAppInfo.new(app + ".desktop")
+                info = DesktopAppInfo.new(app + ".desktop")
             except TypeError:  # PyGObject raises for the NULL a missing desktop file returns
                 info = None
             if info is None:

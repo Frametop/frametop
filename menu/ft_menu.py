@@ -192,10 +192,9 @@ def launch(path, ask=ask_floatd, start=None):
 
 
 def start_entry(path):
-    import gi
-    gi.require_version("Gio", "2.0")
-    from gi.repository import Gio
-    info = Gio.DesktopAppInfo.new_from_filename(path)
+    sys.path.insert(0, os.path.join(REPO, "conf"))
+    from ft_desktopapps import DesktopAppInfo  # GioUnix's or Gio's
+    info = DesktopAppInfo.new_from_filename(path)
     if info is None or not info.launch([], None):
         raise RuntimeError(f"couldn't start {path}")
 

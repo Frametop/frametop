@@ -74,6 +74,7 @@ import ft_layout  # noqa: E402  (the layout: remote displays)
 import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
 import ft_store  # noqa: E402  (files written by a temp file of their own and a rename; conf/ too)
 from ft_input_actions import MENU_ACTIONS  # noqa: E402  (Frametop's own actions; conf/ too)
+from ft_desktopapps import DesktopAppInfo  # noqa: E402  (GioUnix's or Gio's; conf/ too)
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands)
 import spotsearch  # noqa: E402
@@ -361,7 +362,7 @@ class Frunner:
         self.float_sock.setblocking(False)
         self.xkb = Xkb()
         self.icons = Icons()
-        self.apps = []          # spotsearch.Item, kind "app"; data: Gio.DesktopAppInfo
+        self.apps = []          # spotsearch.Item, kind "app"; data: DesktopAppInfo
         self.profiles = []      # spotsearch.Item, kind "profile"; data: {"name", "info"}
         self.remotes = []       # spotsearch.Item, kind "remote"; data: {"n", "id", "host", "label", "off"}
         self.commands = []      # spotsearch.Item, kind "command"; data: {"name", "run"}
@@ -459,7 +460,7 @@ class Frunner:
     def load_apps(self):
         apps, profiles = [], []
         for info in Gio.AppInfo.get_all():
-            if not isinstance(info, Gio.DesktopAppInfo) or not info.should_show():
+            if not isinstance(info, DesktopAppInfo) or not info.should_show():
                 continue
             app_id = (info.get_id() or "").removesuffix(".desktop")
             if not app_id:

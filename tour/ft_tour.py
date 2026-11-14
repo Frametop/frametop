@@ -153,7 +153,7 @@ def pages(f, keys):
                  ["Click, right-click, scroll", "Acts on the panel under the dot"],
                  ["Pick up a controller", "It gets its laser back. Move the mouse to take over again"],
                  "Moving a screen",
-                 ["Point near the bottom of a screen", "Its controls fade in: the pin and reset buttons, the bar, "
+                 ["Point near the bottom of a screen", "Its controls fade in: the layout, pin and reset buttons, the bar, "
                                                        "and the curve and roll buttons"],
                  ["Drag the bar", "Carries the screen. Scroll while dragging to push it away or pull it closer"],
                  ["Hold the right button too while dragging the bar", "Tilts the screen as you move the mouse"],
@@ -162,6 +162,8 @@ def pages(f, keys):
                  ["Drag the roll button sideways, or scroll on it", "Rolls the screen; it snaps level near straight"],
                  ["Click the pin button (left of the reset button)", "Keeps the screen fixed in view as you turn your head. "
                                                                      "Click again, or reset the layout, to leave it in the room"],
+                 ["Hold the layout button (left of the pin button) and move",
+                  "Carries every screen and window in the room together, as they stand"],
                  "Getting back",
                  ["The reset button (left of the bar), or Meta+Shift+R", "Puts every screen back in its layout"],
                  ["Meta+Shift+H", "Hides or shows all screens"]],

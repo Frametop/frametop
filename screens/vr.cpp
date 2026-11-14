@@ -21,6 +21,8 @@
 //   - a pin button left of that: pins the screen to your head as it is now, so it stays fixed in
 //     view (as "pin <screen> head" does), or back in the room where it is then. Blue while pinned.
 //     A reset ends it: the layout places every screen again, as its profile has it (TogglePinView).
+//   - a layout button left of that: held by a laser, the screen is carried as by its bar and every
+//     other panel in the room goes with it, in one piece and level (LayoutGrabStart, layoutgrab.h).
 //   The controls are translucent, like SteamVR's own, and brighten under a laser. They
 //   are invisible until a laser (a controller's, or the 3D mouse's) lands on or passes very close to
 //   one of them (UpdateControls).
@@ -129,6 +131,7 @@
 #include "barhit.h"
 #include "posemath.h"
 #include "roomshift.h"
+#include "layoutgrab.h"
 #include "../conf/ftsock.h"
 #include "vrcmd.h"
 #include "windowdrag.h"
@@ -308,13 +311,17 @@ struct Sub {
     int x = 0, y = 0, w = 0, h = 0;  // in the output's buffer, pixels
 };
 
+// A panel's controls (Screen::Controls). Hand input knows the first kHandControls (handinput::Control).
+constexpr int kControls = 9, kHandControls = 8;
+
 struct Screen {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid, bar = vr::k_ulOverlayHandleInvalid,
                           handle = vr::k_ulOverlayHandleInvalid, curveButton = vr::k_ulOverlayHandleInvalid,
                           rollButton = vr::k_ulOverlayHandleInvalid, dockButton = vr::k_ulOverlayHandleInvalid,
                           closeButton = vr::k_ulOverlayHandleInvalid,  // the last two: floating windows
-                          resetButton = vr::k_ulOverlayHandleInvalid,  // the last two: desktop screens and
-                          pinButton = vr::k_ulOverlayHandleInvalid;    // remote displays
+                          resetButton = vr::k_ulOverlayHandleInvalid,  // the last three: desktop screens and
+                          pinButton = vr::k_ulOverlayHandleInvalid,    // remote displays
+                          layoutButton = vr::k_ulOverlayHandleInvalid;
     int width = 0, height = 0;    // current buffer size (mouse scale)
     double metres = 1;
     double curve = 0;             // cylinder radius in metres; 0 = flat
@@ -347,7 +354,7 @@ struct Screen {
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
     double rollRadius = 0;                    // roll: the laser's distance from the centre then (m)
     double rollTurned = 0;                    // roll: the most the laser has gone round since (rad; RollClick)
-    bool hover[8] = {};                       // a laser is on the bar, curve, roll, resize, dock, close, reset, pin control
+    bool hover[kControls] = {};               // a laser is on the bar, curve, roll, resize, dock, close, reset, pin, layout control
     unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
@@ -404,6 +411,7 @@ struct Screen {
     // point on it, panel-local) carryDist from the eye, facing the head, turned by carryTurn. carryMode 1
     // (Ctrl held): it moves in carryPlane's plane; 2 (Alt held): it turns about its centre, at carryAt.
     bool toggleCarry = false;
+    bool layoutHeld = false;      // carried by its layout button: the room's panels go with it (LayoutGrabStart)
     int carryMode = 0;
     double carryDist = 0, carryAt[3] = {};
     double carryEye[3] = {};      // the sphere's centre (no modifier): the eyes when the carry or this mode began
@@ -448,11 +456,11 @@ struct Screen {
     // Buffer pixels from OpenVR's mouse position on the panel (its origin is bottom left).
     // A cropped panel too: SteamVR gives the position in the whole texture, not the crop.
     void ToBuffer(double mx, double my, double *x, double *y) const { *x = mx, *y = height - my; }
-    std::array<vr::VROverlayHandle_t, 8> Controls() const {
-        return {bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton};
+    std::array<vr::VROverlayHandle_t, kControls> Controls() const {
+        return {bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton};
     }
-    std::array<vr::VROverlayHandle_t, 9> All() const {
-        return {overlay, bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton};
+    std::array<vr::VROverlayHandle_t, kControls + 1> All() const {
+        return {overlay, bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton};
     }
 };
 std::map<int, Screen> g_screens;
@@ -756,6 +764,17 @@ std::vector<uint8_t> PinTexture(int n, bool lit) {
     return px;
 }
 
+std::vector<uint8_t> LayoutTexture(int n) {
+    // Three screens side by side, the middle one bigger: "all of them, as they stand".
+    return ControlTexture(
+        n, InDisc,
+        [](double u, double v) {
+            if (std::fabs(u) <= 0.2 && std::fabs(v) <= 0.3) return true;                         // the middle one
+            return std::fabs(u) >= 0.32 && std::fabs(u) <= 0.62 && std::fabs(v) <= 0.2;          // one each side
+        },
+        DiscRim);
+}
+
 vr::VROverlayHandle_t MakeChrome(const char *key, const char *name, const std::vector<uint8_t> &px, int w, int h) {
     vr::VROverlayHandle_t o = vr::k_ulOverlayHandleInvalid;
     if (const auto err = vr::VROverlay()->CreateOverlay(key, name, &o); err != vr::VROverlayError_None) {
@@ -1019,27 +1038,28 @@ Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 // Put the bar, the curve button, and the corner tab under the screen (same parent: the
 // room or the controller), sized for the screen and its distance, and on its surface.
 // Where each control sits, relative to the screen: bar, curve, roll, resize tab, a
-// floating window's dock and close buttons (left of the bar), and a desktop screen's reset
-// and pin buttons (left of the bar, where a floating window has its dock and close buttons).
+// floating window's dock and close buttons (left of the bar), and a desktop screen's reset,
+// pin and layout buttons (left of the bar, where a floating window has its dock and close buttons;
+// the layout button is the outermost).
 // Their centres on the surface: u along it, v up, metres from the screen's centre.
 //   Between the bar and a button, and button and button, a button's width or more (user, 2026-10-13:
 // "farther apart so it's harder to accidentally click"; was 6% of the bar's width, about a third of a
 // button). It grows with them as a hand comes (ChromeSize).
-void ControlUV(const Screen &s, double u[8], double v[8]) {
+void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
     const double h = s.heightMetres(), bar = barhit::Width(s.chrome, g_barPaddingX), button = s.grip;
     const double gap = std::max(s.chrome * 0.06, button);
-    const double uu[8] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
+    const double uu[kControls] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
                            // Visual, preview and hit-mask canvases share the screen's actual corner.
                            s.cornerX * (s.metres / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
-                          -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5)};
-    for (int k = 0; k < 8; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)) : BarY(s);
+                          -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5), -(bar / 2 + gap * 3 + button * 2.5)};
+    for (int k = 0; k < kControls; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)) : BarY(s);
 }
 Mat RollZ(double rad);
-std::array<Mat, 8> ControlOffsets(const Screen &s) {
-    double u[8], v[8];
+std::array<Mat, kControls> ControlOffsets(const Screen &s) {
+    double u[kControls], v[kControls];
     ControlUV(s, u, v);
-    std::array<Mat, 8> m;
-    for (int k = 0; k < 8; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
+    std::array<Mat, kControls> m;
+    for (int k = 0; k < kControls; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
     // The handle's texture is clear; orientation lives in its mask, not the transform.
     // The shaped mask already encodes the selected corner; do not rotate its canvas.
     return m;
@@ -1090,6 +1110,7 @@ void PlaceChrome(Screen &s) {
     } else {
         vr::VROverlay()->SetOverlayWidthInMeters(s.resetButton, float(button));
         vr::VROverlay()->SetOverlayWidthInMeters(s.pinButton, float(button));
+        vr::VROverlay()->SetOverlayWidthInMeters(s.layoutButton, float(button));
         LightPin(s);
     }
     // Curved, the bar bends with the screen's bottom edge.
@@ -1097,7 +1118,7 @@ void PlaceChrome(Screen &s) {
     const std::pair<vr::VROverlayHandle_t, Mat> parts[] = {
         {s.bar, offsets[0]},        {s.curveButton, offsets[1]}, {s.rollButton, offsets[2]},
         {s.handle, offsets[3]},     {s.dockButton, offsets[4]},  {s.closeButton, offsets[5]},
-        {s.resetButton, offsets[6]}, {s.pinButton, offsets[7]}};
+        {s.resetButton, offsets[6]}, {s.pinButton, offsets[7]},  {s.layoutButton, offsets[8]}};
     PlaceParts(s, parts);
 }
 
@@ -1151,7 +1172,7 @@ void MoveLevelPins() {
         const std::pair<vr::VROverlayHandle_t, Mat> parts[] = {
             {s.bar, offsets[0]},        {s.curveButton, offsets[1]}, {s.rollButton, offsets[2]},
             {s.handle, offsets[3]},     {s.dockButton, offsets[4]},  {s.closeButton, offsets[5]},
-            {s.resetButton, offsets[6]}, {s.pinButton, offsets[7]}};
+            {s.resetButton, offsets[6]}, {s.pinButton, offsets[7]},  {s.layoutButton, offsets[8]}};
         PlaceParts(s, parts);
     }
 }
@@ -1319,11 +1340,12 @@ bool ModeVisible() {
 void ApplyAlpha(const Screen &s) {
     vr::VROverlay()->SetOverlayAlpha(s.overlay, s.alpha);
     for (const auto &[k, sub] : s.subs) vr::VROverlay()->SetOverlayAlpha(sub.overlay, s.alpha);
-    bool active[8] = {s.hover[0] || s.drag == Drag::Move, s.hover[1], s.hover[2] || s.drag == Drag::Roll,
-                      s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6], s.hover[7]};
-    for (int k = 0; k < 8; ++k) active[k] = active[k] || (s.handHover >> k & 1);
+    bool active[kControls] = {s.hover[0] || s.drag == Drag::Move, s.hover[1], s.hover[2] || s.drag == Drag::Roll,
+                              s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6], s.hover[7],
+                              s.hover[8] || s.layoutHeld};
+    for (int k = 0; k < kHandControls; ++k) active[k] = active[k] || (s.handHover >> k & 1);
     const auto controls = s.Controls();
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < kControls; ++k) {
         if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
         // the resize handle brightens as an aim comes to its corner (UpdateCorner)
         const float idle = k == 3 ? kChromeIdle + (1 - kChromeIdle) * std::clamp(s.cornerGlow, 0.f, 1.f) : kChromeIdle;
@@ -1573,7 +1595,7 @@ void UpdateControls() {
             for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5})
                 spots.push_back(Mul(p, OnSurface(s, f * barhit::Width(s.chrome, g_barPaddingX), BarY(s), 0.003)));
             const auto controls = s.Controls();
-            for (int k = 1; k < 8; ++k)
+            for (int k = 1; k < kControls; ++k)
                 if (controls[k] != vr::k_ulOverlayHandleInvalid) spots.push_back(Mul(p, offsets[k]));
             UpdateCorner(s, p, lasers);
             const double reach = std::max(s.grip * 1.5, s.chrome * 0.12);
@@ -1887,7 +1909,7 @@ void EndDrag(Screen &s) {
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.pushedMs = -1;
-    s.dragFacing = s.toggleCarry = false;
+    s.dragFacing = s.toggleCarry = s.layoutHeld = false;
     s.carryMode = 0;
     s.dockOn = -1;
     s.pinTarget = s.onWrist = kNone;
@@ -2344,7 +2366,7 @@ void UpdateDrag(Screen &s, int index) {
             p = FacingPose(at, head);
         }
         SetAbsolute(s, p);
-        CheckWristAim(s, d, p);
+        if (!s.layoutHeld) CheckWristAim(s, d, p);   // (the layout's carry arms no wrist pin)
         return;
     }
     if (s.drag == Drag::Roll) {
@@ -2470,7 +2492,7 @@ void DropFloatPanel(Screen &s) {
     for (auto o : s.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     s.overlay = s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton =
-        s.pinButton = vr::k_ulOverlayHandleInvalid;
+        s.pinButton = s.layoutButton = vr::k_ulOverlayHandleInvalid;
     s.visible = s.controlsUp = s.barLit = s.cornerLit = s.pinLit = false;
     s.controls = 0;
     std::fill(std::begin(s.hover), std::end(s.hover), false);
@@ -3403,14 +3425,14 @@ handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
     P.cropX = s.cropX, P.cropY = s.cropY, P.cropW = s.cropW, P.cropH = s.cropH, P.titleH = s.titleH;
     P.glows = !s.floating;
     P.held = s.drag != Drag::None && !IsHandHolder(s.dragDevice);
-    double u[8], v[8];
+    double u[kControls], v[kControls];
     ControlUV(s, u, v);
     const auto controls = s.Controls();
-    static const handinput::Control kinds[8] = {handinput::Control::Bar, handinput::Control::Curve,
+    static const handinput::Control kinds[kHandControls] = {handinput::Control::Bar, handinput::Control::Curve,
                                                 handinput::Control::Roll, handinput::Control::Tab,
                                                 handinput::Control::Dock, handinput::Control::Close,
                                                 handinput::Control::Reset, handinput::Control::Pin};
-    for (int k = 0; k < 8; ++k) {
+    for (int k = 0; k < kHandControls; ++k) {   // (not the layout button: a laser's, so far)
         if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
         if (k == 3 && g_resizeCorner.sharp) continue;  // legacy retains its original near-hand tab
         const double c = k == 3 ? HandleSize(s) : s.grip;
@@ -4608,7 +4630,7 @@ bool PlaceResetAsk(Screen &s) {
     const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
     g_resetAsk.h = std::max(0.00045 * d * kResetAskH, 1.4 * s.grip);
     g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
-    double u[8], v[8];
+    double u[kControls], v[kControls];
     ControlUV(s, u, v);
     const double at = v[6] - s.grip / 2 - std::max(s.grip, s.chrome * 0.06) - g_resetAsk.h / 2;
     g_resetAsk.pose = Mul(p, OnSurface(s, u[6], at, 0.004));
@@ -5105,6 +5127,9 @@ struct CarryFollow {
     bool lockOnly = false;        // Space held: only the carried panel (and the cursor) follow (CarrySpaceHold)
 } g_carryFollow;
 
+// A layout button's carry (LayoutGrabStart): the screen it carries and the others that go with it.
+layoutgrab::Grab<Mat> g_layoutGrab;
+
 // The border on the panel the 3D mouse carries (carry_toggle; user, 2026-11-01: "a glowing aqua border
 // with a small air gap between it and the window ... pulse an outward-expanding translucent version of
 // the border every 5 seconds"): softglow::CarryTexture, and from the pick-up on, every kCarryPulseMs,
@@ -5207,7 +5232,10 @@ bool CarryAllHas(int panel) { return g_carryFollow.on && g_carryFollow.rel.count
 
 void UpdateCarryGlow() {
     const int64_t now = NowMs();
-    auto want = [](int i, const Screen &s, bool other) { return s.visible && (other ? !s.toggleCarry && CarryAllHas(i) : s.toggleCarry); };
+    // (fuchsia too on what a layout button's carry moves, its own screen as well: LayoutGrabStart)
+    auto want = [](int i, const Screen &s, bool other) {
+        return s.visible && (other ? !s.toggleCarry && (CarryAllHas(i) || g_layoutGrab.Moves(i)) : s.toggleCarry);
+    };
     // a slot on that shouldn't be any more lets go (fuchsia on the panel carried now: gone at once)
     for (CarryGlow &g : g_carryGlow) {
         const auto it = g_screens.find(g.panel);
@@ -6763,6 +6791,9 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
         s.resetButton = chrome("reset", "reset the layout", reset, 64, 64);
         s.pinButton = chrome("pin", "pin in view", pin, 64, 64);
         s.pinLit = false;
+        static const auto layout = LayoutTexture(64);
+        s.layoutButton = chrome("layout", "move the layout", layout, 64, 64);
+        vr::VROverlay()->SetOverlayFlag(s.layoutButton, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
     }
     ApplyAlpha(s);
     return true;
@@ -7094,6 +7125,10 @@ void ShiftRoom(const roomshift::Shift &by, char *reply, int size) {
     if (g_front.panel >= 0) g_front.home = Mul(j, g_front.home);
     for (auto &[i, k] : g_parked)
         if (k.pinned == kNone) k.pose = Mul(j, k.pose);
+    // (a layout button's carry meanwhile: what goes with it goes on from where this put it)
+    for (auto &[i, rel] : g_layoutGrab.rel)
+        if (const auto it = g_screens.find(i); it != g_screens.end() && it->second.drag == Drag::None)
+            g_layoutGrab.Take(i, it->second.pose);
     g_shifted = roomshift::Then(g_shifted, by);
     if (moved) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are now
     std::snprintf(reply, size, "ok %d", moved);
@@ -7107,6 +7142,91 @@ void ShiftCommand(vrcmd::Verb verb, const vrcmd::Cmd &c, char *reply, int size) 
     }
     if (!vrcmd::ShiftOk(c)) return (void)std::snprintf(reply, size, "error shift <dx> <dz> <degrees> | shift back");
     ShiftRoom({c.x, c.z, c.yaw * M_PI / 180}, reply, size);
+}
+
+// ---------------------------------------------------------------- the layout button
+// The layout button, the outermost left of a screen's bar (user, 2026-11-14: "when you grab it, it
+// grabs your entire Frametop layout and moves it ... interactable with the laser pinch underneath a
+// display, and not just with a key binding": carry_toggle's carry-all, the 3D mouse's, was the only way
+// to move the room's panels together). Held by a laser, its screen is carried as by its bar, and every
+// other panel in the room (not pinned; shown or not) keeps its place in a level frame at that screen
+// (layoutgrab.h): the layout turns about you, rises and comes nearer with it in one piece, and nothing
+// in it tilts. The front slot's home and a stopped remote display's place are in the layout too. The
+// panels it moves wear carry-all's fuchsia border (UpdateCarryGlow). One held otherwise meanwhile stays
+// where that has it; the carried screen arms no wrist pin. It ends when the button is let go.
+bool LayoutFrame(const Screen &s, Mat *out) {
+    Mat p, head;
+    return ScreenPose(s, &p) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) && layoutgrab::Frame(p, head, out);
+}
+
+void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
+    if (g_layoutGrab.on()) return;
+    for (const auto &[i, o] : g_screens)
+        if (o.toggleCarry) return;   // (the 3D mouse's carry has the room)
+    StartDrag(s, Drag::Move, dev);
+    Mat f;
+    if (s.drag != Drag::Move) return;
+    if (!LayoutFrame(s, &f)) return (void)std::printf("screen %d: its layout button: carried alone (it's above or below you)\n", index + 1);
+    g_layoutGrab.Begin(index, f);
+    for (auto &[i, o] : g_screens) {
+        Mat p;
+        if (i == index || o.pinned != kNone || !ScreenPose(o, &p)) continue;
+        g_layoutGrab.Take(i, p);
+        g_spin.base.erase(i);   // (turning: it goes on from where the layout leaves it)
+    }
+    s.layoutHeld = true;
+    ApplyAlpha(s);
+    std::printf("screen %d: its layout button: %zu other panel(s) go with it\n", index + 1, g_layoutGrab.rel.size());
+}
+
+void LayoutGrabEnd() {
+    bool screens = false;
+    for (const auto &[i, rel] : g_layoutGrab.rel) {
+        const auto it = g_screens.find(i);
+        if (it != g_screens.end() && !it->second.floating && !it->second.remote) screens = true;
+    }
+    if (screens) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are
+    std::printf("screen %d: its layout button let go: the layout stays there\n", g_layoutGrab.panel + 1);
+    g_layoutGrab.End();
+}
+
+void UpdateLayoutGrab() {
+    layoutgrab::Grab<Mat> &g = g_layoutGrab;
+    if (!g.on()) return;
+    const auto c = g_screens.find(g.panel);
+    if (c == g_screens.end() || !c->second.layoutHeld) return LayoutGrabEnd();
+    Mat f;
+    if (!LayoutFrame(c->second, &f)) return g.Lose();
+    const Mat step = g.Turn(f);
+    for (auto it = g.rel.begin(); it != g.rel.end();) {
+        const auto sit = g_screens.find(it->first);
+        if (sit == g_screens.end() || sit->second.pinned != kNone) {
+            it = g.rel.erase(it);
+            continue;
+        }
+        const int i = it->first;
+        Screen &o = sit->second;
+        const auto m = g_grabMoves.find(i);
+        Mat p;
+        if (o.drag != Drag::None || o.titleCarry || g_handInput.heldByHand(i)) {
+            if (ScreenPose(o, &p)) g.Take(i, p);
+        } else if (m != g_grabMoves.end()) {
+            // on its way somewhere: its way moves with the layout (as a universe's jump moves it, FollowUniverse)
+            GrabMove &move = m->second;
+            move.from = Mul(step, move.from), move.to = Mul(step, move.to), move.lastSet = Mul(step, move.lastSet);
+            SetAbsolute(o, Mul(step, o.pose), move.universe);
+            g.Take(i, o.pose);
+        } else {
+            SetAbsolute(o, g.Pose(i));
+        }
+        ++it;
+    }
+    if (g_front.panel >= 0) {
+        g_front.home = Mul(step, g_front.home);
+        if (g.rel.count(g_front.panel)) g_front.to = Mul(step, g_front.to);
+    }
+    for (auto &[i, k] : g_parked)
+        if (k.pinned == kNone) k.pose = Mul(step, k.pose);
 }
 
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
@@ -7401,6 +7521,21 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
         }
+        // The layout button: held, its screen is carried as by its bar and the room goes with it
+        // (LayoutGrabStart); the wheel pushes and pulls as on the bar.
+        while (s.layoutButton != vr::k_ulOverlayHandleInvalid &&
+               vr::VROverlay()->PollNextOverlayEvent(s.layoutButton, &ev, sizeof ev)) {
+            hover(8);
+            if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
+                continue;
+            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
+                LayoutGrabStart(s, index, ev.trackedDeviceIndex);
+            else if (ev.eventType == vr::VREvent_MouseButtonUp) {
+                EndDragsBy(ev.trackedDeviceIndex);
+                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+            } else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
+                Push(s, ev.data.scroll.ydelta);
+        }
         // The roll button: drag around like a knob, or scroll.
         while (vr::VROverlay()->PollNextOverlayEvent(s.rollButton, &ev, sizeof ev)) {
             hover(2);
@@ -7436,6 +7571,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev))
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
+    UpdateLayoutGrab();   // (after the carried screen's own move, above)
     PollPill(handle, data);
     UpdateHandInput(handle, data);
     DockPushed(handle, data);   // (after UpdateHandInput's dock aims)

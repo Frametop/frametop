@@ -199,6 +199,6 @@ stop applications, release-before-focus-clear ordering and the independent expor
 channel guards. They supplement, rather than replace, wearer testing.
 
 An input-relay restart test currently fails its K3 expectation on untouched
-upstream as well. The control protocol's recorded fixture assumes UID 0; it
-matches when run as the image's default root user, not UID 1000. These limitations
-must not be reported as a fully green repository suite.
+upstream as well. This limitation must not be reported as a fully green
+repository suite. (The control protocol's recorded fixture, once right only as
+root, now holds for any user.)

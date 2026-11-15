@@ -240,11 +240,18 @@ for w in ("vrbtn left/view 1 2", "vrhello 1", "vrgame 1 2", "vrdash", "gamepad",
     CASES.append((w + ", arity", w, {"kb_addr": ADDR} if w.startswith("kb") else {}))
 
 
+def any_uid(case):
+    """The case with the other user's uid as OTHER: the fixture holds whoever runs the test."""
+    text = json.dumps(case, ensure_ascii=False)
+    text = text.replace(f'"uid": {OTHER}', '"uid": "OTHER"').replace(f"another user ({OTHER})", "another user (OTHER)")
+    return json.loads(text)
+
+
 def results():
     out = {}
     for label, text, opts in CASES:
         assert label not in out, label
-        out[label] = {"datagram": text, **{k: plain(v) for k, v in opts.items()}, **run(text, **opts)}
+        out[label] = any_uid({"datagram": text, **{k: plain(v) for k, v in opts.items()}, **run(text, **opts)})
     return out
 
 

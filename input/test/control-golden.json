@@ -206,7 +206,7 @@
   "datagram": "action screens_toggle",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "action screens_toggle, paused": {
   "calls": [
@@ -318,7 +318,7 @@
   "datagram": "calpanel 1",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "calpanel, arity": {
   "calls": [
@@ -563,10 +563,10 @@
   "changed": {},
   "datagram": "gamepad remote",
   "log": [
-   "gamepad from another user (1): ignored"
+   "gamepad from another user (OTHER): ignored"
   ],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "gamepad, arity": {
   "calls": [
@@ -763,10 +763,10 @@
   "changed": {},
   "datagram": "hostdev pc mouse",
   "log": [
-   "hostdev from another user (1): ignored"
+   "hostdev from another user (OTHER): ignored"
   ],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "hostdev pc, arity": {
   "calls": [],
@@ -904,7 +904,7 @@
   "datagram": "kbhello 1",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "kbhello restarted": {
   "calls": [
@@ -1063,7 +1063,7 @@
   "datagram": "kbpanel hide",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "kbpanel show": {
   "calls": [
@@ -1165,7 +1165,7 @@
   "datagram": "kbpoke left hover",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "kbpoke press xyz": {
   "calls": [
@@ -1216,7 +1216,7 @@
   "kb_addr": "\u0000ft_control_test_client",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "kbtext, arity": {
   "calls": [
@@ -1302,7 +1302,7 @@
   "datagram": "keyboard desktop 1 0",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "keyboard desktop 1 0, paused": {
   "calls": [
@@ -1363,7 +1363,7 @@
   "datagram": "keyboard desktop 1 1",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "keyboard desktop 1 1, paused": {
   "calls": [
@@ -1398,7 +1398,7 @@
   "datagram": "keyboard desktop",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "keyboard desktop, paused": {
   "calls": [
@@ -1437,7 +1437,7 @@
   "datagram": "keyboard steam 0",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "keyboard steam 0, paused": {
   "calls": [
@@ -1461,7 +1461,7 @@
   "datagram": "keyboard",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "keyboard, paused": {
   "calls": [
@@ -1643,10 +1643,10 @@
   "changed": {},
   "datagram": "pause enforce",
   "log": [
-   "pause enforce from another user (1): ignored"
+   "pause enforce from another user (OTHER): ignored"
   ],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "pause off gesture": {
   "calls": [
@@ -1779,7 +1779,7 @@
   "datagram": "pause on",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "pause toggle": {
   "calls": [
@@ -2015,7 +2015,7 @@
   "datagram": "textfield 1",
   "log": [],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "textfield bad": {
   "calls": [
@@ -2075,10 +2075,10 @@
   "changed": {},
   "datagram": "type hi",
   "log": [
-   "type from another user (1): ignored"
+   "type from another user (OTHER): ignored"
   ],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "type, arity": {
   "calls": [
@@ -2617,10 +2617,10 @@
   "changed": {},
   "datagram": "vrpad 1 0 0 0 0 0 0",
   "log": [
-   "vrpad from another user (1): ignored"
+   "vrpad from another user (OTHER): ignored"
   ],
   "raised": null,
-  "uid": 1
+  "uid": "OTHER"
  },
  "vrpad short": {
   "calls": [

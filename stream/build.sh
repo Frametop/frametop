@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build stream/build/ft-stream (ft-stream.cpp and host.cpp: a remote display's stream, for
+# Build stream/build/ft-stream (ft-stream.cpp, sharedclip.cpp and host.cpp: a remote display's stream, for
 # ft-screens) in the dev container on the Frame. With --spikes, also the remote-display spikes,
 # after it (so a broken spike can't hold ft-stream back): stream/build/ft-dectest (spike S1,
 # spike/ft-dectest.cpp) and stream/build/ft-streamtest (spike S3, spike/ft-streamtest.cpp, on
@@ -47,7 +47,7 @@ for f in client http mkcert xml; do
 done
 flags="-std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags gbm libdrm egl glesv2)"
 vr="$OPENVR_LIBS"
-g++ $flags -I$mlc/src -I$src/libgamestream -I$src/src -o build/ft-stream ft-stream.cpp host.cpp build/gamestream/*.o \
+g++ $flags -I$mlc/src -I$src/libgamestream -I$src/src -o build/ft-stream ft-stream.cpp sharedclip.cpp host.cpp build/gamestream/*.o \
   build/mlc/libmoonlight-common-c.a build/mlc/enet/libenet.a \
   $(pkg-config --libs gbm egl glesv2 libcurl openssl expat uuid opus libpulse-simple) -lpthread $vr
 strip --strip-unneeded build/ft-stream

@@ -32,17 +32,17 @@ int main() {
     check("a bad word changes nothing", !ParseCommand("meta", "move", "throw", "none", &c));
     check("...not even the modifier", c.mod == before.mod);
 
-    check("same PC, other port", SameHost("192.168.1.61:48989", "192.168.1.61"));
-    check("same PC, same port", SameHost("192.168.1.61", "192.168.1.61"));
-    check("other PC", !SameHost("192.168.1.61:48989", "192.168.1.6"));
-    check("a prefix isn't the same", !SameHost("192.168.1.6", "192.168.1.61"));
+    check("same PC, other port", SameHost("192.0.2.61:48989", "192.0.2.61"));
+    check("same PC, same port", SameHost("192.0.2.61", "192.0.2.61"));
+    check("other PC", !SameHost("192.0.2.61:48989", "192.0.2.6"));
+    check("a prefix isn't the same", !SameHost("192.0.2.6", "192.0.2.61"));
     check("IPv6 whole", SameHost("fd7a::1", "fd7a::1") && !SameHost("fd7a::1", "fd7a::2"));
     check("empty isn't", !SameHost("", ""));
 
-    check("window onto its PC's display", CanDropOn("192.168.1.61:48989", "window:0x55aa10", "192.168.1.61", "display:DP-2"));
-    check("not onto another PC's", !CanDropOn("192.168.1.61:48989", "window:0x55aa10", "192.168.1.20", "display:DP-2"));
-    check("not onto another window", !CanDropOn("192.168.1.61:48989", "window:0x55aa10", "192.168.1.61:48989", "window:0x1"));
-    check("a display isn't dropped", !CanDropOn("192.168.1.61", "display:DP-2", "192.168.1.61", "display:HDMI-A-1"));
-    check("not onto a Desktop app stream", !CanDropOn("192.168.1.61:48989", "window:0x55aa10", "192.168.1.61", "Desktop"));
+    check("window onto its PC's display", CanDropOn("192.0.2.61:48989", "window:0x55aa10", "192.0.2.61", "display:DP-2"));
+    check("not onto another PC's", !CanDropOn("192.0.2.61:48989", "window:0x55aa10", "192.0.2.20", "display:DP-2"));
+    check("not onto another window", !CanDropOn("192.0.2.61:48989", "window:0x55aa10", "192.0.2.61:48989", "window:0x1"));
+    check("a display isn't dropped", !CanDropOn("192.0.2.61", "display:DP-2", "192.0.2.61", "display:HDMI-A-1"));
+    check("not onto a Desktop app stream", !CanDropOn("192.0.2.61:48989", "window:0x55aa10", "192.0.2.61", "Desktop"));
     return failed ? 1 : 0;
 }

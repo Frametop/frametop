@@ -64,7 +64,7 @@ inline bool Moves(const Config &c, uint32_t button, bool meta, bool alt) {
     return Held(c, meta, alt) && ActionOf(c, button) == Move;
 }
 
-// A host as ft-stream reaches it ("192.168.1.61" or "192.168.1.61:48989"), without the port:
+// A host as ft-stream reaches it ("192.0.2.61" or "192.0.2.61:48989"), without the port:
 // one PC's displays and its windows instance have different ports. An address with more than
 // one colon (IPv6) is taken whole.
 inline bool SameHost(const char *a, const char *b) {

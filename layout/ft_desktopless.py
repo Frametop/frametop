@@ -27,6 +27,7 @@ import sys
 import time
 
 import ft_layout as L
+import ft_windows as W
 
 UNIT = "frametop-desktopless"
 POLL_SECONDS = 2.0
@@ -148,7 +149,7 @@ def open_windows(sock, eye, heading, seen, extra=()):
     answers = []
     for host, port in window_hosts(L.load_layout()):
         try:
-            answers.append((host_name(host), L.window_api(host, port, "GET", "/api/frametop/windows")))
+            answers.append((host_name(host), W.window_api(host, port, "GET", "/api/frametop/windows")))
         except RuntimeError:
             continue  # not on (or not reachable): it gives its windows up once it answers
     layout = L.load_layout()
@@ -163,7 +164,7 @@ def open_windows(sock, eye, heading, seen, extra=()):
             continue
         host, port = hosts[name]
         windows = answer.get("windows", [])
-        L.window_prune(layout, host, windows)
+        W.window_prune(layout, host, windows)
         out = {d["app"][7:] for d in host.get("displays", []) if d.get("window")}
         mine = seen.setdefault(name, set())
         mine &= {w.get("address") for w in windows}  # (closed ones: their addresses come back new)
@@ -178,15 +179,15 @@ def open_windows(sock, eye, heading, seen, extra=()):
     todo = sorted(todo, key=lambda t: rank(t[2]))[:max(0, free)]
     fan, new = [], []
     for host, port, w in todo:
-        size = L.window_size({}, (min(w.get("width") or L.WINDOW_SIZE[0], L.WINDOW_MAX[0]),
-                                  min(w.get("height") or L.WINDOW_SIZE[1], L.WINDOW_MAX[1])))
+        size = W.window_size({}, (min(w.get("width") or W.WINDOW_SIZE[0], W.WINDOW_MAX[0]),
+                                  min(w.get("height") or W.WINDOW_SIZE[1], W.WINDOW_MAX[1])))
         saved = places.get(app_key(host, w)) or []
         pose = saved.pop(0) if saved else None
         new.append((host, port, w, size, pose))
         if pose is None:
             fan.append(len(new) - 1)
     def metres(size):  # a new window panel's size in VR (window_add's width)
-        w = max(0.4, size[0] / L.WINDOW_PIXELS_PER_METRE)
+        w = max(0.4, size[0] / W.WINDOW_PIXELS_PER_METRE)
         return w, w * size[1] / size[0]
     poses = arc([s for _, s in extra] + [metres(new[k][3]) for k in fan])
     for (n, _), t in zip(extra, poses):
@@ -203,7 +204,7 @@ def open_windows(sock, eye, heading, seen, extra=()):
             fields["metres"] = saved.get("metres")
         fields.update({k2: v for k2, v in (saved or fanned[k]).items() if k2 in ("pos", "face", "roll")})
         try:
-            d = L.window_add(layout, host, port, w["address"], str(w.get("title") or w.get("class") or ""), size,
+            d = W.window_add(layout, host, port, w["address"], str(w.get("title") or w.get("class") or ""), size,
                              fields=fields)
         except RuntimeError as e:
             L.log(f"desktopless: {host_name(host)} {w.get('address')}: {e}")
@@ -243,7 +244,7 @@ def got_panel(layout, sock, host, d):
         return True
     state(layout)["full"] = len(L.remote_displays(layout)) - 1
     L.log(f"desktopless: SteamVR made no panel for {d['id']}: at most {state(layout)['full']} remote displays now")
-    L.window_close(layout, host, d)
+    W.window_close(layout, host, d)
     return False
 
 
@@ -378,7 +379,7 @@ def close_panels(layout):
     """Every PC window panel goes, and its window back onto its PC."""
     for host, _ in window_hosts(layout):
         for d in [d for d in host.get("displays", []) if d.get("window")]:
-            L.window_close(layout, host, d)
+            W.window_close(layout, host, d)
 
 
 # ---------------------------------------------------------------- profiles and desktop start
@@ -499,7 +500,7 @@ def launch_missing(name):
     can't be)."""
     layout = L.load_layout()
     places = layout.get("profiles", {}).get(name, {}).get("desktopless", {}).get("places", {})
-    want = {k: len(v) for k, v in places.items() if L.WINDOW_APP.fullmatch(k.split("|", 1)[-1])}
+    want = {k: len(v) for k, v in places.items() if W.WINDOW_APP.fullmatch(k.split("|", 1)[-1])}
     if not want:
         return
     try:
@@ -518,7 +519,7 @@ def launch_missing(name):
 def start_apps(layout, sock, room, name, places, want, seen):
     for host, port in window_hosts(layout):
         try:
-            windows = L.window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
+            windows = W.window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
         except RuntimeError:
             continue  # not on: its apps start with the profile next time
         have = {}
@@ -532,11 +533,11 @@ def start_apps(layout, sock, room, name, places, want, seen):
                     L.log(f"desktopless: no panel free for {key}")
                     return
                 app = key.split("|", 1)[1]
-                size = L.WINDOW_SIZE
+                size = W.WINDOW_SIZE
                 try:
-                    opened = L.window_api(host, port, "POST", "/api/frametop/windows/open",
+                    opened = W.window_api(host, port, "POST", "/api/frametop/windows/open",
                                           {"app": app, "width": size[0], "height": size[1]})
-                    d = L.window_add(layout, host, port, opened.get("address", ""), L.window_app_title(app, opened), size,
+                    d = W.window_add(layout, host, port, opened.get("address", ""), W.window_app_title(app, opened), size,
                                      fields={"key": key, "metres": pose.get("metres"),
                                              **{k: pose[k] for k in ("pos", "face", "roll") if k in pose}})
                 except RuntimeError as e:

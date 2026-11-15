@@ -20,6 +20,8 @@ def load_modules(tmp):
     m.CONF_PATH = str(tmp / "frametop.conf")  # none: the screens backend
     m.LAYOUT_PATH = str(tmp / "layout.json")
     sys.path.insert(0, str(HERE))
+    import ft_windows
+    importlib.reload(ft_windows).L = m
     import ft_desktopless
     d = importlib.reload(ft_desktopless)
     d.L = m
@@ -165,7 +167,7 @@ class Desktopless(unittest.TestCase):
         self.assertNotIn("0x20", self.d.read_seen()["oma7"])
         # one closes: the next comes out in its place
         host = layout["hosts"][0]
-        self.m.window_close(layout, host, self.panels(layout)[0])
+        self.d.W.window_close(layout, host, self.panels(layout)[0])
         self.screens.running.discard(103)
         self.d.open_windows(self.screens, (0, 1.6, 0), 0.0, self.d.read_seen())
         self.assertEqual([d["app"] for d in self.panels()], ["window:0x20"])
@@ -174,7 +176,7 @@ class Desktopless(unittest.TestCase):
         self.d.command(["on"])
         layout = self.m.load_layout()
         host = layout["hosts"][0]
-        self.m.window_close(layout, host, next(d for d in host["displays"] if d.get("app") == "window:0x20"))
+        self.d.W.window_close(layout, host, next(d for d in host["displays"] if d.get("app") == "window:0x20"))
         self.windows.append(window("0x50", "gimp", 0, shown=True))
         layout = self.m.load_layout()
         seen = self.d.read_seen()
@@ -313,11 +315,11 @@ class Desktopless(unittest.TestCase):
     def test_a_panel_out_before_the_mode_stays_on_the_pc_once_sent_back(self):
         layout = self.m.load_layout()
         host = layout["hosts"][0]
-        self.m.window_add(layout, host, 48989, "0x20", "brave", (1200, 800))
+        self.d.W.window_add(layout, host, 48989, "0x20", "brave", (1200, 800))
         self.d.command(["on"])
         layout = self.m.load_layout()
         host = layout["hosts"][0]
-        self.m.window_close(layout, host, next(d for d in host["displays"] if d.get("app") == "window:0x20"))
+        self.d.W.window_close(layout, host, next(d for d in host["displays"] if d.get("app") == "window:0x20"))
         self.assertEqual(self.d.open_windows(self.screens, (0, 1.6, 0), 0.0, self.d.read_seen()), 0)
 
     def test_a_second_window_of_an_app_takes_its_next_place(self):

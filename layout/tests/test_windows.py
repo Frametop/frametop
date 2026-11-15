@@ -6,19 +6,27 @@ import importlib.util
 import io
 import json
 import pathlib
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 
+HERE = pathlib.Path(__file__).resolve().parents[1]
+
+
 def load_layout_module(tmp):
-    path = pathlib.Path(__file__).resolve().parents[1] / "ft_layout.py"
-    spec = importlib.util.spec_from_file_location("windows_layout", path)
+    """(ft_layout, ft_windows): a fresh ft_layout of the test's own, and ft_windows bound to it."""
+    spec = importlib.util.spec_from_file_location("windows_layout", HERE / "ft_layout.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.CONF_PATH = str(tmp / "frametop.conf")  # none: the screens backend
     module.LAYOUT_PATH = str(tmp / "layout.json")
-    return module
+    sys.path.insert(0, str(HERE))
+    import ft_windows
+    windows = importlib.reload(ft_windows)
+    windows.L = module
+    return module, windows
 
 
 WINDOWS = {"windows": [
@@ -30,7 +38,7 @@ WINDOWS = {"windows": [
 class Windows(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.m = load_layout_module(pathlib.Path(self.tmp.name))
+        self.m, self.w = load_layout_module(pathlib.Path(self.tmp.name))
         self.streams, self.api = [], []
         self.answers = {}
 
@@ -63,7 +71,7 @@ class Windows(unittest.TestCase):
     def run_window(self, *args):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.m.window_command(list(args))
+            self.w.window_command(list(args))
         return out.getvalue()
 
     def displays(self):
@@ -131,12 +139,12 @@ class Windows(unittest.TestCase):
         self.m.screens_socket = Screens
         self.m.start_remotes_now = lambda layout, only: started.append(set(only))
         layout = self.m.load_layout()
-        self.m.window_add(layout, layout["hosts"][0], 48989, "0x55aa10", "foot", (800, 600))
+        self.w.window_add(layout, layout["hosts"][0], 48989, "0x55aa10", "foot", (800, 600))
         self.assertEqual(started, [{"oma7-window-55aa10"}])   # not running: started
         n = next(d["screen"] for d in self.displays() if d.get("window"))
         running[n] = "live"
         layout = self.m.load_layout()
-        self.m.window_add(layout, layout["hosts"][0], 48989, "0x55aa10", "foot", (800, 600))
+        self.w.window_add(layout, layout["hosts"][0], 48989, "0x55aa10", "foot", (800, 600))
         self.assertEqual(len(started), 1)   # running: left alone (not placed again)
 
     def test_no_such_window(self):
@@ -173,9 +181,9 @@ class Windows(unittest.TestCase):
         self.assertEqual(self.displays()[-1]["label"], "Calculator")
 
     def test_a_store_app_without_a_title_is_named_by_its_package(self):
-        self.assertEqual(self.m.window_app_title("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), "Microsoft.WindowsCalculator")
-        self.assertEqual(self.m.window_app_title("x.lnk", {"title": "  "}), "x")
-        self.assertEqual(self.m.window_app_title("x.lnk", {"title": "a\nb\x1b" + "c" * 100}), "ab" + "c" * 78)
+        self.assertEqual(self.w.window_app_title("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), "Microsoft.WindowsCalculator")
+        self.assertEqual(self.w.window_app_title("x.lnk", {"title": "  "}), "x")
+        self.assertEqual(self.w.window_app_title("x.lnk", {"title": "a\nb\x1b" + "c" * 100}), "ab" + "c" * 78)
 
     def test_launch_refuses_what_is_no_app_id(self):
         for app in ("x.exe", "C:/Windows/notepad.lnk", "a\nb.desktop", "Calc_8wekyb3d8bbwe!App;rm", "Calc!App"):

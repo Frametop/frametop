@@ -16,7 +16,8 @@
 #      now keeps running until you restart the headset.
 #   2. After the restart, run it again. It deletes the code (~/frametop, or the releases in
 #      ~/.local/share/frametop/releases with their containers and images) and, if you want, your
-#      settings, voice dictation's speech models, and the build container.
+#      settings, voice dictation's speech models, the avatar and hand models you imported, and
+#      the build container.
 # When nothing of Frametop is running, one run does both.
 #
 # Options (piped, they go after "bash -s --"):

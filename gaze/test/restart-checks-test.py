@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Offline test of the gaze checks' G4 fixes, and G2's P2 (gaze/gazecheck.py, docs/charts/README.md):
+"""Offline test of the gaze checks' G4 fixes, and G2's P2 (gaze/gazecheck.py;
+docs/charts/G4-gaze.md and G2-desktop.md):
 
   Z1  a full calibration marks the screens it hid (SCREENS_HIDDEN); the next gaze
                 service shows them again if the last one died before close()

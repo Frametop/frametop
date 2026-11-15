@@ -1,6 +1,6 @@
 ---- MODULE G1Lifecycle ----
 \* Frametop G1, lifecycle and presence, as the code at frametop 78e93b1 (experimental) does it,
-\* with the L1-L7 fixes (DEE-252..258) since: see "Fixed" in docs/charts/README.md.
+\* with the L1-L7 fixes (DEE-252..258) since: see "Fixed bugs" in docs/charts/G1-lifecycle.md.
 \* Read-only model: it describes the code and changes nothing. The copy kept for the reader is
 \* ~/frametop-charts/charts/G1-lifecycle.tla; TLC needs the file named after the module, so the
 \* runs use this copy, G1Lifecycle.tla.

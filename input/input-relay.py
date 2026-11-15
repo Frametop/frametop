@@ -2335,7 +2335,7 @@ class Relay:
 
     def recover_from_restart(self):
         """What a relay that starts does for what the one before it left behind, in one place: the
-        restart fixes on the relay's side (docs/charts/README.md, G1 and G3). The pause's own
+        restart fixes on the relay's side (docs/charts/G1-lifecycle.md and G3-input.md). The pause's own
         (L5: the resume a restart cut short; L6: a pause that ends with its game)
         runs as GamePause reads its state file (game_pause.py, load), which has to come before the
         rules configure the pause."""

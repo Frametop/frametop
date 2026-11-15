@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Offline test of what the input relay does when it starts again: Relay.recover_from_restart
-and the pause's state file, one test each for the restart fixes L1, L5 and L6 (G1)
-and K3, K6 and K7 (G3) in docs/charts/README.md. Then the relay's state objects,
-and its reload, which puts the whole config in place or none of it.
+and the pause's state file, one test each for the restart fixes L1, L5 and L6
+(docs/charts/G1-lifecycle.md) and K3, K6 and K7 (docs/charts/G3-input.md). Then the
+relay's state objects, and its reload, which puts the whole config in place or none of it.
 
 It makes Relay objects with fake virtual devices, a renamed helper and ft-screens, a temporary pause
 state file and the pause's worker and controller reader stubbed, and never runs the loop: no

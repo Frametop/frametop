@@ -4,7 +4,7 @@ Rules for people and coding agents changing this repo. The README covers what Fr
 
 ## Charts and models
 
-`docs/charts/` holds state charts and TLA+ models of how Frametop's parts start, stop, hand things over and fail. When a question or change touches lifecycle, pausing for VR games, worn or away, remote displays and host input, input and the pointer, gaze, hand tracking, the desktop's screens and panels, or another charted area, read the matching chart's `.mmd` and model first. [docs/charts/README.md](docs/charts/README.md) says which group covers what, lists the rules each model checks and the open suspected bugs with their tickets, and shows how to re-run a check with `frame-job`.
+`docs/charts/` holds state charts and TLA+ models of how Frametop's parts start, stop, hand things over and fail. When a question or change touches lifecycle, pausing for VR games, worn or away, remote displays and host input, input and the pointer, gaze, hand tracking, the desktop's screens and panels, or another charted area, read the matching chart's `.mmd` and model first. [docs/charts/README.md](docs/charts/README.md) says which group covers what and shows how to re-run a check with `frame-job`; each group's notes beside its chart (`docs/charts/G1-lifecycle.md` ... `G9-together.md`) list the rules its model checks and its fixed and open bugs with their tickets.
 
 ## Two ways to run the scripts
 

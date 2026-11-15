@@ -29,8 +29,8 @@
 // once it has moved. A middle pinch (the right button) never becomes a press.
 //
 // Frametop's drag controls (2026-10-10, Vision Pro-style resize from any corner): a pinch whose
-// pointer is on a screen's resize handle or grab bar (frametop.screen.N.resize, frametop.remote.N.bar,
-// ...; FrameControl in ft-pointer.cpp) is a press after controlHold (0.12 s,
+// pointer is on a screen's resize handle or grab bar (frametop.controls.K.resize, frametop.controls.K.bar;
+// FrameControl in ft-pointer.cpp) is a press after controlHold (0.12 s,
 // POINTER_GAZE_CONTROL_HOLD) still, not hold: there's nothing to click on them, and the hand drags.
 //
 // Two-hand press (user, 2026-10-11: "tap nudge into the right spot, and then tap with the other hand to

@@ -305,6 +305,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/layoutgrab-test.cpp \
       -o build/tests/layoutgrab-test
     run screens/tests/layoutgrab-test.cpp build/tests/layoutgrab-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/chromepool-test.cpp \
+      -o build/tests/chromepool-test
+    run screens/tests/chromepool-test.cpp build/tests/chromepool-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/vrcmd-test.cpp \
       -o build/tests/vrcmd-test
     run screens/tests/vrcmd-test.cpp build/tests/vrcmd-test

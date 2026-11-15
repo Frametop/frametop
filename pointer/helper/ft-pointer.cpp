@@ -656,11 +656,13 @@ bool FramePanel(const std::string &key) {
     return false;
 }
 
-// One of ft-screens' drag controls on such a panel: its grab bar or its resize handle
-// (frametop.screen.N.bar, frametop.remote.N.resize, ...). A gaze pinch on one presses at once
-// (gazehand.h, POINTER_GAZE_CONTROL_HOLD): there's nothing to click on them.
+// One of ft-screens' drag controls on such a panel: its grab bar or its resize handle. The panels
+// share a few sets of controls (screens/chromepool.h: frametop.controls.K.bar, .resize, ...); the
+// panels' own (frametop.screen.N.bar, frametop.remote.N.resize, ...) are an older ft-screens'.
+// A gaze pinch on one presses at once (gazehand.h, POINTER_GAZE_CONTROL_HOLD): there's nothing to
+// click on them.
 bool FrameControl(const std::string &key) {
-    for (const char *prefix : {"frametop.screen.", "frametop.remote.", "frametop.float."}) {
+    for (const char *prefix : {"frametop.controls.", "frametop.screen.", "frametop.remote.", "frametop.float."}) {
         if (key.rfind(prefix, 0) != 0) continue;
         const std::string rest = key.substr(std::strlen(prefix));
         const size_t dot = rest.find('.');

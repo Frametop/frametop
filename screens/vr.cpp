@@ -129,6 +129,7 @@
 #include "roomview.h"
 #include "levelpin.h"
 #include "barhit.h"
+#include "chromepool.h"
 #include "posemath.h"
 #include "roomshift.h"
 #include "layoutgrab.h"
@@ -462,8 +463,19 @@ struct Screen {
     std::array<vr::VROverlayHandle_t, kControls + 1> All() const {
         return {overlay, bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton};
     }
+    // Whether its kind has control k (Controls()' order), whether or not it holds a set of them now
+    // (chromepool.h): a floating window has dock and close, the others reset, pin and layout.
+    bool HasControl(int k) const { return k < 4 || (floating ? k < 6 : k >= 6); }
 };
 std::map<int, Screen> g_screens;
+
+// The panels' shared controls (chromepool.h; LendChrome): each set every control once.
+struct ChromeSet {
+    std::array<vr::VROverlayHandle_t, kControls> part{};
+    bool made = false;
+};
+std::array<ChromeSet, chromepool::kSets> g_chromeSets;
+chromepool::Pool g_chromePool;
 
 // For the log and the debug line (scripts/report.sh): which screen, which drag, which laser.
 int ScreenIndexOf(const Screen &s) {
@@ -1568,9 +1580,13 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     }
 }
 
-// The controls are invisible until a laser is on one of them (SteamVR's hover event) or
-// passes very close (within `reach`, about 1.5 times a button's size); they stay
-// kControlsLinger ticks after it leaves, and while in use.
+void StepChromePool();
+
+// The controls are invisible until a laser (a controller's, or the 3D mouse's for the gaze and the
+// hand ray) passes very close to where they go (within `reach`, about 1.5 times a button's size),
+// a hand comes to them, or a laser is on one of them (SteamVR's hover event); they stay
+// kControlsLinger ticks after it leaves, and while in use. Only the panels something is at have
+// controls of their own just then (StepChromePool).
 void UpdateControls() {
     std::vector<Mat> lasers;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i) {
@@ -1594,9 +1610,8 @@ void UpdateControls() {
             const auto offsets = ControlOffsets(s);
             for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5})
                 spots.push_back(Mul(p, OnSurface(s, f * barhit::Width(s.chrome, g_barPaddingX), BarY(s), 0.003)));
-            const auto controls = s.Controls();
             for (int k = 1; k < kControls; ++k)
-                if (controls[k] != vr::k_ulOverlayHandleInvalid) spots.push_back(Mul(p, offsets[k]));
+                if (s.HasControl(k)) spots.push_back(Mul(p, offsets[k]));
             UpdateCorner(s, p, lasers);
             const double reach = std::max(s.grip * 1.5, s.chrome * 0.12);
             for (const Mat &d : lasers) {
@@ -1611,12 +1626,14 @@ void UpdateControls() {
                 }
             }
         }
+    }
+    StepChromePool();
+    for (auto &[i, s] : g_screens) {
         const bool inUse = s.drag != Drag::None || std::any_of(std::begin(s.hover), std::end(s.hover), [](bool h) { return h; });
         const bool want = s.visible && (inUse || g_tick < s.nearUntil);
-        // The controls stay shown while their screen is, just fully transparent when not
-        // wanted: SteamVR's laser still hits them, and the hover event brings them in, for
-        // any device's laser, whatever its shape.
-        if (s.visible && !s.controlsUp) {
+        // A panel's set of controls stays shown while it has one, just fully transparent when
+        // not wanted: SteamVR's laser still hits them, and the hover event keeps them in.
+        if (s.visible && !s.controlsUp && s.bar != vr::k_ulOverlayHandleInvalid) {
             for (auto o : s.Controls())
                 if (o != vr::k_ulOverlayHandleInvalid) PinShow(o);
             s.controlsUp = true;
@@ -2465,10 +2482,10 @@ void ApplyCrop(Screen &s) {
 
 // ft-floatd's "float": the window's rectangle, its title bar, and the density. The panel's
 // top left corner stays where it is when the window changes size.
-// A floating window's panel and its controls exist only while a window floats on it: SteamVR
-// allows k_unMaxOverlayCount (128) overlays in all, SteamVR's own included, and each panel
-// with its controls takes seven, so eight idle slots held 56 (2026-10-07: with three screens,
-// a third remote screen didn't fit). Everything the overlays show is kept in the Screen, so
+// A floating window's panel exists only while a window floats on it: SteamVR allows
+// k_unMaxOverlayCount (128) overlays in all, SteamVR's own included, and each panel took seven
+// with its controls then, so eight idle slots held 56 (2026-10-07: with three screens, a third
+// remote screen didn't fit). The controls are shared now (chromepool.h). Everything the overlays show is kept in the Screen, so
 // a new panel picks up where the old one was.
 bool MakePanel(Screen &s, const char *prefix, const char *label);
 void SetScreenTexture(const Screen &s, vr::SharedTextureHandle_t handle);
@@ -2488,7 +2505,11 @@ bool EnsureFloatPanel(Screen &s) {
     return true;
 }
 
+void ReturnChrome(Screen &s);
+
 void DropFloatPanel(Screen &s) {
+    g_chromePool.Release(ScreenIndexOf(s));   // (its set's overlays aren't its own to destroy)
+    ReturnChrome(s);
     for (auto o : s.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     s.overlay = s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton =
@@ -3427,13 +3448,12 @@ handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
     P.held = s.drag != Drag::None && !IsHandHolder(s.dragDevice);
     double u[kControls], v[kControls];
     ControlUV(s, u, v);
-    const auto controls = s.Controls();
     static const handinput::Control kinds[kHandControls] = {handinput::Control::Bar, handinput::Control::Curve,
                                                 handinput::Control::Roll, handinput::Control::Tab,
                                                 handinput::Control::Dock, handinput::Control::Close,
                                                 handinput::Control::Reset, handinput::Control::Pin};
     for (int k = 0; k < kHandControls; ++k) {   // (not the layout button: a laser's, so far)
-        if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
+        if (!s.HasControl(k)) continue;   // (by its kind: a set comes once a hand is near, StepChromePool)
         if (k == 3 && g_resizeCorner.sharp) continue;  // legacy retains its original near-hand tab
         const double c = k == 3 ? HandleSize(s) : s.grip;
         const double hw = k == 0 ? s.chrome / 2 : c / 2, hh = k == 0 ? s.chrome * 12 / 256 : c / 2;
@@ -6254,9 +6274,14 @@ void ft_vr_shutdown(void) {
     if (g_catcher != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_catcher);
     g_catcher = vr::k_ulOverlayHandleInvalid;
     for (auto &[i, s] : g_screens) {
+        g_chromePool.Release(i);
+        ReturnChrome(s);
         for (auto o : s.All()) vr::VROverlay()->DestroyOverlay(o);
         for (auto &[k, sub] : s.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);
     }
+    for (auto &set : g_chromeSets)
+        for (auto o : set.part)
+            if (set.made) vr::VROverlay()->DestroyOverlay(o);
     for (auto &[dev, g] : g_guides)
         for (auto o : {g.ring.overlay, g.dot.overlay}) vr::VROverlay()->DestroyOverlay(o);
     for (GuidePart &r : g_palmRing)
@@ -6743,8 +6768,9 @@ bool ft_vr_vsync(double *since, double *hz) {
 
 namespace {
 
-// A panel and its controls. `prefix` names the overlays (frametop.screen.N,
-// frametop.float.N), `label` is what SteamVR shows ("Screen 2", "Floating window 1").
+// A panel. `prefix` names its overlay (frametop.screen.N, frametop.float.N, frametop.remote.N),
+// `label` is what SteamVR shows ("Screen 2", "Floating window 1"). Its controls are lent to it
+// while something is at it (StepChromePool).
 bool MakePanel(Screen &s, const char *prefix, const char *label) {
     char key[64], name[64];
     std::snprintf(key, sizeof key, "%s", prefix);
@@ -6759,44 +6785,114 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
     vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_IgnoreTextureAlpha, true);
     vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
     vr::VROverlay()->SetOverlayFlag(s.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
-    const auto &corner = HandleTexture(false);
-    static const auto curve = CurveTexture(64);
-    static const auto roll = RollTexture(64);
-    // (each told to the pointer helper, as the panel is: its ray and the gaze find them at once)
-    auto chrome = [&](const char *part, const char *what, const std::vector<uint8_t> &px, int w, int h) {
-        std::snprintf(key, sizeof key, "%s.%s", prefix, part);
-        std::snprintf(name, sizeof name, "%s: %s", label, what);
-        const vr::VROverlayHandle_t o = MakeChrome(key, name, px, w, h);
-        if (o != vr::k_ulOverlayHandleInvalid) AnnounceOverlay(key);
-        return o;
-    };
-    const auto &barImage = BarImage(barhit::Pixels(s.chrome, g_barPaddingX, g_barPaddingY), false);
-    s.bar = chrome("bar", "move", barImage.pixels, barImage.width, barImage.height);
-    s.barPaintedVersion = 0;
-    vr::VROverlay()->SetOverlayFlag(s.bar, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
-    s.curveButton = chrome("curve", "curve", curve, 64, 64);
-    s.rollButton = chrome("roll", "roll", roll, 64, 64);
-    vr::VROverlay()->SetOverlayFlag(s.rollButton, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
-    s.handle = chrome("resize", "resize", corner, HandlePixels(), HandlePixels());
-    s.resizePaintedVersion = 0;
-    if (s.floating) vr::VROverlay()->SetOverlayFlag(s.handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (its density)
-    if (s.floating) {
-        static const auto dock = DockTexture(64);
-        static const auto close = CloseTexture(64);
-        s.dockButton = chrome("dock", "back to the desktop", dock, 64, 64);
-        s.closeButton = chrome("close", "close", close, 64, 64);
-    } else {
-        static const auto reset = ResetTexture(64);
-        static const auto pin = PinTexture(64, false);
-        s.resetButton = chrome("reset", "reset the layout", reset, 64, 64);
-        s.pinButton = chrome("pin", "pin in view", pin, 64, 64);
-        s.pinLit = false;
-        static const auto layout = LayoutTexture(64);
-        s.layoutButton = chrome("layout", "move the layout", layout, 64, 64);
-        vr::VROverlay()->SetOverlayFlag(s.layoutButton, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
-    }
     ApplyAlpha(s);
     return true;
+}
+
+// ---------------------------------------------------------------- shared controls
+
+// chromepool.h's sets: every control once each (Screen::Controls()' order), lent to the panels
+// something is at. Their keys are frametop.controls.K.PART, PART as a panel's own were.
+constexpr const char *kControlPart[kControls] = {"bar", "curve", "roll", "resize", "dock", "close", "reset", "pin", "layout"};
+constexpr const char *kControlWhat[kControls] = {"move", "curve", "roll", "resize", "back to the desktop", "close",
+                                                 "reset the layout", "pin in view", "move the layout"};
+// Set k's overlays, made the first time a panel needs it (each told to the pointer helper, as the
+// panels are: its ray and the gaze find them at once). False if SteamVR made them not all.
+bool MakeChromeSet(int k) {
+    ChromeSet &set = g_chromeSets[k];
+    if (set.made) return true;
+    static const auto curve = CurveTexture(64), roll = RollTexture(64), dock = DockTexture(64), close = CloseTexture(64),
+                      reset = ResetTexture(64), pin = PinTexture(64, false), layout = LayoutTexture(64);
+    const std::vector<uint8_t> *round[kControls] = {nullptr, &curve, &roll, nullptr, &dock, &close, &reset, &pin, &layout};
+    const auto &bar = BarImage(barhit::Pixels(0.3, g_barPaddingX, g_barPaddingY), false);
+    for (int c = 0; c < kControls; ++c) {
+        char key[64], name[80];
+        std::snprintf(key, sizeof key, "frametop.controls.%d.%s", k + 1, kControlPart[c]);
+        std::snprintf(name, sizeof name, "Frametop controls %d: %s", k + 1, kControlWhat[c]);
+        set.part[c] = c == 0   ? MakeChrome(key, name, bar.pixels, bar.width, bar.height)
+                      : c == 3 ? MakeChrome(key, name, HandleTexture(false), HandlePixels(), HandlePixels())
+                               : MakeChrome(key, name, *round[c], 64, 64);
+        if (set.part[c] == vr::k_ulOverlayHandleInvalid) {
+            for (int d = 0; d < c; ++d) overlaytex::Forget(set.part[d]), vr::VROverlay()->DestroyOverlay(set.part[d]);
+            set.part.fill(vr::k_ulOverlayHandleInvalid);
+            return false;
+        }
+        AnnounceOverlay(key);
+    }
+    for (int c : {0, 2, 8}) vr::VROverlay()->SetOverlayFlag(set.part[c], vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
+    set.made = true;
+    return true;
+}
+
+// The panel's controls back to their set: hidden, and the panel without any.
+void ReturnChrome(Screen &s) {
+    for (auto o : s.Controls())
+        if (o != vr::k_ulOverlayHandleInvalid) PinHide(o), vr::VROverlay()->SetOverlayAlpha(o, 0);
+    s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton = s.pinButton =
+        s.layoutButton = vr::k_ulOverlayHandleInvalid;
+    std::fill(std::begin(s.hover), std::end(s.hover), false);
+    s.controls = 0, s.controlsUp = false;
+    s.barBuzz.Leave(), s.resizeBuzz.Leave();
+    s.resizeRegionMessage.clear();
+}
+
+// Set k lent to the panel: the controls its kind has, painted, sized and placed for it (shown by
+// UpdateControls); the others hidden. Events still queued from the set's last panel are dropped.
+void LendChrome(Screen &s, int k) {
+    if (!MakeChromeSet(k)) {
+        static bool told = false;
+        if (!told) std::fprintf(stderr, "openvr: no overlays for controls set %d: panels go without until one frees\n", k + 1), told = true;
+        return;
+    }
+    const ChromeSet &set = g_chromeSets[k];
+    vr::VREvent_t ev;
+    for (auto o : set.part)
+        while (vr::VROverlay()->PollNextOverlayEvent(o, &ev, sizeof ev)) {}
+    vr::VROverlayHandle_t *mine[kControls] = {&s.bar,        &s.curveButton, &s.rollButton,  &s.handle,     &s.dockButton,
+                                              &s.closeButton, &s.resetButton, &s.pinButton, &s.layoutButton};
+    for (int c = 0; c < kControls; ++c) {
+        if (!s.HasControl(c)) {
+            PinHide(set.part[c]), vr::VROverlay()->SetOverlayAlpha(set.part[c], 0);
+            *mine[c] = vr::k_ulOverlayHandleInvalid;
+            continue;
+        }
+        *mine[c] = set.part[c];
+        vr::VROverlay()->SetOverlayName(set.part[c], (s.label + ": " + kControlWhat[c]).c_str());
+    }
+    // a floating window's tab scrolls its density (the event loop)
+    vr::VROverlay()->SetOverlayFlag(s.handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, s.floating);
+    static const auto pinNormal = PinTexture(64, false);
+    if (s.pinButton != vr::k_ulOverlayHandleInvalid) overlaytex::Set(s.pinButton, pinNormal.data(), 64, 64);
+    s.pinLit = false;           // (LightPin paints it blue again if it's pinned to the head)
+    s.cornerLit = false;        // (UpdateCorner lights it again while resizing)
+    s.barPaintedVersion = 0;    // (PaintBar)
+    s.resizePaintedVersion = 0; // (PaintResizeMask, which tells the pointer helper its tab's shape)
+    s.controls = 0, s.controlsUp = false;
+    std::fill(std::begin(s.hover), std::end(s.hover), false);
+    PlaceChrome(s);
+    ApplyAlpha(s);
+}
+
+// Every tick, after UpdateControls has seen what's near: the sets go to the shown panels something
+// is at, and back from the ones nothing is at once their controls have faded (chromepool.h).
+void StepChromePool() {
+    std::vector<chromepool::Panel> panels;
+    for (const auto &[i, s] : g_screens) {
+        if (!s.visible) continue;
+        const bool busy = s.drag != Drag::None || s.layoutHeld ||
+                          std::any_of(std::begin(s.hover), std::end(s.hover), [](bool h) { return h; });
+        const bool wants = busy || g_tick < s.nearUntil || s.handNear || s.handHover != 0 ||
+                           (g_barPreview.enabled && g_barPreview.always);
+        panels.push_back({i, busy, wants, s.controls > 0, int64_t(s.nearUntil)});
+    }
+    for (const auto &m : g_chromePool.Step(panels)) {
+        if (m.from >= 0) {
+            if (auto it = g_screens.find(m.from); it != g_screens.end()) ReturnChrome(it->second);
+        }
+        if (m.to >= 0) {
+            if (auto it = g_screens.find(m.to); it != g_screens.end()) LendChrome(it->second, m.set);
+        }
+    }
 }
 
 }  // namespace
@@ -6822,8 +6918,8 @@ void ft_vr_screen_create(int index, double metres, int count) {
 }
 
 // A remote screen's panel (remote.c): like a screen's, with its own overlay keys. False if
-// SteamVR made no panel (it allows k_unMaxOverlayCount overlays in all, and each panel with
-// its controls takes seven).
+// SteamVR made no panel (it allows k_unMaxOverlayCount overlays in all; each panel takes one,
+// and the controls are shared, chromepool.h).
 // A remote screen's place while its stream is stopped (Remote Displays' Disconnect): its next
 // start puts it back there. Only for this run: the room's coordinates may not be the same in
 // the next one, and ft-layout places it then.
@@ -6947,6 +7043,8 @@ void ft_vr_screen_destroy(int index) {
     Mat p;
     const Screen &s = it->second;
     if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe};
+    g_chromePool.Release(index);
+    ReturnChrome(it->second);
     for (auto o : it->second.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     for (auto &[k, sub] : it->second.subs) vr::VROverlay()->DestroyOverlay(sub.overlay);

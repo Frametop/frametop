@@ -577,9 +577,10 @@ Item {
                                             Controls.ToolTip.text: "While you wear the headset and its displays stream, its "
                                                                    + modelData.kind + " works in Frametop and stops working on "
                                                                    + "the computer. Take the headset off, or press both Shifts "
-                                                                   + "and Escape on it, to give it back. Needs Frametop's build "
-                                                                   + "of Vibepollo, with host input turned on there (one without "
-                                                                   + "the other needs a Linux host)."
+                                                                   + "and Escape on it, to give it back. Works on Windows and "
+                                                                   + "Linux with Frametop's build of Vibepollo, with host input "
+                                                                   + "turned on there. Lending only one of the two needs a "
+                                                                   + "Linux host for now: Windows lends both or neither."
                                             Controls.ToolTip.visible: hovered
                                         }
                                     }

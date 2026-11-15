@@ -57,8 +57,8 @@ class Windows(unittest.TestCase):
             raise self.m.NoAnswer("ft-screens isn't running")
 
         self.m.run_stream = fake_stream
-        self.m.ft_hostapi.request = fake_request
-        self.m.ft_hostapi.post_json = fake_post
+        self.w.ft_hostapi.request = fake_request
+        self.w.ft_hostapi.post_json = fake_post
         self.m.screens_socket = no_screens
         self.answers["/api/frametop/windows"] = (200, WINDOWS)
         self.m.save_layout({"hosts": [{"name": "oma7", "address": "192.0.2.30", "windows": {"port": 48989},

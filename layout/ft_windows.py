@@ -11,6 +11,7 @@ import math
 import re
 
 import ft_layout as L
+import ft_hostapi  # noqa: E402  (questions to a PC's Vibepollo Web UI API; on the path ft_layout sets)
 
 WINDOW_SIZE = (1280, 800)  # a launched app's first size
 WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
@@ -68,14 +69,14 @@ def window_host(layout, name):
 def window_api(host, port, method, path, body=None):
     """The host's Frametop windows instance: its JSON answer, or RuntimeError with its why."""
     if method == "GET":
-        status, answer = L.ft_hostapi.request(host["address"], "GET", path, timeout=5.0, port=port)
+        status, answer = ft_hostapi.request(host["address"], "GET", path, timeout=5.0, port=port)
     else:
-        status, answer = L.ft_hostapi.post_json(host["address"], path, body, timeout=25.0, port=port)
+        status, answer = ft_hostapi.post_json(host["address"], path, body, timeout=25.0, port=port)
     if status == 200 and isinstance(answer, dict):
         return answer
     why = answer.get("error") if isinstance(answer, dict) else None
     if not status:
-        why = why or f"no answer (a token in {L.ft_hostapi.token_path(host['address'], port)}?)"
+        why = why or f"no answer (a token in {ft_hostapi.token_path(host['address'], port)}?)"
     raise RuntimeError(f"{host.get('name') or host['address']}: {why or f'HTTP {status}'}")
 
 

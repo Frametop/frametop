@@ -80,8 +80,8 @@ class Desktopless(unittest.TestCase):
                 return 200, {"address": "0x99", "output": "FT-W1"}
             return 200, {"status": True}
 
-        self.m.ft_hostapi.request = fake_request
-        self.m.ft_hostapi.post_json = lambda a, p, b, timeout=20.0, port=0, **kw: fake_request(a, "POST", p, b, port=port)
+        self.d.W.ft_hostapi.request = fake_request
+        self.d.W.ft_hostapi.post_json = lambda a, p, b, timeout=20.0, port=0, **kw: fake_request(a, "POST", p, b, port=port)
         self.m.run_stream = lambda *a, timeout=60, stdin=None: (0, "paired", "")
         self.m.screens_socket = lambda: self.screens
 

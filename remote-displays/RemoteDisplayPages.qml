@@ -552,7 +552,7 @@ Item {
                                 checked: hostCard.modelData.mic
                                 onToggled: backend.setMic(hostCard.modelData.name, checked)
                                 Controls.ToolTip.text: "Apps on it can record the Frame's microphone while its displays stream: "
-                                                       + "pick \"Microphone (Steam Streaming Microphone)\" on Windows, "
+                                                       + "pick \"Microphone (Steam Streaming Microphone)\" on Windows (it needs Steam installed), "
                                                        + "\"Frametop Microphone\" on Linux. Needs Frametop's build of Vibepollo."
                                 Controls.ToolTip.visible: hovered
                             }

@@ -85,7 +85,10 @@ class Carrying:
         if asked is not None and stands(here, asked[0]):
             if self.now() - asked[1] <= SETTLE:
                 return placed       # the room hasn't come round yet
-            return self._put(ident, number, target, want, placed)       # its owner's Frame didn't take it there
+            # its owner's Frame didn't take it there. Asked no more: a room place that comes late is
+            # the room moving it, not a carry to send again.
+            self.asked.pop(ident, None)
+            return self._put(ident, number, target, want, placed)
         if asked is None and stands(here, placing.to_floor(floor, placed)):
             return self._put(ident, number, target, want, placed)       # it stands where it was put: the room moved it
         return self._carried(ident, number, floor, got, target, want, placed)

@@ -163,7 +163,9 @@ def open_windows(sock, eye, heading, seen, extra=()):
         if name not in hosts:
             continue
         host, port = hosts[name]
-        windows = answer.get("windows", [])
+        # (a host's answer, checked as ft_windows checks it: a window it can't name isn't one)
+        windows = [w for w in answer.get("windows") or [] if isinstance(w, dict)
+                   and W.WINDOW_ADDRESS.fullmatch(str(w.get("address", "")))]
         W.window_prune(layout, host, windows)
         out = {d["app"][7:] for d in host.get("displays", []) if d.get("window")}
         mine = seen.setdefault(name, set())
@@ -179,8 +181,8 @@ def open_windows(sock, eye, heading, seen, extra=()):
     todo = sorted(todo, key=lambda t: rank(t[2]))[:max(0, free)]
     fan, new = [], []
     for host, port, w in todo:
-        size = W.window_size({}, (min(w.get("width") or W.WINDOW_SIZE[0], W.WINDOW_MAX[0]),
-                                  min(w.get("height") or W.WINDOW_SIZE[1], W.WINDOW_MAX[1])))
+        size = W.window_size({}, (int(W.number(w.get("width") or None, W.WINDOW_SIZE[0], 1, W.WINDOW_MAX[0])),
+                                  int(W.number(w.get("height") or None, W.WINDOW_SIZE[1], 1, W.WINDOW_MAX[1]))))
         saved = places.get(app_key(host, w)) or []
         pose = saved.pop(0) if saved else None
         new.append((host, port, w, size, pose))

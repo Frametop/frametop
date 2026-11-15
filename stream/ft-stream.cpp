@@ -303,6 +303,7 @@ struct Mic {
 Mic g_mic;
 
 bool HostFlag(const std::string &host, const char *key);
+uint8_t HostInputKinds(const std::string &host);
 
 // A test's file (hostinput::TestForbidding) allows a host's input only with "allow_host_input": true.
 bool AllowsHostInput(const std::string &text) {
@@ -314,7 +315,8 @@ bool AllowsHostInput(const std::string &text) {
 
 // The host's own keyboard and mouse, lent to Frametop (docs/host-input.md) by a Linux host with
 // Frametop's Vibepollo build. One stream per host holds them: the one holding
-// $XDG_RUNTIME_DIR/frametop-input-HOST.lock. While "input": true is on its layout entry, the
+// $XDG_RUNTIME_DIR/frametop-input-HOST.lock. While "input" is on its layout entry (true for the
+// keyboard and mouse, "keyboard" or "mouse" for one: Remote Displays' Keyboard and Mouse switches), the
 // stream is live, the pointer helper says the headset is worn and the relay isn't paused, it
 // renews a lease every 500 ms (LiSendFrametopHostInputLease, moonlight-hostin.patch). When the
 // switch goes off or the headset comes off it releases, which also lifts the host's escape (both
@@ -329,6 +331,7 @@ struct HostInput {
     std::string mark;      // where the host's escape is kept until a release lifts it (hostinput::EscapeMark)
     int sock = -1;         // datagrams to the relay and the pointer helper, and their replies
     bool switchOn = false, locked = false, refusedSaid = false;
+    uint8_t kinds = 0;  // what the switches lend (hostinput::kKeyboard, kMouse); switchOn: any
     int lock = -1;
     std::vector<std::string> testDirs;  // where the tests keep their files
     std::string testSaid;               // the test file the log last said stops the leases
@@ -496,7 +499,18 @@ struct HostInput {
 
     void Tick(int64_t now, bool live) {
         if (sock < 0) return;
-        if (now >= checkAt) checkAt = now + hostinput::kStaleNs, switchOn = HostFlag(host, "input");
+        if (now >= checkAt) {
+            checkAt = now + hostinput::kStaleNs;
+            const uint8_t was = kinds;
+            kinds = HostInputKinds(host), switchOn = kinds != 0;
+            // A switch turned off with the other on: that kind's device goes now, and the next
+            // engage asks for the other alone.
+            if (switchOn && kinds != was) {
+                std::lock_guard<std::mutex> lock(mu);
+                relay.Want(kinds);
+                leaseAt = 0;
+            }
+        }
         if (!switchOn || !live) return Apply(hostinput::Decide(switchOn, live, worn, paused, false, now)), Unlock();
         if (!locked && now >= lockAt) {
             lockAt = now + hostinput::kStaleNs;
@@ -535,9 +549,9 @@ struct HostInput {
         {
             std::lock_guard<std::mutex> lock(mu);
             asking = !leasing;
-            if (asking) leasing = true, relay.Start(id, host);  // before the host can answer
+            if (asking) leasing = true, relay.Start(id, host), relay.Want(kinds);  // before the host can answer
         }
-        const auto engage = hostinput::Engage(seq++);
+        const auto engage = hostinput::Engage(seq++, hostinput::kLeaseMs, kinds);
         if (LiSendFrametopHostInputLease(engage.data(), int(engage.size())) == -1) {
             // Not an encrypted control stream, or not connected yet: asked again now and then.
             leaseAt = now + hostinput::kStaleNs;
@@ -546,7 +560,9 @@ struct HostInput {
             std::lock_guard<std::mutex> lock(mu);
             leasing = false;
         } else {
-            if (asking) std::printf("hostinput: asking for %s's keyboard and mouse\n", host.c_str());
+            if (asking)
+                std::printf("hostinput: asking for %s's %s\n", host.c_str(),
+                            kinds == hostinput::kKeyboard ? "keyboard" : kinds == hostinput::kMouse ? "mouse" : "keyboard and mouse");
             refusedSaid = false;
         }
         std::fflush(stdout);
@@ -1016,8 +1032,7 @@ std::string Route(const std::string &host, int port) {
 }
 
 // Whether the host's entry in the layout has `key` true: "mic" (Frametop Remote Displays' Send my
-// microphone) or "input" (Use this computer's keyboard and mouse). Read again every few seconds
-// while streaming.
+// microphone) or "clipboard" (Share the clipboard). Read again every few seconds while streaming.
 bool HostFlag(const std::string &host, const char *key) {
     const nlohmann::json layout = Layout();
     if (layout.is_null()) return false;
@@ -1031,6 +1046,20 @@ bool HostFlag(const std::string &host, const char *key) {
 // ft-layout from before ports (an older release's Reset Screen Layout or profile launchers) asks
 // for HOST alone: that reached the instance on 47989, where the client isn't paired, so the
 // display froze and its pointer went to the main display (2026-10-10).
+// What the host's "input" lends (Remote Displays' Keyboard and Mouse switches): true both,
+// "keyboard" or "mouse" one, anything else (false, none, garbled) nothing. Read again every few
+// seconds while streaming.
+uint8_t HostInputKinds(const std::string &host) {
+    const nlohmann::json layout = Layout();
+    if (layout.is_null()) return 0;
+    for (const auto &h : layout["hosts"]) {
+        if (!h.is_object() || h.value("address", "") != host || !h.contains("input")) continue;
+        const auto &v = h["input"];
+        return hostinput::InputKinds(v.is_boolean() ? (v.get<bool>() ? "true" : "") : v.is_string() ? v.get<std::string>() : "");
+    }
+    return 0;
+}
+
 int LayoutPort(const std::string &host, const std::string &id) {
     const nlohmann::json layout = Layout();
     if (layout.is_null()) return 0;

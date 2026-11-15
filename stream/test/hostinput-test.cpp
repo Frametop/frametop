@@ -100,7 +100,14 @@ int main() {
     assert(RelayId(std::string(80, 'a')).size() == 64);
 
     // The lease.
-    assert((Engage(0x01020304) == std::array<unsigned char, 8>{kVersion, 1, 4, 3, 2, 1, 0xdc, 0x05}));
+    assert((Engage(0x01020304) == std::vector<unsigned char>{kVersion, 1, 4, 3, 2, 1, 0xdc, 0x05}));
+    // One kind: a ninth byte. Both: none, so a host from before the byte still lends them.
+    assert((Engage(1, 1500, kKeyboard) == std::vector<unsigned char>{kVersion, 1, 1, 0, 0, 0, 0xdc, 0x05, kKeyboard}));
+    assert((Engage(1, 1500, kMouse) == std::vector<unsigned char>{kVersion, 1, 1, 0, 0, 0, 0xdc, 0x05, kMouse}));
+    assert(Engage(1, 1500, kKeyboard | kMouse).size() == 8);
+    // The layout's "input".
+    assert(InputKinds("true") == (kKeyboard | kMouse) && InputKinds("keyboard") == kKeyboard && InputKinds("mouse") == kMouse);
+    assert(InputKinds("") == 0 && InputKinds("Keyboard") == 0 && InputKinds("both") == 0);
     assert((Release() == std::array<unsigned char, 2>{kVersion, 2}));
     assert((Drop() == std::array<unsigned char, 2>{kVersion, 3}));
 
@@ -325,6 +332,30 @@ int main() {
     said.clear();
     relay.Stop();
     assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse"}) && !relay.engaged());
+
+    // One kind asked for: a hello with both brings only that device, and the other's events go nowhere.
+    Relay one([&](const std::string &msg) {
+        said.push_back(msg);
+        return true;
+    });
+    said.clear();
+    one.Start("oma7", "192.0.2.50");
+    one.Want(kMouse);
+    one.Take(on), one.Take(hello);
+    assert((said == std::vector<std::string>{"hostdev oma7 mouse oma7"}));
+    said.clear();
+    one.Take(key), one.Take(move);
+    assert((said == std::vector<std::string>{"hostev oma7 mouse 2 0 1"}));
+    said.clear();
+    // Switched to the keyboard: the mouse goes at once, and the keyboard comes with the next hello.
+    one.Want(kKeyboard);
+    assert((said == std::vector<std::string>{"hostbye oma7 mouse"}) && one.devices() == 0);
+    said.clear();
+    one.Take(hello);
+    assert((said == std::vector<std::string>{"hostdev oma7 keyboard oma7"}));
+    said.clear();
+    one.Want(kKeyboard | kMouse), one.Take(hello);  // both again
+    assert((said == std::vector<std::string>{"hostdev oma7 keyboard oma7", "hostdev oma7 mouse oma7"}));
 
     std::puts("hostinput-test: ok");
 }

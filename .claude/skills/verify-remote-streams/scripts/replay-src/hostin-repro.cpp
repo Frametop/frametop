@@ -30,6 +30,7 @@ int LiSendFrametopHostInputLease(const unsigned char *p, int n) {
     return 0;
 }
 bool HostFlag(const std::string &, const char *key) { return !strcmp(key, "input") && g_switch; }
+uint8_t HostInputKinds(const std::string &) { return g_switch ? hostinput::kKeyboard | hostinput::kMouse : 0; }
 bool AllowsHostInput(const std::string &) { return false; }
 #include "hostin_struct.inc"
 

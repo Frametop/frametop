@@ -156,7 +156,7 @@ Each model action is one step of the code. Change the model when the code it nam
 | `MayDieNow` | the window `GuardCanDieMidFake` opens: `pc` in `on_fake`/`on_verify` is after `start_guard` (l. 245) and before the post-check (l. 317) |
 | `GuardAlive` | `hostinput.py` `guard_alive` (l. 276) |
 | `Released`, the proxy's `hung` | `transport.py` `request` (l. 9): a 4 s timeout raises `socket.timeout`, after the proxy may have acted |
-| `StreamStarts`, `StreamEnds` | a stream to a host with `"input": true` opens or closes (`HostInput` in `stream/ft-stream.cpp`) |
+| `StreamStarts`, `StreamEnds` | a stream to a host with `"input"` (true, `"keyboard"` or `"mouse"`) opens or closes (`HostInput` in `stream/ft-stream.cpp`) |
 | `StreamTakesLock` | `HostInput::Tick` (l. 443): `flock` on `frametop-input-HOST.lock`, retried every 3 s |
 | `StreamTick` (`asked`, `saidTest`, `seen`, `lease`) | `HostInput::Tick`: ask `gaze ? headset` once a second, `TakeAnswers` (l. 417), `hostinput::TestForbidding` (`stream/hostinput.h` l. 170) on the flag every tick, `AfterTest` (l. 181) and `TakeAnswers(now, false)` when it goes, then `Decide` (l. 121): a lease only with no test's file and a fresh "worn" |
 | `HelperAnswers` | the pointer helper's answer to `gaze ? headset`: "worn" while the testbench fakes the wearer |
@@ -164,12 +164,12 @@ Each model action is one step of the code. Change the model when the code it nam
 ## Scope
 
 What the check covers: every interleaving of one testbench command at a time, one guard unit, one
-stream to one host with `"input": true`, a proxy that may stall (`Hangs`), and a guard that may be
+stream to one host with `"input"` (true, `"keyboard"` or `"mouse"`), a proxy that may stall (`Hangs`), and a guard that may be
 killed or sent SIGTERM (`Kills`). It covers that model, not the whole system.
 
 Left out:
 - `--allow-host-input`, which the user approves.
-- A host that gains `"input": true` mid-run. That gap is documented in `docs/host-input.md`.
+- A host that gains `"input"` (true, `"keyboard"` or `"mouse"`) mid-run. That gap is documented in `docs/host-input.md`.
 - Several hosts, and two testbench commands at once.
 - The testbench command itself being killed mid-command.
 - The verify skill's fake viewer and `verify-frametop guard`.

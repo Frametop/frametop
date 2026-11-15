@@ -44,7 +44,8 @@ you face (yaw only), like a recenter. It lives in ~/.config/frametop-layout.json
               "mic": false,                       send the Frame's microphone to it (needs
                                                           Frametop's Vibepollo on Windows; ft-stream)
               "input": false,                     use its own keyboard and mouse in Frametop while
-                                                          the headset is worn (needs Frametop's
+                                                          the headset is worn: true, "keyboard" or
+                                                          "mouse" (host_input.py; needs Frametop's
                                                           Vibepollo on Linux; ft-stream)
               "clipboard": false,                 share copied text and images with it both
                                                           ways (needs Vibepollo; ft-stream)
@@ -112,11 +113,12 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      first, or with --login, with the Web UI login read from stdin
                                      as two lines: a Sunshine instance on PORT) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
-  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off input=on|off
-                             clipboard=on|off windows=PORT|off
+  ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
+                             input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off
                                      how a host's streams reach it (they start over), whether
                                      the Frame's microphone goes to it, and whether its keyboard
-                                     and mouse come to Frametop (both within 3 s, no restart);
+                                     and mouse come to Frametop, or one of them (both within 3 s,
+                                     no restart);
                                      windows: its Frametop windows instance (ft-layout window)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
@@ -188,6 +190,7 @@ import ftipc  # noqa: E402  (questions to the datagram sockets)
 import ft_hostapi  # noqa: E402  (questions to a PC's Vibepollo Web UI API: Frametop windows)
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout_geometry  # noqa: E402  (where the screens go, as pure math)
+import host_input  # noqa: E402  (a host's "input": which of its keyboard and mouse it lends)
 from layout_geometry import (  # noqa: E402, F401  (re-exported: ft_floatd and the tests use them here)
     chain as _chain,
     cross,
@@ -1228,7 +1231,8 @@ def remote_command(args):
             w, h = d.get("size", [2560, 1440])
             state = "disconnected" if d.get("off") else running.get(n, "off")
             state += f" route {host.get('route', 'auto')}{' mic' if host.get('mic') else ''}"
-            state += " input" if host.get("input") else ""
+            lent = host_input.lent(host)
+            state += "" if not lent else " input" if len(lent) == 2 else f" input-{next(iter(lent))}"
             state += " clipboard" if host.get("clipboard") else ""
             print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
@@ -1249,8 +1253,8 @@ def remote_command(args):
                 restart = True
             elif k == "mic" and v in ("on", "off"):
                 host["mic"] = v == "on"  # the stream playing its sound looks every 3 s
-            elif k == "input" and v in ("on", "off"):
-                host["input"] = v == "on"  # its streams look every 3 s
+            elif k == "input" and v in host_input.WORDS:
+                host["input"] = host_input.value(host_input.WORDS[v])  # its streams look every 3 s
             elif k == "clipboard" and v in ("on", "off"):
                 host["clipboard"] = v == "on"  # its streams look every 3 s
             elif k == "windows" and (v == "off" or (v.isdigit() and 1024 < int(v) < 65535)):
@@ -1260,7 +1264,7 @@ def remote_command(args):
                     host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
             else:
                 raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
-                                   "mic=on|off input=on|off clipboard=on|off windows=PORT|off)")
+                                   "mic=on|off input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off)")
         save_layout(layout)
         if not restart:
             return

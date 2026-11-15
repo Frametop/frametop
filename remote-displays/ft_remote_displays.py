@@ -49,6 +49,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path[:0] = [LAYOUT_DIR, os.path.join(HERE, "..", "conf")]
 import ft_layout  # noqa: E402
+import host_input  # noqa: E402  (a host's "input": its keyboard, its mouse or both)
 import ft_hostapi  # noqa: E402  (where a host's token is kept; conf/)
 import ft_hostsignin  # noqa: E402  (the sign-ins that get one)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
@@ -241,7 +242,8 @@ class Backend(QObject):
                         else os.path.exists(ft_hostapi.token_path(address)),
                         "online": self._online.get(address), "route": h.get("route", "auto"),
                         "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
-                        "input": bool(h.get("input")), "clipboard": bool(h.get("clipboard")),
+                        "inputKeyboard": "keyboard" in host_input.lent(h),
+                        "inputMouse": "mouse" in host_input.lent(h), "clipboard": bool(h.get("clipboard")),
                         "appWindows": isinstance(h.get("windows"), dict),
                         "displays": displays})
         return out
@@ -353,11 +355,16 @@ class Backend(QObject):
         self._run(f"{'Sending' if on else 'Not sending'} the microphone to {name}",
                   "remote", "host", name, f"mic={'on' if on else 'off'}")
 
-    @Slot(str, bool)
-    def setInput(self, name, on):
-        """Use the host's own keyboard and mouse in Frametop (its streams pick it up within 3 s)."""
-        self._run(f"{'Using' if on else 'Not using'} {name}'s keyboard and mouse",
-                  "remote", "host", name, f"input={'on' if on else 'off'}")
+    @Slot(str, str, bool)
+    def setInput(self, name, kind, on):
+        """Use the host's own keyboard or mouse ("keyboard", "mouse") in Frametop, or stop, leaving
+        the other as it is (its streams pick it up within 3 s)."""
+        host = next((h for h in ft_layout.load_layout().get("hosts", []) if h.get("name") == name), None)
+        if host is None or kind not in host_input.KINDS:
+            return
+        kinds = host_input.lent(host) | {kind} if on else host_input.lent(host) - {kind}
+        self._run(f"{'Using' if on else 'Not using'} {name}'s {kind}",
+                  "remote", "host", name, f"input={host_input.word(kinds)}")
 
     @Slot(str, bool)
     def setClipboard(self, name, on):

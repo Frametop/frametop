@@ -31,7 +31,7 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
 - Never take a streamed host's keyboard and mouse. ft-stream leases a host's input while the
   headset is worn (docs/host-input.md), and a faked wearer counts: on 2026-10-30 a run took
   Daenon's laptop mid-sentence. `V launch` refuses while a remote display streams from a host with
-  `"input": true` (doctor's "no host-input streams"; `T host-input` lists them), and so does
+  an `"input"` (true, "keyboard" or "mouse"; doctor's "no host-input streams"; `T host-input` lists them), and so does
   `T worn on`. Otherwise `T worn on` starts a guard (user unit `frametop-fake-worn-guard`) that
   holds every such host's input lock while the wearer is faked, so a stream that starts later
   can't lease either; every `T` command releases a faked wearer whose guard has gone, and

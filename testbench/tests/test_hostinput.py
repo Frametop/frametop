@@ -65,6 +65,15 @@ class HostInputTests(Fixture):
         self.layout.write_text('{not json')
         self.assertEqual(hostinput.input_hosts(self.layout), {})
 
+    def test_a_host_lending_one_kind_counts(self):
+        layout = json.loads(self.layout.read_text())
+        layout['hosts'] += [{'name': 'kb', 'address': '192.0.2.71', 'input': 'keyboard'},
+                            {'name': 'ms', 'address': '192.0.2.72', 'input': 'mouse'},
+                            {'name': 'odd', 'address': '192.0.2.73', 'input': 'Keyboard'}]
+        self.layout.write_text(json.dumps(layout))
+        self.assertEqual(hostinput.input_hosts(self.layout),
+                         {'192.0.2.61': 'oma7', '192.0.2.71': 'kb', '192.0.2.72': 'ms', '192.0.2.73': 'odd'})
+
     def test_refusal_names_the_host_only_while_its_stream_is_live(self):
         self.stream(11, '192.0.2.92')   # input off
         self.stream(12, '192.0.2.93')   # no input key

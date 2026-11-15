@@ -76,13 +76,14 @@ def clear_flag():
 
 
 def input_hosts(layout=LAYOUT):
-    """Layout host address -> name, for the hosts with "input": true."""
+    """Layout host address -> name, for the hosts that lend any input: "input" true, "keyboard" or
+    "mouse", or any other value but false (a guard takes too many locks rather than too few)."""
     try:
         hosts = json.loads(Path(layout).read_text()).get('hosts') or []
     except (OSError, ValueError, AttributeError):
         return {}
     return {h['address']: h.get('name') or h['address'] for h in hosts
-            if isinstance(h, dict) and h.get('input') is True and isinstance(h.get('address'), str)}
+            if isinstance(h, dict) and h.get('input') not in (None, False) and isinstance(h.get('address'), str)}
 
 
 def streams(proc='/proc'):

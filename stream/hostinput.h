@@ -10,8 +10,9 @@
 //               record the other keys.
 //   state (2):  engaged (0 or 1), then the reason it isn't (ASCII)
 //   hello (3):  the kinds it lends (bit 1 keyboard, bit 2 mouse), then the host's name
-// A lease is engage (version, 1, a u32 sequence, a u16 lease in ms), release (version, 2), which
-// also lifts the host's escape, or drop (version, 3), which gives the input back but keeps one.
+// A lease is engage (version, 1, a u32 sequence, a u16 lease in ms, then, for one kind only, the
+// kinds: bit 1 keyboard, bit 2 mouse), release (version, 2), which also lifts the host's escape,
+// or drop (version, 3), which gives the input back but keeps one.
 #pragma once
 
 #include <fcntl.h>
@@ -96,9 +97,19 @@ inline std::string RelayId(const std::string &host) {
     return id.empty() ? "host" : id;
 }
 
-inline std::array<unsigned char, 8> Engage(uint32_t seq, uint16_t ms = kLeaseMs) {
-    return {kVersion, 1, (unsigned char)seq, (unsigned char)(seq >> 8), (unsigned char)(seq >> 16), (unsigned char)(seq >> 24),
-            (unsigned char)ms, (unsigned char)(ms >> 8)};
+// An engage for KINDS. For both it has no kinds byte, as before there was one: a host from then
+// takes it. One from then drops an engage for one kind, so it lends nothing: its keyboard and
+// mouse stay on the computer.
+inline std::vector<unsigned char> Engage(uint32_t seq, uint16_t ms = kLeaseMs, uint8_t kinds = kKeyboard | kMouse) {
+    std::vector<unsigned char> out{kVersion, 1, (unsigned char)seq, (unsigned char)(seq >> 8), (unsigned char)(seq >> 16),
+                                   (unsigned char)(seq >> 24), (unsigned char)ms, (unsigned char)(ms >> 8)};
+    if (kinds != (kKeyboard | kMouse)) out.push_back(kinds);
+    return out;
+}
+
+// The kinds the layout's "input" asks for: true both, "keyboard" or "mouse" one, anything else none.
+inline uint8_t InputKinds(const std::string &value) {
+    return value == "true" ? kKeyboard | kMouse : value == "keyboard" ? kKeyboard : value == "mouse" ? kMouse : 0;
 }
 
 inline std::array<unsigned char, 2> Release() { return {kVersion, 2}; }
@@ -257,6 +268,17 @@ public:
 
     void Start(const std::string &id, const std::string &host) { id_ = id, host_ = host, engaged_ = false, reason_.clear(); }
 
+    // The kinds the lease asks for: a device of another kind goes now, and none comes back for it,
+    // whatever a host's hello says.
+    void Want(uint8_t kinds) {
+        wanted_ = kinds;
+        for (uint8_t kind : {kKeyboard, kMouse}) {
+            if (!(devices_ & kind) || (kinds & kind)) continue;
+            devices_ &= uint8_t(~kind);
+            if (!send_("hostbye " + id_ + " " + Kind(kind))) owed_ |= kind;
+        }
+    }
+
     // A line to log when the host's state changed, or empty.
     std::string Take(const Record &r) {
         std::string said;
@@ -272,7 +294,7 @@ public:
                 if (!engaged_) break;
                 for (uint8_t kind : {kKeyboard, kMouse}) {
                     if (owed_ & kind) continue;
-                    if (r.kinds & kind) {
+                    if (r.kinds & wanted_ & kind) {
                         if (send_("hostdev " + id_ + " " + Kind(kind) + " " + (r.text.empty() ? host_ : r.text))) devices_ |= kind;
                         else Bye();
                     } else if (devices_ & kind) {
@@ -319,7 +341,7 @@ private:
     Sender send_;
     std::string id_, host_, reason_;
     bool engaged_ = false;
-    uint8_t devices_ = 0, owed_ = 0;
+    uint8_t devices_ = 0, owed_ = 0, wanted_ = kKeyboard | kMouse;
     int events_ = 0;
 };
 

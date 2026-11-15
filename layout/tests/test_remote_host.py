@@ -45,6 +45,16 @@ class RemoteHost(unittest.TestCase):
         self.m.remote_command(["host", "oma7", "input=off"])
         self.assertIs(self.host()["input"], False)
 
+    def test_input_for_one_kind(self):
+        self.m.remote_command(["host", "oma7", "input=keyboard"])
+        self.assertEqual(self.host()["input"], "keyboard")
+        self.m.remote_command(["host", "oma7", "input=mouse"])
+        self.assertEqual(self.host()["input"], "mouse")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.m.remote_command(["list"])
+        self.assertIn("route auto input-mouse", out.getvalue())
+
     def test_input_needs_no_restart(self):
         # ft-stream reads the switch from the layout every 3 s: nothing asks ft-screens to start over.
         self.m.remote_command(["host", "oma7", "input=on", "mic=on"])
@@ -53,8 +63,8 @@ class RemoteHost(unittest.TestCase):
         self.assertIs(self.host()["mic"], True)
 
     def test_bad_values_save_nothing(self):
-        for bad in ("input=yes", "input=", "input", "inputs=on"):
-            with self.assertRaisesRegex(RuntimeError, "input=on\\|off"):
+        for bad in ("input=yes", "input=", "input", "inputs=on", "input=both", "input=Keyboard"):
+            with self.assertRaisesRegex(RuntimeError, "input=on\\|off\\|keyboard\\|mouse"):
                 self.m.remote_command(["host", "oma7", "input=on", bad])
             self.assertNotIn("input", self.host())
 

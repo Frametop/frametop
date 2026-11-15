@@ -556,18 +556,34 @@ Item {
                                                        + "\"Frametop Microphone\" on Linux. Needs Frametop's build of Vibepollo."
                                 Controls.ToolTip.visible: hovered
                             }
-                            // Its own keyboard and mouse, lent while the headset is worn. Only
-                            // Frametop's build lends them, so Sunshine hosts don't get the switch.
-                            Controls.Switch {
+                            // Its own keyboard and mouse, each lent on its own while the headset is
+                            // worn: with only the keyboard lent, its mouse keeps moving its desktop.
+                            // Only Frametop's build lends them, so Sunshine hosts don't get the switches.
+                            ColumnLayout {
                                 visible: !hostCard.sunshine
-                                text: "Use this computer's keyboard and mouse"
-                                checked: hostCard.modelData.input
-                                onToggled: backend.setInput(hostCard.modelData.name, checked)
-                                Controls.ToolTip.text: "While you wear the headset and its displays stream, its keyboard and mouse "
-                                                       + "work in Frametop, and stop working on the computer. Take the headset off, "
-                                                       + "or press both Shifts and Escape on it, to give them back. Needs "
-                                                       + "Frametop's build of Vibepollo, with host input turned on there."
-                                Controls.ToolTip.visible: hovered
+                                spacing: 0
+                                Controls.Label { text: "Use this computer's own" }
+                                RowLayout {
+                                    spacing: Kirigami.Units.largeSpacing
+                                    Repeater {
+                                        model: [{ kind: "keyboard", label: "Keyboard", flag: "inputKeyboard" },
+                                                { kind: "mouse", label: "Mouse", flag: "inputMouse" }]
+                                        delegate: Controls.Switch {
+                                            required property var modelData
+                                            objectName: "input-" + modelData.kind
+                                            text: modelData.label
+                                            checked: hostCard.modelData[modelData.flag]
+                                            onToggled: backend.setInput(hostCard.modelData.name, modelData.kind, checked)
+                                            Controls.ToolTip.text: "While you wear the headset and its displays stream, its "
+                                                                   + modelData.kind + " works in Frametop and stops working on "
+                                                                   + "the computer. Take the headset off, or press both Shifts "
+                                                                   + "and Escape on it, to give it back. Needs Frametop's build "
+                                                                   + "of Vibepollo, with host input turned on there (one without "
+                                                                   + "the other needs a Linux host)."
+                                            Controls.ToolTip.visible: hovered
+                                        }
+                                    }
+                                }
                             }
                             // Its apps' windows as panels of their own, and in the launcher.
                             // Turning it on signs in to the Vibepollo that shares them, so

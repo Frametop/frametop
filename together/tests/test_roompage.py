@@ -234,10 +234,16 @@ class Page(PageCase):
         self.together.mode, self.together.people = "hosting", [ADA, BEN]
         self.together.asks = [{"id": 4, "name": "cy <b>", "login": "cy@example.org", "address": "100.64.0.9"}]
         self.panels.shared = {1: 0}
-        _, found, warnings = self.window()
+        root, found, warnings = self.window()
         self.assertTrue(self.until(lambda: self.b.mode == "hosting" and len(self.b.shares) == 2 and self.b.voiceUp), "the page asks by itself")
         self.assertTrue(self.until(lambda: found("people") is not None and found("people").property("count") == 2))
         self.assertEqual(found("asks").property("count"), 1)
+        self.assertTrue(self.until(lambda: len(self.items(root, "askText")) == 1))
+        ask = self.items(root, "askText")[0]
+        self.assertEqual(ask.property("text"), "cy <b> asks to come in (cy@example.org)")
+        self.assertIs(self.plain(ask), True, "the name the asker chose isn't read as markup")
+        self.items(root, "askLetIn")[0].clicked.emit()
+        self.assertTrue(self.until(lambda: self.together.asked and self.together.asked[-1] == "accept 4"))
         self.assertEqual(found("shares").property("count"), 2)
         self.assertEqual(found("roomLabel").property("text"), "Your room is open, with 1 other in it")
         self.assertEqual(found("hereLabel").property("text"), "100.64.0.7")

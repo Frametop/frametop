@@ -2,6 +2,7 @@
 #include "commands.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <sstream>
 #include <vector>
@@ -23,12 +24,21 @@ bool Number(const std::string &s, double lo, double hi, double &out) {
     return out = v, true;
 }
 
-// Text a peer sent is text (wire::IsText): only the quote and the backslash need care.
+// A JSON string. Text a peer sent is text (wire::IsText), but a login or a node name from the
+// local tailnet isn't checked so: a control character is written as \u00XX.
 std::string Quoted(const std::string &s) {
     std::string out = "\"";
     for (char c : s) {
-        if (c == '"' || c == '\\') out += '\\';
-        out += c;
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (static_cast<unsigned char>(c) < 0x20) {
+            char hex[7];
+            std::snprintf(hex, sizeof hex, "\\u%04x", static_cast<unsigned char>(c));
+            out += hex;
+        } else {
+            out += c;
+        }
     }
     return out + '"';
 }

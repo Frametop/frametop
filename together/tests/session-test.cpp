@@ -525,6 +525,18 @@ static void noise() {
     check("noise and forged messages on every link: the owner's room holds only who it let in, and only their own panels", ok);
 }
 
+// What the local tailnet says isn't checked as a peer's text is: a login with a control
+// character in it still makes good JSON (commands.cpp Quoted).
+static void tailnetText() {
+    Net net;
+    Frame a(net, "100.64.0.1", 47193, "Ann"), b(net, "100.64.0.2", 47193, "Bo");
+    b.login = "Bo\x01\n@example.com";
+    a.ask("open");
+    const std::string code = a.ask("invite").substr(3);
+    const bool ok = b.ask("join 100.64.0.1 47193 " + code) == "ok" && a.asking();
+    check("a login with control characters is written escaped in the state", ok && a.has("\"login\":\"Bo\\u0001\\u000a@example.com\"") && !a.has("Bo\x01"));
+}
+
 int main() {
     joining();
     mesh();
@@ -534,6 +546,7 @@ int main() {
     panels();
     looks();
     noise();
+    tailnetText();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;
 }

@@ -37,6 +37,7 @@
 #include "local/mediaclient.h"
 #include "media/testpattern.h"
 #include "media/words.h"
+#include "proto/panel.h"
 
 #include "../stream/iris.h"
 
@@ -264,6 +265,13 @@ int Run(const Args &args) {
             decoding.End();
             decoding.Begin();
             if (decoding.has) in.Lost("its video began anew");
+            continue;
+        }
+        if (began && (dec.width > uint32_t(proto::kMostPanelSide) || dec.height > uint32_t(proto::kMostPanelSide))) {
+            // No panel is that big (proto::Fits): a peer's stream that says so gets no pictures here.
+            std::printf("its video is %ux%u, more than a panel has: the panel is a still\n", dec.width, dec.height);
+            decoding.End(local::kDecoderRefused);
+            in.Anew();
             continue;
         }
         if (began) {

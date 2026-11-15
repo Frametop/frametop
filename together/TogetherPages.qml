@@ -246,26 +246,38 @@ Item {
                 Repeater {
                     objectName: "asks"
                     model: backend.ready ? backend.asks : []
-                    delegate: Kirigami.InlineMessage {
+                    // Not an InlineMessage: its label reads markup, and the name is one the
+                    // asker chose (together/README.md: shown as plain text).
+                    delegate: RowLayout {
                         id: askCard
                         required property var modelData
                         Layout.fillWidth: true
-                        visible: true
-                        type: Kirigami.MessageType.Warning
-                        text: (askCard.modelData.name || askCard.modelData.address) + " asks to come in"
-                              + (askCard.modelData.login ? " (" + askCard.modelData.login + ")" : "")
-                        actions: [
-                            Kirigami.Action {
-                                text: "Let in"
-                                icon.name: "dialog-ok"
-                                onTriggered: backend.accept(askCard.modelData.id)
-                            },
-                            Kirigami.Action {
-                                text: "No"
-                                icon.name: "dialog-cancel"
-                                onTriggered: backend.decline(askCard.modelData.id)
-                            }
-                        ]
+                        spacing: Kirigami.Units.smallSpacing
+                        Kirigami.Icon {
+                            source: "dialog-warning"
+                            implicitWidth: Kirigami.Units.iconSizes.small
+                            implicitHeight: Kirigami.Units.iconSizes.small
+                        }
+                        Controls.Label {
+                            objectName: "askText"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: (askCard.modelData.name || askCard.modelData.address) + " asks to come in"
+                                  + (askCard.modelData.login ? " (" + askCard.modelData.login + ")" : "")
+                        }
+                        Controls.Button {
+                            objectName: "askLetIn"
+                            text: "Let in"
+                            icon.name: "dialog-ok"
+                            onClicked: backend.accept(askCard.modelData.id)
+                        }
+                        Controls.Button {
+                            objectName: "askNo"
+                            text: "No"
+                            icon.name: "dialog-cancel"
+                            onClicked: backend.decline(askCard.modelData.id)
+                        }
                     }
                 }
 

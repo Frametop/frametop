@@ -60,6 +60,7 @@ def main():
 
     signal.signal(signal.SIGTERM, ended)
     signal.signal(signal.SIGINT, ended)
+    together = ftipc.address(names["--together"])
     was = refused = None
     try:
         while True:
@@ -71,9 +72,11 @@ def main():
             until = time.monotonic() + LOOK
             while (left := until - time.monotonic()) > 0 and select.select([taker], [], [], left)[0]:
                 try:
-                    data = taker.recv(64)
+                    data, sender = taker.recvfrom(64)
                 except OSError:
                     continue
+                if sender not in (together, together.encode()):
+                    continue   # acts come from ft-together only: another program here could name this socket
                 if data[:1] == bytes([INPUT]):
                     giver.act(data)
                 elif (data[:5] == b"error") != refused:

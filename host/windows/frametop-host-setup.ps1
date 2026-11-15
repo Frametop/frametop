@@ -2,13 +2,15 @@
 # monitors shown as screens on a Steam Frame (docs/remote-displays.md). Run
 # "Setup Frametop host.cmd"; it asks Windows for admin.
 #
-#  1. Vibepollo 2.0.0 (github.com/Nonary/Vibepollo), installed with its own installer if it
-#     isn't here (checked against its SHA-256 first).
-#  2. Frametop's build of Vibepollo's sunshine.exe (github.com/Frametop/frametop-vibepollo):
-#     it can stream any of your monitors (not only the main one), keeps your monitor layout
-#     when a virtual display goes away, turns an HDR monitor's HDR off while Frametop streams
-#     it (back on after), and doesn't stall the Web UI. Downloaded from its release and
-#     checked against its SHA-256; the original is kept as sunshine.exe.2.0.0-original.
+#  1. Vibepollo 2.0.3 (github.com/Nonary/Vibepollo), installed with its own installer if it
+#     isn't here, or if this PC has an older Vibepollo or an older Frametop build on one
+#     (checked against its SHA-256 first).
+#  2. Frametop's build of Vibepollo (github.com/Frametop/frametop-vibepollo): its sunshine.exe,
+#     and in the tools folder the capture helper that draws an app window and its popups and
+#     the clipboard reader. It streams any of your monitors and single app windows, lends the
+#     PC's keyboard and mouse, and shares the clipboard (host/windows/README.md). Downloaded
+#     from its release and each file checked against its SHA-256; the originals are kept next
+#     to them as <name>.2.0.3-original.
 #  3. Settings Frametop needs (the rest of Vibepollo's settings stay as they are): remote
 #     displays carry the PC's sound, and a virtual display goes away when Frametop
 #     disconnects it, but stays through a dropped stream.
@@ -19,8 +21,9 @@
 #     UI answers.
 #
 # Options:
-#   -FrametopBuild PATH|URL   where Frametop's sunshine.exe comes from (default: BuildUrl
-#                             below, else sunshine-frametop.exe next to this script)
+#   -FrametopBuild DIR|URL    where Frametop's build comes from: a folder or release URL with
+#                             sunshine.exe, sunshine_wgc_capture.exe and frametop_clipboard.exe
+#                             (default: BuildUrl below)
 #   -SkipLogin                leave the Web UI login alone
 #   -Check                    only say what would change
 #   -Undo                     put back the original sunshine.exe and the settings from before
@@ -30,18 +33,30 @@ param([string]$FrametopBuild = "", [switch]$SkipLogin, [switch]$Check, [switch]$
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$VibepolloVersion = "2.0.0"
-$SetupUrl = "https://github.com/Nonary/Vibepollo/releases/download/2.0.0/VibepolloSetup-v2.0.0.exe"
-$SetupSha = "7B3500EC0C774644CE5A435A48F61C046C48494D0F18B67AFA0B3561931794B7"
-$OriginalSha = "2CC018FD92DDB4D3748D91D8DA25316909ED45DB3710D1FF278BD73D51EB00C1"  # its sunshine.exe
-# Frametop's build: Frametop/frametop-vibepollo release frametop-2.0.0-2 (its CI, from the tag).
-$BuildSha = "2BF7D1DDBE4350947D58A459A47FF5AE85ED0EFCA957ED7D91F9B582FC37599D"
-$BuildUrl = "https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.0-2/sunshine.exe"
-# Earlier Frametop builds, replaced by this one like the original is.
-$OlderBuildShas = @(
+$VibepolloVersion = "2.0.3"
+$SetupUrl = "https://github.com/Nonary/Vibepollo/releases/download/2.0.3/VibepolloSetup-v2.0.3.exe"
+$SetupSha = "D099E2A686D6E4A61A1F8D48E04C2A2FDA2FE27BCFD7D50EF2365758B09AAB05"
+# Frametop's build: Frametop/frametop-vibepollo release frametop-2.0.4 (its CI, from the tag).
+# Each file: where it goes in the install, its SHA-256, and the SHA-256 of Vibepollo 2.0.3's own
+# (none: 2.0.3 has no such file).
+$BuildUrl = "https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.4"
+$BuildFiles = @(
+    @{ Path = "sunshine.exe"; Sha = "F3CFDCC2FB22519F024CBC1969E9BC77A9BB7392FF47E6B3212C844BCE681BDF"; Stock = "37100D36E920B84899898FEB57EF234702329CE9A7A02A9321AE47F7CF3A132A" }
+    @{ Path = "tools\sunshine_wgc_capture.exe"; Sha = "E16C4EAE337E87297D897B7CBC672B4BCF93BD634AC852710AC655AFAEFF26BB"; Stock = "E6A4EE79E0B8CC71E2227277B99AF25FFFFC57DFF0DFFFEDE042B8C56EFB6066" }
+    @{ Path = "tools\frametop_clipboard.exe"; Sha = "2E020870D9933F017F6DFEBF65ABEAEFFD41B04765C44DC3A7454F9D3780ABDD"; Stock = $null }
+)
+# Earlier Frametop builds on Vibepollo 2.0.3 (their sunshine.exe), replaced by this one.
+$OlderBuildShas = @()
+# sunshine.exe of earlier setups, which Vibepollo 2.0.3's installer replaces first: Vibepollo
+# 2.0.0's own and the Frametop builds the 2.0.0 kits put in, and Frametop's 2.0.3 build.
+$EarlierShas = @(
+    "2CC018FD92DDB4D3748D91D8DA25316909ED45DB3710D1FF278BD73D51EB00C1"  # Vibepollo 2.0.0
     "B5B7D2E7353454AEA6D895D0B68DE235E4CC581684C9DD44F8EFAF2E872F517F"  # 2f032252, built by hand without WebRTC
     "6AF4F34503C7F6F84D1F6967D9FCEFAF2BD8145B34044C992B5E26A614E37A91"  # a84b6cfc, CI, before the HDR-off guard
     "57EECCF9CA6ECEC4F0C5AEBBB27AAFE711A700C9E0986601344A52682856E94E"  # frametop-2.0.0-1, before the resolution switch
+    "2BF7D1DDBE4350947D58A459A47FF5AE85ED0EFCA957ED7D91F9B582FC37599D"  # frametop-2.0.0-2
+    "0023E61B90C4F19D095AC631BF6A1E9B128DD2B477E953BF78D58E2B7BF778B7"  # frametop-2.0.0-3
+    "36FC18277B1325936304FE1E3D736D73ACF42EEE219F64B10038873D2F10C2E3"  # frametop-2.0.3
 )
 $Settings = [ordered]@{
     "remote_monitor_mute_audio"                      = "disabled"
@@ -101,7 +116,7 @@ function Find-Vibepollo {
 
 function Stop-Vibepollo {
     Stop-Service $Service
-    for ($i = 0; $i -lt 30 -and (Get-Process sunshine -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+    for ($i = 0; $i -lt 30 -and (Get-Process sunshine, sunshine_wgc_capture -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
 }
 
 # sunshine.conf: "key = value" lines. Returns the lines with $Settings applied.
@@ -120,19 +135,44 @@ function Set-Settings([string[]]$lines) {
     return , $out.ToArray()
 }
 
+# Where a file of the install keeps Vibepollo's own once Frametop's replaces it.
+function Kept([string]$path) { "$path.$VibepolloVersion-original" }
+
+# Whether the install is Vibepollo 2.0.3's: its own sunshine.exe, or a Frametop build with
+# 2.0.3's kept (not a later Vibepollo installed over one, which leaves the kept file behind).
+function On-Base([string]$dir) {
+    $stock = $BuildFiles[0].Stock
+    $now = Sha "$dir\sunshine.exe"
+    if ($now -eq $stock) { return $true }
+    $kept = Kept "$dir\sunshine.exe"
+    return ((@($BuildFiles[0].Sha) + $OlderBuildShas) -contains $now) -and (Test-Path $kept) -and ((Sha $kept) -eq $stock)
+}
+
+# Frametop's build, every file checked: install path -> the file here. $null when it isn't
+# available (a folder without it).
 function Get-Build {
-    $from = $FrametopBuild
-    if (-not $from) { $from = if ($BuildUrl) { $BuildUrl } else { Join-Path $Here "sunshine-frametop.exe" } }
-    if ($from -match "^https?://") {
-        $file = Join-Path $env:TEMP "sunshine-frametop.exe"
+    $from = if ($FrametopBuild) { $FrametopBuild } else { $BuildUrl }
+    $web = $from -match "^https?://"
+    if ($web) {
+        $folder = Join-Path $env:TEMP "frametop-build"
+        New-Item -ItemType Directory -Force $folder | Out-Null
         Say "Downloading Frametop's build of Vibepollo..."
-        Invoke-WebRequest -UseBasicParsing -Uri $from -OutFile $file
-    } else {
-        $file = $from
     }
-    if (-not (Test-Path $file)) { return $null }
-    if ((Sha $file) -ne $BuildSha) { throw "$file isn't Frametop's build of Vibepollo $VibepolloVersion (its SHA-256 doesn't match)." }
-    return $file
+    $files = @{}
+    foreach ($f in $BuildFiles) {
+        $name = Split-Path $f.Path -Leaf
+        if ($web) {
+            $file = Join-Path $folder $name
+            Invoke-WebRequest -UseBasicParsing -Uri ($from.TrimEnd("/") + "/" + $name) -OutFile $file
+        } else {
+            $file = Join-Path $from $name
+            if (-not (Test-Path $file)) { $file = Join-Path $from $f.Path }  # a build folder: tools\...
+            if (-not (Test-Path $file)) { return $null }
+        }
+        if ((Sha $file) -ne $f.Sha) { throw "$file isn't Frametop's build of Vibepollo (its SHA-256 doesn't match)." }
+        $files[$f.Path] = $file
+    }
+    return $files
 }
 
 function Wait-WebUi {
@@ -158,14 +198,27 @@ public class FrametopTrustLocal : ICertificatePolicy {
 function Main {
     Say "== Frametop host setup$(if ($Check) { ' (check only)' })$(if ($Undo) { ' (undo)' })"
     $dir = Find-Vibepollo
-    $exe = if ($dir) { "$dir\sunshine.exe" } else { $null }
-    $orig = if ($dir) { "$dir\sunshine.exe.$VibepolloVersion-original" } else { $null }
 
     if ($Undo) {
         if (-not $dir) { throw "Vibepollo isn't installed here." }
         $backup = Get-ChildItem $Data -Directory -Filter "backup-*" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1
         Stop-Vibepollo
-        if (Test-Path $orig) { Copy-Item $orig $exe -Force; Say "Put back the original sunshine.exe." }
+        $exe = "$dir\sunshine.exe"
+        $old = "$exe.2.0.0-original"  # a 2.0.0 kit's, on an install no 2.0.3 installer replaced
+        if (-not (Test-Path (Kept $exe)) -and (Test-Path $old) -and ($EarlierShas -contains (Sha $exe))) {
+            Copy-Item $old $exe -Force
+            Say "Put back the original sunshine.exe (Vibepollo 2.0.0)."
+        }
+        foreach ($f in $BuildFiles) {
+            $path = Join-Path $dir $f.Path
+            if (Test-Path (Kept $path)) {
+                Copy-Item (Kept $path) $path -Force
+                Say "Put back the original $($f.Path)."
+            } elseif (-not $f.Stock -and (Test-Path $path)) {
+                Remove-Item $path -Force
+                Say "Removed $($f.Path) (Vibepollo has none)."
+            }
+        }
         if ($backup -and (Test-Path "$($backup.FullName)\sunshine.conf")) {
             Copy-Item "$($backup.FullName)\sunshine.conf" "$dir\config\sunshine.conf" -Force
             Say "Put back the settings from $($backup.FullName)."
@@ -175,41 +228,51 @@ function Main {
         return
     }
 
-    # 1. Vibepollo
-    if (-not $dir) {
-        if ($Check) { Say "Would install Vibepollo $VibepolloVersion."; return }
+    # 1. Vibepollo 2.0.3: installed, or put in over an earlier setup Frametop's build replaced.
+    $update = $false
+    if ($dir -and -not (On-Base $dir)) {
+        if ($EarlierShas -notcontains (Sha "$dir\sunshine.exe")) {
+            $v = (Get-Item "$dir\sunshine.exe").VersionInfo.ProductVersion
+            throw "This PC's sunshine.exe is Vibepollo $v, but neither Vibepollo $VibepolloVersion's own nor a Frametop build this setup knows (a build of your own, or a newer kit's), so it's left as it is. To start over, install Vibepollo $VibepolloVersion ($SetupUrl), then run this again."
+        }
+        $update = $true
+    }
+    if (-not $dir -or $update) {
+        if ($Check) { Say "Would $(if ($update) { 'update Vibepollo to' } else { 'install Vibepollo' }) $VibepolloVersion."; return }
         $setup = Join-Path $env:TEMP "VibepolloSetup-v$VibepolloVersion.exe"
         Say "Downloading Vibepollo $VibepolloVersion..."
         Invoke-WebRequest -UseBasicParsing -Uri $SetupUrl -OutFile $setup
         if ((Sha $setup) -ne $SetupSha) { throw "The Vibepollo installer didn't match its SHA-256; not running it." }
+        if ($update) { Say "Frametop's build now goes into Vibepollo $VibepolloVersion, and this PC has an earlier one." }
         Say "Running Vibepollo's installer: follow its steps, then come back here."
         Start-Process $setup -Wait
         $dir = Find-Vibepollo
         if (-not $dir) { throw "Vibepollo doesn't seem to be installed. Run this again once it is." }
-        $exe = "$dir\sunshine.exe"
-        $orig = "$dir\sunshine.exe.$VibepolloVersion-original"
+        if (-not (On-Base $dir)) { throw "Vibepollo $VibepolloVersion's installer didn't put its sunshine.exe in place. Run this again once it has." }
     }
+    $exe = "$dir\sunshine.exe"
     Say "Vibepollo: $dir"
 
-    # 2. Frametop's build of sunshine.exe
-    $now = Sha $exe
-    $swap = $null
-    if ($now -eq $BuildSha) {
+    # 2. Frametop's build: the files that aren't it yet.
+    $swap = @()
+    foreach ($f in $BuildFiles) {
+        $path = Join-Path $dir $f.Path
+        $now = if (Test-Path $path) { Sha $path } else { $null }
+        if ($now -eq $f.Sha) { continue }
+        if ($f.Stock -and $now -ne $f.Stock -and -not (Test-Path (Kept $path))) {
+            throw "This PC's $($f.Path) is neither Vibepollo $VibepolloVersion's nor Frametop's, so it's left as it is. To start over, reinstall Vibepollo $VibepolloVersion ($SetupUrl), then run this again."
+        }
+        $swap += $f
+    }
+    $build = $null
+    if (-not $swap) {
         Say "Frametop's build of Vibepollo is already installed."
-    } elseif ($now -eq $OriginalSha) {
-        $swap = Get-Build
-        if (-not $swap) {
-            Say "Frametop's build of Vibepollo isn't available here, so this PC can't stream its own monitors yet (virtual displays work)."
+    } elseif (-not $Check) {
+        $build = Get-Build
+        if (-not $build) {
+            Say "Frametop's build of Vibepollo isn't available here, so this PC can't stream its own monitors or app windows yet (virtual displays work)."
+            $swap = @()
         }
-    } elseif ($OlderBuildShas -contains $now) {
-        $swap = Get-Build
-        if (-not $swap) { Say "An older Frametop build of Vibepollo is installed, and the new one isn't available here; keeping it." }
-    } else {
-        $v = (Get-Item $exe).VersionInfo.ProductVersion
-        if ($v -like "$VibepolloVersion*") {
-            throw "This PC's sunshine.exe is Vibepollo $v, but neither Vibepollo's own nor a Frametop build this setup knows (a build of your own, or a newer kit's), so it's left as it is. To start over, reinstall Vibepollo $VibepolloVersion ($SetupUrl), then run this again."
-        }
-        throw "This is Vibepollo $v, and Frametop's build is for $VibepolloVersion. Install Vibepollo $VibepolloVersion ($SetupUrl), then run this again."
     }
 
     # 3. Settings
@@ -246,7 +309,7 @@ function Main {
     }
 
     if ($Check) {
-        Say "Would $(if ($swap) { 'install' } else { 'not change' }) sunshine.exe, $(if ($changed) { 'change' } else { 'not change' }) the settings."
+        Say "Would $(if ($swap) { "install Frametop's $(($swap | ForEach-Object { $_.Path }) -join ', ')" } else { 'not change Vibepollo' }), $(if ($changed) { 'change' } else { 'not change' }) the settings."
     } elseif ($swap -or $changed -or $password) {
         $backup = Join-Path $Data ("backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
         New-Item -ItemType Directory $backup | Out-Null
@@ -255,10 +318,13 @@ function Main {
         Say "Stopping Vibepollo..."
         Stop-Vibepollo
         try {
+            foreach ($f in $swap) {
+                $path = Join-Path $dir $f.Path
+                if ($f.Stock -and -not (Test-Path (Kept $path)) -and (Sha $path) -eq $f.Stock) { Copy-Item $path (Kept $path) }
+                Copy-Item $build[$f.Path] $path -Force
+            }
             if ($swap) {
-                if (-not (Test-Path $orig) -and $now -eq $OriginalSha) { Copy-Item $exe $orig }
-                Copy-Item $swap $exe -Force
-                Say "Installed Frametop's build of Vibepollo (the original is $orig)."
+                Say "Installed Frametop's build of Vibepollo: $(($swap | ForEach-Object { $_.Path }) -join ', ') (Vibepollo's own are kept next to them as <name>.$VibepolloVersion-original)."
             }
             if ($changed) {
                 [IO.File]::WriteAllLines($conf, [string[]]$new)

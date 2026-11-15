@@ -16,9 +16,9 @@
 # .sha256 file and the installer at that tag, and the README's steps to match.
 set -euo pipefail
 
-TAG=frametop-2.0.3
-PACKAGE=vibepollo-2.0.3-1-x86_64.pkg.tar.zst
-PACKAGE_SHA256=cd19c3079608d38b1ef02c665be5c1f8b3213b09bacf25ec4027265674518dc2
+TAG=frametop-2.0.4
+PACKAGE=vibepollo-2.0.4-1-x86_64.pkg.tar.zst
+PACKAGE_SHA256=1bff4e8b26ba909344a27d7aab893e1ec2fe384050607ca66da9f9673b624b08
 INSTALLER_SHA256=8b3611684341df7bbad0b2f6dc80c3644a8dc182fe0fe5282dcf618c87f27242
 RELEASE=https://github.com/Frametop/frametop-vibepollo/releases/download/$TAG
 INSTALLER=https://raw.githubusercontent.com/Frametop/frametop-vibepollo/$TAG/scripts/linux_install.sh

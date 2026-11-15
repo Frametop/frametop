@@ -123,7 +123,9 @@ class HostProtocols(unittest.TestCase):
                 built = b"wl_compositor\0" + (b"wp_fractional_scale_manager_v1\0" if supported else b"")
                 def read(path, mode):
                     return io.BytesIO(lib if str(path).endswith("libkwin.so.6") else built)
+                # realpath stays put: on a host with KWin it follows the real libkwin.so.6 link.
                 with patch.object(m.glob, "glob", return_value=["/usr/lib/libkwin.so.6"]), \
+                     patch.object(m.os.path, "realpath", side_effect=lambda p: p), \
                      patch.object(m, "ft_screens_binary", return_value="/tmp/ft-screens"), \
                      patch("builtins.open", side_effect=read), patch.object(m, "report") as report:
                     m.check_kwin_host_protocols()

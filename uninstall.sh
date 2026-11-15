@@ -286,6 +286,12 @@ main() {
       run rm -rf "$HOME/.local/share/frametop/voice"
   fi
 
+  # Imported avatar and hand models (avatar/README.md): the person's own files, kept unless asked.
+  if [ -d "$HOME/.local/share/frametop/avatars" ]; then
+    ask "Delete the avatar and hand models you imported ($(size "$HOME/.local/share/frametop/avatars"))?" n &&
+      run rm -rf "$HOME/.local/share/frametop/avatars"
+  fi
+
   local recs=()
   for f in "$HOME/.local/share/frametop/eyes" "$HOME/.local/share/frametop/hands" "$HOME/.local/share/frametop/gaze/bench"; do
     [ -e "$f" ] && recs+=("$f")

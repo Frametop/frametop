@@ -242,6 +242,10 @@ def check_host():
         ("/usr/bin/dbus-run-session", "FAIL", "the desktop can't start its session bus"),
         ("/usr/bin/python3", "warn", "nested accessibility can't run its startup helper"),
         ("/usr/bin/gdbus", "warn", "nested accessibility can't discover or check its bus"),
+        # session/ft-userbus hands these the user's own runtime folder and bus inside the desktop.
+        ("/usr/bin/systemctl", "warn", "systemctl --user in the desktop's terminals has nothing to run"),
+        ("/usr/bin/systemd-run", "warn", "systemd-run in the desktop's terminals has nothing to run"),
+        ("/usr/bin/podman", "warn", "podman and distrobox in the desktop's terminals have nothing to run"),
         ("/usr/share/X11/xkb/rules/evdev.xml", "warn",
          "Frametop Settings' Keyboard page lists no desktop layouts (xkeyboard-config's list moved)"),
         ("/usr/lib/qt6/plugins/plasma/kcms/systemsettings/kcm_keyboard.so", "warn",

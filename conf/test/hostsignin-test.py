@@ -52,11 +52,15 @@ PIN = ft_hostapi.spki_pin(DER)
 LOGIN = "Basic " + base64.b64encode(b"me:secret").decode()
 
 
+reads = []
+
+
 class Reply:
     def __init__(self, status, body):
         self.status, self.body = status, body
 
-    def read(self):
+    def read(self, most=-1):
+        reads.append(most)
         return self.body
 
 
@@ -136,13 +140,13 @@ web = Web({47990: {("POST", "/api/token"): (400, b'{"error": "scopes"}')}})
 check("another 400 isn't Sunshine", raises(lambda: ft_hostsignin.sign_in(["h"], "me", "x", connect=web.connect))[:37],
       "SignInError: It didn't make a token (")
 
-web = Web({47990: {("POST", "/api/token"): TOKEN}}, down=["10.35.78.20"])
+web = Web({47990: {("POST", "/api/token"): TOKEN}}, down=["198.51.100.20"])
 check("the dongle doesn't answer: the network does",
-      ft_hostsignin.sign_in(["10.35.78.20", "192.0.2.20"], "me", "secret", connect=web.connect)[0], "tok1")
+      ft_hostsignin.sign_in(["198.51.100.20", "192.0.2.20"], "me", "secret", connect=web.connect)[0], "tok1")
 check("...asked there only", [a[0] for a in web.asked], ["192.0.2.20"])
 web = Web({47990: {("POST", "/api/token"): TOKEN}})
-ft_hostsignin.sign_in(["10.35.78.20", "192.0.2.20"], "me", "secret", connect=web.connect)
-check("the dongle answers: the login goes over it only", [a[0] for a in web.asked], ["10.35.78.20"])
+ft_hostsignin.sign_in(["198.51.100.20", "192.0.2.20"], "me", "secret", connect=web.connect)
+check("the dongle answers: the login goes over it only", [a[0] for a in web.asked], ["198.51.100.20"])
 check("nothing answers", raises(lambda: ft_hostsignin.sign_in(["h"], "me", "x", connect=Web({}).connect)),
       "SignInError: Couldn't reach it: refused")
 
@@ -196,9 +200,9 @@ def known(port):
 check("each port's pin is asked for, and another certificate refused",
       (raises(lambda: ft_hostsignin.app_windows(["h"], "me", "secret", known, connect=web.connect))[:30], seen, web.asked),
       ("SignInError: Its certificate i", [48989], []))
-web = Web({48990: windows}, down=["10.35.78.20"])
+web = Web({48990: windows}, down=["198.51.100.20"])
 check("the dongle first, then the network",
-      (ft_hostsignin.app_windows(["10.35.78.20", "h"], "me", "secret", connect=web.connect)[0], web.asked[0][0]),
+      (ft_hostsignin.app_windows(["198.51.100.20", "h"], "me", "secret", connect=web.connect)[0], web.asked[0][0]),
       (48989, "h"))
 check("nothing answers", raises(lambda: ft_hostsignin.app_windows(["h"], "me", "x", connect=Web({}).connect)),
       "SignInError: Couldn't reach it: refused")
@@ -231,6 +235,12 @@ ft_hostsignin.forget("192.0.2.20")
 check("forgetting a host removes all of its files and nobody else's", sorted(kept()),
       ["192.0.2.2.pin", "192.0.2.2.token", "192.0.2.21.pin"])
 ft_hostsignin.forget("192.0.2.20")  # again: nothing to remove, no error
+os.chmod(ft_hostapi.token_path("192.0.2.2"), 0o644)
+os.chmod(ft_hostapi.TOKEN_DIR, 0o755)
+ft_hostsignin.keep("192.0.2.2", "again", PIN)
+check("a token kept over one others could read is the user's only again",
+      (kept()["192.0.2.2.token"], stat.S_IMODE(os.stat(ft_hostapi.TOKEN_DIR).st_mode)), (("again\n", 0o600), 0o700))
+check("every answer is read up to a cap", sorted(set(reads)), [ft_hostsignin.MOST_ANSWER])
 
 for name in os.listdir(ft_hostapi.TOKEN_DIR):
     os.unlink(os.path.join(ft_hostapi.TOKEN_DIR, name))

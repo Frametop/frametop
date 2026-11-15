@@ -268,7 +268,7 @@ Item {
         property bool loading: false
         readonly property int count: monitors.filter(m => chosen[m.key]).length + (virtualChosen ? 1 : 0)
         function openFor(h) {
-            host = h.name; address = h.address; kind = h.kind; added = h.displays.map(d => d.key)
+            host = h.name; address = h.address; kind = h.kind; added = h.displays.map(d => d.key); pairing = false
             monitors = []; chosen = ({}); virtualChosen = false; error = ""; loading = true
             open()
             backend.listMonitors(address)
@@ -280,6 +280,7 @@ Item {
         }
         function accept() {
             if (!count) return
+            pairing = true
             close()
             const fps = displayRate.currentValue, kbps = Math.round(displayBitrate.value * 1000)
             for (const m of monitors)
@@ -292,8 +293,11 @@ Item {
         }
         function later() {
             close()
-            if (kind === "sunshine") backend.forgetLogin(address)
         }
+        // Escape and a click outside close it without later(): a Sunshine login is forgotten then
+        // too. accept() forgets it itself, once each display has it queued.
+        property bool pairing: false
+        onClosed: if (!pairing && kind === "sunshine") backend.forgetLogin(address)
         Connections {
             target: backend
             function onMonitorsReady(address, monitors, error) {

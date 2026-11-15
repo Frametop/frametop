@@ -218,6 +218,21 @@ class Page(Base):
         self.assertEqual(self.ran, [("remote", "host", "PC", "windows=off")])
         self.assertFalse(self.root.findChild(QObject, "windowsDialog").property("visible"))
 
+    def test_a_sunshine_login_goes_however_the_display_dialog_closes(self):
+        dialog = self.root.findChild(QObject, "displayDialog")
+        for pairing, kept in ((False, False), (True, True)):
+            with self.subTest(pairing=pairing):
+                self.b._logins[ADDRESS] = "alice\nsecret\n"
+                for name, value in (("kind", "sunshine"), ("address", ADDRESS), ("pairing", pairing)):
+                    dialog.setProperty(name, value)
+                QMetaObject.invokeMethod(dialog, "open")
+                self.assertTrue(spin(self.app, lambda: dialog.property("visible")))
+                QMetaObject.invokeMethod(dialog, "close")  # as Escape or a click outside closes it
+                self.assertTrue(spin(self.app, lambda: not dialog.property("visible")))
+                spin(self.app, seconds=0.1)
+                # Picking displays forgets it itself, once each has it queued.
+                self.assertEqual(ADDRESS in self.b._logins, kept)
+
 
 if __name__ == "__main__":
     unittest.main()

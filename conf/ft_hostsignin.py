@@ -78,14 +78,18 @@ def _basic(user, password):
     return {"Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()}
 
 
+# More than any sign-in answer: a host can't make Frametop read without end.
+MOST_ANSWER = 1 << 20
+
+
 def _ask(conn, method, path, login, body=None):
-    """(HTTP status, the answer's text)."""
+    """(HTTP status, the answer's text, its first MOST_ANSWER bytes)."""
     headers = dict(login)
     if body is not None:
         headers["Content-Type"] = "application/json"
     conn.request(method, path, json.dumps(body) if body is not None else None, headers)
     reply = conn.getresponse()
-    return reply.status, reply.read().decode(errors="replace")
+    return reply.status, reply.read(MOST_ANSWER).decode(errors="replace")
 
 
 def _error(text):
@@ -166,8 +170,11 @@ def app_windows(addresses, user, password, known=lambda port: "", connect=_conne
 
 
 def _write_private(path, text):
+    # The modes are set again: makedirs and O_CREAT leave a folder or file that's already there as it was.
     os.makedirs(ft_hostapi.TOKEN_DIR, mode=0o700, exist_ok=True)
+    os.chmod(ft_hostapi.TOKEN_DIR, 0o700)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(text + "\n")
 

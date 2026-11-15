@@ -6,11 +6,11 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 
 ## What comes out
 
-- Every window comes out, from every workspace (user choice, 2026-11-07). The exception is a PC window on a special workspace (a scratchpad), which the PC keeps.
+- Every window comes out, from every workspace (user choice, 2026-11-07). The exception is a PC window on a special workspace (a scratchpad), which the PC keeps. A Windows PC lists the windows of every virtual desktop (Task View's) too (2026-11-15). Windows draws only the desktop it shows, so a window from another one comes to that desktop when its panel opens, and goes back to its own when it's put back. Built without a Windows PC to try it on: see the fork paragraph in [remote-displays.md](remote-displays.md).
 - A window opened while it's on becomes a panel too. On the Frame, a window that would open on a hidden screen floats. On a PC, `ft-layout desktopless watch` checks every 2 s. It runs as the `frametop-desktopless` user unit while the mode is on.
 - A PC that connects later gives its windows up as soon as its Frametop windows instance answers.
 - A window you send back to its PC while the mode is on stays there. The watcher leaves windows it has opened before alone.
-- Panels run out at 16 remote panels, counting the hidden display panels. When a PC has more windows than that, the ones on a workspace that shows come out first, then the most recently used (Hyprland's focus history; user choice, 2026-11-07). The rest come out as panels free up.
+- Panels run out at 16 remote panels, counting the hidden display panels. When a PC has more windows than that, the ones on a workspace that shows (on Windows, the virtual desktop shown) come out first, then the most recently used (Hyprland's focus history; user choice, 2026-11-07). The rest come out as panels free up.
 
 ## Where the panels go
 

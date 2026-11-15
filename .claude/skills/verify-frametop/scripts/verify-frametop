@@ -20,7 +20,8 @@
                                        host input: streams, input lock holders, ft-stream's
                                        hostinput log lines) into RUN/LABEL/, and with --capture a compositor capture
                                        (needs `worn on` and a head pose facing the panels)
-  verify-frametop stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] [--mic-bursts]
+  verify-frametop stream HOST [--display CLIENT] [--seconds N] [--layout FILE] [--allow-host-input]
+                         [--mic-bursts]
                                        guard, then one remote display of HOST (a layout name or
                                        address; its first display, or CLIENT) for N seconds
                                        (default 20) through the release's ft-stream in the
@@ -35,7 +36,12 @@
                                        a 1 kHz burst each second once it records (logged to
                                        bursts.txt); the host needs "mic": true. Record the host's
                                        virtual microphone meanwhile, then scripts/mic-latency
-                                       gives the latency
+                                       gives the latency.
+                                       --layout FILE: HOST from FILE's "hosts" in place of the
+                                       live layout's, for a test host the live desktop must not
+                                       stream (another instance: its displays' "port"); ft-stream
+                                       takes the host's "mic", "clipboard" and "input" from FILE
+                                       too
   verify-frametop cleanup [RUN] [--force]
                                        release every testbench override, compositor auto,
                                        displays back on and gaze mode back as the run found
@@ -65,6 +71,7 @@ import json
 import math
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -408,8 +415,12 @@ def snapshot(label, capture):
 
 def lock_name(host):
     """HOST's input lock, ft-stream's $XDG_RUNTIME_DIR/frametop-input-HOST.lock, named as
-    stream/hostinput.h's RelayId does (and frame_testbench/hostinput.py's lock_path)."""
-    rid = ''.join(c if c.isalnum() or c in '._-' else '-' for c in host[:64]) or 'host'
+    stream/hostinput.h's RelayId does (and frame_testbench/hostinput.py's lock_path). A port
+    isn't part of it (ft-stream names it after the address it splits HOST:PORT into): a host's
+    instances share its keyboard and mouse, and one lock. An IPv6 address has more colons."""
+    if host.count(':') == 1:
+        host = host.split(':')[0]
+    rid =''.join(c if c.isalnum() or c in '._-' else '-' for c in host[:64]) or 'host'
     return RUNTIME / f'frametop-input-{rid}.lock'
 
 
@@ -469,21 +480,40 @@ def source_running(name):
                for line in done.stdout.splitlines())
 
 
-def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=False):
+def scratch_home(out, layout):
+    """A HOME for ft-stream in which LAYOUT is the layout: ft-stream reads a host's "mic",
+    "clipboard", "input" and route from $HOME/.config/frametop-layout.json by its address, so a
+    test host on the live desktop's address (another instance, on its own ports) would get the
+    live entry's. Its client keys and tokens, and libpulse's settings, are the real ones."""
+    home = out / 'home'
+    (home / '.config').mkdir(parents=True, mode=0o700)
+    (home / '.local/share').mkdir(parents=True, mode=0o700)
+    shutil.copyfile(layout, home / '.config/frametop-layout.json')
+    for name in ('.local/share/frametop-stream', '.config/pulse'):
+        if (Path.home() / name).exists():
+            (home / name).symlink_to(Path.home() / name)
+    return home
+
+
+def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=False, layout=LAYOUT):
     run = current_run()
     guard()
     try:
-        hosts = json.loads(LAYOUT.read_text()).get('hosts') or []
+        hosts = json.loads(Path(layout).read_text()).get('hosts') or []
     except (OSError, ValueError, AttributeError) as e:
         sys.exit(f'verify-frametop: no layout ({e})')
     entry = next((h for h in hosts if isinstance(h, dict) and host in (h.get('name'), h.get('address'))), None)
     if not entry or not isinstance(entry.get('address'), str):
-        sys.exit(f'verify-frametop: no host {host!r} in {LAYOUT}')
+        sys.exit(f'verify-frametop: no host {host!r} in {layout}')
     displays = [d for d in entry.get('displays') or [] if isinstance(d, dict) and d.get('client')]
     display = next((d for d in displays if client in (None, d['client'])), None)
     if not display:
         sys.exit(f'verify-frametop: {entry.get("name")} has no display {client or ""}'.rstrip())
     address, client = entry['address'], display['client']
+    # A display of another instance on the host (a windows instance's panel) has its port, as
+    # ft-screens passes it: HOST:PORT.
+    port = display.get('port')
+    target = f'{address}:{port}' if isinstance(port, int) and 0 < port < 65535 else address
     if mic_bursts and entry.get('mic') is not True:
         sys.exit(f'verify-frametop: {entry.get("name")} doesn\'t get the microphone ("mic": true): for '
                  f'the test, `ft-layout remote host {entry.get("name")!r} mic=on`, and put it back after')
@@ -512,12 +542,15 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
             # ft-stream records its default source, which libpulse takes from PULSE_SOURCE.
             fifo = RUNTIME / f'{MIC_SOURCE}.fifo'
             modules = [pipe_source(fifo)]
-            env = ['env', f'PULSE_SOURCE={MIC_SOURCE}']
+            env.append(f'PULSE_SOURCE={MIC_SOURCE}')
+        if Path(layout) != LAYOUT:
+            env.append(f'HOME={scratch_home(out, Path(layout))}')
+        env = ['env', *env] if env else []
         # The viewer holds the input lock itself, so it goes when the stream does, however this
         # process ends.
         with open(out / 'in-box.log', 'wb') as log:
             viewer = subprocess.Popen(
-                [str(RELEASES / 'current' / 'scripts' / 'in-box'), *env, 'python3', str(VIEWER), str(exe), address,
+                [str(RELEASES / 'current' / 'scripts' / 'in-box'), *env, 'python3', str(VIEWER), str(exe), target,
                  client, display.get('app') or 'primary', f'{width}x{height}', '30', '20000', str(seconds), str(out),
                  *([] if allow_host_input else [str(lock_name(address))])],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
@@ -656,7 +689,7 @@ def main(argv):
         snapshot(labels[0], '--capture' in rest)
         return 0
     if command == 'stream' and rest and not rest[0].startswith('-'):
-        opts = {'--display': None, '--seconds': '20'}
+        opts = {'--display': None, '--seconds': '20', '--layout': str(LAYOUT)}
         flags = {'--allow-host-input', '--mic-bursts'}
         words = [w for w in rest[1:] if w not in flags]
         while len(words) >= 2 and words[0] in opts:
@@ -667,9 +700,10 @@ def main(argv):
         except ValueError:
             seconds = 0
         if words or not 0 < seconds <= 3600:
-            sys.exit('verify-frametop: stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] '
-                     '[--mic-bursts]')
-        return stream(rest[0], opts['--display'], seconds, '--allow-host-input' in rest, '--mic-bursts' in rest)
+            sys.exit('verify-frametop: stream HOST [--display CLIENT] [--seconds N] [--layout FILE] '
+                     '[--allow-host-input] [--mic-bursts]')
+        return stream(rest[0], opts['--display'], seconds, '--allow-host-input' in rest, '--mic-bursts' in rest,
+                      opts['--layout'])
     runs = [a for a in rest if a != '--force']
     if command == 'cleanup' and len(runs) <= 1 and not any(a.startswith('-') for a in runs):
         return cleanup(runs[0] if runs else None, '--force' in rest)

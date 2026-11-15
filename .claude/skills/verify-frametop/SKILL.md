@@ -44,6 +44,12 @@ operations as tools), and `G` is `~/.local/share/frametop/releases/current/gaze/
   can change the host's displays and plays its sound here. `V stream HOST` is the only way a run
   streams, and its viewer holds the host's input lock for the whole stream, so that stream can't
   lease the host's keyboard and mouse; `--allow-host-input` drops that, under the rule above.
+  A test host the live desktop must not stream (a second Vibepollo on its own ports, say) goes
+  in a scratch layout of its own: `V stream NAME --layout FILE`, with the instance's `"port"` on
+  each display (as a windows instance's panels have it), the host's flags (`mic`, `clipboard`,
+  `input`) as the test wants them (ft-stream reads them from FILE then), and a client paired for
+  the test (`ft-stream pair ADDRESS:PORT --id NAME` in the box, with that instance's
+  `ADDRESS-PORT.token`). Never `ft-layout remote add` it: that starts it on the live desktop.
 - Every run ends with `V cleanup RUN` (the folder `V launch` printed), even after a failure: it
   turns the displays back on, runs `T release` (worn, pose, HMD buttons, controllers, fake eyes
   and hands, fake peers) and `T compositor auto`, puts gaze mode back as the run found it, and frees the
@@ -197,7 +203,8 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
 ## Helpers
 
 - `scripts/verify-frametop`: `doctor`, `launch [NAME] [--allow-host-input]`, `guard`, `snapshot LABEL [--capture]`,
-  `stream HOST [--display CLIENT] [--seconds N] [--allow-host-input] [--mic-bursts]`, `cleanup [RUN] [--force]`,
+  `stream HOST [--display CLIENT] [--seconds N] [--layout FILE] [--allow-host-input] [--mic-bursts]`,
+  `cleanup [RUN] [--force]`,
   `ask NAME MESSAGE [--listen S]`. `--help` prints the usage. Python 3 standard library only;
   runs on the SteamOS host.
 - `scripts/fake-viewer`: ft-screens' side of one remote display, headless. `V stream` runs it in

@@ -215,6 +215,11 @@ class Backend(QObject):
         for h in layout.get("hosts", []):
             displays = []
             for d in h.get("displays", []):
+                if d.get("window"):
+                    # A window panel isn't one of the PC's monitors: the launcher and the panel
+                    # itself run it, and this page's controls would fight it (turned off, it's
+                    # forgotten; its size is the window's).
+                    continue
                 n = numbers.get(d.get("id"), 0)
                 w, hh = d.get("size", [2560, 1440])
                 if d.get("off"):

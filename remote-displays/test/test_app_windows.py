@@ -130,6 +130,12 @@ class Backend(Base):
         set_hosts({"name": "PC", "address": ADDRESS, "kind": "vibepollo", "windows": {"port": 48989}})
         self.assertEqual([h["appWindows"] for h in self.b.hosts], [True])
 
+    def test_window_panels_are_not_listed_as_monitors(self):
+        set_hosts({"name": "PC", "address": ADDRESS, "kind": "vibepollo", "windows": {"port": 48989},
+                   "displays": [{"id": "pc-hdmi-a-1", "app": "desktop"},
+                                {"id": "pc-window-1", "app": "window", "window": True}]})
+        self.assertEqual([d["id"] for d in self.b.hosts[0]["displays"]], ["pc-hdmi-a-1"])
+
 
 def items(item):
     """An item and everything drawn under it (a Repeater's cards aren't QObject children)."""

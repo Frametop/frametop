@@ -330,7 +330,7 @@ int main() {
         dashtiles::Board t;
         for (int id : {10, 11, 50}) t.Anchor(id, -1, false);
         t.RestoreAll({{10, "tile 0 0 0 1 1 1 0"}});
-        t.EndRestore();   // (vr.cpp: an add long after the set)
+        t.EndRestore();   // (vrtiles.cpp: an add long after the set)
         t.RestoreAll({{11, "tile 0 1 0 1 1 1 0"}}, true);
         check("an add after the set ended goes after the others", order(t) == "[ 10 ][ 50 ][ 11 ]");
     }

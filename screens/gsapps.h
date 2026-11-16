@@ -1,6 +1,6 @@
-// The gamescope apps' bookkeeping (vr.cpp's "gamescope apps"; gsforward.h has what they are):
+// The gamescope apps' bookkeeping (screens/vrgsapps.cpp's; gsforward.h has what they are):
 // which app window has which panel, which popups go over which panel, and where a key goes. Pure:
-// gsforward's events in, what to do with the panels out; vr.cpp does it (the overlays, the tags).
+// gsforward's events in, what to do with the panels out; vrgsapps.cpp does it (the overlays, the tags).
 // Tested by screens/tests/gsapps-test.cpp.
 //
 // A window gets a panel when it's created (so it's tagged before it maps: an untagged window gets

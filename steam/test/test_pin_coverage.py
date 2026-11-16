@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class Coverage(unittest.TestCase):
     def test_compositor_show_calls_go_through_gate(self):
+        for part in ("screens/vrgsapps.cpp", "screens/vrtiles.cpp"):   # (vr.cpp's other parts: PinShow only)
+            self.assertNotIn("ShowOverlay(", (ROOT / part).read_text(), part)
         source = (ROOT / "screens/vr.cpp").read_text()
         raw = [line.strip() for line in source.splitlines() if "->ShowOverlay(" in line]
         self.assertEqual(len(raw), 2, "New overlays must use PinShow, not raw ShowOverlay")

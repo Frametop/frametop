@@ -1,4 +1,4 @@
-// The dashboard tiles' policy (vr.cpp's "Dashboard tiles" does the OpenVR side): which panels are
+// The dashboard tiles' policy (screens/vrtiles.cpp does the OpenVR side): which panels are
 // anchored to the SteamVR dashboard, which of those tile (tilegrid.h keeps their order and sizes,
 // tiling.h places them) and which are satellites, which stay shown with the dashboard closed, what
 // the tiling keys do, and each app's or display's last state (Memory).

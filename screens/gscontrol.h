@@ -1,7 +1,7 @@
-// The gamescope apps (vr.cpp's "gamescope apps"), between the X side and the panels: what
+// The gamescope apps (screens/vrgsapps.cpp), between the X side and the panels: what
 // gsapps::Book says to do with each window, done (a panel made, its window tagged; dropped,
 // untagged), and the laser and the keys on an app's panel as X's. Pure: the X side
-// (gsforward::XSide: gslink.h's AsyncLink) and the panels (Panels: vr.cpp's, on OpenVR) come in,
+// (gsforward::XSide: gslink.h's AsyncLink) and the panels (Panels: vrgsapps.cpp's, on OpenVR) come in,
 // so its test (screens/tests/gscontrol-test.cpp) runs with fakes of both.
 //
 // The laser on a panel or a popup over it moves the X pointer there, and raises that window
@@ -27,7 +27,7 @@
 
 namespace gsapps {
 
-// The panels, as vr.cpp makes them.
+// The panels, as vrgsapps.cpp makes them.
 struct Panels {
     virtual ~Panels() = default;
     // A hidden panel for an app's window at `index`: its overlay's handle, gamescope (`pid`) its

@@ -1,4 +1,4 @@
-// Apps in SteamOS's own gamescope session as Frametop panels (vr.cpp's "gamescope apps";
+// Apps in SteamOS's own gamescope session as Frametop panels (screens/vrgsapps.cpp's panels;
 // docs/design.md "Gamescope apps"). Graduated from the 2026-11-16 spike (branch
 // spike-gamescope-panels; its README has what it showed).
 //

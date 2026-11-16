@@ -1,4 +1,4 @@
-// Where the dashboard's tiles go (vr.cpp's dashboard tiling; tilegrid.h holds their order and sizes).
+// Where the dashboard's tiles go (screens/vrtiles.cpp's dashboard tiling; tilegrid.h holds their order and sizes).
 //
 // Panels anchored to the SteamVR dashboard tile on a sphere round your head, like one 360 degree
 // monitor (user, 2026-11-16): columns side by side round you, each one's panels stacked in it with

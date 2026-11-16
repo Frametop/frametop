@@ -20,7 +20,7 @@ import dash_tiles  # noqa: E402
 import ft_display_settings as fds  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 
-VR = os.path.join(HERE, "..", "..", "screens", "vr.cpp")
+VR = os.path.join(HERE, "..", "..", "screens", "vrtiles.cpp")
 
 
 class DashTiles(unittest.TestCase):
@@ -103,7 +103,7 @@ class DashTiles(unittest.TestCase):
         self.assertTrue(seen)
 
     def test_ranges_match_ft_screens(self):
-        """The ranges here are TileSettings()'s in screens/vr.cpp (the height's lower end is
+        """The ranges here are TileSettings()'s in screens/vrtiles.cpp (the height's lower end is
         tiling::Params::minHeightDeg, 12)."""
         with open(VR) as f:
             src = f.read()

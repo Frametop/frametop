@@ -26,17 +26,18 @@
 #   --zip FILE|URL  with --release: this Frametop.zip instead of GitHub's newest (a URL needs
 #                   the release's SHA256SUMS beside it, as GitHub's releases have)
 #   --any-steamos   with --release: install even on a SteamOS build the release breaks on
-#   --yes, --no-voice, --no-hands, --no-eye-tracker, --no-bluetooth, --bluetooth   passed to install.sh (--yes also
-#                   answers this script's questions: the version already there, or stable)
+#   --yes, --no-voice, --no-hands, --no-eye-tracker, --no-keyboard, --no-bluetooth, --bluetooth
+#                   passed to install.sh (--yes also answers this script's questions: the version
+#                   already there, or stable)
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
 usage: get.sh [--stable | --experimental | --branch NAME] [--dir DIR] [--clone-only] [--yes]
-              [--no-voice] [--no-hands] [--no-eye-tracker] [--no-bluetooth | --bluetooth]
+              [--no-voice] [--no-hands] [--no-eye-tracker] [--no-keyboard] [--no-bluetooth | --bluetooth]
        get.sh --release [--stable | --experimental | --version V | --zip FILE|URL]
               [--any-steamos] [--dir DIR] [--clone-only] [--yes] [--no-voice] [--no-hands]
-              [--no-eye-tracker] [--no-bluetooth | --bluetooth]
+              [--no-eye-tracker] [--no-keyboard] [--no-bluetooth | --bluetooth]
 piped: curl -fsSL https://frametop.github.io/frametop/get.sh | bash -s -- [options]
 EOF
 }
@@ -166,7 +167,7 @@ main() {
       --version) want=${2:?--version needs a version}; shift ;;
       --any-steamos) any=1 ;;
       --yes) yes=1; pass+=("$1") ;;
-      --no-bluetooth|--bluetooth|--no-eye-tracker|--no-voice|--no-hands) pass+=("$1") ;;
+      --no-bluetooth|--bluetooth|--no-eye-tracker|--no-voice|--no-hands|--no-keyboard) pass+=("$1") ;;
       -h|--help) usage; return 0 ;;
       *) echo "unknown option: $1" >&2; usage >&2; return 2 ;;
     esac

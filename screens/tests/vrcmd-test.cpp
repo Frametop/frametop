@@ -43,6 +43,8 @@ int main() {
         {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up},
         {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02 7", Pulled}, {"spin 30", Spin},
         {"shift 0.25 -1.5 30", Shift}, {"shift back", ShiftBack},
+        {"anchor focused toggle", Anchor}, {"stay 2 on", Stay}, {"tile left", Tile}, {"tiles", Tiles},
+        {"tiles set 1 tile 0 0 0 1 1 1 0", Tiles}, {"floatapp 5 org.kde.dolphin", FloatApp},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;
@@ -61,6 +63,9 @@ int main() {
     { Cmd p; check("pulled without a number: seq 0 (refused)", Parse("pulled 103 0.25 0.75", p) == Pulled && p.seq == 0); }
     check("pin: two words scan 2", Parse("pin 1 left", c) == Pin && c.got == 2 && !std::strcmp(c.word, "1") &&
                                        !std::strcmp(c.hand, "left"));
+    c = {};
+    check("pin: the dashboard", Parse("pin 2 dashboard", c) == Pin && c.got == 2 && !std::strcmp(c.word, "2") &&
+                                    !std::strcmp(c.hand, "dashboard"));
     c = {};
     check("pin: with a relative pose scans 14",
           Parse("pin all head 1 0 0 0 0 1 0 0 0 0 1 -1.5", c) == Pin && c.got == 14 && near(c.r[11], -1.5));
@@ -114,6 +119,15 @@ int main() {
     check("sub with a word other than off is nothing", V("sub 5 1 on") == Unknown);
     check("universe and up are exact", V("universe ") == Unknown && V("up ") == Unknown && V("debug ") == Unknown);
     check("the pointer's pose (6 numbers) is no panel pose", V("pose 1 2 3 4 5") == Unknown);
+    { Cmd t; check("tiles set: the rest after it", Parse("tiles set 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "set 2 off")); }
+    { Cmd t; check("tiles add: the rest after it", Parse("tiles add 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "add 2 off")); }
+    { Cmd t; check("tiles clear", Parse("tiles clear", t) == Tiles && t.rest && !std::strcmp(t.rest, "clear")); }
+    { Cmd t; check("tiles alone: no rest", Parse("tiles", t) == Tiles && !t.rest); }
+    check("tiles: not a tile key, nor tilesx", V("tilesx") == Tile && V("tiles setx") == Tile);
+    check("stay is no state", V("state") == State && V("stay 1") == Unknown);
+    { Cmd t; check("floatapp: panel and app", Parse("floatapp 7 org.kde.konsole", t) == FloatApp && t.n == 7 &&
+                                                   !std::strcmp(t.appId, "org.kde.konsole")); }
+    check("groups: tiles", GroupOf(Anchor) == TileGroup && GroupOf(Tiles) == TileGroup && GroupOf(FloatApp) == TileGroup);
 
     // Which handler runs each verb (ft_vr_command's dispatch): every verb has one, Unknown none.
     bool grouped = true;

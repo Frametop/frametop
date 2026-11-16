@@ -765,11 +765,11 @@ static void keys_update(struct server *s) {
     // with the focus. Without one (the remote screen clicked last disconnected, with no KWin at
     // all when streaming without the desktop) a grabbed keyboard would type nowhere.
     const bool target = (s->key_remote >= 0 && ft_remote_is(s->key_remote)) || s->seat->keyboard_state.focused_surface;
-    const bool desktop = spot_open(s) || (s->keys_clicked && shown && target);
+    const bool desktop = spot_open(s) || ft_vr_app_typing() || (s->keys_clicked && shown && target);
     // Gamepad mode's pill goes over the panel typing goes to: the remote screen, or the one KWin has
     // keyboard focus on (vr.cpp, "the gamepad pill").
     int pill = -1;
-    if (desktop && !spot_open(s)) {
+    if (desktop && !spot_open(s) && !ft_vr_app_typing()) {
         if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) pill = s->key_remote;
         for (int i = 0; i < MAX_SCREENS && pill < 0; ++i)
             if (s->screens[i] && s->screens[i]->toplevel &&
@@ -1169,8 +1169,10 @@ static const char *peer_command(struct server *s, const char *words) {
 static void handle_key(struct server *s, uint32_t code, int value, char *reply, int size) {
     if (s->vr && !ft_pin_allowed()) return (void)snprintf(reply, size, "error Steam PIN locked");
     ft_vr_key(code, value);
-    if (value == 2) return (void)snprintf(reply, size, "ok repeat ignored");  // KWin repeats itself
+    // a gamescope app repeats nothing itself (synthetic keys): its repeats go to it as presses
+    if (value == 2) return (void)snprintf(reply, size, ft_vr_app_key(code, 2, spot_open(s)) ? "ok app" : "ok repeat ignored");  // KWin repeats itself
     if (ft_vr_carry_key(code, value)) return (void)snprintf(reply, size, "ok the carry's");
+    if (ft_vr_app_key(code, value, spot_open(s))) return (void)snprintf(reply, size, "ok app");
     const enum ft_relay_key kind = ft_relay_key_kind(code);
     if (kind == FT_RELAY_BUTTON) {
         relay_button(s, code, value != 0, reply, size);
@@ -1253,7 +1255,7 @@ static void keyboard_command(struct server *s, const char *what, char *reply, in
 
 // Where typing goes, for "debug" and "keys".
 static const char *typing_target(struct server *s) {
-    return spot_open(s) ? "frunner" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop"
+    return spot_open(s) ? "frunner" : ft_vr_app_typing() ? "app" : s->key_remote >= 0 ? "remote" : s->keys_desktop ? "desktop"
            : s->keys_clicked ? "desktop (hidden)" : "steam";
 }
 
@@ -1470,12 +1472,13 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                                sc->buffer_height, sc->commits, sc->toplevel->title ? sc->toplevel->title : "");
             }
         } else if (strncmp(buf, "click ", 6) == 0) {
-            // A click on another panel takes typing to Steam. Our own panels (the screens,
-            // their controls) and Full Keyboard's leave it: a click on a screen arrives as a
-            // panel event, and Full Keyboard types where typing goes.
+            // A click on another panel takes typing to Steam, from the desktop and the apps. Our
+            // own panels (the screens, their controls) and Full Keyboard's leave it: a click on a
+            // screen arrives as a panel event, and Full Keyboard types where typing goes.
             if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0 &&
                 strncmp(buf + 6, "org.framekeyboard.", 18) != 0) {
                 s->keys_clicked = false;
+                ft_vr_app_blur();
                 spot_dismiss(s, "click");
             }
             len = sizeof from;

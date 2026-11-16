@@ -22,6 +22,7 @@ enum Verb {
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
     WindowDrag, Pulled,
     Spin, Shift, ShiftBack,
+    Anchor, Stay, Tile, Tiles, FloatApp,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
 constexpr Verb kLastVerb = State;
@@ -48,11 +49,14 @@ struct Cmd {
     int gx = 0, gy = 0;                   // torn
     char mod[16] = {}, b1[16] = {}, b2[16] = {}, b3[16] = {};  // windowdrag
     double da = 0, db = 0;                // carryturn
+    char appId[128] = {};                 // floatapp: the window's app (ft-floatd's desktop file name)
+    const char *rest = nullptr;           // tiles: "clear" or "set ..." (what follows "tiles ")
 };
 
 // Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands. A verb's case
 // must be in the handler of the group named here, or it answers "error unknown command".
-enum Group { NoGroup, PanelGroup, ReadoutGroup, VisibilityGroup, HelperWordGroup, HandFeatureGroup, CutoutsGroup, FloatGroup, SpinGroup };
+enum Group { NoGroup, PanelGroup, ReadoutGroup, VisibilityGroup, HelperWordGroup, HandFeatureGroup, CutoutsGroup, FloatGroup, SpinGroup,
+             TileGroup };
 
 inline Group GroupOf(Verb v) {
     switch (v) {
@@ -74,6 +78,8 @@ inline Group GroupOf(Verb v) {
         return FloatGroup;
     case Spin: case Shift: case ShiftBack:
         return SpinGroup;
+    case Anchor: case Stay: case Tile: case Tiles: case FloatApp:
+        return TileGroup;
     case Unknown:
         break;
     }
@@ -145,6 +151,15 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     char more = 0;
     if (std::sscanf(cmd, "shift %lf %lf %lf %c", &c.x, &c.z, &c.yaw, &more) == 3) return Shift;
     if (std::strcmp(cmd, "shift back") == 0) return ShiftBack;
+    // the dashboard tiles (vr.cpp's TileCommand): "tiles" before "tile ", which would read its "s"
+    if (std::sscanf(cmd, "anchor %15s %15s", c.word, c.hand) == 2) return Anchor;
+    if (std::sscanf(cmd, "stay %15s %15s", c.word, c.hand) == 2) return Stay;
+    if (std::strcmp(cmd, "tiles") == 0) return Tiles;
+    if (!std::strcmp(cmd, "tiles clear") ||
+        ((!std::strncmp(cmd, "tiles set", 9) || !std::strncmp(cmd, "tiles add", 9)) && (!cmd[9] || cmd[9] == ' ')))
+        return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..." ("add": more of the same set)
+    if (std::sscanf(cmd, "tile %15s", c.word) == 1) return Tile;
+    if (std::sscanf(cmd, "floatapp %d %127s", &c.n, c.appId) == 2) return FloatApp;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;
     if (std::strcmp(cmd, "debug") == 0) return Debug;
     if (std::strncmp(cmd, "state", 5) == 0) return State;

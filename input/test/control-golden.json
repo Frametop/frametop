@@ -66,6 +66,25 @@
   "log": [],
   "raised": null
  },
+ "action keys_list (not runnable)": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not a menu action 'keys_list'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action keys_list",
+  "log": [],
+  "raised": null
+ },
  "action not a menu one": {
   "calls": [
    [
@@ -228,6 +247,35 @@
   "paused": true,
   "raised": null
  },
+ "action tile_left (the key list's)": {
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "tile left",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "tile_left",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action tile_left",
+  "log": [
+   "tile_left"
+  ],
+  "raised": null
+ },
  "action unbound": {
   "addr": "",
   "calls": [
@@ -382,6 +430,16 @@
        "hands_toggle",
        "release_keys",
        "desktopless_toggle",
+       "tile_left",
+       "tile_right",
+       "tile_up",
+       "tile_down",
+       "tile_wider",
+       "tile_narrower",
+       "tile_taller",
+       "tile_shorter",
+       "anchor_toggle",
+       "keys_list",
        "key",
        "none"
       ],
@@ -442,6 +500,16 @@
        "hands_toggle",
        "release_keys",
        "desktopless_toggle",
+       "tile_left",
+       "tile_right",
+       "tile_up",
+       "tile_down",
+       "tile_wider",
+       "tile_narrower",
+       "tile_taller",
+       "tile_shorter",
+       "anchor_toggle",
+       "keys_list",
        "key",
        "none"
       ],
@@ -2052,6 +2120,49 @@
   ],
   "changed": {},
   "datagram": "textfield",
+  "log": [],
+  "raised": null
+ },
+ "tilefocus 0": {
+  "calls": [],
+  "changed": {},
+  "datagram": "tilefocus 0",
+  "log": [],
+  "raised": null
+ },
+ "tilefocus 1": {
+  "calls": [],
+  "changed": {
+   "tile_focus_until": 105.0
+  },
+  "datagram": "tilefocus 1",
+  "log": [],
+  "raised": null
+ },
+ "tilefocus 1, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "tilefocus 1",
+  "log": [],
+  "raised": null,
+  "uid": "OTHER"
+ },
+ "tilefocus bad": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'tilefocus'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "tilefocus 2",
   "log": [],
   "raised": null
  },

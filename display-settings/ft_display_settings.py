@@ -49,6 +49,7 @@ from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import steam_settings  # noqa: E402
 import stereo_wallpaper  # noqa: E402  (DEE-317: the pictures here, the rest on the host)
+import dash_tiles  # noqa: E402  (the dashboard tiles' settings: backend.dashTiles)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 DESKTOPS = os.path.join(HERE, "..", "desktops.sh")
@@ -116,6 +117,8 @@ class Backend(QObject):
         self._roomRead.connect(self._room_read, Qt.QueuedConnection)
         self.changed.connect(self.previewChanged)
         self.roomPoll = QTimer(interval=1000, timeout=self._read_room)
+        self._dashTiles = dash_tiles.DashTiles(self._setBar, self)
+        self.changed.connect(self._dashTiles.changed)
 
     # --- state ---
     def _conf(self):
@@ -860,8 +863,8 @@ class Backend(QObject):
 
     @Slot(str, str)
     def pin(self, which, where):
-        """Pin screen `which` (1-based, or "all") to "left", "right", or "head" as it is
-        now, or take it off ("none")."""
+        """Pin screen `which` (1-based, or "all") to "left", "right", "head", or "dashboard" (the
+        SteamVR dashboard) as it is now, or take it off ("none")."""
         cmd = f"unpin {which}" if where == "none" else f"pin {which} {where}"
         if self._running:
             self._ask_screens(cmd, then=lambda reply: self._pinned(which, where, reply))
@@ -872,10 +875,20 @@ class Backend(QObject):
         if not (reply and reply.startswith("ok")):
             self.message.emit(f"Couldn't {'unpin' if where == 'none' else 'pin'}: "
                               f"{reply or 'the desktop is not running'}", True)
+        elif where == "dashboard" and "waiting" in reply:
+            # ft-screens hasn't seen the dashboard yet this run: it pins them when it first opens
+            who = "The screens stay" if which == "all" else f"Screen {which} stays"
+            self.message.emit(f"{who} where they are until the dashboard first opens, then ride on it from there.",
+                              False)
         elif which == "all" and where != "none":
-            place = "on your head" if where == "head" else f"on your {where} wrist"
+            place = {"head": "on your head", "dashboard": "on the dashboard"}.get(where, f"on your {where} wrist")
             self.message.emit(f"All screens ride {place} now. Save as profile… (Layout & profiles) keeps it.", False)
         self._check_running()
+
+    @Property(QObject, constant=True)
+    def dashTiles(self):
+        """The dashboard tiles' settings (dash_tiles.py)."""
+        return self._dashTiles
 
     # --- stereo wallpaper (DEE-317, stereo_wallpaper.py) ---
     @Property(bool, notify=changed)

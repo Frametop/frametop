@@ -462,6 +462,29 @@ try:
     check("a plain open after the OS menu lists nothing again", json.loads(ask("rows")[3:]), [])
     press(ESC)
 
+    # The key list (the relay's keys_list, Meta+/; frunner/keylist.py): every key combination, the
+    # Rebind row first; Enter does a tiling key or a menu action, and only says which keys for the rest.
+    with open(os.path.join(home, ".config", "frametop-input.json"), "w") as f:
+        json.dump({"key_bindings": {"125+105": "tile_left", "42+125+33": "float_toggle", "125+53": "keys_list",
+                                    "29": "none"}}, f)
+    check("toggle ... keys opens the key list", ask("toggle keyboard keys"), "ok")
+    check("...Rebind first, then each binding by its action's name, none left out", json.loads(ask("rows")[3:]),
+          ["Rebind keys in Frametop Settings", "Meta+Left", "Shift+Meta+F", "Meta+/"])
+    type_text("tile")
+    check("typing filters it", json.loads(ask("rows")[3:]), ["Meta+Left"])
+    relay.take()
+    press(ENTER)
+    check("Enter on a tiling key: the relay does it", relay.take(), ["action tile_left"])
+    check("...and closes", ask("status").split()[1], "closed")
+    ask("open keyboard keys")
+    type_text("float")
+    press(ENTER)
+    check("Enter on one it can't do from here: nothing asked, closed", (relay.take(), ask("status").split()[1]),
+          ([], "closed"))
+    ask("open")
+    check("a plain open after the key list lists nothing again", json.loads(ask("rows")[3:]), [])
+    press(ESC)
+
     # A PC's apps and windows (DEE-351): oma7 has a Frametop windows instance.
     calls = os.path.join(home, "layout-calls")
 

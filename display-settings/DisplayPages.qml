@@ -1429,13 +1429,14 @@ Item {
                         delegate: Controls.ComboBox {
                             id: pinBox
                             required property int index
-                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head"].indexOf(backend.pins[index]))
+                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head", "dashboard"].indexOf(backend.pins[index]))
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
                             model: [
                                 { text: "In the room", value: "none" },
                                 { text: "On the left wrist", value: "left" },
                                 { text: "On the right wrist", value: "right" },
-                                { text: "On your head", value: "head" }
+                                { text: "On your head", value: "head" },
+                                { text: "On the dashboard", value: "dashboard" }
                             ]
                             textRole: "text"
                             valueRole: "value"
@@ -1503,10 +1504,74 @@ Item {
                             onClicked: backend.pin("all", "head")
                         }
                         Controls.Button {
+                            text: "Pin to dashboard"
+                            enabled: backend.desktopRunning
+                            onClicked: backend.pin("all", "dashboard")
+                        }
+                        Controls.Button {
                             text: "Unpin"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "none")
                         }
+                    }
+
+                    // Dashboard tiles (dash_tiles.py; screens/tiling.h): ft-screens takes each live.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Dashboard tiles" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Stay visible:"
+                        text: "Panels anchored from now on stay with the dashboard closed"
+                        checked: backend.dashTiles.stay
+                        onToggled: backend.dashTiles.setStay(checked)
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Dashboard apps:"
+                        text: "Apps started from the dashboard open as Frametop panels"
+                        checked: backend.dashTiles.gsApps
+                        onToggled: backend.dashTiles.setGsApps(checked)
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Above the dashboard:"
+                        Controls.Slider {
+                            id: tileRaise
+                            from: -30; to: 60; stepSize: 1
+                            value: backend.dashTiles.raiseDeg
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.dashTiles.setRaiseDeg(value)
+                        }
+                        Controls.Label { text: Math.round(tileRaise.value) + "°" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Column height:"
+                        Controls.Slider {
+                            id: tileHeight
+                            from: 12; to: 120; stepSize: 1
+                            value: backend.dashTiles.heightDeg
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.dashTiles.setHeightDeg(value)
+                        }
+                        Controls.Label { text: Math.round(tileHeight.value) + "°" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Highest top:"
+                        Controls.Slider {
+                            id: tileTop
+                            from: 20; to: 80; stepSize: 1
+                            value: backend.dashTiles.maxTopDeg
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.dashTiles.setMaxTopDeg(value)
+                        }
+                        Controls.Label { text: Math.round(tileTop.value) + "° above your eyes" }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "Distance:"
+                        Controls.Slider {
+                            id: tileRadius
+                            from: 0.8; to: 4; stepSize: 0.05
+                            value: backend.dashTiles.radius
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.dashTiles.setRadius(value)
+                        }
+                        Controls.Label { text: tileRadius.value.toFixed(2) + " m" }
                     }
                 }
 
@@ -1523,7 +1588,18 @@ Item {
                           + "it.\n\nPin a screen to your head: choose On your head above. It rides on the headset where it "
                           + "is now, like a HUD, and shows whenever the screens do. Grab its bar to move it; it stays on "
                           + "your head where you let go. Choosing a pin above keeps the screen where it is now, so place "
-                          + "it first. Save as profile… (Layout) keeps pins."
+                          + "it first. Save as profile… (Layout) keeps pins.\n\nAnchor a screen to the dashboard: choose On "
+                          + "the dashboard above, or press the anchor button under any screen, floating window or remote "
+                          + "display. Anchored panels tile round you above the SteamVR dashboard, like one big curved monitor, "
+                          + "and go where it opens. They show only with the dashboard open, unless Stay visible is on (a "
+                          + "long press on the anchor button switches it for one panel). With the pointer or your gaze on "
+                          + "one, Meta+arrows move it between columns and rows and Meta+Ctrl+arrows resize it; Meta+/ "
+                          + "lists every key. Drag a tile to reorder; pull it well away and it stays anchored where you let "
+                          + "go. Anchored before the dashboard has opened, a panel stays where it is until the dashboard "
+                          + "first opens. Each app, screen and remote display remembers whether it was anchored.\n\nWith "
+                          + "Dashboard apps on, a flatscreen app you start from the SteamVR dashboard opens as a Frametop "
+                          + "panel, anchored and staying visible the first time. Click it to type into it. Off, Steam "
+                          + "shows it on a panel of its own, as before."
                 }
 
                 Kirigami.FormLayout {

@@ -684,7 +684,47 @@ def tests():
           (relay.known_action("os_menu"), relay.needs_pointer("os_menu"), "os_menu" in relay.DEFAULT_KEY_BINDINGS.values(),
            relay.works_paused("os_menu")), (True, False, False, False))
     check("every menu action is an action that works without pointer mode",
-          [a for a in relay.MENU_ACTION_NAMES if not relay.known_action(a) or relay.needs_pointer(a)], [])
+          [a for a in sys.modules["ft_input_actions"].MENU_ACTION_NAMES if not relay.known_action(a) or relay.needs_pointer(a)], [])
+
+    # The dashboard tiling keys (defaults): Meta+Left goes to ft-screens as "tile left" only while it
+    # says an anchored tile has the focus ("tilefocus 1", renewed every 2 s); otherwise, and once that
+    # lapses, it's the desktop's (KWin's Meta+Left). Meta+/ lists the key combinations in frunner.
+    LEFT, RIGHT, SLASH = 105, 106, 53
+    to_relay("keyboard desktop")
+    time.sleep(0.05)
+    typed()
+
+    def meta(*codes):
+        for c in (META, *codes):
+            key(c, 1)
+        for c in reversed((META, *codes)):
+            key(c, 0)
+        return typed()
+
+    got = meta(LEFT)
+    check("Meta+Left, no tile focused: the desktop gets Left", ([m for m in got if m.startswith("tile ")],
+                                                                f"key {LEFT} 1" in got), ([], True))
+    to_relay("tilefocus 1")
+    time.sleep(0.05)
+    got = meta(LEFT)
+    check("Meta+Left, a tile focused: ft-screens moves it, the desktop doesn't get Left",
+          ([m for m in got if m.startswith("tile ")], f"key {LEFT} 1" in got), (["tile left"], False))
+    check("Meta+Ctrl+Right: wider", [m for m in meta(CTRL, RIGHT) if m.startswith("tile ")], ["tile wider"])
+    to_relay("tilefocus 0")
+    time.sleep(0.05)
+    check("tilefocus 0: Meta+Left is the desktop's again", [m for m in meta(LEFT) if m.startswith("tile ")], [])
+    lapse, relay.TILE_FOCUS_LAPSE = relay.TILE_FOCUS_LAPSE, 0.2
+    to_relay("tilefocus 1")
+    time.sleep(0.35)
+    check("tilefocus lapses without renewal", [m for m in meta(LEFT) if m.startswith("tile ")], [])
+    relay.TILE_FOCUS_LAPSE = lapse
+    meta(SLASH)
+    check("Meta+/ (default): frunner lists the key combinations", frunner_got(), ["toggle keyboard keys"])
+    check("the tiling actions and keys_list work without pointer mode",
+          [a for a in (*relay.TILE_ACTIONS, "keys_list") if not relay.known_action(a) or relay.needs_pointer(a)], [])
+    to_relay("keyboard steam")
+    time.sleep(0.05)
+    typed()
 
     # Meta+Shift+H (a default): ft-screens hides or shows the screens. Hidden, they give typing to
     # Steam and the keyboards aren't grabbed, but the relay still reads them, so a second press

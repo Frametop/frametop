@@ -88,6 +88,8 @@ d.floats.clear(), d.screens.sent.clear()
 slot.window = None
 d.float_window(ev)
 check("floated another way (the float key): no carry", [t for t in d.screens.sent if t.startswith("torn")], [])
+check("...ft-screens hears whose window it is, after its panel (the dashboard tiles' memory)",
+      [t for t in d.screens.sent if t.startswith("floatapp")], ["floatapp 4 org.kde.dolphin"])
 
 # "carry_on_float" (Input Settings, DEE-328): a window floated from the desktop starts carried ("carry
 # take"), only with it on, and never one torn off (ft-screens carries that on as "torn").

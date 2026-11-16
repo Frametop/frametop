@@ -16,6 +16,10 @@ and the arrow keys move through what's found, and Enter or a click opens it:
   - one of Frametop's own actions (ft_input_actions.MENU_ACTIONS): the input relay does it
     ("action NAME" to @frametop_relay). Opened as the OS menu (the relay's os_menu action),
     an empty query lists them.
+Opened as the key list (the relay's keys_list, Meta+/; frunner/keylist.py) it lists every key
+combination instead, and typing filters them: Enter on a dashboard tiling key or a menu action does
+it, on any other says which keys to press, and the first row opens Frametop Settings' Keyboard
+page to rebind them.
 Shift+Enter or a right click opens the item's menu: an app's own actions (a browser's private
 window), Open new window, Open docked on this screen, and its windows; a display's Go to and
 Disconnect; a PC window's Back to the PC. Esc goes back from a menu, and closes the search.
@@ -28,10 +32,11 @@ second; see compositor.c), from keyboards and Frametop's keyboard alike, so noth
 app or Steam meanwhile.
 
 Datagrams on @ft_frunner (--socket NAME); a sender with an address gets "ok ..." or "error":
-  toggle [keyboard|mouse|left|right] [actions]   the input relay's frunner action, and what
+  toggle [keyboard|mouse|left|right] [actions|keys]   the input relay's frunner action, and what
                                        pressed it: from a mouse or controller, Frametop's keyboard
-                                       opens too; actions: its os_menu, the OS menu
-  open [SOURCE] [actions] | close | status   (status -> "ok open|closed list|menu <query>")
+                                       opens too; actions: its os_menu, the OS menu; keys: its
+                                       keys_list, the key list
+  open [SOURCE] [actions|keys] | close | status   (status -> "ok open|closed list|menu <query>")
   rows                                 -> "ok [titles]" (JSON): what's listed now, for tests
   key <code> <value>                   ft-screens: typing, while the search has it
   dismiss <why>                        ft-screens: something else took the typing (a click
@@ -78,6 +83,7 @@ from ft_desktopapps import DesktopAppInfo  # noqa: E402  (GioUnix's or Gio's; co
 sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands)
 import spotsearch  # noqa: E402
+import keylist  # noqa: E402  (the key list)
 
 PANEL = os.path.join(REPO, "screens", "build", "ft-spotpanel")
 IN_BOX = os.path.join(REPO, "scripts", "in-box")  # runs a program in the container it was built in
@@ -97,6 +103,8 @@ KEY_UP, KEY_DOWN, KEY_LEFT, KEY_PAGEUP, KEY_PAGEDOWN, KEY_U = 103, 108, 105, 104
 REMOTE_ICON = "video-display"
 COMMAND_ICON = "utilities-terminal"
 ACTION_ICON = "preferences-system"
+SETTINGS_ICON = "input-keyboard"
+SETTINGS = os.path.join(REPO, "settings", "ft-settings")  # Frametop Settings [SECTION]
 WINDOW_ICON = "window"
 PC_ICON = "computer"
 
@@ -377,6 +385,8 @@ class Frunner:
         self.actions = [spotsearch.Item("action", "action:" + name, title, "", keywords, "", {"name": name})
                         for name, title, keywords in MENU_ACTIONS]
         self.actions_menu = False  # opened as the OS menu: an empty query lists the actions
+        self.keys_menu = False     # opened as the key list: only key_items, every one with no query
+        self.key_items = []        # keylist.items(), read at each such open
         self.running_remotes = {}  # screen number -> state, from ft-screens
         self.windows = []       # ft-floatd's spotlist
         self.usage = self.load_usage()
@@ -662,6 +672,11 @@ class Frunner:
     # ------------------------------------------------------------ the rows
 
     def result_entry(self, item):
+        if item.kind == "keybind":
+            if item.key == keylist.REBIND_KEY:
+                return Entry("item", item.title, item.generic, SETTINGS_ICON, "Open", run=self.open_key_settings, item=item)
+            return Entry("item", item.data["keys"], keylist.label(item.data["action"]), ACTION_ICON,
+                         "Do" if item.data["runnable"] else "", run=lambda: self.run_keybind(item), item=item)
         if item.kind == "action":
             return Entry("item", item.title, "Frametop", ACTION_ICON, "Do", run=lambda: self.run_action(item), item=item)
         if item.kind == "command":
@@ -700,7 +715,10 @@ class Frunner:
         was = self.entries[self.sel].item if keep and 0 <= self.sel < len(self.entries) else None
         for a in self.apps:
             a.running = bool(self.windows_of(a)) if self.windows else False
-        if self.actions_menu and not self.query.strip():
+        if self.keys_menu:
+            q = self.query.strip()
+            found = spotsearch.search(self.key_items, q, self.usage) if q else list(self.key_items)
+        elif self.actions_menu and not self.query.strip():
             found = list(self.actions)  # the OS menu, in its own order
         else:
             found = spotsearch.search(self.apps + self.profiles + self.remotes + self.commands + self.actions +
@@ -715,6 +733,11 @@ class Frunner:
         rows = [Entry("header", item.title, "", entry.icon)]  # (a click on it goes back)
         if item.kind == "action":
             rows.append(Entry("item", "Do it", "Frametop", run=lambda: self.run_action(item)))
+            return rows
+        if item.kind == "keybind":
+            if item.data["runnable"]:
+                rows.append(Entry("item", "Do it", item.data["keys"], run=lambda: self.run_keybind(item)))
+            rows.append(Entry("item", "Rebind", "Frametop Settings, Keyboard", run=self.open_key_settings))
             return rows
         if item.kind == "command":
             rows.append(Entry("item", "Run", item.data["run"], run=lambda: self.run_command(item)))
@@ -807,8 +830,9 @@ class Frunner:
 
     # ------------------------------------------------------------ open and close
 
-    def open(self, source="keyboard", actions=False):
-        """Open the search; actions: as the OS menu, Frametop's own actions listed until you type."""
+    def open(self, source="keyboard", actions=False, keys=False):
+        """Open the search; actions: as the OS menu, Frametop's own actions listed until you type;
+        keys: as the key list, only the key combinations."""
         if self.is_open:
             return "ok open"
         if not self.panel and not self.args.no_panel:
@@ -831,6 +855,8 @@ class Frunner:
         self.load_commands()
         self.load_pc()
         self.actions_menu = actions
+        self.keys_menu = keys
+        self.key_items = keylist.items(keylist.bindings()) if keys else []
         self.refilter()
         reply = self.ask(self.args.panel_socket, "show") if not self.args.no_panel else "ok"
         if not reply or not reply.startswith("ok"):
@@ -840,7 +866,7 @@ class Frunner:
         self.renew = GLib.timeout_add(RENEW_MS, self.renew_lease)
         # Opened from a mouse or controller button: maybe no keyboard at hand.
         self.opened_keyboard = source != "keyboard" and self.screens("vrkeyboard show") == "ok opened"
-        log(f"open (from the {source}{', the OS menu' if actions else ''})")
+        log(f"open (from the {source}{', the OS menu' if actions else ', the key list' if keys else ''})")
         return "ok"
 
     def renew_lease(self):
@@ -933,6 +959,8 @@ class Frunner:
             self.toast(f"{name} is on your {pin} wrist")
         elif pin == "head":
             self.toast(f"{name} is pinned to your view")
+        elif pin == "dashboard":
+            self.toast(f"{name} is pinned to the dashboard")
 
     def launch(self, item, action=None, screen=None):
         self.close("launch")
@@ -975,6 +1003,24 @@ class Frunner:
         why = answer.get("error") or "the input relay didn't answer"
         log(f"action {item.data['name']}: {why}")
         self.toast(f"{item.title}: {why}")
+
+    def run_keybind(self, item):
+        """A row of the key list: the relay does it if it can from here, else a word on its keys."""
+        if not item.data["runnable"]:
+            self.close("key list")
+            self.toast(f"Press {item.data['keys']}")
+            return
+        self.run_action(spotsearch.Item("action", item.key, keylist.label(item.data["action"]), data={"name": item.data["action"]}))
+
+    def open_key_settings(self):
+        """Frametop Settings on its Keyboard page, where key combinations are bound."""
+        self.close("rebind keys")
+        try:
+            subprocess.Popen([SETTINGS, "keyboard"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            log(f"Frametop Settings: {e}")
+            self.toast("Frametop Settings didn't start")
 
     def stop_command(self, item):
         self.close("command")
@@ -1180,13 +1226,14 @@ class Frunner:
                 return "error key CODE VALUE"
             return None
         if cmd in ("toggle", "open"):
-            # "toggle|open [SOURCE] [actions]": actions, the OS menu (the relay's os_menu).
-            actions = "actions" in rest
-            source = next((w for w in rest if w != "actions"), "keyboard")
+            # "toggle|open [SOURCE] [actions|keys]": actions, the OS menu (the relay's os_menu);
+            # keys, the key list (its keys_list).
+            actions, keys = "actions" in rest, "keys" in rest
+            source = next((w for w in rest if w not in ("actions", "keys")), "keyboard")
             if cmd == "toggle" and self.is_open:
                 self.close("toggle")
                 return "ok closed"
-            return self.open(source, actions)
+            return self.open(source, actions and not keys, keys)
         if cmd == "close":
             self.close("asked")
             return "ok"

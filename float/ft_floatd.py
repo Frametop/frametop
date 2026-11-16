@@ -774,6 +774,9 @@ class Daemon:
             self.pose(f, *place)
         else:
             self.place_panel(f, ev)
+        if f.app:
+            # whose window it is: on the dashboard again if that app's last one was (ft-screens' tiles)
+            self.screens.ask(f"floatapp {slot.index} {re.sub(r'[^A-Za-z0-9._-]', '_', f.app)}", quiet=True)
         if tear:
             # torn off: ft-screens carries it on with the laser that held it, by where it held it (pixels in it)
             k, out = scales.get(ev["output"], 1.0) or 1.0, ev.get("outputRect") or {"x": 0, "y": 0}

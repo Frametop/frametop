@@ -76,7 +76,8 @@ stops on its release, and a key, mouse button or scroll in between makes it a sh
 cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
 Meta+K: gaze_right, Meta+Shift+F: float_toggle, Meta+Shift+H: screens_toggle, Ctrl+Alt+Shift+Esc:
-release_keys), plus a Right Ctrl tap for dictate once Frametop Voice is installed
+release_keys, Meta+arrows and Meta+Ctrl+arrows: the dashboard tiling keys, Meta+/: keys_list), plus a
+Right Ctrl tap for dictate once Frametop Voice is installed
 (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. A combination bound to
 release_keys also fires with more modifiers held than it names, so one stuck here doesn't stop it.
 The float, screens, profile, Steam menu, pause, dictation, hand tracking, release and command
@@ -219,8 +220,12 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   reload            re-read both config files, re-apply roles, tell the helper
   vrcapture <s>     take every controller button for s seconds (0: stop), so the settings
                     app can capture one; watchers see them as events with id frame_controller
-  action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS
-                    only; from this user only), as a button would ({"t": "action"}, or an error)
+  action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS,
+                    and from its key list the tiling keys: KEY_LIST_RUNNABLE; from this user only),
+                    as a button would ({"t": "action"}, or an error)
+  tilefocus 1|0     from ft-screens: an anchored dashboard tile has the focus (renewed every 2 s,
+                    lapses TILE_FOCUS_LAPSE after the last), so the tiling keys (TILE_FOCUS_ACTIONS)
+                    are ft-screens'; without it they go to the desktop. Ignored from another user
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
@@ -308,7 +313,10 @@ import ft_pinlock  # noqa: E402
 from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabulary)
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
+    KEY_LIST_RUNNABLE,
     MENU_ACTION_NAMES,
+    TILE_ACTIONS,
+    TILE_FOCUS_ACTIONS,
     VOICE_ACTIONS,
     VOICE_KEY_BINDINGS,
     VR_BUTTONS,
@@ -345,7 +353,8 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "carry_toggle", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "os_menu", "hands_toggle", "release_keys", "desktopless_toggle", "key", "none")
+           "frunner", "os_menu", "hands_toggle", "release_keys", "desktopless_toggle", *TILE_ACTIONS, "keys_list",
+           "key", "none")
 # GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
 # file without "key_bindings" gets, are ft_input_actions'.
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
@@ -377,6 +386,7 @@ TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to 
 # Between a character typed as keys and one committed through the input method (or back): they
 # reach the app by different ways, so the first gets this long to arrive before the next goes.
 TYPE_SWITCH = 0.05
+TILE_FOCUS_LAPSE = 5.0  # ft-screens renews its "tilefocus 1" every 2 s; the tiling keys go back to the desktop this long after
 TEXT_INPUT_LAPSE = 7.0  # ft-textinput renews its "textfield 1" every 2 s; its address lapses this long after
 KB_POKES = ("hover", "press", "move", "up", "end")  # a fingertip on Full Keyboard (ft-screens' "kbpoke")
 KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
@@ -402,7 +412,10 @@ SCREENS_ACTIONS = {"spin_next": b"spin next", "spin_prev": b"spin prev", "screen
 # need pointer mode, and does nothing while Frametop is paused.
 FRUNNER = "\0ft_frunner"
 # os_menu opens it with Frametop's own actions listed (ft_input_actions.MENU_ACTIONS, the OS
-# menu): "toggle <source> actions". Picking one sends "action NAME" here.
+# menu): "toggle <source> actions". Picking one sends "action NAME" here. keys_list opens it with
+# every key combination listed ("toggle <source> keys").
+# The tiling actions (ft_input_actions.TILE_ACTIONS) go to ft-screens as its "tile KEY" and
+# "anchor focused toggle"; they don't need pointer mode either.
 # renamed_actions(): old action names rules files may still use, under their new ones (ft_input_actions).
 # hands_toggle: hand tracking off if it runs, else on (HANDSMODE toggle, which says which in this
 # service's log). It doesn't need pointer mode either.
@@ -434,8 +447,8 @@ def known_action(a):
 
 
 def needs_pointer(a):
-    return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS
-            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "hands_toggle", "release_keys",
+    return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS and a not in TILE_ACTIONS
+            and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "keys_list", "hands_toggle", "release_keys",
                           "desktopless_toggle")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
@@ -1297,6 +1310,7 @@ class Relay:
         self.desktop_until, self.typing_applied = 0.0, None
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
+        self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1": the tiling keys are its until then
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
         # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
         # characters the desktop's layout has no key for, until text_input_until; None without one.
@@ -1520,11 +1534,18 @@ class Relay:
                 except OSError:
                     pass  # the Frametop desktop isn't running
                 log(action)
-        elif action in ("frunner", "os_menu"):
+        elif action in TILE_ACTIONS:
             if value == 1:
                 try:
-                    self.screens_sock.sendto(f"toggle {source}{' actions' if action == 'os_menu' else ''}".encode(),
-                                             FRUNNER)
+                    self.screens_sock.sendto(TILE_ACTIONS[action].encode(), SCREENS)
+                except OSError:
+                    pass  # the Frametop desktop isn't running
+                log(action)
+        elif action in ("frunner", "os_menu", "keys_list"):
+            if value == 1:
+                mode = {"os_menu": " actions", "keys_list": " keys"}.get(action, "")
+                try:
+                    self.screens_sock.sendto(f"toggle {source}{mode}".encode(), FRUNNER)
                 except OSError:
                     log("frunner: not running (the Frametop desktop starts it)")
                 log(action)
@@ -1668,6 +1689,8 @@ class Relay:
             combo, action = self.release_combo(code) or (combo, action)
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return combo, None
+        if action in TILE_FOCUS_ACTIONS and time.monotonic() >= self.tile_focus_until:
+            return combo, None  # no anchored tile has the focus: the desktop's key (KWin's Meta+arrows)
         return combo, action
 
     def release_combo(self, code):
@@ -2181,11 +2204,11 @@ class Relay:
             return
         if cmd == "action" and len(words) == 2:
             # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu.
-            # Only those (MENU_ACTION_NAMES), and only from this user: never run:, command: or keys:.
+            # Only those (KEY_LIST_RUNNABLE), and only from this user: never run:, command: or keys:.
             name = words[1]
             if uid != os.getuid():
                 self.reply(addr, {"t": "error", "error": "another user's"})
-            elif name not in MENU_ACTION_NAMES:
+            elif name not in KEY_LIST_RUNNABLE:
                 self.reply(addr, {"t": "error", "error": f"not a menu action {name!r}"})
             elif self.pause.paused and not works_paused(name):
                 self.reply(addr, {"t": "error", "error": "paused"})
@@ -2193,6 +2216,11 @@ class Relay:
                 self.do_action(name, 1, now, "frunner")
                 self.do_action(name, 0, now, "frunner")
                 self.reply(addr, {"t": "action", "action": name})
+            return
+        if cmd == "tilefocus" and words[1:] in (["1"], ["0"]):
+            # From ft-screens (unbound, no reply): an anchored tile has the focus, or not any more.
+            if uid == os.getuid():
+                self.tile_focus_until = now + TILE_FOCUS_LAPSE if words[1] == "1" else 0.0
             return
         if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
             # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop

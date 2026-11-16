@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline test of input/rules-migrate.py, the one-time changes to the input relay's rules: a
-key_bindings list of its own gets Meta+Shift+H once, Ctrl+Alt+Shift+Esc once and Meta+Shift+D once,
-and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
+key_bindings list of its own gets Meta+Shift+H once, Ctrl+Alt+Shift+Esc once, Meta+Shift+D once and
+the dashboard tiling keys once, and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
 
   input/test/rules-migrate-test.py
 """
@@ -205,7 +205,7 @@ try:
 
     # Ctrl+Alt+Shift+Esc, with the changes before it, as an install of its day ran them.
     check("every change runs, in order", [name for name, _ in ALL_MIGRATIONS],
-          ["screens-toggle-key", "release-keys-key", "desktopless-key"])
+          ["screens-toggle-key", "release-keys-key", "desktopless-key", "dashboard-tile-keys"])
     rm.MIGRATIONS = ALL_MIGRATIONS[:2]
     # A list that got Meta+Shift+H already (an install with the screens-toggle key change): it gets this one, once.
     with_h = {**CUSTOM, "key_bindings": {"42+125+35": "screens_toggle", **CUSTOM["key_bindings"]}}
@@ -309,8 +309,8 @@ try:
           any("add Ctrl+Alt+Shift+Esc (Release all keys) on its Keyboard page" in line
               for line in out.getvalue().splitlines()), True)
 
-    # Meta+Shift+D (desktopless mode), with every change, as an install runs them now.
-    rm.MIGRATIONS = ALL_MIGRATIONS
+    # Meta+Shift+D (desktopless mode), with the changes before it, as an install of its day ran them.
+    rm.MIGRATIONS = ALL_MIGRATIONS[:3]
     DESKTOPLESS_LINE = '    "42+125+32": "desktopless_toggle",\n'
     with_both = {**with_h, "key_bindings": {"29+42+56+1": "release_keys", **with_h["key_bindings"]}}
     rules, state = case("desktopless-after", with_both)
@@ -339,6 +339,34 @@ try:
     rm.main(rules, state)
     check("Meta+Shift+D bound already: unchanged, no backup, marked",
           (read(rules), read(rules + ".bak-desktopless-key"), marked(state, rm.DESKTOPLESS_KEY)), (before, None, True))
+
+    # The dashboard tiling keys, with every change, as an install runs them now: the ones the list
+    # lacks go first, in one change; one the user bound already stays theirs.
+    rm.MIGRATIONS = ALL_MIGRATIONS
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "conf"))
+    import ft_input_actions
+    check("the tiling keys are ft_input_actions' defaults", rm.TILE_COMBOS, dict(ft_input_actions.TILE_KEY_BINDINGS))
+    with_three = {**with_both, "key_bindings": {"42+125+32": "desktopless_toggle", "125+53": "command:mine",
+                                                **with_both["key_bindings"]}}
+    rules, state = case("tile-keys-after", with_three)
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump({rm.SCREENS_TOGGLE_KEY: True, rm.RELEASE_KEYS_KEY: True, rm.DESKTOPLESS_KEY: True}, f)
+    before = read(rules)
+    reloads()
+    check("after the desktopless change: done", rm.main(rules, state), 0)
+    after = json.loads(read(rules))["key_bindings"]
+    added = [c for c in rm.TILE_COMBOS if c != "125+53"]
+    check("...the tiling keys added first, the others in their order", list(after), [*added, *with_three["key_bindings"]])
+    check("...Meta+/ bound already: the user's", after["125+53"], "command:mine")
+    tile_lines = "".join(f'    "{c}": "{rm.TILE_COMBOS[c]}",\n' for c in added)
+    check("...every other byte as it was", read(rules).decode().replace(tile_lines, "", 1).encode(), before)
+    check("...backed up, marked, the relay told once",
+          (read(rules + ".bak-dashboard-tile-keys"), marked(state, rm.TILE_KEYS_KEY), reloads()), (before, True, 1))
+    with open(rules, "wb") as f:
+        f.write(before)
+    rm.main(rules, state)
+    check("...removed afterwards: not added again", read(rules), before)
 finally:
     rm.MIGRATIONS = ALL_MIGRATIONS
     relay.close()

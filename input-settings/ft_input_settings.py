@@ -80,7 +80,7 @@ import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
 # GAZE_ACTIONS: gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md).
 # DEFAULT_KEY_BINDINGS: what a rules file without "key_bindings" gets, as the relay reads it.
-from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS  # noqa: E402  (the rules file's vocabulary)
+from ft_input_actions import ACTION_LABELS, DEFAULT_KEY_BINDINGS, GAZE_ACTIONS  # noqa: E402  (the rules file's vocabulary)
 # This folder's own modules (pack/pyside-runtime.py loads this file by its path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import input_rules  # noqa: E402  (the rules file and frametop.conf)
@@ -227,35 +227,6 @@ BTN_MISC = 0x100
 RANGE_ALIASES = {"BTN_MISC", "BTN_MOUSE", "BTN_JOYSTICK", "BTN_GAMEPAD", "BTN_DIGI", "BTN_WHEEL",
                  "BTN_TRIGGER_HAPPY", "KEY_MIN_INTERESTING", "KEY_MAX", "KEY_CNT", "BTN_A", "BTN_B", "BTN_X", "BTN_Y"}
 DEFAULT_BUTTONS = {0x110: "left", 0x111: "right", 0x112: "middle", 0x113: "back", 0x114: "back"}
-ACTION_LABELS = {
-    "left": "Left click", "right": "Right click", "middle": "Middle click", "back": "Back",
-    "scroll_up": "Scroll up", "scroll_down": "Scroll down", "dashboard": "Toggle SteamVR dashboard",
-    "steam_menu": "Open Steam menu / close dashboard",
-    "recenter": "Recenter pointer", "pointer_toggle": "Pointer on/off",
-    "follow_toggle": "Head follow on/off (experimental)", "gaze_toggle": "Gaze pointer on/off (experimental)",
-    "gaze_precision": "Gaze precision: hold to steer, release to click",
-    "gaze_drag": "Gaze drag: press where you look, steer, release",
-    "gaze_left": "Gaze left click: tap, or hold and turn your head to aim",
-    "gaze_right": "Gaze right click: tap, or hold and turn your head to aim",
-    "gaze_quickcal": "Gaze quick check (one dot)",
-    "sens_up": "Faster pointer",
-    "sens_down": "Slower pointer", "layout_reset": "Reset desktop screen layout",
-    "screens_toggle": "Hide/show desktop screens", "keyboard_toggle": "Open/close keyboard",
-    "float_toggle": "Float window in VR / put it back", "dock_all": "Put all floating windows back",
-    "pause_toggle": "Pause/resume Frametop (for VR games)",
-    "dictate": "Dictation: start or stop",
-    "dictate_hold": "Dictation: while held",
-    "spin_next": "Spin the panels: next one on the right to the front",
-    "spin_prev": "Spin the panels: next one on the left to the front",
-    "carry_toggle": "Carry the panel under the pointer / carry all",
-    "frunner": "Frunner: search apps and remote displays",
-    "os_menu": "OS menu: Frametop's actions in frunner",
-    "hands_toggle": "Hand tracking on/off",
-    "release_keys": "Release all keys (a stuck modifier)",
-    "desktopless_toggle": "Desktopless mode on/off",
-    "key": "Pass through as key",
-    "none": "Do nothing",
-}
 # When Frametop's keyboard opens ("vr_keyboard" in the rules; the relay's
 # VR_KEYBOARD_MODES). "no_keyboard" is the default.
 VR_KEYBOARD_MODES = {

@@ -20,6 +20,11 @@ user removes afterwards stays removed.
   desktopless-key (2026-11-07): Meta+Shift+D turns desktopless mode on or off ("42+125+32":
   desktopless_toggle, a new default; docs/desktopless.md). Added the same way.
 
+  dashboard-tile-keys (2026-11-16): the dashboard tiling keys, Meta+arrows and Meta+Ctrl+arrows,
+  and Meta+/ for the key list (ft_input_actions.TILE_KEY_BINDINGS, new defaults; docs/design.md,
+  Dashboard tiles). Each one the list lacks is added the same way, in one change; one the list
+  binds already stays the user's.
+
   input/rules-migrate.py [RULES [STATE]]
 Python 3 standard library only: it runs on the SteamOS host.
 """
@@ -40,6 +45,11 @@ RELEASE_KEYS_KEY = "release-keys-key"
 RELEASE_COMBO, RELEASE_ACTION = "29+42+56+1", "release_keys"
 DESKTOPLESS_KEY = "desktopless-key"
 DESKTOPLESS_COMBO, DESKTOPLESS_ACTION = "42+125+32", "desktopless_toggle"
+TILE_KEYS_KEY = "dashboard-tile-keys"
+# ft_input_actions.TILE_KEY_BINDINGS, copied: this runs on the host before conf/ may be importable
+TILE_COMBOS = {"125+105": "tile_left", "125+106": "tile_right", "125+103": "tile_up", "125+108": "tile_down",
+               "29+125+106": "tile_wider", "29+125+105": "tile_narrower", "29+125+103": "tile_taller",
+               "29+125+108": "tile_shorter", "125+53": "keys_list"}
 
 
 def read_state(path):
@@ -79,6 +89,12 @@ def add_binding(path, name, combo, action, keys, what, setting):
     the list. keys, what and setting name it in messages ("Meta+Shift+H", "hide or show the
     screens", "Hide/show desktop screens": its name in Input Settings). (done, message): done
     False means try again on the next install."""
+    return add_bindings(path, name, {combo: action}, keys, what, setting)
+
+
+def add_bindings(path, name, combos, keys, what, setting):
+    """add_binding for several combinations ({combo: action}) in one change: each one the list
+    lacks goes first in it, in combos' order; the ones it has stay as they are."""
     path = os.path.realpath(path)  # a symlinked rules file: write where it points
     try:
         with open(path, "rb") as f:
@@ -95,15 +111,16 @@ def add_binding(path, name, combo, action, keys, what, setting):
         # The relay reads it as no rules (the defaults), but it may be half written: next time.
         return False, f"key combinations: {path} isn't JSON; left as it is"
     bindings = rules.get("key_bindings") if isinstance(rules, dict) else None
-    if not isinstance(bindings, dict) or combo in bindings:
-        return True, None  # the defaults, or the combination is the user's already
+    missing = {c: a for c, a in combos.items() if isinstance(bindings, dict) and c not in bindings}
+    if not missing:
+        return True, None  # the defaults, or the combinations are the user's already
     laid_out = json.dumps(rules, indent=2)
     if not text.startswith(laid_out) or text[len(laid_out):].strip():
         return True, (f"key combinations: {path} isn't laid out as Frametop Settings writes it, so it's "
                       f"left as it is: add {keys} ({setting}) on its Keyboard page")
     if not mode & 0o200:
         return True, f"key combinations: {path} is read-only, so it's left as it is: {keys} wasn't added"
-    rules["key_bindings"] = {combo: action, **bindings}
+    rules["key_bindings"] = {**missing, **bindings}
     backup = path + ".bak-" + name
     try:
         if read(backup) not in (None, raw):  # an earlier try's, of another version of the file
@@ -150,8 +167,13 @@ def desktopless_key(path):
                        "turn desktopless mode on or off", "Desktopless mode on/off")
 
 
+def tile_keys(path):
+    return add_bindings(path, TILE_KEYS_KEY, TILE_COMBOS, "Meta+arrows, Meta+Ctrl+arrows and Meta+/",
+                        "move and size the dashboard tiles, list the key combinations", "Dashboard tile: ...")
+
+
 MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key), (RELEASE_KEYS_KEY, release_keys_key),
-              (DESKTOPLESS_KEY, desktopless_key))
+              (DESKTOPLESS_KEY, desktopless_key), (TILE_KEYS_KEY, tile_keys))
 
 
 def main(rules=RULES, state_path=STATE):

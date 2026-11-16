@@ -49,6 +49,7 @@ from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import steam_settings  # noqa: E402
 import stereo_wallpaper  # noqa: E402  (DEE-317: the pictures here, the rest on the host)
+import dash_tiles  # noqa: E402  (the dashboard tiles' settings: backend.dashTiles)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 DESKTOPS = os.path.join(HERE, "..", "desktops.sh")
@@ -116,6 +117,8 @@ class Backend(QObject):
         self._roomRead.connect(self._room_read, Qt.QueuedConnection)
         self.changed.connect(self.previewChanged)
         self.roomPoll = QTimer(interval=1000, timeout=self._read_room)
+        self._dashTiles = dash_tiles.DashTiles(self._setBar, self)
+        self.changed.connect(self._dashTiles.changed)
 
     # --- state ---
     def _conf(self):
@@ -881,6 +884,11 @@ class Backend(QObject):
             place = {"head": "on your head", "dashboard": "on the dashboard"}.get(where, f"on your {where} wrist")
             self.message.emit(f"All screens ride {place} now. Save as profile… (Layout & profiles) keeps it.", False)
         self._check_running()
+
+    @Property(QObject, constant=True)
+    def dashTiles(self):
+        """The dashboard tiles' settings (dash_tiles.py)."""
+        return self._dashTiles
 
     # --- stereo wallpaper (DEE-317, stereo_wallpaper.py) ---
     @Property(bool, notify=changed)

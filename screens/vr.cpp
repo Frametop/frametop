@@ -2280,6 +2280,32 @@ bool Regroup() {
     return true;
 }
 
+// The DASH_TILE_* numbers in frametop.conf (read at start, and live from Frametop Settings'
+// "handsetting"), with their ranges.
+struct TileSetting {
+    const char *name;
+    double *value;
+    double lo, hi;
+};
+std::array<TileSetting, 4> TileSettings() {
+    return {{{"DASH_TILE_RAISE_DEG", &g_tileRaiseDeg, -30, 60},   // the band's bottom above the dashboard's bar
+             {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 4},   // the sphere's, metres
+             {"DASH_TILE_HEIGHT_DEG", &g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120},
+             {"DASH_TILE_MAX_TOP_DEG", &g_tiles.params.maxTopDeg, 20, 80}}};   // the column height cap
+}
+// One of them live: false if it isn't one, or out of its range. The tiles go round again.
+bool SetTileSetting(const char *name, double value) {
+    for (const TileSetting &t : TileSettings()) {
+        if (std::strcmp(t.name, name) != 0) continue;
+        if (!(value >= t.lo && value <= t.hi)) return false;
+        *t.value = value;
+        g_tileRegroup = true;   // (the raise needs the bar's elevation again: on the next good read)
+        RetileDash(true);
+        return true;
+    }
+    return false;
+}
+
 bool TileAnchored(int i) { return g_tiles.Anchored(i); }
 std::string TileLabel(int i) { return "screen " + std::to_string(i + 1); }
 
@@ -6636,10 +6662,7 @@ bool ft_vr_init(void) {
     num("FLOAT_DOCK_DISTANCE", g_floatDockDistance, 0, 1);   // a floating window carried this near a screen docks onto it
     // the dashboard tiles (dashtiles.h, tiling.h): where their band and sphere are, and whether a panel
     // anchored stays shown with the dashboard closed
-    num("DASH_TILE_RAISE_DEG", g_tileRaiseDeg, -30, 60);
-    num("DASH_TILE_RADIUS", g_tiles.params.radius, 0.8, 4);
-    num("DASH_TILE_HEIGHT_DEG", g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120);
-    num("DASH_TILE_MAX_TOP_DEG", g_tiles.params.maxTopDeg, 20, 80);
+    for (const TileSetting &t : TileSettings()) num(t.name, *t.value, t.lo, t.hi);
     g_tileStayDefault = handcut::Setting("DASH_TILE_STAY", "0") == "1";
     LoadTileMemory();
     if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
@@ -8624,6 +8647,13 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     int &rr = parsed.rr;
     switch (verb) {
     case vrcmd::HandSetting: {
+        if (!std::strncmp(key, "DASH_TILE_", 10) && std::strcmp(key, "DASH_TILE_STAY") != 0) {
+            double value;
+            if (!ft_conf_number(word, &value) || !SetTileSetting(key, value))
+                return (void)std::snprintf(reply, size, "error invalid dashboard tile setting");
+            std::snprintf(reply, size, "ok %s %s", key, word);
+            return;
+        }
         if (!std::strncmp(key, "GRAB_BAR_", 9)) {
             const std::string name = key;
             bool valid = false;

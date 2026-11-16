@@ -40,6 +40,14 @@
 //     screens do. Carrying it works like a wrist pin: let go and it's re-pinned to your
 //     head where you put it; sweep across a wrist ring to move it to that wrist, or twice
 //     to leave it in the room.
+//   - pin to the dashboard ("pin <screen> dashboard", from ft-layout and Frametop Settings): the
+//     screen keeps its place relative to the SteamVR dashboard, tilt included: drag the dashboard, or
+//     close it and open it again in front of you, and the screen goes with it. OpenVR won't say where
+//     the dashboard is, so we follow Steam's bar under it (dashanchor.h, UpdateDashAnchor). While the
+//     dashboard is closed the screen stays where it last was (the visibility mode decides whether it
+//     shows). Pinned before the dashboard has opened this run, it stays in the room until the dashboard
+//     first opens, then rides on it from where it is then (AttachDashWaits). Carrying it works like a
+//     wrist pin: let go and it's re-pinned to the dashboard where you put it.
 //   - visibility modes: always (the hide hotkey toggles), only with the SteamVR dashboard
 //     open, while you look at a chosen controller (the wrist gesture), or toggle only
 //     (hidden until the hotkey shows them).
@@ -112,7 +120,8 @@
 //     open, like SteamVR's own over a game; its click gives SteamVR's Gamepad mode to that panel
 //     (through the hidden dashboard overlay frametop.gamepad, input/vrpad.py).
 // OpenVR has no overlay-relative transforms here (openvr v2.15.6), so the bar, button,
-// and handle are placed whenever their screen moves.
+// and handle are placed whenever their screen moves, and a dashboard pin is placed by us every
+// time the dashboard moves (MoveFramePins).
 #include "vr.h"
 #include "../hands/include/fh_events.h"
 
@@ -130,6 +139,7 @@
 #include "levelpin.h"
 #include "barhit.h"
 #include "chromepool.h"
+#include "dashanchor.h"
 #include "posemath.h"
 #include "roomshift.h"
 #include "layoutgrab.h"
@@ -247,14 +257,19 @@ bool IsHandController(vr::TrackedDeviceIndex_t i) {
     vr::VRSystem()->GetStringTrackedDeviceProperty(i, vr::Prop_ControllerType_String, type, sizeof type);
     return std::strcmp(type, "ft_pointer") != 0;  // not the 3D mouse's virtual controller
 }
-// "left", "right", or "head" (the headset) -> the device to pin to.
+// A screen pinned to the SteamVR dashboard rides on this in place of a device (UpdateDashAnchor, PinFrame): no
+// device has it, so DevicePose fails for it (kHandHolder, below, are +1 and +2).
+constexpr vr::TrackedDeviceIndex_t kDashboard = vr::k_unMaxTrackedDeviceCount + 3;
+// "left", "right", "head" (the headset), or "dashboard" (kDashboard) -> what to pin to.
 vr::TrackedDeviceIndex_t HandDevice(const char *hand) {
     if (std::strcmp(hand, "head") == 0) return vr::k_unTrackedDeviceIndex_Hmd;
+    if (std::strcmp(hand, "dashboard") == 0) return kDashboard;
     return vr::VRSystem()->GetTrackedDeviceIndexForControllerRole(
         std::strcmp(hand, "right") == 0 ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand);
 }
 const char *HandName(vr::TrackedDeviceIndex_t i) {
     if (i == vr::k_unTrackedDeviceIndex_Hmd) return "head";
+    if (i == kDashboard) return "dashboard";
     switch (vr::VRSystem()->GetControllerRoleForTrackedDeviceIndex(i)) {
         case vr::TrackedControllerRole_LeftHand: return "left";
         case vr::TrackedControllerRole_RightHand: return "right";
@@ -333,7 +348,12 @@ struct Screen {
     vr::TrackedDeviceIndex_t pinned = kNone;  // riding on this controller
     Mat pinRel = Identity();                  // controller -> screen (a level pin: level frame -> screen)
     levelpin::Mode pinMode = levelpin::Rigid; // on the head, Level or Walk (SCREEN_PIN_LEVEL): FloorFrame, not the headset
-    Mat levelAt{};                            // a floor pin: the frame it was last placed with (MoveLevelPins)
+    Mat levelAt{};                            // a floor pin: the frame it was last placed with (MoveFramePins)
+    // Pinned to the dashboard before it was seen this run (WaitForDash): in the room (pinned is kNone) until the
+    // dashboard first opens (AttachDashWaits), then on it at dashRel, or (no dashRel) where it is then.
+    bool dashWait = false;
+    bool dashHasRel = false;                  // dashRel came with the pin (a profile's); moved meanwhile: dropped
+    Mat dashRel = Identity();                 // dashboard -> screen
     Mat pose = Identity();                    // where it is in the room, when not pinned
     Drag drag = Drag::None;
     vr::TrackedDeviceIndex_t dragDevice = kNone;
@@ -493,6 +513,7 @@ const char *DragName(Drag d) {
 }
 std::string DeviceLabel(vr::TrackedDeviceIndex_t i) {
     if (i == kNone) return "none";
+    if (i == kDashboard) return "dashboard";
     if (vr::VRSystem()->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_Controller && !IsHandController(i))
         return "3D mouse";
     const std::string hand = HandName(i);
@@ -897,7 +918,7 @@ void ApplyCurve(const Screen &s) {
 // Level head pins (SCREEN_PIN_LEVEL, levelpin.h; user 2026-10-27: "pin only follows horizontal movement"): a screen
 // pinned to the head follows it turning left and right and walking, but not looking up or down, tilting,
 // or rising and crouching. SteamVR only pins rigidly to a device, so these sit in the room, and
-// MoveLevelPins moves them every tick to FloorFrame times pinRel. The frame is on the floor under the
+// MoveFramePins moves them every tick to FloorFrame times pinRel. The frame is on the floor under the
 // head, turned with it, upright; pinRel holds the screen's height. Walking head pins (SCREEN_PIN_LEVEL=2)
 // are moved the same way, on a frame with the room's axes: they follow you walking, not turning.
 // Outside ft-screens a floor pin is still a head pin: "get" reports it relative to the headset, and
@@ -930,14 +951,87 @@ bool FloorFrame(levelpin::Mode mode, Mat *out) {
     return true;
 }
 
-// What a pinned screen rides on: its device's pose, or for a floor pin its floor frame.
-bool PinFrame(const Screen &s, Mat *out) { return s.pinMode ? FloorFrame(s.pinMode, out) : DevicePose(s.pinned, out); }
+// Dashboard pins (user, 2026-11-16: anchor screens to the SteamVR dashboard; docs/design.md, Dashboard pins).
+// OpenVR won't let another process read the dashboard's transform (valve.steam.gamepadui.main is a
+// DashboardTab overlay), but Steam's bar under it (kDashKey) is an Absolute overlay placed rigidly with it:
+// read every tick (dashanchor.h says which reads count), it's the frame dashboard pins ride on, placed by
+// us as floor pins are (MoveFramePins). Hidden (the dashboard closed), the last good frame stays. A
+// Steam-internal name: scripts/update-check.py checks it's still there.
+constexpr const char *kDashKey = "valve.steam.gamepadui.bar";
+struct DashAnchor {
+    vr::VROverlayHandle_t bar = vr::k_ulOverlayHandleInvalid;
+    long retryAt = 0;          // missing: g_tick to look for it again at
+    bool missingLogged = false;
+    dashanchor::Anchor a;      // a.ever: dashboard pins have a frame
+};
+DashAnchor g_dash;
+
+Mat DashFrame() {
+    Mat m;
+    std::memcpy(m.m, g_dash.a.frame, sizeof m.m);
+    return m;
+}
+
+// Each tick: read the bar. True when the dashboard moved (or was seen for the first time).
+bool UpdateDashAnchor() {
+    vr::IVROverlay *ov = vr::VROverlay();
+    if (g_dash.bar == vr::k_ulOverlayHandleInvalid) {
+        if (g_tick < g_dash.retryAt) return false;
+        if (ov->FindOverlay(kDashKey, &g_dash.bar) != vr::VROverlayError_None) {
+            g_dash.bar = vr::k_ulOverlayHandleInvalid;
+            g_dash.retryAt = g_tick + 90;   // about a second
+            if (!g_dash.missingLogged)
+                std::printf("dashboard pins: no %s overlay (Steam not up?); looking again every second\n", kDashKey);
+            g_dash.missingLogged = true;
+            return false;
+        }
+        std::printf("dashboard pins: following %s\n", kDashKey);
+        g_dash.missingLogged = false;
+    }
+    vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
+    vr::HmdMatrix34_t m{};
+    const bool shown = ov->IsOverlayVisible(g_dash.bar);
+    const vr::EVROverlayError err = ov->GetOverlayTransformAbsolute(g_dash.bar, &origin, &m);
+    if (err == vr::VROverlayError_UnknownOverlay || err == vr::VROverlayError_InvalidHandle) {
+        // Steam made it again (restarted): look it up again next tick
+        g_dash.bar = vr::k_ulOverlayHandleInvalid;
+        g_dash.a.Feed(false, false, m.m);
+        return false;
+    }
+    const bool first = !g_dash.a.ever;
+    const char *before = g_dash.a.why;
+    const bool moved = g_dash.a.Feed(shown, err == vr::VROverlayError_None && origin == vr::TrackingUniverseStanding, m.m);
+    // Each change of verdict, with what was read (why a read didn't count shows in the log).
+    if (g_dash.a.why != before) {
+        double ax[3];
+        for (int c = 0; c < 3; ++c) ax[c] = std::sqrt(double(m.m[0][c]) * m.m[0][c] + double(m.m[1][c]) * m.m[1][c] + double(m.m[2][c]) * m.m[2][c]);
+        std::printf("dashboard pins: bar read %s (shown %d, error %d, origin %d, at %.3f %.3f %.3f, axes %.4f %.4f %.4f)\n",
+                    g_dash.a.why ? g_dash.a.why : "counts", shown ? 1 : 0, int(err), int(origin), m.m[0][3], m.m[1][3],
+                    m.m[2][3], ax[0], ax[1], ax[2]);
+    }
+    if (moved && first)
+        std::printf("dashboard pins: the dashboard is at %.3f %.3f %.3f\n", g_dash.a.frame[0][3], g_dash.a.frame[1][3],
+                    g_dash.a.frame[2][3]);
+    return moved;
+}
+
+// What a pinned screen rides on: its device's pose, for a floor pin its floor frame, for a dashboard pin the
+// dashboard's (none until it's been seen).
+bool PinFrame(const Screen &s, Mat *out) {
+    if (s.pinned == kDashboard) {
+        if (!g_dash.a.ever) return false;
+        *out = DashFrame();
+        return true;
+    }
+    return s.pinMode ? FloorFrame(s.pinMode, out) : DevicePose(s.pinned, out);
+}
 
 // An overlay on a pinned screen at `rel` from what it rides on.
 void SetOnPin(const Screen &s, vr::VROverlayHandle_t o, const Mat &rel) {
-    if (!s.pinMode) return (void)vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(o, s.pinned, &rel);
+    if (!s.pinMode && s.pinned != kDashboard)
+        return (void)vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(o, s.pinned, &rel);
     Mat f;
-    if (!FloorFrame(s.pinMode, &f)) return;
+    if (!PinFrame(s, &f)) return;
     const Mat m = Mul(f, rel);
     vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &m);
 }
@@ -1134,7 +1228,7 @@ void PlaceChrome(Screen &s) {
     PlaceParts(s, parts);
 }
 
-// Where the controls and popups go, their sizes set (PlaceChrome; MoveLevelPins every tick).
+// Where the controls and popups go, their sizes set (PlaceChrome; MoveFramePins every tick).
 template <size_t N>
 void PlaceParts(Screen &s, const std::pair<vr::VROverlayHandle_t, Mat> (&parts)[N]) {
     PlaceSubs(s);
@@ -1168,17 +1262,24 @@ void RefreshChrome() {
     }
 }
 
-// Each tick: floor pins follow the head (FloorFrame), the shown ones, when their frame moved.
-void MoveLevelPins() {
+// Each tick: floor pins follow the head (FloorFrame), the shown ones, when their frame moved. Dashboard pins
+// follow the dashboard (UpdateDashAnchor) when it moved (`dashMoved`), shown or not: one the visibility mode
+// hid with the dashboard closed is in its new place when it shows with the dashboard again.
+void MoveFramePins(bool dashMoved) {
     Mat f;
     for (auto &[i, s] : g_screens) {
-        if (!s.pinMode || !s.visible || s.overlay == vr::k_ulOverlayHandleInvalid) continue;
-        if (!FloorFrame(s.pinMode, &f)) return;
-        const auto &a = f.m, &b = s.levelAt.m;
-        if (std::fabs(a[0][3] - b[0][3]) < 2e-4 && std::fabs(a[2][3] - b[2][3]) < 2e-4 &&
-            std::fabs(a[0][0] - b[0][0]) < 5e-5 && std::fabs(a[2][0] - b[2][0]) < 5e-5)
-            continue;
-        s.levelAt = f;
+        if (s.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        if (s.pinned == kDashboard) {
+            if (!dashMoved) continue;
+        } else {
+            if (!s.pinMode || !s.visible) continue;
+            if (!FloorFrame(s.pinMode, &f)) continue;
+            const auto &a = f.m, &b = s.levelAt.m;
+            if (std::fabs(a[0][3] - b[0][3]) < 2e-4 && std::fabs(a[2][3] - b[2][3]) < 2e-4 &&
+                std::fabs(a[0][0] - b[0][0]) < 5e-5 && std::fabs(a[2][0] - b[2][0]) < 5e-5)
+                continue;
+            s.levelAt = f;
+        }
         SetOnPin(s, s.overlay, s.pinRel);
         const auto offsets = ControlOffsets(s);
         const std::pair<vr::VROverlayHandle_t, Mat> parts[] = {
@@ -1198,6 +1299,7 @@ void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe = 0) {
         s.universe = g_universe ? g_universe : ReadUniverse();   // (before the first tick: panels made at start)
     s.pinned = kNone;
     s.pinMode = levelpin::Rigid;
+    s.dashHasRel = false;   // waiting for the dashboard (dashWait) and moved: it attaches where it is then
     s.pose = pose;
     vr::VROverlay()->SetOverlayTransformAbsolute(s.overlay, vr::TrackingUniverseStanding, &pose);
     PlaceChrome(s);
@@ -1208,6 +1310,7 @@ void PinIn(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel, levelpin::Mo
     s.pinned = dev;
     s.pinRel = rel;
     s.pinMode = dev == vr::k_unTrackedDeviceIndex_Hmd ? mode : levelpin::Rigid;
+    s.dashWait = s.dashHasRel = false;
     if (s.pinMode) FloorFrame(s.pinMode, &s.levelAt);
     SetOnPin(s, s.overlay, s.pinRel);
     PlaceChrome(s);
@@ -1216,8 +1319,22 @@ void PinIn(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel, levelpin::Mo
 void Pin(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &rel) {
     PinIn(s, dev, rel, dev == s.pinned ? s.pinMode : levelpin::Rigid);
 }
-// A new pin, with the screen where it is in the room (`p`): to the head, level or walking when SCREEN_PIN_LEVEL says.
+// Pinned to the dashboard before it was seen this run: in the room where it is (`p`) until the dashboard first
+// opens (AttachDashWaits), then on it at `rel`, or (none) where it is then.
+void WaitForDash(Screen &s, const Mat &p, const Mat *rel) {
+    if (s.pinned != kNone) SetAbsolute(s, p);
+    s.dashWait = true;
+    s.dashHasRel = rel != nullptr;
+    if (rel) s.dashRel = *rel;
+}
+// A new pin, with the screen where it is in the room (`p`): to the head, level or walking when SCREEN_PIN_LEVEL says;
+// to the dashboard (waiting for it, before it's been seen).
 bool PinAt(Screen &s, vr::TrackedDeviceIndex_t dev, const Mat &p) {
+    if (dev == kDashboard) {
+        if (!g_dash.a.ever) return WaitForDash(s, p, nullptr), true;
+        PinIn(s, kDashboard, Mul(Inverse(DashFrame()), p), levelpin::Rigid);
+        return true;
+    }
     const levelpin::Mode mode = dev == vr::k_unTrackedDeviceIndex_Hmd ? g_pinMode : levelpin::Rigid;
     Mat f;
     if (!(mode ? FloorFrame(mode, &f) : DevicePose(dev, &f))) return false;
@@ -1239,6 +1356,20 @@ void SetPinMode(levelpin::Mode mode) {
         if (s.pinned != vr::k_unTrackedDeviceIndex_Hmd || s.pinMode == mode || !ScreenPose(s, &p)) continue;
         PinAt(s, s.pinned, p);
         std::printf("screen %d: its head pin is %s now (SCREEN_PIN_LEVEL)\n", i + 1, levelpin::ModeName(mode));
+    }
+}
+
+// The dashboard seen: screens pinned to it before then (WaitForDash) go on it, a held one when it's let go.
+void AttachDashWaits() {
+    if (!g_dash.a.ever) return;
+    for (auto &[i, s] : g_screens) {
+        Mat p;
+        if (!s.dashWait || s.drag != Drag::None || !ScreenPose(s, &p)) continue;
+        const bool atRel = s.dashHasRel;
+        const Mat rel = atRel ? s.dashRel : Mul(Inverse(DashFrame()), p);
+        PinIn(s, kDashboard, rel, levelpin::Rigid);
+        std::printf("screen %d: on the dashboard now (pinned before it opened; %s)\n", i + 1,
+                    atRel ? "where its pin puts it" : "where it was");
     }
 }
 
@@ -1398,9 +1529,10 @@ void UpdateVisibility() {
         if (s.floating) visible = visible && s.floatOn && s.outputOn && !s.minimized && s.cropW > 0;
         float alpha = 1;
         Mat p;
-        if (visible && s.pinned != kNone && s.pinned != vr::k_unTrackedDeviceIndex_Hmd && s.drag == Drag::None &&
+        if (visible && s.pinned != kNone && s.pinned != vr::k_unTrackedDeviceIndex_Hmd && s.pinned != kDashboard &&
+            s.drag == Drag::None &&
             haveHead && ScreenPose(s, &p)) {
-            // A pinned screen shows while you see its front: fully inside the wrist angle,
+            // A screen on a wrist shows while you see its front: fully inside the wrist angle,
             // fading out over the last kFade degrees, gone beyond it (and from behind).
             const double a = FacingAngle(p, head);
             alpha = float(std::clamp((g_wristAngle - a) / kFade, 0.0, 1.0));
@@ -2033,6 +2165,8 @@ void FinishDrag(Screen &s, int index) {
     if (!s.floating && !s.remote) ArrangeDesktopSoon();
     if (target != kNone && ScreenPose(s, &p) && PinAt(s, target, p)) {
         if (target == vr::k_unTrackedDeviceIndex_Hmd) std::printf("screen %d: pinned to the head\n", index + 1);
+        else if (target == kDashboard)
+            std::printf("screen %d: pinned to the dashboard%s\n", index + 1, s.dashWait ? " (when it first opens)" : "");
         else std::printf("screen %d: pinned to the %s controller\n", index + 1, HandName(target));
     }
 }
@@ -6931,6 +7065,8 @@ struct Parked {
     bool alone;
     levelpin::Mode pinMode;
     uint64_t universe;   // where the pose was placed (universefix.h)
+    bool dashWait, dashHasRel;   // waiting for the dashboard (WaitForDash)
+    Mat dashRel;
 };
 std::map<int, Parked> g_parked;
 
@@ -6962,8 +7098,10 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         CapCurve(s);
         ApplyCurve(s);
         Mat d;
-        if (k.pinned != kNone && DevicePose(k.pinned, &d)) PinIn(s, k.pinned, k.pinRel, k.pinMode);
+        if (k.pinned == kDashboard ? g_dash.a.ever : k.pinned != kNone && DevicePose(k.pinned, &d))
+            PinIn(s, k.pinned, k.pinRel, k.pinMode);
         else SetAbsolute(s, k.pose), s.universe = k.universe;
+        if (k.dashWait) s.dashWait = true, s.dashHasRel = k.dashHasRel, s.dashRel = k.dashRel;
         s.alone = k.alone;
         g_parked.erase(pk);
         UpdateVisibility();
@@ -7042,7 +7180,8 @@ void ft_vr_screen_destroy(int index) {
     if (g_cutterState == 1) g_cutter.DropPanel(index);
     Mat p;
     const Screen &s = it->second;
-    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe};
+    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe,
+                                                        s.dashWait, s.dashHasRel, s.dashRel};
     g_chromePool.Release(index);
     ReturnChrome(it->second);
     for (auto o : it->second.All())
@@ -7387,7 +7526,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         if (g_universeTrack.Tick(g_tick, ReadUniverse(), hp.bPoseIsValid, head, &sw)) FollowUniverse(sw);
         else if (g_tick % 90 == 0) UniverseKind(g_universe);   // (read again while it's unknown)
     }
-    MoveLevelPins();
+    {
+        const bool dashMoved = UpdateDashAnchor();
+        AttachDashWaits();
+        MoveFramePins(dashMoved);
+    }
     UpdateCarryFollow();   // (before the carried panel's own move, below)
     // the hands, once per tick, for the cutouts and hand input
     {
@@ -7758,6 +7901,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
         EndDrag(*s);
         g_spin.base.erase(n - 1);
+        s->dashWait = false;
         SetAbsolute(*s, PanelPose(x, y, z, yaw, pitch, roll));
         std::snprintf(reply, size, "ok");
         return;
@@ -7786,9 +7930,24 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         return;
     }
     case vrcmd::Pin: {
-        if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head"))
-            return (void)std::snprintf(reply, size, "error pin to left, right, or head");
+        if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head") && std::strcmp(hand, "dashboard"))
+            return (void)std::snprintf(reply, size, "error pin to left, right, head, or dashboard");
         const vr::TrackedDeviceIndex_t dev = HandDevice(hand);
+        if (dev == kDashboard) {
+            // rel: dashboard -> screen. Not seen yet this run: in the room until it first opens (WaitForDash).
+            Mat rel = Identity();
+            for (int k = 0; k < 12; ++k) rel.m[k / 4][k % 4] = r[k];
+            const bool found = EachScreen(word, [&](Screen &s) {
+                Mat p;
+                EndDrag(s);
+                if (!ScreenPose(s, &p)) return;
+                if (!g_dash.a.ever) WaitForDash(s, p, got == 14 ? &rel : nullptr);
+                else if (got == 14) Pin(s, kDashboard, rel);
+                else PinAt(s, kDashboard, p);
+            });
+            std::snprintf(reply, size, !found ? "error no such screen" : g_dash.a.ever ? "ok" : "ok waiting for the dashboard to open");
+            return;
+        }
         Mat c;
         if (dev == vr::k_unTrackedDeviceIndex_Hmd && !DevicePose(dev, &c))
             return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
@@ -7809,6 +7968,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
     case vrcmd::Unpin: {
         const bool found = EachScreen(word, [&](Screen &s) {
             Mat p;
+            s.dashWait = false;
             if (s.pinned != kNone && ScreenPose(s, &p)) SetAbsolute(s, p);
         });
         std::snprintf(reply, size, found ? "ok" : "error no such screen");
@@ -7823,9 +7983,11 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
                                 "ok %.4f %.4f %.4f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.4f %.4f %.3f %s",
                                 m.m[0][3], m.m[1][3], m.m[2][3], m.m[0][0], m.m[1][0], m.m[2][0], m.m[0][1], m.m[1][1],
                                 m.m[2][1], m.m[0][2], m.m[1][2], m.m[2][2], s->metres, s->heightMetres(), s->curve,
-                                s->pinned == kNone ? "none" : HandName(s->pinned));
-        if (s->pinned != kNone) {
-            const Mat rel = HeadRel(*s);
+                                s->pinned != kNone ? HandName(s->pinned) : s->dashWait ? "dashboard" : "none");
+        // pinned: what it rides on -> it (a floor pin: the headset; the dashboard: its bar); waiting for the
+        // dashboard: the pin it came with, if any
+        if (s->pinned != kNone || (s->dashWait && s->dashHasRel)) {
+            const Mat rel = s->pinned != kNone ? HeadRel(*s) : s->dashRel;
             for (int k = 0; k < 12 && len < size; ++k)
                 len += std::snprintf(reply + len, size - len, " %.5f", rel.m[k / 4][k % 4]);
         }
@@ -7838,6 +8000,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = r[k];
         EndDrag(*s);
         g_spin.base.erase(n - 1);
+        s->dashWait = false;
         SetAbsolute(*s, m);
         std::snprintf(reply, size, "ok");
         return;
@@ -8448,12 +8611,13 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //   width <screen> <metres>
 //   curve <screen> <radius>   cylinder radius in metres; 0 = flat
 //   curve <screen> on|off     on: the radius is the head's distance to it now -> "ok <radius>"
-//   pin <screen|all> <left|right|head> [12 numbers]   pin to that hand's controller or the
-//                             headset: as it is now, or at the given device->screen transform
-//                             (rows of a 3x4)
+//   pin <screen|all> <left|right|head|dashboard> [12 numbers]   pin to that hand's controller,
+//                             the headset, or the SteamVR dashboard: as it is now, or at the given
+//                             device->screen transform (rows of a 3x4). The dashboard not seen yet
+//                             this run: "ok waiting for the dashboard to open" (it goes on when it does)
 //   unpin <screen|all>
 //   get <screen>  -> "ok x y z  xx xy xz  yx yy yz  zx zy zz  width height curve pin
-//                     [12 numbers: device->screen, when pinned]"   (pin: none|left|right|head)
+//                     [12 numbers: device->screen, when pinned]"   (pin: none|left|right|head|dashboard)
 //   screens       -> "ok <count> <index>:<pixels w>x<h>:<metres> ..."
 //   head          -> "ok x y z yaw"
 //   reach         -> "ok lx ly lz rx ry rz"   where the left and the right hand controller are

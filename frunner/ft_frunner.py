@@ -933,6 +933,8 @@ class Frunner:
             self.toast(f"{name} is on your {pin} wrist")
         elif pin == "head":
             self.toast(f"{name} is pinned to your view")
+        elif pin == "dashboard":
+            self.toast(f"{name} is pinned to the dashboard")
 
     def launch(self, item, action=None, screen=None):
         self.close("launch")

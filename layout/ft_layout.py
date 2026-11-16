@@ -103,8 +103,8 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout hide N|all               hide a screen on its own (it stays hidden whatever the
   ft-layout show N|all               visibility mode or the hotkey say), or show it again
   ft-layout hidden                   the screens hidden on their own
-  ft-layout pin all|N left|right|head  pin screens to a wrist or your head as they are;
-                                     unpin all|N
+  ft-layout pin all|N left|right|head|dashboard  pin screens to a wrist, your head, or the
+                                     SteamVR dashboard as they are; unpin all|N
   ft-layout remote list              the remote displays, their numbers and their streams' state
   ft-layout remote monitors ADDRESS  the host's displays (Vibepollo's /api/display-devices, JSON)
   ft-layout remote add HOST ADDRESS APP [--size WxH] [--fps F] [--bitrate KBPS] [--label TEXT]
@@ -728,7 +728,8 @@ def recenter_screens():
     Named layout poses are read into this invocation only. Do not save that copy:
     Reset must not change window state, hidden screens, or remote connections.
     A panel pinned to the head (its pin button) goes back in the room, as with a full
-    reset, and is pinned again only if the layout saved it so; one on a wrist stays there.
+    reset, and is pinned again only if the layout saved it so; one on a wrist or the
+    dashboard stays there.
     """
     layout = load_layout()
     name = layout.get("active") if layout.get("mode") == "custom" else None
@@ -753,7 +754,8 @@ def recenter_screens():
                 log(f"recenter: screen {n} unavailable; left alone ({e})")
                 continue
             if current["hand"] not in ("none", "head"):
-                log(f"recenter: screen {n} is on a wrist; left alone")
+                where = "the dashboard" if current["hand"] == "dashboard" else "a wrist"
+                log(f"recenter: screen {n} is on {where}; left alone")
                 continue
             head_pin = saved if saved and saved.get("hand") == "head" and len(saved.get("rel", [])) == 12 else None
             movable.append((n, t, head_pin))

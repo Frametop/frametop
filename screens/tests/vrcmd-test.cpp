@@ -62,6 +62,9 @@ int main() {
     check("pin: two words scan 2", Parse("pin 1 left", c) == Pin && c.got == 2 && !std::strcmp(c.word, "1") &&
                                        !std::strcmp(c.hand, "left"));
     c = {};
+    check("pin: the dashboard", Parse("pin 2 dashboard", c) == Pin && c.got == 2 && !std::strcmp(c.word, "2") &&
+                                    !std::strcmp(c.hand, "dashboard"));
+    c = {};
     check("pin: with a relative pose scans 14",
           Parse("pin all head 1 0 0 0 0 1 0 0 0 0 1 -1.5", c) == Pin && c.got == 14 && near(c.r[11], -1.5));
     c = {};

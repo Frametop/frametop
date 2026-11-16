@@ -860,8 +860,8 @@ class Backend(QObject):
 
     @Slot(str, str)
     def pin(self, which, where):
-        """Pin screen `which` (1-based, or "all") to "left", "right", or "head" as it is
-        now, or take it off ("none")."""
+        """Pin screen `which` (1-based, or "all") to "left", "right", "head", or "dashboard" (the
+        SteamVR dashboard) as it is now, or take it off ("none")."""
         cmd = f"unpin {which}" if where == "none" else f"pin {which} {where}"
         if self._running:
             self._ask_screens(cmd, then=lambda reply: self._pinned(which, where, reply))
@@ -872,8 +872,13 @@ class Backend(QObject):
         if not (reply and reply.startswith("ok")):
             self.message.emit(f"Couldn't {'unpin' if where == 'none' else 'pin'}: "
                               f"{reply or 'the desktop is not running'}", True)
+        elif where == "dashboard" and "waiting" in reply:
+            # ft-screens hasn't seen the dashboard yet this run: it pins them when it first opens
+            who = "The screens stay" if which == "all" else f"Screen {which} stays"
+            self.message.emit(f"{who} where they are until the dashboard first opens, then ride on it from there.",
+                              False)
         elif which == "all" and where != "none":
-            place = "on your head" if where == "head" else f"on your {where} wrist"
+            place = {"head": "on your head", "dashboard": "on the dashboard"}.get(where, f"on your {where} wrist")
             self.message.emit(f"All screens ride {place} now. Save as profile… (Layout & profiles) keeps it.", False)
         self._check_running()
 

@@ -97,7 +97,7 @@ ft-screens listens for datagrams on the abstract socket `@ft_screens` and replie
 
 ```
 place N x y z yaw pitch roll     width N metres          curve N radius|on|off
-pin N|all left|right|head [matrix]    unpin N|all        size N w h
+pin N|all left|right|head|dashboard [matrix]    unpin N|all        size N w h
 get N    screens    head    reach    universe    state    key code value    keys    keys release    scale N s    vrkeyboard show|hide|toggle|close    fullkb 0|1
 visibility always|dashboard|gesture|toggle    wrist degrees    gesture left|right degrees
 hide | show | toggle    controllers always|outside_games|dashboard    ingames hide|visible    pause on|off|state

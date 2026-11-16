@@ -1429,13 +1429,14 @@ Item {
                         delegate: Controls.ComboBox {
                             id: pinBox
                             required property int index
-                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head"].indexOf(backend.pins[index]))
+                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head", "dashboard"].indexOf(backend.pins[index]))
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
                             model: [
                                 { text: "In the room", value: "none" },
                                 { text: "On the left wrist", value: "left" },
                                 { text: "On the right wrist", value: "right" },
-                                { text: "On your head", value: "head" }
+                                { text: "On your head", value: "head" },
+                                { text: "On the dashboard", value: "dashboard" }
                             ]
                             textRole: "text"
                             valueRole: "value"
@@ -1503,6 +1504,11 @@ Item {
                             onClicked: backend.pin("all", "head")
                         }
                         Controls.Button {
+                            text: "Pin to dashboard"
+                            enabled: backend.desktopRunning
+                            onClicked: backend.pin("all", "dashboard")
+                        }
+                        Controls.Button {
                             text: "Unpin"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "none")
@@ -1523,7 +1529,12 @@ Item {
                           + "it.\n\nPin a screen to your head: choose On your head above. It rides on the headset where it "
                           + "is now, like a HUD, and shows whenever the screens do. Grab its bar to move it; it stays on "
                           + "your head where you let go. Choosing a pin above keeps the screen where it is now, so place "
-                          + "it first. Save as profile… (Layout) keeps pins."
+                          + "it first. Save as profile… (Layout) keeps pins.\n\nPin a screen to the dashboard: choose On "
+                          + "the dashboard above. It keeps its place next to the SteamVR dashboard: drag the dashboard, or "
+                          + "close it and open it again in front of you, and the screen goes with it. With the dashboard "
+                          + "closed it stays where it was; for the screens to show only with the dashboard, choose Only with "
+                          + "the SteamVR dashboard open under When the screens show. Pinned before the dashboard has opened, it stays where it is until the dashboard first "
+                          + "opens. Grab its bar to move it; it stays on the dashboard where you let go."
                 }
 
                 Kirigami.FormLayout {

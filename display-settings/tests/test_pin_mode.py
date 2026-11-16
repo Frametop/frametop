@@ -1,5 +1,6 @@
 """Display Settings' head pin mode (SCREEN_PIN_LEVEL 0, 1 or 2; 2 is the walking pin): read
-from frametop.conf, written there, and sent to ft-screens live. HOME is a temp folder and the ask
+from frametop.conf, written there, and sent to ft-screens live. And the per-screen pin, to the
+dashboard too. HOME is a temp folder and the ask
 to ft-screens is recorded, not sent. Needs PySide6 (the image's python3).
 
   python3 display-settings/tests/test_pin_mode.py
@@ -61,6 +62,43 @@ class PinMode(unittest.TestCase):
         self.b.setPinMode(2)
         self.assertEqual(self.asked, [])
         self.assertEqual(self.b.pinMode, 2)
+
+
+class PinTo(unittest.TestCase):
+    """The per-screen pin, the dashboard one included, and what it says when ft-screens is still
+    waiting for the dashboard to open."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QGuiApplication.instance() or QGuiApplication([])
+
+    def setUp(self):
+        self.b = fds.Backend()
+        self.asked = []
+        self.b._ask_screens = lambda text, then=None: self.asked.append(text)
+        self.b._check_running = lambda: None
+        self.b._running = True
+        self.said = []
+        self.b.message.connect(lambda text, error: self.said.append((text, error)))
+
+    def test_pin_and_unpin_sent(self):
+        self.b.pin("2", "dashboard")
+        self.b.pin("2", "none")
+        self.assertEqual(self.asked, ["pin 2 dashboard", "unpin 2"])
+
+    def test_waiting_for_the_dashboard_said(self):
+        self.b._pinned("1", "dashboard", "ok waiting for the dashboard to open")
+        self.assertEqual(len(self.said), 1)
+        self.assertIn("until the dashboard first opens", self.said[0][0])
+        self.assertFalse(self.said[0][1])
+
+    def test_all_on_the_dashboard_said(self):
+        self.b._pinned("all", "dashboard", "ok")
+        self.assertIn("on the dashboard", self.said[0][0])
+
+    def test_failure_said(self):
+        self.b._pinned("1", "dashboard", "error no such screen")
+        self.assertTrue(self.said[0][1])
 
 
 if __name__ == "__main__":

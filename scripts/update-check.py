@@ -648,6 +648,15 @@ def check_overlays(desktop_up):
         report("FAIL", "vrcmd --overlays", f"lists {len(keys)} overlays, but none of the desktop's screens")
     else:
         report("ok", "vrcmd --overlays", f"{len(keys)} overlays in the format the pointer parses")
+    # Dashboard pins follow Steam's bar under the dashboard (screens/vr.cpp kDashKey, dashanchor.h): a
+    # Steam-internal overlay key. Only checked with Steam's VR UI up (it lists other gamepadui overlays).
+    if any(k.startswith("valve.steam.gamepadui.") for k in keys):
+        if "valve.steam.gamepadui.bar" in keys:
+            report("ok", "dashboard pins", "Steam's valve.steam.gamepadui.bar overlay is there to follow")
+        else:
+            report("warn", "dashboard pins", "vrcmd --overlays lists Steam's UI but no valve.steam.gamepadui.bar: "
+                   "screens pinned to the dashboard won't follow it (screens/vr.cpp kDashKey; probe its new "
+                   "name with an Absolute transform that moves with the dashboard)")
 
 
 def check_services(sockets, desktop_up):

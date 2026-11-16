@@ -44,13 +44,23 @@ static void Panels() {
     // a helper that grows before it maps gets one at the map
     a = b.On(Ev(Event::Mapped, Win(11, Kind::Main)), 30);
     CHECK(a.size() == 2 && a[0].type == Action::Make && a[0].index == kFirst + 1 && a[1].type == Action::Show);
-    // unmapped: gone, and its index free again
-    CHECK(One(b.On(Ev(Event::Unmapped, Win(10, Kind::Main)), 40), Action::Drop, kFirst));
-    CHECK(b.On(Ev(Event::Gone, Win(10, Kind::Main)), 41).empty());
-    CHECK(One(b.On(Ev(Event::Created, Win(12, Kind::Main)), 50), Action::Make, kFirst));
-    // created, never mapped: dropped after a while
+    // unmapped: hidden, its panel (and tag) kept; mapped again: shown at once, nothing made anew
+    CHECK(One(b.On(Ev(Event::Unmapped, Win(10, Kind::Main)), 40), Action::Hide, kFirst));
+    CHECK(b.WindowOf(kFirst) == 10 && b.Panels() == 2);
+    CHECK(One(b.On(Ev(Event::Mapped, Win(10, Kind::Main)), 45), Action::Show, kFirst));
+    // unmapped and not mapped again: dropped after a while, and its index free again
+    CHECK(One(b.On(Ev(Event::Unmapped, Win(10, Kind::Main)), 50), Action::Hide, kFirst));
     CHECK(b.Tick(50 + kMapWaitMs).empty());
     CHECK(One(b.Tick(51 + kMapWaitMs), Action::Drop, kFirst));
+    CHECK(b.On(Ev(Event::Gone, Win(10, Kind::Main)), 52 + kMapWaitMs).empty());
+    // unmapped, then gone: dropped at once
+    CHECK(One(b.On(Ev(Event::Unmapped, Win(11, Kind::Main)), 60), Action::Hide, kFirst + 1));
+    CHECK(One(b.On(Ev(Event::Gone, Win(11, Kind::Main)), 61), Action::Drop, kFirst + 1));
+    const int64_t t = 100 + kMapWaitMs;
+    CHECK(One(b.On(Ev(Event::Created, Win(12, Kind::Main)), t), Action::Make, kFirst));
+    // created, never mapped: dropped after a while
+    CHECK(b.Tick(t + kMapWaitMs).empty());
+    CHECK(One(b.Tick(t + 1 + kMapWaitMs), Action::Drop, kFirst));
     // kMax at most
     Book full;
     for (int i = 0; i < kMax; ++i) CHECK(One(full.On(Ev(Event::Created, Win(100 + i, Kind::Main)), 0), Action::Make, kFirst + i));
@@ -119,10 +129,29 @@ static void Typing() {
     CHECK(k.Target() == 0 && k.Route(33, 0, false) == 0 && k.Down().empty());
 }
 
+// Two lasers on app panels: the one moving keeps the X pointer, a press takes it (follow-up)
+static void Lasers() {
+    PointerOwner o;
+    CHECK(o.Move(1, 0));
+    CHECK(!o.Move(2, 10));              // laser 1 still moving
+    CHECK(o.Move(1, 20));
+    CHECK(o.Move(2, 20 + PointerOwner::kHoldMs + 1));   // laser 1 still: laser 2 takes it
+    CHECK(!o.Move(1, 400));
+    o.Press(1, true, 410);              // a press takes it
+    CHECK(o.Move(1, 420) && !o.Move(2, 2000));   // held: laser 2 waits however long
+    o.Press(2, false, 2010);            // (another laser's release doesn't end laser 1's hold)
+    CHECK(!o.Move(2, 2020));
+    o.Press(1, false, 2030);
+    CHECK(!o.Move(2, 2100) && o.Move(2, 2030 + PointerOwner::kHoldMs + 1));
+    o.Left(2);                          // it left the app panels: anyone's
+    CHECK(o.Move(1, 2400));
+}
+
 int main() {
     Panels();
     Popups();
     Typing();
+    Lasers();
     if (failures) return std::printf("gsapps-test: %d failed\n", failures), 1;
     std::printf("gsapps-test: ok\n");
     return 0;

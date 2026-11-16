@@ -90,13 +90,13 @@ int main() {
         bool ordered = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
-                if (t.col + 1 == u.col) ordered = ordered && t.az1 + q.gapDeg - 1e-9 <= u.az0;
+                if (t.col + 1 == u.col) ordered = ordered && t.az1 + q.gapDeg * l.shrink - 1e-9 <= u.az0;
         check("columns: left to right, a gap between", ordered);
         check("columns: no corner pokes into the next column, even at 70 degrees up", cornersInColumns(l, q.radius));
         bool stacked = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
-                if (t.col == u.col && t.row + 1 == u.row) stacked = stacked && t.el0 - q.gapDeg + 1e-9 >= u.el1;
+                if (t.col == u.col && t.row + 1 == u.row) stacked = stacked && t.el0 - q.gapDeg * l.shrink + 1e-9 >= u.el1;
         check("rows: top down, a gap between", stacked);
     }
     // --- fixed keep their shape, resizable fill the cell
@@ -118,11 +118,24 @@ int main() {
         std::vector<tiling::Column> cols;
         for (int i = 0; i < 20; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
         const auto l = tiling::Arrange(cols, q);
-        check("overflow: the strip fits in a turn", l.az1 - l.az0 <= q.maxSpanDeg - q.gapDeg + 1e-6);
-        check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (q.maxSpanDeg - q.gapDeg));
+        const double gap = q.gapDeg * l.shrink;   // (the gaps shrink with it)
+        check("overflow: the strip fits in a turn", l.az1 - l.az0 <= q.maxSpanDeg - gap + 1e-6);
+        check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (q.maxSpanDeg - gap));
         check("overflow: shrunk", l.shrink < 1);
         check("overflow: still no corner overlap", cornersInColumns(l, q.radius));
         check("overflow: the band shrank with it (shapes kept)", l.el1 - l.el0 < std::min(q.heightDeg, q.maxTopDeg - q.bottomDeg));
+    }
+    // --- the clamps' far end: a band at -85 with dozens of columns still fits a turn (follow-up:
+    // the gaps alone took more than a turn, and nothing fit)
+    for (int n : {60, 200, 400}) {
+        tiling::Params q = p;
+        q.bottomDeg = -120, q.heightDeg = 30;   // (clamped to -85)
+        std::vector<tiling::Column> cols;
+        for (int i = 0; i < n; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}, {1000 + i, 1, false, 1}}));
+        const auto l = tiling::Arrange(cols, q);
+        char what[96];
+        std::snprintf(what, sizeof what, "extreme: %d columns at -85 fit a turn, no corner overlap", n);
+        check(what, l.az1 - l.az0 <= q.maxSpanDeg + 1e-6 && l.shrink > 0 && cornersInColumns(l, q.radius));
     }
     // --- desktops at the default band: in front of you, at full size (council, 2026-11-16: the old
     // span hit its 180 degree cap and put two desktops at +-90)

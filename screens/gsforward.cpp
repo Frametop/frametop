@@ -26,10 +26,12 @@ struct Link::Impl {
         std::free(r);
         return a;
     }
-    uint32_t Cardinal(xcb_window_t w, xcb_atom_t a) {
+    uint32_t Cardinal(xcb_window_t w, xcb_atom_t a, bool *has = nullptr) {
         auto r = xcb_get_property_reply(c, xcb_get_property(c, 0, w, a, XCB_ATOM_CARDINAL, 0, 1), nullptr);
         uint32_t v = 0;
-        if (r && xcb_get_property_value_length(r) >= 4) std::memcpy(&v, xcb_get_property_value(r), 4);
+        const bool there = r && xcb_get_property_value_length(r) >= 4;
+        if (there) std::memcpy(&v, xcb_get_property_value(r), 4);
+        if (has) *has = there;
         std::free(r);
         return v;
     }
@@ -90,6 +92,13 @@ bool Link::Open(const char *display, bool needForwarding, std::string *why) {
     d.pid = d.Cardinal(d.root, d.Atom("GAMESCOPE_PID"));
     if (needForwarding && (!forwarding || !d.pid)) {
         if (why) *why = std::string(display) + " isn't a gamescope that forwards windows to overlays";
+        Close();
+        return false;
+    }
+    bool numbered = false;   // (gamescope's first Xwayland is Steam's own, not its apps')
+    const uint32_t server = d.Cardinal(d.root, d.Atom("GAMESCOPE_XWAYLAND_SERVER_ID"), &numbered);
+    if (needForwarding && numbered && server == 0) {
+        if (why) *why = std::string(display) + " is Steam's own (gamescope's first Xwayland)";
         Close();
         return false;
     }
@@ -156,6 +165,18 @@ std::vector<Event> Link::Poll() {
             case XCB_UNMAP_NOTIFY: {
                 auto *n = reinterpret_cast<xcb_unmap_notify_event_t *>(ev);
                 if (n->event == d.root && d.top.count(n->window)) e.type = Event::Unmapped, e.win.id = n->window, take = true;
+                break;
+            }
+            case XCB_REPARENT_NOTIFY: {   // (an app embedding a window, or giving one back: a top-level one gone, or new)
+                auto *n = reinterpret_cast<xcb_reparent_notify_event_t *>(ev);
+                if (n->event != d.root) break;
+                bool mapped = false;
+                if (n->parent != d.root) {
+                    if (d.top.erase(n->window)) e.type = Event::Gone, e.win.id = n->window, take = true;
+                } else if (!d.top.count(n->window) && d.Read(n->window, &e.win, &mapped)) {
+                    e.type = Event::Created, out.push_back(e);
+                    if (mapped) e.type = Event::Mapped, take = true;
+                }
                 break;
             }
             case XCB_DESTROY_NOTIFY: {

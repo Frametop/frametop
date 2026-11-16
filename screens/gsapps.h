@@ -20,7 +20,7 @@ namespace gsapps {
 
 constexpr int kFirst = 199;           // panel indices kFirst.. (screen numbers 200..; remote displays are 100..115)
 constexpr int kMax = 8;               // panels at most (SteamVR's 128 overlays are shared by everything)
-constexpr int64_t kMapWaitMs = 5000;  // created, not mapped by then: dropped
+constexpr int64_t kMapWaitMs = 5000;  // created or unmapped, not mapped (again) by then: dropped
 constexpr int kMaxPopups = 8;         // popups' overlays at most, all apps' (more keep gamescope's)
 
 struct Action {
@@ -28,6 +28,7 @@ struct Action {
         Make,       // a panel for win at index, hidden (tag win)
         Show,       // win mapped: show its panel (win: its rectangle; Describe for its name)
         Move,       // win's rectangle changed
+        Hide,       // win unmapped: its panel hidden, win still tagged (a remap shows it again at once)
         Drop,       // its panel goes (untag win)
         MakePopup,  // a popup over index's panel (tag win; sub: its number there)
         MovePopup,
@@ -82,6 +83,17 @@ public:
                 }
                 break;
             case gsforward::Event::Unmapped:
+                // An app's window keeps its panel and its tag a while: one that maps again (a
+                // toggled window, a Steam-launched app's splash) doesn't show gamescope's own panel
+                // before ours is tagged again, and keeps its place. A popup goes (menus open anew).
+                if (auto m = mains_.find(id); m != mains_.end() && m->second.mapped) {
+                    m->second.mapped = false, m->second.sinceMs = nowMs;
+                    out.push_back({Action::Hide, m->second.index, 0, m->second.win});
+                    if (lastPointed_ == id) lastPointed_ = 0;
+                } else {
+                    Forget(id, out);
+                }
+                break;
             case gsforward::Event::Gone:
                 Forget(id, out);
                 break;
@@ -89,12 +101,13 @@ public:
         return out;
     }
 
-    // Windows created but never mapped, past kMapWaitMs: dropped (popups too).
+    // Windows created and never mapped, or unmapped and not mapped again, past kMapWaitMs: dropped
+    // (popups too).
     std::vector<Action> Tick(int64_t nowMs) {
         std::vector<Action> out;
         std::vector<uint32_t> late;
         for (const auto &[id, m] : mains_)
-            if (!m.mapped && nowMs - m.createdMs > kMapWaitMs) late.push_back(id);
+            if (!m.mapped && nowMs - m.sinceMs > kMapWaitMs) late.push_back(id);
         for (const auto &[id, p] : popups_)
             if (!p.mapped && nowMs - p.createdMs > kMapWaitMs) late.push_back(id);
         for (uint32_t id : late) Forget(id, out);
@@ -140,6 +153,11 @@ public:
         if (auto p = popups_.find(win); p != popups_.end()) return p->second.index;
         return -1;
     }
+    // A popup that's override-redirect (a menu or a tooltip, not a dialog).
+    bool Menu(uint32_t win) const {
+        const auto p = popups_.find(win);
+        return p != popups_.end() && p->second.win.overrideRedirect;
+    }
     // A window that couldn't have its panel after all: what goes with it.
     std::vector<Action> Lose(uint32_t win) {
         std::vector<Action> out;
@@ -153,7 +171,7 @@ private:
     struct MainWin {
         int index;
         bool mapped = false;
-        int64_t createdMs = 0;
+        int64_t sinceMs = 0;   // when it was created, or unmapped last
         gsforward::Window win;
     };
     struct PopupWin {
@@ -182,12 +200,18 @@ private:
     void MakePopup(const gsforward::Window &w, int64_t nowMs, std::vector<Action> &out) {
         // (no panel to go over, or too many: gamescope's)
         if (popups_.count(w.id) || mains_.empty() || int(popups_.size()) >= kMaxPopups) return;
-        std::vector<uint32_t> mapped;
-        for (const auto &[id, m] : mains_)
-            if (m.mapped) mapped.push_back(id);
-        const uint32_t owner = gsforward::PopupOwner(w.transientFor, lastPointed_, mapped);
-        if (!owner) return;
-        const int index = mains_[owner].index, sub = nextSub_++;
+        int index = -1;
+        if (const auto tp = popups_.find(w.transientFor); w.transientFor && tp != popups_.end())
+            index = tp->second.index;   // a dialog's dialog or a submenu: over the same app's
+        else {
+            std::vector<uint32_t> mapped;
+            for (const auto &[id, m] : mains_)
+                if (m.mapped) mapped.push_back(id);
+            const uint32_t owner = gsforward::PopupOwner(w.transientFor, lastPointed_, mapped);
+            if (!owner) return;
+            index = mains_[owner].index;
+        }
+        const int sub = nextSub_++;
         popups_[w.id] = {index, sub, w, false, nowMs};
         out.push_back({Action::MakePopup, index, sub, w});
     }
@@ -235,6 +259,10 @@ public:
     // The window went: its keys are nobody's (their releases go on as no app's).
     void Gone(uint32_t win) {
         if (target_ == win) target_ = 0;
+        Released(win);
+    }
+    // Its keys were let go of (it's hidden: the typing stays, to go on when it's shown again).
+    void Released(uint32_t win) {
         for (auto d = down_.begin(); d != down_.end();) d = d->second == win ? down_.erase(d) : std::next(d);
     }
     // Keys down on apps now (to let go of at the end).
@@ -243,6 +271,36 @@ public:
 private:
     uint32_t target_ = 0;
     std::map<uint32_t, uint32_t> down_;   // key -> the window it went down on
+};
+
+// Which laser has the X pointer (gamescope's screen has one, all app panels share it): the one
+// that moved it last keeps it while it moves (a move within kHoldMs of its last) or holds a
+// button; another laser's moves wait until then, and a press takes it at once. Two lasers on two
+// app panels don't flip it (and its raise) between them every frame.
+class PointerOwner {
+public:
+    static constexpr int64_t kHoldMs = 300;
+    // A move by `device`: whether it may move the pointer (and it's its now).
+    bool Move(uint32_t device, int64_t nowMs) {
+        if (owned_ && owner_ != device && (held_ || nowMs - lastMs_ < kHoldMs)) return false;
+        if (!owned_ || owner_ != device) held_ = false;
+        owned_ = true, owner_ = device, lastMs_ = nowMs;
+        return true;
+    }
+    void Press(uint32_t device, bool down, int64_t nowMs) {
+        if (down) owned_ = true, owner_ = device, held_ = true;
+        else if (owned_ && owner_ == device) held_ = false;
+        if (owned_ && owner_ == device) lastMs_ = nowMs;
+    }
+    // It left the app panels (or the app went): anyone's.
+    void Left(uint32_t device) {
+        if (owned_ && owner_ == device) owned_ = false, held_ = false;
+    }
+
+private:
+    bool owned_ = false, held_ = false;
+    uint32_t owner_ = 0;
+    int64_t lastMs_ = 0;
 };
 
 }  // namespace gsapps

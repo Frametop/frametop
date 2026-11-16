@@ -58,13 +58,13 @@ namespace handinput {
 using Mat = handcut::Mat;
 
 // A panel's controls (vr.cpp's ControlOffsets), in the order of Screen::Controls().
-enum class Control { Bar, Curve, Roll, Tab, Dock, Close, Reset, Pin, None };
+enum class Control { Bar, Curve, Roll, Tab, Dock, Close, Reset, Pin, Anchor, None };
 
 // The round buttons a poke or a pinch presses (not the bar or the resize tab). The roll button is one
 // since DEE-337: a hand can't turn it like a knob, and pressing it levels the screen.
 inline bool PressableButton(Control c) {
     return c == Control::Curve || c == Control::Roll || c == Control::Reset || c == Control::Pin || c == Control::Dock ||
-           c == Control::Close;
+           c == Control::Close || c == Control::Anchor;
 }
 const char *ControlName(Control c);
 

@@ -309,6 +309,7 @@ const char *ControlName(Control c) {
         case Control::Close: return "the close button";
         case Control::Reset: return "the reset button";
         case Control::Pin: return "the pin button";
+        case Control::Anchor: return "the anchor button";
         default: return "nothing";
     }
 }

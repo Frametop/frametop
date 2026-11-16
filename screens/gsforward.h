@@ -151,7 +151,8 @@ public:
     Link &operator=(const Link &) = delete;
 
     // Connects to `display`. With `needForwarding`, only a gamescope that forwards (and says its
-    // pid); `why` says what's missing. The windows already there come as Created (and Mapped).
+    // pid), and not its first Xwayland (GAMESCOPE_XWAYLAND_SERVER_ID 0: Steam's own); `why` says
+    // what's missing. The windows already there come as Created (and Mapped).
     bool Open(const char *display, bool needForwarding, std::string *why);
     void Close();   // (the tags stay: Untag first)
     bool IsOpen() const;

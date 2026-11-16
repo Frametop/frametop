@@ -292,6 +292,61 @@ int main() {
         o2.RestoreAll({{11, line(1, 0, 1)}}, true);
         check("anchored again after it, an add keeps it", o2.Anchored(30));
     }
+    // --- follow-ups: the state as a record (any whitespace, junk refused), one "placed" rule, a set ended
+    {
+        auto order = [](const dashtiles::Board &b) {
+            std::string o;
+            for (const auto &c : b.Grid().Cols()) {
+                o += "[";
+                for (const auto &cell : c.cells) o += " " + std::to_string(cell.id);
+                o += " ]";
+            }
+            return o;
+        };
+        dashtiles::State s;
+        check("state: tabs and doubled spaces parse", dashtiles::Parse(" tile\t1  2 0 1   1.5 1 40 \n", &s) &&
+                                                          s.kind == dashtiles::State::Kind::Tile && s.stay && s.col == 2 &&
+                                                          s.row == 0 && s.alone && near(s.weight, 1.5) && near(s.width, 40));
+        check("state: text round trip", dashtiles::Text(s) == "tile 1 2 0 1 1.500 1.000 40.00");
+        bool junk = false;
+        for (const char *bad : {"tile 0 1 0 1 1 1 0 x", "tile 0 a 0 1 1 1 0", "tile 0 1 0 1 nan 1 0", "sat 1", "off off",
+                                "tile 0 1 0 1 1 1", "", "tile 0 1.5 0 1 1 1 0", "sat 1 1 0 0 0 0 1 0 0 0 0 1 inf"})
+            junk |= dashtiles::Parse(bad, &s);
+        check("state: junk refused", !junk);
+        check("state: a satellite parses", dashtiles::Parse("sat 0 1 0 0 0.5 0 1 0 0 0 0 1 -2", &s) &&
+                                               s.kind == dashtiles::State::Kind::Sat && near(s.rel[0][3], 0.5) &&
+                                               near(s.rel[2][3], -2));
+        dashtiles::Board w;
+        for (int id : {10, 11, 20}) w.Anchor(id, -1, false);
+        w.RestoreAll({{10, "tile  0   0 0 1 1 1 0"}, {11, "tile\t0\t1\t0\t1\t1\t1\t0"}});
+        w.SetStay(10, true);
+        w.RestoreAll({{20, "tile 0 2 0 1 1 1 0"}}, true);
+        check("odd whitespace: a stay change before an add keeps the tile on the grid",
+              w.Stay(10) && order(w).rfind("[ 10 ][ 11 ][ 20 ]", 0) == 0);
+        dashtiles::Board r;
+        for (int id : {10, 11, 12}) r.Anchor(id, -1, false);
+        r.RestoreAll({{10, "tile 0 0 0 1 1 1 0"}, {11, "tile 0 5 -1 1 1 1 0"}, {12, "tile 0 6 0 1 1 1 0"}});
+        check("a tile with no row: no column kept for it, put where a new one goes", order(r) == "[ 10 ][ 12 ][ 11 ]");
+        dashtiles::Board t;
+        for (int id : {10, 11, 50}) t.Anchor(id, -1, false);
+        t.RestoreAll({{10, "tile 0 0 0 1 1 1 0"}});
+        t.EndRestore();   // (vr.cpp: an add long after the set)
+        t.RestoreAll({{11, "tile 0 1 0 1 1 1 0"}}, true);
+        check("an add after the set ended goes after the others", order(t) == "[ 10 ][ 50 ][ 11 ]");
+    }
+    {   // the memory's file: one write a moment after a burst of changes, and a flush on the way out
+        dashtiles::SaveTimer s;
+        check("nothing changed: never due", !s.Due(0) && !s.Due(100000) && !s.Flush());
+        s.Changed(1000);
+        s.Changed(1500);
+        s.Changed(2900);   // (a burst: still due 2 s after the first)
+        check("not due before the delay", !s.Due(2999));
+        check("due once after it", s.Due(3000) && !s.Due(3001) && !s.Due(9000));
+        s.Changed(10000);
+        check("a change after the write: due again later", !s.Due(11000) && s.Due(12000));
+        s.Changed(20000);
+        check("shutting down: flushed once", s.Flush() && !s.Flush() && !s.Due(30000));
+    }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;
 }

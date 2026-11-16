@@ -4674,11 +4674,13 @@ void TestPinButton() {
     const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
     p.controls[4].u = -(chrome / 2 + gap + grip / 2);
     p.controls.push_back({Control::Pin, -(chrome / 2 + gap * 2 + grip * 1.5), v, grip / 2, grip / 2});
-    const Spot reset = p.controls[4], pin = p.controls[5];
+    p.controls.push_back({Control::Anchor, chrome / 2 + gap * 3 + grip * 2.5, v, grip / 2, grip / 2});
+    const Spot reset = p.controls[4], pin = p.controls[5], anchor = p.controls[6];
     CHECK(PressableButton(Control::Pin));
+    CHECK(PressableButton(Control::Anchor));   // (a hand presses the anchor button too: follow-up)
     CHECK(ControlAt(p, pin.u + 0.002, v, 0.005, 0.015) == Control::Pin);
     CHECK(ControlAt(p, reset.u - 0.002, v, 0.005, 0.015) == Control::Reset);
-    for (const Spot *at : {&pin, &reset}) {
+    for (const Spot *at : {&pin, &reset, &anchor}) {
         Rig r;
         r.panels = {p};
         for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(at->u + 0.002, v, mm / 1000.0)});

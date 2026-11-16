@@ -58,6 +58,16 @@ class DashTiles(unittest.TestCase):
         self.assertEqual(self.asked[-1], "handsetting DASH_TILE_STAY 0")
         self.assertIn("# mine", self.conf())
 
+    def test_gamescope_apps_on_unless_off(self):
+        self.assertTrue(self.t.gsApps)
+        self.t.setGsApps(False)
+        self.assertIn("GSAPP_PANELS=0", self.conf())
+        self.assertFalse(self.t.gsApps)
+        self.assertEqual(self.asked[-1], "handsetting GSAPP_PANELS 0")
+        self.t.setGsApps(True)
+        self.assertTrue(self.t.gsApps)
+        self.assertEqual(self.asked[-1], "handsetting GSAPP_PANELS 1")
+
     def test_numbers_written_and_sent(self):
         self.t.setRaiseDeg(12)
         self.t.setRadius(2.25)

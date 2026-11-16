@@ -1,7 +1,9 @@
 """Display Settings' dashboard tiles (Visibility & pins): whether a panel anchored to the SteamVR
 dashboard stays shown with it closed, and the band the tiles fill round you (screens/tiling.h,
 docs/design.md "Dashboard tiles"). Each is a frametop.conf value ft-screens reads at start and
-takes live as `handsetting KEY VALUE`, as the drag bars' are.
+takes live as `handsetting KEY VALUE`, as the drag bars' are. And whether the apps started from the
+dashboard (Steam's gamescope session) come up as Frametop panels (GSAPP_PANELS; docs/design.md
+"Gamescope apps"), which go on the dashboard the first time.
 
 The QML reaches it as backend.dashTiles. The numbers' ranges are ft-screens' own
 (TileSettings() in screens/vr.cpp): a value outside one is refused there, so it's clamped here.
@@ -17,6 +19,7 @@ import ft_layout  # noqa: E402
 from ft_layout import ft_conf  # noqa: E402
 
 STAY = "DASH_TILE_STAY"
+GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
 # key: (default, lo, hi), as screens/vr.cpp's TileSettings() and tiling::Params have them
 NUMBERS = {
     "DASH_TILE_RAISE_DEG": (30.0, -30.0, 60.0),    # the band's bottom above the dashboard's bar
@@ -55,6 +58,14 @@ class DashTiles(QObject):
     @Slot(bool)
     def setStay(self, on):
         self._set_value(STAY, "1" if on else "0")
+
+    @Property(bool, notify=changed)
+    def gsApps(self):
+        return ft_layout.read_conf().get(GSAPPS, "1") != "0"
+
+    @Slot(bool)
+    def setGsApps(self, on):
+        self._set_value(GSAPPS, "1" if on else "0")
 
     @Property(float, notify=changed)
     def raiseDeg(self):

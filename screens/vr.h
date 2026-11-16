@@ -59,6 +59,12 @@ void ft_vr_key(uint32_t code, int value);
 // Ctrl or Alt pressed while the 3D mouse carries a panel (carry_toggle): true for its press, repeats and
 // release, which go to the carry, not the desktop.
 bool ft_vr_carry_key(uint32_t code, int value);
+// A key for the gamescope app clicked last (vr.cpp's "gamescope apps"; value as ft_vr_key's, a repeat
+// sent as a press): true if it went there. A key goes up where it went down; a press doesn't go
+// while `elsewhere` (frunner's search has the typing) or while that app's panel is hidden.
+bool ft_vr_app_key(uint32_t code, int value, bool elsewhere);
+// An app has the typing (the relay grabs the keyboards for it, as for the desktop).
+bool ft_vr_app_typing(void);
 // The 3D mouse's wheel (notches, + up) during a carry_toggle carry: it pushes the carried panel. False if none.
 bool ft_vr_carry_wheel(int notches);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It

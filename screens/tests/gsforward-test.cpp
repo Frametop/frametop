@@ -53,6 +53,10 @@ static void Policy() {
     CHECK(State(m) == 5);
     m = Mods{false, false, true, true};
     CHECK(State(m) == 72);
+    // a Shift's own press isn't shifted; its release is
+    CHECK(!Before(Mods{true, false, false, false}, 42, true).shift);
+    CHECK(Before(Mods{false, false, false, false}, 42, false).shift);
+    CHECK(Before(Mods{true, true, false, false}, 30, true).shift && Before(Mods{true, true, false, false}, 30, true).ctrl);
 
     CHECK(XButton(0x110) == 1);
     CHECK(XButton(0x111) == 3);

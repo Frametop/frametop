@@ -1523,6 +1523,12 @@ Item {
                         checked: backend.dashTiles.stay
                         onToggled: backend.dashTiles.setStay(checked)
                     }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Dashboard apps:"
+                        text: "Apps started from the dashboard open as Frametop panels"
+                        checked: backend.dashTiles.gsApps
+                        onToggled: backend.dashTiles.setGsApps(checked)
+                    }
                     RowLayout {
                         Kirigami.FormData.label: "Above the dashboard:"
                         Controls.Slider {
@@ -1590,7 +1596,10 @@ Item {
                           + "one, Meta+arrows move it between columns and rows and Meta+Ctrl+arrows resize it; Meta+/ "
                           + "lists every key. Drag a tile to reorder; pull it well away and it stays anchored where you let "
                           + "go. Anchored before the dashboard has opened, a panel stays where it is until the dashboard "
-                          + "first opens. Each app, screen and remote display remembers whether it was anchored."
+                          + "first opens. Each app, screen and remote display remembers whether it was anchored.\n\nWith "
+                          + "Dashboard apps on, a flatscreen app you start from the SteamVR dashboard opens as a Frametop "
+                          + "panel, anchored and staying visible the first time. Click it to type into it. Off, Steam "
+                          + "shows it on a panel of its own, as before."
                 }
 
                 Kirigami.FormLayout {

@@ -79,6 +79,21 @@ inline uint16_t State(const Mods &m) {
     return uint16_t((m.shift ? 1 : 0) | (m.ctrl ? 4 : 0) | (m.alt ? 8 : 0) | (m.meta ? 64 : 0));
 }
 
+// The modifiers as X gives them with a key: as they were before it (a Shift's own press isn't
+// shifted, its release is). `now` is after it.
+inline Mods Before(Mods now, uint32_t code, bool down) {
+    bool *m = nullptr;
+    switch (code) {
+        case 42: case 54: m = &now.shift; break;    // KEY_LEFTSHIFT, KEY_RIGHTSHIFT
+        case 29: case 97: m = &now.ctrl; break;     // KEY_LEFTCTRL, KEY_RIGHTCTRL
+        case 56: case 100: m = &now.alt; break;     // KEY_LEFTALT, KEY_RIGHTALT
+        case 125: case 126: m = &now.meta; break;   // KEY_LEFTMETA, KEY_RIGHTMETA
+        default: break;
+    }
+    if (m) *m = !down;
+    return now;
+}
+
 // A Linux mouse button (BTN_LEFT 0x110 ...) as X's: 1 left, 2 middle, 3 right, 8 back, 9 forward.
 inline uint8_t XButton(int linuxButton) {
     switch (linuxButton) {

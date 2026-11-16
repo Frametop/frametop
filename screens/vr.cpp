@@ -141,6 +141,7 @@
 #include "chromepool.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
+#include "gsapps.h"
 #include "posemath.h"
 #include "roomshift.h"
 #include "layoutgrab.h"
@@ -415,6 +416,9 @@ struct Screen {
     bool floating = false;        // a spare output's panel
     int slot = 0;                 // ...its number, from 1 (its overlays exist only while a window floats)
     bool remote = false;          // a remote display: another machine's monitor, streamed (remote.c)
+    bool gsapp = false;           // a gamescope app's window (the gamescope apps): gamescope draws it
+    uint32_t gsWin = 0;           // ...which X window
+    int gsX = 0, gsY = 0;         // ...where it is on the X screen (its popups go by it, PlaceSubs)
     std::string label;            // its name (MakePanel's: "Screen 1", "host: display", "Floating window 2")
     bool floatOn = false;         // ft-floatd has a window on it ("float" .. "unfloat")
     bool outputOn = false;        // KWin has the spare output turned on
@@ -489,8 +493,11 @@ struct Screen {
                 anchorButton};
     }
     // Whether its kind has control k (Controls()' order), whether or not it holds a set of them now
-    // (chromepool.h): a floating window has dock and close, the others reset, pin and layout; every kind the anchor.
-    bool HasControl(int k) const { return k < 4 || k == 9 || (floating ? k < 6 : k >= 6); }
+    // (chromepool.h): a floating window has dock and close, a desktop screen or remote display reset,
+    // pin and layout, a gamescope app none of those; every kind the anchor.
+    bool HasControl(int k) const { return k < 4 || k == 9 || (!gsapp && (floating ? k < 6 : k >= 6)); }
+    // One of KWin's outputs: a desktop screen (not a floating window's, a remote display or an app's).
+    bool Desktop() const { return !floating && !remote && !gsapp; }
 };
 std::map<int, Screen> g_screens;
 
@@ -1201,13 +1208,16 @@ std::array<Mat, kControls> ControlOffsets(const Screen &s) {
 
 // A floating window's popups and dialogs, a few millimetres in front of it, where they are
 // in the buffer relative to the window.
+// A gamescope app's popups the same, by where they and the window are on the X screen.
 void PlaceSubs(const Screen &s) {
-    if (s.subs.empty() || s.cropW <= 0) return;
+    const int ox = s.gsapp ? s.gsX : s.cropX, oy = s.gsapp ? s.gsY : s.cropY, ow = s.gsapp ? s.width : s.cropW,
+              oh = s.gsapp ? s.height : s.cropH;
+    if (s.subs.empty() || ow <= 0) return;
     Mat p;
     if (s.pinned == kNone && !ScreenPose(s, &p)) return;
     for (const auto &[k, sub] : s.subs) {
-        const double u = (sub.x + sub.w / 2.0 - (s.cropX + s.cropW / 2.0)) * s.mpp;
-        const double v = -(sub.y + sub.h / 2.0 - (s.cropY + s.cropH / 2.0)) * s.mpp;
+        const double u = (sub.x + sub.w / 2.0 - (ox + ow / 2.0)) * s.mpp;
+        const double v = -(sub.y + sub.h / 2.0 - (oy + oh / 2.0)) * s.mpp;
         const Mat off = OnSurface(s, u, v, 0.005);
         vr::VROverlay()->SetOverlayWidthInMeters(sub.overlay, float(std::max(0.01, sub.w * s.mpp)));
         if (s.pinned != kNone) {
@@ -2218,7 +2228,7 @@ dashtiles::Info TileInfo(int id) {
     if (it == g_screens.end()) return info;
     const Screen &s = it->second;
     info.aspect = s.metres / std::max(1e-6, s.heightMetres());
-    info.fixed = !s.floating;   // a desktop screen or a remote display: the other end's resolution
+    info.fixed = !s.floating && !s.gsapp;   // a desktop screen or a remote display: the other end's resolution
     return info;
 }
 
@@ -2229,7 +2239,8 @@ Mat ToMat(const double m[3][4]) {
     return o;
 }
 
-// Each tiled panel pinned to its place, sized for it (a floating window gets the pixels: `resize`),
+void GsResize(const Screen &s, int w, int h);
+// Each tiled panel pinned to its place, sized for it (a floating window or an app gets the pixels: `resize`),
 // and each satellite at its own. Nothing until the group has a frame (the dashboard seen).
 void RetileDash(bool resize) {
     if (!g_tileGroupSet || !g_dash.a.ever) return;
@@ -2239,14 +2250,18 @@ void RetileDash(bool resize) {
         if (it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
-        if (!s.floating) {
+        if (!s.floating && !s.gsapp) {
             if (std::fabs(s.metres - p.widthM) > 0.002) SetWidth(s, p.widthM);
         } else if (resize && s.mpp > 0) {
             const int w = int(std::lround(p.widthM / s.mpp)), h = int(std::lround(p.heightM / s.mpp));
             const int pw = PictureW(s), ph = PictureH(s);
             if (w > 0 && h > 0 && (std::abs(w - pw) > std::max(4, pw / 33) || std::abs(h - ph) > std::max(4, ph / 33))) {
-                Stretch(s, w, h);
-                SendStretch(s);
+                if (s.gsapp) {
+                    GsResize(s, w, h);   // (its new size comes back as the window's: GsGeometry)
+                } else {
+                    Stretch(s, w, h);
+                    SendStretch(s);
+                }
             }
         }
         double m[3][4];
@@ -2556,7 +2571,7 @@ void FinishDrag(Screen &s, int index) {
                   std::to_string(s.dockY) + " " + std::to_string(s.dockGX) + " " + std::to_string(s.dockGY));
         return;
     }
-    if (!s.floating && !s.remote) ArrangeDesktopSoon();
+    if (s.Desktop()) ArrangeDesktopSoon();
     if (target != kNone && ScreenPose(s, &p) && PinAt(s, target, p)) {
         if (target == vr::k_unTrackedDeviceIndex_Hmd) std::printf("screen %d: pinned to the head\n", index + 1);
         else if (target == kDashboard)
@@ -2583,7 +2598,7 @@ void TogglePinView(Screen &s, int index, const char *by) {
     } else {
         return void(std::printf("screen %d: the pin button: no head pose\n", index + 1));
     }
-    if (!s.floating && !s.remote) ArrangeDesktopSoon();   // KWin's outputs: pinned screens go last
+    if (s.Desktop()) ArrangeDesktopSoon();   // KWin's outputs: pinned screens go last
 }
 
 void RememberPlace(int i, Screen &s);       // (how far out a sent-away panel goes: by SendBack)
@@ -3497,7 +3512,7 @@ Screen *CarriedByPress() {
 // here (g_press.torn) and its release goes to KWin no more. ft-floatd floats the window and answers "torn"
 // with where in it the laser held it; if that takes longer than kTearMs, it stays floating where it came up.
 bool TearOff(Screen &s, int index, void (*handle)(const struct ft_event *, void *), void *data) {
-    if (g_kwinMove.window.empty() || s.floating || s.remote || g_press.torn || !(g_press.buttons & ButtonBit(BTN_LEFT)) ||
+    if (g_kwinMove.window.empty() || !s.Desktop() || g_press.torn || !(g_press.buttons & ButtonBit(BTN_LEFT)) ||
         g_press.screen != index || IsHandHolder(g_press.device))
         return false;
     ft_event e{};
@@ -3550,7 +3565,7 @@ bool ModCarry(Screen &s, int index, vr::TrackedDeviceIndex_t dev, uint32_t butto
         return false;
     const windowdrag::Action action = windowdrag::ActionOf(g_windowDrag, button);
     const char *app = s.remote ? ft_remote_app(index) : nullptr;
-    if (action == windowdrag::Nothing || (!s.floating && !(app && !std::strncmp(app, "window:", 7)))) return false;
+    if (action == windowdrag::Nothing || (!s.floating && !s.gsapp && !(app && !std::strncmp(app, "window:", 7)))) return false;
     PressDown(dev, button, index, x, y);
     g_press.torn = true;
     if (action == windowdrag::Resize) {
@@ -4755,7 +4770,7 @@ void AnimateGrabMoves() {
             continue;
         }
         FitCurve(s);
-        if (!s.floating && !s.remote) ArrangeDesktopSoon();
+        if (s.Desktop()) ArrangeDesktopSoon();
         it = g_grabMoves.erase(it);
     }
 }
@@ -5563,7 +5578,7 @@ void UpdateDockAims() {
             Mat q;
             double ou, ov, t;
             const char *oApp = o.remote ? ft_remote_app(k) : nullptr, *oHost = o.remote ? ft_remote_host(k) : nullptr;
-            const bool fits = window ? oApp && oHost && windowdrag::CanDropOn(host, app, oHost, oApp) : !o.floating && !o.remote;
+            const bool fits = window ? oApp && oHost && windowdrag::CanDropOn(host, app, oHost, oApp) : o.Desktop();
             if (k == i || !fits || !o.visible || o.width <= 0 || o.metres <= 0 || !ScreenPose(o, &q) ||
                 !RayOnSurface(o, q, l, &ou, &ov, &t) || std::fabs(ou) > o.metres / 2 || std::fabs(ov) > o.heightMetres() / 2)
                 continue;
@@ -6227,6 +6242,8 @@ void UpdateHandGuides() {
 
 // The hand interactions Input Settings switches on and off live ("handsetting KEY 0|1"); each also read
 // from frametop.conf at start (ft_vr_init). A number-valued one goes back to its default when switched on.
+void GsSwitch(bool on);
+void GsShutdown();
 bool SetHandSetting(const char *key, bool on) {
     handinput::Params &k = g_handInput.params();
     const handinput::Params d;
@@ -6259,6 +6276,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
     else if (n == "DASH_TILE_STAY") g_tileStayDefault = on;   // (panels anchored from now on)
+    else if (n == "GSAPP_PANELS") GsSwitch(on);
     else if (n == "SCREEN_PIN_LEVEL") SetPinMode(on ? levelpin::Level : levelpin::Rigid);   // (2, Walk: the command's own case)
     else return false;
     return true;
@@ -6665,6 +6683,7 @@ bool ft_vr_init(void) {
     for (const TileSetting &t : TileSettings()) num(t.name, *t.value, t.lo, t.hi);
     g_tileStayDefault = handcut::Setting("DASH_TILE_STAY", "0") == "1";
     LoadTileMemory();
+    GsSwitch(handcut::Setting("GSAPP_PANELS", "1") != "0");   // the gamescope apps as panels of ours
     if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
                                   handcut::Setting("WINDOW_DRAG_RIGHT", "resize").c_str(),
                                   handcut::Setting("WINDOW_DRAG_MIDDLE", "none").c_str(), &g_windowDrag))
@@ -6801,6 +6820,7 @@ void ft_vr_shutdown(void) {
     if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;
     if (g_carryFollow.on) SendPointer("follow carry off");
     if (!g_vr) return;
+    GsShutdown();   // (the apps' windows back to gamescope first)
     // The panels go first, their textures cleared, and the imports only after SteamVR has had
     // a moment to take them down (see the shutdown in compositor.c).
     for (auto &[i, s] : g_screens) {
@@ -6935,7 +6955,7 @@ static void CarryFollowEnd() {
     for (const auto &[i, rel] : f.rel) {
         g_spin.base.erase(i);
         const auto it = g_screens.find(i);
-        if (it != g_screens.end() && !it->second.floating && !it->second.remote) screens = true;
+        if (it != g_screens.end() && it->second.Desktop()) screens = true;
     }
     if (screens) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are
     f.on = f.lockOnly = false, f.rel.clear();
@@ -7169,7 +7189,7 @@ static void CarrySpace(bool face) {
         SetAbsolute(s, l);
         g_spin.base.erase(i);
         if (frame) g_carryFollow.rel[i] = Mul(inv, l);
-        if (!s.floating && !s.remote) screens = true;
+        if (s.Desktop()) screens = true;
     }
     if (screens) ArrangeDesktopSoon();
     std::printf("carry_toggle: %d panel(s) %s (Space%s)\n", n, face ? "facing you" : "levelled", face ? " twice" : "");
@@ -7203,7 +7223,7 @@ static void CarryUndoAll() {
         if (s.pinned != kNone || s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i)) continue;
         SetAbsolute(s, u.pose);
         g_spin.base.erase(i);
-        if (!s.floating && !s.remote) screens = true;
+        if (s.Desktop()) screens = true;
     }
     if (screens) ArrangeDesktopSoon();
     g_carryUndo.clear();
@@ -7833,7 +7853,7 @@ void LayoutGrabEnd() {
     bool screens = false;
     for (const auto &[i, rel] : g_layoutGrab.rel) {
         const auto it = g_screens.find(i);
-        if (it != g_screens.end() && !it->second.floating && !it->second.remote) screens = true;
+        if (it != g_screens.end() && it->second.Desktop()) screens = true;
     }
     if (screens) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are
     std::printf("screen %d: its layout button let go: the layout stays there\n", g_layoutGrab.panel + 1);
@@ -7877,6 +7897,299 @@ void UpdateLayoutGrab() {
     }
     for (auto &[i, k] : g_parked)
         if (k.pinned == kNone) k.pose = Mul(step, k.pose);
+}
+
+// ---------------------------------------------------------------- gamescope apps
+//
+// The windows of apps in SteamOS's own gamescope session (those started from the SteamVR dashboard:
+// gamescope's app display, :1) as panels of ours: gsforward.h has how, gsapps.h the bookkeeping,
+// docs/design.md "Gamescope apps" what it's for. gamescope puts each window's frames on its panel;
+// where the panel is, its size, its controls and the dashboard tiles are a panel's like any other's
+// (an app's has the bar, curve, roll, resize and anchor). The first time an app is seen its panel is
+// anchored to the dashboard, staying shown; after that it comes back as the app was (TileKnown).
+// Input: the laser's pointer, buttons and wheel through XTest; keys as synthetic events to the
+// app clicked last (ft_vr_app_key), until a click on another panel. GSAPP_PANELS=0 (Display
+// Settings) leaves every window to gamescope's own panels.
+extern "C++" {  // (this part of the file is extern "C")
+namespace {
+gsforward::Link g_gs;
+gsapps::Book g_gsBook;
+gsapps::Keys g_gsKeys;
+bool g_gsOn = false;            // GSAPP_PANELS (read at start)
+int64_t g_gsNextTry = 0;        // when to try the app display again (ms)
+std::string g_gsWhy;            // why it didn't open the last time (said once each time it changes)
+uint32_t g_gsRaised = 0;        // the window raised last (so the X pointer finds the one the laser's on)
+uint32_t g_gsButtons = 0;       // X buttons held (bit b: button b), let go when the laser leaves
+constexpr const char *kGsDisplay = ":1";
+constexpr int64_t kGsRetryMs = 10000;
+constexpr double kGsMpp = 1.0 / 1250;   // a new app's density: 1250 pixels a metre
+
+// The window's size and place: the panel keeps its density (a resize by its corner changed that),
+// and its tile or corner where it is.
+void GsGeometry(Screen &s, int index, const gsforward::Window &w) {
+    if (w.w <= 0 || w.h <= 0) return;
+    const bool first = s.width <= 0;
+    const double oldW = s.metres, oldH = s.heightMetres();
+    if (!first) s.mpp = s.metres / s.width;
+    s.gsX = w.x, s.gsY = w.y;
+    if (w.w == s.width && w.h == s.height) return PlaceSubs(s);
+    s.width = w.w, s.height = w.h;
+    const vr::HmdVector2_t scale = {{float(w.w), float(w.h)}};
+    vr::VROverlay()->SetOverlayMouseScale(s.overlay, &scale);
+    s.metres = std::clamp(w.w * s.mpp, kMinWidth, 12.0);
+    vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+    CapCurve(s);
+    ApplyCurve(s);
+    if (TileAnchored(index)) RetileDash(false);
+    else if (!first) KeepCorner(s, oldW, oldH);
+    PlaceChrome(s);
+    PlaceSubs(s);
+    std::printf("screen %d: %dx%d (a gamescope app)\n", index + 1, w.w, w.h);
+}
+
+// A window's panel, hidden until it maps, and the tag that gives gamescope it.
+void GsMake(int index, const gsforward::Window &w) {
+    if (g_screens.count(index)) return;
+    Screen &s = g_screens[index];
+    s.gsapp = true, s.gsWin = w.id, s.mpp = kGsMpp;
+    s.metres = std::clamp(w.w * kGsMpp, kMinWidth, 12.0);
+    char prefix[64];
+    std::snprintf(prefix, sizeof prefix, "frametop.app.%d", index + 1);
+    if (!MakePanel(s, prefix, "App")) return void(g_screens.erase(index));   // (gamescope's own panel has it)
+    AnnounceOverlay(prefix);
+    vr::VROverlay()->SetOverlayRenderingPid(s.overlay, g_gs.GamescopePid());   // (only its renderer may set its texture)
+    // Until it's on the dashboard or put somewhere: 1.5 m ahead of the head.
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) head = Identity();
+    const double yaw = std::atan2(head.m[0][2], head.m[2][2]);
+    SetAbsolute(s, PanelPose(head.m[0][3] - std::sin(yaw) * 1.5, head.m[1][3], head.m[2][3] - std::cos(yaw) * 1.5,
+                             yaw * 180 / M_PI, 0, 0));
+    g_gs.Tag(w.id, s.overlay);
+}
+
+// It mapped: named, sized, back where its app was (or anchored, staying shown, the first time), shown.
+void GsShow(int index, gsforward::Window w) {
+    const auto it = g_screens.find(index);
+    if (it == g_screens.end()) return;
+    Screen &s = it->second;
+    g_gs.Describe(&w);
+    s.label = w.title;
+    vr::VROverlay()->SetOverlayName(s.overlay, w.title.c_str());
+    GsGeometry(s, index, w);
+    s.shown = &g_gs;   // (no buffer of ours: gamescope's frames)
+    const std::string key = w.key.empty() ? "" : dashtiles::Memory::Clean(w.key);
+    const bool known = !key.empty() && !g_tileMemory.Get(key).empty();
+    if (!key.empty()) TileKnown(index, w.key);
+    if (!known) TileAnchor(index, true, "a gamescope app");
+    std::printf("screen %d: %s (%s, window 0x%x), a gamescope app\n", index + 1, w.title.c_str(),
+                key.empty() ? "no app id" : key.c_str(), w.id);
+    UpdateVisibility();
+}
+
+void GsDrop(int index, uint32_t win) {
+    g_gs.Untag(win);
+    g_gsKeys.Gone(win);
+    if (g_gsRaised == win) g_gsRaised = 0;
+    if (g_mouseScreen == index) g_mouseScreen = -1;
+    if (g_screens.count(index)) std::printf("screen %d: gone (a gamescope app)\n", index + 1);
+    ft_vr_screen_destroy(index);
+}
+
+// A popup (number `sub`) over its app's panel, at its place on the X screen; `make`: its overlay first.
+void GsPopup(int index, int sub, const gsforward::Window &w, bool make) {
+    const auto it = g_screens.find(index);
+    if (it == g_screens.end()) return;
+    Screen &s = it->second;
+    if (make && !s.subs.count(sub)) {
+        Sub o;
+        char key[80];
+        std::snprintf(key, sizeof key, "frametop.app.%d.sub.%d", index + 1, sub);
+        if (vr::VROverlay()->CreateOverlay(key, "App menu", &o.overlay) != vr::VROverlayError_None) return;
+        vr::VROverlay()->SetOverlayInputMethod(o.overlay, vr::VROverlayInputMethod_Mouse);
+        vr::VROverlay()->SetOverlayFlag(o.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
+        vr::VROverlay()->SetOverlayFlag(o.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, s.lasers);
+        vr::VROverlay()->SetOverlaySortOrder(o.overlay, 5);
+        vr::VROverlay()->SetOverlayRenderingPid(o.overlay, g_gs.GamescopePid());
+        vr::VROverlay()->SetOverlayAlpha(o.overlay, s.alpha);
+        AnnounceOverlay(key);
+        if (s.visible) PinShow(o.overlay);
+        s.subs[sub] = o;
+        g_gs.Tag(w.id, o.overlay);
+    }
+    const auto sit = s.subs.find(sub);
+    if (sit == s.subs.end()) return;
+    sit->second.x = w.x, sit->second.y = w.y, sit->second.w = w.w, sit->second.h = w.h;
+    const vr::HmdVector2_t scale = {{float(std::max(1, w.w)), float(std::max(1, w.h))}};
+    vr::VROverlay()->SetOverlayMouseScale(sit->second.overlay, &scale);
+    PlaceSubs(s);
+}
+void GsDropPopup(int index, int sub, uint32_t win) {
+    g_gs.Untag(win);
+    const auto it = g_screens.find(index);
+    if (it == g_screens.end()) return;
+    const auto sit = it->second.subs.find(sub);
+    if (sit == it->second.subs.end()) return;
+    vr::VROverlay()->DestroyOverlay(sit->second.overlay);
+    it->second.subs.erase(sit);
+}
+
+void GsDo(const std::vector<gsapps::Action> &actions) {
+    using A = gsapps::Action;
+    for (const A &a : actions) switch (a.type) {
+            case A::Make: GsMake(a.index, a.win); break;
+            case A::Show: GsShow(a.index, a.win); break;
+            case A::Move:
+                if (auto it = g_screens.find(a.index); it != g_screens.end()) GsGeometry(it->second, a.index, a.win);
+                break;
+            case A::Drop: GsDrop(a.index, a.win.id); break;
+            case A::MakePopup: GsPopup(a.index, a.sub, a.win, true); break;
+            case A::MovePopup: GsPopup(a.index, a.sub, a.win, false); break;
+            case A::DropPopup: GsDropPopup(a.index, a.sub, a.win.id); break;
+        }
+}
+
+// Each tick: the app display opened (every kGsRetryMs until it is: gamescope comes and goes with
+// Steam), and what happened there since.
+void GsStep() {
+    if (!g_gsOn) return;
+    const int64_t now = NowMs();
+    if (!g_gs.IsOpen()) {
+        if (g_gsBook.Panels()) GsDo(g_gsBook.Clear()), std::printf("gamescope apps: the app display went\n");
+        if (now < g_gsNextTry) return;
+        g_gsNextTry = now + kGsRetryMs;
+        std::string why;
+        if (!g_gs.Open(kGsDisplay, true, &why)) {
+            if (why != g_gsWhy) std::printf("gamescope apps: %s (trying again every %lld s)\n", why.c_str(), (long long)kGsRetryMs / 1000);
+            g_gsWhy = why;
+            return;
+        }
+        g_gsWhy.clear();
+        std::printf("gamescope apps: on %s (gamescope %u)\n", kGsDisplay, g_gs.GamescopePid());
+    }
+    for (const gsforward::Event &e : g_gs.Poll()) GsDo(g_gsBook.On(e, now));
+    GsDo(g_gsBook.Tick(now));
+}
+
+// The X buttons held, let go (the laser went off the app, or the app went).
+void GsLetGo() {
+    for (uint8_t b = 1; b < 32; ++b)
+        if (g_gsButtons & (1u << b)) g_gs.Button(b, false);
+    g_gsButtons = 0;
+}
+
+// Laser events on an app's panel and its popups: the X pointer, buttons and wheel there.
+void GsPanelEvents(Screen &s, int index) {
+    auto one = [&](const vr::VREvent_t &ev, int ox, int oy, int h) {
+        const int64_t now = NowMs();
+        if (ev.eventType != vr::VREvent_FocusLeave) {
+            s.inputMs = now;
+            if (FromLaser(ev)) s.laserMs = now, s.laserDevice = ev.trackedDeviceIndex;
+        }
+        const int ours = OurPointer(ev.trackedDeviceIndex);
+        if (ev.eventType == vr::VREvent_FocusLeave) {
+            if (ours >= 0 && g_mouseScreen == index) g_mouseScreen = -1;
+        } else if (ours > 0) {
+            g_mouseScreen = index, g_mouseDevice = ev.trackedDeviceIndex;
+        }
+        // where on the X screen (OpenVR's y runs up from the bottom)
+        const int x = ox + int(std::lround(ev.data.mouse.x)), y = oy + h - int(std::lround(ev.data.mouse.y));
+        auto point = [&] {
+            g_gsBook.Pointed(index);
+            if (g_gsRaised != s.gsWin) g_gs.Raise(s.gsWin), g_gsRaised = s.gsWin;
+            g_gs.Pointer(x, y);
+        };
+        switch (ev.eventType) {
+            case vr::VREvent_MouseMove:
+                if (s.toggleCarry || s.drag != Drag::None) return;
+                point();
+                break;
+            case vr::VREvent_MouseButtonDown:
+            case vr::VREvent_MouseButtonUp: {
+                if (CarryClick(ev)) return;
+                const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
+                const uint32_t button = LinuxButton(ev.data.mouse.button);
+                if (!down) {
+                    EndDragsBy(ev.trackedDeviceIndex);
+                    if (g_press.torn && ev.trackedDeviceIndex == g_press.device) {   // a modifier drag's: nowhere
+                        g_press.buttons &= ~ButtonBit(button);
+                        if (!g_press.buttons) g_press.upAt = -1, g_press.torn = false;
+                        return;
+                    }
+                } else {
+                    s.useMs = now;
+                    if (g_meta || g_alt || g_ctrl || g_shift) SendRelay("notap");
+                    if (ModCarry(s, index, ev.trackedDeviceIndex, button, ev.data.mouse.x, s.height - ev.data.mouse.y)) return;
+                    g_gsKeys.Focus(s.gsWin);   // typing goes to it now
+                }
+                const uint8_t b = gsforward::XButton(int(button));
+                point();
+                g_gs.Button(b, down);
+                if (down) g_gsButtons |= 1u << b;
+                else g_gsButtons &= ~(1u << b);
+                break;
+            }
+            case vr::VREvent_ScrollDiscrete:
+                if (CarryScroll(ev)) return;
+                s.useMs = now;
+                g_gs.Scroll(int(std::lround(ev.data.scroll.ydelta)));
+                break;
+            case vr::VREvent_FocusLeave:
+                if (g_gsButtons && s.drag == Drag::None) GsLetGo();
+                break;
+            default:
+                break;
+        }
+    };
+    vr::VREvent_t ev;
+    while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) one(ev, s.gsX, s.gsY, s.height);
+    for (const auto &[k, sub] : s.subs)
+        while (vr::VROverlay()->PollNextOverlayEvent(sub.overlay, &ev, sizeof ev)) one(ev, sub.x, sub.y, sub.h);
+}
+
+// Whether the app typing goes to is on a panel that's shown.
+bool GsTypingShown() {
+    const uint32_t win = g_gsKeys.Target();
+    if (!win) return false;
+    for (const auto &[i, s] : g_screens)
+        if (s.gsapp && s.gsWin == win) return s.visible;
+    return false;
+}
+
+void GsResize(const Screen &s, int w, int h) {
+    if (s.gsapp) g_gs.Resize(s.gsWin, w, h);
+}
+
+void GsSwitch(bool on) {
+    if (on == g_gsOn) return;
+    g_gsOn = on;
+    if (on) {
+        g_gsNextTry = 0;
+        return;
+    }
+    GsLetGo();
+    GsDo(g_gsBook.Clear());   // (each window back to gamescope's own panel)
+    g_gs.Close();
+    std::printf("gamescope apps: off (GSAPP_PANELS)\n");
+}
+
+void GsShutdown() {
+    GsLetGo();
+    for (const auto &[code, win] : g_gsKeys.Down()) g_gs.Key(win, gsforward::XKeycode(code), 0, false);
+    GsDo(g_gsBook.Clear());
+    g_gs.Close();
+}
+}  // namespace
+}  // extern "C++"
+
+bool ft_vr_app_typing(void) { return g_vr && g_gs.IsOpen() && GsTypingShown(); }
+
+bool ft_vr_app_key(uint32_t code, int value, bool elsewhere) {
+    if (!g_vr || !g_gs.IsOpen()) return false;
+    const uint32_t win = g_gsKeys.Route(code, value, elsewhere || (value && !GsTypingShown()));
+    if (!win) return false;
+    const gsforward::Mods now{g_shift, g_ctrl, g_alt, g_meta};
+    g_gs.Key(win, gsforward::XKeycode(code), gsforward::State(gsforward::Before(now, code, value != 0)), value != 0);
+    return true;
 }
 
 void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
@@ -7945,6 +8258,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         MoveFramePins(dashMoved);
         UpdateDashTiles();
     }
+    GsStep();   // (before the panels' events: a new app's panel has its first ones)
     UpdateCarryFollow();   // (before the carried panel's own move, below)
     // the hands, once per tick, for the cutouts and hand input
     {
@@ -8016,6 +8330,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                         return;
                     }
                     if (e.pressed) {
+                        g_gsKeys.Focus(0);   // (a gamescope app's typing ends with a click elsewhere)
                         // A laser clicking with a modifier held: its release isn't a tap (the relay sees no laser clicks)
                         if (g_meta || g_alt || g_ctrl || g_shift) SendRelay("notap");
                         if (!sub && ModCarry(s, index, ev.trackedDeviceIndex, e.button, e.x, e.y)) return;
@@ -8060,9 +8375,13 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             }
             handle(&e, data);
         };
-        while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) panelEvent(ev, false);
-        for (const auto &[k, sub] : s.subs)
-            while (vr::VROverlay()->PollNextOverlayEvent(sub.overlay, &ev, sizeof ev)) panelEvent(ev, true);
+        if (s.gsapp) {
+            GsPanelEvents(s, index);   // (X's, not KWin's)
+        } else {
+            while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) panelEvent(ev, false);
+            for (const auto &[k, sub] : s.subs)
+                while (vr::VROverlay()->PollNextOverlayEvent(sub.overlay, &ev, sizeof ev)) panelEvent(ev, true);
+        }
         // The controls light up under a laser.
         auto hover = [&](int k) {
             if (CarryScroll(ev)) ev.eventType = vr::VREvent_None;   // (the carried panel's, not this control's)
@@ -8450,7 +8769,7 @@ static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
     case vrcmd::Screens: {
         // KWin's screens only: ft-layout, Display Settings and ft-floatd count KWin's outputs
         // by it. Remote screens are listed by "remotes" (remote.c).
-        const auto kwin = [](const Screen &s) { return !s.floating && !s.remote; };
+        const auto kwin = [](const Screen &s) { return s.Desktop(); };
         const size_t count = std::count_if(g_screens.begin(), g_screens.end(), [&](auto &e) { return kwin(e.second); });
         int len = std::snprintf(reply, size, "ok %zu", count);
         for (auto &[i, s] : g_screens)

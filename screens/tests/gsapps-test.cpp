@@ -80,6 +80,22 @@ static void Popups() {
     CHECK(a.size() == 2 && a[0].type == Action::DropPopup && a[0].sub == 2 && a[1].type == Action::Drop);
     CHECK(b.PopupWindow(kFirst + 1, 2) == 0);
     CHECK(One(b.On(Ev(Event::Unmapped, Win(9, Kind::Popup)), 0), Action::DropPopup, kFirst));
+    // popups made ahead of time and never mapped go after a while; kMaxPopups at most (council,
+    // 2026-11-16: hidden menus used up SteamVR's overlays)
+    Book many;
+    many.On(Ev(Event::Created, Win(1, Kind::Main)), 0), many.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+    for (int i = 0; i < kMaxPopups; ++i) CHECK(many.On(Ev(Event::Created, Win(50 + i, Kind::Popup, 100, 50)), 0).size() == 1);
+    CHECK(many.On(Ev(Event::Created, Win(90, Kind::Popup, 100, 50)), 0).empty());
+    CHECK(many.On(Ev(Event::Mapped, Win(50, Kind::Popup, 100, 50)), 10).size() == 1);   // this one maps: it stays
+    a = many.Tick(1 + kMapWaitMs);
+    CHECK(int(a.size()) == kMaxPopups - 1 && a[0].type == Action::DropPopup);
+    CHECK(many.PopupWindow(kFirst, 1) == 50 && many.PanelOf(50) == kFirst && many.PanelOf(51) == -1);
+    a = many.On(Ev(Event::Mapped, Win(51, Kind::Popup, 100, 50)), 2 + kMapWaitMs);   // mapped later: made then
+    CHECK(a.size() == 1 && a[0].type == Action::MakePopup);
+    CHECK(many.Tick(100 + 2 * kMapWaitMs).empty());   // (mapped ones stay)
+    // a window whose panel couldn't be made: forgotten, its index free
+    a = many.Lose(1);
+    CHECK(a.size() == 3 && a.back().type == Action::Drop && many.Panels() == 0);
     // no panel to go over: none
     Book none;
     CHECK(none.On(Ev(Event::Created, Win(3, Kind::Popup, 50, 50)), 0).empty());

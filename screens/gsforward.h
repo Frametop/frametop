@@ -19,7 +19,8 @@
 // them; ones that refuse synthetic events (xterm by default, games reading raw input) don't.
 //
 // Two halves: the policy here (pure, tested by screens/tests/gsforward-test.cpp), and Link, the
-// X connection (gsforward.cpp, xcb; tested against Xvfb by the same test).
+// X connection (gsforward.cpp, xcb; tested against Xvfb by the same test). Its replies wait for the
+// X server, so ft-screens runs it on a thread of its own (gslink.h).
 #pragma once
 
 #include <cstdint>
@@ -125,7 +126,23 @@ struct Event {
     Window win;   // Moved: the new rectangle; Unmapped, Gone: the id only
 };
 
-class Link {
+// What's sent to the app display (Link does it now; gslink.h's AsyncLink on its own thread).
+struct XSide {
+    virtual ~XSide() = default;
+    virtual void Tag(uint32_t win, uint64_t overlay) = 0;
+    virtual void Untag(uint32_t win) = 0;
+    // The X pointer to (x, y) on the screen, and buttons and the wheel there.
+    virtual void Pointer(int x, int y) = 0;
+    virtual void Button(uint8_t button, bool down) = 0;
+    virtual void Scroll(int notches) = 0;   // up positive
+    // A key straight to the window (a synthetic event; see the top).
+    virtual void Key(uint32_t win, uint8_t keycode, uint16_t state, bool down) = 0;
+    virtual void Raise(uint32_t win) = 0;
+    virtual void Resize(uint32_t win, int w, int h) = 0;
+};
+
+// The connection, on the caller's thread: its replies wait for the X server.
+class Link : public XSide {
 public:
     Link();
     ~Link();
@@ -144,16 +161,17 @@ public:
     // A window's key and title, now (it maps with them set).
     void Describe(Window *w);
 
-    void Tag(uint32_t win, uint64_t overlay);
-    void Untag(uint32_t win);
-    // The X pointer to (x, y) on the screen, and buttons and the wheel there.
-    void Pointer(int x, int y);
-    void Button(uint8_t button, bool down);
-    void Scroll(int notches);   // up positive
-    // A key straight to the window (a synthetic event; see the top).
-    void Key(uint32_t win, uint8_t keycode, uint16_t state, bool down);
-    void Raise(uint32_t win);
-    void Resize(uint32_t win, int w, int h);
+    // Connected socket's fd (-1 closed): readable when events wait.
+    int Fd() const;
+
+    void Tag(uint32_t win, uint64_t overlay) override;
+    void Untag(uint32_t win) override;
+    void Pointer(int x, int y) override;
+    void Button(uint8_t button, bool down) override;
+    void Scroll(int notches) override;
+    void Key(uint32_t win, uint8_t keycode, uint16_t state, bool down) override;
+    void Raise(uint32_t win) override;
+    void Resize(uint32_t win, int w, int h) override;
 
 private:
     struct Impl;

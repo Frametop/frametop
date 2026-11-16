@@ -684,7 +684,7 @@ def tests():
           (relay.known_action("os_menu"), relay.needs_pointer("os_menu"), "os_menu" in relay.DEFAULT_KEY_BINDINGS.values(),
            relay.works_paused("os_menu")), (True, False, False, False))
     check("every menu action is an action that works without pointer mode",
-          [a for a in relay.MENU_ACTION_NAMES if not relay.known_action(a) or relay.needs_pointer(a)], [])
+          [a for a in sys.modules["ft_input_actions"].MENU_ACTION_NAMES if not relay.known_action(a) or relay.needs_pointer(a)], [])
 
     # The dashboard tiling keys (defaults): Meta+Left goes to ft-screens as "tile left" only while it
     # says an anchored tile has the focus ("tilefocus 1", renewed every 2 s); otherwise, and once that

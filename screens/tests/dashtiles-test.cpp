@@ -72,6 +72,26 @@ int main() {
         check("moved to the right end: a new column there", b.Grid().Cols().back().cells[0].id == 1 &&
                                                                  b.Grid().Cols()[0].cells.size() == 1);
     }
+    // --- drops aim at the grid as shown (council, 2026-11-16: it used the grid re-centred without
+    // the dragged one, so a drop on the middle column's middle made a new column)
+    {
+        dashtiles::Board b;
+        b.params.heightDeg = 25;
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+        b.Arrange(desk);
+        const tiling::Placed p2 = *b.PlacedOf(2);
+        auto d = b.DropFor(3, p2.azDeg, p2.elDeg - 1, desk);
+        check("drop: the right one on the middle one's middle: into it", d.kind == tiling::Drop::Into && d.col == 1);
+        b.Drop(3, d, rel);
+        check("...stacked under 2", b.Grid().Cols().size() == 2 && b.Grid().Cols()[1].cells.size() == 2 &&
+                                        b.Grid().Cols()[1].cells[0].id == 2 && b.Grid().Cols()[1].cells[1].id == 3);
+        b.Arrange(desk);
+        const tiling::Placed p1 = *b.PlacedOf(1);
+        d = b.DropFor(1, p1.azDeg, p1.elDeg, desk);
+        b.Drop(1, d, rel);
+        check("drop: onto itself: back where it was", b.Grid().Cols().size() == 2 && b.Grid().Cols()[0].cells[0].id == 1);
+    }
     // --- the keys
     {
         dashtiles::Board b;
@@ -107,16 +127,6 @@ int main() {
         b.Arrange(info);
         check("...its column 1.5 times as wide", near(b.PlacedOf(10)->az1 - b.PlacedOf(10)->az0, w * 1.5, 1e-6));
     }
-    // --- a profile's grid
-    {
-        dashtiles::Board b;
-        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
-        const std::string text = "col 30.00 3:1.000 1:2.000; col 0.00 9:1.000";
-        check("grid set: taken", b.SetGrid(text));
-        check("...9 isn't anchored: left out; 2 left out of it: a column at the end",
-              b.Grid().Cols().size() == 2 && b.Grid().Cols()[0].cells.size() == 2 && b.Grid().Cols()[1].cells[0].id == 2);
-        check("grid set: garbage refused, grid kept", !b.SetGrid("nonsense") && b.Grid().Cols().size() == 2);
-    }
     // --- memory
     {
         dashtiles::Board b;
@@ -151,6 +161,26 @@ int main() {
         check("memory: round trip, junk skipped", n.Text() == m.Text() && n.Size() == 2);
         for (int i = 0; i < 600; ++i) n.Set("k" + std::to_string(i), "off");
         check("memory: capped", n.Size() == dashtiles::Memory::kMax);
+        // the one set longest ago goes, not the first in order (council, 2026-11-16)
+        check("memory: the newest stays", n.Set("app:aa.just.opened", "off") && n.Get("app:aa.just.opened") == "off");
+        check("memory: the oldest went", n.Get("k100").empty() && n.Get("k101") == "off");
+        dashtiles::Memory o;
+        o.Load(n.Text());
+        o.Set("zz.new", "off");
+        check("memory: the order survives a save and load", o.Get("k101").empty() && o.Get("app:aa.just.opened") == "off");
+    }
+    // --- a profile's tiles back: its columns first, as saved; the tiles it doesn't name after
+    // (council, 2026-11-16: they were inserted into the live grid, so they joined its columns)
+    {
+        dashtiles::Board b;
+        b.Anchor(199, -1, true);   // a gamescope app, the only tile
+        const std::string top = "tile 0 0 0 0 1.000 1.000 0.00", under = "tile 0 0 1 0 1.000 1.000 0.00";
+        check("restore all: both taken", b.RestoreAll({{0, top}, {1, under}, {5, "nonsense"}}) == 2);
+        const auto &cols = b.Grid().Cols();
+        check("restore all: the profile's column first, stacked as saved", cols.size() == 2 && cols[0].cells.size() == 2 &&
+                                                                               cols[0].cells[0].id == 0 && cols[0].cells[1].id == 1);
+        check("restore all: the app in a column of its own after it", cols[1].cells.size() == 1 && cols[1].cells[0].id == 199);
+        check("restore all: a line that isn't one: left alone", !b.Anchored(5));
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

@@ -1472,12 +1472,13 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                                sc->buffer_height, sc->commits, sc->toplevel->title ? sc->toplevel->title : "");
             }
         } else if (strncmp(buf, "click ", 6) == 0) {
-            // A click on another panel takes typing to Steam. Our own panels (the screens,
-            // their controls) and Full Keyboard's leave it: a click on a screen arrives as a
-            // panel event, and Full Keyboard types where typing goes.
+            // A click on another panel takes typing to Steam, from the desktop and the apps. Our
+            // own panels (the screens, their controls) and Full Keyboard's leave it: a click on a
+            // screen arrives as a panel event, and Full Keyboard types where typing goes.
             if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0 &&
                 strncmp(buf + 6, "org.framekeyboard.", 18) != 0) {
                 s->keys_clicked = false;
+                ft_vr_app_blur();
                 spot_dismiss(s, "click");
             }
             len = sizeof from;

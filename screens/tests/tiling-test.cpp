@@ -119,9 +119,47 @@ int main() {
         for (int i = 0; i < 20; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
         const auto l = tiling::Arrange(cols, q);
         check("overflow: the strip fits in a turn", l.az1 - l.az0 <= q.maxSpanDeg - q.gapDeg + 1e-6);
+        check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (q.maxSpanDeg - q.gapDeg));
         check("overflow: shrunk", l.shrink < 1);
         check("overflow: still no corner overlap", cornersInColumns(l, q.radius));
         check("overflow: the band shrank with it (shapes kept)", l.el1 - l.el0 < std::min(q.heightDeg, q.maxTopDeg - q.bottomDeg));
+    }
+    // --- desktops at the default band: in front of you, at full size (council, 2026-11-16: the old
+    // span hit its 180 degree cap and put two desktops at +-90)
+    {
+        tiling::Params q = p;
+        q.bottomDeg = 10;   // a bar 20 degrees down, raised 30
+        const double one = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q).az1;   // (half the strip: it's centred)
+        for (int n = 1; n <= 3; ++n) {
+            std::vector<tiling::Column> cols;
+            for (int i = 0; i < n; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
+            const auto l = tiling::Arrange(cols, q);
+            char what[96];
+            std::snprintf(what, sizeof what, "desktops: %d at full size, %.0f degrees round you", n, l.az1 - l.az0);
+            check(what, near(l.shrink, 1) && near(l.az1 - l.az0, 2 * one * n + q.gapDeg * (n - 1), 1e-6));
+            std::snprintf(what, sizeof what, "desktops: %d, the corners in their columns", n);
+            check(what, cornersInColumns(l, q.radius));
+        }
+        std::vector<tiling::Column> two = {col({{1, 16.0 / 9, true, 1}}), col({{2, 16.0 / 9, true, 1}})};
+        const auto l = tiling::Arrange(two, q);
+        check("desktops: two either side of the dashboard, near it", l.tiles[0].azDeg > -60 && l.tiles[1].azDeg < 60);
+    }
+    // --- a dashboard high up (lying back, or a raise set high): the band stays under the cap
+    {
+        tiling::Params q = p;
+        for (double bottom : {50.0, 70.0, 95.0}) {
+            q.bottomDeg = bottom;
+            std::vector<tiling::Column> cols = {col({{1, 16.0 / 9, true, 1}}), col({{2, 1, false, 1}}, 30)};
+            const auto l = tiling::Arrange(cols, q);
+            bool sane = l.el1 <= q.maxTopDeg + 1e-9 && l.el1 - l.el0 >= q.minHeightDeg - 1e-9;
+            for (const auto &t : l.tiles) sane = sane && t.widthM > 0.05 && t.heightM > 0.05 && std::fabs(t.azDeg) < 180;
+            char what[96];
+            std::snprintf(what, sizeof what, "high bar (%.0f up): band %.0f..%.0f, sizes positive, in front", bottom, l.el0, l.el1);
+            check(what, sane && cornersInColumns(l, q.radius));
+        }
+        q.bottomDeg = 10, q.maxTopDeg = 20, q.heightDeg = 60;   // settings at odd ends
+        const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
+        check("band: a low cap moves the bottom down, it doesn't go past the cap", l.el1 <= 20 + 1e-9 && l.el1 - l.el0 >= q.minHeightDeg - 1e-9);
     }
     // --- drops
     {
@@ -172,15 +210,6 @@ int main() {
         check("taller alone in a column: nothing", !g.Heighten(1, tilegrid::kStep));
         check("wider: its column's width set", g.Widen(1, tilegrid::kStep, 40) && near(g.Cols()[1].widthDeg, 44));
         check("narrower: never below the minimum", g.Widen(1, 0.01, 44) && near(g.Cols()[1].widthDeg, tilegrid::kMinWidthDeg));
-        const std::string text = g.Text();
-        tilegrid::Grid h;
-        check("text: round trip", h.FromText(text, [](int) { return true; }) && h.Text() == text);
-        tilegrid::Grid k;
-        check("text: panels that went are dropped, empty columns too",
-              k.FromText(text, [](int id) { return id != 1; }) && k.Cols().size() == 3 && !k.Has(1));
-        check("text: garbage is refused", !k.FromText("rows 1 2", [](int) { return true; }) && k.Cols().size() == 3);
-        check("text: a panel twice is once", k.FromText("col 0 7:1 7:1; col 0 7:1", [](int) { return true; }) &&
-                                                 k.Cols().size() == 1 && k.Cols()[0].cells.size() == 1);
         check("remove: its column goes with its last panel", g.Remove(1) && !g.Has(1) && g.Cols().size() == 3);
         check("remove: not there", !g.Remove(1));
     }

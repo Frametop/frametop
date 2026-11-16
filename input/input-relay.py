@@ -314,7 +314,6 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
     KEY_LIST_RUNNABLE,
-    MENU_ACTION_NAMES,
     TILE_ACTIONS,
     TILE_FOCUS_ACTIONS,
     VOICE_ACTIONS,

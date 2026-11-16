@@ -6,7 +6,8 @@
 // A window gets a panel when it's created (so it's tagged before it maps: an untagged window gets
 // a panel of gamescope's own for a moment), shown when it maps, and dropped when it unmaps or
 // goes. One that's created but not mapped within kMapWaitMs is dropped too (a window an app keeps
-// for later); it gets a panel again if it maps. Past kMax panels a window keeps gamescope's own.
+// for later, a menu made ahead of time); it gets a panel again if it maps. Past kMax panels, or
+// kMaxPopups popups, a window keeps gamescope's own: SteamVR's overlays are few.
 #pragma once
 
 #include "gsforward.h"
@@ -20,6 +21,7 @@ namespace gsapps {
 constexpr int kFirst = 199;           // panel indices kFirst.. (screen numbers 200..; remote displays are 100..115)
 constexpr int kMax = 8;               // panels at most (SteamVR's 128 overlays are shared by everything)
 constexpr int64_t kMapWaitMs = 5000;  // created, not mapped by then: dropped
+constexpr int kMaxPopups = 8;         // popups' overlays at most, all apps' (more keep gamescope's)
 
 struct Action {
     enum Type {
@@ -45,7 +47,7 @@ public:
         switch (e.type) {
             case gsforward::Event::Created:
                 if (e.win.kind == gsforward::Kind::Main) MakeMain(e.win, nowMs, out);
-                else if (e.win.kind == gsforward::Kind::Popup) MakePopup(e.win, out);
+                else if (e.win.kind == gsforward::Kind::Popup) MakePopup(e.win, nowMs, out);
                 break;
             case gsforward::Event::Mapped: {
                 auto m = mains_.find(id);
@@ -59,10 +61,12 @@ public:
                     out.push_back({Action::Show, m->second.index, 0, e.win});
                 } else if (popups_.count(id)) {
                     PopupWin &p = popups_[id];
+                    p.mapped = true;
                     p.win.x = e.win.x, p.win.y = e.win.y, p.win.w = e.win.w, p.win.h = e.win.h;
                     out.push_back({Action::MovePopup, p.index, p.sub, p.win});
                 } else if (e.win.kind == gsforward::Kind::Popup) {
-                    MakePopup(e.win, out);
+                    MakePopup(e.win, nowMs, out);
+                    if (auto p = popups_.find(id); p != popups_.end()) p->second.mapped = true;
                 }
                 break;
             }
@@ -85,12 +89,14 @@ public:
         return out;
     }
 
-    // Windows created but never mapped, past kMapWaitMs: dropped.
+    // Windows created but never mapped, past kMapWaitMs: dropped (popups too).
     std::vector<Action> Tick(int64_t nowMs) {
         std::vector<Action> out;
         std::vector<uint32_t> late;
         for (const auto &[id, m] : mains_)
             if (!m.mapped && nowMs - m.createdMs > kMapWaitMs) late.push_back(id);
+        for (const auto &[id, p] : popups_)
+            if (!p.mapped && nowMs - p.createdMs > kMapWaitMs) late.push_back(id);
         for (uint32_t id : late) Forget(id, out);
         return out;
     }
@@ -128,6 +134,18 @@ public:
         const uint32_t id = PopupWindow(index, sub);
         return id ? &popups_.at(id).win : nullptr;
     }
+    // The panel a window is on (a popup's: its app's), or -1.
+    int PanelOf(uint32_t win) const {
+        if (auto m = mains_.find(win); m != mains_.end()) return m->second.index;
+        if (auto p = popups_.find(win); p != popups_.end()) return p->second.index;
+        return -1;
+    }
+    // A window that couldn't have its panel after all: what goes with it.
+    std::vector<Action> Lose(uint32_t win) {
+        std::vector<Action> out;
+        Forget(win, out);
+        return out;
+    }
     static bool Ours(int index) { return index >= kFirst && index < kFirst + kMax; }
     size_t Panels() const { return mains_.size(); }
 
@@ -141,6 +159,8 @@ private:
     struct PopupWin {
         int index, sub;
         gsforward::Window win;
+        bool mapped = false;
+        int64_t createdMs = 0;
     };
     std::map<uint32_t, MainWin> mains_;
     std::map<uint32_t, PopupWin> popups_;
@@ -159,15 +179,16 @@ private:
         mains_[w.id] = {index, false, nowMs, w};
         out.push_back({Action::Make, index, 0, w});
     }
-    void MakePopup(const gsforward::Window &w, std::vector<Action> &out) {
-        if (popups_.count(w.id) || mains_.empty()) return;   // (no panel to go over: gamescope's)
+    void MakePopup(const gsforward::Window &w, int64_t nowMs, std::vector<Action> &out) {
+        // (no panel to go over, or too many: gamescope's)
+        if (popups_.count(w.id) || mains_.empty() || int(popups_.size()) >= kMaxPopups) return;
         std::vector<uint32_t> mapped;
         for (const auto &[id, m] : mains_)
             if (m.mapped) mapped.push_back(id);
         const uint32_t owner = gsforward::PopupOwner(w.transientFor, lastPointed_, mapped);
         if (!owner) return;
         const int index = mains_[owner].index, sub = nextSub_++;
-        popups_[w.id] = {index, sub, w};
+        popups_[w.id] = {index, sub, w, false, nowMs};
         out.push_back({Action::MakePopup, index, sub, w});
     }
     void Forget(uint32_t id, std::vector<Action> &out) {

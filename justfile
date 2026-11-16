@@ -308,6 +308,11 @@ test-c:
     run screens/tests/gsforward-test.cpp build/tests/gsforward-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gsapps-test.cpp -o build/tests/gsapps-test
     run screens/tests/gsapps-test.cpp build/tests/gsapps-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gscontrol-test.cpp -o build/tests/gscontrol-test
+    run screens/tests/gscontrol-test.cpp build/tests/gscontrol-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Iscreens screens/tests/gslink-test.cpp screens/gslink.cpp screens/gsforward.cpp \
+      $(pkg-config --cflags --libs xcb xcb-xtest xcb-icccm) -o build/tests/gslink-test
+    run screens/tests/gslink-test.cpp build/tests/gslink-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/universefix-test.cpp \
       -o build/tests/universefix-test
     run screens/tests/universefix-test.cpp build/tests/universefix-test

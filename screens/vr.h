@@ -63,8 +63,10 @@ bool ft_vr_carry_key(uint32_t code, int value);
 // sent as a press): true if it went there. A key goes up where it went down; a press doesn't go
 // while `elsewhere` (frunner's search has the typing) or while that app's panel is hidden.
 bool ft_vr_app_key(uint32_t code, int value, bool elsewhere);
-// An app has the typing (the relay grabs the keyboards for it, as for the desktop).
+// An app has the typing, on a panel that's shown (the relay grabs the keyboards for it, as for the desktop).
 bool ft_vr_app_typing(void);
+// A click on something that isn't an app (Steam's panels): the typing leaves the apps.
+void ft_vr_app_blur(void);
 // The 3D mouse's wheel (notches, + up) during a carry_toggle carry: it pushes the carried panel. False if none.
 bool ft_vr_carry_wheel(int notches);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It

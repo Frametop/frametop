@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -155,61 +154,6 @@ public:
     double WidthOf(int id) const {
         const Where w = Find(id);
         return w.ok() ? cols_[w.col].widthDeg : 0;
-    }
-
-    // As text, for a profile and ft-layout: "col WIDTH ID:WEIGHT[:SCALE] ...; col ..." ("" when empty).
-    std::string Text() const {
-        std::string s;
-        char b[64];
-        for (const Col &c : cols_) {
-            if (!s.empty()) s += "; ";
-            std::snprintf(b, sizeof b, "col %.2f", c.widthDeg);
-            s += b;
-            for (const Cell &cell : c.cells) {
-                if (cell.scale < 1) std::snprintf(b, sizeof b, " %d:%.3f:%.3f", cell.id, cell.weight, cell.scale);
-                else std::snprintf(b, sizeof b, " %d:%.3f", cell.id, cell.weight);
-                s += b;
-            }
-        }
-        return s;
-    }
-    // Back from Text(), keeping only the panels `keep` says exist. False (and unchanged) if it isn't one.
-    template <typename Keep>
-    bool FromText(const std::string &text, Keep keep) {
-        std::vector<Col> cols;
-        size_t at = 0;
-        while (at < text.size()) {
-            size_t end = text.find(';', at);
-            if (end == std::string::npos) end = text.size();
-            const std::string part = text.substr(at, end - at);
-            at = end + 1;
-            if (part.find_first_not_of(' ') == std::string::npos) continue;
-            Col col;
-            int used = 0;
-            if (std::sscanf(part.c_str(), " col %lf%n", &col.widthDeg, &used) != 1) return false;
-            const char *p = part.c_str() + used;
-            int id, n;
-            double w;
-            while (std::sscanf(p, " %d:%lf%n", &id, &w, &n) == 2) {
-                p += n;
-                double sc = 1;
-                if (*p == ':') {
-                    if (std::sscanf(p, ":%lf%n", &sc, &n) != 1) return false;
-                    p += n;
-                }
-                bool dup = false;
-                for (const Col &c : cols)
-                    for (const Cell &cell : c.cells) dup = dup || cell.id == id;
-                for (const Cell &cell : col.cells) dup = dup || cell.id == id;
-                if (!dup && keep(id)) col.cells.push_back({id, Clamp(w), std::clamp(sc, kMinScale, 1.0)});
-            }
-            if (std::string(p).find_first_not_of(' ') != std::string::npos) return false;
-            if (col.widthDeg < 0) col.widthDeg = 0;
-            if (col.widthDeg > 0) col.widthDeg = std::clamp(col.widthDeg, kMinWidthDeg, kMaxWidthDeg);
-            if (!col.cells.empty()) cols.push_back(col);
-        }
-        cols_ = cols;
-        return true;
     }
 
 private:

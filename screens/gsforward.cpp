@@ -62,6 +62,7 @@ Link::Link() : d_(new Impl) {}
 Link::~Link() { Close(); }
 
 bool Link::IsOpen() const { return d_->c != nullptr; }
+int Link::Fd() const { return d_->c ? xcb_get_file_descriptor(d_->c) : -1; }
 uint32_t Link::GamescopePid() const { return d_->pid; }
 
 bool Link::Open(const char *display, bool needForwarding, std::string *why) {
@@ -104,6 +105,9 @@ bool Link::Open(const char *display, bool needForwarding, std::string *why) {
         for (int i = 0; i < xcb_query_tree_children_length(tree); ++i) {
             Event e;
             bool mapped = false;
+            // (a tag left from an ft-screens that went without untagging names an overlay that's
+            // gone: off, so the window has gamescope's own panel until one of ours tags it)
+            xcb_delete_property(c, kids[i], d.target);
             if (!d.Read(kids[i], &e.win, &mapped)) continue;
             d.pending.push_back(e);
             if (mapped) e.type = Event::Mapped, d.pending.push_back(e);

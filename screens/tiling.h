@@ -74,53 +74,92 @@ struct Layout {
 // The chord across an angle on the sphere: a row's height in metres.
 inline double Chord(double radius, double deg) { return 2 * radius * std::sin(Rad(deg) / 2); }
 
-// The angle round you a panel this wide needs at its highest corner's elevation (`worstEl`), so it
-// doesn't run into its neighbours there.
-inline double SpanFor(double radius, double widthM, double worstEl) {
-    const double c = std::max(0.05, std::cos(Rad(worstEl)));
-    const double half = std::min(1.0, widthM / 2 / (radius * c));
-    return Deg(2 * std::asin(half));
+// A flat panel facing the centre at elevation `elDeg`, `widthM` x `heightM`: the angle round you
+// its corners take. Its corners nearer the pole (its top ones above your eyes, its bottom ones
+// below) are nearest the vertical axis, so they're the widest round you: half of it is
+// atan2(w/2, r cos e - h/2 |sin e|). 180 when the panel reaches over the pole.
+inline double SpanFor(double radius, double widthM, double heightM, double elDeg) {
+    const double e = Rad(elDeg);
+    const double depth = radius * std::cos(e) - heightM / 2 * std::fabs(std::sin(e));
+    if (depth <= 1e-6) return 180;
+    return std::min(180.0, Deg(2 * std::atan2(widthM / 2, depth)));
+}
+// The other way: how wide a panel can be in `spanDeg` round you (0 at or over the pole).
+inline double WidthFor(double radius, double spanDeg, double heightM, double elDeg) {
+    const double e = Rad(elDeg);
+    const double depth = radius * std::cos(e) - heightM / 2 * std::fabs(std::sin(e));
+    if (depth <= 1e-6 || spanDeg <= 0) return 0;
+    return 2 * depth * std::tan(Rad(std::min(spanDeg, 179.0)) / 2);
 }
 
 inline double Scale(const Tile &t) { return std::clamp(t.scale, 0.05, 1.0); }
 
+// The band the columns fill: from the dashboard's top edge up heightDeg, its top never past
+// maxTopDeg, at least minHeightDeg tall. A dashboard high up (you lying back, a raise set high)
+// moves the bottom down rather than the band past the cap.
+inline void Band(const Params &p, double *bottom, double *height) {
+    const double cap = std::clamp(p.maxTopDeg, p.minHeightDeg - 80, 85.0);
+    const double b = std::clamp(p.bottomDeg, -85.0, cap - p.minHeightDeg);
+    *bottom = b;
+    *height = std::max(p.minHeightDeg, std::min(b + p.heightDeg, cap) - b);
+}
+
+// Each column's span round you that its fixed panels need, in a band `h` tall from `bottom`.
+inline std::vector<double> Spans(const std::vector<Column> &cols, const Params &p, double bottom, double h) {
+    std::vector<double> spans(cols.size());
+    for (size_t c = 0; c < cols.size(); ++c) {
+        const Column &col = cols[c];
+        double span = 0;
+        double sum = 0;
+        for (const Tile &t : col.tiles) sum += std::max(0.05, t.weight);
+        const double avail = std::max(1.0, h - p.gapDeg * (double(col.tiles.size()) - 1));
+        double elTop = bottom + h;
+        for (const Tile &t : col.tiles) {
+            const double rowDeg = avail * std::max(0.05, t.weight) / std::max(0.05, sum);
+            const double e1 = elTop, e0 = elTop - rowDeg;
+            elTop = e0 - p.gapDeg;
+            if (!t.fixed) continue;
+            const double hm = Chord(p.radius, rowDeg) * Scale(t);
+            span = std::max(span, SpanFor(p.radius, t.aspect * hm, hm, (e0 + e1) / 2));
+        }
+        spans[c] = span;
+    }
+    return spans;
+}
+
 inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     Layout out;
-    const double top = std::min(p.bottomDeg + p.heightDeg, p.maxTopDeg);
-    const double band = std::max(p.minHeightDeg, top - p.bottomDeg);
-    double k = 1;
-    std::vector<double> spans(cols.size());
-    for (int pass = 0; pass < 6; ++pass) {
-        const double h = band * k;
-        double total = 0;
+    double bottom, band;
+    Band(p, &bottom, &band);
+    // (a gap between each two, and one where the strip's ends would meet behind you)
+    const double room = p.maxSpanDeg - p.gapDeg * double(cols.size());
+    // the strip at size k: the columns' own widths scale with it, fixed panels' spans from their rows
+    auto spansAt = [&](double k, double *total) {
+        std::vector<double> s = Spans(cols, p, bottom, band * k);
+        *total = 0;
         for (size_t c = 0; c < cols.size(); ++c) {
-            const Column &col = cols[c];
-            double span = (col.widthDeg > 0 ? col.widthDeg : p.columnDeg) * k;
-            double sum = 0;
-            for (const Tile &t : col.tiles) sum += std::max(0.05, t.weight);
-            const double avail = std::max(1.0, h - p.gapDeg * (double(col.tiles.size()) - 1));
-            double elTop = p.bottomDeg + h;
-            for (const Tile &t : col.tiles) {
-                const double rowDeg = avail * std::max(0.05, t.weight) / std::max(0.05, sum);
-                const double e1 = elTop, e0 = elTop - rowDeg;
-                elTop = e0 - p.gapDeg;
-                if (!t.fixed) continue;
-                const double worst = std::max(std::fabs(e0), std::fabs(e1));
-                span = std::max(span, SpanFor(p.radius, t.aspect * Chord(p.radius, rowDeg) * Scale(t), worst));
-            }
-            spans[c] = span;
-            total += span;
+            s[c] = std::max(s[c], (cols[c].widthDeg > 0 ? cols[c].widthDeg : p.columnDeg) * k);
+            *total += s[c];
         }
-        total += p.gapDeg * std::max(0.0, double(cols.size()) - 1);
-        const double room = p.maxSpanDeg - p.gapDeg;
-        if (total <= room + 1e-9 || cols.empty()) break;
-        k *= room / total * 0.999;
+        return s;
+    };
+    double k = 1, total = 0;
+    std::vector<double> spans = spansAt(1, &total);
+    if (total > room && !cols.empty()) {
+        // past a turn: the largest k that fits (the strip only grows with k), by halving
+        double lo = 0, hi = 1;
+        for (int i = 0; i < 40; ++i) {
+            const double mid = (lo + hi) / 2;
+            double t;
+            spansAt(mid, &t);
+            (t <= room ? lo : hi) = mid;
+        }
+        k = std::max(lo, 1e-3);
+        spans = spansAt(k, &total);
     }
     out.shrink = k;
     const double h = band * k;
-    out.el0 = p.bottomDeg, out.el1 = p.bottomDeg + h;
-    double total = 0;
-    for (double s : spans) total += s;
+    out.el0 = bottom, out.el1 = bottom + h;
     total += p.gapDeg * std::max(0.0, double(cols.size()) - 1);
     double az = -total / 2;
     out.az0 = az, out.az1 = az + total;
@@ -131,7 +170,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
         double sum = 0;
         for (const Tile &t : col.tiles) sum += std::max(0.05, t.weight);
         const double avail = std::max(1.0, h - p.gapDeg * (double(col.tiles.size()) - 1));
-        double elTop = p.bottomDeg + h;
+        double elTop = bottom + h;
         for (size_t r = 0; r < col.tiles.size(); ++r) {
             const Tile &t = col.tiles[r];
             const double rowDeg = avail * std::max(0.05, t.weight) / std::max(0.05, sum);
@@ -142,11 +181,9 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
             pl.az0 = a0, pl.az1 = a1;
             pl.azDeg = (a0 + a1) / 2, pl.elDeg = (pl.el0 + pl.el1) / 2;
             pl.heightM = Chord(p.radius, rowDeg);
-            const double worst = std::max(std::fabs(pl.el0), std::fabs(pl.el1));
-            // A resizable panel takes its column's width where it's narrowest (its highest corner);
-            // a fixed one its own, no wider than that.
-            const double cellW = 2 * p.radius * std::cos(Rad(worst)) * std::sin(Rad(a1 - a0) / 2);
             if (t.fixed) pl.heightM *= Scale(t);
+            // A resizable panel fills its cell; a fixed one keeps its shape, no wider than the cell.
+            const double cellW = WidthFor(p.radius, a1 - a0, pl.heightM, pl.elDeg);
             pl.widthM = t.fixed ? std::min(t.aspect * pl.heightM, cellW) : cellW;
             if (t.fixed && pl.widthM < t.aspect * pl.heightM - 1e-9) pl.heightM = pl.widthM / t.aspect;
             out.tiles.push_back(pl);

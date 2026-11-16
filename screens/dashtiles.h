@@ -17,7 +17,9 @@
 #include "tilegrid.h"
 #include "tiling.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -111,13 +113,12 @@ public:
         s.satellite = true;
         std::memcpy(s.rel, rel, sizeof s.rel);
     }
-    // Where a drop at (az, el) goes: on the grid as it is without the dragged panel.
+    // Where a drop at (az, el) goes: aimed at the grid as you see it (the dragged panel's place
+    // still in it: the others don't move while you drag), as indices in the grid without it.
     template <typename InfoOf>
     tiling::Drop DropFor(int id, double az, double el, InfoOf info) const {
-        Board without = *this;
-        without.grid_.Remove(id);
-        const auto cols = without.Columns(info);
-        return tiling::DropAt(tiling::Arrange(cols, params), cols, az, el);
+        const auto cols = Columns(info);
+        return Without(grid_, id, tiling::DropAt(tiling::Arrange(cols, params), cols, az, el));
     }
     // Let go: where DropFor said (a column's indices are the grid's without it), or torn off at `rel`.
     void Drop(int id, const tiling::Drop &d, const double rel[3][4]) {
@@ -183,20 +184,6 @@ public:
         return nullptr;
     }
 
-    // The grid as text (tilegrid's: a profile's), and back. Anchored panels it leaves out keep a
-    // column at the end; panels in it that aren't anchored are left out.
-    std::string GridText() const { return grid_.Text(); }
-    bool SetGrid(const std::string &text) {
-        tilegrid::Grid g;
-        if (!g.FromText(text, [this](int id) { return Anchored(id); })) return false;
-        for (const auto &[id, spot] : spots_)
-            if (!spot.satellite && !g.Has(id)) g.Add(id);
-        for (auto &[id, spot] : spots_)
-            if (g.Has(id)) spot.satellite = false;
-        grid_ = g;
-        return true;
-    }
-
     // A panel's state, to remember it: "off", "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" or
     // "sat STAY" and its 12 numbers.
     std::string Remember(int id) const {
@@ -255,7 +242,41 @@ public:
         return false;
     }
 
+    // A profile's tiles back, each (panel, Remember's line) in the order given (by column and
+    // row): its columns first, as it saved them, then the tiles it doesn't name, each column as it
+    // was. A line that isn't one leaves that panel as it is. The number of lines taken.
+    int RestoreAll(const std::vector<std::pair<int, std::string>> &saved) {
+        std::vector<std::pair<int, std::string>> good;
+        for (const auto &[id, line] : saved) {
+            Board scratch;
+            if (scratch.Restore(id, line, -1)) good.push_back({id, line});
+        }
+        tilegrid::Grid rest = grid_;
+        for (const auto &[id, line] : good) rest.Remove(id);
+        grid_ = tilegrid::Grid{};
+        for (const auto &[id, line] : good) Restore(id, line, -1);
+        for (const tilegrid::Col &c : rest.Cols()) {
+            const int at = int(grid_.Cols().size());
+            for (size_t r = 0; r < c.cells.size(); ++r)
+                grid_.Insert(c.cells[r].id, at, int(r), r == 0, c.cells[r].weight, r == 0 ? c.widthDeg : 0, c.cells[r].scale);
+        }
+        return int(good.size());
+    }
+
 private:
+    // A drop aimed at `g` as it is, as indices once `id` is out of it.
+    static tiling::Drop Without(const tilegrid::Grid &g, int id, tiling::Drop d) {
+        const tilegrid::Where w = g.Find(id);
+        if (!w.ok() || d.kind == tiling::Drop::TearOff) return d;
+        const bool alone = g.Cols()[size_t(w.col)].cells.size() == 1;   // (its column goes with it)
+        if (d.kind == tiling::Drop::Into && d.col == w.col) {
+            if (alone) return d.kind = tiling::Drop::NewColumn, d;   // onto itself: back where it was
+            if (w.row < d.row) --d.row;
+            return d;
+        }
+        if (alone && w.col < d.col) --d.col;
+        return d;
+    }
     // A tiled panel's column width now (as laid out, before any shrink), in degrees.
     double NowWidth(int id) const {
         if (const tiling::Placed *p = PlacedOf(id)) return (p->az1 - p->az0) / std::max(1e-6, last_.shrink);
@@ -273,7 +294,7 @@ private:
 // "KEY<TAB>STATE".
 class Memory {
 public:
-    static constexpr size_t kMax = 500;   // entries at most (the oldest key in order goes)
+    static constexpr size_t kMax = 500;   // entries at most (the one set longest ago goes)
 
     // Spaces and control characters out (a key is one word), at most 200 bytes.
     static std::string Clean(const std::string &key) {
@@ -283,25 +304,35 @@ public:
     }
     std::string Get(const std::string &key) const {
         const auto it = m_.find(Clean(key));
-        return it == m_.end() ? std::string() : it->second;
+        return it == m_.end() ? std::string() : it->second.state;
     }
     // True when it changed.
     bool Set(const std::string &key, const std::string &state) {
         const std::string k = Clean(key);
         if (k.empty() || state.find_first_of("\t\n") != std::string::npos) return false;
         auto it = m_.find(k);
-        if (it != m_.end() && it->second == state) return false;
-        m_[k] = state;
-        while (m_.size() > kMax) m_.erase(m_.begin());
+        if (it != m_.end() && it->second.state == state) return false;
+        m_[k] = {state, ++seq_};
+        while (m_.size() > kMax) {
+            auto old = m_.begin();
+            for (auto e = m_.begin(); e != m_.end(); ++e)
+                if (e->second.seq < old->second.seq) old = e;
+            m_.erase(old);
+        }
         return true;
     }
+    // Set longest ago first (Load keeps that order).
     std::string Text() const {
+        std::vector<std::pair<uint64_t, const std::string *>> order;
+        for (const auto &[k, e] : m_) order.push_back({e.seq, &k});
+        std::sort(order.begin(), order.end());
         std::string s;
-        for (const auto &[k, v] : m_) s += k + "\t" + v + "\n";
+        for (const auto &[seq, k] : order) s += *k + "\t" + m_.at(*k).state + "\n";
         return s;
     }
     void Load(const std::string &text) {
         m_.clear();
+        seq_ = 0;
         size_t at = 0;
         while (at < text.size()) {
             size_t end = text.find('\n', at);
@@ -316,7 +347,12 @@ public:
     size_t Size() const { return m_.size(); }
 
 private:
-    std::map<std::string, std::string> m_;
+    struct Entry {
+        std::string state;
+        uint64_t seq = 0;   // when it was set (the one set longest ago goes first)
+    };
+    std::map<std::string, Entry> m_;
+    uint64_t seq_ = 0;
 };
 
 }  // namespace dashtiles

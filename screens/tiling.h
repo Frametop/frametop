@@ -36,6 +36,7 @@ struct Tile {
     double aspect = 16.0 / 9;   // width / height, a fixed panel's (a resizable one's now, for nothing)
     bool fixed = true;          // keeps its shape: its column fits it
     double weight = 1;          // its share of its column's height
+    double scale = 1;           // a fixed one: its size, as a share of what its row gives it (at most 1)
 };
 
 struct Column {
@@ -81,6 +82,8 @@ inline double SpanFor(double radius, double widthM, double worstEl) {
     return Deg(2 * std::asin(half));
 }
 
+inline double Scale(const Tile &t) { return std::clamp(t.scale, 0.05, 1.0); }
+
 inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     Layout out;
     const double top = std::min(p.bottomDeg + p.heightDeg, p.maxTopDeg);
@@ -103,7 +106,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
                 elTop = e0 - p.gapDeg;
                 if (!t.fixed) continue;
                 const double worst = std::max(std::fabs(e0), std::fabs(e1));
-                span = std::max(span, SpanFor(p.radius, t.aspect * Chord(p.radius, rowDeg), worst));
+                span = std::max(span, SpanFor(p.radius, t.aspect * Chord(p.radius, rowDeg) * Scale(t), worst));
             }
             spans[c] = span;
             total += span;
@@ -143,6 +146,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
             // A resizable panel takes its column's width where it's narrowest (its highest corner);
             // a fixed one its own, no wider than that.
             const double cellW = 2 * p.radius * std::cos(Rad(worst)) * std::sin(Rad(a1 - a0) / 2);
+            if (t.fixed) pl.heightM *= Scale(t);
             pl.widthM = t.fixed ? std::min(t.aspect * pl.heightM, cellW) : cellW;
             if (t.fixed && pl.widthM < t.aspect * pl.heightM - 1e-9) pl.heightM = pl.widthM / t.aspect;
             out.tiles.push_back(pl);

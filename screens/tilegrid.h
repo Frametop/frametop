@@ -23,10 +23,12 @@ namespace tilegrid {
 constexpr double kStep = 1.1;         // one key press: 10% wider, taller, narrower or shorter
 constexpr double kMinWeight = 0.2, kMaxWeight = 5;
 constexpr double kMinWidthDeg = 12, kMaxWidthDeg = 160;
+constexpr double kMinScale = 0.3;     // a fixed panel at least this much of its row (never more than all of it)
 
 struct Cell {
     int id = 0;
     double weight = 1;
+    double scale = 1;   // a fixed panel's size in its row (tiling::Tile::scale)
 };
 struct Col {
     std::vector<Cell> cells;
@@ -60,16 +62,16 @@ public:
         cols_.insert(cols_.begin() + at, Col{{Cell{id, 1}}, widthDeg});
     }
     // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such column.
-    void Insert(int id, int col, int row, bool newColumn, double weight = 1, double widthDeg = 0) {
+    void Insert(int id, int col, int row, bool newColumn, double weight = 1, double widthDeg = 0, double scale = 1) {
         if (Has(id)) Remove(id);
         col = std::clamp(col, 0, int(cols_.size()));
         if (newColumn || col == int(cols_.size())) {
-            cols_.insert(cols_.begin() + col, Col{{Cell{id, Clamp(weight)}}, widthDeg});
+            cols_.insert(cols_.begin() + col, Col{{Cell{id, Clamp(weight), Sc(scale)}}, widthDeg});
             return;
         }
         auto &cells = cols_[col].cells;
         row = std::clamp(row, 0, int(cells.size()));
-        cells.insert(cells.begin() + row, Cell{id, Clamp(weight)});
+        cells.insert(cells.begin() + row, Cell{id, Clamp(weight), Sc(scale)});
     }
     // Out of the grid (its column goes when it was the last in it). False if it wasn't in it.
     bool Remove(int id) {
@@ -97,11 +99,11 @@ public:
         col.cells.erase(col.cells.begin() + w.row);
         if (next < 0 || next >= int(cols_.size())) {
             // at the end: out into a column of its own that side
-            cols_.insert(cols_.begin() + (next < 0 ? 0 : int(cols_.size())), Col{{Cell{cell.id, 1}}, 0});
+            cols_.insert(cols_.begin() + (next < 0 ? 0 : int(cols_.size())), Col{{Cell{cell.id, 1, cell.scale}}, 0});
             return true;
         }
         auto &into = cols_[next].cells;
-        into.insert(into.begin() + std::min(w.row, int(into.size())), Cell{cell.id, 1});
+        into.insert(into.begin() + std::min(w.row, int(into.size())), Cell{cell.id, 1, cell.scale});
         return true;
     }
     // Meta+Up (-1) / Meta+Down (+1): one row up or down its column.
@@ -134,7 +136,28 @@ public:
         return true;
     }
 
-    // As text, for a profile and ft-layout: "col WIDTH ID:WEIGHT ID:WEIGHT; col ..." ("" when empty).
+    // A fixed panel's size in its row `factor` times (at most all of it). False when nothing changed.
+    bool Scale(int id, double factor) {
+        const Where w = Find(id);
+        if (!w.ok()) return false;
+        double &sc = cols_[w.col].cells[w.row].scale;
+        const double to = std::clamp(sc * factor, kMinScale, 1.0);
+        if (std::fabs(to - sc) < 1e-9) return false;
+        sc = to;
+        return true;
+    }
+    // A panel's cell, or null.
+    const Cell *CellOf(int id) const {
+        const Where w = Find(id);
+        return w.ok() ? &cols_[w.col].cells[w.row] : nullptr;
+    }
+    // Its column's width as asked (0: the default).
+    double WidthOf(int id) const {
+        const Where w = Find(id);
+        return w.ok() ? cols_[w.col].widthDeg : 0;
+    }
+
+    // As text, for a profile and ft-layout: "col WIDTH ID:WEIGHT[:SCALE] ...; col ..." ("" when empty).
     std::string Text() const {
         std::string s;
         char b[64];
@@ -143,7 +166,8 @@ public:
             std::snprintf(b, sizeof b, "col %.2f", c.widthDeg);
             s += b;
             for (const Cell &cell : c.cells) {
-                std::snprintf(b, sizeof b, " %d:%.3f", cell.id, cell.weight);
+                if (cell.scale < 1) std::snprintf(b, sizeof b, " %d:%.3f:%.3f", cell.id, cell.weight, cell.scale);
+                else std::snprintf(b, sizeof b, " %d:%.3f", cell.id, cell.weight);
                 s += b;
             }
         }
@@ -168,11 +192,16 @@ public:
             double w;
             while (std::sscanf(p, " %d:%lf%n", &id, &w, &n) == 2) {
                 p += n;
+                double sc = 1;
+                if (*p == ':') {
+                    if (std::sscanf(p, ":%lf%n", &sc, &n) != 1) return false;
+                    p += n;
+                }
                 bool dup = false;
                 for (const Col &c : cols)
                     for (const Cell &cell : c.cells) dup = dup || cell.id == id;
                 for (const Cell &cell : col.cells) dup = dup || cell.id == id;
-                if (!dup && keep(id)) col.cells.push_back({id, Clamp(w)});
+                if (!dup && keep(id)) col.cells.push_back({id, Clamp(w), std::clamp(sc, kMinScale, 1.0)});
             }
             if (std::string(p).find_first_not_of(' ') != std::string::npos) return false;
             if (col.widthDeg < 0) col.widthDeg = 0;
@@ -185,6 +214,7 @@ public:
 
 private:
     static double Clamp(double w) { return std::clamp(w, kMinWeight, kMaxWeight); }
+    static double Sc(double s) { return std::clamp(s, kMinScale, 1.0); }
     std::vector<Col> cols_;
 };
 

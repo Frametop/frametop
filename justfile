@@ -299,6 +299,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/tiling-test.cpp \
       -o build/tests/tiling-test
     run screens/tests/tiling-test.cpp build/tests/tiling-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/dashtiles-test.cpp \
+      -o build/tests/dashtiles-test
+    run screens/tests/dashtiles-test.cpp build/tests/dashtiles-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/universefix-test.cpp \
       -o build/tests/universefix-test
     run screens/tests/universefix-test.cpp build/tests/universefix-test

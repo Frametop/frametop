@@ -371,6 +371,8 @@ Programs built in the `dev` container link against its glibc, which is newer tha
 
 MIT. See [LICENSE](LICENSE). `testbench/` is MIT too, copyright Donn Green: see [testbench/LICENSE](testbench/LICENSE).
 
+Anchoring panels to the SteamVR dashboard started from Yoshey's [dashboard-anchor branch](https://github.com/Yoshey/frametop-dashboardanchor/tree/dashboard-anchor); his commit is in the history under his name.
+
 Frametop's keyboard is [Full Keyboard for Steam Frame](https://github.com/TaiKeid/steam-frame-full-keyboard) by TaiKeid and contributors (MIT, Copyright (c) 2026 TaiKeid and contributors), in `keyboard/` with Frametop's changes. [keyboard/FRAMETOP.md](keyboard/FRAMETOP.md) lists what Frametop changed, and [keyboard/third_party/README.md](keyboard/third_party/README.md) the parts it includes.
 
 The rendered hands' 3D models in `screens/assets/hands` (see its [README](screens/assets/hands/README.md); each folder has its licence) are from:

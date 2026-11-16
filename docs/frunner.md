@@ -23,6 +23,10 @@ Esc goes back from a menu and closes the search. Meta+Space again, or a click an
 
 Frunner works while the Frametop desktop is running and Frametop isn't paused for a VR game. It's the `frunner` action in Frametop Settings, so a mouse button, a controller button, or another key combination can open it too. When it opens from a mouse or controller, Frametop's keyboard opens with it.
 
+## The key list
+
+The `keys_list` action (`Meta+/` by default) opens frunner as a list of every key combination the input relay has bound, each by what it does (`frunner/keylist.py`). Typing filters it. Enter on a dashboard tiling key or one of the OS menu's actions does it; on any other it says which keys to press. The first item, Rebind keys, opens Frametop Settings' Keyboard page.
+
 ## The OS menu
 
 The `os_menu` action opens frunner as an OS menu: before you type, it lists Frametop's own actions instead of nothing. Pick one with Tab, the arrow keys, the lasers or the 3D mouse, and Enter or a click does it. Typing searches everything as usual, and an empty query lists the actions again. `os_menu` has no default. Bind it to a controller button, a mouse button or a key combination in Frametop Settings. Opened from a controller or mouse, Frametop's keyboard opens too, as with `frunner`.

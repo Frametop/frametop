@@ -1,6 +1,6 @@
 // Apps in SteamOS's own gamescope session as Frametop panels (vr.cpp's "gamescope apps";
-// docs/design.md "Gamescope apps"). Graduated from the spike spikes/gamescope-panels (its README
-// has what the spike showed, 2026-11-16).
+// docs/design.md "Gamescope apps"). Graduated from the 2026-11-16 spike (branch
+// spike-gamescope-panels; its README has what it showed).
 //
 // gamescope forwards an X11 window's frames to any SteamVR overlay that the window's
 // STEAM_GAMESCOPE_VROVERLAY_TARGET property names (two 32-bit cardinals: the handle's low half,

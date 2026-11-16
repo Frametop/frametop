@@ -2377,6 +2377,7 @@ void TileKnown(int i, const std::string &key) {
         TileUnanchor(i, "another app on it");   // (left in the room, off the grid; nothing remembered for it)
     }
     g_tileKey[i] = k;
+    g_tileMemory.Used(k);
     const std::string line = g_tileMemory.Get(k);
     if (line.empty()) return;
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
@@ -9259,7 +9260,9 @@ static void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, c
             return (void)std::snprintf(reply, size, "ok");
         }
         // "set N STATE; N STATE...": each as Remember gave it, in the order given (by column and
-        // row); the tiles it doesn't name go after its columns
+        // row); the tiles it doesn't name go after its columns. "add ...": more of the same set,
+        // after the columns it has put back so far (layout_tiles.py splits a long one).
+        const bool more = !std::strncmp(parsed.rest, "add", 3);
         int done = 0, bad = 0;
         std::vector<std::pair<int, std::string>> saved;
         std::string list = parsed.rest + 3;
@@ -9285,7 +9288,7 @@ static void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, c
             }
             saved.push_back({i, state});
         }
-        const int taken = g_tiles.RestoreAll(saved);
+        const int taken = g_tiles.RestoreAll(saved, more);
         done += taken, bad += int(saved.size()) - taken;
         for (const auto &[i, state] : saved) LightAnchor(g_screens[i]);
         if (taken && !g_tileGroupSet) g_tileRegroup = true;

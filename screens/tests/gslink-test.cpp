@@ -143,6 +143,25 @@ int main() {
     while (TagLength(app, w, target) != 0 && MsSince(t1) < 2000) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     CHECK(TagLength(app, w, target) == 0);   // what waited went once it came back
 
+    // the queue full while it's stopped: moves and presses drop, a release never does (council pass 2)
+    kill(x, SIGSTOP);
+    link.Pointer(20, 20);
+    link.Button(1, true);
+    for (size_t i = 0; i < AsyncLink::kMaxQueued + 500; ++i) link.Raise(i % 2 ? w : stale);
+    link.Button(1, false);
+    kill(x, SIGCONT);
+    auto held = [&] {
+        xcb_query_pointer_reply_t *q = xcb_query_pointer_reply(app, xcb_query_pointer(app, scr->root), nullptr);
+        const bool down = q && (q->mask & XCB_BUTTON_MASK_1);
+        std::free(q);
+        return down;
+    };
+    const auto t3 = Clock::now();
+    bool sawUp = false;
+    while (MsSince(t3) < 3000 && !(sawUp = !held())) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));   // (all of the queue through)
+    CHECK(sawUp && !held());
+
     // off: closed; on again: open again, the windows there again
     link.SetOn(false);
     CHECK(Until(link, [](const Update &u) { return u.type == Update::Closed; }));

@@ -155,8 +155,9 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "anchor %15s %15s", c.word, c.hand) == 2) return Anchor;
     if (std::sscanf(cmd, "stay %15s %15s", c.word, c.hand) == 2) return Stay;
     if (std::strcmp(cmd, "tiles") == 0) return Tiles;
-    if (!std::strcmp(cmd, "tiles clear") || (!std::strncmp(cmd, "tiles set", 9) && (!cmd[9] || cmd[9] == ' ')))
-        return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..."
+    if (!std::strcmp(cmd, "tiles clear") ||
+        ((!std::strncmp(cmd, "tiles set", 9) || !std::strncmp(cmd, "tiles add", 9)) && (!cmd[9] || cmd[9] == ' ')))
+        return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..." ("add": more of the same set)
     if (std::sscanf(cmd, "tile %15s", c.word) == 1) return Tile;
     if (std::sscanf(cmd, "floatapp %d %127s", &c.n, c.appId) == 2) return FloatApp;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;

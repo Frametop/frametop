@@ -68,7 +68,9 @@ class Pure(unittest.TestCase):
         saved = [[f"screen:{i}", SAT] for i in range(1, 13)]
         cmds = layout_tiles.commands(saved, {i: f"screen:{i}" for i in range(1, 13)})
         self.assertGreater(len(cmds), 1)
-        self.assertTrue(all(len(c) <= layout_tiles.MAX_COMMAND and c.startswith("tiles set ") for c in cmds))
+        self.assertTrue(all(len(c) <= layout_tiles.MAX_COMMAND for c in cmds))
+        # the first sets, the rest add after it (a set again would put its columns first)
+        self.assertTrue(cmds[0].startswith("tiles set ") and all(c.startswith("tiles add ") for c in cmds[1:]))
         items = [i for c in cmds for i in c[len("tiles set "):].split("; ")]
         self.assertEqual(items, [f"{i} {SAT}" for i in range(1, 13)])   # in order
 

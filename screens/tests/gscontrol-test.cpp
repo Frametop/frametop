@@ -155,6 +155,34 @@ int main() {
         c.Resize(kFirst, 640, 480);
         CHECK(x.Logged("resize 1 640x480"));
     }
+    // --- a menu or dialog going (council pass 2, 2026-11-16): the typing back to its app, nothing left held
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        c.On(Ev(Event::Created, Win(1, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+        c.Press(kFirst, 0, 1, true, 1, 1), c.Press(kFirst, 0, 1, false, 1, 1);   // the editor clicked
+        c.On(Ev(Event::Created, Win(7, Kind::Popup, 200, 100, 1)), 0), c.On(Ev(Event::Mapped, Win(7, Kind::Popup, 200, 100, 1)), 0);
+        c.Press(kFirst, 1, 1, true, 5, 5), c.Press(kFirst, 1, 1, false, 5, 5);   // a menu item
+        c.On(Ev(Event::Unmapped, Win(7, Kind::Popup)), 0);
+        x.log.clear();
+        CHECK(c.Typing() && c.Key(30, 1, false, {}) && x.Logged("key 1 38 0 down"));
+        c.Key(30, 0, false, {});
+        // a dialog that goes with the button still down on it, and a key down on it
+        c.On(Ev(Event::Created, Win(8, Kind::Popup, 300, 200, 1)), 0), c.On(Ev(Event::Mapped, Win(8, Kind::Popup, 300, 200, 1)), 0);
+        c.Press(kFirst, 2, 1, true, 5, 5);
+        c.Key(28, 1, false, {});   // Enter, held
+        x.log.clear();
+        c.On(Ev(Event::Gone, Win(8, Kind::Popup)), 0);
+        CHECK(!c.Holding() && x.held.empty() && x.Logged("key 8 36 0 up"));
+        CHECK(!c.Key(28, 0, false, {}));   // (its own release later: let go of already)
+        CHECK(c.Typing());
+        // a key held on the app while it unmaps (and maps again): its release went
+        c.Key(17, 1, false, {});
+        x.log.clear();
+        c.On(Ev(Event::Unmapped, Win(1, Kind::Main)), 0);
+        CHECK(x.Logged("key 1 25 0 up") && !c.Typing());
+    }
     // --- off: buttons and keys held let go of, windows untagged
     {
         FakeX x;

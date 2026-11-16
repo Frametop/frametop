@@ -120,6 +120,7 @@ int main() {
     check("universe and up are exact", V("universe ") == Unknown && V("up ") == Unknown && V("debug ") == Unknown);
     check("the pointer's pose (6 numbers) is no panel pose", V("pose 1 2 3 4 5") == Unknown);
     { Cmd t; check("tiles set: the rest after it", Parse("tiles set 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "set 2 off")); }
+    { Cmd t; check("tiles add: the rest after it", Parse("tiles add 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "add 2 off")); }
     { Cmd t; check("tiles clear", Parse("tiles clear", t) == Tiles && t.rest && !std::strcmp(t.rest, "clear")); }
     { Cmd t; check("tiles alone: no rest", Parse("tiles", t) == Tiles && !t.rest); }
     check("tiles: not a tile key, nor tilesx", V("tilesx") == Tile && V("tiles setx") == Tile);

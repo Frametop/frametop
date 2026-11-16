@@ -146,7 +146,10 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     double k = 1, total = 0;
     std::vector<double> spans = spansAt(1, &total);
     if (total > room && !cols.empty()) {
-        // past a turn: the largest k that fits (the strip only grows with k), by halving
+        // past a turn: a k that fits, by halving. (The strip grows with k nearly everywhere: rows
+        // that shrink move the panels' centres, so it can dip a little, and halving then finds one
+        // within a few percent of the largest, which is fine. Past the clamps' far ends, a band at
+        // -85 with dozens of columns, nothing fits and the smallest k is used.)
         double lo = 0, hi = 1;
         for (int i = 0; i < 40; ++i) {
             const double mid = (lo + hi) / 2;

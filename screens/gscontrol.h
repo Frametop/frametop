@@ -7,7 +7,9 @@
 // The laser on a panel or a popup over it moves the X pointer there, and raises that window
 // first: apps overlap on gamescope's one screen, and the X pointer goes to the top one. A press
 // gives that window the typing (a dialog's own, not its app's), until a click somewhere that isn't
-// an app (Blur). Keys go only while the panel of the window with the typing is shown.
+// an app (Blur); when a menu or dialog with the typing goes, its app has it again. Keys go only
+// while the panel of the window with the typing is shown. A window that goes takes nothing held
+// with it: a button pressed on it and keys down on it are let go of.
 #pragma once
 
 #include "gsapps.h"
@@ -45,7 +47,7 @@ public:
         tagging_ = false;
         Do(book_.Clear());
         tagging_ = true;
-        buttons_ = 0, raised_ = 0, keys_ = Keys();
+        buttons_ = 0, raised_ = 0, pressedOn_ = 0, keys_ = Keys();
     }
     // Off (GSAPP_PANELS, or ft-screens going): buttons and keys held let go of, each window back to
     // gamescope's own panel.
@@ -54,7 +56,7 @@ public:
         for (const auto &[code, win] : keys_.Down()) x_.Key(win, gsforward::XKeycode(code), 0, false);
         keys_ = Keys();
         Do(book_.Clear());
-        raised_ = 0;
+        raised_ = 0, pressedOn_ = 0;
     }
     void On(const gsforward::Event &e, int64_t nowMs) { Do(book_.On(e, nowMs)); }
     void Tick(int64_t nowMs) { Do(book_.Tick(nowMs)); }
@@ -71,7 +73,7 @@ public:
     void Press(int index, int sub, uint8_t button, bool down, int x, int y) {
         const uint32_t w = WindowAt(index, sub);
         if (!w) return;
-        if (down) keys_.Focus(w);
+        if (down) keys_.Focus(w), pressedOn_ = w;
         Point(index, sub, x, y);
         x_.Button(button, down);
         if (button < 32) buttons_ = down ? buttons_ | 1u << button : buttons_ & ~(1u << button);
@@ -109,6 +111,7 @@ private:
     uint32_t pid_ = 0;
     uint32_t raised_ = 0;     // the window raised last
     uint32_t buttons_ = 0;    // X buttons held (bit b: button b)
+    uint32_t pressedOn_ = 0;  // the window the last press went to
     bool tagging_ = true;     // (false: the display's gone, nobody to untag at)
 
     uint32_t WindowAt(int index, int sub) const { return sub ? book_.PopupWindow(index, sub) : book_.WindowOf(index); }
@@ -116,10 +119,19 @@ private:
         const int index = keys_.Target() ? book_.PanelOf(keys_.Target()) : -1;
         return index >= 0 && panels_.Shown(index);
     }
-    void Gone(uint32_t win) {
-        if (tagging_) x_.Untag(win);
+    // `win`'s panel or popup went; `owner`: its app's window, for a popup's (0 for an app's own).
+    void Gone(uint32_t win, uint32_t owner) {
+        if (tagging_) {
+            if (buttons_ && pressedOn_ == win) LetGo();   // (its overlay's gone: no release comes from it)
+            for (const auto &[code, w] : keys_.Down())
+                if (w == win) x_.Key(win, gsforward::XKeycode(code), 0, false);
+            x_.Untag(win);
+        }
+        const bool typing = keys_.Target() == win;
         keys_.Gone(win);
+        if (typing && owner) keys_.Focus(owner);   // a menu item picked, a dialog closed: back to its app
         if (raised_ == win) raised_ = 0;
+        if (pressedOn_ == win) pressedOn_ = 0;
     }
     void Do(const std::vector<Action> &actions) {
         for (const Action &a : actions) switch (a.type) {
@@ -129,13 +141,13 @@ private:
                     break;
                 case Action::Show: panels_.Show(a.index, a.win); break;
                 case Action::Move: panels_.Move(a.index, a.win); break;
-                case Action::Drop: Gone(a.win.id), panels_.Drop(a.index); break;
+                case Action::Drop: Gone(a.win.id, 0), panels_.Drop(a.index); break;
                 case Action::MakePopup:
                     if (const uint64_t o = panels_.MakePopup(a.index, a.sub, a.win, pid_)) x_.Tag(a.win.id, o);
                     else Do(book_.Lose(a.win.id));
                     break;
                 case Action::MovePopup: panels_.MovePopup(a.index, a.sub, a.win); break;
-                case Action::DropPopup: Gone(a.win.id), panels_.DropPopup(a.index, a.sub); break;
+                case Action::DropPopup: Gone(a.win.id, book_.WindowOf(a.index)), panels_.DropPopup(a.index, a.sub); break;
             }
     }
 };

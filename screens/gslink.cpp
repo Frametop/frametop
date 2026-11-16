@@ -44,11 +44,20 @@ struct AsyncLink::Shared {
         const uint64_t one = 1;
         if (wake >= 0) (void)!write(wake, &one, sizeof one);
     }
+    // What may be dropped with the queue full (a hung gamescope): moves, presses, the wheel. Never
+    // a release, a tag or an untag: a button or key left down, or a window on a gone overlay, stays so.
+    static bool Droppable(const Send &s) {
+        switch (s.type) {
+            case Send::Pointer: case Send::Raise: case Send::Scroll: case Send::Resize: return true;
+            case Send::Button: case Send::Key: return s.down;
+            default: return false;
+        }
+    }
     void Push(const Send &s) {
         {
             std::lock_guard<std::mutex> l(m);
             if (s.type == Send::Pointer && !sends.empty() && sends.back().type == Send::Pointer) sends.back() = s;
-            else if (sends.size() < kMaxQueued) sends.push_back(s);
+            else if (sends.size() < kMaxQueued || !Droppable(s)) sends.push_back(s);
         }
         Wake();
     }
@@ -105,6 +114,7 @@ struct AsyncLink::Shared {
                 std::string why;
                 if (link.Open(display.c_str(), needForwarding, &why)) {
                     lastWhy.clear();
+                    wasOpen = true;   // (gone again before this pass ends: its Closed is said below)
                     Update u;
                     u.type = Update::Opened, u.pid = link.GamescopePid();
                     Say(u);

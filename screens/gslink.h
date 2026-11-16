@@ -27,7 +27,8 @@ struct Update {
 class AsyncLink : public XSide {
 public:
     static constexpr int kRetryMs = 10000;
-    static constexpr size_t kMaxQueued = 4096;   // sends waiting at most (a pointer move replaces the last one)
+    static constexpr size_t kMaxQueued = 4096;   // sends waiting at most (a pointer move replaces the last one;
+                                                 // past it moves and presses drop, never a release or a tag)
 
     // `display`: the app display; `needForwarding` as Link::Open's.
     AsyncLink(std::string display, bool needForwarding);

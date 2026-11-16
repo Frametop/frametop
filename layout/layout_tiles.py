@@ -4,7 +4,7 @@ displays are anchored to the SteamVR dashboard, and where in the grid (docs/desi
 (`floatapp`), and a profile's apps open with new panel numbers anyway.
 
 ft-screens' `tiles` lists every anchored panel as "N STATE", by column and row; `tiles set` takes
-them back the same way. A profile keeps them by what each panel is ("screen:N", "remote:ID"),
+them back the same way (and `tiles add` the rest of one too long for a command, after them). A profile keeps them by what each panel is ("screen:N", "remote:ID"),
 since a remote display's panel number can differ next time. Pure: the caller asks ft-screens
 (`ask(text) -> reply`, raising on an error) and says which panel is which.
 """
@@ -31,9 +31,10 @@ def capture(ask, panels):
 
 
 def commands(saved, panels):
-    """The `tiles set` commands that put `saved` (capture's) back: every panel in `panels`
-    ({number: key}) the profile didn't anchor goes off first, then the saved ones in order.
-    Each command fits ft-screens' buffer; ones it can't place are left out."""
+    """The commands that put `saved` (capture's) back: every panel in `panels` ({number: key})
+    the profile didn't anchor goes off first, then the saved ones in order. Each command fits
+    ft-screens' buffer: the first is `tiles set`, any after it `tiles add` (the columns go on
+    after the ones before). Items too long for any command are left out."""
     numbers = {key: n for n, key in panels.items()}
     kept = {key for key, _ in saved}
     items = [f"{n} off" for n, key in sorted(panels.items()) if key not in kept]
@@ -45,7 +46,7 @@ def commands(saved, panels):
         if line and len(line) + 2 + len(item) > MAX_COMMAND:
             out.append(line)
             line = ""
-        line = f"{line}; {item}" if line else f"tiles set {item}"
+        line = f"{line}; {item}" if line else f"tiles {'add' if out else 'set'} {item}"
     if line:
         out.append(line)
     return out

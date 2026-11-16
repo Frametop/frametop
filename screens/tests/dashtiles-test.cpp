@@ -182,6 +182,41 @@ int main() {
         check("restore all: the app in a column of its own after it", cols[1].cells.size() == 1 && cols[1].cells[0].id == 199);
         check("restore all: a line that isn't one: left alone", !b.Anchored(5));
     }
+    // --- memory: kept by use
+    {
+        dashtiles::Memory m;
+        m.Set("app:daily", "off");
+        for (size_t i = 1; i < dashtiles::Memory::kMax; ++i) {
+            m.Set("app:once" + std::to_string(i), "off");
+            if (i % 100 == 0) m.Used("app:daily");   // (it keeps coming back)
+        }
+        m.Set("app:new", "off");
+        check("memory: the one used often stays, the oldest one-off goes",
+              !m.Get("app:daily").empty() && m.Get("app:once1").empty() && m.Size() == dashtiles::Memory::kMax);
+    }
+    // --- a profile split over two commands (layout_tiles.py: "tiles set", then "tiles add")
+    {
+        dashtiles::Board b;
+        b.Anchor(199, -1, true);
+        auto line = [](int col, int row, int alone, double width) {
+            char t[96];
+            std::snprintf(t, sizeof t, "tile 0 %d %d %d 1.000 1.000 %.2f", col, row, alone, width);
+            return std::string(t);
+        };
+        b.RestoreAll({{10, line(0, 0, 1, 0)}, {11, line(1, 0, 1, 0)}, {12, line(2, 0, 0, 53.24)}});
+        b.RestoreAll({{13, line(2, 1, 0, 53.24)}, {14, line(3, 0, 1, 0)}}, true);
+        std::string order;
+        for (const auto &c : b.Grid().Cols()) {
+            order += "[";
+            for (const auto &cell : c.cells) order += " " + std::to_string(cell.id);
+            order += " ]";
+        }
+        check("split restore: columns in the profile's order, the app after them",
+              order == "[ 10 ][ 11 ][ 12 13 ][ 14 ][ 199 ]");
+        check("split restore: a stacked column keeps its width", std::fabs(b.Grid().Cols()[2].widthDeg - 53.24) < 1e-6);
+        b.RestoreAll({{14, line(0, 0, 1, 0)}});   // a set again: a new profile, its columns first
+        check("a set again starts over", b.Grid().Cols()[0].cells[0].id == 14);
+    }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;
 }

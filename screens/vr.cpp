@@ -140,6 +140,7 @@
 #include "barhit.h"
 #include "chromepool.h"
 #include "dashanchor.h"
+#include "dashtiles.h"
 #include "posemath.h"
 #include "roomshift.h"
 #include "layoutgrab.h"
@@ -328,7 +329,7 @@ struct Sub {
 };
 
 // A panel's controls (Screen::Controls). Hand input knows the first kHandControls (handinput::Control).
-constexpr int kControls = 9, kHandControls = 8;
+constexpr int kControls = 10, kHandControls = 8;
 
 struct Screen {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid, bar = vr::k_ulOverlayHandleInvalid,
@@ -337,7 +338,8 @@ struct Screen {
                           closeButton = vr::k_ulOverlayHandleInvalid,  // the last two: floating windows
                           resetButton = vr::k_ulOverlayHandleInvalid,  // the last three: desktop screens and
                           pinButton = vr::k_ulOverlayHandleInvalid,    // remote displays
-                          layoutButton = vr::k_ulOverlayHandleInvalid;
+                          layoutButton = vr::k_ulOverlayHandleInvalid,
+                          anchorButton = vr::k_ulOverlayHandleInvalid; // every kind (the dashboard tiles)
     int width = 0, height = 0;    // current buffer size (mouse scale)
     double metres = 1;
     double curve = 0;             // cylinder radius in metres; 0 = flat
@@ -398,6 +400,8 @@ struct Screen {
     std::string resizeRegionMessage;
     resizecorner::HoverBuzz resizeBuzz;
     bool pinLit = false;          // the pin button shows it pinned to the head (LightPin)
+    int anchorLit = 0;            // the anchor button shows it anchored (1), staying shown too (2) (LightAnchor)
+    int64_t anchorDownMs = -1;    // the anchor button's press (a long one: stay, else anchor)
     const void *key = nullptr;    // the client buffer on it now, and its dmabuf (for cutouts)
     ft_dmabuf buf{};
     vr::SharedTextureHandle_t plain = 0;  // that buffer's SteamVR import
@@ -478,14 +482,15 @@ struct Screen {
     // A cropped panel too: SteamVR gives the position in the whole texture, not the crop.
     void ToBuffer(double mx, double my, double *x, double *y) const { *x = mx, *y = height - my; }
     std::array<vr::VROverlayHandle_t, kControls> Controls() const {
-        return {bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton};
+        return {bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton, anchorButton};
     }
     std::array<vr::VROverlayHandle_t, kControls + 1> All() const {
-        return {overlay, bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton};
+        return {overlay, bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton,
+                anchorButton};
     }
     // Whether its kind has control k (Controls()' order), whether or not it holds a set of them now
-    // (chromepool.h): a floating window has dock and close, the others reset, pin and layout.
-    bool HasControl(int k) const { return k < 4 || (floating ? k < 6 : k >= 6); }
+    // (chromepool.h): a floating window has dock and close, the others reset, pin and layout; every kind the anchor.
+    bool HasControl(int k) const { return k < 4 || k == 9 || (floating ? k < 6 : k >= 6); }
 };
 std::map<int, Screen> g_screens;
 
@@ -794,6 +799,27 @@ std::vector<uint8_t> PinTexture(int n, bool lit) {
     if (lit)
         for (size_t k = 0; k < px.size(); k += 4)
             if (px[k] < 128) px[k] = 40, px[k + 1] = 110, px[k + 2] = 225;   // the dark part only
+    return px;
+}
+
+// An anchor: "this one rides with the dashboard". lit 1 (anchored): the disc blue; 2 (anchored and
+// staying shown with the dashboard closed): a ring round it too.
+std::vector<uint8_t> AnchorTexture(int n, int lit) {
+    auto px = ControlTexture(
+        n, InDisc,
+        [lit](double u, double v) {
+            if (lit == 2 && u * u + v * v > 0.74 * 0.74 && u * u + v * v < 0.82 * 0.82) return true;   // the ring
+            const double ring = std::hypot(u, v - 0.42);
+            if (ring > 0.07 && ring < 0.15) return true;                         // the eye at the top
+            if (std::fabs(u) < 0.055 && v > -0.5 && v < 0.28) return true;       // the shank
+            if (std::fabs(v - 0.16) < 0.045 && std::fabs(u) < 0.26) return true; // the stock
+            const double arm = std::hypot(u, v + 0.08);                          // the arms, a curve up to the flukes
+            return v < -0.2 && arm > 0.4 && arm < 0.5 && std::fabs(u) < 0.42;
+        },
+        DiscRim);
+    if (lit)
+        for (size_t k = 0; k < px.size(); k += 4)
+            if (px[k] < 128) px[k] = 40, px[k + 1] = 110, px[k + 2] = 225;
     return px;
 }
 
@@ -1157,7 +1183,9 @@ void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
     const double uu[kControls] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
                            // Visual, preview and hit-mask canvases share the screen's actual corner.
                            s.cornerX * (s.metres / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
-                          -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5), -(bar / 2 + gap * 3 + button * 2.5)};
+                          -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5), -(bar / 2 + gap * 3 + button * 2.5),
+                          // the anchor: outermost on the left (a floating window's after its dock and close)
+                          -(bar / 2 + gap * (s.floating ? 3 : 4) + button * (s.floating ? 2.5 : 3.5))};
     for (int k = 0; k < kControls; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)) : BarY(s);
 }
 Mat RollZ(double rad);
@@ -1191,8 +1219,16 @@ void PlaceSubs(const Screen &s) {
     }
 }
 
-template <size_t N>
-void PlaceParts(Screen &s, const std::pair<vr::VROverlayHandle_t, Mat> (&parts)[N]);
+using ChromePart = std::pair<vr::VROverlayHandle_t, Mat>;
+// Each control with its offset from the panel (Controls()' order).
+std::array<ChromePart, kControls> ChromeParts(const Screen &s, const std::array<Mat, kControls> &offsets) {
+    const auto controls = s.Controls();
+    std::array<ChromePart, kControls> parts;
+    for (int k = 0; k < kControls; ++k) parts[k] = {controls[k], offsets[k]};
+    return parts;
+}
+void PlaceParts(Screen &s, const std::array<ChromePart, kControls> &parts);
+void LightAnchor(Screen &s);
 
 void PlaceChrome(Screen &s) {
     ChromeSize(s);
@@ -1219,18 +1255,15 @@ void PlaceChrome(Screen &s) {
         vr::VROverlay()->SetOverlayWidthInMeters(s.layoutButton, float(button));
         LightPin(s);
     }
+    vr::VROverlay()->SetOverlayWidthInMeters(s.anchorButton, float(button));
+    LightAnchor(s);
     // Curved, the bar bends with the screen's bottom edge.
     vr::VROverlay()->SetOverlayCurvature(s.bar, s.curve > 0 ? float(std::min(1.0, targetWidth / (2 * M_PI * s.curve))) : 0.f);
-    const std::pair<vr::VROverlayHandle_t, Mat> parts[] = {
-        {s.bar, offsets[0]},        {s.curveButton, offsets[1]}, {s.rollButton, offsets[2]},
-        {s.handle, offsets[3]},     {s.dockButton, offsets[4]},  {s.closeButton, offsets[5]},
-        {s.resetButton, offsets[6]}, {s.pinButton, offsets[7]},  {s.layoutButton, offsets[8]}};
-    PlaceParts(s, parts);
+    PlaceParts(s, ChromeParts(s, offsets));
 }
 
 // Where the controls and popups go, their sizes set (PlaceChrome; MoveFramePins every tick).
-template <size_t N>
-void PlaceParts(Screen &s, const std::pair<vr::VROverlayHandle_t, Mat> (&parts)[N]) {
+void PlaceParts(Screen &s, const std::array<ChromePart, kControls> &parts) {
     PlaceSubs(s);
     if (s.pinned != kNone) {
         for (const auto &[o, off] : parts) {
@@ -1281,12 +1314,7 @@ void MoveFramePins(bool dashMoved) {
             s.levelAt = f;
         }
         SetOnPin(s, s.overlay, s.pinRel);
-        const auto offsets = ControlOffsets(s);
-        const std::pair<vr::VROverlayHandle_t, Mat> parts[] = {
-            {s.bar, offsets[0]},        {s.curveButton, offsets[1]}, {s.rollButton, offsets[2]},
-            {s.handle, offsets[3]},     {s.dockButton, offsets[4]},  {s.closeButton, offsets[5]},
-            {s.resetButton, offsets[6]}, {s.pinButton, offsets[7]},  {s.layoutButton, offsets[8]}};
-        PlaceParts(s, parts);
+        PlaceParts(s, ChromeParts(s, ControlOffsets(s)));
     }
 }
 
@@ -1485,7 +1513,7 @@ void ApplyAlpha(const Screen &s) {
     for (const auto &[k, sub] : s.subs) vr::VROverlay()->SetOverlayAlpha(sub.overlay, s.alpha);
     bool active[kControls] = {s.hover[0] || s.drag == Drag::Move, s.hover[1], s.hover[2] || s.drag == Drag::Roll,
                               s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6], s.hover[7],
-                              s.hover[8] || s.layoutHeld};
+                              s.hover[8] || s.layoutHeld, s.hover[9]};
     for (int k = 0; k < kHandControls; ++k) active[k] = active[k] || (s.handHover >> k & 1);
     const auto controls = s.Controls();
     for (int k = 0; k < kControls; ++k) {
@@ -1518,12 +1546,16 @@ void SetVisible(Screen &s, bool visible, float alpha) {
     s.controls = 0, s.controlsUp = false;
 }
 
+bool TileShown(const Screen &s, int i, bool dashUp);
+bool TileAnchored(int i);
+
 void UpdateVisibility() {
     const bool shared = ModeVisible();
+    const bool dashUp = vr::VROverlay()->IsDashboardVisible();
     Mat head;
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
     for (auto &[i, s] : g_screens) {
-        bool visible = !g_paused && s.shown && (shared || s.drag != Drag::None) && !s.alone;
+        bool visible = TileAnchored(i) ? TileShown(s, i, dashUp) : !g_paused && s.shown && (shared || s.drag != Drag::None) && !s.alone;
         // A floating window's panel: while a window floats on it, its output is on, and the
         // window isn't minimized (and once it has a crop).
         if (s.floating) visible = visible && s.floatOn && s.outputOn && !s.minimized && s.cropW > 0;
@@ -2115,6 +2147,339 @@ void UpdateArrange() {
     RunLayout("scale");
 }
 
+// ---------------------------------------------------------------- dashboard tiles
+
+// Panels anchored to the SteamVR dashboard (user, 2026-11-16; docs/design.md, Dashboard tiles): the
+// policy is dashtiles.h's (which are anchored, tiled or satellites, the keys, the memory), the places
+// tiling.h's. Here: the group frame, from your head and Steam's bar when the dashboard opens
+// (Regroup), held to the bar after that (a pin on kDashboard rides on its frame: MoveFramePins), so a
+// dashboard dragged carries its tiles; the panels pinned to their places in it (RetileDash); which
+// panel the tiling keys act on and its border (UpdateTileFocus); and each app's or display's last
+// state in ~/.config/frametop-tiles.txt.
+dashtiles::Board g_tiles;
+dashtiles::Memory g_tileMemory;
+std::map<int, std::string> g_tileKey;     // panel -> its memory key ("screen:2", "app:ID", "remote:HOST/APP")
+Mat g_tileGroupRel = Identity();          // the dashboard's frame (DashFrame) -> the group frame
+bool g_tileGroupSet = false;              // ...since the dashboard was first seen with a panel anchored
+bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
+bool g_dashWasUp = false;
+double g_tileRaiseDeg = 30;               // DASH_TILE_RAISE_DEG: the band's bottom this far above the bar
+bool g_tileStayDefault = false;           // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
+int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
+int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus, 0 not
+int64_t g_tileFocusSaidMs = 0;
+constexpr int64_t kTileFocusRenewMs = 2000;   // said again this often (the relay lapses it after 5 s)
+constexpr int64_t kAnchorStayMs = 600;        // an anchor button press this long: stay, not anchor
+constexpr double kTileBorder = 0.012;         // the focused tile's border, metres each side
+struct TileBorder {
+    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+    int on = -1;                  // the panel it's round, or -1 (hidden)
+    int texW = 0, texH = 0;       // its texture now (made again when the panel's shape changes)
+} g_tileBorder;
+
+}  // namespace
+extern "C" int g_mouseScreen;   // (the panel under the mouse, from the extern "C" side below)
+namespace {
+
+std::string TilesPath() {
+    const char *home = std::getenv("HOME");
+    return std::string(home ? home : "/tmp") + "/.config/frametop-tiles.txt";
+}
+void LoadTileMemory() {
+    std::FILE *f = std::fopen(TilesPath().c_str(), "r");
+    if (!f) return;
+    std::string text;
+    char buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0 && text.size() < (1 << 20)) text.append(buf, n);
+    std::fclose(f);
+    g_tileMemory.Load(text);
+    std::printf("dashboard tiles: %zu apps and displays remembered (%s)\n", g_tileMemory.Size(), TilesPath().c_str());
+}
+void SaveTileMemory() {
+    const std::string path = TilesPath(), tmp = path + ".tmp";
+    std::FILE *f = std::fopen(tmp.c_str(), "w");
+    if (!f) return (void)std::fprintf(stderr, "dashboard tiles: can't write %s\n", tmp.c_str());
+    const std::string text = g_tileMemory.Text();
+    const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+    if (std::fclose(f) != 0 || !ok || std::rename(tmp.c_str(), path.c_str()) != 0)
+        std::fprintf(stderr, "dashboard tiles: can't write %s\n", path.c_str());
+}
+// Every panel with a key remembered as it is now (a change to one moves the others on the grid too).
+void RememberTiles() {
+    bool changed = false;
+    for (const auto &[i, key] : g_tileKey) changed |= g_tileMemory.Set(key, g_tiles.Remember(i));
+    if (changed) SaveTileMemory();
+}
+
+dashtiles::Info TileInfo(int id) {
+    dashtiles::Info info;
+    const auto it = g_screens.find(id);
+    if (it == g_screens.end()) return info;
+    const Screen &s = it->second;
+    info.aspect = s.metres / std::max(1e-6, s.heightMetres());
+    info.fixed = !s.floating;   // a desktop screen or a remote display: the other end's resolution
+    return info;
+}
+
+Mat ToMat(const double m[3][4]) {
+    Mat o;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) o.m[r][c] = float(m[r][c]);
+    return o;
+}
+
+// Each tiled panel pinned to its place, sized for it (a floating window gets the pixels: `resize`),
+// and each satellite at its own. Nothing until the group has a frame (the dashboard seen).
+void RetileDash(bool resize) {
+    if (!g_tileGroupSet || !g_dash.a.ever) return;
+    const auto &l = g_tiles.Arrange(TileInfo);
+    for (const tiling::Placed &p : l.tiles) {
+        auto it = g_screens.find(p.id);
+        if (it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        Screen &s = it->second;
+        if (s.drag != Drag::None) continue;
+        if (!s.floating) {
+            if (std::fabs(s.metres - p.widthM) > 0.002) SetWidth(s, p.widthM);
+        } else if (resize && s.mpp > 0) {
+            const int w = int(std::lround(p.widthM / s.mpp)), h = int(std::lround(p.heightM / s.mpp));
+            const int pw = PictureW(s), ph = PictureH(s);
+            if (w > 0 && h > 0 && (std::abs(w - pw) > std::max(4, pw / 33) || std::abs(h - ph) > std::max(4, ph / 33))) {
+                Stretch(s, w, h);
+                SendStretch(s);
+            }
+        }
+        double m[3][4];
+        tiling::Pose(p.azDeg, p.elDeg, g_tiles.params.radius, m);
+        PinIn(s, kDashboard, Mul(g_tileGroupRel, ToMat(m)), levelpin::Rigid);
+    }
+    for (const int id : g_tiles.Ids()) {
+        const dashtiles::Spot *spot = g_tiles.SpotOf(id);
+        auto it = g_screens.find(id);
+        if (!spot || !spot->satellite || it == g_screens.end() || it->second.drag != Drag::None) continue;
+        PinIn(it->second, kDashboard, Mul(g_tileGroupRel, ToMat(spot->rel)), levelpin::Rigid);
+    }
+}
+
+// The group to where the dashboard is now, round your head: false without a head pose.
+bool Regroup() {
+    Mat head;
+    if (!g_dash.a.ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
+    const Mat bar = DashFrame();
+    const double h[3] = {head.m[0][3], head.m[1][3], head.m[2][3]}, b[3] = {bar.m[0][3], bar.m[1][3], bar.m[2][3]},
+                 back[3] = {bar.m[0][2], bar.m[1][2], bar.m[2][2]};
+    double g[3][4], barEl;
+    dashtiles::GroupFrame(h, b, back, g, &barEl);
+    g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
+    // (whole degrees: a little difference in where the dashboard opens doesn't resize the windows)
+    g_tiles.params.bottomDeg = std::round(barEl + g_tileRaiseDeg);
+    g_tileGroupSet = true;
+    RetileDash(true);
+    std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, the band from %.0f degrees up\n", h[0], h[1], h[2],
+                g_tiles.params.bottomDeg);
+    return true;
+}
+
+bool TileAnchored(int i) { return g_tiles.Anchored(i); }
+std::string TileLabel(int i) { return "screen " + std::to_string(i + 1); }
+
+void TileAnchor(int i, bool stay, const char *by) {
+    auto it = g_screens.find(i);
+    if (it == g_screens.end() || g_tiles.Anchored(i)) return;
+    EndDrag(it->second);
+    const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
+    g_tiles.Anchor(i, after, stay);
+    if (!g_tileGroupSet) g_tileRegroup = true;
+    RetileDash(true);
+    RememberTiles();
+    std::printf("%s: anchored to the dashboard%s (%s)%s\n", TileLabel(i).c_str(), stay ? ", staying shown" : "", by,
+                g_tileGroupSet ? "" : "; it goes on when the dashboard opens");
+}
+void TileUnanchor(int i, const char *by) {
+    auto it = g_screens.find(i);
+    if (it == g_screens.end() || !g_tiles.Anchored(i)) return;
+    Screen &s = it->second;
+    Mat p;
+    const bool placed = ScreenPose(s, &p);
+    EndDrag(s);
+    g_tiles.Unanchor(i);
+    if (placed && s.pinned == kDashboard) SetAbsolute(s, p);   // left in the room where it is
+    RetileDash(true);
+    RememberTiles();
+    std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
+}
+void TileStay(int i, bool on, const char *by) {
+    if (!g_tiles.Anchored(i)) {
+        if (on) TileAnchor(i, true, by);
+        return;
+    }
+    if (g_tiles.Stay(i) == on) return;
+    g_tiles.SetStay(i, on);
+    LightAnchor(g_screens[i]);
+    RememberTiles();
+    std::printf("%s: %s with the dashboard closed (%s)\n", TileLabel(i).c_str(), on ? "stays shown" : "hidden", by);
+}
+
+// A panel's key is known (made, or ft-floatd said whose window it is): back to its last state.
+void TileKnown(int i, const std::string &key) {
+    const std::string k = dashtiles::Memory::Clean(key);
+    const auto was = g_tileKey.find(i);
+    if (was != g_tileKey.end() && was->second == k) return;
+    if (was != g_tileKey.end()) {   // another app on the panel now: the last one's state is its own
+        g_tileMemory.Set(was->second, g_tiles.Remember(i));
+        g_tiles.Unanchor(i);
+    }
+    g_tileKey[i] = k;
+    const std::string line = g_tileMemory.Get(k);
+    if (line.empty()) return;
+    const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
+    if (!g_tiles.Restore(i, line, after)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
+    if (g_tiles.Anchored(i)) {
+        if (!g_tileGroupSet) g_tileRegroup = true;
+        RetileDash(true);
+        std::printf("%s: back on the dashboard, as %s was (%s)\n", TileLabel(i).c_str(), k.c_str(), line.c_str());
+    }
+}
+// The panel goes (its window, its display): what it was is remembered under its key.
+void TileGone(int i) {
+    const auto k = g_tileKey.find(i);
+    if (k != g_tileKey.end() && g_tileMemory.Set(k->second, g_tiles.Remember(i))) SaveTileMemory();
+    if (k != g_tileKey.end()) g_tileKey.erase(k);
+    if (g_tileFocus == i) g_tileFocus = -1;
+    if (g_tiles.Unanchor(i)) RetileDash(true), RememberTiles();
+}
+
+// Anchored panels (dashtiles.h): shown with the dashboard, or always when they stay; the hide key
+// (the manual switch in "always") and a panel's own conceal still hide them. The visibility mode
+// is the room's panels' (user, 2026-11-16).
+bool TileShown(const Screen &s, int i, bool dashUp) {
+    const bool hiddenByKey = EffectiveMode() == Mode::Always && g_manual;
+    return !g_paused && s.shown && !s.alone && !hiddenByKey && (g_tiles.Stay(i) || dashUp || s.drag != Drag::None);
+}
+
+// Let go after a move: where on the grid it goes, or torn off as a satellite where it is.
+void TileDrop(Screen &s, int i) {
+    Mat p;
+    if (!g_tileGroupSet || !ScreenPose(s, &p)) return;
+    const Mat q = Mul(Inverse(Mul(DashFrame(), g_tileGroupRel)), p);
+    const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
+    double az, el, rel[3][4];
+    tiling::Direction(pt, &az, &el);
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) rel[r][c] = q.m[r][c];
+    const tiling::Drop d = g_tiles.DropFor(i, az, el, TileInfo);
+    g_tiles.Drop(i, d, rel);
+    static const char *kinds[] = {"into column", "a new column at", "torn off (a satellite) at"};
+    std::printf("%s: let go at %.0f, %.0f degrees: %s %d\n", TileLabel(i).c_str(), az, el, kinds[d.kind], d.col + 1);
+    RetileDash(true);
+    RememberTiles();
+}
+// Resized by its corner on the grid: its column and row take the new size.
+void TileResized(Screen &s, int i) {
+    const tiling::Placed *p = g_tiles.PlacedOf(i);
+    if (!p || p->widthM <= 0 || p->heightM <= 0) return;
+    const double fw = s.metres / p->widthM, fh = s.heightMetres() / p->heightM;
+    g_tiles.Resized(i, fw, fh, TileInfo(i));
+    RetileDash(true);
+    RememberTiles();
+}
+
+// The panel the tiling keys act on: the one under the pointer, else the one you're looking at
+// (within 25 degrees of straight ahead). The relay is told when it's an anchored one (the keys are
+// the desktop's otherwise), and it gets a thin border.
+void UpdateTileFocus() {
+    int f = -1;
+    const auto m = g_screens.find(g_mouseScreen);
+    if (m != g_screens.end() && m->second.visible) f = g_mouseScreen;
+    Mat head;
+    if (f < 0 && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+        const double fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]};
+        double best = std::cos(25 * M_PI / 180);
+        for (auto &[i, s] : g_screens) {
+            Mat p;
+            if (!s.visible || !ScreenPose(s, &p)) continue;
+            double to[3] = {p.m[0][3] - head.m[0][3], p.m[1][3] - head.m[1][3], p.m[2][3] - head.m[2][3]};
+            const double cs = Dot3(to, fwd) / (std::sqrt(Dot3(to, to)) + 1e-9);
+            if (cs > best) best = cs, f = i;
+        }
+    }
+    g_tileFocus = f;
+    const bool tile = f >= 0 && g_tiles.Anchored(f);
+    const int64_t now = NowMs();
+    if (int(tile) != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
+        SendRelay(tile ? "tilefocus 1" : "tilefocus 0");
+        g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
+    }
+    // the border: one overlay, behind the focused tile, a frame its shape
+    TileBorder &b = g_tileBorder;
+    if (!tile) {
+        if (b.on >= 0 && b.overlay != vr::k_ulOverlayHandleInvalid) PinHide(b.overlay);
+        b.on = -1;
+        return;
+    }
+    if (b.overlay == vr::k_ulOverlayHandleInvalid) {
+        if (vr::VROverlay()->CreateOverlay("frametop.tilefocus", "Frametop: the focused dashboard tile", &b.overlay) !=
+            vr::VROverlayError_None)
+            return (void)(b.overlay = vr::k_ulOverlayHandleInvalid);
+        vr::VROverlay()->SetOverlayInputMethod(b.overlay, vr::VROverlayInputMethod_None);
+    }
+    Screen &s = g_screens[f];
+    Mat p;
+    if (!ScreenPose(s, &p)) return;
+    const double w = s.metres + 2 * kTileBorder, h = s.heightMetres() + 2 * kTileBorder;
+    const int tw = 256, th = std::clamp(int(std::lround(256 * h / w)), 8, 2048);
+    if (tw != b.texW || th != b.texH) {
+        const int edgeX = std::max(2, int(std::lround(tw * kTileBorder / w))), edgeY = std::max(2, int(std::lround(th * kTileBorder / h)));
+        std::vector<uint8_t> px(size_t(tw) * th * 4, 0);
+        for (int y = 0; y < th; ++y)
+            for (int x = 0; x < tw; ++x) {
+                if (x >= edgeX && x < tw - edgeX && y >= edgeY && y < th - edgeY) continue;
+                uint8_t *q = &px[(size_t(y) * tw + x) * 4];
+                q[0] = 90, q[1] = 160, q[2] = 255, q[3] = 220;
+            }
+        overlaytex::Set(b.overlay, px.data(), tw, th);
+        b.texW = tw, b.texH = th;
+    }
+    vr::VROverlay()->SetOverlayWidthInMeters(b.overlay, float(w));
+    const Mat at = Mul(p, Translation(0, 0, -0.002));
+    vr::VROverlay()->SetOverlayTransformAbsolute(b.overlay, vr::TrackingUniverseStanding, &at);
+    if (b.on != f) PinShow(b.overlay);
+    b.on = f;
+}
+
+// Each tick, after the dashboard pins have moved.
+void UpdateDashTiles() {
+    const bool up = vr::VROverlay()->IsDashboardVisible();
+    if (up && !g_dashWasUp) g_tileRegroup = true;
+    g_dashWasUp = up;
+    // (a read that counts: this opening's, or before the group was ever set the last good one)
+    const bool fresh = !g_dash.a.why || (!g_tileGroupSet && !std::strcmp(g_dash.a.why, "hidden"));
+    if (g_tileRegroup && g_dash.a.ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
+    UpdateTileFocus();
+}
+
+// The anchor button: a click anchors or lets go, a long press (kAnchorStayMs) makes it stay shown
+// with the dashboard closed, or not (anchoring it if it wasn't).
+void AnchorButtonUp(int i, const char *by) {
+    auto it = g_screens.find(i);
+    if (it == g_screens.end() || it->second.anchorDownMs < 0) return;
+    const bool longPress = NowMs() - it->second.anchorDownMs >= kAnchorStayMs;
+    it->second.anchorDownMs = -1;
+    if (longPress) TileStay(i, !g_tiles.Stay(i), by);
+    else if (g_tiles.Anchored(i)) TileUnanchor(i, by);
+    else TileAnchor(i, g_tileStayDefault, by);
+}
+
+// The anchor button blue while anchored, ringed while it stays shown too.
+void LightAnchor(Screen &s) {
+    const int i = ScreenIndexOf(s);
+    const int lit = !g_tiles.Anchored(i) ? 0 : g_tiles.Stay(i) ? 2 : 1;
+    if (s.anchorButton == vr::k_ulOverlayHandleInvalid || s.anchorLit == lit) return;
+    s.anchorLit = lit;
+    static const std::vector<uint8_t> tex[3] = {AnchorTexture(64, 0), AnchorTexture(64, 1), AnchorTexture(64, 2)};
+    overlaytex::Set(s.anchorButton, tex[lit].data(), 64, 64);
+}
+
 // A floating window's resize by the corner tab (or a hand's pinch at a corner) let go: it slid in its own
 // plane, the opposite corner kept, which takes it off the sphere round the head and leaves it turned
 // away from you, more the farther it grew; a carry afterwards kept that turn (DEE-336). It turns back,
@@ -2144,9 +2509,12 @@ void FinishDrag(Screen &s, int index) {
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
     const int dockOn = s.dockOn;
     EndDrag(s);
+    if (resized && g_tiles.Tiled(index)) return TileResized(s, index);
     if (resized) FaceAfterResize(s, index);
     Mat p;
     if (!moved) return;
+    if (g_tiles.Anchored(index) && target == kNone && dockOn < 0) return TileDrop(s, index);
+    if (g_tiles.Anchored(index)) TileUnanchor(index, "carried onto a wrist, the head or a screen");
     if (s.remote && dockOn >= 0) {
         // a PC window panel onto one of its PC's displays: the PC puts the window there (ft-layout window drop)
         std::printf("screen %d: let go on screen %d: the window goes onto that display at %.2f,%.2f\n", index + 1, dockOn + 1,
@@ -2179,6 +2547,7 @@ void FinishDrag(Screen &s, int index) {
 void TogglePinView(Screen &s, int index, const char *by) {
     Mat p;
     EndDrag(s);
+    if (g_tiles.Anchored(index)) TileUnanchor(index, "the pin button");   // (off the dashboard, onto the head)
     if (!ScreenPose(s, &p)) return;
     if (s.pinned == vr::k_unTrackedDeviceIndex_Hmd) {
         SetAbsolute(s, p);
@@ -2641,14 +3010,17 @@ bool EnsureFloatPanel(Screen &s) {
 
 void ReturnChrome(Screen &s);
 
+void TileGone(int i);
 void DropFloatPanel(Screen &s) {
+    TileGone(ScreenIndexOf(s));               // (the window went: its app remembers where it was)
     g_chromePool.Release(ScreenIndexOf(s));   // (its set's overlays aren't its own to destroy)
     ReturnChrome(s);
     for (auto o : s.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
     s.overlay = s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton =
-        s.pinButton = s.layoutButton = vr::k_ulOverlayHandleInvalid;
+        s.pinButton = s.layoutButton = s.anchorButton = vr::k_ulOverlayHandleInvalid;
     s.visible = s.controlsUp = s.barLit = s.cornerLit = s.pinLit = false;
+    s.anchorLit = 0;
     s.controls = 0;
     std::fill(std::begin(s.hover), std::end(s.hover), false);
 }
@@ -5860,6 +6232,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_PALM_MENU") g_palm.params().on = on;
     else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
+    else if (n == "DASH_TILE_STAY") g_tileStayDefault = on;   // (panels anchored from now on)
     else if (n == "SCREEN_PIN_LEVEL") SetPinMode(on ? levelpin::Level : levelpin::Rigid);   // (2, Walk: the command's own case)
     else return false;
     return true;
@@ -6261,6 +6634,14 @@ bool ft_vr_init(void) {
     g_susanBring = handcut::Setting("SCREEN_SPIN_BRING", "1") != "0";
     g_pinMode = levelpin::ModeOf(handcut::Setting("SCREEN_PIN_LEVEL", "0").c_str());   // head pins: 1 level, 2 walking   // the lazy susan brings panels (0: the room turns)
     num("FLOAT_DOCK_DISTANCE", g_floatDockDistance, 0, 1);   // a floating window carried this near a screen docks onto it
+    // the dashboard tiles (dashtiles.h, tiling.h): where their band and sphere are, and whether a panel
+    // anchored stays shown with the dashboard closed
+    num("DASH_TILE_RAISE_DEG", g_tileRaiseDeg, -30, 60);
+    num("DASH_TILE_RADIUS", g_tiles.params.radius, 0.8, 4);
+    num("DASH_TILE_HEIGHT_DEG", g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120);
+    num("DASH_TILE_MAX_TOP_DEG", g_tiles.params.maxTopDeg, 20, 80);
+    g_tileStayDefault = handcut::Setting("DASH_TILE_STAY", "0") == "1";
+    LoadTileMemory();
     if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
                                   handcut::Setting("WINDOW_DRAG_RIGHT", "resize").c_str(),
                                   handcut::Setting("WINDOW_DRAG_MIDDLE", "none").c_str(), &g_windowDrag))
@@ -6927,17 +7308,19 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
 
 // chromepool.h's sets: every control once each (Screen::Controls()' order), lent to the panels
 // something is at. Their keys are frametop.controls.K.PART, PART as a panel's own were.
-constexpr const char *kControlPart[kControls] = {"bar", "curve", "roll", "resize", "dock", "close", "reset", "pin", "layout"};
+constexpr const char *kControlPart[kControls] = {"bar", "curve", "roll", "resize", "dock", "close", "reset", "pin", "layout", "anchor"};
 constexpr const char *kControlWhat[kControls] = {"move", "curve", "roll", "resize", "back to the desktop", "close",
-                                                 "reset the layout", "pin in view", "move the layout"};
+                                                 "reset the layout", "pin in view", "move the layout",
+                                                 "anchor to the dashboard"};
 // Set k's overlays, made the first time a panel needs it (each told to the pointer helper, as the
 // panels are: its ray and the gaze find them at once). False if SteamVR made them not all.
 bool MakeChromeSet(int k) {
     ChromeSet &set = g_chromeSets[k];
     if (set.made) return true;
     static const auto curve = CurveTexture(64), roll = RollTexture(64), dock = DockTexture(64), close = CloseTexture(64),
-                      reset = ResetTexture(64), pin = PinTexture(64, false), layout = LayoutTexture(64);
-    const std::vector<uint8_t> *round[kControls] = {nullptr, &curve, &roll, nullptr, &dock, &close, &reset, &pin, &layout};
+                      reset = ResetTexture(64), pin = PinTexture(64, false), layout = LayoutTexture(64),
+                      anchor = AnchorTexture(64, 0);
+    const std::vector<uint8_t> *round[kControls] = {nullptr, &curve, &roll, nullptr, &dock, &close, &reset, &pin, &layout, &anchor};
     const auto &bar = BarImage(barhit::Pixels(0.3, g_barPaddingX, g_barPaddingY), false);
     for (int c = 0; c < kControls; ++c) {
         char key[64], name[80];
@@ -6963,7 +7346,8 @@ void ReturnChrome(Screen &s) {
     for (auto o : s.Controls())
         if (o != vr::k_ulOverlayHandleInvalid) PinHide(o), vr::VROverlay()->SetOverlayAlpha(o, 0);
     s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton = s.pinButton =
-        s.layoutButton = vr::k_ulOverlayHandleInvalid;
+        s.layoutButton = s.anchorButton = vr::k_ulOverlayHandleInvalid;
+    s.anchorDownMs = -1;
     std::fill(std::begin(s.hover), std::end(s.hover), false);
     s.controls = 0, s.controlsUp = false;
     s.barBuzz.Leave(), s.resizeBuzz.Leave();
@@ -6983,7 +7367,8 @@ void LendChrome(Screen &s, int k) {
     for (auto o : set.part)
         while (vr::VROverlay()->PollNextOverlayEvent(o, &ev, sizeof ev)) {}
     vr::VROverlayHandle_t *mine[kControls] = {&s.bar,        &s.curveButton, &s.rollButton,  &s.handle,     &s.dockButton,
-                                              &s.closeButton, &s.resetButton, &s.pinButton, &s.layoutButton};
+                                              &s.closeButton, &s.resetButton, &s.pinButton, &s.layoutButton,
+                                              &s.anchorButton};
     for (int c = 0; c < kControls; ++c) {
         if (!s.HasControl(c)) {
             PinHide(set.part[c]), vr::VROverlay()->SetOverlayAlpha(set.part[c], 0);
@@ -6998,6 +7383,7 @@ void LendChrome(Screen &s, int k) {
     static const auto pinNormal = PinTexture(64, false);
     if (s.pinButton != vr::k_ulOverlayHandleInvalid) overlaytex::Set(s.pinButton, pinNormal.data(), 64, 64);
     s.pinLit = false;           // (LightPin paints it blue again if it's pinned to the head)
+    s.anchorLit = -1;           // (LightAnchor paints it for its anchor; -1: whatever the set's last panel had)
     s.cornerLit = false;        // (UpdateCorner lights it again while resizing)
     s.barPaintedVersion = 0;    // (PaintBar)
     s.resizePaintedVersion = 0; // (PaintResizeMask, which tells the pointer helper its tab's shape)
@@ -7049,6 +7435,7 @@ void ft_vr_screen_create(int index, double metres, int count) {
     const double yaw = heading + (double(count - 1) / 2 - index) * 35;
     const double dx = -std::sin(yaw * M_PI / 180), dz = -std::cos(yaw * M_PI / 180);
     SetAbsolute(s, PanelPose(head.m[0][3] + dx * 2, head.m[1][3], head.m[2][3] + dz * 2, yaw, 0, 0));
+    TileKnown(index, "screen:" + std::to_string(index + 1));
 }
 
 // A remote screen's panel (remote.c): like a screen's, with its own overlay keys. False if
@@ -7107,6 +7494,8 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         UpdateVisibility();
         *restored = true;
     }
+    const char *host = ft_remote_host(index), *app = ft_remote_app(index);
+    TileKnown(index, std::string("remote:") + (host ? host : "?") + "/" + (app ? app : "?"));
     return true;
 }
 
@@ -7182,6 +7571,7 @@ void ft_vr_screen_destroy(int index) {
     const Screen &s = it->second;
     if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe,
                                                         s.dashWait, s.dashHasRel, s.dashRel};
+    TileGone(index);
     g_chromePool.Release(index);
     ReturnChrome(it->second);
     for (auto o : it->second.All())
@@ -7530,6 +7920,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         const bool dashMoved = UpdateDashAnchor();
         AttachDashWaits();
         MoveFramePins(dashMoved);
+        UpdateDashTiles();
     }
     UpdateCarryFollow();   // (before the carried panel's own move, below)
     // the hands, once per tick, for the cutouts and hand input
@@ -7777,6 +8168,19 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             } else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
                 Push(s, ev.data.scroll.ydelta);
         }
+        // The anchor button: a click anchors to the dashboard or lets go, a long press stays shown (AnchorButtonUp).
+        while (s.anchorButton != vr::k_ulOverlayHandleInvalid &&
+               vr::VROverlay()->PollNextOverlayEvent(s.anchorButton, &ev, sizeof ev)) {
+            hover(9);
+            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
+                s.anchorDownMs = NowMs();
+            } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
+                if (ev.data.mouse.button == vr::VRMouseButton_Left)
+                    AnchorButtonUp(index, DeviceLabel(ev.trackedDeviceIndex).c_str());
+                EndDragsBy(ev.trackedDeviceIndex);
+                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+            }
+        }
         // The roll button: drag around like a knob, or scroll.
         while (vr::VROverlay()->PollNextOverlayEvent(s.rollButton, &ev, sizeof ev)) {
             hover(2);
@@ -7899,6 +8303,9 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
     case vrcmd::Place: {
         Screen *s = Find(n);
         if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        // An anchored panel's place is the dashboard tiles' ("anchor N off" first): a profile or a reset
+        // placing every screen leaves it where it is.
+        if (g_tiles.Anchored(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");
         EndDrag(*s);
         g_spin.base.erase(n - 1);
         s->dashWait = false;
@@ -7909,6 +8316,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
     case vrcmd::Width: {
         Screen *s = Find(n);
         if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        if (g_tiles.Tiled(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");   // (its tile sizes it)
         SetWidth(*s, w);
         std::snprintf(reply, size, "ok");
         return;
@@ -7934,17 +8342,9 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
             return (void)std::snprintf(reply, size, "error pin to left, right, head, or dashboard");
         const vr::TrackedDeviceIndex_t dev = HandDevice(hand);
         if (dev == kDashboard) {
-            // rel: dashboard -> screen. Not seen yet this run: in the room until it first opens (WaitForDash).
-            Mat rel = Identity();
-            for (int k = 0; k < 12; ++k) rel.m[k / 4][k % 4] = r[k];
-            const bool found = EachScreen(word, [&](Screen &s) {
-                Mat p;
-                EndDrag(s);
-                if (!ScreenPose(s, &p)) return;
-                if (!g_dash.a.ever) WaitForDash(s, p, got == 14 ? &rel : nullptr);
-                else if (got == 14) Pin(s, kDashboard, rel);
-                else PinAt(s, kDashboard, p);
-            });
+            // To the dashboard: anchored, and so tiled (a pose given with it, an older profile's, is
+            // the tiles' to choose now). Not seen yet this run: in the room until it first opens.
+            const bool found = EachScreen(word, [&](Screen &s) { TileAnchor(ScreenIndexOf(s), g_tileStayDefault, "pin dashboard"); });
             std::snprintf(reply, size, !found ? "error no such screen" : g_dash.a.ever ? "ok" : "ok waiting for the dashboard to open");
             return;
         }
@@ -7958,6 +8358,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         const bool found = EachScreen(word, [&](Screen &s) {
             Mat p;
             EndDrag(s);
+            TileUnanchor(ScreenIndexOf(s), "pinned elsewhere");
             if (got == 14 && dev == vr::k_unTrackedDeviceIndex_Hmd) PinAt(s, dev, Mul(c, rel));   // level or not
             else if (got == 14) Pin(s, dev, rel);
             else if (ScreenPose(s, &p)) PinAt(s, dev, p);
@@ -7969,6 +8370,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         const bool found = EachScreen(word, [&](Screen &s) {
             Mat p;
             s.dashWait = false;
+            TileUnanchor(ScreenIndexOf(s), "unpin");
             if (s.pinned != kNone && ScreenPose(s, &p)) SetAbsolute(s, p);
         });
         std::snprintf(reply, size, found ? "ok" : "error no such screen");
@@ -7998,6 +8400,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
         Mat m{};
         for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = r[k];
+        if (g_tiles.Anchored(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");   // (as place)
         EndDrag(*s);
         g_spin.base.erase(n - 1);
         s->dashWait = false;
@@ -8473,6 +8876,107 @@ static void CutoutsCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
     }
 }
 
+// The dashboard tiles (dashtiles.h): anchor and stay, the tiling keys, the grid for a profile, and
+// whose window a floating panel is (ft-floatd), so it comes back as that app was.
+static void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
+    (void)cmd;
+    // "focused" (the panel the keys act on), or a panel's number from 1
+    const auto which = [&](const char *word) -> int {
+        if (!std::strcmp(word, "focused")) return g_tileFocus;
+        return Find(std::atoi(word)) ? std::atoi(word) - 1 : -1;
+    };
+    // "on", "off" or "toggle" against what it is now; -1 if it's none of those
+    const auto setting = [](const char *word, bool now) {
+        return !std::strcmp(word, "on") ? 1 : !std::strcmp(word, "off") ? 0 : !std::strcmp(word, "toggle") ? int(!now) : -1;
+    };
+    switch (verb) {
+    case vrcmd::Anchor: case vrcmd::Stay: {
+        const int i = which(parsed.word);
+        if (i < 0) return (void)std::snprintf(reply, size, "error no such panel");
+        const bool anchor = verb == vrcmd::Anchor;
+        const int to = setting(parsed.hand, anchor ? g_tiles.Anchored(i) : g_tiles.Stay(i));
+        if (to < 0) return (void)std::snprintf(reply, size, "error on, off or toggle");
+        if (!anchor) TileStay(i, to, "command");
+        else if (to) TileAnchor(i, g_tileStayDefault, "command");
+        else TileUnanchor(i, "command");
+        std::snprintf(reply, size, "ok %s %s", anchor ? "anchored" : "stay", to ? "on" : "off");
+        return;
+    }
+    case vrcmd::Tile: {
+        dashtiles::Key key;
+        if (!dashtiles::ParseKey(parsed.word, &key)) return (void)std::snprintf(reply, size, "error no such tiling key");
+        const int i = g_tileFocus;
+        if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
+        if (!g_tiles.Press(i, key, TileInfo(i))) return (void)std::snprintf(reply, size, "ok nothing to do");
+        RetileDash(true);
+        RememberTiles();
+        std::snprintf(reply, size, "ok %s", parsed.word);
+        return;
+    }
+    case vrcmd::Tiles: {
+        if (!parsed.rest) {   // "ok N STATE; N STATE..." for every anchored panel, by column and row
+            std::string out = "ok";
+            std::vector<std::pair<std::pair<int, int>, int>> order;
+            for (const int id : g_tiles.Ids()) {
+                const auto w = g_tiles.Grid().Find(id);
+                order.push_back({{w.ok() ? w.col : 1 << 20, w.ok() ? w.row : 0}, id});
+            }
+            std::sort(order.begin(), order.end());
+            for (const auto &o : order)
+                out += (out.size() > 2 ? "; " : " ") + std::to_string(o.second + 1) + " " + g_tiles.Remember(o.second);
+            if (int(out.size()) >= size) return (void)std::snprintf(reply, size, "error too many tiles to list");
+            std::snprintf(reply, size, "%s", out.c_str());
+            return;
+        }
+        if (!std::strcmp(parsed.rest, "clear")) {
+            for (const int id : g_tiles.Ids()) TileUnanchor(id, "tiles clear");
+            return (void)std::snprintf(reply, size, "ok");
+        }
+        // "set N STATE; N STATE...": each as Remember gave it, in the order given (by column and row)
+        int done = 0, bad = 0;
+        std::string list = parsed.rest + 3;
+        for (size_t at = 0; at < list.size();) {
+            size_t end = list.find(';', at);
+            if (end == std::string::npos) end = list.size();
+            std::string part = list.substr(at, end - at);
+            at = end + 1;
+            const size_t a = part.find_first_not_of(' ');
+            if (a == std::string::npos) continue;
+            part = part.substr(a, part.find_last_not_of(' ') + 1 - a);
+            int n = 0, used = 0;
+            const int i = std::sscanf(part.c_str(), "%d %n", &n, &used) == 1 && used > 0 && Find(n) ? n - 1 : -1;
+            const std::string state = i < 0 ? "" : part.substr(used);
+            if (state == "off") {
+                TileUnanchor(i, "tiles set");   // (left in the room where it is)
+                ++done;
+                continue;
+            }
+            if (i < 0 || !g_tiles.Restore(i, state, -1)) {
+                ++bad;
+                continue;
+            }
+            ++done;
+            if (!g_tileGroupSet) g_tileRegroup = true;
+            LightAnchor(g_screens[i]);
+        }
+        RetileDash(true);
+        RememberTiles();
+        std::snprintf(reply, size, bad ? "ok %d set, %d not" : "ok %d set", done, bad);
+        return;
+    }
+    case vrcmd::FloatApp: {
+        Screen *s = Find(parsed.n);
+        if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no such floating window");
+        TileKnown(parsed.n - 1, std::string("app:") + parsed.appId);
+        LightAnchor(*s);
+        std::snprintf(reply, size, "ok");
+        return;
+    }
+    default:
+        std::snprintf(reply, size, "error unknown command");
+    }
+}
+
 // Floating windows (ft-floatd and KWin's script): their rectangles, poses, popups and carries.
 static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
     int &n = parsed.n;
@@ -8493,6 +8997,7 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         if (!(w > 1e-5 && w < 0.01) || w0 < 1 || h0 < 1) return (void)std::snprintf(reply, size, "error bad float");
         SetFloat(*s, w, x0, y0, w0, h0, std::max(0, t0));
+        if (g_tiles.Anchored(ScreenIndexOf(*s))) RetileDash(false);   // (its new size kept where its tile is)
         std::snprintf(reply, size, "ok");
         return;
     }
@@ -8704,6 +9209,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     case vrcmd::HandFeatureGroup: return HandFeatureCommand(verb, parsed, cmd, reply, size);
     case vrcmd::CutoutsGroup: return CutoutsCommand(verb, parsed, cmd, reply, size);
     case vrcmd::FloatGroup: return FloatCommand(verb, parsed, cmd, reply, size);
+    case vrcmd::TileGroup: return TileCommand(verb, parsed, cmd, reply, size);
     case vrcmd::SpinGroup:
         if (verb != vrcmd::Spin) return ShiftCommand(verb, parsed, reply, size);
         SpinCommand(cmd + 5, reply, size);

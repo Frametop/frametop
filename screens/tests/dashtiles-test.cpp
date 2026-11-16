@@ -260,6 +260,37 @@ int main() {
         check("moved: [ 12 ][ 10 ][ 11 ]", order(m).rfind("[ 12 ][ 10 ][ 11 ]", 0) == 0);
         m.RestoreAll({{20, line(3, 0, 1)}}, true);
         check("an add after a move keeps the move, its tile after", order(m) == "[ 12 ][ 10 ][ 11 ][ 20 ]");
+        // council pass 5: a stack listed before a lower column; per-panel forgetting; a key that changes nothing
+        dashtiles::Board u;
+        for (int id : {1, 2, 3}) u.Anchor(id, -1, false);
+        u.RestoreAll({{2, line(1, 0, 0)}, {3, line(1, 1, 0)}, {1, line(0, 0, 1)}});
+        check("a stack listed first: kept, columns by number", order(u) == "[ 1 ][ 2 3 ]");
+        dashtiles::Board f;
+        for (int id : {10, 11, 12, 20}) f.Anchor(id, -1, false);
+        f.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
+        f.Unanchor(10), f.Anchor(10, 12, false);   // off and on again: now after 12
+        f.SetStay(11, true);
+        f.RestoreAll({{20, line(3, 0, 1)}}, true);
+        check("an add after an unanchor keeps it where it went", order(f) == "[ 11 ][ 12 ][ 20 ][ 10 ]");
+        check("an add after a stay change keeps it", f.Stay(11));
+        dashtiles::Board n;
+        for (int id : {10, 11, 12, 99}) n.Anchor(id, -1, false);
+        n.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}});
+        n.Press(10, dashtiles::Key::Left, info);   // (the first column: nothing moves)
+        n.RestoreAll({{12, line(2, 0, 1)}}, true);
+        check("a key that changes nothing keeps the set going", order(n).rfind("[ 10 ][ 11 ][ 12 ]", 0) == 0);
+        dashtiles::Board e;
+        for (int id : {1, 2, 50}) e.Anchor(id, -1, false);
+        e.RestoreAll({{7, "nonsense"}});   // a set with no line it could take
+        e.RestoreAll({{1, line(0, 0, 1)}, {2, line(1, 0, 1)}}, true);
+        check("an add after an empty set: still the set's, first", order(e).rfind("[ 1 ][ 2 ]", 0) == 0);
+        dashtiles::Board o2;
+        for (int id : {10, 11, 30}) o2.Anchor(id, -1, false);
+        o2.RestoreAll({{10, line(0, 0, 1)}, {30, "off"}});
+        check("an off line: unanchored", !o2.Anchored(30));
+        o2.Anchor(30, -1, false);
+        o2.RestoreAll({{11, line(1, 0, 1)}}, true);
+        check("anchored again after it, an add keeps it", o2.Anchored(30));
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

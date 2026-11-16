@@ -90,7 +90,7 @@ public:
         if (down) {
             if (sub) TypeIn(w);
             else keys_.Focus(w);
-            pressedOn_ = w;
+            pressedOn_ = w, blurredFrom_ = 0;
         }
         Point(index, sub, x, y);
         x_.Button(button, down);
@@ -135,7 +135,7 @@ private:
     uint32_t pressedOn_ = 0;  // the window the last press went to
     // a popup that had the typing -> the app window that had it before (erased when the popup goes)
     std::map<uint32_t, uint32_t> typedBefore_;
-    uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur
+    uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur (0 after a press)
     bool tagging_ = true;     // (false: the display's gone, nobody to untag at)
 
     uint32_t WindowAt(int index, int sub) const { return sub ? book_.PopupWindow(index, sub) : book_.WindowOf(index); }
@@ -143,8 +143,8 @@ private:
         const int index = keys_.Target() ? book_.PanelOf(keys_.Target()) : -1;
         return index >= 0 && panels_.Shown(index);
     }
-    // The typing to popup `w`, the app window it leaves remembered (off the apps: the one that had
-    // it before the Blur, which X still has focused).
+    // The typing to popup `w`, the app window it leaves remembered (off the apps since a Blur, with
+    // no press on an app after it: the one that had it before the Blur).
     void TypeIn(uint32_t w) {
         if (const uint32_t t = keys_.Target() ? keys_.Target() : blurredFrom_; t && t != w) typedBefore_[w] = t;
         keys_.Focus(w);

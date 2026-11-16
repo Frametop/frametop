@@ -18,6 +18,7 @@
 #include "tiling.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -99,16 +100,21 @@ public:
     }
     // Not anchored any more (or gone). False if it wasn't.
     bool Unanchor(int id) {
+        Forget(id);
         grid_.Remove(id);
         return spots_.erase(id) != 0;
     }
     void SetStay(int id, bool on) {
-        if (Anchored(id)) spots_[id].stay = on;
+        if (!Anchored(id)) return;
+        spots_[id].stay = on;
+        for (auto &[i, line] : batch_)   // (its line's stay, the word after "tile" or "sat")
+            if (const size_t a = line.find(' '), b = line.find(' ', a + 1); i == id && a != std::string::npos)
+                line.replace(a + 1, (b == std::string::npos ? line.size() : b) - a - 1, on ? "1" : "0");
     }
     // Off the grid, a satellite at `rel` (the group frame's -> the panel's).
     void TearOff(int id, const double rel[3][4]) {
         if (!Anchored(id)) return;
-        batch_.clear();
+        EndBatch();
         grid_.Remove(id);
         Spot &s = spots_[id];
         s.satellite = true;
@@ -127,7 +133,7 @@ public:
         if (d.kind == tiling::Drop::TearOff) return TearOff(id, rel);
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
-        batch_.clear();
+        EndBatch();
         grid_.Remove(id);
         spots_[id].satellite = false;
         grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale);
@@ -137,7 +143,19 @@ public:
     // panel fills its row's height already, so wider and narrower size it in its row instead.
     bool Press(int id, Key k, const Info &info) {
         if (!grid_.Has(id)) return false;
-        batch_.clear();
+        return Changed(Pressed(id, k, info));
+    }
+    // Resized by its corner on the grid: `fw`, `fh` times as wide and tall as its tile was.
+    bool Resized(int id, double fw, double fh, const Info &info) {
+        if (!grid_.Has(id) || !(fw > 0) || !(fh > 0)) return false;
+        if (info.fixed) return Changed(grid_.Scale(id, fw));
+        const bool w = grid_.Widen(id, fw, NowWidth(id));
+        const bool h = grid_.Heighten(id, fh);
+        return Changed(w || h);
+    }
+
+private:
+    bool Pressed(int id, Key k, const Info &info) {
         const bool grow = k == Key::Wider || k == Key::Taller;
         const double f = grow ? tilegrid::kStep : 1 / tilegrid::kStep;
         switch (k) {
@@ -152,15 +170,12 @@ public:
         }
         return false;
     }
-    // Resized by its corner on the grid: `fw`, `fh` times as wide and tall as its tile was.
-    bool Resized(int id, double fw, double fh, const Info &info) {
-        if (!grid_.Has(id) || !(fw > 0) || !(fh > 0)) return false;
-        batch_.clear();
-        if (info.fixed) return grid_.Scale(id, fw);
-        const bool w = grid_.Widen(id, fw, NowWidth(id));
-        const bool h = grid_.Heighten(id, fh);
-        return w || h;
+    bool Changed(bool changed) {
+        if (changed) EndBatch();
+        return changed;
     }
+
+public:
 
     template <typename InfoOf>
     std::vector<tiling::Column> Columns(InfoOf info) const {
@@ -255,7 +270,7 @@ public:
     // off, an add puts its tiles after the others. A line that isn't one leaves that panel as it is. The
     // number of lines taken.
     int RestoreAll(const std::vector<std::pair<int, std::string>> &saved, bool more = false) {
-        const bool after = more && batch_.empty();   // an add on its own: its tiles after the others
+        const bool after = more && batchMode_ != BatchMode::First;   // an add on its own: after the others
         std::vector<std::pair<int, std::string>> good;
         if (more)
             for (const auto &[id, line] : batch_)
@@ -266,26 +281,43 @@ public:
             if (!scratch.Restore(id, line, -1)) continue;
             ++taken;
             for (auto g = good.begin(); g != good.end();) g = g->first == id ? good.erase(g) : std::next(g);
-            good.push_back({id, line});
+            if (line == "off") Unanchor(id);   // (now, and not kept: anchoring it again later stays)
+            else good.push_back({id, line});
         }
-        batch_ = good;
         tilegrid::Grid rest = grid_;
         for (const auto &[id, line] : good) rest.Remove(id);
         grid_ = tilegrid::Grid{};
         if (after)
             for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
-        // saved column -> its column now
+        // saved column -> its column now; the lines by column and row, however they came
         const std::map<int, int> cols = Ranks(good, after ? int(grid_.Cols().size()) : 0);
-        for (const auto &[id, line] : good) Restore(id, Closed(line, cols), -1);
+        std::vector<std::pair<int, std::string>> sorted = good;
+        std::stable_sort(sorted.begin(), sorted.end(),
+                         [](const auto &a, const auto &b) { return RestoreOrder(a.second) < RestoreOrder(b.second); });
+        for (const auto &[id, line] : sorted) Restore(id, Closed(line, cols), -1);
         if (!after)
             for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
+        batch_ = good, batchMode_ = after ? BatchMode::After : BatchMode::First;   // (after: Restore forgets)
         return taken;
     }
 
 private:
-    // RestoreAll: the profile put back last, until a tile is moved, resized or torn off (an add
-    // after that would undo it)
+    // RestoreAll: the profile put back last (a panel unanchored since: its line forgotten), until
+    // a tile is moved, resized or torn off (an add after that would undo it). Its mode: whether its
+    // tiles went first (a set) or after the others (an add on its own).
+    enum class BatchMode { None, First, After };
     std::vector<std::pair<int, std::string>> batch_;
+    BatchMode batchMode_ = BatchMode::None;
+    void EndBatch() { batch_.clear(), batchMode_ = BatchMode::None; }
+    void Forget(int id) {
+        for (auto b = batch_.begin(); b != batch_.end();) b = b->first == id ? batch_.erase(b) : std::next(b);
+    }
+    // A line's place for restoring in order: a tile's (column, row); others after, as they came.
+    static std::pair<int, int> RestoreOrder(const std::string &line) {
+        int stay = 0, col = 0, row = 0;
+        if (std::sscanf(line.c_str(), "tile %d %d %d", &stay, &col, &row) == 3 && col >= 0 && row >= 0) return {col, row};
+        return {INT_MAX, 0};
+    }
 
     // The saved columns the tile lines name, each numbered by its rank among them (gaps closed up),
     // from `first`.

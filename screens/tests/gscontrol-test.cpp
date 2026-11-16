@@ -262,6 +262,30 @@ int main() {
         CHECK(c.Key(32, 1, false, {}) && x.Logged("key 6 40 0 down"));
         c.Key(32, 0, false, {});
     }
+    // --- council pass 5: a press on an app after a Blur ends what the Blur left: a menu picked
+    // later goes back to its own app, not the one typed in before the Blur
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        for (uint32_t id : {1u, 2u, 3u}) c.On(Ev(Event::Created, Win(id, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(id, Kind::Main)), 0);
+        const int i1 = c.Windows().PanelOf(1), i2 = c.Windows().PanelOf(2), i3 = c.Windows().PanelOf(3);
+        c.Press(i1, 0, 1, true, 1, 1), c.Press(i1, 0, 1, false, 1, 1);
+        c.Blur();
+        c.Press(i2, 0, 1, true, 1, 1), c.Press(i2, 0, 1, false, 1, 1);
+        c.On(Ev(Event::Gone, Win(2, Kind::Main)), 0);   // app 2 quits: nothing has the typing
+        c.Point(i3, 0, 1, 1);
+        c.On(Ev(Event::Created, Menu(9, 150, 80)), 0), c.On(Ev(Event::Mapped, Menu(9, 150, 80)), 0);
+        uint32_t sub = 0;
+        for (int s = 1; s < 10 && !sub; ++s)
+            if (c.Windows().PopupWindow(i3, s) == 9) sub = uint32_t(s);
+        CHECK(sub != 0);
+        c.Press(i3, int(sub), 1, true, 5, 5), c.Press(i3, int(sub), 1, false, 5, 5);
+        c.On(Ev(Event::Unmapped, Menu(9, 150, 80)), 0);
+        x.log.clear();
+        CHECK(c.Key(30, 1, false, {}) && x.Logged("key 3 38 0 down"));
+        c.Key(30, 0, false, {});
+    }
     // --- off: buttons and keys held let go of, windows untagged
     {
         FakeX x;

@@ -49,6 +49,7 @@ struct Link::Impl {
             xcb_window_t tf = 0;
             xcb_icccm_get_wm_transient_for_reply(c, xcb_icccm_get_wm_transient_for(c, id), &tf, nullptr);
             w->id = id, w->x = g->x, w->y = g->y, w->w = g->width, w->h = g->height, w->transientFor = tf;
+            w->overrideRedirect = a->override_redirect != 0;
             w->kind = Classify(a->_class == XCB_WINDOW_CLASS_INPUT_OUTPUT, a->override_redirect, tf != 0, w->w, w->h);
             top[id] = a->override_redirect;
             if (mapped) *mapped = a->map_state == XCB_MAP_STATE_VIEWABLE;

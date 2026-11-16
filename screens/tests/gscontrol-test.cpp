@@ -74,6 +74,11 @@ static Window Win(uint32_t id, Kind kind, int w = 800, int h = 600, uint32_t tra
     win.id = id, win.kind = kind, win.w = w, win.h = h, win.transientFor = transientFor;
     return win;
 }
+static Window Menu(uint32_t id, int w, int h, uint32_t transientFor = 0) {
+    Window win = Win(id, Kind::Popup, w, h, transientFor);
+    win.overrideRedirect = true;
+    return win;
+}
 static Event Ev(Event::Type type, const Window &w) {
     Event e;
     e.type = type, e.win = w;
@@ -196,7 +201,7 @@ int main() {
         CHECK(c.Key(30, 1, false, {}) && x.Logged("key 2 38 0 down"));
         c.Key(30, 0, false, {});
         // its right-click menu (override-redirect: for nobody), an item picked
-        c.On(Ev(Event::Created, Win(3, Kind::Popup, 150, 80)), 0), c.On(Ev(Event::Mapped, Win(3, Kind::Popup, 150, 80)), 0);
+        c.On(Ev(Event::Created, Menu(3, 150, 80)), 0), c.On(Ev(Event::Mapped, Menu(3, 150, 80)), 0);
         const int menuSub = 2;
         CHECK(c.Windows().PopupWindow(kFirst, menuSub) == 3);
         c.Press(kFirst, menuSub, 1, true, 5, 5), c.Press(kFirst, menuSub, 1, false, 5, 5);
@@ -215,6 +220,47 @@ int main() {
         x.log.clear();
         CHECK(c.Key(33, 1, false, {}) && x.Logged("key 1 41 0 down"));
         c.Key(33, 0, false, {});
+    }
+    // --- council pass 4: a tooltip doesn't take the typing; a dialog closed gives it to the window
+    // it's for, not the one clicked before it; a menu picked after a Blur goes back to the dialog
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        c.On(Ev(Event::Created, Win(1, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+        c.Press(kFirst, 0, 1, true, 1, 1), c.Press(kFirst, 0, 1, false, 1, 1);
+        // a tooltip (override-redirect, transient for the app, as GTK's and Qt's are)
+        c.On(Ev(Event::Created, Menu(5, 80, 40, 1)), 0), c.On(Ev(Event::Mapped, Menu(5, 80, 40, 1)), 0);
+        x.log.clear();
+        CHECK(c.Key(30, 1, false, {}) && x.Logged("key 1 38 0 down"));
+        c.Key(30, 0, false, {});
+        c.On(Ev(Event::Unmapped, Menu(5, 80, 40)), 0);
+        // app 1's dialog; app 2 clicked; the dialog's OK clicked, it closes: back to app 1
+        c.On(Ev(Event::Created, Win(2, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(2, Kind::Main)), 0);
+        c.On(Ev(Event::Created, Win(3, Kind::Popup, 400, 300, 1)), 0), c.On(Ev(Event::Mapped, Win(3, Kind::Popup, 400, 300, 1)), 0);
+        c.Press(kFirst + 1, 0, 1, true, 1, 1), c.Press(kFirst + 1, 0, 1, false, 1, 1);
+        uint32_t dialogSub = 0;
+        for (int s = 1; s < 10 && !dialogSub; ++s)
+            if (c.Windows().PopupWindow(kFirst, s) == 3) dialogSub = uint32_t(s);
+        CHECK(dialogSub != 0);
+        c.Press(kFirst, int(dialogSub), 1, true, 5, 5), c.Press(kFirst, int(dialogSub), 1, false, 5, 5);
+        c.On(Ev(Event::Gone, Win(3, Kind::Popup)), 0);
+        x.log.clear();
+        CHECK(c.Key(31, 1, false, {}) && x.Logged("key 1 39 0 down"));
+        c.Key(31, 0, false, {});
+        // a dialog again, its menu open; a click on a Steam panel (Blur); a menu item picked
+        c.On(Ev(Event::Created, Win(6, Kind::Popup, 400, 300, 1)), 0), c.On(Ev(Event::Mapped, Win(6, Kind::Popup, 400, 300, 1)), 0);
+        c.On(Ev(Event::Created, Menu(7, 150, 80)), 0), c.On(Ev(Event::Mapped, Menu(7, 150, 80)), 0);
+        uint32_t menuSub = 0;
+        for (int s = 1; s < 20 && !menuSub; ++s)
+            if (c.Windows().PopupWindow(kFirst, s) == 7) menuSub = uint32_t(s);
+        CHECK(menuSub != 0);
+        c.Blur();
+        c.Press(kFirst, int(menuSub), 1, true, 5, 5), c.Press(kFirst, int(menuSub), 1, false, 5, 5);
+        c.On(Ev(Event::Unmapped, Menu(7, 150, 80)), 0);
+        x.log.clear();
+        CHECK(c.Key(32, 1, false, {}) && x.Logged("key 6 40 0 down"));
+        c.Key(32, 0, false, {});
     }
     // --- off: buttons and keys held let go of, windows untagged
     {

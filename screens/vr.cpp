@@ -9260,8 +9260,8 @@ static void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, c
             return (void)std::snprintf(reply, size, "ok");
         }
         // "set N STATE; N STATE...": each as Remember gave it, in the order given (by column and
-        // row); the tiles it doesn't name go after its columns. "add ...": more of the same set,
-        // after the columns it has put back so far (layout_tiles.py splits a long one).
+        // row); the tiles it doesn't name go after its columns. "add ...": more of the same set
+        // (layout_tiles.py splits a long one): the whole set is put back again with it.
         const bool more = !std::strncmp(parsed.rest, "add", 3);
         int done = 0, bad = 0;
         std::vector<std::pair<int, std::string>> saved;

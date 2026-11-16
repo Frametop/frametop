@@ -118,6 +118,7 @@ struct Window {
     int x = 0, y = 0, w = 0, h = 0;   // on the X screen
     Kind kind = Kind::Ignore;
     uint32_t transientFor = 0;
+    bool overrideRedirect = false;    // (a menu, a tooltip: no window manager focuses it)
     std::string key, title;           // AppKey's, and its title (read when it maps)
 };
 

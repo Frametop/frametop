@@ -246,6 +246,20 @@ int main() {
         q.Unanchor(11);   // gone between the two
         q.RestoreAll({{13, line(3, 0, 1)}, {14, line(4, 0, 1)}}, true);
         check("set, a panel goes, add: the rest in order", order(q) == "[ 10 ][ 12 ][ 13 ][ 14 ][ 70 ]");
+        // council pass 4: columns by their saved number, whatever order the lines come in
+        dashtiles::Board o;
+        for (int id : {2, 3}) o.Anchor(id, -1, false);
+        o.RestoreAll({{3, line(1, 0, 1)}, {2, line(0, 0, 1)}});
+        check("lines out of order: columns by number", order(o) == "[ 2 ][ 3 ]");
+        // council pass 4: a tile moved after a set; an add then doesn't undo the move
+        dashtiles::Board m;
+        for (int id : {10, 11, 12, 20}) m.Anchor(id, -1, false);
+        m.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
+        dashtiles::Info info;
+        m.Press(12, dashtiles::Key::Left, info), m.Press(12, dashtiles::Key::Left, info);
+        check("moved: [ 12 ][ 10 ][ 11 ]", order(m).rfind("[ 12 ][ 10 ][ 11 ]", 0) == 0);
+        m.RestoreAll({{20, line(3, 0, 1)}}, true);
+        check("an add after a move keeps the move, its tile after", order(m) == "[ 12 ][ 10 ][ 11 ][ 20 ]");
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

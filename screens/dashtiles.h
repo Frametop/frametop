@@ -108,6 +108,7 @@ public:
     // Off the grid, a satellite at `rel` (the group frame's -> the panel's).
     void TearOff(int id, const double rel[3][4]) {
         if (!Anchored(id)) return;
+        batch_.clear();
         grid_.Remove(id);
         Spot &s = spots_[id];
         s.satellite = true;
@@ -126,6 +127,7 @@ public:
         if (d.kind == tiling::Drop::TearOff) return TearOff(id, rel);
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
+        batch_.clear();
         grid_.Remove(id);
         spots_[id].satellite = false;
         grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale);
@@ -135,6 +137,7 @@ public:
     // panel fills its row's height already, so wider and narrower size it in its row instead.
     bool Press(int id, Key k, const Info &info) {
         if (!grid_.Has(id)) return false;
+        batch_.clear();
         const bool grow = k == Key::Wider || k == Key::Taller;
         const double f = grow ? tilegrid::kStep : 1 / tilegrid::kStep;
         switch (k) {
@@ -152,6 +155,7 @@ public:
     // Resized by its corner on the grid: `fw`, `fh` times as wide and tall as its tile was.
     bool Resized(int id, double fw, double fh, const Info &info) {
         if (!grid_.Has(id) || !(fw > 0) || !(fh > 0)) return false;
+        batch_.clear();
         if (info.fixed) return grid_.Scale(id, fw);
         const bool w = grid_.Widen(id, fw, NowWidth(id));
         const bool h = grid_.Heighten(id, fh);
@@ -247,9 +251,11 @@ public:
     // was. The saved column numbers count panels the profile doesn't have (a floating window, a
     // remote display that isn't on): its columns close up, stacks kept. `more`: the rest of the same
     // profile (one too long for a command goes in several): the whole of it is put back again, as
-    // if it had come at once, whatever changed between (minus its panels that went). A line that
-    // isn't one leaves that panel as it is. The number of lines taken.
+    // if it had come at once (minus its panels that went); after a tile is moved, resized or torn
+    // off, an add puts its tiles after the others. A line that isn't one leaves that panel as it is. The
+    // number of lines taken.
     int RestoreAll(const std::vector<std::pair<int, std::string>> &saved, bool more = false) {
+        const bool after = more && batch_.empty();   // an add on its own: its tiles after the others
         std::vector<std::pair<int, std::string>> good;
         if (more)
             for (const auto &[id, line] : batch_)
@@ -266,21 +272,38 @@ public:
         tilegrid::Grid rest = grid_;
         for (const auto &[id, line] : good) rest.Remove(id);
         grid_ = tilegrid::Grid{};
-        std::map<int, int> cols;   // saved column -> its column now
+        if (after)
+            for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
+        // saved column -> its column now
+        const std::map<int, int> cols = Ranks(good, after ? int(grid_.Cols().size()) : 0);
         for (const auto &[id, line] : good) Restore(id, Closed(line, cols), -1);
-        for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
+        if (!after)
+            for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
         return taken;
     }
 
 private:
-    std::vector<std::pair<int, std::string>> batch_;   // RestoreAll: the profile put back last
+    // RestoreAll: the profile put back last, until a tile is moved, resized or torn off (an add
+    // after that would undo it)
+    std::vector<std::pair<int, std::string>> batch_;
 
-    // A tile line with its saved column as the next one free (`cols`: the ones seen so far).
-    static std::string Closed(const std::string &line, std::map<int, int> &cols) {
+    // The saved columns the tile lines name, each numbered by its rank among them (gaps closed up),
+    // from `first`.
+    static std::map<int, int> Ranks(const std::vector<std::pair<int, std::string>> &lines, int first) {
+        std::map<int, int> cols;
+        for (const auto &[id, line] : lines) {
+            int stay = 0, col = 0;
+            if (std::sscanf(line.c_str(), "tile %d %d", &stay, &col) == 2 && col >= 0) cols[col] = 0;
+        }
+        int rank = first;
+        for (auto &[col, now] : cols) now = rank++;
+        return cols;
+    }
+    // A tile line with its saved column as its rank (Ranks').
+    static std::string Closed(const std::string &line, const std::map<int, int> &cols) {
         int stay = 0, col = 0, n = 0;
         if (std::sscanf(line.c_str(), "tile %d %d%n", &stay, &col, &n) != 2 || col < 0) return line;
-        const auto it = cols.emplace(col, int(cols.size())).first;
-        return "tile " + std::to_string(stay) + " " + std::to_string(it->second) + line.substr(size_t(n));
+        return "tile " + std::to_string(stay) + " " + std::to_string(cols.at(col)) + line.substr(size_t(n));
     }
 
     static void AppendColumn(tilegrid::Grid &g, const tilegrid::Col &c) {

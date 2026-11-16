@@ -10,7 +10,10 @@ the physical devices as they come and go.
 Every USB or Bluetooth mouse and keyboard is a candidate. A physical device is
 identified by its Bluetooth address (EVIOCGUNIQ) or USB bus:vendor:product:name,
 so all its event nodes share one role (the Swiftpoint Z3 has a mouse node and a
-keyboard node for its extra buttons), except with "combo". Roles, from
+keyboard node for its extra buttons), except with "combo". Apple Magic Mouse 2
+has no physical wheel: hid-generic (this kernel has no hid-magicmouse) only
+moves the pointer, so the relay turns surface drags into REL_WHEEL / REL_HWHEEL from hidraw
+(input/magicmouse.py). Roles, from
 ~/.config/frametop-input.json (written by the Frametop Input Settings app):
   pointer      grabbed; drives the universal 3D mouse (default for devices with a mouse node)
   passthrough  keys go to the desktop; grabbed only while typing goes there, otherwise only observed,
@@ -122,7 +125,7 @@ hide, or Frametop pauses). Other buttons and keys from KEY_OK up don't go there.
 Typing goes to the panel clicked last, and ft-screens says which ("keyboard
 desktop|steam SHOWN PAUSED WHEEL" on the control socket, every second; SHOWN 1|0, whether the
 screens show; PAUSED 1|0, its pause; WHEEL 1|0, whether the 3D mouse's laser is on a panel, so
-its wheel goes to ft-screens as "wheel N" and not through SteamVR's joystick). While it's the desktop,
+its wheel goes to ft-screens as "wheel DY DX" and not through SteamVR's joystick). While it's the desktop,
 pass-through keyboards are grabbed, so gamescope, which reads every keyboard itself,
 doesn't type them into its focused app too. Without word from ft-screens for 3 seconds
 they're released.
@@ -268,6 +271,7 @@ import sys
 import time
 
 import game_pause
+import magicmouse
 from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
     EV_KEY,
     EV_REL,
@@ -310,8 +314,8 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
 # record and the ioctl numbers are ft_evdev's (shared with vrpad.py); the codes are here.
 BTN_MISC = 0x100
 KEY_A = 30
-REL_X, REL_Y, REL_WHEEL, REL_MAX = 0x00, 0x01, 0x08, 0x0F
-SCROLLS = {0x06, REL_WHEEL, 0x0B, 0x0C}  # REL_HWHEEL, REL_WHEEL and their _HI_RES
+REL_X, REL_Y, REL_HWHEEL, REL_WHEEL, REL_MAX = 0x00, 0x01, 0x06, 0x08, 0x0F
+SCROLLS = {REL_HWHEEL, REL_WHEEL, 0x0B, 0x0C}  # and their _HI_RES
 BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA = 0x110, 0x111, 0x112, 0x113, 0x114
 BTN_MOUSE, BTN_TASK = 0x110, 0x117  # mouse buttons, the first and the last
 KEY_LEFTMETA, KEY_RIGHTMETA = 125, 126
@@ -788,10 +792,10 @@ class Pointer:
         self.dx = self.dy = 0
         self.move_at = 0.0  # motion last went to the helper then
         self.scroll_until = None  # the joystick push ends then
-        self.scroll_direction = 0
+        self.scroll_sx = self.scroll_sy = 0  # stick deflection while a push is under way (-1, 0, 1)
         # Scrolls notches on the panel the laser is on and says True, or says False: the joystick
-        # then. PointerLease sets it (ft-screens' "keyboard", its fifth word).
-        self.wheel_to = lambda notches: False
+        # then. PointerLease sets it (ft-screens' "keyboard", its fifth word). DY then DX.
+        self.wheel_to = lambda notches, hwheel=0: False
         self.claim_at = None  # when to press the claim button
         self.claim_release = None
         self.system_at = None  # dashboard toggle: when to press the virtual system button
@@ -887,7 +891,9 @@ class Pointer:
         elif code == REL_Y:
             self.dy += value
         elif code == REL_WHEEL and value:
-            self.scroll(value, now)
+            self.scroll(value, 0, now)
+        elif code == REL_HWHEEL and value:
+            self.scroll(0, value, now)
 
     def action(self, name, value, now, source="mouse"):
         """A mapped button: value 1 press, 0 release, 2 autorepeat (ignored). source: what
@@ -922,7 +928,7 @@ class Pointer:
             return  # the rest act on press
         elif name in ("scroll_up", "scroll_down"):
             self.wake(now)
-            self.scroll(1 if name == "scroll_up" else -1, now)
+            self.scroll(1 if name == "scroll_up" else -1, 0, now)
         elif name == "dashboard":
             self.dashboard(now)
         elif name == "recenter":
@@ -955,17 +961,31 @@ class Pointer:
             self.sensitivity *= 1.25 if name == "sens_up" else 0.8
             log(f"sensitivity {self.sensitivity:.4f} deg/count")
 
-    def scroll(self, notches, now):
-        """Scroll by notches (positive: up). On a Frametop panel, ft-screens takes them directly
-        (wheel_to). Elsewhere, deflect the joystick for SCROLL_STEP per notch: a notch in the same
-        direction adds its time to the push under way; the other direction starts again."""
-        if self.wheel_to(notches):
+    def scroll(self, dy, dx, now):
+        """Scroll by notches: dy is REL_WHEEL (positive up), dx is REL_HWHEEL (positive right).
+        On a Frametop panel, ft-screens takes them directly (wheel_to). Elsewhere, deflect the
+        joystick for SCROLL_STEP per notch: a notch in the same direction adds its time to the
+        push under way; the other direction on an axis starts that axis again. A new
+        horizontal-only push also sets Y (right is down): SteamVR's overlay mouse is a wheel."""
+        if not dy and not dx:
             return
-        direction = 1 if notches > 0 else -1
-        if self.scroll_until is None or direction != self.scroll_direction:
-            self.send(f"scroll 0 {direction}", droppable=True)
-            self.scroll_direction, self.scroll_until = direction, now
-        self.scroll_until = min(max(self.scroll_until, now) + abs(notches) * self.SCROLL_STEP,
+        if self.wheel_to(dy, dx):
+            return
+        sx = 1 if dx > 0 else -1 if dx < 0 else 0
+        sy = 1 if dy > 0 else -1 if dy < 0 else 0
+        if self.scroll_until is not None:
+            if not sx:
+                sx = self.scroll_sx
+            if not sy:
+                sy = self.scroll_sy
+        elif sy == 0 and sx:
+            # SteamVR's overlay mouse is mousewheel-style (Y). A horizontal-only swipe
+            # would otherwise sit on X and leave the home shelf still; right is wheel down.
+            sy = -sx
+        if self.scroll_until is None or sx != self.scroll_sx or sy != self.scroll_sy:
+            self.send(f"scroll {sx} {sy}", droppable=True)
+            self.scroll_sx, self.scroll_sy, self.scroll_until = sx, sy, now
+        self.scroll_until = min(max(self.scroll_until, now) + (abs(dx) + abs(dy)) * self.SCROLL_STEP,
                                 now + self.SCROLL_BACKLOG)
 
     def flush(self, now=None):
@@ -1011,6 +1031,7 @@ class Pointer:
         if self.scroll_until is not None and now >= self.scroll_until:
             self.send("scroll 0 0")
             self.scroll_until = None
+            self.scroll_sx = self.scroll_sy = 0
         if self.active and now - self.last_used > self.idle and now >= self.gaze_awake_until:
             self.send("hide idle")
             self.active = False
@@ -1056,6 +1077,7 @@ class Pointer:
         for command in releases:
             self.send(command)
         self.system_at = self.system_release = self.claim_at = self.claim_release = self.scroll_until = None
+        self.scroll_sx = self.scroll_sy = 0
         self.dx = self.dy = self.pending = 0
         self.gaze_awake_until = 0.0
         self.send("hide pause")
@@ -1156,7 +1178,7 @@ class PointerLease:
         self.current = None
         self.holding = False
         # Each Pointer's wheel_to (Pointer.scroll): the relay's, which sends notches to ft-screens.
-        self.wheel_to = lambda notches: False
+        self.wheel_to = lambda notches, hwheel=0: False
 
     def configure(self, on, sensitivity, idle, wake_counts, paused):
         """frametop.conf's pointer settings (pointer_settings), put in place."""
@@ -1293,6 +1315,7 @@ class Relay:
         self.kb = FullKeyboardLink()
 
         self.nodes = {}  # fd -> Node
+        self.magic = magicmouse.MagicMice(log)  # Magic Mouse 2 hidraw, surface -> wheel
         # Nodes already probed (rejected or open): path -> inode. A device that disconnects and
         # reconnects between two scans often gets the same event numbers back, so the path alone
         # would hide it; the re-created node has a new inode.
@@ -1397,13 +1420,14 @@ class Relay:
         except OSError:
             pass  # ft-screens not running
 
-    def wheel_to(self, notches):
+    def wheel_to(self, notches, hwheel=0):
         """The 3D mouse's wheel to ft-screens, while its laser is on a panel (Pointer.scroll):
-        every notch, at any speed, where SteamVR's joystick scrolls 20 steps a second at most."""
+        every notch, at any speed, where SteamVR's joystick scrolls 20 steps a second at most.
+        notches is REL_WHEEL (positive up), hwheel is REL_HWHEEL (positive right)."""
         if time.monotonic() >= self.wheel_until:
             return False
         try:
-            self.screens_sock.sendto(f"wheel {notches}".encode(), SCREENS)
+            self.screens_sock.sendto(f"wheel {notches} {hwheel}".encode(), SCREENS)
         except OSError:
             return False  # ft-screens not running, or behind: the joystick then
         return True
@@ -1974,6 +1998,7 @@ class Relay:
         os.close(node.fd)
         if node.wfd is not None:
             os.close(node.wfd)
+        self.magic.forget(node)
         del self.nodes[node.fd]
         self.seen.pop(node.path, None)
         log(f"released {node.name} ({node.path}): {reason}")
@@ -2318,7 +2343,7 @@ class Relay:
             # looks the controllers up again (game_pause.py).
             if self.lease.holding_changed():
                 self.pause.controllers_changed()
-            ready, _, _ = select.select(list(self.nodes) + [self.control], [], [],
+            ready, _, _ = select.select(list(self.nodes) + [self.control] + self.magic.fds(), [], [],
                                         self.typing_timeout(now, min(self.volume.timeout(now, pointer.timeout() if pointer else 0.5),
                                                                      self.pause.timeout(now), self.gamepad.timeout(now))))
             now = time.monotonic()
@@ -2328,6 +2353,8 @@ class Relay:
                     self.handle_control(now)
                 elif fd in self.nodes:  # (not dropped earlier in this batch: a host's "hostbye")
                     self.read_node(self.nodes[fd], now)
+                else:
+                    self.read_magic(fd, now)
 
     def scan(self, now):
         """Once a second: hosts gone quiet, keys no device holds, and event nodes come and gone."""
@@ -2366,6 +2393,7 @@ class Relay:
                 added = True
         if added:
             self.apply_roles()
+        self.magic.sync(self.nodes)
 
     def tick(self, now, pointer):
         """The timers, after each wait: pointer is the 3D mouse in use as the wait began."""
@@ -2492,6 +2520,24 @@ class Relay:
                     pointer.flush(now)
                 self.mouse.sync()
                 self.keyboard.sync()
+
+    def read_magic(self, fd, now):
+        """Wheel motions the Magic Mouse 2 hidraw has ready, as if they came from its mouse node."""
+        node, motions = self.magic.read(fd, self.nodes)
+        if not motions or node is None or node.role != "pointer":
+            return
+        pointer = self.lease.current
+        for code, value in motions:
+            self.broadcast(node, EV_REL, code, value, now)
+            self.held.tap = None
+            self.cancel_talk()
+            if pointer:
+                pointer.motion(code, value, now)
+            else:
+                self.mouse.emit(EV_REL, code, value)
+        if pointer:
+            pointer.flush(now)
+        self.mouse.sync()
 
 def main():
     can_grab = "--no-grab" not in sys.argv

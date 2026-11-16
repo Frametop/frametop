@@ -1059,7 +1059,8 @@ static void keys_state(struct server *s, char *reply, int size) {
 // "toplevels" (-> "ok <count>" and a line per KWin window: "<screen> <w>x<h> <commits>
 // <title>"), "input <screen> move|down|up|leave [x y [left|right|middle]]" (pointer input
 // as if from that panel, x and y in its pixels; for tests, mostly with --no-vr),
-// "key <code> <value>", "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
+// "key <code> <value>", "wheel DY [DX]" (3D mouse notches, positive DY up, DX right; from the
+// input relay while the laser is on a panel), "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
 // SteamVR's Gamepad mode is for), "vrkeyboard show|hide|toggle|close" (Full Keyboard,
 // from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
 // "frunner on|off" (frunner's search has the typing; see spot_open), "keys" (what's held:
@@ -1075,7 +1076,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
     while ((n = recvfrom(fd, buf, sizeof buf - 1, MSG_DONTWAIT, (struct sockaddr *)&from, &len)) > 0) {
         buf[n] = 0;
         unsigned code;
-        int value, index, w, h;
+        int value, index, w, h, hwheel;
         double scale;
         char tail;
         if (strcmp(buf, "controller-click?") == 0) {
@@ -1120,16 +1121,21 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             if (pad >= 0 && ft_remote_is(pad)) ft_remote_pad(pad, buf);
             len = sizeof from;
             continue;
-        } else if (sscanf(buf, "wheel %d", &value) == 1) {
+        } else if ((hwheel = 0), sscanf(buf, "wheel %d %d", &value, &hwheel) >= 1) {
             // The 3D mouse's wheel, from the input relay while we said its laser is on a panel
-            // (keys_update): notches, positive up. No reply. Scrolled as SteamVR's would be.
+            // (keys_update): DY notches, positive up; optional DX, positive right. No reply.
+            // "wheel 3" is still only vertical. Scrolled as SteamVR's would be.
             const int screen = ft_vr_mouse_screen();
             // (during a carry it's the carried panel's, whatever panel the laser is on: ft_vr_carry_wheel)
-            if (value && !ft_vr_carry_wheel(value)) {
+            if (value && ft_vr_carry_wheel(value)) {
+                len = sizeof from;
+                continue;
+            }
+            if (value || hwheel) {
                 if (screen >= 0) {
-                    struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value};
+                    struct ft_event e = {.type = FT_SCROLL, .screen = screen, .dy = -value, .dx = -hwheel};
                     handle_vr_event(&e, s);
-                } else {
+                } else if (value) {
                     // a press just started, before the relay heard (keys_update, every ~100 ms): not lost
                     ft_vr_held_wheel(value, handle_vr_event, s);
                 }

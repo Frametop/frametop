@@ -217,6 +217,36 @@ int main() {
         b.RestoreAll({{14, line(0, 0, 1, 0)}});   // a set again: a new profile, its columns first
         check("a set again starts over", b.Grid().Cols()[0].cells[0].id == 14);
     }
+    // --- council pass 3: saved columns with gaps (panels the profile doesn't keep), and changes between set and add
+    {
+        auto order = [](const dashtiles::Board &b) {
+            std::string o;
+            for (const auto &c : b.Grid().Cols()) {
+                o += "[";
+                for (const auto &cell : c.cells) o += " " + std::to_string(cell.id);
+                o += " ]";
+            }
+            return o;
+        };
+        auto line = [](int col, int row, int alone) {
+            return "tile 0 " + std::to_string(col) + " " + std::to_string(row) + " " + std::to_string(alone) + " 1.000 1.000 0.00";
+        };
+        dashtiles::Board g;   // saved as [ 0 ][ 50 ][ 1 2 ]: 50 a floating window, not in the profile
+        g.RestoreAll({{0, line(0, 0, 1)}, {1, line(2, 0, 0)}, {2, line(2, 1, 0)}});
+        check("gaps: the stack kept, the columns closed up", order(g) == "[ 0 ][ 1 2 ]");
+        dashtiles::Board r;
+        for (int id : {14, 13, 12, 11, 10}) r.Anchor(id, -1, false);
+        r.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
+        r.Restore(60, line(1, 0, 1), -1);   // an app back from its memory between the two
+        r.RestoreAll({{13, line(3, 0, 1)}, {14, line(4, 0, 1)}}, true);
+        check("set, an app, add: the profile's order, then the app", order(r) == "[ 10 ][ 11 ][ 12 ][ 13 ][ 14 ][ 60 ]");
+        dashtiles::Board q;
+        for (int id : {14, 13, 12, 11, 10, 70}) q.Anchor(id, -1, false);
+        q.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
+        q.Unanchor(11);   // gone between the two
+        q.RestoreAll({{13, line(3, 0, 1)}, {14, line(4, 0, 1)}}, true);
+        check("set, a panel goes, add: the rest in order", order(q) == "[ 10 ][ 12 ][ 13 ][ 14 ][ 70 ]");
+    }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;
 }

@@ -244,29 +244,44 @@ public:
 
     // A profile's tiles back, each (panel, Remember's line) in the order given (by column and
     // row): its columns first, as it saved them, then the tiles it doesn't name, each column as it
-    // was. `more`: the rest of the same profile (one too long for a command goes in several), after
-    // the columns the ones before put back. A line that isn't one leaves that panel as it is. The
-    // number of lines taken.
+    // was. The saved column numbers count panels the profile doesn't have (a floating window, a
+    // remote display that isn't on): its columns close up, stacks kept. `more`: the rest of the same
+    // profile (one too long for a command goes in several): the whole of it is put back again, as
+    // if it had come at once, whatever changed between (minus its panels that went). A line that
+    // isn't one leaves that panel as it is. The number of lines taken.
     int RestoreAll(const std::vector<std::pair<int, std::string>> &saved, bool more = false) {
         std::vector<std::pair<int, std::string>> good;
+        if (more)
+            for (const auto &[id, line] : batch_)
+                if (Anchored(id)) good.push_back({id, line});   // (the ones gone since: left out)
+        int taken = 0;
         for (const auto &[id, line] : saved) {
             Board scratch;
-            if (scratch.Restore(id, line, -1)) good.push_back({id, line});
+            if (!scratch.Restore(id, line, -1)) continue;
+            ++taken;
+            for (auto g = good.begin(); g != good.end();) g = g->first == id ? good.erase(g) : std::next(g);
+            good.push_back({id, line});
         }
+        batch_ = good;
         tilegrid::Grid rest = grid_;
         for (const auto &[id, line] : good) rest.Remove(id);
-        const size_t keep = more ? std::min(restored_, rest.Cols().size()) : 0;   // (this profile's so far)
         grid_ = tilegrid::Grid{};
-        for (size_t c = 0; c < rest.Cols().size(); ++c)
-            if (c < keep) AppendColumn(grid_, rest.Cols()[c]);
-        for (const auto &[id, line] : good) Restore(id, line, -1);
-        restored_ = grid_.Cols().size();
-        for (size_t c = keep; c < rest.Cols().size(); ++c) AppendColumn(grid_, rest.Cols()[c]);
-        return int(good.size());
+        std::map<int, int> cols;   // saved column -> its column now
+        for (const auto &[id, line] : good) Restore(id, Closed(line, cols), -1);
+        for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
+        return taken;
     }
 
 private:
-    size_t restored_ = 0;   // RestoreAll: the columns its profile has put back so far
+    std::vector<std::pair<int, std::string>> batch_;   // RestoreAll: the profile put back last
+
+    // A tile line with its saved column as the next one free (`cols`: the ones seen so far).
+    static std::string Closed(const std::string &line, std::map<int, int> &cols) {
+        int stay = 0, col = 0, n = 0;
+        if (std::sscanf(line.c_str(), "tile %d %d%n", &stay, &col, &n) != 2 || col < 0) return line;
+        const auto it = cols.emplace(col, int(cols.size())).first;
+        return "tile " + std::to_string(stay) + " " + std::to_string(it->second) + line.substr(size_t(n));
+    }
 
     static void AppendColumn(tilegrid::Grid &g, const tilegrid::Col &c) {
         const int at = int(g.Cols().size());
@@ -316,8 +331,10 @@ public:
         return it == m_.end() ? std::string() : it->second.state;
     }
     // Its app or display is here again: the last to go when the memory is full.
-    void Used(const std::string &key) {
-        if (auto it = m_.find(Clean(key)); it != m_.end()) it->second.seq = ++seq_;
+    // False if it isn't remembered.
+    bool Used(const std::string &key) {
+        const auto it = m_.find(Clean(key));
+        return it != m_.end() && (it->second.seq = ++seq_);
     }
     // True when it changed (the same again only counts as a use).
     bool Set(const std::string &key, const std::string &state) {
@@ -362,7 +379,7 @@ public:
 private:
     struct Entry {
         std::string state;
-        uint64_t seq = 0;   // when it was set (the one set longest ago goes first)
+        uint64_t seq = 0;   // when it was set or used last (the one used longest ago goes first)
     };
     std::map<std::string, Entry> m_;
     uint64_t seq_ = 0;

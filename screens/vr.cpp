@@ -2377,7 +2377,7 @@ void TileKnown(int i, const std::string &key) {
         TileUnanchor(i, "another app on it");   // (left in the room, off the grid; nothing remembered for it)
     }
     g_tileKey[i] = k;
-    g_tileMemory.Used(k);
+    if (g_tileMemory.Used(k)) SaveTileMemory();   // (its use kept over a restart: the last to go when it's full)
     const std::string line = g_tileMemory.Get(k);
     if (line.empty()) return;
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;

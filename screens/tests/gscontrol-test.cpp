@@ -183,6 +183,39 @@ int main() {
         c.On(Ev(Event::Unmapped, Win(1, Kind::Main)), 0);
         CHECK(x.Logged("key 1 25 0 up") && !c.Typing());
     }
+    // --- a dialog's own menu (council pass 3): the typing back to the dialog, not the app behind it
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        c.On(Ev(Event::Created, Win(1, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+        c.Press(kFirst, 0, 1, true, 1, 1), c.Press(kFirst, 0, 1, false, 1, 1);
+        // a dialog the app opens takes the typing (as a window manager gives it)
+        c.On(Ev(Event::Created, Win(2, Kind::Popup, 400, 300, 1)), 0), c.On(Ev(Event::Mapped, Win(2, Kind::Popup, 400, 300, 1)), 0);
+        x.log.clear();
+        CHECK(c.Key(30, 1, false, {}) && x.Logged("key 2 38 0 down"));
+        c.Key(30, 0, false, {});
+        // its right-click menu (override-redirect: for nobody), an item picked
+        c.On(Ev(Event::Created, Win(3, Kind::Popup, 150, 80)), 0), c.On(Ev(Event::Mapped, Win(3, Kind::Popup, 150, 80)), 0);
+        const int menuSub = 2;
+        CHECK(c.Windows().PopupWindow(kFirst, menuSub) == 3);
+        c.Press(kFirst, menuSub, 1, true, 5, 5), c.Press(kFirst, menuSub, 1, false, 5, 5);
+        c.On(Ev(Event::Unmapped, Win(3, Kind::Popup)), 0);
+        x.log.clear();
+        CHECK(c.Key(31, 1, false, {}) && x.Logged("key 2 39 0 down"));
+        c.Key(31, 0, false, {});
+        // its dropdown (transient for it), the dialog clicked by the app first: back to the dialog
+        c.On(Ev(Event::Created, Win(4, Kind::Popup, 150, 80, 2)), 0), c.On(Ev(Event::Mapped, Win(4, Kind::Popup, 150, 80, 2)), 0);
+        c.On(Ev(Event::Gone, Win(4, Kind::Popup)), 0);
+        x.log.clear();
+        CHECK(c.Key(32, 1, false, {}) && x.Logged("key 2 40 0 down"));
+        c.Key(32, 0, false, {});
+        // the dialog closed: back to the app
+        c.On(Ev(Event::Gone, Win(2, Kind::Popup)), 0);
+        x.log.clear();
+        CHECK(c.Key(33, 1, false, {}) && x.Logged("key 1 41 0 down"));
+        c.Key(33, 0, false, {});
+    }
     // --- off: buttons and keys held let go of, windows untagged
     {
         FakeX x;

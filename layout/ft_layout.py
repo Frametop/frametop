@@ -1584,12 +1584,49 @@ def capture_profile(layout, name):
             remote[d["id"]]["hidden"] = bool(d.get("hidden"))
     import ft_desktopless
     ft_desktopless.capture(layout, profile)
+    capture_tiles(layout, profile, name)
     reply = ask_float("windows")
     if reply and reply.startswith("ok "):
         profile["windows"] = json.loads(reply[3:])
         log(f"profile {name!r}: {len(profile['windows'])} windows, hidden screens {hidden or 'none'}")
     else:
         log(f"profile {name!r}: the apps weren't saved ({reply or 'ft-floatd is not running'})")
+
+
+def tile_panels(layout):
+    """{panel number: what it is} for the panels a profile keeps the dashboard tiles of
+    (layout_tiles.py): the desktop's screens and the remote displays connected."""
+    panels = {i + 1: f"screen:{i + 1}" for i in range(native_count(layout))}
+    panels.update((n, f"remote:{d['id']}") for n, _, d in remote_displays(layout) if not d.get("off") and d.get("id"))
+    return panels
+
+
+def capture_tiles(layout, profile, name):
+    """The screens anchored to the dashboard now, and where they tile, into a profile (kept as
+    they were if ft-screens doesn't answer, or is older than the tiles)."""
+    if backend() != "screens":
+        return
+    import layout_tiles
+    try:
+        profile["tiles"] = layout_tiles.capture(screens_socket().ask, tile_panels(layout))
+    except (RuntimeError, ValueError) as e:
+        log(f"profile {name!r}: the dashboard tiles weren't saved ({e})")
+
+
+def use_tiles(layout, name):
+    """A profile's dashboard tiles back, after its screens are placed (a profile saved before
+    them leaves the tiles as they are)."""
+    saved = layout.get("profiles", {}).get(name, {}).get("tiles")
+    if backend() != "screens" or not isinstance(saved, list):
+        return
+    import layout_tiles
+    saved = [t for t in saved if isinstance(t, list) and len(t) == 2 and all(isinstance(v, str) for v in t)]
+    try:
+        for reply in layout_tiles.restore(screens_socket().ask, saved, tile_panels(layout)):
+            if ", " in reply:   # "ok N set, M not": ones it couldn't place
+                log(f"dashboard tiles: {reply[3:]}")
+    except RuntimeError as e:
+        log(f"dashboard tiles: {e}")
 
 
 def use_hidden(layout, name):
@@ -2033,6 +2070,7 @@ def main(argv):
                     apply(wait)
                 except RuntimeError as e:   # (no head pose with the headset off): the scales still go
                     log(f"not arranged now: {e}")
+                use_tiles(layout, name)
                 if streams_only():
                     ft_desktopless.resume(name, mode=mode)
                     return 0  # no KWin to scale, no Plasma to open apps in
@@ -2171,6 +2209,7 @@ def main(argv):
                             pass
                     else:
                         kwin_follow()
+                    use_tiles(layout, argv[2])  # (anchoring needs no head pose)
                     open_apps(argv[2])  # floating windows go relative to the screens, wherever they are
                     ft_desktopless.resume(argv[2], wait=10, mode=mode)
                 else:

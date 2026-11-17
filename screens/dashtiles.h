@@ -122,8 +122,9 @@ public:
         if (Anchored(id)) return;
         spots_[id].stay = stay;
         if (grid_.Has(focused)) return grid_.Add(id, focused);
-        // none: the end that brings the strip's middle nearer in front (its left one when it leans right)
-        grid_.AddAtEnd(id, last_.split >= 0 && tiling::WrapNear((last_.az0 + last_.az1) / 2, 0) > 0);
+        // none: the end that brings the strip's middle nearer in front (its left one when it leans
+        // right; centred, the right one, however the sums round)
+        grid_.AddAtEnd(id, last_.split >= 0 && tiling::WrapNear((last_.az0 + last_.az1) / 2, 0) > 1e-6);
     }
     // Not anchored any more (or gone). False if it wasn't.
     bool Unanchor(int id) {

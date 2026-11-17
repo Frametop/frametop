@@ -47,7 +47,7 @@ class DashTiles(unittest.TestCase):
 
     def test_defaults(self):
         self.assertFalse(self.t.stay)
-        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (0, 1.6, 40, 55))
+        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (0, 1.9, 40, 55))
 
     def test_stay_written_and_sent(self):
         self.t.setStay(True)
@@ -88,7 +88,7 @@ class DashTiles(unittest.TestCase):
         with open(fds.CONF_PATH, "a") as f:
             f.write("DASH_TILE_MAX_TOP_DEG=95\nDASH_TILE_RADIUS=junk\n")
         self.assertEqual(self.t.maxTopDeg, 55)
-        self.assertEqual(self.t.radius, 1.6)
+        self.assertEqual(self.t.radius, 1.9)
 
     def test_not_sent_without_ft_screens(self):
         self.b._running = False

@@ -1571,7 +1571,7 @@ Item {
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                             onMoved: backend.dashTiles.setRadius(value)
                         }
-                        Controls.Label { text: tileRadius.value.toFixed(2) + " m" }
+                        Controls.Label { text: tileRadius.value.toFixed(2) + " m to their corners" }
                     }
                 }
 

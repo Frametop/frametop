@@ -50,7 +50,7 @@ struct Cmd {
     char mod[16] = {}, b1[16] = {}, b2[16] = {}, b3[16] = {};  // windowdrag
     double da = 0, db = 0;                // carryturn
     char appId[128] = {};                 // floatapp: the window's app (ft-floatd's desktop file name)
-    const char *rest = nullptr;           // tiles: "clear" or "set ..." (what follows "tiles ")
+    const char *rest = nullptr;           // tiles: "clear", "gaps" or "set ..." (what follows "tiles ")
 };
 
 // Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands. A verb's case
@@ -155,7 +155,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "anchor %15s %15s", c.word, c.hand) == 2) return Anchor;
     if (std::sscanf(cmd, "stay %15s %15s", c.word, c.hand) == 2) return Stay;
     if (std::strcmp(cmd, "tiles") == 0) return Tiles;
-    if (!std::strcmp(cmd, "tiles clear") ||
+    if (!std::strcmp(cmd, "tiles clear") || !std::strcmp(cmd, "tiles gaps") ||
         ((!std::strncmp(cmd, "tiles set", 9) || !std::strncmp(cmd, "tiles add", 9)) && (!cmd[9] || cmd[9] == ' ')))
         return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..." ("add": more of the same set)
     if (std::sscanf(cmd, "tile %15s", c.word) == 1) return Tile;

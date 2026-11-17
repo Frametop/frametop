@@ -94,6 +94,7 @@ struct Screen {
     int width = 0, height = 0;    // current buffer size (mouse scale)
     double metres = 1;
     double curve = 0;             // cylinder radius in metres; 0 = flat
+    double tileCurve = 0;         // its own curve while it's tiled flat (tiling::FlatWhileTiled)
     const void *shown = nullptr;  // a frame arrived
     bool visible = false;         // shown in VR right now
     bool alone = false;           // hidden on its own (conceal <screen>), whatever the mode
@@ -309,6 +310,7 @@ void SendStretch(Screen &s);
 std::vector<uint8_t> AnchorTexture(int n, int lit);
 const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dashboard pins ride on it)
 Mat DashFrame();
+Mat OnSurface(const Screen &s, double u, double v, double dz);   // a point on its surface (along the arc when curved)
 double DashWidth();   // the bar's width in the room, metres (0: not known)
 uint32_t ButtonBit(uint32_t linuxButton);
 uint32_t LinuxButton(uint32_t vrButton);
@@ -327,7 +329,7 @@ struct TileSetting {
     double *value;
     double lo, hi;
 };
-std::array<TileSetting, 4> TileSettings();
+std::array<TileSetting, 5> TileSettings();
 bool SetTileSetting(const char *name, double value);   // false: not one, or out of its range
 extern dashtiles::Memory g_tileMemory;   // each app's or display's last state (its key's)
 void LoadTileMemory();

@@ -90,7 +90,7 @@ void Events(const steamwin::Tracker &t, steamcdp::Pages &pages) {
                 break;
             }
             case vr::VREvent_ScrollDiscrete: pages.Wheel(w.title, int(std::lround(ev.data.scroll.ydelta))); break;
-            case vr::VREvent_FocusLeave: pages.LetGo(); break;
+            case vr::VREvent_FocusLeave: pages.Leave(w.title); break;
             default: break;
         }
     }

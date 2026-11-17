@@ -17,9 +17,9 @@ static void check(const char *what, bool ok) {
 static bool near(double a, double b, double eps = 1e-6) { return std::fabs(a - b) <= eps; }
 
 // A placed tile's four corners in the group frame.
-static void corners(const tiling::Placed &t, double radius, double out[4][3]) {
+static void corners(const tiling::Placed &t, double out[4][3]) {
     double m[3][4];
-    tiling::Pose(t.azDeg, t.elDeg, radius, m);
+    tiling::Pose(t.azDeg, t.elDeg, t.distM, m);   // (its middle there: its corners on the sphere)
     const double su[4] = {-1, 1, -1, 1}, sv[4] = {-1, -1, 1, 1};
     for (int k = 0; k < 4; ++k)
         for (int r = 0; r < 3; ++r)
@@ -28,10 +28,10 @@ static void corners(const tiling::Placed &t, double radius, double out[4][3]) {
 
 // No corner of one tile inside another's azimuth/elevation span seen from the centre: neighbours
 // don't overlap anywhere on the sphere (a corner's own azimuth inside its column's span).
-static bool cornersInColumns(const tiling::Layout &l, double radius) {
+static bool cornersInColumns(const tiling::Layout &l) {
     for (const auto &t : l.tiles) {
         double c[4][3];
-        corners(t, radius, c);
+        corners(t, c);
         for (auto &pt : c) {
             double az, el;
             tiling::Direction(pt, &az, &el);
@@ -99,7 +99,7 @@ int main() {
             for (const auto &u : l.tiles)
                 if (t.col + 1 == u.col) ordered = ordered && t.az1 + q.gapDeg * l.shrink - 1e-9 <= u.az0;
         check("columns: left to right, a gap between", ordered);
-        check("columns: no corner pokes into the next column, even at 70 degrees up", cornersInColumns(l, q.radius));
+        check("columns: no corner pokes into the next column, even at 70 degrees up", cornersInColumns(l));
         bool stacked = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
@@ -117,7 +117,7 @@ int main() {
         check("resizable: the lower one no narrower (the circles round you are wider lower down)", b.widthM >= a.widthM - 1e-9);
         check("resizable: rows by weight (1:3)", near((b.el1 - b.el0) / (a.el1 - a.el0), 3, 1e-6));
         check("resizable: its column kept the 30 degrees asked for", near(a.az1 - a.az0, 30));
-        check("columns: no corner overlap with mixed kinds", cornersInColumns(l, q.radius));
+        check("columns: no corner overlap with mixed kinds", cornersInColumns(l));
     }
     // --- past a full turn: shrinks to fit
     {
@@ -129,7 +129,7 @@ int main() {
         check("overflow: the strip fits in a turn", l.az1 - l.az0 <= q.maxSpanDeg - gap + 1e-6);
         check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (q.maxSpanDeg - gap));
         check("overflow: shrunk", l.shrink < 1);
-        check("overflow: still no corner overlap", cornersInColumns(l, q.radius));
+        check("overflow: still no corner overlap", cornersInColumns(l));
         check("overflow: the band shrank with it (shapes kept)", l.el1 - l.el0 < q.heightDeg);
     }
     // --- the clamps' far end: a band at -85 with dozens of columns still fits a turn (follow-up:
@@ -142,7 +142,7 @@ int main() {
         const auto l = tiling::Arrange(cols, q);
         char what[96];
         std::snprintf(what, sizeof what, "extreme: %d columns at -85 fit a turn, no corner overlap", n);
-        check(what, l.az1 - l.az0 <= q.maxSpanDeg + 1e-6 && l.shrink > 0 && cornersInColumns(l, q.radius));
+        check(what, l.az1 - l.az0 <= q.maxSpanDeg + 1e-6 && l.shrink > 0 && cornersInColumns(l));
     }
     // --- the default band (vrtiles.cpp: its middle at your eyes): an ultrawide desktop and a laptop's
     // display in front of you at about their own sizes, not up at the cap (2026-11-16: the old band
@@ -151,7 +151,8 @@ int main() {
         const tiling::Params q = p;
         const auto l = tiling::Arrange({col({{1, 3440.0 / 1440, true, 1}}), col({{2, 2560.0 / 1600, true, 1}})}, q);
         check("default band: centred on your eyes", near(l.tiles[0].elDeg, 0) && near(l.tiles[1].elDeg, 0));
-        check("default band: about a desktop's size (1.0-1.2 m tall)", l.tiles[0].heightM > 1.0 && l.tiles[0].heightM < 1.2);
+        const double tall = tiling::Deg(2 * std::atan2(l.tiles[0].heightM / 2, l.tiles[0].distM));   // (its corners on the sphere: a wide one nearer)
+        check("default band: about a desktop's size (35-40 degrees tall, about 1 m at 1.4 m)", tall > 35 && tall < 40 && l.tiles[0].heightM > 0.9);
         check("default band: the pair within 150 degrees round you", l.az1 - l.az0 < 150 && near(l.az0, -l.az1));
     }
     // --- desktops at the default band: in front of you, at full size (council, 2026-11-16: the old
@@ -168,7 +169,7 @@ int main() {
             std::snprintf(what, sizeof what, "desktops: %d at full size, %.0f degrees round you", n, l.az1 - l.az0);
             check(what, near(l.shrink, 1) && near(l.az1 - l.az0, 2 * one * n + q.gapDeg * (n - 1), 1e-6));
             std::snprintf(what, sizeof what, "desktops: %d, the corners in their columns", n);
-            check(what, cornersInColumns(l, q.radius));
+            check(what, cornersInColumns(l));
         }
         std::vector<tiling::Column> two = {col({{1, 16.0 / 9, true, 1}}), col({{2, 16.0 / 9, true, 1}})};
         const auto l = tiling::Arrange(two, q);
@@ -185,7 +186,7 @@ int main() {
             for (const auto &t : l.tiles) sane = sane && t.widthM > 0.05 && t.heightM > 0.05 && std::fabs(t.azDeg) < 180;
             char what[96];
             std::snprintf(what, sizeof what, "middle %.0f up: band %.0f..%.0f, sizes positive, in front", middle, l.el0, l.el1);
-            check(what, sane && cornersInColumns(l, q.radius));
+            check(what, sane && cornersInColumns(l));
         }
         q.middleDeg = 30, q.maxTopDeg = 20, q.heightDeg = 60;   // settings at odd ends
         const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
@@ -225,7 +226,7 @@ int main() {
         const auto full = tiling::Arrange(many, q);
         check("slot: past a turn the columns shrink, the slot doesn't", full.shrink < 1 && clear(full, 10, 50) &&
                                                                           full.az1 - full.az0 <= q.maxSpanDeg + 1e-6 &&
-                                                                          cornersInColumns(full, q.radius));
+                                                                          cornersInColumns(full));
         const auto right = tiling::Arrange(many, q, 0);   // (all right of the menu: the strip runs past 180)
         const auto &last = right.tiles.back();   // (past 180 degrees: seen from the head, -180 + ...)
         d = tiling::DropAt(right, many, last.azDeg - 360, last.elDeg);
@@ -394,15 +395,44 @@ int main() {
         const tiling::Placed &a = l.tiles[0], &b = l.tiles[1];
         // half the angle a panel w wide covers from the centre at r, curved round R (0 flat): OpenVR
         // curves it toward its front, the cylinder's axis R in front of it
-        const auto half = [&](double w, double R) {
-            if (R <= 0) return tiling::Deg(std::atan2(w / 2, q.radius));
-            return tiling::Deg(std::atan2(R * std::sin(w / 2 / R), q.radius - R + R * std::cos(w / 2 / R)));
+        const auto half = [&](const tiling::Placed &t, double R) {
+            if (R <= 0) return tiling::Deg(std::atan2(t.widthM / 2, t.distM));
+            return tiling::Deg(std::atan2(R * std::sin(t.widthM / 2 / R), t.distM - R + R * std::cos(t.widthM / 2 / R)));
         };
-        const double flatGap = (b.azDeg - half(b.widthM, 0)) - (a.azDeg + half(a.widthM, 0));
-        const double curvedGap = (b.azDeg - half(b.widthM, 1.5)) - (a.azDeg + half(a.widthM, 1.5));
+        const double flatGap = (b.azDeg - half(b, 0)) - (a.azDeg + half(a, 0));
+        const double curvedGap = (b.azDeg - half(b, 1.2)) - (a.azDeg + half(a, 1.2));
         check("flat: two flat tiles keep the gap between them", near(flatGap, q.gapDeg, 1e-6));
-        check("flat: curved round 1.5 m they'd overlap", curvedGap < 0);
-        check("flat: the gap is 3 degrees, about 8 cm at 1.6 m", near(q.gapDeg, 3) && near(tiling::Chord(q.radius, q.gapDeg), 0.084, 1e-3));
+        check("flat: curved round 1.2 m they'd overlap", curvedGap < 0);
+        check("flat: the gap is 3 degrees, about 8 cm at 1.6 m", near(q.gapDeg, 3) && near(tiling::Chord(1.6, q.gapDeg), 0.084, 1e-3));
+    }
+    // --- every tile's corners on the sphere, not its middle: different widths, the corners at one depth
+    {
+        tiling::Params q;
+        const auto allOn = [&](const tiling::Layout &l, double r) {
+            for (const auto &t : l.tiles) {
+                double c[4][3];
+                corners(t, c);
+                for (auto &pt : c)
+                    if (!near(std::sqrt(pt[0] * pt[0] + pt[1] * pt[1] + pt[2] * pt[2]), r, 1e-9)) return false;
+            }
+            return true;
+        };
+        const tiling::Layout l = tiling::Arrange({col({{1, 3440.0 / 1440}}), col({{2, 16.0 / 9}}), col({{3, 1.0, false}})}, q);
+        check("corners: a wide, a 16:9 and a resizable one: every corner at the radius", allOn(l, q.radius));
+        check("corners: the wider one nearer", l.tiles[0].distM < l.tiles[1].distM && l.tiles[1].distM < q.radius);
+        check("corners: a 16:9 one's middle about 1.6 m away", near(l.tiles[1].distM, 1.6, 0.05));
+        check("corners: and they still don't reach past their columns", cornersInColumns(l));
+        tiling::Params hi = q;
+        hi.middleDeg = 30, hi.heightDeg = 50;
+        const tiling::Layout s2 = tiling::Arrange({col({{1, 1.6}, {2, 2.4}}), col({{3, 1.0, false}, {4, 1.0, false}, {5, 0.7}})}, hi);
+        check("corners: stacked rows high up: every corner at the radius", allOn(s2, hi.radius));
+        check("corners: ...and inside their columns", cornersInColumns(s2));
+        // seen from the centre, each looks as big as it did with its middle at the radius
+        tiling::Placed one;
+        one.widthM = 1.2, one.heightM = 0.7;
+        const double before = std::atan2(one.widthM / 2, q.radius);
+        tiling::CornersOnSphere(q.radius, &one);
+        check("corners: the same span seen from the centre", near(std::atan2(one.widthM / 2, one.distM), before, 1e-12));
     }
     return failed ? 1 : 0;
 }

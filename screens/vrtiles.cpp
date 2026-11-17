@@ -131,27 +131,42 @@ void RetileDash(bool resize) {
     FlattenTiles();
     if (!g_tileGroupSet || !Dash().ever) return;
     const auto &l = g_tiles.Arrange(TileInfo);
+    const Mat group = Mul(DashFrame(), g_tileGroupRel);   // (its origin: the centre)
     for (const tiling::Placed &p : l.tiles) {
         auto it = g_screens.find(p.id);
         if (it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
+        const int pw = PictureW(s), ph = PictureH(s);
         if (!s.floating && !s.gsapp) {
             if (std::fabs(s.metres - p.widthM) > 0.002) SetWidth(s, p.widthM);
-        } else if (resize && s.mpp > 0) {
-            const int w = int(std::lround(p.widthM / s.mpp)), h = int(std::lround(p.heightM / s.mpp));
-            const int pw = PictureW(s), ph = PictureH(s);
-            if (w > 0 && h > 0 && (std::abs(w - pw) > std::max(4, pw / 33) || std::abs(h - ph) > std::max(4, ph / 33))) {
-                if (s.gsapp) {
-                    GsResize(p.id, w, h);   // (its new size comes back as the window's: GsGeometry)
-                } else {
-                    Stretch(s, w, h);
-                    SendStretch(s);
+        } else if (pw > 0 && s.metres > 0) {
+            if (resize) {
+                // its pixels as many a degree as now: a tile nearer than it is gets fewer metres a pixel
+                Mat now;
+                const double d = ScreenPose(s, &now) ? std::hypot(now.m[0][3] - group.m[0][3], now.m[1][3] - group.m[1][3],
+                                                                  now.m[2][3] - group.m[2][3])
+                                                     : p.distM;
+                const double perPx = s.metres / pw * p.distM / std::max(0.1, d);
+                const int w = int(std::lround(p.widthM / perPx)), h = int(std::lround(p.heightM / perPx));
+                if (w > 0 && h > 0 && (std::abs(w - pw) > std::max(4, pw / 33) || std::abs(h - ph) > std::max(4, ph / 33))) {
+                    if (s.gsapp) {
+                        GsResize(p.id, w, h);   // (its new size comes back as the window's: GsGeometry)
+                    } else {
+                        s.mpp = p.widthM / w;   // (so the stretch makes it its tile's width)
+                        Stretch(s, w, h);
+                        SendStretch(s);
+                    }
                 }
+            }
+            // its tile's width with the pixels it has (an app's answer, or a resize too small to ask for)
+            if (s.stretchW <= 0 && std::fabs(s.metres - p.widthM) > 0.002) {
+                if (s.floating) s.mpp = p.widthM / pw;
+                SetWidth(s, p.widthM);
             }
         }
         double m[3][4];
-        tiling::Pose(p.azDeg, p.elDeg, g_tiles.params.radius, m);
+        tiling::Pose(p.azDeg, p.elDeg, p.distM, m);
         PinIn(s, kDashboard, Mul(g_tileGroupRel, ToMat(m)), levelpin::Rigid);
     }
     for (const int id : g_tiles.Ids()) {
@@ -196,7 +211,7 @@ bool Regroup() {
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
 std::array<TileSetting, 5> TileSettings() {
     return {{{"DASH_TILE_RAISE_DEG", &g_tileRaiseDeg, -30, 30},   // the band's middle above your eyes
-             {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 4},   // the sphere's, metres
+             {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 4},   // the tiles' corners from you, metres
              {"DASH_TILE_HEIGHT_DEG", &g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120},
              {"DASH_TILE_MAX_TOP_DEG", &g_tiles.params.maxTopDeg, 20, 80},   // the column height cap
              {"DASH_TILE_GAP_DEG", &g_tiles.params.gapDeg, 0, 10}}};   // between tiles, round you and up

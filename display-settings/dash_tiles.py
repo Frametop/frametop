@@ -23,7 +23,7 @@ GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
 # key: (default, lo, hi), as screens/vrtiles.cpp's TileSettings() and tiling::Params have them
 NUMBERS = {
     "DASH_TILE_RAISE_DEG": (0.0, -30.0, 30.0),     # the band's middle above your eyes
-    "DASH_TILE_RADIUS": (1.6, 0.8, 4.0),           # metres from your head
+    "DASH_TILE_RADIUS": (1.9, 0.8, 4.0),           # metres from your head to the tiles' corners
     "DASH_TILE_HEIGHT_DEG": (40.0, 12.0, 120.0),   # how tall the band is asked to be
     "DASH_TILE_MAX_TOP_DEG": (55.0, 20.0, 80.0),   # ...but its top never higher (the column cap)
 }

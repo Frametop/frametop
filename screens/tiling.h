@@ -17,6 +17,13 @@
 // when the strip centred in front of you would reach it, with the split that puts the strip's
 // middle nearest in front of you. Past a full turn round you everything shrinks until it fits.
 //
+// Every panel's corners are `radius` from the centre, not its middle (user, 2026-11-17: "make the
+// distances of the displays be based off the edges and not the center ... some are wider than
+// others"): laid out at the radius, each one then moves along its own line from the centre, and
+// grows or shrinks with it, till its corners are there. Seen from the centre nothing changes (every
+// span and gap is the same), but a wider panel comes nearer, and neighbours' corners meet at the
+// same depth.
+//
 // Every tiled panel is flat: the spans here are a flat panel's, and a curved one reaches further
 // round you than its column (user, 2026-11-17: tiles "should stay the same distance around each
 // other, not overlap"; a desktop curved 1.5 m round ran 9 degrees into its neighbour).
@@ -56,7 +63,7 @@ struct Column {
 };
 
 struct Params {
-    double radius = 1.6;        // metres: the sphere's (the dashboard's distance)
+    double radius = 1.9;        // metres: the sphere's, the tiles' corners on it (a 16:9 one's middle 1.6 m away)
     double middleDeg = 0;       // the band's middle, up from your eyes
     double heightDeg = 40;      // how tall the band is asked to be (a desktop at about its size)
     double maxTopDeg = 55;      // ...but never past this up or down (the column height cap)
@@ -73,6 +80,7 @@ struct Placed {
     int col = 0, row = 0;
     double azDeg = 0, elDeg = 0;          // its centre
     double widthM = 0, heightM = 0;       // its size, metres
+    double distM = 0;                     // its middle from the centre (its corners: Params::radius)
     double az0 = 0, az1 = 0;              // its column's span round you
     double el0 = 0, el1 = 0;              // its row's span, bottom to top
 };
@@ -100,6 +108,14 @@ inline bool FlatWhileTiled(bool tiled, double *curve, double *kept) {
     if (back) *curve = *kept;
     *kept = 0;
     return back;
+}
+
+// A panel laid out at `radius` (its middle there, facing the centre) moved along its line from the
+// centre, its size with it, till its corners are at `radius`: the same spans seen from the centre.
+inline void CornersOnSphere(double radius, Placed *pl) {
+    const double u = pl->widthM / (2 * radius), v = pl->heightM / (2 * radius);
+    const double f = 1 / std::sqrt(1 + u * u + v * v);
+    pl->distM = radius * f, pl->widthM *= f, pl->heightM *= f;
 }
 
 // The chord across an angle on the sphere: a row's height in metres.
@@ -275,6 +291,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int spli
             const double cellW = WidthFor(p.radius, a1 - a0, pl.heightM, pl.elDeg);
             pl.widthM = t.fixed ? std::min(t.aspect * pl.heightM, cellW) : cellW;
             if (t.fixed && pl.widthM < t.aspect * pl.heightM - 1e-9) pl.heightM = pl.widthM / t.aspect;
+            CornersOnSphere(p.radius, &pl);
             out.tiles.push_back(pl);
         }
     }

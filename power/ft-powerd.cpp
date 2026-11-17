@@ -28,7 +28,10 @@
 // it also means this saves the panels' power and light, not the whole headset's.
 // If something else turns the backlight back on while it's off (SteamVR leaving standby,
 // the brightness setting), that counts as use. While SteamVR has the headset in standby
-// (taken off), SteamVR owns the displays and ft-powerd waits. The value to put back is
+// (taken off), SteamVR owns the displays and ft-powerd waits, unless they are still lit
+// 10 s into it: some standbys leave them on (SteamOS 0.5.9, vrserver.txt "1 - entering
+// standby" with no "cv: Set displays off" after it, the compositor paused, the panels lit
+// for hours), and then ft-powerd turns them off itself. The value to put back is
 // also kept in ~/.cache/frametop/powerd-brightness until the displays wake, so a crash or
 // a stop while they're off doesn't leave them dark: the next start puts it back.
 //
@@ -263,6 +266,7 @@ int main() {
     auto lastUse = now, lastScan = now, lastClasses = now - std::chrono::hours(1), lastConf = now;
     auto graceUntil = now;  // after "off", nothing counts as use until then
     auto awaySince = now;  // when the headset's activity level last agreed with `away`
+    auto awayAt = now;     // when SteamVR's standby began, or the last use during it
     bool off = false, away = false;
     int restore = 0;  // the brightness to put back
 
@@ -345,6 +349,7 @@ int main() {
             if (awayNow == away) awaySince = now;
             if (awayNow != away && now - awaySince >= std::chrono::seconds(1)) {
                 away = awayNow;
+                awayAt = now;
                 std::printf("SteamVR: headset %s\n", away ? "off (SteamVR's standby has the displays)" : "on");
                 if (!away) use = "headset on again";
             }
@@ -388,7 +393,12 @@ int main() {
         }
         if (!use.empty()) {
             lastUse = now;
+            awayAt = now;  // SteamVR lighting them as it leaves standby must not be undone at once
             turnOn(use);
+        }
+        if (!off && away && now - awayAt >= std::chrono::seconds(10) && ReadInt(kBacklight, -1) > 0) {
+            turnOff("SteamVR's standby left them lit");
+            if (!off) awayAt = now;  // couldn't: try again in 10 s, not every tick
         }
         if (!off && !away && offAfter > 0 && now - lastUse >= std::chrono::duration<double>(offAfter)) {
             char why[64];

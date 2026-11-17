@@ -5716,6 +5716,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
     else if (n == "DASH_TILE_STAY") SetTileStayDefault(on);   // (panels anchored from now on)
     else if (n == "GSAPP_PANELS") GsSwitch(on);
+    else if (n == "STEAM_DASH_PANEL") SteamDashSwitch(on);
     else if (n == "SCREEN_PIN_LEVEL") SetPinMode(on ? levelpin::Level : levelpin::Rigid);   // (2, Walk: the command's own case)
     else return false;
     return true;
@@ -6125,6 +6126,7 @@ bool ft_vr_init(void) {
     SetTileStayDefault(handcut::Setting("DASH_TILE_STAY", "0") == "1");
     LoadTileMemory();
     GsSwitch(handcut::Setting("GSAPP_PANELS", "1") != "0");   // the gamescope apps as panels of ours
+    SteamDashSwitch(handcut::Setting("STEAM_DASH_PANEL", "0") == "1");   // Steam's dashboard window as one (a spike)
     if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
                                   handcut::Setting("WINDOW_DRAG_RIGHT", "resize").c_str(),
                                   handcut::Setting("WINDOW_DRAG_MIDDLE", "none").c_str(), &g_windowDrag))
@@ -6264,6 +6266,7 @@ void ft_vr_shutdown(void) {
     // aren't the user's changes, so their panels' last states stay as they were)
     FlushTileMemory();
     if (!g_vr) return;
+    SteamDashShutdown();   // (Steam's window back to Steam first)
     GsShutdown();   // (the apps' windows back to gamescope first)
     // The panels go first, their textures cleared, and the imports only after SteamVR has had
     // a moment to take them down (see the shutdown in compositor.c).
@@ -7427,6 +7430,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         UpdateDashTiles();
     }
     GsStep();   // (before the panels' events: a new app's panel has its first ones)
+    SteamDashStep();
     UpdateCarryFollow();   // (before the carried panel's own move, below)
     // the hands, once per tick, for the cutouts and hand input
     {
@@ -7543,7 +7547,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             }
             handle(&e, data);
         };
-        if (s.gsapp) {
+        if (s.steamDash) {
+            SteamDashEvents(s, index);   // (Steam's display's)
+        } else if (s.gsapp) {
             GsPanelEvents(s, index);   // (X's, not KWin's)
         } else {
             while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) panelEvent(ev, false);

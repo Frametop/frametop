@@ -120,12 +120,20 @@ struct Window {
     uint32_t transientFor = 0;
     bool overrideRedirect = false;    // (a menu, a tooltip: no window manager focuses it)
     std::string key, title;           // AppKey's, and its title (read when it maps)
+    uint64_t target = 0;              // Role::Steam only: the overlay its target names (0: none)
 };
 
 struct Event {
-    enum Type { Created, Mapped, Moved, Unmapped, Gone } type = Created;
-    Window win;   // Moved: the new rectangle; Unmapped, Gone: the id only
+    enum Type { Created, Mapped, Moved, Unmapped, Gone, Retarget } type = Created;
+    Window win;   // Moved: the new rectangle; Unmapped, Gone: the id only; Retarget: the id and its target now
 };
+
+// Which of gamescope's displays a Link watches. Apps: its app display (`:1`), whose windows we
+// tag, never Steam's own (GAMESCOPE_XWAYLAND_SERVER_ID 0); a tag left there by an ft-screens that
+// went without untagging is cleared on opening. Steam: only Steam's own (`:0`), whose windows
+// Steam tags with its own overlays: nothing is cleared, each window's target comes with it, and a
+// change of one comes as Retarget (steamwin.h: Steam's dashboard window as a panel of ours).
+enum class Role { Apps, Steam };
 
 // What's sent to the app display (Link does it now; gslink.h's AsyncLink on its own thread).
 struct XSide {
@@ -152,8 +160,9 @@ public:
 
     // Connects to `display`. With `needForwarding`, only a gamescope that forwards (and says its
     // pid), and not its first Xwayland (GAMESCOPE_XWAYLAND_SERVER_ID 0: Steam's own); `why` says
-    // what's missing. The windows already there come as Created (and Mapped).
-    bool Open(const char *display, bool needForwarding, std::string *why);
+    // what's missing. Role::Steam: only a gamescope that forwards, and only its first Xwayland.
+    // The windows already there come as Created (and Mapped).
+    bool Open(const char *display, bool needForwarding, std::string *why, Role role = Role::Apps);
     void Close();   // (the tags stay: Untag first)
     bool IsOpen() const;
     uint32_t GamescopePid() const;

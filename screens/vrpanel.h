@@ -170,6 +170,7 @@ struct Screen {
     bool gsapp = false;           // a gamescope app's window (the gamescope apps): gamescope draws it
     uint32_t gsWin = 0;           // ...which X window
     bool gsSeen = false;          // ...shown before (mapped again after an unmap: not anchored again)
+    bool steamDash = false;       // ...Steam's own dashboard window (vrsteamwin.cpp; its input there, its size fixed)
     int gsX = 0, gsY = 0;         // ...where it is on the X screen (its popups go by it, PlaceSubs)
     std::string label;            // its name (MakePanel's: "Screen 1", "host: display", "Floating window 2")
     bool floatOn = false;         // ft-floatd has a window on it ("float" .. "unfloat")
@@ -364,6 +365,14 @@ void GsShutdown();
 bool GsTyping();
 bool GsKey(uint32_t code, int value, bool elsewhere, gsforward::Mods now);
 void GsBlur();
+
+// ---------------------------------------------------------------- vrsteamwin.cpp's
+
+int SteamDashIndex();   // Steam's window's panel index while STEAM_DASH_PANEL is on, else -1
+void SteamDashStep();
+void SteamDashEvents(Screen &s, int index);
+void SteamDashSwitch(bool on);
+void SteamDashShutdown();
 
 }  // namespace ftvr
 

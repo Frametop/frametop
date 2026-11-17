@@ -14,6 +14,7 @@
 # gsforward.cpp is the X side of the gamescope apps (gsforward.h), on xcb (wlroots-devel brings it);
 # gslink.cpp runs it on a thread of its own.
 # vrgsapps.cpp is the gamescope apps' panels, on OpenVR (vrpanel.h: what it shares with vr.cpp).
+# vrsteamwin.cpp is Steam's dashboard window as a panel (steamwin.h; STEAM_DASH_PANEL, a spike).
 # vrtiles.cpp is the dashboard tiles' glue (the anchor, the grid's places, the focus, the memory, the tiles commands).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
 # shipped with SteamVR on the Frame predates, so the build uses the public header from
@@ -41,6 +42,7 @@ cxx="g++ -std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include $(
 $cxx -c -o build/vr.o vr.cpp
 $cxx -c -o build/vrgsapps.o vrgsapps.cpp
 $cxx -c -o build/vrtiles.o vrtiles.cpp
+$cxx -c -o build/vrsteamwin.o vrsteamwin.cpp
 $cxx -c -o build/label.o label.cpp
 $cxx -c -o build/overlaytex.o overlaytex.cpp
 $cxx -c -o build/handcut.o handcut.cpp
@@ -78,7 +80,7 @@ for f in micear ownface; do   # the face of the avatar you wear: its mouth from 
   avatars="$avatars build/avatars-$f.o"
 done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrsteamwin.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1 xcb xcb-xtest xcb-icccm) $vrlibs -pthread
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs

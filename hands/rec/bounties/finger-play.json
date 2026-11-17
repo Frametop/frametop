@@ -185,38 +185,10 @@
       {
        "s": 1.1,
        "win": "a",
-       "lit": "button:3",
-       "gesture": "poke",
-       "label": "5",
-       "say": "Press it with your little finger (5)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
        "lit": "button:2",
        "gesture": "poke",
        "label": "4",
        "say": "Press it with your ring finger (4)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:3",
-       "gesture": "poke",
-       "label": "5",
-       "say": "Press it with your little finger (5)"
       },
       {
        "s": 0.4,
@@ -245,34 +217,6 @@
        "gesture": "poke",
        "label": "5",
        "say": "Press it with your little finger (5)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:0",
-       "gesture": "poke",
-       "label": "2",
-       "say": "Press it with your index finger (2)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:2",
-       "gesture": "poke",
-       "label": "4",
-       "say": "Press it with your ring finger (4)"
       },
       {
        "s": 0.4,
@@ -297,6 +241,34 @@
       {
        "s": 1.1,
        "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "label": "4",
+       "say": "Press it with your ring finger (4)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:3",
+       "gesture": "poke",
+       "label": "5",
+       "say": "Press it with your little finger (5)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
        "lit": "button:0",
        "gesture": "poke",
        "label": "2",
@@ -315,6 +287,34 @@
        "gesture": "poke",
        "label": "4",
        "say": "Press it with your ring finger (4)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:0",
+       "gesture": "poke",
+       "label": "2",
+       "say": "Press it with your index finger (2)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "label": "3",
+       "say": "Press it with your middle finger (3)"
       },
       {
        "s": 0.4,
@@ -347,62 +347,6 @@
       {
        "s": 1.1,
        "win": "a",
-       "lit": "button:3",
-       "gesture": "poke",
-       "label": "2",
-       "say": "Press it with your index finger (2)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:2",
-       "gesture": "poke",
-       "label": "3",
-       "say": "Press it with your middle finger (3)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:3",
-       "gesture": "poke",
-       "label": "2",
-       "say": "Press it with your index finger (2)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:2",
-       "gesture": "poke",
-       "label": "3",
-       "say": "Press it with your middle finger (3)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
        "lit": "button:0",
        "gesture": "poke",
        "label": "5",
@@ -417,24 +361,10 @@
       {
        "s": 1.1,
        "win": "a",
-       "lit": "button:2",
+       "lit": "button:3",
        "gesture": "poke",
-       "label": "3",
-       "say": "Press it with your middle finger (3)"
-      },
-      {
-       "s": 0.4,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 1.1,
-       "win": "a",
-       "lit": "button:0",
-       "gesture": "poke",
-       "label": "5",
-       "say": "Press it with your little finger (5)"
+       "label": "2",
+       "say": "Press it with your index finger (2)"
       },
       {
        "s": 0.4,
@@ -477,6 +407,76 @@
        "gesture": "poke",
        "label": "5",
        "say": "Press it with your little finger (5)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "label": "4",
+       "say": "Press it with your ring finger (4)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:3",
+       "gesture": "poke",
+       "label": "2",
+       "say": "Press it with your index finger (2)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "label": "4",
+       "say": "Press it with your ring finger (4)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:3",
+       "gesture": "poke",
+       "label": "2",
+       "say": "Press it with your index finger (2)"
+      },
+      {
+       "s": 0.4,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 1.1,
+       "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "label": "3",
+       "say": "Press it with your middle finger (3)"
       },
       {
        "s": 0.4,
@@ -522,70 +522,10 @@
       {
        "s": 2.0,
        "win": "a",
-       "lit": "button:3",
-       "gesture": "poke",
-       "label": "L_2",
-       "say": "Left hand, index finger (2)",
-       "hand": "left"
-      },
-      {
-       "s": 0.5,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 2.0,
-       "win": "b",
-       "lit": "button:0",
-       "gesture": "poke",
-       "label": "R_2",
-       "say": "Right hand, index finger (2)",
-       "hand": "right"
-      },
-      {
-       "s": 0.5,
-       "win": "b",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 2.0,
-       "win": "a",
        "lit": "button:2",
        "gesture": "poke",
        "label": "L_3",
        "say": "Left hand, middle finger (3)",
-       "hand": "left"
-      },
-      {
-       "s": 0.5,
-       "win": "a",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 2.0,
-       "win": "b",
-       "lit": "button:1",
-       "gesture": "poke",
-       "label": "R_3",
-       "say": "Right hand, middle finger (3)",
-       "hand": "right"
-      },
-      {
-       "s": 0.5,
-       "win": "b",
-       "gesture": "rest",
-       "say": "Fingers resting over the keys"
-      },
-      {
-       "s": 2.0,
-       "win": "a",
-       "lit": "button:0",
-       "gesture": "poke",
-       "label": "L_5",
-       "say": "Left hand, little finger (5)",
        "hand": "left"
       },
       {
@@ -627,10 +567,70 @@
       {
        "s": 2.0,
        "win": "b",
+       "lit": "button:3",
+       "gesture": "poke",
+       "label": "R_5",
+       "say": "Right hand, little finger (5)",
+       "hand": "right"
+      },
+      {
+       "s": 0.5,
+       "win": "b",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 2.0,
+       "win": "a",
+       "lit": "button:0",
+       "gesture": "poke",
+       "label": "L_5",
+       "say": "Left hand, little finger (5)",
+       "hand": "left"
+      },
+      {
+       "s": 0.5,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 2.0,
+       "win": "b",
        "lit": "button:0",
        "gesture": "poke",
        "label": "R_2",
        "say": "Right hand, index finger (2)",
+       "hand": "right"
+      },
+      {
+       "s": 0.5,
+       "win": "b",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 2.0,
+       "win": "a",
+       "lit": "button:3",
+       "gesture": "poke",
+       "label": "L_2",
+       "say": "Left hand, index finger (2)",
+       "hand": "left"
+      },
+      {
+       "s": 0.5,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Fingers resting over the keys"
+      },
+      {
+       "s": 2.0,
+       "win": "b",
+       "lit": "button:1",
+       "gesture": "poke",
+       "label": "R_3",
+       "say": "Right hand, middle finger (3)",
        "hand": "right"
       },
       {

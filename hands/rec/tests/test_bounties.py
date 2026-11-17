@@ -136,9 +136,10 @@ class ShippedTest(unittest.TestCase):
                 if p["hands"] in ("left", "right"):
                     self.assertFalse(any("hand" in w["to"] and "face" not in w["to"] for w in p["switch"]), p["id"])
             for p in plan[2]["prompts"]:
+                cells = {w["id"]: session._cells(w["look"]) for w in p["scene"]["windows"]}
                 for a in p["scene"]["acts"]:
-                    if a["gesture"] != "rest":
-                        self.assertNotEqual(a["lit"], "none", p["id"])
+                    if a["lit"].startswith("button:"):   # a button the window has: the panel lights nothing otherwise
+                        self.assertLess(int(a["lit"].split(":")[1]), cells[a["win"]], (p["id"], a["lit"]))
             self.assertTrue(100 <= sum(p["seconds"] for p in steps) <= 150, name)
             palm = [p for p in steps if re.search(r"palms? toward you", p["text"], re.I)]
             self.assertGreater(len(palm), len(steps) / 2, "%s: mostly palm toward the cameras" % name)
@@ -158,15 +159,23 @@ class ShippedTest(unittest.TestCase):
             self.assertTrue(all(finger_of(a) == [f for f, n in fingers.items() if n == a["label"]] for a in pokes))
         steps, scene = plan_of("finger-play")
         self.assertTrue(all(w["at"][1] <= -0.2 for p in scene for w in p["scene"]["windows"]), "piano: low")
-        for p in scene:   # one key a finger, the right hand's index on the left; the label ends in the finger
+        for p in scene:   # one key a finger, the right hand's index on the left; the label and the line name it
+            wins = {w["id"]: w["at"][0] for w in p["scene"]["windows"]}
             for a in p["scene"]["acts"]:
                 if a["gesture"] == "poke":
                     hand = a["hand"] or p["hands"]
                     order = ["index", "middle", "ring", "little"][::1 if hand == "right" else -1]
-                    k = int(a["lit"].split(":")[1])
-                    self.assertEqual(a["label"][-1], fingers[order[k]], (p["id"], a))
+                    f = order[int(a["lit"].split(":")[1])]
+                    self.assertEqual(a["label"], ({"left": "L_", "right": "R_"}[hand] if a["hand"] else "") + fingers[f])
+                    self.assertEqual(finger_of(a), [f], (p["id"], a))
+                    if len(wins) > 1:   # the left hand's keys on the left
+                        self.assertEqual(wins[a["win"]] < 0, hand == "left", (p["id"], a))
+            presses = [(a["hand"] or p["hands"], a["label"][-1]) for a in p["scene"]["acts"] if a["gesture"] == "poke"]
+            for hand in {h for h, _ in presses}:   # the ring and little fingers as often as the middle at least
+                n = {d: sum(1 for h, x in presses if h == hand and x == d) for d in "2345"}
+                self.assertGreaterEqual(min(n["4"], n["5"]), max(1, n["3"]), (p["id"], hand, n))
         both = [a for a in scene[-1]["scene"]["acts"] if a["gesture"] == "poke"]
-        self.assertEqual(sum(a["hand"] == "left" for a in both), sum(a["hand"] == "right" for a in both))
+        self.assertEqual(sorted(a["label"] for a in both), ["L_2", "L_3", "L_4", "L_5", "R_2", "R_3", "R_4", "R_5"])
         steps, scene = plan_of("hands-together")
         self.assertTrue(all(p["hands"] == "both" for p in steps))
         pokes = [a for a in scene[0]["scene"]["acts"] if a["gesture"] == "poke"]

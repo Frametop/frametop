@@ -318,7 +318,7 @@
       "every_s": 3.5,
       "gap_s": 1.2,
       "count": 4,
-      "say": "Arms crossed: pinch both corners, then like the ghost",
+      "say": "Arms crossed: pinch both corners, like the ghost",
       "moves": [
        {
         "grab": "tl+tr",

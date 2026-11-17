@@ -105,6 +105,17 @@ int main() {
         check("slot: a bar right in front of you, at most kMaxSlotDeg", dashtiles::SteamSlot(g, close, 1.2, &az, &span) &&
                                                                             near(span, dashtiles::kMaxSlotDeg));
     }
+    // --- Steam's menu tile anchored left of Steam's window's
+    {
+        dashtiles::Board b;
+        b.Anchor(1, -1, false), b.Anchor(2, 1, false), b.Anchor(3, 2, false);
+        b.Anchor(9, 1, false, 2);
+        const auto &cols = b.Grid().Cols();
+        check("left of: a column of its own just left of it, with the focused one ignored",
+              cols.size() == 4 && cols[0].cells[0].id == 1 && cols[1].cells[0].id == 9 && cols[2].cells[0].id == 2);
+        b.Anchor(8, 1, false, 77);
+        check("left of one not tiled: as without it", b.Grid().Find(8).col == 1);
+    }
     // --- the slot's side stays put (council, 2026-11-16: it was the column count's middle, so an
     // anchor or a drop moved panels across Steam's menu)
     {

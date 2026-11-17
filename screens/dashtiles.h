@@ -118,9 +118,11 @@ public:
     // Anchored (already: nothing): a column of its own right of `focused`'s (not tiled: at the
     // strip's end that brings its middle nearer in front of you, the left one when Steam's slot has
     // pushed it right).
-    void Anchor(int id, int focused, bool stay) {
+    // With `leftOf` tiled: a column of its own just left of its.
+    void Anchor(int id, int focused, bool stay, int leftOf = -1) {
         if (Anchored(id)) return;
         spots_[id].stay = stay;
+        if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
         if (grid_.Has(focused)) return grid_.Add(id, focused);
         // none: the end that brings the strip's middle nearer in front (its left one when it leans
         // right; centred, the right one, however the sums round)

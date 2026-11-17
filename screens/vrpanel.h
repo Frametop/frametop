@@ -341,7 +341,7 @@ bool TileTiled(int i);
 bool TileStayDefault();   // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
 void SetTileStayDefault(bool on);
 void RetileDash(bool resize);
-void TileAnchor(int i, bool stay, const char *by);
+void TileAnchor(int i, bool stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
 void TileKnown(int i, const std::string &key);
 void TileGone(int i);

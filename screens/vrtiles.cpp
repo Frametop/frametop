@@ -238,12 +238,12 @@ namespace {
 std::string TileLabel(int i) { return "screen " + std::to_string(i + 1); }
 }  // namespace
 
-void TileAnchor(int i, bool stay, const char *by) {
+void TileAnchor(int i, bool stay, const char *by, int leftOf) {
     auto it = g_screens.find(i);
     if (it == g_screens.end() || g_tiles.Anchored(i)) return;
     EndDrag(it->second);
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
-    g_tiles.Anchor(i, after, stay);
+    g_tiles.Anchor(i, after, stay, leftOf);
     LightAnchor(it->second);
     if (!g_tileGroupSet) g_tileRegroup = true;
     RetileDash(true);

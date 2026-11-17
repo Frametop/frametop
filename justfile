@@ -310,6 +310,8 @@ test-c:
     run screens/tests/gsapps-test.cpp build/tests/gsapps-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/steamwin-test.cpp -o build/tests/steamwin-test
     run screens/tests/steamwin-test.cpp build/tests/steamwin-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/steamplace-test.cpp -o build/tests/steamplace-test
+    run screens/tests/steamplace-test.cpp build/tests/steamplace-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gscontrol-test.cpp -o build/tests/gscontrol-test
     run screens/tests/gscontrol-test.cpp build/tests/gscontrol-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Iscreens screens/tests/gslink-test.cpp screens/gslink.cpp screens/gsforward.cpp \

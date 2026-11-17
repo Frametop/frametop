@@ -3,21 +3,21 @@
 // Panels anchored to the SteamVR dashboard tile on a sphere round your head, like one 360 degree
 // monitor (user, 2026-11-16): columns side by side round you, each one's panels stacked in it with
 // rows of their own heights, as Hyprland's scrolling columns are laid out. Every panel faces your
-// head: a column curves up the sphere as well as round it. The band the columns fill starts at the
-// dashboard's top edge and goes up `heightDeg`, but never past `maxTopDeg`: near the top of a
+// head: a column curves up the sphere as well as round it. The band the columns fill starts at
+// `bottomDeg` and goes up `heightDeg`, but never past `maxTopDeg`: near the top of a
 // sphere the circles round it shrink, so panels in neighbouring columns would run into each other
 // at their upper corners ("so we don't end up with lots of displays overlapping at the corners on
 // the top and bottom"). Each column is as wide as the widest of its panels needs at the panel's
-// highest corner, so they never touch there, and the strip of columns is centred over the
-// dashboard. Past a full turn round you everything shrinks until it fits.
+// highest corner, so they never touch there, and the strip of columns is centred in front of
+// you. Past a full turn round you everything shrinks until it fits.
 //
 // A panel with pixels of its own to change (a floating window, an app gamescope hands us) fills
 // its cell: its width is the column's. A panel at a fixed resolution (a desktop screen, a remote
 // display) keeps its shape: its row's height and its aspect, and its column grows to fit it.
 //
-// Angles in degrees. Azimuth is round you, 0 over the dashboard, positive to the right;
-// elevation is up from your eyes' height. The group frame: origin at the sphere's centre (your
-// head when the dashboard opened), -Z towards the dashboard, +Y up, as SteamVR's axes are.
+// Angles in degrees. Azimuth is round you, 0 in front, positive to the right; elevation is up
+// from your eyes' height. The group frame: origin at the sphere's centre (your head when the
+// dashboard opened), -Z the way you faced then, +Y up, as SteamVR's axes are.
 // Header only, no OpenVR, so its test runs anywhere.
 #pragma once
 
@@ -46,8 +46,8 @@ struct Column {
 
 struct Params {
     double radius = 1.6;        // metres: the sphere's (the dashboard's distance)
-    double bottomDeg = 5;       // the band's bottom: the dashboard's top edge
-    double heightDeg = 60;      // how tall the band is asked to be
+    double bottomDeg = -20;     // the band's bottom (vrtiles.cpp: its middle at your eyes)
+    double heightDeg = 40;      // how tall the band is asked to be (a desktop at about its size)
     double maxTopDeg = 55;      // ...but its top never higher (the column height cap)
     double minHeightDeg = 12;   // ...and never shorter than this
     double gapDeg = 1.5;        // between columns, and between the panels in one
@@ -94,9 +94,8 @@ inline double WidthFor(double radius, double spanDeg, double heightM, double elD
 
 inline double Scale(const Tile &t) { return std::clamp(t.scale, 0.05, 1.0); }
 
-// The band the columns fill: from the dashboard's top edge up heightDeg, its top never past
-// maxTopDeg, at least minHeightDeg tall. A dashboard high up (you lying back, a raise set high)
-// moves the bottom down rather than the band past the cap.
+// The band the columns fill: from bottomDeg up heightDeg, its top never past maxTopDeg, at least
+// minHeightDeg tall. A bottom set high moves down rather than the band past the cap.
 inline void Band(const Params &p, double *bottom, double *height) {
     const double cap = std::clamp(p.maxTopDeg, p.minHeightDeg - 80, 85.0);
     const double b = std::clamp(p.bottomDeg, -85.0, cap - p.minHeightDeg);

@@ -137,11 +137,22 @@ int main() {
         std::snprintf(what, sizeof what, "extreme: %d columns at -85 fit a turn, no corner overlap", n);
         check(what, l.az1 - l.az0 <= q.maxSpanDeg + 1e-6 && l.shrink > 0 && cornersInColumns(l, q.radius));
     }
+    // --- the default band (vrtiles.cpp: its middle at your eyes): an ultrawide desktop and a laptop's
+    // display in front of you at about their own sizes, not up at the cap (2026-11-16: the old band
+    // ran from the bar's raise to the cap, each panel 53 degrees tall, the pair 200 degrees round)
+    {
+        tiling::Params q = p;
+        q.bottomDeg = -q.heightDeg / 2;
+        const auto l = tiling::Arrange({col({{1, 3440.0 / 1440, true, 1}}), col({{2, 2560.0 / 1600, true, 1}})}, q);
+        check("default band: centred on your eyes", near(l.tiles[0].elDeg, 0) && near(l.tiles[1].elDeg, 0));
+        check("default band: about a desktop's size (1.0-1.2 m tall)", l.tiles[0].heightM > 1.0 && l.tiles[0].heightM < 1.2);
+        check("default band: the pair within 150 degrees round you", l.az1 - l.az0 < 150 && near(l.az0, -l.az1));
+    }
     // --- desktops at the default band: in front of you, at full size (council, 2026-11-16: the old
     // span hit its 180 degree cap and put two desktops at +-90)
     {
         tiling::Params q = p;
-        q.bottomDeg = 10;   // a bar 20 degrees down, raised 30
+        q.bottomDeg = 10;   // a high band (the old default: a bar 20 degrees down, raised 30)
         const double one = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q).az1;   // (half the strip: it's centred)
         for (int n = 1; n <= 3; ++n) {
             std::vector<tiling::Column> cols;

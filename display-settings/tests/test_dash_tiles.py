@@ -47,7 +47,7 @@ class DashTiles(unittest.TestCase):
 
     def test_defaults(self):
         self.assertFalse(self.t.stay)
-        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (30, 1.6, 60, 55))
+        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (0, 1.6, 40, 55))
 
     def test_stay_written_and_sent(self):
         self.t.setStay(True)
@@ -82,7 +82,7 @@ class DashTiles(unittest.TestCase):
         self.t.setHeightDeg(1)
         self.t.setRaiseDeg(float("nan"))
         self.assertEqual(self.asked, ["handsetting DASH_TILE_RADIUS 4", "handsetting DASH_TILE_HEIGHT_DEG 12",
-                                      "handsetting DASH_TILE_RAISE_DEG 30"])
+                                      "handsetting DASH_TILE_RAISE_DEG 0"])
 
     def test_bad_conf_value_is_the_default(self):
         with open(fds.CONF_PATH, "a") as f:

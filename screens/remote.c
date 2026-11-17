@@ -583,7 +583,7 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
         for (int i = 0; i < FT_REMOTE_MAX && !r; ++i)
             if (!g_remotes[i].used && g_remotes[i].pid == 0) r = &g_remotes[i];
         if (!r) return snprintf(reply, size, "error too many remote screens"), true;
-        if (!ft_vr_remote_create(index, c.label, c.metres, &restored))
+        if (!ft_vr_remote_create(index, c.label, c.metres, c.host, c.app, &restored))
             return snprintf(reply, size, "error SteamVR made no panel (too many overlays?)"), true;
         *r = (struct remote){.used = true, .index = index, .fd = -1, .shown = -1, .attention = -1};
     } else {

@@ -6935,7 +6935,8 @@ struct Parked {
 };
 std::map<int, Parked> g_parked;
 
-bool ft_vr_remote_create(int index, const char *label, double metres, bool *restored) {
+bool ft_vr_remote_create(int index, const char *label, double metres, const char *host, const char *app,
+                         bool *restored) {
     *restored = false;
     if (!g_vr) return false;
     Screen &s = g_screens[index];
@@ -6972,8 +6973,8 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         UpdateVisibility();
         *restored = true;
     }
-    const char *host = ft_remote_host(index), *app = ft_remote_app(index);
-    TileKnown(index, std::string("remote:") + (host ? host : "?") + "/" + (app ? app : "?"));
+    // (from the caller: its remote.c slot isn't filled in yet)
+    TileKnown(index, std::string("remote:") + (host && *host ? host : "?") + "/" + (app && *app ? app : "?"));
     return true;
 }
 

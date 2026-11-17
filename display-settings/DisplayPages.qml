@@ -1530,10 +1530,10 @@ Item {
                         onToggled: backend.dashTiles.setGsApps(checked)
                     }
                     RowLayout {
-                        Kirigami.FormData.label: "Above the dashboard:"
+                        Kirigami.FormData.label: "Above your eyes:"
                         Controls.Slider {
                             id: tileRaise
-                            from: -30; to: 60; stepSize: 1
+                            from: -30; to: 30; stepSize: 1
                             value: backend.dashTiles.raiseDeg
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                             onMoved: backend.dashTiles.setRaiseDeg(value)

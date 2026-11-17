@@ -1,7 +1,7 @@
 // The dashboard tiles' glue on OpenVR (user, 2026-11-16; docs/design.md, Dashboard tiles): panels
 // anchored to the SteamVR dashboard. The policy is dashtiles.h's (which are anchored, tiled or
 // satellites, the keys, the memory), the places tiling.h's, the panel vrpanel.h's. Here: the group
-// frame, from your head and Steam's bar when the dashboard opens (Regroup), held to the bar after that
+// frame, in front of you when the dashboard opens (Regroup), held to the bar after that
 // (a pin on kDashboard rides on its frame: vr.cpp's MoveFramePins), so a dashboard dragged carries its
 // tiles; the panels pinned to their places in it (RetileDash); which panel the tiling keys act on and
 // its border (UpdateTileFocus); each app's or display's last state in ~/.config/frametop-tiles.txt;
@@ -31,7 +31,7 @@ Mat g_tileGroupRel = Identity();          // the dashboard's frame (DashFrame) -
 bool g_tileGroupSet = false;              // ...since the dashboard was first seen with a panel anchored
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
 bool g_dashWasUp = false;
-double g_tileRaiseDeg = 30;               // DASH_TILE_RAISE_DEG: the band's bottom this far above the bar
+double g_tileRaiseDeg = 0;                // DASH_TILE_RAISE_DEG: the band's middle this far above your eyes
 bool g_tileStayDefault = false;           // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
@@ -116,6 +116,9 @@ Mat ToMat(const double m[3][4]) {
 // Each tiled panel pinned to its place, sized for it (a floating window or an app gets the pixels: `resize`),
 // and each satellite at its own. Nothing until the group has a frame (the dashboard seen).
 void RetileDash(bool resize) {
+    // the band's middle at your eyes' height, raised DASH_TILE_RAISE_DEG (the settings may have
+    // changed: they're read at start and set live)
+    g_tiles.params.bottomDeg = g_tileRaiseDeg - g_tiles.params.heightDeg / 2;
     if (!g_tileGroupSet || !Dash().ever) return;
     const auto &l = g_tiles.Arrange(TileInfo);
     for (const tiling::Placed &p : l.tiles) {
@@ -157,15 +160,16 @@ bool Regroup() {
     if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
     const Mat bar = DashFrame();
     const double h[3] = {head.m[0][3], head.m[1][3], head.m[2][3]}, b[3] = {bar.m[0][3], bar.m[1][3], bar.m[2][3]},
-                 back[3] = {bar.m[0][2], bar.m[1][2], bar.m[2][2]};
-    double g[3][4], barEl;
-    dashtiles::GroupFrame(h, b, back, g, &barEl);
+                 fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, back[3] = {bar.m[0][2], bar.m[1][2], bar.m[2][2]};
+    double g[3][4];
+    dashtiles::GroupFrame(h, fwd, b, back, g);
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
-    // (whole degrees: a little difference in where the dashboard opens doesn't resize the windows)
-    g_tiles.params.bottomDeg = std::round(barEl + g_tileRaiseDeg);
     g_tileGroupSet = true;
     RetileDash(true);
-    std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, the band from %.0f degrees up\n", h[0], h[1], h[2],
+    // (azimuths in the room, 0 its -Z, right positive: where the strip went and where the bar is)
+    std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees (the bar at %.0f), "
+                "the band from %.0f degrees up\n",
+                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), tiling::Deg(std::atan2(b[0] - h[0], h[2] - b[2])),
                 g_tiles.params.bottomDeg);
     return true;
 }
@@ -173,7 +177,7 @@ bool Regroup() {
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
 std::array<TileSetting, 4> TileSettings() {
-    return {{{"DASH_TILE_RAISE_DEG", &g_tileRaiseDeg, -30, 60},   // the band's bottom above the dashboard's bar
+    return {{{"DASH_TILE_RAISE_DEG", &g_tileRaiseDeg, -30, 30},   // the band's middle above your eyes
              {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 4},   // the sphere's, metres
              {"DASH_TILE_HEIGHT_DEG", &g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120},
              {"DASH_TILE_MAX_TOP_DEG", &g_tiles.params.maxTopDeg, 20, 80}}};   // the column height cap
@@ -184,7 +188,6 @@ bool SetTileSetting(const char *name, double value) {
         if (std::strcmp(t.name, name) != 0) continue;
         if (!(value >= t.lo && value <= t.hi)) return false;
         *t.value = value;
-        g_tileRegroup = true;   // (the raise needs the bar's elevation again: on the next good read)
         RetileDash(true);
         return true;
     }

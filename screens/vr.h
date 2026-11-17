@@ -72,8 +72,9 @@ bool ft_vr_carry_wheel(int notches);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It
 // has a screen's controls and takes the same commands; its frames come through
 // ft_vr_screen_present, and its input arrives as events for its index. *restored: it's back
-// where it was when its stream last stopped in this run (Remote Displays' Disconnect).
-bool ft_vr_remote_create(int index, const char *label, double metres, bool *restored);
+// where it was when its stream last stopped in this run (Remote Displays' Disconnect). `host` and
+// `app` name it for its dashboard tile's memory.
+bool ft_vr_remote_create(int index, const char *label, double metres, const char *host, const char *app, bool *restored);
 // A remote screen's host ("192.0.2.61" or with ":PORT") and app ("display:DP-2", "window:0x...",
 // "Desktop"), as ft-layout started it (remote.c); NULL for a screen that isn't a remote one.
 const char *ft_remote_host(int index);

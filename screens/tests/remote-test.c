@@ -30,7 +30,11 @@ void ft_vr_forget(const void *k) { (void)k; }
 enum ft_attention ft_vr_screen_attention(int i) { (void)i; return FT_HIDDEN; }
 static int g_destroyed;
 void ft_vr_screen_destroy(int i) { (void)i, ++g_destroyed; }
-bool ft_vr_remote_create(int i, const char *l, double m, bool *r) { (void)i, (void)l, (void)m; *r = false; return true; }
+bool ft_vr_remote_create(int i, const char *l, double m, const char *h, const char *a, bool *r) {
+    (void)i, (void)l, (void)m, (void)h, (void)a;
+    *r = false;
+    return true;
+}
 
 static char g_log[PATH_MAX];
 

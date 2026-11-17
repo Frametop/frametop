@@ -51,21 +51,22 @@ inline bool ParseKey(const char *word, Key *k) {
     return false;
 }
 
-// The group frame in the room, from the head's position and the bar's (Steam's, under the
-// dashboard): at the head, level, its -Z towards the bar. `barBack`: the bar's +Z (for a bar
-// right over or under the head). `barElDeg`: the bar's elevation from the head.
-inline void GroupFrame(const double head[3], const double bar[3], const double barBack[3], double out[3][4],
-                       double *barElDeg) {
-    double d[3] = {bar[0] - head[0], bar[1] - head[1], bar[2] - head[2]};
-    double flat = std::hypot(d[0], d[2]);
-    double fx = d[0], fz = d[2];
-    if (flat < 0.05) fx = -barBack[0], fz = -barBack[2];
+// The group frame in the room, from the head's pose and the bar's (Steam's, under the
+// dashboard): at the head, level, its -Z the way the head faces, so the strip is in front of you
+// wherever Steam put its bar (the palm menu's Steam menu opens it low and to the side). Looking
+// nearly straight up or down, the bar's way instead; a bar right over or under the head, its back
+// (`barBack`, the bar's +Z). `headFwd`: the head's -Z.
+inline void GroupFrame(const double head[3], const double headFwd[3], const double bar[3], const double barBack[3],
+                       double out[3][4]) {
+    const double d[3] = {bar[0] - head[0], bar[1] - head[1], bar[2] - head[2]};
+    double fx = headFwd[0], fz = headFwd[2];
+    if (std::hypot(fx, fz) < 0.25) fx = d[0], fz = d[2];   // (within about 15 degrees of straight up or down)
+    if (std::hypot(fx, fz) < 0.05) fx = -barBack[0], fz = -barBack[2];
     const double n = std::hypot(fx, fz);
     if (n < 1e-9) fx = 0, fz = -1;
     else fx /= n, fz /= n;
     const double x[3] = {-fz, 0, fx}, y[3] = {0, 1, 0}, z[3] = {-fx, 0, -fz};
     for (int r = 0; r < 3; ++r) out[r][0] = x[r], out[r][1] = y[r], out[r][2] = z[r], out[r][3] = head[r];
-    *barElDeg = tiling::Deg(std::atan2(d[1], std::max(flat, 1e-9)));
 }
 
 class Board {

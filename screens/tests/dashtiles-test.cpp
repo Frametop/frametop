@@ -18,19 +18,26 @@ int main() {
     const auto info = [](int id) { return dashtiles::Info{id >= 10 ? 4.0 / 3 : 16.0 / 9, id < 10}; };
     // --- the group frame
     {
-        double g[3][4], el;
-        const double head[3] = {1, 1.6, 0}, bar[3] = {1, 1.2, -1.5}, back[3] = {0, 0, 1};
-        dashtiles::GroupFrame(head, bar, back, g, &el);
+        double g[3][4];
+        const double head[3] = {1, 1.6, 0}, ahead[3] = {0, 0, -1}, bar[3] = {1, 1.2, -1.5}, back[3] = {0, 0, 1};
+        dashtiles::GroupFrame(head, ahead, bar, back, g);
         check("group: at the head", near(g[0][3], 1) && near(g[1][3], 1.6) && near(g[2][3], 0));
-        check("group: -Z towards the bar", near(g[2][2], 1) && near(g[0][2], 0));
+        check("group: -Z the way the head faces", near(g[2][2], 1) && near(g[0][2], 0));
         check("group: level", near(g[1][1], 1) && near(g[1][0], 0) && near(g[1][2], 0));
-        check("group: the bar's elevation", near(el, tiling::Deg(std::atan2(-0.4, 1.5))));
-        const double right[3] = {2.5, 1.6, 0};
-        dashtiles::GroupFrame(head, right, back, g, &el);
-        check("group: turned to a bar on the right (-Z is +X)", near(g[0][2], -1) && near(g[0][0], 0) && near(g[2][0], 1));
-        const double over[3] = {1, 2.5, 0}, tilted[3] = {0, 0.3, 1};
-        dashtiles::GroupFrame(head, over, tilted, g, &el);
-        check("group: a bar right overhead faces its back", near(g[2][2], 1) && near(el, 90, 1e-3));
+        // the palm menu's Steam menu: the bar low and behind on the right, the head looking ahead
+        const double side[3] = {1.8, 0.6, 0.7};
+        dashtiles::GroupFrame(head, ahead, side, back, g);
+        check("group: in front of the head, not towards a bar off to the side", near(g[2][2], 1) && near(g[0][2], 0));
+        const double pitched[3] = {0.6, -0.5, -0.64};   // looking right and down a little
+        dashtiles::GroupFrame(head, pitched, bar, back, g);
+        check("group: turned the way the head faces (level)", near(-g[0][2], 0.6 / std::hypot(0.6, 0.64)) &&
+                                                            near(g[2][2], 0.64 / std::hypot(0.6, 0.64)) && near(g[1][2], 0));
+        const double right[3] = {2.5, 1.6, 0}, down[3] = {0.05, -1, 0.05};
+        dashtiles::GroupFrame(head, down, right, back, g);
+        check("group: looking straight down, towards the bar (-Z is +X)", near(g[0][2], -1) && near(g[0][0], 0) && near(g[2][0], 1));
+        const double over[3] = {1, 2.5, 0}, tilted[3] = {0, 0.3, 1}, up[3] = {0, 1, 0};
+        dashtiles::GroupFrame(head, up, over, tilted, g);
+        check("group: straight up at a bar right overhead faces its back", near(g[2][2], 1));
     }
     // --- anchoring
     {

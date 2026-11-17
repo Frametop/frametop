@@ -722,6 +722,8 @@ public:
     bool pressing(int side) const { return side_[side].state == State::Press; }
     // the control a side is pressing (None: not pressing one): a hold on the reset button
     Control pressControl(int side) const { return pressing(side) ? side_[side].control : Control::None; }
+    // ...and whether the last one ended with the hand lost (or input taken away), not let go
+    bool controlPressLost(int side) const { return side_[side].controlLost; }
     // ...holding KWin's button (not a poked control)
     bool pressingKwin(int side) const { return pressing(side) && side_[side].control == Control::None; }
     bool grabbing(int side) const { return side_[side].state == State::Grab; }
@@ -790,6 +792,7 @@ private:
         bool rearmed = true;                 // out past Params::rearm since the last release
         int64_t grabbedNs = 0;
         Control control = Control::None;     // pressed a control (no KWin press)
+        bool controlLost = false;            // the last control press ended with the hand lost
         double hoverX = -1, hoverY = -1, hoverU = 0, hoverV = 0;
         // the aim (Params::lockOut): where a tap will land, frozen as the tip comes within lockOut
         double aimU = 0, aimV = 0, tipD = 1;

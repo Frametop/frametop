@@ -616,6 +616,7 @@ void HandInput::Emit(Event::Type t, int s, int panel, double x, double y, bool l
 void HandInput::EndPress(int s, bool lost, const char *why) {
     Side &sd = side_[s];
     if (sd.state != State::Press) return;
+    if (sd.control != Control::None) sd.controlLost = lost;
     if (sd.control == Control::None) {
         Emit(Event::Release, s, sd.panel, sd.lastX, sd.lastY, lost);
         ++stats.releases, stats.lostReleases += lost;

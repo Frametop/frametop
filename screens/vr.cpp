@@ -929,7 +929,6 @@ const overlayregion::Region &ResizeRegion(int sx, int sy) {
     return regions[(sy < 0 ? 2 : 0) + (sx > 0 ? 1 : 0)];
 }
 void SendPointer(const std::string &msg);
-int64_t NowMs();
 void PaintResizeMask(Screen &s) {
     if (s.handle == vr::k_ulOverlayHandleInvalid || (s.resizePaintedVersion == g_resizeVersion &&
         s.resizePaintedX == s.cornerX && s.resizePaintedY == s.cornerY)) return;
@@ -1349,8 +1348,6 @@ void SetVisible(Screen &s, bool visible, float alpha) {
         if (o != vr::k_ulOverlayHandleInvalid) PinHide(o);
     s.controls = 0, s.controlsUp = false;
 }
-
-bool TileAnchored(int i);
 
 void UpdateVisibility() {
     const bool shared = ModeVisible();
@@ -2466,8 +2463,7 @@ void ApplyCrop(Screen &s) {
 // k_unMaxOverlayCount (128) overlays in all, SteamVR's own included, and each panel took seven
 // with its controls then, so eight idle slots held 56 (2026-10-07: with three screens, a third
 // remote screen didn't fit). The controls are shared now (chromepool.h). Everything the overlays show is kept in the Screen, so
-// a new panel picks up where the old one was.
-bool MakePanel(Screen &s, const char *prefix, const char *label);
+// a new panel picks up where the old one was (MakePanel, declared in vrpanel.h).
 void SetScreenTexture(const Screen &s, vr::SharedTextureHandle_t handle);
 
 bool EnsureFloatPanel(Screen &s) {
@@ -4231,21 +4227,28 @@ void ResetHoldEnd(vr::TrackedDeviceIndex_t device) {
     g_resetHold = {};
 }
 // The anchor button pressed by a hand: let go (the hand off it), a click or a long press as a
-// laser's (AnchorButtonUp).
+// laser's (AnchorButtonUp); the hand lost meanwhile, nothing.
 struct AnchorHold {
     int panel = -1, side = -1;
-} g_anchorHold;
+} g_anchorHold[2];   // each hand's
 void AnchorHandDown(int panel, int side) {
     const auto it = g_screens.find(panel);
-    if (it == g_screens.end()) return;
+    if (it == g_screens.end() || side < 0 || side > 1) return;
     it->second.anchorDownMs = NowMs();
-    g_anchorHold = {panel, side};
+    g_anchorHold[side] = {panel, side};
 }
 void UpdateAnchorHold() {
-    if (g_anchorHold.panel < 0 || g_handInput.pressControl(g_anchorHold.side) == handinput::Control::Anchor) return;
-    const AnchorHold h = g_anchorHold;
-    g_anchorHold = {};
-    AnchorButtonUp(h.panel, h.side ? "the right hand" : "the left hand");
+    for (AnchorHold &hold : g_anchorHold) {
+        if (hold.panel < 0 || g_handInput.pressControl(hold.side) == handinput::Control::Anchor) continue;
+        const AnchorHold h = hold;
+        hold = {};
+        if (g_handInput.controlPressLost(h.side)) {
+            if (const auto it = g_screens.find(h.panel); it != g_screens.end()) it->second.anchorDownMs = -1;
+            std::printf("screen %d: the anchor button: the hand was lost, nothing done\n", h.panel + 1);
+            continue;
+        }
+        AnchorButtonUp(h.panel, h.side ? "the right hand" : "the left hand");
+    }
 }
 void UpdateResetHold() {
     if (g_resetHold.panel < 0) return;
@@ -5671,8 +5674,6 @@ void UpdateHandGuides() {
 
 // The hand interactions Input Settings switches on and off live ("handsetting KEY 0|1"); each also read
 // from frametop.conf at start (ft_vr_init). A number-valued one goes back to its default when switched on.
-void GsSwitch(bool on);
-void GsShutdown();
 bool SetHandSetting(const char *key, bool on) {
     handinput::Params &k = g_handInput.params();
     const handinput::Params d;
@@ -6250,7 +6251,9 @@ void ft_vr_shutdown(void) {
     // the pointer helper's carry modes end with us (they'd freeze its cursor or keep the laser)
     if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;
     if (g_carryFollow.on) SendPointer("follow carry off");
-    FlushTileMemory();   // (a change from the last 2 seconds)
+    // (a change from the last 2 seconds; before GsShutdown on purpose: the apps going back to gamescope
+    // aren't the user's changes, so their panels' last states stay as they were)
+    FlushTileMemory();
     if (!g_vr) return;
     GsShutdown();   // (the apps' windows back to gamescope first)
     // The panels go first, their textures cleared, and the imports only after SteamVR has had

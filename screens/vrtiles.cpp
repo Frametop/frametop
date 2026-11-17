@@ -83,13 +83,16 @@ void SaveTileMemoryDue() {
 void FlushTileMemory() {
     if (g_tileSave.Flush()) WriteTileMemory();
 }
+namespace {
 // Every panel with a key remembered as it is now (a change to one moves the others on the grid too).
 void RememberTiles() {
     bool changed = false;
     for (const auto &[i, key] : g_tileKey) changed |= g_tileMemory.Set(key, g_tiles.Remember(i));
     if (changed) SaveTileMemory();
 }
+}  // namespace
 
+namespace {
 dashtiles::Info TileInfo(int id) {
     dashtiles::Info info;
     const auto it = g_screens.find(id);
@@ -99,6 +102,7 @@ dashtiles::Info TileInfo(int id) {
     info.fixed = !s.floating && !s.gsapp;   // a desktop screen or a remote display: the other end's resolution
     return info;
 }
+}  // namespace
 
 namespace {
 Mat ToMat(const double m[3][4]) {
@@ -222,6 +226,7 @@ void TileUnanchor(int i, const char *by) {
     RememberTiles();
     std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
 }
+namespace {
 void TileStay(int i, bool on, const char *by) {
     if (!g_tiles.Anchored(i)) {
         if (on) TileAnchor(i, true, by);
@@ -233,6 +238,7 @@ void TileStay(int i, bool on, const char *by) {
     RememberTiles();
     std::printf("%s: %s with the dashboard closed (%s)\n", TileLabel(i).c_str(), on ? "stays shown" : "hidden", by);
 }
+}  // namespace
 
 // A panel's key is known (made, or ft-floatd said whose window it is): back to its last state.
 void TileKnown(int i, const std::string &key) {
@@ -301,6 +307,7 @@ void TileResized(Screen &s, int i) {
     RememberTiles();
 }
 
+namespace {
 // The panel the tiling keys act on: the one under the pointer, else the one you're looking at
 // (within 25 degrees of straight ahead). The relay is told when it's an anchored one (the keys are
 // the desktop's otherwise), and it gets a thin border.
@@ -328,6 +335,7 @@ void UpdateTileFocus() {
         g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
     }
 }
+}  // namespace
 
 // The border: one overlay, behind the focused tile, a frame its shape. Placed after the tick's
 // moves (the end of ft_vr_poll) and whenever the tiles are (RetileDash), so it keeps up with its tile.

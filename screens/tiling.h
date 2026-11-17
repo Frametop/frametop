@@ -171,7 +171,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     out.shrink = k;
     const double h = band * k, gap = p.gapDeg * k;
     out.el0 = bottom, out.el1 = bottom + h;
-    total -= gap;   // (the one behind you isn't in the strip)
+    total = cols.empty() ? 0 : total - gap;   // (the one behind you isn't in the strip; no columns, no strip)
     double az = -total / 2;
     out.az0 = az, out.az1 = az + total;
     for (size_t c = 0; c < cols.size(); ++c) {

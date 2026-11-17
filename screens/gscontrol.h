@@ -162,8 +162,6 @@ private:
         if (const uint32_t t = keys_.Target() ? keys_.Target() : blurredFrom_; t && t != w) typedBefore_[w] = t;
         keys_.Focus(w);
     }
-    // `win`'s panel or popup went; for a popup's, `forWin` the window it's for, `owner` its app's
-    // (0 for an app's own), `menu` whether it was override-redirect.
     // What's held on `win` let go of (its overlay's gone or hidden: no release comes from it).
     void LetGoOf(uint32_t win) {
         if (buttons_ && pressedOn_ == win) LetGo();
@@ -171,6 +169,8 @@ private:
             if (w == win) x_.Key(win, gsforward::XKeycode(code), 0, false);
         keys_.Released(win);
     }
+    // `win`'s panel or popup went; for a popup's, `forWin` the window it's for, `owner` its app's
+    // (0 for an app's own), `menu` whether it was override-redirect.
     void Gone(uint32_t win, uint32_t forWin, uint32_t owner, bool menu) {
         if (tagging_) {
             LetGoOf(win);

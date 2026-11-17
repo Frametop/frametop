@@ -4690,6 +4690,31 @@ void TestPinButton() {
     }
 }
 
+// The anchor button held by a hand (vr.cpp's UpdateAnchorHold): pulled back off it is a let-go,
+// the hand lost on it is not (controlPressLost), so a loss doesn't anchor or let go of a panel.
+void TestAnchorLost() {
+    Panel p = LivePanel();
+    const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
+    p.controls.push_back({Control::Anchor, chrome / 2 + gap * 3 + grip * 2.5, v, grip / 2, grip / 2});
+    const Spot anchor = p.controls.back();
+    for (const bool lose : {false, true}) {
+        Rig r;
+        r.panels = {p};
+        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(anchor.u + 0.002, v, mm / 1000.0)});
+        CHECK(r.in.pressControl(1) == Control::Anchor);
+        if (lose) {
+            SynthHand gone;
+            gone.present = false;
+            for (int k = 0; k < 15; ++k) r.Frame({gone});
+        } else {
+            for (int mm = -15; mm <= 80; mm += 10) r.Frame({TipAt(anchor.u + 0.002, v, mm / 1000.0)});
+        }
+        CHECK(r.in.pressControl(1) == Control::None);
+        CHECK(r.in.controlPressLost(1) == lose);
+        std::printf("anchor held: %s: lost %d\n", lose ? "the hand lost" : "pulled back", int(r.in.controlPressLost(1)));
+    }
+}
+
 // The roll button (DEE-337): a poke on it presses it (vr.cpp levels the screen), not the curve button or
 // the bar beside it, and gives the desktop no press.
 void TestRollButton() {
@@ -5664,6 +5689,7 @@ int main(int argc, char **argv) {
     TestGrabThatAfterThrow();
     TestButtons();
     TestPinButton();
+    TestAnchorLost();
     TestRollButton();
     TestTouchDot();
     TestGuides();

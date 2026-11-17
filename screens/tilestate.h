@@ -49,10 +49,11 @@ inline bool Int(const std::string &w, int *out) {
     if (errno || *end || end == w.c_str() || v < -1000000 || v > 1000000) return false;
     return *out = int(v), true;
 }
+// (bounded as Int is: a state's numbers are metres, weights and scales, and Text's are short)
 inline bool Num(const std::string &w, double *out) {
     char *end = nullptr;
     const double v = std::strtod(w.c_str(), &end);
-    if (*end || end == w.c_str() || !std::isfinite(v)) return false;
+    if (*end || end == w.c_str() || !std::isfinite(v) || std::fabs(v) > 1e6) return false;
     return *out = v, true;
 }
 }  // namespace detail
@@ -83,19 +84,23 @@ inline bool Parse(const std::string &text, State *out) {
     return false;
 }
 
+// Any state's, whatever its numbers (each is formatted on its own: no fixed buffer to fill).
 inline std::string Text(const State &s) {
-    char b[512];
+    const auto num = [](const char *format, double v) {
+        char b[400];   // (%f of the largest double is 309 digits and the decimals)
+        std::snprintf(b, sizeof b, format, v);
+        return std::string(b);
+    };
     switch (s.kind) {
         case State::Kind::Off: return "off";
         case State::Kind::Tile:
-            std::snprintf(b, sizeof b, "tile %d %d %d %d %.3f %.3f %.2f", s.stay ? 1 : 0, s.col, s.row, s.alone ? 1 : 0,
-                          s.weight, s.scale, s.width);
-            return b;
+            return "tile " + std::to_string(s.stay ? 1 : 0) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
+                   std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.weight) + num(" %.3f", s.scale) + num(" %.2f", s.width);
         case State::Kind::Sat: {
-            int n = std::snprintf(b, sizeof b, "sat %d", s.stay ? 1 : 0);
+            std::string t = std::string("sat ") + (s.stay ? "1" : "0");
             for (int r = 0; r < 3; ++r)
-                for (int c = 0; c < 4; ++c) n += std::snprintf(b + n, sizeof b - size_t(n), " %.4f", s.rel[r][c]);
-            return b;
+                for (int c = 0; c < 4; ++c) t += num(" %.4f", s.rel[r][c]);
+            return t;
         }
     }
     return "off";

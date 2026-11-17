@@ -86,7 +86,9 @@ public:
                 // An app's window keeps its panel and its tag a while: one that maps again (a
                 // toggled window, a Steam-launched app's splash) doesn't show gamescope's own panel
                 // before ours is tagged again, and keeps its place. A popup goes (menus open anew).
-                if (auto m = mains_.find(id); m != mains_.end() && m->second.mapped) {
+                // One with a popup still mapped over it (a dialog left up, as an app minimized to
+                // its tray does) goes now, as before: hidden, it would take the dialog with it.
+                if (auto m = mains_.find(id); m != mains_.end() && m->second.mapped && !MappedPopupOn(m->second.index)) {
                     m->second.mapped = false, m->second.sinceMs = nowMs;
                     out.push_back({Action::Hide, m->second.index, 0, m->second.win});
                     if (lastPointed_ == id) lastPointed_ = 0;
@@ -215,6 +217,11 @@ private:
         popups_[w.id] = {index, sub, w, false, nowMs};
         out.push_back({Action::MakePopup, index, sub, w});
     }
+    bool MappedPopupOn(int index) const {
+        for (const auto &[pid, p] : popups_)
+            if (p.index == index && p.mapped) return true;
+        return false;
+    }
     void Forget(uint32_t id, std::vector<Action> &out) {
         if (auto p = popups_.find(id); p != popups_.end()) {
             out.push_back({Action::DropPopup, p->second.index, p->second.sub, p->second.win});
@@ -287,8 +294,10 @@ public:
         owned_ = true, owner_ = device, lastMs_ = nowMs;
         return true;
     }
-    void Press(uint32_t device, bool down, int64_t nowMs) {
-        if (down) owned_ = true, owner_ = device, held_ = true;
+    // `panel` and `sub` (0: the panel itself, else a popup over it): what was pressed on (its going
+    // lets go: PanelGone).
+    void Press(uint32_t device, bool down, int64_t nowMs, int panel = -1, int sub = 0) {
+        if (down) owned_ = true, owner_ = device, held_ = true, panel_ = panel, sub_ = sub;
         else if (owned_ && owner_ == device) held_ = false;
         if (owned_ && owner_ == device) lastMs_ = nowMs;
     }
@@ -296,9 +305,15 @@ public:
     void Left(uint32_t device) {
         if (owned_ && owner_ == device) owned_ = false, held_ = false;
     }
+    // What was pressed on went or hid (a button that closes its window, a menu item its menu): no
+    // release or leave comes from it, so the press is over. sub -1: the panel and its popups.
+    void PanelGone(int panel, int sub = -1) {
+        if (owned_ && held_ && panel_ == panel && (sub < 0 || sub_ == sub)) owned_ = false, held_ = false;
+    }
 
 private:
     bool owned_ = false, held_ = false;
+    int panel_ = -1, sub_ = 0;
     uint32_t owner_ = 0;
     int64_t lastMs_ = 0;
 };

@@ -51,6 +51,8 @@ void GsGeometry(Screen &s, int index, const gsforward::Window &w) {
 }
 
 namespace {
+gsapps::PointerOwner g_gsPointer;   // which laser has the X pointer (all the app panels share it)
+
 // The apps' panels (gscontrol.h's Panels), on OpenVR.
 class GsPanels : public gsapps::Panels {
 public:
@@ -95,6 +97,7 @@ public:
         const auto it = g_screens.find(index);
         if (it == g_screens.end()) return;
         if (g_mouseScreen == index) g_mouseScreen = -1;
+        g_gsPointer.PanelGone(index);
         EndDrag(it->second);
         it->second.shown = nullptr;
         std::printf("screen %d: unmapped (a gamescope app): hidden until it maps again\n", index + 1);
@@ -105,6 +108,7 @@ public:
     }
     void Drop(int index) override {
         if (g_mouseScreen == index) g_mouseScreen = -1;
+        g_gsPointer.PanelGone(index);
         if (g_screens.count(index)) std::printf("screen %d: gone (a gamescope app)\n", index + 1);
         ft_vr_screen_destroy(index);
     }
@@ -149,6 +153,7 @@ public:
         if (sit == it->second.subs.end()) return;
         vr::VROverlay()->DestroyOverlay(sit->second.overlay);
         it->second.subs.erase(sit);
+        g_gsPointer.PanelGone(index, sub);   // (a menu item that closes its menu on the press)
     }
     // (PIN locked: nothing is, whatever the panel last said)
     bool Shown(int index) const override {
@@ -161,7 +166,6 @@ GsPanels g_gsPanels;
 std::unique_ptr<gsforward::AsyncLink> g_gsLink;   // (made when first switched on: its thread)
 std::unique_ptr<gsapps::Control> g_gsControl;     // (after it: goes first)
 bool g_gsOn = false;                              // GSAPP_PANELS
-gsapps::PointerOwner g_gsPointer;                 // which laser has the X pointer (all the app panels share it)
 }  // namespace
 
 // Each tick: what happened on the app display since (gslink.h's thread opens it, every
@@ -227,7 +231,7 @@ void GsPanelEvents(Screen &s, int index) {
                     if (g_meta || g_alt || g_ctrl || g_shift) SendRelay("notap");
                     if (ModCarry(s, index, ev.trackedDeviceIndex, button, ev.data.mouse.x, s.height - ev.data.mouse.y)) return;
                 }
-                g_gsPointer.Press(ev.trackedDeviceIndex, down, now);
+                g_gsPointer.Press(ev.trackedDeviceIndex, down, now, index, sub);
                 gs.Press(index, sub, gsforward::XButton(int(button)), down, x, y);   // (a press: typing goes to it)
                 break;
             }

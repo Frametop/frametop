@@ -1,6 +1,6 @@
 // ft-screens' OpenVR side, shared by its parts: vr.cpp (the panels, their input, the C API in
-// vr.h), vrgsapps.cpp (the gamescope apps' panels). The panel (Screen) and what each part uses
-// of the others'. Not an interface outside ft-screens' C++: compositor.c sees vr.h only.
+// vr.h), vrgsapps.cpp (the gamescope apps' panels) and vrtiles.cpp (the dashboard tiles). The
+// panel (Screen) and what each part uses of the others'. Not an interface outside ft-screens' C++: compositor.c sees vr.h only.
 #pragma once
 
 #include "vr.h"

@@ -100,6 +100,13 @@ static void Popups() {
     a = many.Tick(1 + kMapWaitMs);
     CHECK(int(a.size()) == kMaxPopups - 1 && a[0].type == Action::DropPopup);
     CHECK(many.PopupWindow(kFirst, 1) == 50 && many.PanelOf(50) == kFirst && many.PanelOf(51) == -1);
+    // a window that unmaps with its dialog still up goes at once (council pass 7: hidden, it took the
+    // dialog with it for kMapWaitMs); with nothing over it, it's only hidden
+    Book d;
+    d.On(Ev(Event::Created, Win(1, Kind::Main)), 0), d.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+    d.On(Ev(Event::Created, Win(7, Kind::Popup, 300, 200, 1)), 0), d.On(Ev(Event::Mapped, Win(7, Kind::Popup, 300, 200, 1)), 0);
+    a = d.On(Ev(Event::Unmapped, Win(1, Kind::Main)), 10);
+    CHECK(a.size() == 2 && a[0].type == Action::DropPopup && a[1].type == Action::Drop && d.PanelOf(7) == -1);
     a = many.On(Ev(Event::Mapped, Win(51, Kind::Popup, 100, 50)), 2 + kMapWaitMs);   // mapped later: made then
     CHECK(a.size() == 1 && a[0].type == Action::MakePopup);
     CHECK(many.Tick(100 + 2 * kMapWaitMs).empty());   // (mapped ones stay)
@@ -145,6 +152,18 @@ static void Lasers() {
     CHECK(!o.Move(2, 2100) && o.Move(2, 2030 + PointerOwner::kHoldMs + 1));
     o.Left(2);                          // it left the app panels: anyone's
     CHECK(o.Move(1, 2400));
+    // the panel pressed on goes (a button that closes its window): no release comes, the press is over
+    PointerOwner g;
+    g.Press(1, true, 0, 4, 0);
+    g.PanelGone(4, 2);                  // a menu over it went: still held
+    CHECK(!g.Move(2, 1000));
+    g.PanelGone(5);                     // another panel: still held
+    CHECK(!g.Move(2, 1100));
+    g.PanelGone(4);                     // its own
+    CHECK(g.Move(2, 1200));
+    g.Press(2, true, 1300, 4, 3);       // on a menu, which closes on the press
+    g.PanelGone(4, 3);
+    CHECK(g.Move(1, 1300 + PointerOwner::kHoldMs + 1));
 }
 
 int main() {

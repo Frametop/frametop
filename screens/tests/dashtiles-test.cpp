@@ -316,6 +316,19 @@ int main() {
         check("state: a satellite parses", dashtiles::Parse("sat 0 1 0 0 0.5 0 1 0 0 0 0 1 -2", &s) &&
                                                s.kind == dashtiles::State::Kind::Sat && near(s.rel[0][3], 0.5) &&
                                                near(s.rel[2][3], -2));
+        // (council pass 7: a satellite of huge numbers overran Text's buffer, from a file or a profile)
+        std::string huge = "sat 1";
+        for (int k = 0; k < 12; ++k) huge += " 1e300";
+        check("state: numbers past 1e6 refused", !dashtiles::Parse(huge, &s) && !dashtiles::Parse("tile 0 1 0 1 2e6 1 0", &s));
+        dashtiles::State big;
+        big.kind = dashtiles::State::Kind::Sat;
+        for (auto &row : big.rel)
+            for (double &v : row) v = -1e308;
+        const std::string bigText = dashtiles::Text(big);
+        check("state: any state's text is whole", bigText.size() > 12 * 300 && bigText.rfind("sat 0 -1", 0) == 0);
+        dashtiles::Board hb;
+        hb.Anchor(5, -1, false);
+        check("state: a huge satellite from a profile is refused", !hb.Restore(5, huge, -1));
         dashtiles::Board w;
         for (int id : {10, 11, 20}) w.Anchor(id, -1, false);
         w.RestoreAll({{10, "tile  0   0 0 1 1 1 0"}, {11, "tile\t0\t1\t0\t1\t1\t1\t0"}});

@@ -198,6 +198,8 @@ int main() {
         check("drop: well below it (in front of the dashboard): torn off", d.kind == tiling::Drop::TearOff);
         d = tiling::DropAt(tiling::Arrange({}, q), {}, 0, 0);
         check("drop: an empty grid takes it as its first column", d.kind == tiling::Drop::NewColumn && d.col == 0);
+        const tiling::Layout none = tiling::Arrange({}, q);
+        check("an empty strip has no span", none.az0 == 0 && none.az1 == 0);
     }
     // --- the grid model
     {

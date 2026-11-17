@@ -7061,7 +7061,7 @@ void ft_vr_screen_destroy(int index) {
     if (g_cutterState == 1) g_cutter.DropPanel(index);
     Mat p;
     const Screen &s = it->second;
-    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe,
+    if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.tileCurve > 0 ? s.tileCurve : s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe,
                                                         s.dashWait, s.dashHasRel, s.dashRel};
     TileGone(index);
     g_chromePool.Release(index);

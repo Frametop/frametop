@@ -105,6 +105,17 @@ dashtiles::Info TileInfo(int id) {
 }  // namespace
 
 namespace {
+// Tiled panels flat, the others with their own curves back (tiling.h's FlatWhileTiled).
+void FlattenTiles() {
+    for (auto &[i, s] : g_screens) {
+        if (s.overlay == vr::k_ulOverlayHandleInvalid || !tiling::FlatWhileTiled(g_tiles.Tiled(i), &s.curve, &s.tileCurve))
+            continue;
+        CapCurve(s);
+        ApplyCurve(s);
+        PlaceChrome(s);
+    }
+}
+
 Mat ToMat(const double m[3][4]) {
     Mat o;
     for (int r = 0; r < 3; ++r)
@@ -117,6 +128,7 @@ Mat ToMat(const double m[3][4]) {
 // and each satellite at its own. Nothing until the group has a frame (the dashboard seen).
 void RetileDash(bool resize) {
     g_tiles.params.middleDeg = g_tileRaiseDeg;   // (read at start, and set live)
+    FlattenTiles();
     if (!g_tileGroupSet || !Dash().ever) return;
     const auto &l = g_tiles.Arrange(TileInfo);
     for (const tiling::Placed &p : l.tiles) {
@@ -182,11 +194,12 @@ bool Regroup() {
 }  // namespace
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
-std::array<TileSetting, 4> TileSettings() {
+std::array<TileSetting, 5> TileSettings() {
     return {{{"DASH_TILE_RAISE_DEG", &g_tileRaiseDeg, -30, 30},   // the band's middle above your eyes
              {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 4},   // the sphere's, metres
              {"DASH_TILE_HEIGHT_DEG", &g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120},
-             {"DASH_TILE_MAX_TOP_DEG", &g_tiles.params.maxTopDeg, 20, 80}}};   // the column height cap
+             {"DASH_TILE_MAX_TOP_DEG", &g_tiles.params.maxTopDeg, 20, 80},   // the column height cap
+             {"DASH_TILE_GAP_DEG", &g_tiles.params.gapDeg, 0, 10}}};   // between tiles, round you and up
 }
 // One of them live: false if it isn't one, or out of its range. The tiles go round again.
 bool SetTileSetting(const char *name, double value) {
@@ -393,6 +406,7 @@ void PlaceTileBorder() {
 
 // Each tick, after the dashboard pins have moved.
 void UpdateDashTiles() {
+    FlattenTiles();   // (a curve given a tiled panel since: its curve button, a layout put back)
     const bool up = vr::VROverlay()->IsDashboardVisible();
     if (up && !g_dashWasUp) g_tileRegroup = true;
     g_dashWasUp = up;
@@ -401,6 +415,62 @@ void UpdateDashTiles() {
     if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
     UpdateTileFocus();
 }
+
+namespace {
+// "tiles gaps": the tiled panels as SteamVR shows them (each one's pose, size and curve), seen from
+// the group's centre: the smallest gap between neighbours (columns side by side, rows in a column)
+// and either side of Steam's slot, then each one's span round you and up. A check in the headset
+// that the tiles keep their distance (tiling::Params::gapDeg) and don't run into each other.
+void TileGaps(char *reply, int size) {
+    if (!g_tileGroupSet) return (void)std::snprintf(reply, size, "error no tiles placed yet");
+    const tiling::Layout &l = g_tiles.Last();
+    const Mat toGroup = Inverse(Mul(DashFrame(), g_tileGroupRel));
+    struct Seen {
+        int id, col, row;
+        double az0, az1, el0, el1, curve;
+    };
+    std::vector<Seen> seen;
+    for (const tiling::Placed &p : l.tiles) {
+        const auto it = g_screens.find(p.id);
+        Mat pose;
+        if (it == g_screens.end() || !ScreenPose(it->second, &pose)) continue;
+        const Screen &s = it->second;
+        Seen v{p.id, p.col, p.row, 1e9, -1e9, 1e9, -1e9, s.curve};
+        for (int i = 0; i <= 16; ++i)   // (its edges and middle line, along the arc when curved)
+            for (int j = 0; j <= 2; ++j) {
+                const Mat at = Mul(toGroup, Mul(pose, OnSurface(s, s.metres * (i / 16.0 - 0.5), s.heightMetres() * (j / 2.0 - 0.5), 0)));
+                const double pt[3] = {at.m[0][3], at.m[1][3], at.m[2][3]};
+                double az, el;
+                tiling::Direction(pt, &az, &el);
+                az = tiling::WrapNear(az, p.azDeg);
+                v.az0 = std::min(v.az0, az), v.az1 = std::max(v.az1, az), v.el0 = std::min(v.el0, el), v.el1 = std::max(v.el1, el);
+            }
+        seen.push_back(v);
+    }
+    double gap = 1e9, slotL = 1e9, slotR = 1e9;
+    const double s0 = l.slotAz - g_tiles.params.reserveDeg / 2, s1 = l.slotAz + g_tiles.params.reserveDeg / 2;
+    for (const Seen &a : seen) {
+        if (l.split >= 0 && a.col == l.split - 1) slotL = std::min(slotL, s0 - a.az1);
+        if (l.split >= 0 && a.col == l.split) slotR = std::min(slotR, a.az0 - s1);
+        for (const Seen &b : seen) {
+            if (b.col == a.col && b.row == a.row + 1) gap = std::min(gap, a.el0 - b.el1);   // (rows top down)
+            if (b.col == a.col + 1 && b.el0 < a.el1 && a.el0 < b.el1)
+                gap = std::min(gap, b.az0 - a.az1 - (l.split == b.col ? s1 - s0 + g_tiles.params.gapDeg : 0));
+        }
+    }
+    std::string out;
+    char part[160];
+    std::snprintf(part, sizeof part, "ok smallest gap %.1f degrees (wanted %.1f; none: 1e9), Steam's slot clear by %.1f left, %.1f right",
+                  gap, g_tiles.params.gapDeg, slotL, slotR);
+    out = part;
+    for (const Seen &v : seen) {
+        std::snprintf(part, sizeof part, "; %d: column %d row %d, %.1f..%.1f round, %.1f..%.1f up, curve %.2f m", v.id + 1, v.col,
+                      v.row, v.az0, v.az1, v.el0, v.el1, v.curve);
+        out += part;
+    }
+    std::snprintf(reply, size, "%s", out.c_str());
+}
+}  // namespace
 
 // The anchor button: a click anchors or lets go, a long press (kAnchorStayMs) makes it stay shown
 // with the dashboard closed, or not (anchoring it if it wasn't).
@@ -476,6 +546,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             std::snprintf(reply, size, "%s", out.c_str());
             return;
         }
+        if (!std::strcmp(parsed.rest, "gaps")) return TileGaps(reply, size);
         if (!std::strcmp(parsed.rest, "clear")) {
             for (const int id : g_tiles.Ids()) TileUnanchor(id, "tiles clear");
             return (void)std::snprintf(reply, size, "ok");

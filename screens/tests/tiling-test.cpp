@@ -369,5 +369,40 @@ int main() {
         check("split: none set on an empty grid", g.Split(1) == -1);
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
+    // --- tiled panels are flat (a curved one reaches past its column), their own curves kept
+    {
+        double curve = 1.5, kept = 0;
+        check("flat: a curved panel tiled goes flat", tiling::FlatWhileTiled(true, &curve, &kept) && curve == 0 && near(kept, 1.5));
+        check("flat: ...and stays so (nothing to change)", !tiling::FlatWhileTiled(true, &curve, &kept) && curve == 0 && near(kept, 1.5));
+        check("flat: its curve back when it leaves", tiling::FlatWhileTiled(false, &curve, &kept) && near(curve, 1.5) && kept == 0);
+        check("flat: a panel not tiled keeps its own", !tiling::FlatWhileTiled(false, &curve, &kept) && near(curve, 1.5));
+        double flat = 0, none = 0;
+        check("flat: a flat one tiled: nothing kept", !tiling::FlatWhileTiled(true, &flat, &none) && flat == 0 && none == 0);
+        curve = 2, kept = 0;
+        tiling::FlatWhileTiled(true, &curve, &kept);
+        curve = 1.2;   // its curve button while tiled
+        check("flat: a curve given it tiled goes flat, kept for later", tiling::FlatWhileTiled(true, &curve, &kept) && curve == 0 && near(kept, 1.2));
+        tiling::FlatWhileTiled(true, &curve, &kept);
+        tiling::FlatWhileTiled(false, &curve, &kept);
+        curve = 3, kept = 2;   // (one given it once it left, by grab that, before the sweep)
+        check("flat: a curve given it after it left stays", !tiling::FlatWhileTiled(false, &curve, &kept) && near(curve, 3) && kept == 0);
+    }
+    // --- why: a panel curved round its own cylinder covers more of a turn than its (flat) column
+    {
+        tiling::Params q;
+        const tiling::Layout l = tiling::Arrange({col({{1, 3440.0 / 1440}}), col({{2, 1.6}})}, q);
+        const tiling::Placed &a = l.tiles[0], &b = l.tiles[1];
+        // half the angle a panel w wide covers from the centre at r, curved round R (0 flat): OpenVR
+        // curves it toward its front, the cylinder's axis R in front of it
+        const auto half = [&](double w, double R) {
+            if (R <= 0) return tiling::Deg(std::atan2(w / 2, q.radius));
+            return tiling::Deg(std::atan2(R * std::sin(w / 2 / R), q.radius - R + R * std::cos(w / 2 / R)));
+        };
+        const double flatGap = (b.azDeg - half(b.widthM, 0)) - (a.azDeg + half(a.widthM, 0));
+        const double curvedGap = (b.azDeg - half(b.widthM, 1.5)) - (a.azDeg + half(a.widthM, 1.5));
+        check("flat: two flat tiles keep the gap between them", near(flatGap, q.gapDeg, 1e-6));
+        check("flat: curved round 1.5 m they'd overlap", curvedGap < 0);
+        check("flat: the gap is 3 degrees, about 8 cm at 1.6 m", near(q.gapDeg, 3) && near(tiling::Chord(q.radius, q.gapDeg), 0.084, 1e-3));
+    }
     return failed ? 1 : 0;
 }

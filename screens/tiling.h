@@ -17,6 +17,11 @@
 // when the strip centred in front of you would reach it, with the split that puts the strip's
 // middle nearest in front of you. Past a full turn round you everything shrinks until it fits.
 //
+// Every tiled panel is flat: the spans here are a flat panel's, and a curved one reaches further
+// round you than its column (user, 2026-11-17: tiles "should stay the same distance around each
+// other, not overlap"; a desktop curved 1.5 m round ran 9 degrees into its neighbour).
+// FlatWhileTiled keeps a panel's own curve while it's tiled and gives it back when it leaves.
+//
 // A panel with pixels of its own to change (a floating window, an app gamescope hands us) fills
 // its cell: its width is the column's. A panel at a fixed resolution (a desktop screen, a remote
 // display) keeps its shape: its row's height and its aspect, and its column grows to fit it.
@@ -56,7 +61,7 @@ struct Params {
     double heightDeg = 40;      // how tall the band is asked to be (a desktop at about its size)
     double maxTopDeg = 55;      // ...but never past this up or down (the column height cap)
     double minHeightDeg = 12;   // ...and never shorter than this
-    double gapDeg = 1.5;        // between columns, and between the panels in one
+    double gapDeg = 3;          // between columns, and between the panels in one (about 8 cm at 1.6 m)
     double columnDeg = 40;      // a column's width when it has none of its own
     double maxSpanDeg = 360;    // the strip round you, gaps included, at most
     double reserveAzDeg = 0;    // Steam's menu, a slot kept clear when the strip would reach it: its middle
@@ -80,6 +85,22 @@ struct Layout {
     int split = -1;                       // the columns left of Steam's slot (-1: no slot in the strip)
     double slotAz = 0;                    // ...the slot's middle (a drop left or right of it)
 };
+
+// A panel's curve (a cylinder's radius, 0 flat) while it's `tiled`, its own kept in `kept` until it
+// isn't: true when `curve` changed. A curve given it while it's tiled (its curve button) is kept
+// for later in the same way; one given it once it has left (grab that's) stays.
+inline bool FlatWhileTiled(bool tiled, double *curve, double *kept) {
+    if (tiled) {
+        if (*curve <= 0) return false;
+        *kept = *curve, *curve = 0;
+        return true;
+    }
+    if (*kept <= 0) return false;
+    const bool back = *curve <= 0;
+    if (back) *curve = *kept;
+    *kept = 0;
+    return back;
+}
 
 // The chord across an angle on the sphere: a row's height in metres.
 inline double Chord(double radius, double deg) { return 2 * radius * std::sin(Rad(deg) / 2); }

@@ -126,11 +126,19 @@ class ShippedTest(unittest.TestCase):
         board's check as a fetched round would, so the dataset can carry it to recorders out there."""
         def plan_of(name):
             script = session.load_script(session.bounty_script(name))
+            self.assertEqual(script.get("record_hz"), 30, name)
             self.assertEqual(session.check_round(name, json.loads(json.dumps(script))), script)
             plan, skipped = session.build_plan(script, {}, seed=1)
             self.assertEqual(skipped, [])
             self.assertEqual([s["kind"] for s in plan], ["prompts", "prompts", "scene"], name)
             steps = plan[1]["prompts"]
+            for p in steps:   # a step for one hand that switches hands would warn about the hand put down
+                if p["hands"] in ("left", "right"):
+                    self.assertFalse(any("hand" in w["to"] and "face" not in w["to"] for w in p["switch"]), p["id"])
+            for p in plan[2]["prompts"]:
+                for a in p["scene"]["acts"]:
+                    if a["gesture"] != "rest":
+                        self.assertNotEqual(a["lit"], "none", p["id"])
             self.assertTrue(100 <= sum(p["seconds"] for p in steps) <= 150, name)
             palm = [p for p in steps if re.search(r"palms? toward you", p["text"], re.I)]
             self.assertGreater(len(palm), len(steps) / 2, "%s: mostly palm toward the cameras" % name)
@@ -138,15 +146,27 @@ class ShippedTest(unittest.TestCase):
                                 for p in steps), "%s: up close" % name)
             self.assertLessEqual(session.plan_seconds(script, plan, worst=True), 5 * 60, name)
             return steps, plan[2]["prompts"]
+        fingers = {"index": "2", "middle": "3", "ring": "4", "little": "5"}   # the act's label: which finger
+
+        def finger_of(a):
+            return [f for f in fingers if "your %s finger" % f in a["say"] or " %s finger" % f in a["say"]]
         steps, scene = plan_of("single-fingers")
         self.assertLessEqual({"left", "right", "both"}, {p["hands"] for p in steps})
         for p in scene:
-            says = " ".join(a["say"] for a in p["scene"]["acts"] if a["gesture"] == "poke")
-            for finger in ("index", "middle", "ring", "little"):
-                self.assertIn("your %s finger" % finger, says, p["id"])
+            pokes = [a for a in p["scene"]["acts"] if a["gesture"] == "poke"]
+            self.assertEqual(sorted(a["label"] for a in pokes), sorted(list(fingers.values()) * 2), p["id"])
+            self.assertTrue(all(finger_of(a) == [f for f, n in fingers.items() if n == a["label"]] for a in pokes))
         steps, scene = plan_of("finger-play")
-        self.assertTrue(all(w["at"][1] <= -0.25 for p in scene for w in p["scene"]["windows"]), "piano: low")
-        self.assertIn("both", {p["hands"] for p in scene})
+        self.assertTrue(all(w["at"][1] <= -0.2 for p in scene for w in p["scene"]["windows"]), "piano: low")
+        for p in scene:   # one key a finger, the right hand's index on the left; the label ends in the finger
+            for a in p["scene"]["acts"]:
+                if a["gesture"] == "poke":
+                    hand = a["hand"] or p["hands"]
+                    order = ["index", "middle", "ring", "little"][::1 if hand == "right" else -1]
+                    k = int(a["lit"].split(":")[1])
+                    self.assertEqual(a["label"][-1], fingers[order[k]], (p["id"], a))
+        both = [a for a in scene[-1]["scene"]["acts"] if a["gesture"] == "poke"]
+        self.assertEqual(sum(a["hand"] == "left" for a in both), sum(a["hand"] == "right" for a in both))
         steps, scene = plan_of("hands-together")
         self.assertTrue(all(p["hands"] == "both" for p in steps))
         pokes = [a for a in scene[0]["scene"]["acts"] if a["gesture"] == "poke"]

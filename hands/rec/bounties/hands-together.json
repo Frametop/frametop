@@ -53,7 +53,6 @@
    "prompts": [
     {
      "id": "together/tips",
-     "pose": "near-face",
      "seconds": 16,
      "text": "Both hands up, palms toward you. Touch matching fingertips together, like a steeple,|then tap each pair of fingertips together one at a time.",
      "switch": [
@@ -109,7 +108,6 @@
     },
     {
      "id": "together/holding",
-     "pose": "grab",
      "seconds": 16,
      "text": "Hold your left wrist with your right hand while the left hand's fingers move, its palm toward you.|Then hold one of its fingers instead.",
      "switch": [
@@ -128,7 +126,6 @@
     },
     {
      "id": "together/close",
-     "pose": "near-face",
      "distance": "near",
      "seconds": 14,
      "text": "Any of these close to your face, about a forearm's length away, palms toward you:|fingertips touching, fingers laced, one hand over the other."
@@ -149,26 +146,26 @@
       {
        "id": "a",
        "at": [
-        -0.2,
+        -0.16,
         -0.1,
-        -0.42
+        -0.4
        ],
        "size": [
-        0.24,
-        0.18
+        0.22,
+        0.16
        ],
        "look": "grid:2x2"
       },
       {
        "id": "b",
        "at": [
-        0.2,
+        0.16,
         -0.1,
-        -0.42
+        -0.4
        ],
        "size": [
-        0.24,
-        0.18
+        0.22,
+        0.16
        ],
        "look": "grid:2x2"
       }

@@ -106,21 +106,20 @@
     },
     {
      "id": "fingers/odd-ways",
-     "hands": "right",
-     "pose": "claw",
+     "hands": "any",
+     "pose": "spread",
      "seconds": 20,
-     "text": "Right hand, palm toward you. Bend only the fingertip's knuckle, then only the base knuckle,|wiggle fingers sideways, spread them in pairs, cross the index over the middle.",
+     "text": "One hand, palm toward you. Bend only the fingertip's knuckle, then only the base knuckle,|wiggle fingers sideways, spread them in pairs, cross the index over the middle.",
      "switch": [
       {
        "at": 0.5,
-       "to": "the left hand"
+       "to": "the other hand"
       }
      ]
     },
     {
      "id": "fingers/both-different",
      "hands": "both",
-     "pose": "count-2",
      "seconds": 16,
      "text": "Both hands up, palms toward you. Move a different finger on each hand at the same time,|never the same one on both.",
      "switch": [
@@ -189,104 +188,112 @@
        "win": "a",
        "lit": "button:1",
        "gesture": "poke",
-       "say": "Right hand: poke it with your little finger only"
+       "label": "5",
+       "say": "Right hand: poke with your little finger (5)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:4",
        "gesture": "poke",
-       "say": "Right hand: poke it with your index finger only"
+       "label": "2",
+       "say": "Right hand: poke with your index finger (2)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:3",
        "gesture": "poke",
-       "say": "Right hand: poke it with your middle finger only"
+       "label": "3",
+       "say": "Right hand: poke with your middle finger (3)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:1",
        "gesture": "poke",
-       "say": "Right hand: poke it with your ring finger only"
+       "label": "4",
+       "say": "Right hand: poke with your ring finger (4)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:5",
        "gesture": "poke",
-       "say": "Right hand: poke it with your index finger only"
+       "label": "2",
+       "say": "Right hand: poke with your index finger (2)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:2",
        "gesture": "poke",
-       "say": "Right hand: poke it with your middle finger only"
+       "label": "3",
+       "say": "Right hand: poke with your middle finger (3)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:1",
        "gesture": "poke",
-       "say": "Right hand: poke it with your little finger only"
+       "label": "5",
+       "say": "Right hand: poke with your little finger (5)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:4",
        "gesture": "poke",
-       "say": "Right hand: poke it with your ring finger only"
+       "label": "4",
+       "say": "Right hand: poke with your ring finger (4)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Right hand: hand back, palm toward you"
+       "say": "Right hand: back a little, fingers relaxed"
       }
      ]
     },
@@ -315,104 +322,112 @@
        "win": "a",
        "lit": "button:1",
        "gesture": "poke",
-       "say": "Left hand: poke it with your middle finger only"
+       "label": "3",
+       "say": "Left hand: poke with your middle finger (3)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:4",
        "gesture": "poke",
-       "say": "Left hand: poke it with your index finger only"
+       "label": "2",
+       "say": "Left hand: poke with your index finger (2)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:2",
        "gesture": "poke",
-       "say": "Left hand: poke it with your little finger only"
+       "label": "5",
+       "say": "Left hand: poke with your little finger (5)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:0",
        "gesture": "poke",
-       "say": "Left hand: poke it with your index finger only"
+       "label": "2",
+       "say": "Left hand: poke with your index finger (2)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:5",
        "gesture": "poke",
-       "say": "Left hand: poke it with your middle finger only"
+       "label": "3",
+       "say": "Left hand: poke with your middle finger (3)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:2",
        "gesture": "poke",
-       "say": "Left hand: poke it with your ring finger only"
+       "label": "4",
+       "say": "Left hand: poke with your ring finger (4)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:1",
        "gesture": "poke",
-       "say": "Left hand: poke it with your little finger only"
+       "label": "5",
+       "say": "Left hand: poke with your little finger (5)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       },
       {
        "s": 2.2,
        "win": "a",
        "lit": "button:5",
        "gesture": "poke",
-       "say": "Left hand: poke it with your ring finger only"
+       "label": "4",
+       "say": "Left hand: poke with your ring finger (4)"
       },
       {
        "s": 0.8,
        "win": "a",
        "gesture": "rest",
-       "say": "Left hand: hand back, palm toward you"
+       "say": "Left hand: back a little, fingers relaxed"
       }
      ]
     }

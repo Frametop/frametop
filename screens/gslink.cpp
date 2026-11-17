@@ -27,6 +27,7 @@ struct Send {
 struct AsyncLink::Shared {
     std::function<std::vector<std::string>()> displays;
     bool needForwarding = true;
+    Role role = Role::Apps;
     std::mutex m;
     std::condition_variable done;
     std::deque<Send> sends;
@@ -126,7 +127,7 @@ struct AsyncLink::Shared {
                 bool opened = false;
                 for (const std::string &d : displays()) {
                     std::string whyNot;
-                    if ((opened = link.Open(d.c_str(), needForwarding, &whyNot))) {
+                    if ((opened = link.Open(d.c_str(), needForwarding, &whyNot, role))) {
                         at = d;
                         break;
                     }
@@ -185,10 +186,11 @@ struct AsyncLink::Shared {
     }
 };
 
-AsyncLink::AsyncLink(std::function<std::vector<std::string>()> displays, bool needForwarding)
+AsyncLink::AsyncLink(std::function<std::vector<std::string>()> displays, bool needForwarding, Role role)
     : d_(std::make_shared<Shared>()) {
     d_->displays = std::move(displays);
     d_->needForwarding = needForwarding;
+    d_->role = role;
     d_->wake = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     std::thread([d = d_] { d->Run(); }).detach();
 }

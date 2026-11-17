@@ -121,7 +121,32 @@ static void WithX() {
         };
         set("GAMESCOPE_VROVERLAY_FORWARDING", 3), set("GAMESCOPE_PID", 4242), set("GAMESCOPE_XWAYLAND_SERVER_ID", 0);
         CHECK(!link.Open(display, true, &why) && why.find("Steam's own") != std::string::npos);
+        {   // Steam's own, as Role::Steam: its windows' tags kept and read, a change of one said
+            const xcb_window_t sw = xcb_generate_id(app);
+            xcb_create_window(app, XCB_COPY_FROM_PARENT, sw, scr->root, 0, 0, 1920, 1080, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                              scr->root_visual, 0, nullptr);
+            const uint32_t steams[2] = {39, 56};
+            const xcb_atom_t target = atom("STEAM_GAMESCOPE_VROVERLAY_TARGET");
+            xcb_change_property(app, XCB_PROP_MODE_REPLACE, sw, target, XCB_ATOM_CARDINAL, 32, 2, steams);
+            xcb_map_window(app, sw);
+            std::free(xcb_get_input_focus_reply(app, xcb_get_input_focus(app), nullptr));
+            CHECK(link.Open(display, true, &why, Role::Steam));
+            Event se;
+            CHECK(Wait(link, Event::Created, sw, &se) && se.win.target == (uint64_t(56) << 32 | 39));
+            auto r = xcb_get_property_reply(app, xcb_get_property(app, 0, sw, target, XCB_ATOM_CARDINAL, 0, 2), nullptr);
+            CHECK(r && xcb_get_property_value_length(r) == 8);   // (not cleared: Steam's)
+            std::free(r);
+            link.Tag(sw, 0x0000000300000009ull);
+            CHECK(Wait(link, Event::Retarget, sw, &se) && se.win.target == 0x0000000300000009ull);
+            xcb_delete_property(app, sw, target);
+            xcb_flush(app);
+            CHECK(Wait(link, Event::Retarget, sw, &se) && se.win.target == 0);
+            link.Close();
+            xcb_destroy_window(app, sw);
+            xcb_flush(app);
+        }
         set("GAMESCOPE_XWAYLAND_SERVER_ID", 1);
+        CHECK(!link.Open(display, true, &why, Role::Steam) && why.find("isn't Steam's own") != std::string::npos);
         CHECK(link.Open(display, true, &why) && link.GamescopePid() == 4242);
         link.Close();
         for (const char *n : {"GAMESCOPE_VROVERLAY_FORWARDING", "GAMESCOPE_PID", "GAMESCOPE_XWAYLAND_SERVER_ID"})

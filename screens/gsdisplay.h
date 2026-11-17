@@ -87,14 +87,22 @@ inline std::string SteamGameDisplay() {
     return found;
 }
 
-inline std::vector<std::string> AppDisplays() {
+inline std::vector<std::string> SocketNames() {
     std::vector<std::string> sockets;
     if (DIR *dir = opendir("/tmp/.X11-unix")) {
         while (const dirent *d = readdir(dir)) sockets.push_back(d->d_name);
         closedir(dir);
     }
-    const char *env = std::getenv("GSAPP_DISPLAY");
-    return Candidates(env, env && DisplayName(env) ? "" : SteamGameDisplay(), std::move(sockets));
+    return sockets;
 }
+
+inline std::vector<std::string> AppDisplays() {
+    const char *env = std::getenv("GSAPP_DISPLAY");
+    return Candidates(env, env && DisplayName(env) ? "" : SteamGameDisplay(), SocketNames());
+}
+
+// The displays to try for Steam's own (gamescope's first Xwayland: Role::Steam takes only that
+// one), by number: `:0` on the Frame.
+inline std::vector<std::string> SteamDisplays() { return Candidates(nullptr, "", SocketNames()); }
 
 }  // namespace gsforward

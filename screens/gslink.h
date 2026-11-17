@@ -36,7 +36,8 @@ public:
     // `displays`: the displays to try, in order (the first that opens is the app display), asked
     // again before each try (gamescope picks them as it starts: gsdisplay.h); `needForwarding` as
     // Link::Open's.
-    AsyncLink(std::function<std::vector<std::string>()> displays, bool needForwarding);
+    // `role`: which of gamescope's displays (gsforward.h).
+    AsyncLink(std::function<std::vector<std::string>()> displays, bool needForwarding, Role role = Role::Apps);
     AsyncLink(std::string display, bool needForwarding)
         : AsyncLink([display] { return std::vector<std::string>{display}; }, needForwarding) {}
     ~AsyncLink() override;   // Stop(0) if not stopped

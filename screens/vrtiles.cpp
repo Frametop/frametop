@@ -99,7 +99,7 @@ dashtiles::Info TileInfo(int id) {
     if (it == g_screens.end()) return info;
     const Screen &s = it->second;
     info.aspect = s.metres / std::max(1e-6, s.heightMetres());
-    info.fixed = !s.floating && !s.gsapp;   // a desktop screen or a remote display: the other end's resolution
+    info.fixed = (!s.floating && !s.gsapp) || s.steamDash;   // a desktop screen, a remote display, Steam's window: their own size
     return info;
 }
 }  // namespace
@@ -138,7 +138,7 @@ void RetileDash(bool resize) {
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
         const int pw = PictureW(s), ph = PictureH(s);
-        if (!s.floating && !s.gsapp) {
+        if ((!s.floating && !s.gsapp) || s.steamDash) {
             if (std::fabs(s.metres - p.widthM) > 0.002) SetWidth(s, p.widthM);
         } else if (pw > 0 && s.metres > 0) {
             if (resize) {
@@ -192,6 +192,8 @@ bool Regroup() {
     const double barW = DashWidth();
     double barAz = 0, slot = 0;
     if (!dashtiles::SteamSlot(g, b, barW, &barAz, &slot)) slot = 0;
+    const int steam = SteamDashIndex();
+    if (steam >= 0 && g_tiles.Tiled(steam)) slot = 0;   // Steam's window is a tile itself: no slot kept for it
     g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
     g_tiles.SlotMoved();
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));

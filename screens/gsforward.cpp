@@ -16,6 +16,7 @@ struct Link::Impl {
     xcb_connection_t *c = nullptr;
     xcb_window_t root = 0;
     uint32_t pid = 0;
+    Role role = Role::Apps;
     xcb_atom_t target = 0, steamGame = 0, netName = 0, utf8 = 0;
     std::map<uint32_t, bool> top;   // root's children seen, and whether each is override-redirect
     std::vector<Event> pending;
@@ -32,6 +33,17 @@ struct Link::Impl {
         const bool there = r && xcb_get_property_value_length(r) >= 4;
         if (there) std::memcpy(&v, xcb_get_property_value(r), 4);
         if (has) *has = there;
+        std::free(r);
+        return v;
+    }
+    // The overlay a window's target names (its two halves), 0 for none.
+    uint64_t Target(xcb_window_t w) {
+        auto r = xcb_get_property_reply(c, xcb_get_property(c, 0, w, target, XCB_ATOM_CARDINAL, 0, 2), nullptr);
+        uint64_t v = 0;
+        if (r && xcb_get_property_value_length(r) >= 8) {
+            const uint32_t *h = static_cast<const uint32_t *>(xcb_get_property_value(r));
+            v = uint64_t(h[0]) | uint64_t(h[1]) << 32;
+        }
         std::free(r);
         return v;
     }
@@ -55,6 +67,11 @@ struct Link::Impl {
             w->kind = Classify(a->_class == XCB_WINDOW_CLASS_INPUT_OUTPUT, a->override_redirect, tf != 0, w->w, w->h);
             top[id] = a->override_redirect;
             if (mapped) *mapped = a->map_state == XCB_MAP_STATE_VIEWABLE;
+            if (role == Role::Steam) {   // (its target now, and each change of it from here on)
+                const uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
+                xcb_change_window_attributes(c, id, XCB_CW_EVENT_MASK, &mask);
+                w->target = Target(id);
+            }
         }
         std::free(a), std::free(g);
         return ok;
@@ -68,7 +85,9 @@ bool Link::IsOpen() const { return d_->c != nullptr; }
 int Link::Fd() const { return d_->c ? xcb_get_file_descriptor(d_->c) : -1; }
 uint32_t Link::GamescopePid() const { return d_->pid; }
 
-bool Link::Open(const char *display, bool needForwarding, std::string *why) {
+bool Link::Open(const char *display, bool needForwarding, std::string *why, Role role) {
+    const bool steams = role == Role::Steam;
+    needForwarding = needForwarding || steams;
     Close();
     int screen = 0;
     xcb_connection_t *c = xcb_connect(display, &screen);
@@ -97,11 +116,17 @@ bool Link::Open(const char *display, bool needForwarding, std::string *why) {
     }
     bool numbered = false;   // (gamescope's first Xwayland is Steam's own, not its apps')
     const uint32_t server = d.Cardinal(d.root, d.Atom("GAMESCOPE_XWAYLAND_SERVER_ID"), &numbered);
-    if (needForwarding && numbered && server == 0) {
+    if (!steams && needForwarding && numbered && server == 0) {
         if (why) *why = std::string(display) + " is Steam's own (gamescope's first Xwayland)";
         Close();
         return false;
     }
+    if (steams && !(numbered && server == 0)) {
+        if (why) *why = std::string(display) + " isn't Steam's own (gamescope's first Xwayland)";
+        Close();
+        return false;
+    }
+    d.role = role;
     d.target = d.Atom("STEAM_GAMESCOPE_VROVERLAY_TARGET");
     d.steamGame = d.Atom("STEAM_GAME");
     d.netName = d.Atom("_NET_WM_NAME");
@@ -116,8 +141,9 @@ bool Link::Open(const char *display, bool needForwarding, std::string *why) {
             Event e;
             bool mapped = false;
             // (a tag left from an ft-screens that went without untagging names an overlay that's
-            // gone: off, so the window has gamescope's own panel until one of ours tags it)
-            xcb_delete_property(c, kids[i], d.target);
+            // gone: off, so the window has gamescope's own panel until one of ours tags it; Steam's
+            // own windows' tags are Steam's)
+            if (!steams) xcb_delete_property(c, kids[i], d.target);
             if (!d.Read(kids[i], &e.win, &mapped)) continue;
             d.pending.push_back(e);
             if (mapped) e.type = Event::Mapped, d.pending.push_back(e);
@@ -177,6 +203,13 @@ std::vector<Event> Link::Poll() {
                     e.type = Event::Created, out.push_back(e);
                     if (mapped) e.type = Event::Mapped, take = true;
                 }
+                break;
+            }
+            case XCB_PROPERTY_NOTIFY: {
+                auto *n = reinterpret_cast<xcb_property_notify_event_t *>(ev);
+                if (d.role != Role::Steam || n->atom != d.target || !d.top.count(n->window)) break;
+                e.type = Event::Retarget, e.win.id = n->window, take = true;
+                e.win.target = n->state == XCB_PROPERTY_DELETE ? 0 : d.Target(n->window);
                 break;
             }
             case XCB_DESTROY_NOTIFY: {

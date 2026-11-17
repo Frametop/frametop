@@ -99,6 +99,8 @@ public:
             case gsforward::Event::Gone:
                 Forget(id, out);
                 break;
+            case gsforward::Event::Retarget:   // (Role::Steam's only: never on the app display)
+                break;
         }
         return out;
     }

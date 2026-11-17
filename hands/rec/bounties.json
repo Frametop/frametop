@@ -1,46 +1,30 @@
 {
  "schema": 1,
- "updated": "2026-10-28",
+ "updated": "2026-11-17",
  "bounties": [
   {
-   "id": "close-up",
-   "title": "Close-up hands",
-   "blurb": "Pokes, taps and pinches on windows very close to you, about a forearm's length from your eyes: the hand near your face, low in front of your chest and out to the side. Up close is where hand tracking loses the most fingers today.",
-   "minutes": 4,
+   "id": "single-fingers",
+   "title": "One finger at a time",
+   "blurb": "Move each finger on its own with your palm toward you, near and far: bend it all the way, wiggle it, cross it, then poke buttons with the finger each one names. Today the tracker moves fingers together when only one moves, worst with the hand close to your face.",
+   "minutes": 5,
    "priority": "high",
-   "script": "close-up"
+   "script": "single-fingers"
   },
   {
-   "id": "near-misses",
-   "title": "Near misses",
-   "blurb": "Taps and pinches that stop about 1 cm short, and a relaxed hand aiming between clicks, mixed with real taps. These teach the tracker what isn't a click, so it stops clicking or holding when you didn't mean to.",
-   "minutes": 4,
+   "id": "finger-play",
+   "title": "Finger play",
+   "blurb": "Anything with your fingers, as long as each one does something different: an invisible piano, counting in a strange order, waves, flicks and shapes, near and far, then pressing piano keys with the finger above each. Range and variety matter more than doing it right.",
+   "minutes": 5,
    "priority": "high",
-   "script": "near-misses"
+   "script": "finger-play"
   },
   {
-   "id": "three-finger",
-   "title": "Three-finger pinches",
-   "blurb": "Taps and scrolls with three fingers: the thumb on the index and middle fingertips together, mixed with ordinary taps and middle taps. Today these often read as a plain thumb and index tap.",
-   "minutes": 4,
+   "id": "hands-together",
+   "title": "Hands touching and crossing",
+   "blurb": "Fingertips touching, fingers laced, counting on the other hand, wrists crossed and one hand passing in front of the other, then windows used with your arms crossed. Two hands touching are where the tracker mixes up whose finger is whose.",
+   "minutes": 5,
    "priority": "high",
-   "script": "three-finger"
-  },
-  {
-   "id": "fists",
-   "title": "Fists",
-   "blurb": "Close your fist on a window, carry it and open your hand to let go: slowly, quickly, with each hand and both, and against pinches and card grabs. Fists closing and opening are still jumpy.",
-   "minutes": 4,
-   "priority": "high",
-   "script": "fists"
-  },
-  {
-   "id": "sideways-hands",
-   "title": "Sideways hands",
-   "blurb": "Pinch, drag and tap windows at arm's length with your hand on its side, thumb on top, as for a handshake, plus lazy susan sweeps. A hand on its edge is the hardest for the cameras to judge for distance.",
-   "minutes": 4,
-   "priority": "high",
-   "script": "sideways-hands"
+   "script": "hands-together"
   },
   {
    "id": "desk-work",
@@ -49,6 +33,46 @@
    "minutes": 5,
    "priority": "high",
    "script": "desk-work"
+  },
+  {
+   "id": "close-up",
+   "title": "Close-up hands",
+   "blurb": "Pokes, taps and pinches on windows very close to you, about a forearm's length from your eyes: the hand near your face, low in front of your chest and out to the side. Up close is where hand tracking loses the most fingers today.",
+   "minutes": 4,
+   "priority": "normal",
+   "script": "close-up"
+  },
+  {
+   "id": "near-misses",
+   "title": "Near misses",
+   "blurb": "Taps and pinches that stop about 1 cm short, and a relaxed hand aiming between clicks, mixed with real taps. These teach the tracker what isn't a click, so it stops clicking or holding when you didn't mean to.",
+   "minutes": 4,
+   "priority": "normal",
+   "script": "near-misses"
+  },
+  {
+   "id": "three-finger",
+   "title": "Three-finger pinches",
+   "blurb": "Taps and scrolls with three fingers: the thumb on the index and middle fingertips together, mixed with ordinary taps and middle taps. Today these often read as a plain thumb and index tap.",
+   "minutes": 4,
+   "priority": "normal",
+   "script": "three-finger"
+  },
+  {
+   "id": "fists",
+   "title": "Fists",
+   "blurb": "Close your fist on a window, carry it and open your hand to let go: slowly, quickly, with each hand and both, and against pinches and card grabs. Fists closing and opening are still jumpy.",
+   "minutes": 4,
+   "priority": "normal",
+   "script": "fists"
+  },
+  {
+   "id": "sideways-hands",
+   "title": "Sideways hands",
+   "blurb": "Pinch, drag and tap windows at arm's length with your hand on its side, thumb on top, as for a handshake, plus lazy susan sweeps. A hand on its edge is the hardest for the cameras to judge for distance.",
+   "minutes": 4,
+   "priority": "normal",
+   "script": "sideways-hands"
   },
   {
    "id": "pokes",

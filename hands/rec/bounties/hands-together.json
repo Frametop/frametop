@@ -1,0 +1,378 @@
+{
+ "version": 1,
+ "name": "hands-together",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Hands touching and crossing",
+  "seconds": 8,
+  "text": "Steps without windows come first: do what each one says with your fingers while the cameras record your hands. Then windows will appear in front of you: they don't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "together",
+   "title": "Hands together",
+   "defaults": {
+    "hands": "both"
+   },
+   "intro": "Both hands touching, laced and crossing each other, mostly with your palms toward you. There's no wrong way: what helps is the fingers of both hands moving while they touch.",
+   "prompts": [
+    {
+     "id": "together/tips",
+     "pose": "near-face",
+     "seconds": 16,
+     "text": "Both hands up, palms toward you. Touch matching fingertips together, like a steeple,|then tap each pair of fingertips together one at a time.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "hands close to your face"
+      }
+     ]
+    },
+    {
+     "id": "together/laced",
+     "pose": "overlap",
+     "seconds": 16,
+     "text": "Lace your fingers together, open and close them,|twist the hands around and pull them apart again."
+    },
+    {
+     "id": "together/counting",
+     "pose": "count-5",
+     "seconds": 16,
+     "text": "Touch each finger of your left hand with your right index, as if counting on it.|Palms toward you.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the left index counting",
+       "text": "Now the other way: your left index touches each finger of your right hand.|Palms toward you."
+      }
+     ]
+    },
+    {
+     "id": "together/crossed",
+     "pose": "cross",
+     "seconds": 16,
+     "text": "Cross your wrists in an X, palms toward you, and keep the fingers moving.|Uncross and cross the other way round.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "each hand on the other side",
+       "text": "Arms crossed: right hand out to your left, left hand out to your right,|fingers moving."
+      }
+     ]
+    },
+    {
+     "id": "together/passing",
+     "pose": "overlap",
+     "seconds": 16,
+     "text": "Pass one hand slowly in front of the other and back, palms toward you,|fingers moving.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you"
+      }
+     ]
+    },
+    {
+     "id": "together/holding",
+     "pose": "grab",
+     "seconds": 16,
+     "text": "Hold your left wrist with your right hand while the left hand's fingers move, its palm toward you.|Then hold one of its fingers instead.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other way round",
+       "text": "Now the left hand holds the right wrist, then one of its fingers,|while the right hand's fingers move, its palm toward you."
+      }
+     ]
+    },
+    {
+     "id": "together/contact",
+     "pose": "overlap",
+     "seconds": 16,
+     "text": "Slow claps, rub your palms together, then stack the hands:|one palm on the other's back, swapping which is on top."
+    },
+    {
+     "id": "together/close",
+     "pose": "near-face",
+     "distance": "near",
+     "seconds": 14,
+     "text": "Any of these close to your face, about a forearm's length away, palms toward you:|fingertips touching, fingers laced, one hand over the other."
+    }
+   ]
+  },
+  {
+   "id": "crossed",
+   "title": "Arms crossed",
+   "kind": "scene",
+   "intro": "Two windows, left and right. Use them with your arms crossed: the right hand on the left window, the left hand on the right. Nothing happens when you do: the cameras record your hands.",
+   "prompts": [
+    {
+     "id": "crossed-pokes",
+     "hands": "both",
+     "text": "Arms crossed. Each lit button says L or R: poke it with that hand,|the right hand on the left window and the left hand on the right.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.2,
+        -0.1,
+        -0.42
+       ],
+       "size": [
+        0.24,
+        0.18
+       ],
+       "look": "grid:2x2"
+      },
+      {
+       "id": "b",
+       "at": [
+        0.2,
+        -0.1,
+        -0.42
+       ],
+       "size": [
+        0.24,
+        0.18
+       ],
+       "look": "grid:2x2"
+      }
+     ],
+     "acts": [
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:3",
+       "gesture": "poke",
+       "hand": "right",
+       "label": "R",
+       "say": "Arms crossed: poke it with your right hand"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "b",
+       "lit": "button:2",
+       "gesture": "poke",
+       "hand": "left",
+       "label": "L",
+       "say": "Arms crossed: poke it with your left hand"
+      },
+      {
+       "s": 0.8,
+       "win": "b",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "hand": "right",
+       "label": "R",
+       "say": "Arms crossed: poke it with your right hand"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "b",
+       "lit": "button:0",
+       "gesture": "poke",
+       "hand": "left",
+       "label": "L",
+       "say": "Arms crossed: poke it with your left hand"
+      },
+      {
+       "s": 0.8,
+       "win": "b",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:0",
+       "gesture": "poke",
+       "hand": "right",
+       "label": "R",
+       "say": "Arms crossed: poke it with your right hand"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "b",
+       "lit": "button:3",
+       "gesture": "poke",
+       "hand": "left",
+       "label": "L",
+       "say": "Arms crossed: poke it with your left hand"
+      },
+      {
+       "s": 0.8,
+       "win": "b",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "hand": "right",
+       "label": "R",
+       "say": "Arms crossed: poke it with your right hand"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      },
+      {
+       "s": 2.2,
+       "win": "b",
+       "lit": "button:1",
+       "gesture": "poke",
+       "hand": "left",
+       "label": "L",
+       "say": "Arms crossed: poke it with your left hand"
+      },
+      {
+       "s": 0.8,
+       "win": "b",
+       "gesture": "rest",
+       "say": "Arms crossed, keep them there"
+      }
+     ]
+    },
+    {
+     "id": "crossed-pinch",
+     "hands": "both",
+     "text": "Arms crossed: the right hand pinches the lit left corner, the left hand the right corner.|Stretch or turn the window like the ghost, then let go.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.12,
+        -0.42
+       ],
+       "size": [
+        0.34,
+        0.22
+       ],
+       "look": "plain"
+      }
+     ],
+     "acts": {
+      "gen": "moves",
+      "gesture": "pinch",
+      "every_s": 3.5,
+      "gap_s": 1.2,
+      "count": 4,
+      "say": "Arms crossed: pinch both corners, then like the ghost",
+      "moves": [
+       {
+        "grab": "tl+tr",
+        "ghost": [
+         0,
+         0,
+         0,
+         0,
+         0,
+         0,
+         1.3
+        ]
+       },
+       {
+        "grab": "bl+br",
+        "ghost": [
+         0,
+         0.06,
+         0,
+         25,
+         0,
+         0
+        ]
+       },
+       {
+        "grab": "tl+tr",
+        "ghost": [
+         0,
+         -0.04,
+         0.08,
+         0,
+         0,
+         0,
+         0.8
+        ]
+       },
+       {
+        "grab": "bl+br",
+        "ghost": [
+         0.05,
+         0,
+         0,
+         -25,
+         0,
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

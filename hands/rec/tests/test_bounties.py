@@ -8,6 +8,7 @@ events in prompts.jsonl, session.json's bounty and sets a second, and the done m
 import json
 import os
 import random
+import re
 import shutil
 import tempfile
 import time
@@ -42,6 +43,10 @@ def step(p, seed="x"):
     return p
 
 
+# Rounds whose plain steps come before the scene, as their labels come from the steps (DESIGN.md, "Bounties").
+PLAIN_FIRST = ("desk-work", "single-fingers", "finger-play", "hands-together")
+
+
 class ShippedTest(unittest.TestCase):
     """The board and round scripts that ship with the recorder."""
 
@@ -49,10 +54,13 @@ class ShippedTest(unittest.TestCase):
         board = bounties.load(session.BOARD_PATH)
         self.assertIsNotNone(board, "bounties.json doesn't validate")
         ids = [b["id"] for b in board["bounties"]]
-        self.assertEqual(ids, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands", "desk-work", "pokes",
-                               "middle-taps", "index-taps", "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
-        live = [b["id"] for b in board["bounties"] if b["priority"] != "retired"]
-        self.assertEqual(live, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands", "desk-work"])
+        self.assertEqual(ids, ["single-fingers", "finger-play", "hands-together", "desk-work", "close-up", "near-misses",
+                               "three-finger", "fists", "sideways-hands", "pokes", "middle-taps", "index-taps",
+                               "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
+        high = [b["id"] for b in board["bounties"] if b["priority"] == "high"]
+        self.assertEqual(high, ["single-fingers", "finger-play", "hands-together", "desk-work"])
+        normal = [b["id"] for b in board["bounties"] if b["priority"] == "normal"]
+        self.assertEqual(normal, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands"])
         for b in board["bounties"]:
             self.assertTrue(session.have_bounty_script(b["script"]), b["script"])
 
@@ -62,7 +70,7 @@ class ShippedTest(unittest.TestCase):
         every act's gesture and lit part valid (build_plan raises otherwise)."""
         board = bounties.load(session.BOARD_PATH)
         for b in board["bounties"]:
-            if b["script"] == "desk-work":   # its own shape: test_desk_work
+            if b["script"] in PLAIN_FIRST:   # their own shape: test_desk_work, test_finger_rounds
                 continue
             script = session.load_script(session.bounty_script(b["script"]))
             self.assertEqual(script.get("record_hz"), 30, b["id"])
@@ -109,6 +117,42 @@ class ShippedTest(unittest.TestCase):
             gestures = {a["gesture"] for a in acts["desk-scene/reach-" + side]}
             self.assertLessEqual({"tap", "poke", "nogo", "rest"}, gestures, side)
         self.assertLessEqual(session.plan_seconds(script, plan, worst=True), 5 * 60)
+
+    def test_finger_rounds(self):
+        """The finger rounds (2026-11-17, user: fingers moved one at a time up close read as grouped): hand size,
+        about two minutes of plain steps, most with the palm toward the cameras and near ones among them, then a
+        short scene. single-fingers names every finger on each hand in its pokes; finger-play presses piano keys
+        low in front; hands-together has the arms crossed (the right hand on the left window). Each passes the
+        board's check as a fetched round would, so the dataset can carry it to recorders out there."""
+        def plan_of(name):
+            script = session.load_script(session.bounty_script(name))
+            self.assertEqual(session.check_round(name, json.loads(json.dumps(script))), script)
+            plan, skipped = session.build_plan(script, {}, seed=1)
+            self.assertEqual(skipped, [])
+            self.assertEqual([s["kind"] for s in plan], ["prompts", "prompts", "scene"], name)
+            steps = plan[1]["prompts"]
+            self.assertTrue(100 <= sum(p["seconds"] for p in steps) <= 150, name)
+            palm = [p for p in steps if re.search(r"palms? toward you", p["text"], re.I)]
+            self.assertGreater(len(palm), len(steps) / 2, "%s: mostly palm toward the cameras" % name)
+            self.assertTrue(any(p["distance"] == "near" or p["switch"] and "face" in p["switch"][0]["to"]
+                                for p in steps), "%s: up close" % name)
+            self.assertLessEqual(session.plan_seconds(script, plan, worst=True), 5 * 60, name)
+            return steps, plan[2]["prompts"]
+        steps, scene = plan_of("single-fingers")
+        self.assertLessEqual({"left", "right", "both"}, {p["hands"] for p in steps})
+        for p in scene:
+            says = " ".join(a["say"] for a in p["scene"]["acts"] if a["gesture"] == "poke")
+            for finger in ("index", "middle", "ring", "little"):
+                self.assertIn("your %s finger" % finger, says, p["id"])
+        steps, scene = plan_of("finger-play")
+        self.assertTrue(all(w["at"][1] <= -0.25 for p in scene for w in p["scene"]["windows"]), "piano: low")
+        self.assertIn("both", {p["hands"] for p in scene})
+        steps, scene = plan_of("hands-together")
+        self.assertTrue(all(p["hands"] == "both" for p in steps))
+        pokes = [a for a in scene[0]["scene"]["acts"] if a["gesture"] == "poke"]
+        wins = {w["id"]: w["at"][0] for w in scene[0]["scene"]["windows"]}
+        self.assertTrue(all((wins[a["win"]] < 0) == (a["hand"] == "right") for a in pokes), "crossed: R on the left")
+        self.assertEqual({a["label"] for a in pokes}, {"L", "R"})
 
     def test_pokes_and_gestures(self):
         """The rounds made from the 2026-10-15 testing sessions: pokes on windows within reach (low ones

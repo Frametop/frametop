@@ -1,0 +1,269 @@
+{
+ "version": 1,
+ "name": "finger-play",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Finger play",
+  "seconds": 8,
+  "text": "Steps without windows come first: do what each one says with your fingers while the cameras record your hands. Then windows will appear in front of you: they don't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "play",
+   "title": "Finger play",
+   "intro": "Anything with your fingers, as long as they each do something different. The steps give ideas: there's no wrong way, so make it odd. Mostly palm toward you, near and far.",
+   "prompts": [
+    {
+     "id": "play/piano-right",
+     "hands": "right",
+     "distance": "mid",
+     "pose": "flat",
+     "seconds": 18,
+     "text": "Right hand, palm toward you, about 40 cm out. Play an invisible piano in the air:|each finger pressing on its own, fast and slow.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "close to your face",
+       "text": "Keep playing, the hand close now:|about a forearm's length from your eyes."
+      }
+     ]
+    },
+    {
+     "id": "play/piano-left",
+     "hands": "left",
+     "distance": "mid",
+     "pose": "flat",
+     "seconds": 18,
+     "text": "Left hand, palm toward you, about 40 cm out. Play an invisible piano in the air:|each finger pressing on its own, fast and slow.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "close to your face",
+       "text": "Keep playing, the hand close now:|about a forearm's length from your eyes."
+      }
+     ]
+    },
+    {
+     "id": "play/count",
+     "hands": "right",
+     "pose": "count-3",
+     "seconds": 18,
+     "text": "Palm toward you. Count on your fingers in a strange order, raising and dropping them one at a time,|skipping around. Then two at a time that aren't next to each other.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the left hand"
+      }
+     ]
+    },
+    {
+     "id": "play/wave",
+     "hands": "any",
+     "pose": "open",
+     "seconds": 16,
+     "text": "Palm toward you. Ripple your fingers in a wave, little finger to index and back,|then flick each finger out from under the thumb.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "play/shapes",
+     "hands": "any",
+     "pose": "ok",
+     "seconds": 18,
+     "text": "Palm toward you. Make shapes, a new one every second or two: rock horns, a finger gun,|the OK sign, crossed fingers, a claw, or anything else.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "play/turning",
+     "hands": "any",
+     "pose": "turn-in-out",
+     "seconds": 16,
+     "text": "Keep the fingers moving while you slowly turn the hand: palm toward you,|on its side, back toward you, and round again.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "play/both",
+     "hands": "both",
+     "pose": "count-5",
+     "seconds": 16,
+     "text": "Both hands, palms toward you, each doing its own thing:|one playing piano while the other counts, or anything else.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "hands closer to your face"
+      }
+     ]
+    },
+    {
+     "id": "play/reach",
+     "hands": "any",
+     "pose": "open",
+     "seconds": 16,
+     "text": "Palm toward you, fingers moving the whole time: start at arm's length,|bring the hand all the way in to a forearm's length from your eyes and back out.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "piano",
+   "title": "Piano keys",
+   "kind": "scene",
+   "intro": "A row of keys low in front of you, like a piano. Rest your fingers over them and press the lit key with the finger above it. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "right",
+     "hands": "right",
+     "text": "Right hand over the keys. Press the lit key with the finger above it,|the others staying up.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.04,
+        -0.28,
+        -0.36
+       ],
+       "size": [
+        0.3,
+        0.1
+       ],
+       "look": "grid:5x1"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "lit_s": 1.0,
+      "seconds": 14,
+      "mix": {
+       "poke": 1
+      },
+      "says": {
+       "poke": "Press it with the finger above it"
+      }
+     }
+    },
+    {
+     "id": "left",
+     "hands": "left",
+     "text": "Left hand over the keys. Press the lit key with the finger above it,|the others staying up.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.04,
+        -0.28,
+        -0.36
+       ],
+       "size": [
+        0.3,
+        0.1
+       ],
+       "look": "grid:5x1"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.4,
+      "lit_s": 1.0,
+      "seconds": 14,
+      "mix": {
+       "poke": 1
+      },
+      "says": {
+       "poke": "Press it with the finger above it"
+      }
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands over a longer row. Each lit key says L or R:|press it with a finger of that hand.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.0,
+        -0.28,
+        -0.36
+       ],
+       "size": [
+        0.44,
+        0.1
+       ],
+       "look": "grid:6x1"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "poke": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ],
+      "says": {
+       "poke": "Press it with a finger of that hand"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

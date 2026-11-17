@@ -1,0 +1,422 @@
+{
+ "version": 1,
+ "name": "single-fingers",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "One finger at a time",
+  "seconds": 8,
+  "text": "Steps without windows come first: do what each one says with your fingers while the cameras record your hands. Then windows will appear in front of you: they don't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "fingers",
+   "title": "One finger at a time",
+   "intro": "Move each finger on its own, mostly with your palm toward you, near and far. Keep the other fingers as still as you can. There's no wrong way: what helps is every finger moving all the way, on its own.",
+   "prompts": [
+    {
+     "id": "fingers/right-mid",
+     "hands": "right",
+     "distance": "mid",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Right hand up, palm toward you, about 40 cm out. Bend each finger all the way down and back up,|one at a time, thumb to little finger. Keep the others still.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "little finger to thumb"
+      }
+     ]
+    },
+    {
+     "id": "fingers/left-mid",
+     "hands": "left",
+     "distance": "mid",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Left hand up, palm toward you, about 40 cm out. Bend each finger all the way down and back up,|one at a time, thumb to little finger. Keep the others still.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "little finger to thumb"
+      }
+     ]
+    },
+    {
+     "id": "fingers/right-close",
+     "hands": "right",
+     "distance": "near",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Right hand close, palm toward you, about a forearm's length from your eyes.|One finger at a time, all the way down and back up.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "fast, in any order"
+      }
+     ]
+    },
+    {
+     "id": "fingers/left-close",
+     "hands": "left",
+     "distance": "near",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Left hand close, palm toward you, about a forearm's length from your eyes.|One finger at a time, all the way down and back up.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "fast, in any order"
+      }
+     ]
+    },
+    {
+     "id": "fingers/odd-ways",
+     "hands": "right",
+     "pose": "claw",
+     "seconds": 20,
+     "text": "Right hand, palm toward you. Bend only the fingertip's knuckle, then only the base knuckle,|wiggle fingers sideways, spread them in pairs, cross the index over the middle.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the left hand"
+      }
+     ]
+    },
+    {
+     "id": "fingers/both-different",
+     "hands": "both",
+     "pose": "count-2",
+     "seconds": 16,
+     "text": "Both hands up, palms toward you. Move a different finger on each hand at the same time,|never the same one on both.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "hands closer to your face"
+      }
+     ]
+    },
+    {
+     "id": "fingers/moving",
+     "hands": "any",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "One hand, palm toward you. Keep moving fingers one at a time while the hand travels:|to the edge of your view, low, high, close to your face and back out.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "fingers/backs",
+     "hands": "any",
+     "pose": "flat-back",
+     "seconds": 12,
+     "text": "Now the back of the hand toward you, fingers up.|One finger at a time, down and back up.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "finger-pokes",
+   "title": "One finger pokes",
+   "kind": "scene",
+   "intro": "A window close to you. Poke each lit button with the finger it names, keeping the other fingers out of the way. Nothing happens when you do: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "right",
+     "hands": "right",
+     "text": "Right hand: poke the lit button with the finger it names, and only that finger.|This window is close: about a forearm's length from your eyes.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0.06,
+        -0.1,
+        -0.3
+       ],
+       "size": [
+        0.26,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": [
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your little finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:4",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your index finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:3",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your middle finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your ring finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:5",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your index finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your middle finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your little finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:4",
+       "gesture": "poke",
+       "say": "Right hand: poke it with your ring finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Right hand: hand back, palm toward you"
+      }
+     ]
+    },
+    {
+     "id": "left",
+     "hands": "left",
+     "text": "Left hand: poke the lit button with the finger it names, and only that finger.|Let the hand come close to your face.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.06,
+        -0.1,
+        -0.3
+       ],
+       "size": [
+        0.26,
+        0.18
+       ],
+       "look": "grid:3x2"
+      }
+     ],
+     "acts": [
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your middle finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:4",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your index finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your little finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:0",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your index finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:5",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your middle finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:2",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your ring finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:1",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your little finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      },
+      {
+       "s": 2.2,
+       "win": "a",
+       "lit": "button:5",
+       "gesture": "poke",
+       "say": "Left hand: poke it with your ring finger only"
+      },
+      {
+       "s": 0.8,
+       "win": "a",
+       "gesture": "rest",
+       "say": "Left hand: hand back, palm toward you"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -11,13 +11,14 @@
 //
 // Steam's menu is a slot in the strip (tiling.h): a split is how many columns are left of it, one
 // for each place the menu opens (kSplits: in front, as the Steam button opens it, and off to the
-// right or the left, as the palm menu does; dashtiles.h's SplitKey), so a palm-menu open leaves
+// right or the left, as the palm menu does; slotsplit.h's KeyOf), so a palm-menu open leaves
 // the front one as it was. A column stays on its side of the slot shown: a new one next to the
 // focused one goes on its side (of each split), a drop on the side it was let go, and
 // Meta+Left/Right steps a panel across the slot (alone in its column: the column goes; with
 // others: out into a column of its own) rather than past it. A swap of two columns round another
 // place's slot moves them both across it: splits count columns, so one order can't keep them all.
-// -1: not chosen yet (the tiling chooses one, Board keeps it); a grid emptied by Remove has none.
+// -1: not chosen yet (the tiling chooses one; Board keeps it, or chooses again while it's only
+// a default); a grid emptied by Remove has none.
 //
 // Header only, so its test runs anywhere.
 #pragma once

@@ -202,18 +202,53 @@ int main() {
         drift.Anchor(1, -1, false);
         drift.Arrange(desk);
         for (int i = 2; i <= 4; ++i) drift.Anchor(i, 1, false), drift.Arrange(desk);   // (all next to 1: right of the menu)
-        const bool lopsided = drift.Grid().Split(0) == 0 && dashtiles::Board::Off(drift.Last()) > 90;
+        const bool lopsided = drift.Grid().Split(0) == 0 && slotsplit::Off(drift.Last()) > 90;
         drift.SlotMoved();
         drift.Arrange(desk);
         check("split: adds all went one side: the next open chooses again, the strip in front",
-              lopsided && drift.Grid().Split(0) == 2 && dashtiles::Board::Off(drift.Last()) < 1);
+              lopsided && drift.Grid().Split(0) == 2 && slotsplit::Off(drift.Last()) < 1);
+        // a reorder on one side doesn't make it yours (council, 2026-11-17)
+        dashtiles::Board same;
+        same.params.reserveAzDeg = 0, same.params.reserveDeg = 66;
+        same.Anchor(1, -1, false);
+        same.Arrange(desk);
+        for (int i = 2; i <= 4; ++i) same.Anchor(i, 1, false), same.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
+        const bool swapped = same.Press(3, dashtiles::Key::Right, desk(3));
+        same.Arrange(desk);
+        const tiling::Placed *p4 = same.PlacedOf(4);
+        same.Drop(4, same.DropFor(4, (p4->az0 + p4->az1) / 2, 0, desk), rel);   // (let go where it was)
+        same.Arrange(desk);
+        const bool stillLopsided = same.Grid().Split(0) == 0;
+        same.SlotMoved();
+        same.Arrange(desk);
+        check("split: moves on one side of the menu: still chosen again on the next open",
+              swapped && stillLopsided && same.Grid().Split(0) == 2 && slotsplit::Off(same.Last()) < 1);
+        // where the menu happens to open doesn't flip a default split (council, 2026-11-17)
+        dashtiles::Board flip;
+        flip.params.reserveAzDeg = 0, flip.params.reserveDeg = 66;
+        const auto floating = [](int) { dashtiles::Info i; i.aspect = 16.0 / 9, i.fixed = false; return i; };
+        flip.Anchor(1, -1, false);
+        for (int i = 2; i <= 6; ++i) flip.Anchor(i, i - 1, false);
+        flip.Arrange(floating);
+        const int first = flip.Grid().Split(0);
+        bool flat = true;
+        for (double az : {40.0, 0.0, -40.0, 0.0, 44.0, -44.0}) {
+            flip.params.reserveAzDeg = az;
+            flip.SlotMoved();
+            flip.Arrange(floating);
+            flat = flat && flip.Grid().Split(0) == first;
+        }
+        check("split: the menu opening 40 degrees either way: no panel crosses it", first >= 0 && flat);
         // ...but not one you set
         drift.Press(4, dashtiles::Key::Right, desk(4));   // ([ 1 ][ 4 ] S [ 3 ][ 2 ]: 4 steps across)
         drift.Arrange(desk);
-        const bool pushed = drift.Grid().Split(0) == 1 && dashtiles::Board::Off(drift.Last()) > 30 + 1;
+        const bool pushed = drift.Grid().Split(0) == 1 && slotsplit::Off(drift.Last()) > 30 + 1;
         drift.SlotMoved();
         drift.Arrange(desk);
         check("split: one you set is kept on the next open", pushed && drift.Grid().Split(0) == 1);
+        check("split keys: in front, right, left, wrapped", slotsplit::KeyOf(0) == 0 && slotsplit::KeyOf(44) == 0 &&
+                                                               slotsplit::KeyOf(110) == 1 && slotsplit::KeyOf(-110) == 2 &&
+                                                               slotsplit::KeyOf(370) == 0 && slotsplit::KeyOf(250) == 2);
         // anchored with nothing tiled in focus (the anchor button: the focus is the panel itself):
         // at the end that brings the strip's middle nearer in front of you, not always the right
         dashtiles::Board e;

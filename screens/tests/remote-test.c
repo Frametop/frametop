@@ -30,11 +30,9 @@ void ft_vr_forget(const void *k) { (void)k; }
 enum ft_attention ft_vr_screen_attention(int i) { (void)i; return FT_HIDDEN; }
 static int g_destroyed;
 void ft_vr_screen_destroy(int i) { (void)i, ++g_destroyed; }
-bool ft_vr_remote_create(int i, const char *l, double m, const char *h, const char *a, bool *r) {
-    (void)i, (void)l, (void)m, (void)h, (void)a;
-    *r = false;
-    return true;
-}
+bool ft_vr_remote_create(int i, const char *l, double m, bool *r) { (void)i, (void)l, (void)m; *r = false; return true; }
+static char g_named[256];   // the last ft_vr_remote_named: "INDEX HOST APP" (the index is the number - 1)
+void ft_vr_remote_named(int i, const char *h, const char *a) { snprintf(g_named, sizeof g_named, "%d %s %s", i, h, a); }
 
 static char g_log[PATH_MAX];
 
@@ -223,6 +221,16 @@ static bool new_settings(void) {
     read_log();
     EXPECT(g_nprocs == 2);
     EXPECT(g_procs[1].start >= g_procs[0].gone);
+    return true;
+}
+
+// Its dashboard tile's key is what it shows: named once the slot is filled in (it was "?/?" when
+// read before, 2026-11-16), and again when new settings point it at another display.
+static bool named(void) {
+    start(101, "192.0.2.7", "display:X", 60);
+    EXPECT(!strcmp(g_named, "100 192.0.2.7 display:X"));
+    start(101, "192.0.2.7", "display:Y", 60);
+    EXPECT(!strcmp(g_named, "100 192.0.2.7 display:Y"));
     return true;
 }
 
@@ -491,6 +499,7 @@ int main(int argc, char **argv) {
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
         {"window closed", window_closed}, {"window retry", window_retry}, {"room panels", room_panels},
         {"room panel refused", room_panel_refused}, {"pointer leaves", pointer_leaves}, {"someone else", someone_else},
+        {"named for its tile", named},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

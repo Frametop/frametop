@@ -116,9 +116,7 @@ Mat ToMat(const double m[3][4]) {
 // Each tiled panel pinned to its place, sized for it (a floating window or an app gets the pixels: `resize`),
 // and each satellite at its own. Nothing until the group has a frame (the dashboard seen).
 void RetileDash(bool resize) {
-    // the band's middle at your eyes' height, raised DASH_TILE_RAISE_DEG (the settings may have
-    // changed: they're read at start and set live)
-    g_tiles.params.bottomDeg = g_tileRaiseDeg - g_tiles.params.heightDeg / 2;
+    g_tiles.params.middleDeg = g_tileRaiseDeg;   // (read at start, and set live)
     if (!g_tileGroupSet || !Dash().ever) return;
     const auto &l = g_tiles.Arrange(TileInfo);
     for (const tiling::Placed &p : l.tiles) {
@@ -154,23 +152,28 @@ void RetileDash(bool resize) {
 }
 
 namespace {
-// The group to where the dashboard is now, round your head: false without a head pose.
+// The group to where the dashboard is now, in front of your head, with Steam's menu a slot in it
+// when it's in front too: false without a head pose.
 bool Regroup() {
     Mat head;
     if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
     const Mat bar = DashFrame();
     const double h[3] = {head.m[0][3], head.m[1][3], head.m[2][3]}, b[3] = {bar.m[0][3], bar.m[1][3], bar.m[2][3]},
-                 fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, back[3] = {bar.m[0][2], bar.m[1][2], bar.m[2][2]};
+                 fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, up[3] = {head.m[0][1], head.m[1][1], head.m[2][1]};
     double g[3][4];
-    dashtiles::GroupFrame(h, fwd, b, back, g);
+    dashtiles::GroupFrame(h, fwd, up, g);
+    const double barW = DashWidth();
+    double barAz = 0, slot = 0;
+    if (!dashtiles::SteamSlot(g, b, barW, &barAz, &slot)) slot = 0;
+    g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
     RetileDash(true);
-    // (azimuths in the room, 0 its -Z, right positive: where the strip went and where the bar is)
-    std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees (the bar at %.0f), "
-                "the band from %.0f degrees up\n",
-                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), tiling::Deg(std::atan2(b[0] - h[0], h[2] - b[2])),
-                g_tiles.params.bottomDeg);
+    const tiling::Layout &l = g_tiles.Last();
+    // (the facing in the room, 0 its -Z, right positive; the bar from there)
+    std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees; Steam's bar %.0f degrees "
+                "round, %.2f m wide, its slot %.0f degrees (0: none); the band %.0f..%.0f degrees up, the strip %.0f..%.0f\n",
+                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.el0, l.el1, l.az0, l.az1);
     return true;
 }
 }  // namespace

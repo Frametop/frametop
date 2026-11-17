@@ -71,11 +71,11 @@ class DashTiles(unittest.TestCase):
     def test_numbers_written_and_sent(self):
         self.t.setRaiseDeg(12)
         self.t.setRadius(2.25)
-        self.t.setHeightDeg(40)
+        self.t.setHeightDeg(45)
         self.t.setMaxTopDeg(50)
         self.assertEqual(self.asked, ["handsetting DASH_TILE_RAISE_DEG 12", "handsetting DASH_TILE_RADIUS 2.25",
-                                      "handsetting DASH_TILE_HEIGHT_DEG 40", "handsetting DASH_TILE_MAX_TOP_DEG 50"])
-        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (12, 2.25, 40, 50))
+                                      "handsetting DASH_TILE_HEIGHT_DEG 45", "handsetting DASH_TILE_MAX_TOP_DEG 50"])
+        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (12, 2.25, 45, 50))
 
     def test_clamped_to_the_range(self):
         self.t.setRadius(9)

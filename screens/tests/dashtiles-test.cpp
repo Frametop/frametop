@@ -19,25 +19,65 @@ int main() {
     // --- the group frame
     {
         double g[3][4];
-        const double head[3] = {1, 1.6, 0}, ahead[3] = {0, 0, -1}, bar[3] = {1, 1.2, -1.5}, back[3] = {0, 0, 1};
-        dashtiles::GroupFrame(head, ahead, bar, back, g);
+        const double head[3] = {1, 1.6, 0}, ahead[3] = {0, 0, -1}, up[3] = {0, 1, 0};
+        dashtiles::GroupFrame(head, ahead, up, g);
         check("group: at the head", near(g[0][3], 1) && near(g[1][3], 1.6) && near(g[2][3], 0));
         check("group: -Z the way the head faces", near(g[2][2], 1) && near(g[0][2], 0));
         check("group: level", near(g[1][1], 1) && near(g[1][0], 0) && near(g[1][2], 0));
-        // the palm menu's Steam menu: the bar low and behind on the right, the head looking ahead
-        const double side[3] = {1.8, 0.6, 0.7};
-        dashtiles::GroupFrame(head, ahead, side, back, g);
-        check("group: in front of the head, not towards a bar off to the side", near(g[2][2], 1) && near(g[0][2], 0));
-        const double pitched[3] = {0.6, -0.5, -0.64};   // looking right and down a little
-        dashtiles::GroupFrame(head, pitched, bar, back, g);
-        check("group: turned the way the head faces (level)", near(-g[0][2], 0.6 / std::hypot(0.6, 0.64)) &&
-                                                            near(g[2][2], 0.64 / std::hypot(0.6, 0.64)) && near(g[1][2], 0));
-        const double right[3] = {2.5, 1.6, 0}, down[3] = {0.05, -1, 0.05};
-        dashtiles::GroupFrame(head, down, right, back, g);
-        check("group: looking straight down, towards the bar (-Z is +X)", near(g[0][2], -1) && near(g[0][0], 0) && near(g[2][0], 1));
-        const double over[3] = {1, 2.5, 0}, tilted[3] = {0, 0.3, 1}, up[3] = {0, 1, 0};
-        dashtiles::GroupFrame(head, up, over, tilted, g);
-        check("group: straight up at a bar right overhead faces its back", near(g[2][2], 1));
+        // the way the head faces, level, at any pitch, with or without roll: yaw 20 degrees right
+        const double yaw = tiling::Rad(20);
+        bool steady = true;
+        for (double pitchDeg : {-89.0, -80.0, -76.0, -75.0, -40.0, 0.0, 40.0, 80.0, 89.0})
+            for (double rollDeg : {0.0, 30.0, 60.0}) {
+                const double pt = tiling::Rad(pitchDeg), rl = tiling::Rad(rollDeg);
+                // the head's axes: yaw (about Y), then pitch (about X), then roll (about Z)
+                const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pt), sp = std::sin(pt), cr = std::cos(rl), sr = std::sin(rl);
+                // yaw Ry, pitch Rx, roll Rz: M = Ry * Rx * Rz; forward = M * (0,0,-1), up = M * (0,1,0)
+                const double Ry[3][3] = {{cy, 0, -sy}, {0, 1, 0}, {sy, 0, cy}};
+                const double Rx[3][3] = {{1, 0, 0}, {0, cp, -sp}, {0, sp, cp}};
+                const double Rz[3][3] = {{cr, -sr, 0}, {sr, cr, 0}, {0, 0, 1}};
+                double A[3][3] = {}, M[3][3] = {};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        for (int k = 0; k < 3; ++k) A[i][j] += Ry[i][k] * Rx[k][j];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        for (int k = 0; k < 3; ++k) M[i][j] += A[i][k] * Rz[k][j];
+                const double f[3] = {-M[0][2], -M[1][2], -M[2][2]}, u[3] = {M[0][1], M[1][1], M[2][1]};
+                dashtiles::GroupFrame(head, f, u, g);
+                const double fx = -g[0][2], fz = -g[2][2];   // the group's -Z
+                const double want = std::atan2(-Ry[0][2], -Ry[2][2]);   // (where the yaw alone turns -Z)
+                double err = std::fabs(std::atan2(fx, fz) - want);
+                err = std::min(err, 2 * tiling::kPi - err);
+                // exact within 60 degrees of level at any roll, and at any pitch without roll; past
+                // 60 with roll, near (looking straight down, a rolled head's way is its up's)
+                const double tol = std::fabs(pitchDeg) <= 60 || rollDeg == 0 ? 1e-6 : tiling::Rad(rollDeg) + 1e-6;
+                steady = steady && err <= tol && near(g[1][2], 0);
+            }
+        check("group: the head's way at every pitch to 89 degrees and roll to 60 (no turn to the bar)", steady);
+        const double sideways[3] = {1, 0, 0}, down[3] = {0, -1, 0};   // rolled onto its side, looking ahead
+        dashtiles::GroupFrame(head, ahead, sideways, g);
+        check("group: a head on its side takes its forward", near(g[2][2], 1));
+        dashtiles::GroupFrame(head, down, down, g);   // (not a head pose: no way at all)
+        check("group: no way at all: -Z", near(g[2][2], 1));
+    }
+    // --- Steam's slot: the menu near the front is one, off to the side it isn't
+    {
+        double g[3][4];
+        const double head[3] = {0, 1.6, 0}, ahead[3] = {0, 0, -1}, up[3] = {0, 1, 0};
+        dashtiles::GroupFrame(head, ahead, up, g);
+        double az = 99, span = 0;
+        const double front[3] = {0, 1.0, -1.2};   // a Steam-button open: ahead, low
+        check("slot: Steam's menu ahead is one", dashtiles::SteamSlot(g, front, 1.0, &az, &span) && near(az, 0) &&
+                                                     near(span, 2 * tiling::Deg(std::atan2(0.5, 1.2))));
+        const double palm[3] = {0.8, 1.05, 0.64};   // the palm menu's: low, right and behind
+        check("slot: the palm menu's, off to the side, isn't", !dashtiles::SteamSlot(g, palm, 1.0, &az, &span) && az > 90);
+        const double right[3] = {0.6, 1.2, -1.2};
+        check("slot: a little to the right, at its place", dashtiles::SteamSlot(g, right, 1.0, &az, &span) &&
+                                                               near(az, tiling::Deg(std::atan2(0.6, 1.2))));
+        check("slot: no width, none", !dashtiles::SteamSlot(g, front, 0, &az, &span));
+        const double over[3] = {0.05, 2.5, 0};
+        check("slot: right over the head, none", !dashtiles::SteamSlot(g, over, 1.0, &az, &span));
     }
     // --- anchoring
     {

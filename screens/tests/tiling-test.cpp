@@ -35,6 +35,7 @@ static bool cornersInColumns(const tiling::Layout &l, double radius) {
         for (auto &pt : c) {
             double az, el;
             tiling::Direction(pt, &az, &el);
+            az = tiling::WrapNear(az, t.azDeg);
             if (az < t.az0 - 1e-6 || az > t.az1 + 1e-6) return false;
         }
     }
@@ -71,10 +72,16 @@ int main() {
     // --- the band and its cap
     {
         tiling::Params q = p;
-        q.bottomDeg = 10, q.heightDeg = 80, q.maxTopDeg = 55;
+        q.middleDeg = 50, q.heightDeg = 80, q.maxTopDeg = 55;
         const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
         check("band: capped at maxTopDeg", near(l.el1, 55));
-        check("band: starts at the dashboard's top", near(l.el0, 10));
+        check("band: moved down from the cap, its height kept", near(l.el0, -25));
+        q.middleDeg = -30, q.heightDeg = 120;
+        const auto low = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
+        check("band: never past the cap downward either (the bottom pole)", near(low.el0, -55) && near(low.el1, 55));
+        q.middleDeg = 10, q.heightDeg = 40;
+        const auto mid = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
+        check("band: round its middle", near(mid.el0, -10) && near(mid.el1, 30));
         q.heightDeg = 3;
         const auto s = tiling::Arrange({col({{1, 1, true, 1}})}, q);
         check("band: never shorter than minHeightDeg", near(s.el1 - s.el0, q.minHeightDeg));
@@ -82,11 +89,11 @@ int main() {
     // --- columns: centred, ordered, gaps, no corner overlap high up
     {
         tiling::Params q = p;
-        q.bottomDeg = 20, q.heightDeg = 60, q.maxTopDeg = 70;   // a high band: corners pinch together
+        q.middleDeg = 45, q.heightDeg = 50, q.maxTopDeg = 70;   // a high band (20..70): corners pinch together
         std::vector<tiling::Column> cols;
         for (int i = 0; i < 4; ++i) cols.push_back(col({{i * 10 + 1, 16.0 / 9, true, 1}, {i * 10 + 2, 4.0 / 3, true, 1}}));
         const auto l = tiling::Arrange(cols, q);
-        check("columns: strip centred over the dashboard", near(l.az0, -l.az1));
+        check("columns: strip centred in front of you", near(l.az0, -l.az1));
         bool ordered = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
@@ -123,13 +130,13 @@ int main() {
         check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (q.maxSpanDeg - gap));
         check("overflow: shrunk", l.shrink < 1);
         check("overflow: still no corner overlap", cornersInColumns(l, q.radius));
-        check("overflow: the band shrank with it (shapes kept)", l.el1 - l.el0 < std::min(q.heightDeg, q.maxTopDeg - q.bottomDeg));
+        check("overflow: the band shrank with it (shapes kept)", l.el1 - l.el0 < q.heightDeg);
     }
     // --- the clamps' far end: a band at -85 with dozens of columns still fits a turn (follow-up:
     // the gaps alone took more than a turn, and nothing fit)
     for (int n : {60, 200, 400}) {
         tiling::Params q = p;
-        q.bottomDeg = -120, q.heightDeg = 30;   // (clamped to -85)
+        q.maxTopDeg = 85, q.middleDeg = -120, q.heightDeg = 30;   // (its bottom clamped to -85)
         std::vector<tiling::Column> cols;
         for (int i = 0; i < n; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}, {1000 + i, 1, false, 1}}));
         const auto l = tiling::Arrange(cols, q);
@@ -141,8 +148,7 @@ int main() {
     // display in front of you at about their own sizes, not up at the cap (2026-11-16: the old band
     // ran from the bar's raise to the cap, each panel 53 degrees tall, the pair 200 degrees round)
     {
-        tiling::Params q = p;
-        q.bottomDeg = -q.heightDeg / 2;
+        const tiling::Params q = p;
         const auto l = tiling::Arrange({col({{1, 3440.0 / 1440, true, 1}}), col({{2, 2560.0 / 1600, true, 1}})}, q);
         check("default band: centred on your eyes", near(l.tiles[0].elDeg, 0) && near(l.tiles[1].elDeg, 0));
         check("default band: about a desktop's size (1.0-1.2 m tall)", l.tiles[0].heightM > 1.0 && l.tiles[0].heightM < 1.2);
@@ -152,7 +158,7 @@ int main() {
     // span hit its 180 degree cap and put two desktops at +-90)
     {
         tiling::Params q = p;
-        q.bottomDeg = 10;   // a high band (the old default: a bar 20 degrees down, raised 30)
+        q.middleDeg = 30;   // a high band, 10..50 (the old default's bottom: a bar 20 degrees down, raised 30)
         const double one = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q).az1;   // (half the strip: it's centred)
         for (int n = 1; n <= 3; ++n) {
             std::vector<tiling::Column> cols;
@@ -168,22 +174,56 @@ int main() {
         const auto l = tiling::Arrange(two, q);
         check("desktops: two either side of the dashboard, near it", l.tiles[0].azDeg > -60 && l.tiles[1].azDeg < 60);
     }
-    // --- a dashboard high up (lying back, or a raise set high): the band stays under the cap
+    // --- a middle set high (or low, past the settings' ends): the band stays within the caps
     {
         tiling::Params q = p;
-        for (double bottom : {50.0, 70.0, 95.0}) {
-            q.bottomDeg = bottom;
+        for (double middle : {50.0, 70.0, 95.0, -95.0}) {
+            q.middleDeg = middle;
             std::vector<tiling::Column> cols = {col({{1, 16.0 / 9, true, 1}}), col({{2, 1, false, 1}}, 30)};
             const auto l = tiling::Arrange(cols, q);
-            bool sane = l.el1 <= q.maxTopDeg + 1e-9 && l.el1 - l.el0 >= q.minHeightDeg - 1e-9;
+            bool sane = l.el1 <= q.maxTopDeg + 1e-9 && l.el0 >= -q.maxTopDeg - 1e-9 && l.el1 - l.el0 >= q.minHeightDeg - 1e-9;
             for (const auto &t : l.tiles) sane = sane && t.widthM > 0.05 && t.heightM > 0.05 && std::fabs(t.azDeg) < 180;
             char what[96];
-            std::snprintf(what, sizeof what, "high bar (%.0f up): band %.0f..%.0f, sizes positive, in front", bottom, l.el0, l.el1);
+            std::snprintf(what, sizeof what, "middle %.0f up: band %.0f..%.0f, sizes positive, in front", middle, l.el0, l.el1);
             check(what, sane && cornersInColumns(l, q.radius));
         }
-        q.bottomDeg = 10, q.maxTopDeg = 20, q.heightDeg = 60;   // settings at odd ends
+        q.middleDeg = 30, q.maxTopDeg = 20, q.heightDeg = 60;   // settings at odd ends
         const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
-        check("band: a low cap moves the bottom down, it doesn't go past the cap", l.el1 <= 20 + 1e-9 && l.el1 - l.el0 >= q.minHeightDeg - 1e-9);
+        check("band: a low cap keeps it within +-20", near(l.el1, 20) && near(l.el0, -20));
+    }
+    // --- Steam's menu, a slot in the strip: half the columns either side of it, none in it
+    {
+        const auto clear = [](const tiling::Layout &l, double az0, double az1) {
+            for (const auto &t : l.tiles)
+                if (t.az1 > az0 + 1e-9 && t.az0 < az1 - 1e-9) return false;
+            return true;
+        };
+        tiling::Params q = p;
+        q.reserveAzDeg = 0, q.reserveDeg = 40;
+        const auto one = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
+        check("slot: one column goes right of it, a gap between", near(one.tiles[0].az0, 20 + q.gapDeg));
+        std::vector<tiling::Column> two = {col({{1, 16.0 / 9, true, 1}}), col({{2, 16.0 / 9, true, 1}})};
+        const auto l = tiling::Arrange(two, q);
+        check("slot: two go either side of it", near(l.tiles[0].az1, -20 - q.gapDeg) && near(l.tiles[1].az0, 20 + q.gapDeg));
+        check("slot: the strip takes it in", l.az0 < -20 && l.az1 > 20 && near(l.az1 - l.az0, (l.tiles[0].az1 - l.tiles[0].az0) * 2 + 40 + 2 * q.gapDeg));
+        auto d = tiling::DropAt(l, two, 0, 0);
+        check("slot: a drop on Steam's menu is a new column there", d.kind == tiling::Drop::NewColumn && d.col == 1);
+        q.reserveAzDeg = 30;
+        std::vector<tiling::Column> three = {col({{1, 16.0 / 9, true, 1}}), col({{2, 1, false, 1}}, 30), col({{3, 4.0 / 3, true, 1}})};
+        const auto off = tiling::Arrange(three, q);
+        check("slot: where the menu is (30 degrees round), clear", clear(off, 10, 50) && off.tiles[0].az1 <= 10 && off.tiles[1].az0 >= 50);
+        std::vector<tiling::Column> many;
+        for (int i = 0; i < 20; ++i) many.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
+        const auto full = tiling::Arrange(many, q);
+        check("slot: past a turn the columns shrink, the slot doesn't", full.shrink < 1 && clear(full, 10, 50) &&
+                                                                          full.az1 - full.az0 <= q.maxSpanDeg + 1e-6 &&
+                                                                          cornersInColumns(full, q.radius));
+        const auto &last = full.tiles.back();   // (past 180 degrees: seen from the head, -180 + ...)
+        d = tiling::DropAt(full, many, last.azDeg - 360, last.elDeg);
+        check("slot: a drop on a tile past 180 degrees finds it", last.az1 > 180 && d.kind == tiling::Drop::Into && d.col == 19);
+        q.reserveDeg = 0;
+        const auto none = tiling::Arrange(two, q);
+        check("slot: none, the strip centred in front again", near(none.az0, -none.az1));
     }
     // --- drops
     {

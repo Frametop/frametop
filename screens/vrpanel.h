@@ -309,6 +309,7 @@ void SendStretch(Screen &s);
 std::vector<uint8_t> AnchorTexture(int n, int lit);
 const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dashboard pins ride on it)
 Mat DashFrame();
+double DashWidth();   // the bar's width in the room, metres (0: not known)
 uint32_t ButtonBit(uint32_t linuxButton);
 uint32_t LinuxButton(uint32_t vrButton);
 bool FromLaser(const vr::VREvent_t &ev);

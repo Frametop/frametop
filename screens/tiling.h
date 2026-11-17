@@ -3,13 +3,16 @@
 // Panels anchored to the SteamVR dashboard tile on a sphere round your head, like one 360 degree
 // monitor (user, 2026-11-16): columns side by side round you, each one's panels stacked in it with
 // rows of their own heights, as Hyprland's scrolling columns are laid out. Every panel faces your
-// head: a column curves up the sphere as well as round it. The band the columns fill starts at
-// `bottomDeg` and goes up `heightDeg`, but never past `maxTopDeg`: near the top of a
+// head: a column curves up the sphere as well as round it. The band the columns fill is
+// `heightDeg` tall round `middleDeg`, but never past `maxTopDeg` up or down: near the poles of a
 // sphere the circles round it shrink, so panels in neighbouring columns would run into each other
-// at their upper corners ("so we don't end up with lots of displays overlapping at the corners on
-// the top and bottom"). Each column is as wide as the widest of its panels needs at the panel's
-// highest corner, so they never touch there, and the strip of columns is centred in front of
-// you. Past a full turn round you everything shrinks until it fits.
+// at their corners ("so we don't end up with lots of displays overlapping at the corners on the
+// top and bottom"). Each column is as wide as the widest of its panels needs at the panel's
+// farthest corner, so they never touch there, and the strip of columns is centred in front of
+// you. Steam's menu is part of it when it's near the front (user, 2026-11-16: "the steam menu
+// should ... be part of the tiling system"): a slot kept clear in the middle of the strip
+// (`reserveDeg` wide at `reserveAzDeg`), half the columns either side of it. Past a full turn
+// round you everything shrinks until it fits.
 //
 // A panel with pixels of its own to change (a floating window, an app gamescope hands us) fills
 // its cell: its width is the column's. A panel at a fixed resolution (a desktop screen, a remote
@@ -46,13 +49,15 @@ struct Column {
 
 struct Params {
     double radius = 1.6;        // metres: the sphere's (the dashboard's distance)
-    double bottomDeg = -20;     // the band's bottom (vrtiles.cpp: its middle at your eyes)
+    double middleDeg = 0;       // the band's middle, up from your eyes
     double heightDeg = 40;      // how tall the band is asked to be (a desktop at about its size)
-    double maxTopDeg = 55;      // ...but its top never higher (the column height cap)
+    double maxTopDeg = 55;      // ...but never past this up or down (the column height cap)
     double minHeightDeg = 12;   // ...and never shorter than this
     double gapDeg = 1.5;        // between columns, and between the panels in one
     double columnDeg = 40;      // a column's width when it has none of its own
     double maxSpanDeg = 360;    // the strip round you, gaps included, at most
+    double reserveAzDeg = 0;    // a slot kept clear in the strip (Steam's menu): its middle
+    double reserveDeg = 0;      // ...and its width (0: none; the strip is centred on 0 then)
 };
 
 struct Placed {
@@ -94,13 +99,14 @@ inline double WidthFor(double radius, double spanDeg, double heightM, double elD
 
 inline double Scale(const Tile &t) { return std::clamp(t.scale, 0.05, 1.0); }
 
-// The band the columns fill: from bottomDeg up heightDeg, its top never past maxTopDeg, at least
-// minHeightDeg tall. A bottom set high moves down rather than the band past the cap.
+// The band the columns fill: heightDeg tall round middleDeg (at least minHeightDeg, at most twice
+// the cap), never past maxTopDeg up or down. A middle set near a cap moves away from it rather
+// than the band past it.
 inline void Band(const Params &p, double *bottom, double *height) {
-    const double cap = std::clamp(p.maxTopDeg, p.minHeightDeg - 80, 85.0);
-    const double b = std::clamp(p.bottomDeg, -85.0, cap - p.minHeightDeg);
-    *bottom = b;
-    *height = std::max(p.minHeightDeg, std::min(b + p.heightDeg, cap) - b);
+    const double cap = std::clamp(p.maxTopDeg, p.minHeightDeg / 2, 85.0);
+    const double h = std::clamp(p.heightDeg, p.minHeightDeg, 2 * cap);
+    *bottom = std::clamp(p.middleDeg - h / 2, -cap, cap - h);
+    *height = h;
 }
 
 // The rows' share of a column `h` tall with `gap` between them (at least a degree, or all of a
@@ -137,12 +143,15 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     Layout out;
     double bottom, band;
     Band(p, &bottom, &band);
+    // Steam's slot (not scaled: it's Steam's size), and a gap after it
+    const bool reserve = p.reserveDeg > 0 && !cols.empty();
+    const double slot = reserve ? std::min(p.reserveDeg, p.maxSpanDeg / 2) : 0;
     // the strip at size k: the band, the gaps and the columns' own widths scale with it, fixed
     // panels' spans from their rows; a gap between each two columns, and one where the strip's ends
     // would meet behind you
     auto spansAt = [&](double k, double *total) {
         std::vector<double> s = Spans(cols, p, bottom, band * k, p.gapDeg * k);
-        *total = p.gapDeg * k * double(cols.size());
+        *total = p.gapDeg * k * double(cols.size()) + (reserve ? slot + p.gapDeg * k : 0);
         for (size_t c = 0; c < cols.size(); ++c) {
             s[c] = std::max(s[c], (cols[c].widthDeg > 0 ? cols[c].widthDeg : p.columnDeg) * k);
             *total += s[c];
@@ -151,7 +160,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     };
     double k = 1, total = 0;
     std::vector<double> spans = spansAt(1, &total);
-    const double room = p.maxSpanDeg;
+    const double room = p.maxSpanDeg;   // (the slot is at most half of it: the columns get the rest)
     if (total > room && !cols.empty()) {
         // past a turn: a k that fits, by halving. (The strip grows with k nearly everywhere: rows
         // that shrink move the panels' centres, so it can dip a little, and halving then finds one
@@ -171,9 +180,14 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     const double h = band * k, gap = p.gapDeg * k;
     out.el0 = bottom, out.el1 = bottom + h;
     total = cols.empty() ? 0 : total - gap;   // (the one behind you isn't in the strip; no columns, no strip)
-    double az = -total / 2;
+    // the first half of the columns left of Steam's slot (each with its gap), the rest right of it
+    const size_t left = reserve ? cols.size() / 2 : 0;
+    double leftSpan = 0;
+    for (size_t c = 0; c < left; ++c) leftSpan += spans[c] + gap;
+    double az = reserve ? p.reserveAzDeg - slot / 2 - leftSpan : -total / 2;
     out.az0 = az, out.az1 = az + total;
     for (size_t c = 0; c < cols.size(); ++c) {
+        if (reserve && c == left) az += slot + gap;
         const Column &col = cols[c];
         const double a0 = az, a1 = az + spans[c];
         az = a1 + gap;
@@ -231,9 +245,14 @@ struct Drop {
 };
 constexpr double kTearMarginDeg = 10;   // this far past the strip or the band: torn off
 
+// `az` a turn either way to within half a turn of `centre` (a strip with Steam's slot off to one
+// side can run past 180 degrees: an azimuth seen from the head is in -180..180).
+inline double WrapNear(double az, double centre) { return az - 360 * std::round((az - centre) / 360); }
+
 inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, double el) {
     Drop d;
     if (cols.empty()) return d.kind = Drop::NewColumn, d.col = 0, d;
+    az = WrapNear(az, (l.az0 + l.az1) / 2);
     if (az < l.az0 - kTearMarginDeg || az > l.az1 + kTearMarginDeg || el < l.el0 - kTearMarginDeg ||
         el > l.el1 + kTearMarginDeg)
         return d;

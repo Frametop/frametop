@@ -790,9 +790,19 @@ struct DashAnchor {
     long retryAt = 0;          // missing: g_tick to look for it again at
     bool missingLogged = false;
     dashanchor::Anchor a;      // a.ever: dashboard pins have a frame
+    double scale = 1;          // the bar's scale in its last good read (Steam draws it scaled)
 };
 DashAnchor g_dash;
 const dashanchor::Anchor &Dash() { return g_dash.a; }
+
+// The bar's width in the room, metres (its overlay's width at its scale), 0 when it isn't known.
+double DashWidth() {
+    float w = 0;
+    if (g_dash.bar == vr::k_ulOverlayHandleInvalid || !g_dash.a.ever ||
+        vr::VROverlay()->GetOverlayWidthInMeters(g_dash.bar, &w) != vr::VROverlayError_None || !(w > 0))
+        return 0;
+    return w * g_dash.scale;
+}
 
 Mat DashFrame() {
     Mat m;
@@ -829,6 +839,8 @@ bool UpdateDashAnchor() {
     const bool first = !g_dash.a.ever;
     const char *before = g_dash.a.why;
     const bool moved = g_dash.a.Feed(shown, err == vr::VROverlayError_None && origin == vr::TrackingUniverseStanding, m.m);
+    if (!g_dash.a.why)
+        g_dash.scale = std::sqrt(double(m.m[0][0]) * m.m[0][0] + double(m.m[1][0]) * m.m[1][0] + double(m.m[2][0]) * m.m[2][0]);
     // Each change of verdict, with what was read (why a read didn't count shows in the log).
     if (g_dash.a.why != before) {
         double ax[3];
@@ -6935,8 +6947,7 @@ struct Parked {
 };
 std::map<int, Parked> g_parked;
 
-bool ft_vr_remote_create(int index, const char *label, double metres, const char *host, const char *app,
-                         bool *restored) {
+bool ft_vr_remote_create(int index, const char *label, double metres, bool *restored) {
     *restored = false;
     if (!g_vr) return false;
     Screen &s = g_screens[index];
@@ -6973,9 +6984,12 @@ bool ft_vr_remote_create(int index, const char *label, double metres, const char
         UpdateVisibility();
         *restored = true;
     }
-    // (from the caller: its remote.c slot isn't filled in yet)
-    TileKnown(index, std::string("remote:") + (host && *host ? host : "?") + "/" + (app && *app ? app : "?"));
     return true;
+}
+
+void ft_vr_remote_named(int index, const char *host, const char *app) {
+    if (!g_vr || !g_screens.count(index)) return;
+    TileKnown(index, std::string("remote:") + (host && *host ? host : "?") + "/" + (app && *app ? app : "?"));
 }
 
 void ft_vr_beside(void) { g_beside = true; }

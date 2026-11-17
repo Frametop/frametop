@@ -9,9 +9,9 @@
 //
 // What the spike is there to find out (docs/design.md, HEADSET-TESTS.md): whether Steam tags its
 // window back itself (each time is logged, and after steamwin::kMaxRetakes in a row it's given
-// back), whether Steam's own panel goes blank or keeps its last frame (its alpha is set to 0
-// while the window is ours, and the answer logged: OpenVR may refuse it for another process's
-// overlay), and whether the X pointer reaches the window. Keys aren't sent to it yet.
+// back) and whether the X pointer reaches the window. Keys aren't sent to it yet. Steam's own panel
+// is left alone: with the window ours it has no texture (gamescope forwards to one overlay), so it
+// draws nothing, and Steam paints only while that panel counts as visible (alpha 0 = a black tile).
 
 #include "vrpanel.h"
 #include "gsdisplay.h"
@@ -43,18 +43,6 @@ const char g_frames = 0;            // (Screen::shown: gamescope's frames, no bu
 uint64_t FindSteams() {
     vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
     return vr::VROverlay()->FindOverlay(steamwin::kSteamOverlay, &h) == vr::VROverlayError_None ? h : 0;
-}
-
-// Steam's own panel see-through while its window is ours (its last frame would cover the tiles), opaque
-// again when it's Steam's: what OpenVR says to each, logged once.
-void SteamsAlpha(float a) {
-    if (!g_steams) return;
-    static int said = -1;
-    const vr::EVROverlayError e = vr::VROverlay()->SetOverlayAlpha(g_steams, a);
-    if (int(e) != said || a > 0.5f)
-        std::printf("Steam's window: its own panel's alpha to %.0f: %s\n", a,
-                    e == vr::VROverlayError_None ? "done" : vr::VROverlay()->GetOverlayErrorNameFromEnum(e));
-    said = int(e);
 }
 
 uint64_t Make(const gsforward::Window &w) {
@@ -113,11 +101,9 @@ void Do(const std::vector<steamwin::Action> &actions) {
                         break;
                     }
                     g_link->Tag(a.win.id, g_steams);
-                    SteamsAlpha(1);
                     std::printf("Steam's window (0x%x): Steam's own again\n", a.win.id);
                 } else {
                     g_link->Tag(a.win.id, a.overlay);
-                    SteamsAlpha(0);
                     std::printf("Steam's window (0x%x): on screen %d (Steam has tagged it back %d times)\n", a.win.id,
                                 kIndex + 1, g_win.Retaken());
                 }

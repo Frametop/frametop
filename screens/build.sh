@@ -15,7 +15,8 @@
 # gslink.cpp runs it on a thread of its own.
 # vrgsapps.cpp is the gamescope apps' panels, on OpenVR (vrpanel.h: what it shares with vr.cpp).
 # vrsteamwin.cpp is Steam's own windows as panels (steamwin.h; STEAM_DASH_PANEL, a spike), and
-# vrsteamfollow.cpp its popups, placed with them (steamplace.h).
+# vrsteamfollow.cpp its popups, placed with them (steamplace.h); steamcdp.cpp sends the laser on
+# them to their pages in Steam's CEF, on a thread of its own (X's pointer doesn't reach them).
 # vrtiles.cpp is the dashboard tiles' glue (the anchor, the grid's places, the focus, the memory, the tiles commands).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
 # shipped with SteamVR on the Frame predates, so the build uses the public header from
@@ -56,6 +57,7 @@ $cxx -c -o build/grabthat.o grabthat.cpp
 $cxx -c -o build/steampanels.o steampanels.cpp
 $cxx $(pkg-config --cflags xcb xcb-xtest xcb-icccm) -c -o build/gsforward.o gsforward.cpp
 $cxx -pthread -c -o build/gslink.o gslink.cpp
+$cxx -pthread -c -o build/steamcdp.o steamcdp.cpp
 $cxx -c -o build/handtest.o handtest.cpp
 $cxx -c -o build/handmesh.o handmesh.cpp
 $cxx -c -o build/handskin.o handskin.cpp
@@ -82,7 +84,7 @@ for f in micear ownface; do   # the face of the avatar you wear: its mouth from 
   avatars="$avatars build/avatars-$f.o"
 done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrsteamwin.o build/vrsteamfollow.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrsteamwin.o build/vrsteamfollow.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/steamcdp.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1 xcb xcb-xtest xcb-icccm) $vrlibs -pthread
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs

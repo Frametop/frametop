@@ -403,8 +403,9 @@ int main() {
 
             // Lit 10 s into SteamVR's standby: off. Here, on the same reading as the lit-after-
             // dark check above, so nothing else waking the loop (a status request, input that
-            // isn't use) can land between SteamVR lighting them and that check.
-            if (!off && away && use.empty() && lit > 0 && now - awayAt >= std::chrono::seconds(10)) {
+            // isn't use) can land between SteamVR lighting them and that check. awayNow too: the
+            // headset going on in the second before `away` follows it doesn't count.
+            if (!off && away && awayNow && use.empty() && lit > 0 && now - awayAt >= std::chrono::seconds(10)) {
                 turnOff("SteamVR's standby left them lit");
                 if (!off) awayAt = now;  // couldn't: try again in 10 s, not every tick
             }

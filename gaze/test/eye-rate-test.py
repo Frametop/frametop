@@ -161,8 +161,14 @@ er.EYE_LOG.write_text("\n".join([
     head + "eyetracking 2.18.2 startup with PID=2, config=x",
     head + "Eye tracking started"]) + "\n")
 check("no rate set since the last start: 90", er.camera_rate(), 90.0)
-er.SERVER_LOG.write_text(head + "//=====\n" + "Sat Oct 10 2026 22:40:00.000000 [Info] - later\n")
-check("SteamVR's start: vrserver.txt's first line", er.steamvr_start(), er.time.mktime((2026, 10, 10, 22, 35, 43, 0, 0, -1)))
+# Two SteamVR starts in one vrserver.txt (a restart doesn't always begin a new file): the last.
+er.SERVER_LOG.write_text("\n".join([
+    head + "//=====",
+    head + "vrserver 2.19.3 startup with PID=10, config=x",
+    head + "cv: Request eye tracking framerate: 15.000000",
+    "Sat Oct 10 2026 22:50:01.000000 [Info] - vrserver 2.19.3 startup with PID=11, config=x",
+    "Sat Oct 10 2026 22:50:02.000000 [Info] - Process 12: eyetracking startup with PID=12"]) + "\n")
+check("SteamVR's start: the last vrserver start", er.steamvr_start(), er.time.mktime((2026, 10, 10, 22, 50, 1, 0, 0, -1)))
 with er.EYE_LOG.open("a") as f:
     f.write(head + "CStereoAdspCams: Set framerate 15.000000\n")
 check("15 set since the last start", er.camera_rate(), 15.0)

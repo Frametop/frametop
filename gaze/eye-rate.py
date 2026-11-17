@@ -43,7 +43,7 @@ STEAMVR_SETTINGS = ft_vrsettings.FILES
 # one line per setting, "steamvr.<key> was off; Frametop turned it on".
 MARK = HOME / ".local/state/frametop/gaze/steamvr-eye-rate"
 EYE_LOG = HOME / ".local/share/Steam/logs/eyetracking.txt"
-SERVER_LOG = HOME / ".local/share/Steam/logs/vrserver.txt"  # a new one at each SteamVR start
+SERVER_LOG = HOME / ".local/share/Steam/logs/vrserver.txt"  # one or more SteamVR starts each
 # A terminal in the desktop has the desktop's own config folder, where SteamVR's path registry
 # isn't (see scripts/update-check.py): vrcmd needs the real one.
 ENV = dict(os.environ, XDG_CONFIG_HOME=str(HOME / ".config"), LD_LIBRARY_PATH=STEAMVR_BIN)
@@ -111,13 +111,17 @@ def log_time(line):
 
 
 def steamvr_start():
-    """When SteamVR (vrserver, which reads the setting) last started: vrserver.txt's first line.
-    None without it."""
+    """When SteamVR (vrserver, which reads the setting) last started: vrserver.txt's last "vrserver
+    ... startup with PID" line (a restart doesn't always begin a new file: seen 2026-11-17, three
+    starts in one). None without one."""
     try:
-        with SERVER_LOG.open(errors="replace") as f:
-            return log_time(f.readline())
+        lines = SERVER_LOG.read_text(errors="replace").splitlines()
     except OSError:
         return None
+    for line in reversed(lines):
+        if " - vrserver " in line and " startup with PID" in line:
+            return log_time(line)
+    return None
 
 
 def since_last_start():

@@ -86,6 +86,13 @@ class EyeRate(unittest.TestCase):
         self.assertEqual(state, "FAIL")
         self.assertIn("gaze/eye-rate.py on", detail)
 
+    def test_failed_start_is_not_ok(self):
+        # 2026-11-17: the eye tracker's start failed, and the old check said "ok 90 fps".
+        state, detail = self.m.eye_rate_verdict(self.SETTING, True, None, 200.0, 100.0, True,
+                                                "Eye tracking system init failed")
+        self.assertEqual(state, "FAIL")
+        self.assertIn("didn't start", detail)
+
     def test_off_at_90_warns(self):
         state, detail = self.verdict(on=False, rate=90.0, marked_at=None)
         self.assertEqual(state, "warn")

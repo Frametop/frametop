@@ -29,9 +29,12 @@
 // If something else turns the backlight back on while it's off (SteamVR leaving standby,
 // the brightness setting), that counts as use. While SteamVR has the headset in standby
 // (taken off), SteamVR owns the displays and ft-powerd waits, unless they are still lit
-// 10 s into it: some standbys leave them on (SteamOS 0.5.9, vrserver.txt "1 - entering
-// standby" with no "cv: Set displays off" after it, the compositor paused, the panels lit
-// for hours), and then ft-powerd turns them off itself. The value to put back is
+// 10 s into it, whatever DISPLAY_OFF_MIN says: then ft-powerd turns them off itself. SteamVR
+// can light them during its standby without leaving it (SteamOS 0.5.9, 2026-11-17: another
+// device, index 1 in vrserver.txt's "1 - leaving standby", woke and the driver logged "cv: Set
+// displays on" while the headset stayed in standby, then the panels stayed lit for 40 min
+// with the compositor paused). Lit after dark, or any use, starts the 10 s again, so SteamVR
+// waking them as the headset goes on isn't undone. The value to put back is
 // also kept in ~/.cache/frametop/powerd-brightness until the displays wake, so a crash or
 // a stop while they're off doesn't leave them dark: the next start puts it back.
 //
@@ -41,7 +44,8 @@
 //   off    -> "ok": the displays off now, to try it (for 2 s nothing counts as use)
 //   on     -> "ok": back on
 // Settings (~/.config/frametop.conf, re-read when the file changes): DISPLAY_OFF_MIN (0 =
-// never, the default), DISPLAY_MOVE_MM (5), DISPLAY_MOVE_DEG (0.5).
+// never, the default; displays SteamVR's standby leaves lit go off either way),
+// DISPLAY_MOVE_MM (5), DISPLAY_MOVE_DEG (0.5).
 #include <openvr.h>
 
 #include "../conf/ftsock.h"
@@ -396,15 +400,19 @@ int main() {
                 use = "turned on elsewhere";
                 std::printf("displays on: turned on elsewhere\n");
             }
+
+            // Lit 10 s into SteamVR's standby: off. Here, on the same reading as the lit-after-
+            // dark check above, so nothing else waking the loop (a status request, input that
+            // isn't use) can land between SteamVR lighting them and that check.
+            if (!off && away && use.empty() && lit > 0 && now - awayAt >= std::chrono::seconds(10)) {
+                turnOff("SteamVR's standby left them lit");
+                if (!off) awayAt = now;  // couldn't: try again in 10 s, not every tick
+            }
         }
         if (!use.empty()) {
             lastUse = now;
-            awayAt = now;  // SteamVR lighting them as it leaves standby must not be undone at once
+            awayAt = now;  // use during SteamVR's standby: its 10 s start again
             turnOn(use);
-        }
-        if (!off && away && now - awayAt >= std::chrono::seconds(10) && ReadInt(kBacklight, -1) > 0) {
-            turnOff("SteamVR's standby left them lit");
-            if (!off) awayAt = now;  // couldn't: try again in 10 s, not every tick
         }
         if (!off && !away && offAfter > 0 && now - lastUse >= std::chrono::duration<double>(offAfter)) {
             char why[64];

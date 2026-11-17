@@ -58,6 +58,9 @@ driver.write_bytes(b"\x7fELF\0eyeTrackingRateMin\0gazeDepEyeToHeadEnable\0gazeDe
 check("0.4's driver: the old name", er.key(), OLD)
 driver.write_bytes(b"\x7fELF\0eyeTrackingRateMin\0gazeDepEyeToHeadEnable2\0gazeDepEyeToHeadDist\0")
 check("0.5's driver: the new name", er.key(), NEW)
+driver.write_bytes(b"\x7fELF\0eyeTrackingRateMin\0gazeDepEyeToHeadEnable3\0")
+check("a driver with neither name: the newest known, not 0.4's", er.key(), NEW)
+driver.write_bytes(b"\x7fELF\0eyeTrackingRateMin\0gazeDepEyeToHeadEnable2\0gazeDepEyeToHeadDist\0")
 
 # --- SteamVR off: the settings file ---
 er.steamvr_up = lambda: False
@@ -147,7 +150,8 @@ check("vrcmd didn't take it: no mark", er.MARK.exists(), False)
 
 # --- The camera rate, from eyetracking.txt ---
 check("no eyetracking.txt: unknown", er.camera_rate(), None)
-check("no eyetracking.txt: no start", er.last_start(), None)
+check("no vrserver.txt: no SteamVR start", er.steamvr_start(), None)
+check("no eyetracking.txt: no failed start", er.start_failed(), None)
 er.EYE_LOG.parent.mkdir(parents=True)
 head = "Sat Oct 10 2026 22:35:43.000000 [Info] - "
 er.EYE_LOG.write_text("\n".join([
@@ -157,10 +161,26 @@ er.EYE_LOG.write_text("\n".join([
     head + "eyetracking 2.18.2 startup with PID=2, config=x",
     head + "Eye tracking started"]) + "\n")
 check("no rate set since the last start: 90", er.camera_rate(), 90.0)
-check("the last start's time", er.last_start(), er.time.mktime((2026, 10, 10, 22, 35, 43, 0, 0, -1)))
+er.SERVER_LOG.write_text(head + "//=====\n" + "Sat Oct 10 2026 22:40:00.000000 [Info] - later\n")
+check("SteamVR's start: vrserver.txt's first line", er.steamvr_start(), er.time.mktime((2026, 10, 10, 22, 35, 43, 0, 0, -1)))
 with er.EYE_LOG.open("a") as f:
     f.write(head + "CStereoAdspCams: Set framerate 15.000000\n")
 check("15 set since the last start", er.camera_rate(), 15.0)
+
+# A start that failed (2026-11-17: the cDSP refused the weights): no rate, and the line says why.
+with er.EYE_LOG.open("a") as f:
+    f.write(head + "eyetracking 2.19.3 startup with PID=3, config=x\n")
+    f.write(head + "CGazeEstimatorCdsp: Failed to upload weights to cDSP: 2\n")
+    f.write(head + "Eye tracking system init failed\n")
+check("failed start: no rate (not a guessed 90)", er.camera_rate(), None)
+check("failed start: the line", er.start_failed(), "Eye tracking system init failed")
+code, out = main_with("status")
+check("failed start: status says the cameras are off", "didn't start" in out, True)
+with er.EYE_LOG.open("a") as f:
+    f.write(head + "eyetracking 2.19.3 startup with PID=4, config=x\n")
+    f.write(head + "Eye tracking started\n")
+check("a good start after it: 90 again", er.camera_rate(), 90.0)
+check("a good start after it: not failed", er.start_failed(), None)
 
 print("eye-rate-test:", "FAILED " + ", ".join(failures) if failures else "all passed")
 raise SystemExit(1 if failures else 0)

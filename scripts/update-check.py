@@ -953,11 +953,15 @@ def check_eye_tracker():
            "check again after that")
 
 
-def eye_rate_verdict(setting, on, rate, started, marked_at, ours):
+def eye_rate_verdict(setting, on, rate, started, marked_at, ours, failed=None):
     """What the eye check says: (state, detail). setting: the name the driver reads; on: it is;
     rate: the cameras' fps since the eye tracker's last start (None: unknown); started: when
-    that was; marked_at: when Frametop turned the setting on (None: it didn't); ours: our eye
-    tracker is installed."""
+    SteamVR (which reads the setting) last started; marked_at: when Frametop turned the setting
+    on (None: it didn't); ours: our eye tracker is installed; failed: the log line that says
+    the eye tracker's last start failed."""
+    if failed:
+        return ("FAIL" if ours else "warn", f"SteamVR's eye tracker didn't start ({failed}), so the eye cameras "
+                "don't run: restart SteamVR, and if it says this again, restart the Frame")
     if rate is not None and rate < 90:
         why = (f"SteamVR runs the eye cameras at {rate:g} fps, so our eye tracker can't calibrate (a dot needs "
                "15 frames in 0.6 s) and the gaze moves only that often")
@@ -992,8 +996,9 @@ def check_eye_rate():
         name = er.key()
         marked_at = os.path.getmtime(er.MARK) if name in er.marked() else None
         state, detail = eye_rate_verdict(f"{er.SECTION}.{name}", er.get(name) is True, er.camera_rate(),
-                                         er.last_start(), marked_at,
-                                         os.path.exists("/etc/systemd/system/frametop-eyegrab.service"))
+                                         er.steamvr_start(), marked_at,
+                                         os.path.exists("/etc/systemd/system/frametop-eyegrab.service"),
+                                         er.start_failed())
     except Exception as e:  # a broken checkout: say so rather than stop the whole check
         state, detail = "warn", f"couldn't read gaze/eye-rate.py: {e}"
     report(state, "eye cameras", detail)

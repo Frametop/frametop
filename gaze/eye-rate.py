@@ -9,10 +9,11 @@ own tracker copes, but our tracker gets 8 or 9 frames in a calibration dot's 0.6
 needs 15, so it can never calibrate, and the gaze pointer would move 15 times a second.
 With steamvr.gazeDepEyeToHeadEnable on, SteamVR asks for 90 (seen 2026-10-10: a headset with
 it on asks for 90 at every start; a user's with it off, at 15, calibrated once it was on).
-SteamOS 0.5's driver (driver_cv.so) reads steamvr.gazeDepEyeToHeadEnable2 instead and ignores the
-old name (seen 2026-11-17: 15 at every start with the old one on; with the new one on, the 15 was
-no longer asked for), so this sets the name the installed driver reads. SteamVR's settings have
-no switch for either.
+SteamOS 0.5's driver (driver_cv.so) has only the name steamvr.gazeDepEyeToHeadEnable2 (seen
+2026-11-17 on 0.5.9: 15 at every start since 0.5 with the old name on; with the new one on, a
+start that brought the eye tracker up logged "Request eye tracking framerate: 90"), so this sets
+the name the installed driver has. SteamVR's settings have no switch for either, and what else it
+changes isn't documented.
 
   gaze/eye-rate.py on      # turn it on (gaze/run.sh install); it counts from SteamVR's next start
   gaze/eye-rate.py off     # turn it off again, if this turned it on (gaze/run.sh uninstall)
@@ -42,6 +43,7 @@ STEAMVR_SETTINGS = ft_vrsettings.FILES
 # one line per setting, "steamvr.<key> was off; Frametop turned it on".
 MARK = HOME / ".local/state/frametop/gaze/steamvr-eye-rate"
 EYE_LOG = HOME / ".local/share/Steam/logs/eyetracking.txt"
+SERVER_LOG = HOME / ".local/share/Steam/logs/vrserver.txt"  # a new one at each SteamVR start
 # A terminal in the desktop has the desktop's own config folder, where SteamVR's path registry
 # isn't (see scripts/update-check.py): vrcmd needs the real one.
 ENV = dict(os.environ, XDG_CONFIG_HOME=str(HOME / ".config"), LD_LIBRARY_PATH=STEAMVR_BIN)
@@ -62,11 +64,12 @@ def settings_file():
 
 def key():
     """The setting's name in the installed driver: SteamOS 0.5's when the driver has that name in
-    it, else 0.4's. Unreadable (no SteamVR): 0.5's, the current one."""
+    it, 0.4's when it has only that one. Unreadable, or neither (a newer rename): 0.5's."""
     try:
-        return NEW_KEY if (NEW_KEY + "\0").encode() in DRIVER.read_bytes() else OLD_KEY
+        data = DRIVER.read_bytes()
     except OSError:
         return NEW_KEY
+    return OLD_KEY if (OLD_KEY + "\0").encode() in data and (NEW_KEY + "\0").encode() not in data else NEW_KEY
 
 
 def get(name=None):
@@ -98,34 +101,54 @@ def marked():
     return [n for n in names if n in (OLD_KEY, NEW_KEY)]
 
 
-def last_start():
-    """When the eye tracker last started (eyetracking.txt's clock, local time) as a Unix time, or
-    None without the log or a start in it."""
+def log_time(line):
+    """A SteamVR log line's time ("Mon Nov 16 2026 12:24:34.650276 [Info] - ...", local time) as a
+    Unix time, or None."""
+    try:
+        return time.mktime(time.strptime(line[:24], "%a %b %d %Y %H:%M:%S"))
+    except ValueError:
+        return None
+
+
+def steamvr_start():
+    """When SteamVR (vrserver, which reads the setting) last started: vrserver.txt's first line.
+    None without it."""
+    try:
+        with SERVER_LOG.open(errors="replace") as f:
+            return log_time(f.readline())
+    except OSError:
+        return None
+
+
+def since_last_start():
+    """eyetracking.txt's lines since the eye tracker's last start, or None without the log or a
+    start in it."""
     try:
         lines = EYE_LOG.read_text(errors="replace").splitlines()
     except OSError:
         return None
-    for line in reversed(lines):
-        if " startup with PID" in line:
-            try:  # "Mon Nov 16 2026 12:24:34.650276 [Info] - eyetracking 2.19.3 startup with PID=..."
-                return time.mktime(time.strptime(line[:24], "%a %b %d %Y %H:%M:%S"))
-            except ValueError:
-                return None
+    starts = [i for i, line in enumerate(lines) if " startup with PID" in line]
+    return lines[starts[-1]:] if starts else None
+
+
+def start_failed():
+    """The line that says the eye tracker's last start failed ("Eye tracking system init failed",
+    seen 2026-11-17 after "Failed to upload weights to cDSP"), or None. With it, the cameras
+    don't run at all."""
+    for line in since_last_start() or []:
+        if "init failed" in line or "Failed to initialize" in line:
+            return line.split(" - ", 1)[-1].strip()
     return None
 
 
 def camera_rate():
     """The rate the eye cameras run at since the eye tracker last started: the last "Set
     framerate" after its last start, or 90 when it set none (it starts at 90). None without
-    the log or a start in it."""
-    try:
-        lines = EYE_LOG.read_text(errors="replace").splitlines()
-    except OSError:
+    the log or a start in it, or when that start failed."""
+    lines = since_last_start()
+    if lines is None or start_failed():
         return None
-    starts = [i for i, line in enumerate(lines) if " startup with PID" in line]
-    if not starts:
-        return None
-    rates = re.findall(r"CStereoAdspCams: Set framerate ([\d.]+)", "\n".join(lines[starts[-1]:]))
+    rates = re.findall(r"CStereoAdspCams: Set framerate ([\d.]+)", "\n".join(lines))
     return float(rates[-1]) if rates else 90.0
 
 
@@ -163,7 +186,9 @@ def main():
         value = get(name)
         rate = camera_rate()
         print(f"{SECTION}.{name}: {'on' if value else 'off'}" + (" (set by Frametop)" if name in marked() else ""))
-        print("eye cameras: " + (f"{rate:g} fps since the eye tracker started" if rate else "unknown (no eyetracking.txt)"))
+        failed = start_failed()
+        print("eye cameras: " + (f"off: SteamVR's eye tracker didn't start ({failed}); restart SteamVR" if failed else
+                                 f"{rate:g} fps since the eye tracker started" if rate else "unknown (no eyetracking.txt)"))
         return 0
     print("usage: gaze/eye-rate.py on|off|status", file=sys.stderr)
     return 2

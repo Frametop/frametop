@@ -1364,6 +1364,7 @@ void UpdateVisibility() {
     Mat head;
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
     for (auto &[i, s] : g_screens) {
+        if (s.glueTo >= 0) continue;   // (with what it's glued to, below)
         bool visible = TileAnchored(i) ? TileShown(s, i, dashUp) : !g_paused && s.shown && (shared || s.drag != Drag::None) && !s.alone;
         // A floating window's panel: while a window floats on it, its output is on, and the
         // window isn't minimized (and once it has a crop).
@@ -1380,6 +1381,12 @@ void UpdateVisibility() {
             visible = alpha > 0.02f;
         }
         SetVisible(s, visible, alpha);
+    }
+    for (auto &[i, s] : g_screens) {
+        if (s.glueTo < 0) continue;
+        const auto to = g_screens.find(s.glueTo);
+        const bool on = to != g_screens.end() && to->second.visible && s.shown;
+        SetVisible(s, on, on ? to->second.alpha : 1);
     }
 }
 
@@ -6888,7 +6895,7 @@ void LendChrome(Screen &s, int k) {
 void StepChromePool() {
     std::vector<chromepool::Panel> panels;
     for (const auto &[i, s] : g_screens) {
-        if (!s.visible) continue;
+        if (!s.visible || s.glueTo >= 0) continue;   // (a glued one has no controls)
         const bool busy = s.drag != Drag::None || s.layoutHeld ||
                           std::any_of(std::begin(s.hover), std::end(s.hover), [](bool h) { return h; });
         const bool wants = busy || g_tick < s.nearUntil || s.handNear || s.handHover != 0 ||
@@ -8424,7 +8431,7 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no floating window panel %d", n);
         if (!(w > 1e-5 && w < 0.01) || w0 < 1 || h0 < 1) return (void)std::snprintf(reply, size, "error bad float");
         SetFloat(*s, w, x0, y0, w0, h0, std::max(0, t0));
-        if (TileAnchored(ScreenIndexOf(*s))) RetileDash(false);   // (its new size kept where its tile is)
+        if (TileAnchored(ScreenIndexOf(*s))) RetileDash();   // (its new size kept where its tile is)
         std::snprintf(reply, size, "ok");
         return;
     }

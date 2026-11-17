@@ -43,7 +43,7 @@ void GsGeometry(Screen &s, int index, const gsforward::Window &w) {
     vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
     CapCurve(s);
     ApplyCurve(s);
-    if (TileAnchored(index)) RetileDash(false);
+    if (TileAnchored(index)) RetileDash();
     else if (!first) KeepCorner(s, oldW, oldH);
     PlaceChrome(s);
     PlaceSubs(s);

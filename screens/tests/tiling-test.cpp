@@ -1,7 +1,8 @@
-// The dashboard tiles (screens/tiling.h, screens/tilegrid.h): every panel faces the head, neighbours
-// never touch at their corners however high the band goes, the band's top is capped, a strip past a
-// full turn shrinks to fit, fixed panels keep their shape, drops land where they're let go, and the
-// keys move and size panels as Omarchy's do.
+// The dashboard tiles (screens/tiling.h, screens/tilegrid.h): a command wall. Every panel faces the
+// head at its own size, the columns stand on the desk line with each panel resting on the one under
+// it, neighbours never touch at their corners however high a column goes, a strip past a full turn
+// (or a column past kMaxTopDeg) shrinks to fit, drops land where they're let go, and the keys move
+// and size panels as Omarchy's do.
 #include "../tiling.h"
 #include "../tilegrid.h"
 
@@ -42,12 +43,17 @@ static bool cornersInColumns(const tiling::Layout &l) {
     return true;
 }
 
-static tiling::Column col(std::initializer_list<tiling::Tile> tiles, double widthDeg = 0) {
+static tiling::Column col(std::initializer_list<tiling::Tile> tiles) {
     tiling::Column c;
     c.tiles = tiles;
-    c.widthDeg = widthDeg;
     return c;
 }
+// A panel `px` x `py` pixels at its natural size on the wall `p`.
+static tiling::Tile px(int id, int w, int h, const tiling::Params &p = {}) {
+    const double m = tiling::MetresPerPx(p);
+    return {id, w * m, h * m};
+}
+static tiling::Tile hd(int id) { return px(id, 1920, 1080); }
 
 int main() {
     tiling::Params p;
@@ -69,128 +75,92 @@ int main() {
         tiling::Pose(90, 0, 1, m);
         check("pose: positive azimuth is to the right (+X)", near(m[0][3], 1));
     }
-    // --- the band and its cap
+    // --- natural size: the same pixels a degree for every panel
     {
-        tiling::Params q = p;
-        q.middleDeg = 50, q.heightDeg = 80, q.maxTopDeg = 55;
-        const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
-        check("band: capped at maxTopDeg", near(l.el1, 55));
-        check("band: moved down from the cap, its height kept", near(l.el0, -25));
-        q.middleDeg = -30, q.heightDeg = 120;
-        const auto low = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
-        check("band: never past the cap downward either (the bottom pole)", near(low.el0, -55) && near(low.el1, 55));
-        q.middleDeg = 10, q.heightDeg = 40;
-        const auto mid = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
-        check("band: round its middle", near(mid.el0, -10) && near(mid.el1, 30));
-        q.heightDeg = 3;
-        const auto s = tiling::Arrange({col({{1, 1, true, 1}})}, q);
-        check("band: never shorter than minHeightDeg", near(s.el1 - s.el0, q.minHeightDeg));
+        const auto l = tiling::Arrange({col({hd(1)}), col({px(2, 1080, 1920)}), col({px(3, 800, 600)})}, p);
+        bool same = true;
+        for (const auto &t : l.tiles) {
+            const int w = t.id == 1 ? 1920 : t.id == 2 ? 1080 : 800;
+            const double deg = tiling::Deg(2 * std::atan2(t.widthM / 2, t.distM));   // (its span seen from you)
+            same = same && near(deg, 2 * tiling::Deg(std::atan(std::tan(tiling::Rad(0.5 / p.pxPerDeg)) * w)), 1e-6);
+        }
+        check("natural: every panel the same pixels a degree, whatever its shape", same);
+        check("natural: 1920 wide is about 40 degrees at 48 a degree", near(l.az1 - l.az0, l.az1 - l.az0) &&
+                                                                          near(l.tiles[0].az1 - l.tiles[0].az0, 40, 1.5));
+        check("natural: a portrait one is taller than a landscape one", l.tiles[1].el1 > l.tiles[0].el1);
+    }
+    // --- the desk: every column stands on it, each panel resting on the one under it
+    {
+        const auto l = tiling::Arrange({col({px(1, 800, 600), hd(2)}), col({px(3, 1080, 1920)}), col({hd(4)})}, p);
+        bool onDesk = true;
+        for (const auto &t : l.tiles)
+            if (t.id != 1) onDesk = onDesk && near(t.el0, p.deskDeg);
+        check("desk: each column's bottom panel on the desk line", onDesk && near(l.el0, p.deskDeg));
+        const auto &top = l.tiles[0], &under = l.tiles[1];
+        check("desk: rows top down, the last on the desk", top.id == 1 && under.id == 2 && top.row == 0 && under.row == 1);
+        check("desk: the one above rests on the one under it, a gap between", near(top.el0, under.el1 + p.gapDeg));
+        check("desk: the tallest column's top is the layout's", near(l.el1, std::max(top.el1, l.tiles[2].el1)));
+        check("desk: a narrow panel centred in its column", near(top.azDeg, (top.az0 + top.az1) / 2) && near(top.azDeg, under.azDeg));
+        check("desk: the column as wide as its widest", near(under.az1 - under.az0, tiling::SpanFor(p.radius, under.widthM / under.distM * p.radius,
+                                                                                                under.heightM / under.distM * p.radius, under.elDeg), 1e-6));
+        check("desk: below your eyes by default (the bottom panels' tops above them)", p.deskDeg < 0 && under.el1 > 0);
     }
     // --- columns: centred, ordered, gaps, no corner overlap high up
     {
-        tiling::Params q = p;
-        q.middleDeg = 45, q.heightDeg = 50, q.maxTopDeg = 70;   // a high band (20..70): corners pinch together
         std::vector<tiling::Column> cols;
-        for (int i = 0; i < 4; ++i) cols.push_back(col({{i * 10 + 1, 16.0 / 9, true, 1}, {i * 10 + 2, 4.0 / 3, true, 1}}));
-        const auto l = tiling::Arrange(cols, q);
+        for (int i = 0; i < 4; ++i) cols.push_back(col({px(i * 10 + 1, 1600, 1200), hd(i * 10 + 2), hd(i * 10 + 3)}));
+        const auto l = tiling::Arrange(cols, p);
         check("columns: strip centred in front of you", near(l.az0, -l.az1));
         bool ordered = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
-                if (t.col + 1 == u.col) ordered = ordered && t.az1 + q.gapDeg * l.shrink - 1e-9 <= u.az0;
+                if (t.col + 1 == u.col) ordered = ordered && t.az1 + p.gapDeg * l.shrink - 1e-9 <= u.az0;
         check("columns: left to right, a gap between", ordered);
-        check("columns: no corner pokes into the next column, even at 70 degrees up", cornersInColumns(l));
+        check("columns: no corner pokes into the next column, three high", cornersInColumns(l));
         bool stacked = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
-                if (t.col == u.col && t.row + 1 == u.row) stacked = stacked && t.el0 - q.gapDeg * l.shrink + 1e-9 >= u.el1;
+                if (t.col == u.col && t.row + 1 == u.row) stacked = stacked && near(t.el0 - p.gapDeg * l.shrink, u.el1);
         check("rows: top down, a gap between", stacked);
-    }
-    // --- fixed keep their shape, resizable fill the cell
-    {
-        tiling::Params q = p;
-        const auto l = tiling::Arrange({col({{1, 21.0 / 9, true, 1}}, 20), col({{2, 1, false, 1}, {3, 1, false, 3}}, 30)}, q);
-        const auto &ultra = l.tiles[0];
-        check("fixed: keeps its aspect", near(ultra.widthM / ultra.heightM, 21.0 / 9, 1e-6));
-        check("fixed: its column grew past the 20 degrees asked for", ultra.az1 - ultra.az0 > 20 + 1e-6);
-        const auto &a = l.tiles[1], &b = l.tiles[2];
-        check("resizable: the lower one no narrower (the circles round you are wider lower down)", b.widthM >= a.widthM - 1e-9);
-        check("resizable: rows by weight (1:3)", near((b.el1 - b.el0) / (a.el1 - a.el0), 3, 1e-6));
-        check("resizable: its column kept the 30 degrees asked for", near(a.az1 - a.az0, 30));
-        check("columns: no corner overlap with mixed kinds", cornersInColumns(l));
     }
     // --- past a full turn: shrinks to fit
     {
-        tiling::Params q = p;
         std::vector<tiling::Column> cols;
-        for (int i = 0; i < 20; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
-        const auto l = tiling::Arrange(cols, q);
-        const double gap = q.gapDeg * l.shrink;   // (the gaps shrink with it)
-        check("overflow: the strip fits in a turn", l.az1 - l.az0 <= q.maxSpanDeg - gap + 1e-6);
-        check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (q.maxSpanDeg - gap));
+        for (int i = 0; i < 20; ++i) cols.push_back(col({hd(i + 1)}));
+        const auto l = tiling::Arrange(cols, p);
+        const double gap = p.gapDeg * l.shrink;   // (the gaps shrink with it)
+        check("overflow: the strip fits in a turn", l.az1 - l.az0 <= p.maxSpanDeg - gap + 1e-6);
+        check("overflow: and fills it (shrunk no more than it needs)", l.az1 - l.az0 >= 0.99 * (p.maxSpanDeg - gap));
         check("overflow: shrunk", l.shrink < 1);
         check("overflow: still no corner overlap", cornersInColumns(l));
-        check("overflow: the band shrank with it (shapes kept)", l.el1 - l.el0 < q.heightDeg);
     }
-    // --- the clamps' far end: a band at -85 with dozens of columns still fits a turn (follow-up:
-    // the gaps alone took more than a turn, and nothing fit)
+    // --- a column past kMaxTopDeg: shrinks till it's under it
+    {
+        const auto l = tiling::Arrange({col({hd(1), hd(2), hd(3), hd(4), hd(5)})}, p);
+        check("too tall: under the cap", l.el1 <= tiling::kMaxTopDeg + 1e-6 && l.shrink < 1 && l.el1 > tiling::kMaxTopDeg - 1);
+        check("too tall: still on the desk", near(l.tiles.back().el0, p.deskDeg) && cornersInColumns(l));
+    }
+    // --- the clamps' far end: dozens of tall columns at a low desk still fit a turn
     for (int n : {60, 200, 400}) {
         tiling::Params q = p;
-        q.maxTopDeg = 85, q.middleDeg = -120, q.heightDeg = 30;   // (its bottom clamped to -85)
+        q.deskDeg = -40;
         std::vector<tiling::Column> cols;
-        for (int i = 0; i < n; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}, {1000 + i, 1, false, 1}}));
+        for (int i = 0; i < n; ++i) cols.push_back(col({hd(i + 1), px(1000 + i, 1080, 1920)}));
         const auto l = tiling::Arrange(cols, q);
         char what[96];
-        std::snprintf(what, sizeof what, "extreme: %d columns at -85 fit a turn, no corner overlap", n);
+        std::snprintf(what, sizeof what, "extreme: %d columns fit a turn, no corner overlap", n);
         check(what, l.az1 - l.az0 <= q.maxSpanDeg + 1e-6 && l.shrink > 0 && cornersInColumns(l));
     }
-    // --- the default band (vrtiles.cpp: its middle at your eyes): an ultrawide desktop and a laptop's
-    // display in front of you at about their own sizes, not up at the cap (2026-11-16: the old band
-    // ran from the bar's raise to the cap, each panel 53 degrees tall, the pair 200 degrees round)
-    {
-        const tiling::Params q = p;
-        const auto l = tiling::Arrange({col({{1, 3440.0 / 1440, true, 1}}), col({{2, 2560.0 / 1600, true, 1}})}, q);
-        check("default band: centred on your eyes", near(l.tiles[0].elDeg, 0) && near(l.tiles[1].elDeg, 0));
-        const double tall = tiling::Deg(2 * std::atan2(l.tiles[0].heightM / 2, l.tiles[0].distM));   // (its corners on the sphere: a wide one nearer)
-        check("default band: about a desktop's size (35-40 degrees tall, about 1 m at 1.4 m)", tall > 35 && tall < 40 && l.tiles[0].heightM > 0.9);
-        check("default band: the pair within 150 degrees round you", l.az1 - l.az0 < 150 && near(l.az0, -l.az1));
-    }
-    // --- desktops at the default band: in front of you, at full size (council, 2026-11-16: the old
-    // span hit its 180 degree cap and put two desktops at +-90)
-    {
+    // --- a desk set high or low: sizes positive, in front
+    for (double desk : {-40.0, 20.0}) {
         tiling::Params q = p;
-        q.middleDeg = 30;   // a high band, 10..50 (the old default's bottom: a bar 20 degrees down, raised 30)
-        const double one = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q).az1;   // (half the strip: it's centred)
-        for (int n = 1; n <= 3; ++n) {
-            std::vector<tiling::Column> cols;
-            for (int i = 0; i < n; ++i) cols.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
-            const auto l = tiling::Arrange(cols, q);
-            char what[96];
-            std::snprintf(what, sizeof what, "desktops: %d at full size, %.0f degrees round you", n, l.az1 - l.az0);
-            check(what, near(l.shrink, 1) && near(l.az1 - l.az0, 2 * one * n + q.gapDeg * (n - 1), 1e-6));
-            std::snprintf(what, sizeof what, "desktops: %d, the corners in their columns", n);
-            check(what, cornersInColumns(l));
-        }
-        std::vector<tiling::Column> two = {col({{1, 16.0 / 9, true, 1}}), col({{2, 16.0 / 9, true, 1}})};
-        const auto l = tiling::Arrange(two, q);
-        check("desktops: two either side of the dashboard, near it", l.tiles[0].azDeg > -60 && l.tiles[1].azDeg < 60);
-    }
-    // --- a middle set high (or low, past the settings' ends): the band stays within the caps
-    {
-        tiling::Params q = p;
-        for (double middle : {50.0, 70.0, 95.0, -95.0}) {
-            q.middleDeg = middle;
-            std::vector<tiling::Column> cols = {col({{1, 16.0 / 9, true, 1}}), col({{2, 1, false, 1}}, 30)};
-            const auto l = tiling::Arrange(cols, q);
-            bool sane = l.el1 <= q.maxTopDeg + 1e-9 && l.el0 >= -q.maxTopDeg - 1e-9 && l.el1 - l.el0 >= q.minHeightDeg - 1e-9;
-            for (const auto &t : l.tiles) sane = sane && t.widthM > 0.05 && t.heightM > 0.05 && std::fabs(t.azDeg) < 180;
-            char what[96];
-            std::snprintf(what, sizeof what, "middle %.0f up: band %.0f..%.0f, sizes positive, in front", middle, l.el0, l.el1);
-            check(what, sane && cornersInColumns(l));
-        }
-        q.middleDeg = 30, q.maxTopDeg = 20, q.heightDeg = 60;   // settings at odd ends
-        const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
-        check("band: a low cap keeps it within +-20", near(l.el1, 20) && near(l.el0, -20));
+        q.deskDeg = desk;
+        const auto l = tiling::Arrange({col({hd(1), px(2, 1080, 1920)}), col({px(3, 800, 600)})}, q);
+        bool sane = l.el1 <= tiling::kMaxTopDeg + 1e-9 && near(l.el0, desk);
+        for (const auto &t : l.tiles) sane = sane && t.widthM > 0.05 && t.heightM > 0.05 && std::fabs(t.azDeg) < 180;
+        char what[96];
+        std::snprintf(what, sizeof what, "desk %.0f up: on it, sizes positive, in front", desk);
+        check(what, sane && cornersInColumns(l));
     }
     // --- Steam's menu, a slot in the strip when the strip reaches it: the split's columns left of
     // it, the rest right, none in it
@@ -202,16 +172,16 @@ int main() {
         };
         tiling::Params q = p;
         q.reserveAzDeg = 0, q.reserveDeg = 40;
-        const auto one = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
+        const auto one = tiling::Arrange({col({hd(1)})}, q);
         check("slot: one column goes right of it, a gap between", near(one.tiles[0].az0, 20 + q.gapDeg));
-        std::vector<tiling::Column> two = {col({{1, 16.0 / 9, true, 1}}), col({{2, 16.0 / 9, true, 1}})};
+        std::vector<tiling::Column> two = {col({hd(1)}), col({hd(2)})};
         const auto l = tiling::Arrange(two, q);
         check("slot: two go either side of it", near(l.tiles[0].az1, -20 - q.gapDeg) && near(l.tiles[1].az0, 20 + q.gapDeg));
         check("slot: the strip takes it in", l.az0 < -20 && l.az1 > 20 && near(l.az1 - l.az0, (l.tiles[0].az1 - l.tiles[0].az0) * 2 + 40 + 2 * q.gapDeg));
         auto d = tiling::DropAt(l, two, 0, 0);
         check("slot: a drop on Steam's menu is a new column there", d.kind == tiling::Drop::NewColumn && d.col == 1);
         q.reserveAzDeg = 30;
-        std::vector<tiling::Column> three = {col({{1, 16.0 / 9, true, 1}}), col({{2, 1, false, 1}}, 30), col({{3, 4.0 / 3, true, 1}})};
+        std::vector<tiling::Column> three = {col({hd(1)}), col({px(2, 1200, 1200)}), col({px(3, 1024, 768)})};
         const auto off = tiling::Arrange(three, q);
         const auto mid = [](const tiling::Layout &l) { return std::fabs(l.az0 + l.az1) / 2; };
         check("slot: where the menu is (30 degrees round), clear", clear(off, 10, 50) && off.split >= 0);
@@ -222,7 +192,7 @@ int main() {
         check("slot: a split given is kept (the grid's)", kept.split == 0 && clear(kept, 10, 50) && kept.tiles[0].az0 >= 50);
         check("slot: a split past the columns is all of them", tiling::Arrange(three, q, 7).split == 3);
         std::vector<tiling::Column> many;
-        for (int i = 0; i < 20; ++i) many.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
+        for (int i = 0; i < 20; ++i) many.push_back(col({hd(i + 1)}));
         const auto full = tiling::Arrange(many, q);
         check("slot: past a turn the columns shrink, the slot doesn't", full.shrink < 1 && clear(full, 10, 50) &&
                                                                           full.az1 - full.az0 <= q.maxSpanDeg + 1e-6 &&
@@ -244,11 +214,11 @@ int main() {
         q.reserveAzDeg = 50, q.reserveDeg = 62;   // (council, 2026-11-16: past the old 45 degree gate, covered)
         const auto fifty = tiling::Arrange(two, q);
         check("slot: a menu 50 degrees round the strip reaches: kept clear", fifty.split >= 0 && clear(fifty, 19, 81));
-        q.reserveAzDeg = 110, q.reserveDeg = 52;   // (the palm menu's, off to the side, with four columns)
+        q.reserveAzDeg = 70, q.reserveDeg = 52;   // (the palm menu's, off to the side, with four columns)
         std::vector<tiling::Column> four = three;
-        four.push_back(col({{4, 1, false, 1}}, 40));
+        four.push_back(col({px(4, 1600, 1600)}));
         const auto palm = tiling::Arrange(four, q);
-        check("slot: the palm menu's, the strip reaching it: kept clear", palm.split >= 0 && clear(palm, 84, 136));
+        check("slot: the palm menu's, the strip reaching it: kept clear", palm.split >= 0 && clear(palm, 44, 96));
         q.reserveAzDeg = -170, q.reserveDeg = 40;   // (behind you: the strip's ends wrap round to it)
         const auto behind = tiling::Arrange(many, q);
         bool wrapClear = true;
@@ -262,7 +232,7 @@ int main() {
     // --- drops
     {
         tiling::Params q = p;
-        std::vector<tiling::Column> cols = {col({{1, 1, false, 1}, {2, 1, false, 1}}, 40), col({{3, 1, false, 1}}, 40)};
+        std::vector<tiling::Column> cols = {col({px(1, 1600, 900), px(2, 1600, 900)}), col({px(3, 1600, 900)})};
         const auto l = tiling::Arrange(cols, q);
         const auto &left = l.tiles[0], &lower = l.tiles[1];
         auto d = tiling::DropAt(l, cols, left.azDeg, left.el1 - 0.5);
@@ -278,7 +248,7 @@ int main() {
         d = tiling::DropAt(l, cols, l.az1 + 30, left.elDeg);
         check("drop: well past the strip: torn off", d.kind == tiling::Drop::TearOff);
         d = tiling::DropAt(l, cols, 0, l.el1 + 25);
-        check("drop: well above the band: torn off", d.kind == tiling::Drop::TearOff);
+        check("drop: well above the tallest column: torn off", d.kind == tiling::Drop::TearOff);
         d = tiling::DropAt(l, cols, 0, l.el0 - 25);
         check("drop: well below it (in front of the dashboard): torn off", d.kind == tiling::Drop::TearOff);
         d = tiling::DropAt(tiling::Arrange({}, q), {}, 0, 0);
@@ -307,10 +277,11 @@ int main() {
         g.Insert(5, 0, 0, false);   // over 3
         check("move down: swaps with the one under", g.MoveUpDown(5, +1) && g.Cols()[0].cells[1].id == 5);
         check("move down at the bottom: nothing", !g.MoveUpDown(5, +1));
-        check("taller: its weight grows", g.Heighten(5, tilegrid::kStep) && g.Cols()[0].cells[1].weight > 1);
-        check("taller alone in a column: nothing", !g.Heighten(1, tilegrid::kStep));
-        check("wider: its column's width set", g.Widen(1, tilegrid::kStep, 40) && near(g.Cols()[1].widthDeg, 44));
-        check("narrower: never below the minimum", g.Widen(1, 0.01, 44) && near(g.Cols()[1].widthDeg, tilegrid::kMinWidthDeg));
+        check("bigger: its size grows", g.Scale(5, tilegrid::kStep) && near(g.CellOf(5)->scale, 1.1));
+        check("bigger: past its natural size, to the most", g.Scale(5, 100) && near(g.CellOf(5)->scale, tilegrid::kMaxScale) &&
+                                                               !g.Scale(5, 2));
+        check("smaller: never below the least", g.Scale(1, 0.001) && near(g.CellOf(1)->scale, tilegrid::kMinScale));
+        check("size: a factor that isn't one changes nothing", !g.Scale(1, 0) && !g.Scale(1, -1) && !g.Scale(1, NAN));
         check("remove: its column goes with its last panel", g.Remove(1) && !g.Has(1) && g.Cols().size() == 3);
         check("remove: not there", !g.Remove(1));
     }
@@ -342,9 +313,9 @@ int main() {
         check("split: a left column gone: one fewer left", ids() == "2 5 S 3 6 4 7 ");
         g.Remove(6);
         check("split: a right one gone: the same", ids() == "2 5 S 3 4 7 ");
-        g.Insert(8, 2, 0, true, 1, 0, 1, true);
+        g.Insert(8, 2, 0, true, 1, true);
         check("split: a new column at the slot, left of it", ids() == "2 5 8 S 3 4 7 ");
-        g.Insert(9, 3, 0, true, 1, 0, 1, false);
+        g.Insert(9, 3, 0, true, 1, false);
         check("split: ...right of it", ids() == "2 5 8 S 9 3 4 7 ");
         check("split: the other place's kept through the adds and removes", ids(1) == "2 5 8 9 3 4 S 7 ");
         check("split: alone, Meta+Right steps across the slot", g.MoveSide(8, +1, 0) && ids() == "2 5 S 8 9 3 4 7 ");
@@ -369,7 +340,6 @@ int main() {
         g.SetSplit(1, 0);
         check("split: none set on an empty grid", g.Split(1) == -1);
     }
-    std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     // --- tiled panels are flat (a curved one reaches past its column), their own curves kept
     {
         double curve = 1.5, kept = 0;
@@ -391,7 +361,7 @@ int main() {
     // --- why: a panel curved round its own cylinder covers more of a turn than its (flat) column
     {
         tiling::Params q;
-        const tiling::Layout l = tiling::Arrange({col({{1, 3440.0 / 1440}}), col({{2, 1.6}})}, q);
+        const tiling::Layout l = tiling::Arrange({col({px(1, 3440, 1440)}), col({px(2, 2560, 1600)})}, q);
         const tiling::Placed &a = l.tiles[0], &b = l.tiles[1];
         // half the angle a panel w wide covers from the centre at r, curved round R (0 flat): OpenVR
         // curves it toward its front, the cylinder's axis R in front of it
@@ -401,9 +371,8 @@ int main() {
         };
         const double flatGap = (b.azDeg - half(b, 0)) - (a.azDeg + half(a, 0));
         const double curvedGap = (b.azDeg - half(b, 1.2)) - (a.azDeg + half(a, 1.2));
-        check("flat: two flat tiles keep the gap between them", near(flatGap, q.gapDeg, 1e-6));
+        check("flat: two flat tiles on the desk line keep at least the gap", flatGap >= q.gapDeg - 1e-6);
         check("flat: curved round 1.2 m they'd overlap", curvedGap < 0);
-        check("flat: the gap is 3 degrees, about 8 cm at 1.6 m", near(q.gapDeg, 3) && near(tiling::Chord(1.6, q.gapDeg), 0.084, 1e-3));
     }
     // --- every tile's corners on the sphere, not its middle: different widths, the corners at one depth
     {
@@ -417,14 +386,14 @@ int main() {
             }
             return true;
         };
-        const tiling::Layout l = tiling::Arrange({col({{1, 3440.0 / 1440}}), col({{2, 16.0 / 9}}), col({{3, 1.0, false}})}, q);
-        check("corners: a wide, a 16:9 and a resizable one: every corner at the radius", allOn(l, q.radius));
+        const tiling::Layout l = tiling::Arrange({col({px(1, 3440, 1440)}), col({hd(2)}), col({px(3, 1000, 1000)})}, q);
+        check("corners: a wide, a 16:9 and a square one: every corner at the radius", allOn(l, q.radius));
         check("corners: the wider one nearer", l.tiles[0].distM < l.tiles[1].distM && l.tiles[1].distM < q.radius);
-        check("corners: a 16:9 one's middle about 1.6 m away", near(l.tiles[1].distM, 1.6, 0.05));
+        check("corners: a 16:9 one's middle about 2.5 m away", near(l.tiles[1].distM, 2.5, 0.05));
         check("corners: and they still don't reach past their columns", cornersInColumns(l));
         tiling::Params hi = q;
-        hi.middleDeg = 30, hi.heightDeg = 50;
-        const tiling::Layout s2 = tiling::Arrange({col({{1, 1.6}, {2, 2.4}}), col({{3, 1.0, false}, {4, 1.0, false}, {5, 0.7}})}, hi);
+        hi.deskDeg = 10;
+        const tiling::Layout s2 = tiling::Arrange({col({px(1, 1600, 1000), px(2, 2400, 1000)}), col({px(3, 1000, 1000), px(4, 1000, 1000), px(5, 700, 1000)})}, hi);
         check("corners: stacked rows high up: every corner at the radius", allOn(s2, hi.radius));
         check("corners: ...and inside their columns", cornersInColumns(s2));
         // seen from the centre, each looks as big as it did with its middle at the radius
@@ -434,5 +403,6 @@ int main() {
         tiling::CornersOnSphere(q.radius, &one);
         check("corners: the same span seen from the centre", near(std::atan2(one.widthM / 2, one.distM), before, 1e-12));
     }
+    std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;
 }

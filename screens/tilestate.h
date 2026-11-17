@@ -1,7 +1,8 @@
 // A dashboard panel's remembered state as a record (dashtiles.h's Board writes and reads it), and
 // the batch of them a profile put back last. The text form is what ft-screens' tile memory and the
-// `tiles` command carry: "off", "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" or "sat STAY" and the
-// satellite's 12 numbers. Parse takes any whitespace between the words and nothing else.
+// `tiles` command carry: "off", "tile STAY COL ROW ALONE SCALE" or "sat STAY" and the satellite's 12
+// numbers. Parse takes any whitespace between the words and nothing else, and the sphere's older
+// "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" (its scale taken as the size, the rest dropped).
 // Header only, no OpenVR, so its test runs anywhere (screens/tests/dashtiles-test.cpp).
 #pragma once
 
@@ -22,7 +23,7 @@ struct State {
     bool stay = false;
     int col = 0, row = 0;   // a tile's place on the grid when it was saved (negative: none)
     bool alone = true;      // a column of its own
-    double weight = 1, scale = 1, width = 0;
+    double scale = 1;       // its size, times its natural one
     double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // a satellite's: group frame -> panel
 
     // A tile with a place on the grid (else it goes where a new one would).
@@ -65,10 +66,12 @@ inline bool Parse(const std::string &text, State *out) {
     State s;
     int stay = 0, alone = 1;
     if (w[0] == "off" && w.size() == 1) return *out = s, true;
-    if (w[0] == "tile" && w.size() == 8) {
-        if (!detail::Int(w[1], &stay) || !detail::Int(w[2], &s.col) || !detail::Int(w[3], &s.row) ||
-            !detail::Int(w[4], &alone) || !detail::Num(w[5], &s.weight) || !detail::Num(w[6], &s.scale) ||
-            !detail::Num(w[7], &s.width))
+    if (w[0] == "tile" && (w.size() == 6 || w.size() == 8)) {
+        double old = 0;   // (the old form's weight and width)
+        const bool ok = w.size() == 6 ? detail::Num(w[5], &s.scale)
+                                      : detail::Num(w[5], &old) && detail::Num(w[6], &s.scale) && detail::Num(w[7], &old);
+        if (!ok || !detail::Int(w[1], &stay) || !detail::Int(w[2], &s.col) || !detail::Int(w[3], &s.row) ||
+            !detail::Int(w[4], &alone))
             return false;
         s.kind = State::Kind::Tile, s.stay = stay != 0, s.alone = alone != 0;
         return *out = s, true;
@@ -95,7 +98,7 @@ inline std::string Text(const State &s) {
         case State::Kind::Off: return "off";
         case State::Kind::Tile:
             return "tile " + std::to_string(s.stay ? 1 : 0) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
-                   std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.weight) + num(" %.3f", s.scale) + num(" %.2f", s.width);
+                   std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.scale);
         case State::Kind::Sat: {
             std::string t = std::string("sat ") + (s.stay ? "1" : "0");
             for (int r = 0; r < 3; ++r)

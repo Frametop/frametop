@@ -1530,43 +1530,46 @@ Item {
                         onToggled: backend.dashTiles.setGsApps(checked)
                     }
                     RowLayout {
-                        Kirigami.FormData.label: "Above your eyes:"
+                        Kirigami.FormData.label: "Desk line:"
                         Controls.Slider {
-                            id: tileRaise
-                            from: -30; to: 30; stepSize: 1
-                            value: backend.dashTiles.raiseDeg
+                            id: tileDesk
+                            from: -40; to: 20; stepSize: 1
+                            value: backend.dashTiles.deskDeg
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.dashTiles.setRaiseDeg(value)
+                            onMoved: backend.dashTiles.setDeskDeg(value)
                         }
-                        Controls.Label { text: Math.round(tileRaise.value) + "°" }
+                        Controls.Label {
+                            text: Math.abs(Math.round(tileDesk.value)) + "° " + (tileDesk.value < 0 ? "below" : "above") + " your eyes"
+                        }
                     }
                     RowLayout {
-                        Kirigami.FormData.label: "Column height:"
+                        Kirigami.FormData.label: "Panel size:"
                         Controls.Slider {
-                            id: tileHeight
-                            from: 12; to: 120; stepSize: 1
-                            value: backend.dashTiles.heightDeg
+                            id: tileDensity
+                            // (left smaller, right bigger: fewer pixels a degree)
+                            from: -120; to: -15; stepSize: 1
+                            value: -backend.dashTiles.pxPerDeg
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.dashTiles.setHeightDeg(value)
+                            onMoved: backend.dashTiles.setPxPerDeg(-value)
                         }
-                        Controls.Label { text: Math.round(tileHeight.value) + "°" }
+                        Controls.Label { text: Math.round(-tileDensity.value) + " pixels a degree" }
                     }
                     RowLayout {
-                        Kirigami.FormData.label: "Highest top:"
+                        Kirigami.FormData.label: "Desk width:"
                         Controls.Slider {
-                            id: tileTop
-                            from: 20; to: 80; stepSize: 1
-                            value: backend.dashTiles.maxTopDeg
+                            id: tileWall
+                            from: 30; to: 300; stepSize: 5
+                            value: backend.dashTiles.wallDeg
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.dashTiles.setMaxTopDeg(value)
+                            onMoved: backend.dashTiles.setWallDeg(value)
                         }
-                        Controls.Label { text: Math.round(tileTop.value) + "° above your eyes" }
+                        Controls.Label { text: Math.round(tileWall.value) + "° round you, then panels stack" }
                     }
                     RowLayout {
                         Kirigami.FormData.label: "Distance:"
                         Controls.Slider {
                             id: tileRadius
-                            from: 0.8; to: 4; stepSize: 0.05
+                            from: 0.8; to: 6; stepSize: 0.05
                             value: backend.dashTiles.radius
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                             onMoved: backend.dashTiles.setRadius(value)
@@ -1590,10 +1593,12 @@ Item {
                           + "your head where you let go. Choosing a pin above keeps the screen where it is now, so place "
                           + "it first. Save as profile… (Layout) keeps pins.\n\nAnchor a screen to the dashboard: choose On "
                           + "the dashboard above, or press the anchor button under any screen, floating window or remote "
-                          + "display. Anchored panels tile round you at eye level, like one big curved monitor, in front of you "
-                          + "when the dashboard opens, either side of Steam's menu when it's in front. They show only with the dashboard open, unless Stay visible is on (a "
+                          + "display. Anchored panels stand on a desk round you like monitors of their own sizes, text the same "
+                          + "size on each, in front of you when the dashboard opens, either side of Steam's menu when it's in "
+                          + "front. Once the desk is as wide as Desk width, a new panel goes on top of the lowest column. They "
+                          + "show only with the dashboard open, unless Stay visible is on (a "
                           + "long press on the anchor button switches it for one panel). With the pointer or your gaze on "
-                          + "one, Meta+arrows move it between columns and rows and Meta+Ctrl+arrows resize it; Meta+/ "
+                          + "one, Meta+arrows move it between columns and rows and Meta+Ctrl+arrows make it bigger or smaller; Meta+/ "
                           + "lists every key. Drag a tile to reorder; pull it well away and it stays anchored where you let "
                           + "go. Anchored before the dashboard has opened, a panel stays where it is until the dashboard "
                           + "first opens. Each app, screen and remote display remembers whether it was anchored.\n\nWith "

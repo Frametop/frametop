@@ -1,5 +1,5 @@
 """Display Settings' dashboard tiles (dash_tiles.py, backend.dashTiles): the stay default and the
-band's numbers, read from frametop.conf, written there, clamped to ft-screens' ranges and sent
+wall's numbers, read from frametop.conf, written there, clamped to ft-screens' ranges and sent
 to it live. HOME is a temp folder and the ask to ft-screens is recorded, not sent. Needs PySide6
 (the image's python3).
 
@@ -47,7 +47,7 @@ class DashTiles(unittest.TestCase):
 
     def test_defaults(self):
         self.assertFalse(self.t.stay)
-        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (0, 1.9, 40, 55))
+        self.assertEqual((self.t.deskDeg, self.t.radius, self.t.pxPerDeg, self.t.wallDeg), (-12, 2.7, 48, 120))
 
     def test_stay_written_and_sent(self):
         self.t.setStay(True)
@@ -69,32 +69,32 @@ class DashTiles(unittest.TestCase):
         self.assertEqual(self.asked[-1], "handsetting GSAPP_PANELS 1")
 
     def test_numbers_written_and_sent(self):
-        self.t.setRaiseDeg(12)
+        self.t.setDeskDeg(-20)
         self.t.setRadius(2.25)
-        self.t.setHeightDeg(45)
-        self.t.setMaxTopDeg(50)
-        self.assertEqual(self.asked, ["handsetting DASH_TILE_RAISE_DEG 12", "handsetting DASH_TILE_RADIUS 2.25",
-                                      "handsetting DASH_TILE_HEIGHT_DEG 45", "handsetting DASH_TILE_MAX_TOP_DEG 50"])
-        self.assertEqual((self.t.raiseDeg, self.t.radius, self.t.heightDeg, self.t.maxTopDeg), (12, 2.25, 45, 50))
+        self.t.setPxPerDeg(60)
+        self.t.setWallDeg(150)
+        self.assertEqual(self.asked, ["handsetting DASH_TILE_DESK_DEG -20", "handsetting DASH_TILE_RADIUS 2.25",
+                                      "handsetting DASH_TILE_PX_PER_DEG 60", "handsetting DASH_TILE_WALL_DEG 150"])
+        self.assertEqual((self.t.deskDeg, self.t.radius, self.t.pxPerDeg, self.t.wallDeg), (-20, 2.25, 60, 150))
 
     def test_clamped_to_the_range(self):
         self.t.setRadius(9)
-        self.t.setHeightDeg(1)
-        self.t.setRaiseDeg(float("nan"))
-        self.assertEqual(self.asked, ["handsetting DASH_TILE_RADIUS 4", "handsetting DASH_TILE_HEIGHT_DEG 12",
-                                      "handsetting DASH_TILE_RAISE_DEG 0"])
+        self.t.setPxPerDeg(1)
+        self.t.setDeskDeg(float("nan"))
+        self.assertEqual(self.asked, ["handsetting DASH_TILE_RADIUS 6", "handsetting DASH_TILE_PX_PER_DEG 15",
+                                      "handsetting DASH_TILE_DESK_DEG -12"])
 
     def test_bad_conf_value_is_the_default(self):
         with open(fds.CONF_PATH, "a") as f:
-            f.write("DASH_TILE_MAX_TOP_DEG=95\nDASH_TILE_RADIUS=junk\n")
-        self.assertEqual(self.t.maxTopDeg, 55)
-        self.assertEqual(self.t.radius, 1.9)
+            f.write("DASH_TILE_WALL_DEG=400\nDASH_TILE_RADIUS=junk\n")
+        self.assertEqual(self.t.wallDeg, 120)
+        self.assertEqual(self.t.radius, 2.7)
 
     def test_not_sent_without_ft_screens(self):
         self.b._running = False
-        self.t.setHeightDeg(30)
+        self.t.setWallDeg(90)
         self.assertEqual(self.asked, [])
-        self.assertEqual(self.t.heightDeg, 30)
+        self.assertEqual(self.t.wallDeg, 90)
 
     def test_changed_reaches_the_qml(self):
         seen = []
@@ -103,16 +103,26 @@ class DashTiles(unittest.TestCase):
         self.assertTrue(seen)
 
     def test_ranges_match_ft_screens(self):
-        """The ranges here are TileSettings()'s in screens/vrtiles.cpp (the height's lower end is
-        tiling::Params::minHeightDeg, 12)."""
+        """The ranges here are TileSettings()'s in screens/vrtiles.cpp."""
         with open(VR) as f:
             src = f.read()
         for key, (_default, lo, hi) in dash_tiles.NUMBERS.items():
             with self.subTest(key=key):
                 m = re.search(r'\{"%s", &[\w.]+, ([\w.-]+), ([\d.]+)\}' % key, src)
                 self.assertIsNotNone(m, key)
-                want_lo = 12.0 if m.group(1) == "g_tiles.params.minHeightDeg" else float(m.group(1))
-                self.assertEqual((want_lo, float(m.group(2))), (lo, hi))
+                self.assertEqual((float(m.group(1)), float(m.group(2))), (lo, hi))
+
+    def test_defaults_match_ft_screens(self):
+        """The defaults here are tiling::Params' in screens/tiling.h."""
+        with open(os.path.join(HERE, "..", "..", "screens", "tiling.h")) as f:
+            src = f.read()
+        fields = {"DASH_TILE_DESK_DEG": "deskDeg", "DASH_TILE_RADIUS": "radius", "DASH_TILE_PX_PER_DEG": "pxPerDeg",
+                  "DASH_TILE_WALL_DEG": "wallDeg"}
+        for key, (default, _lo, _hi) in dash_tiles.NUMBERS.items():
+            with self.subTest(key=key):
+                m = re.search(r"double %s = ([\d.-]+);" % fields[key], src)
+                self.assertIsNotNone(m, key)
+                self.assertEqual(float(m.group(1)), default)
 
     def test_page_loads(self):
         from test_grab_bar import page_errors

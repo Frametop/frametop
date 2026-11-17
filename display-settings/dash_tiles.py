@@ -1,5 +1,5 @@
 """Display Settings' dashboard tiles (Visibility & pins): whether a panel anchored to the SteamVR
-dashboard stays shown with it closed, and the band the tiles fill round you (screens/tiling.h,
+dashboard stays shown with it closed, and the wall the tiles stand on round you (screens/tiling.h,
 docs/design.md "Dashboard tiles"). Each is a frametop.conf value ft-screens reads at start and
 takes live as `handsetting KEY VALUE`, as the drag bars' are. And whether the apps started from the
 dashboard (Steam's gamescope session) come up as Frametop panels (GSAPP_PANELS; docs/design.md
@@ -22,10 +22,10 @@ STAY = "DASH_TILE_STAY"
 GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
 # key: (default, lo, hi), as screens/vrtiles.cpp's TileSettings() and tiling::Params have them
 NUMBERS = {
-    "DASH_TILE_RAISE_DEG": (0.0, -30.0, 30.0),     # the band's middle above your eyes
-    "DASH_TILE_RADIUS": (1.9, 0.8, 4.0),           # metres from your head to the tiles' corners
-    "DASH_TILE_HEIGHT_DEG": (40.0, 12.0, 120.0),   # how tall the band is asked to be
-    "DASH_TILE_MAX_TOP_DEG": (55.0, 20.0, 80.0),   # ...but its top never higher (the column cap)
+    "DASH_TILE_DESK_DEG": (-12.0, -40.0, 20.0),     # the desk line the columns stand on, up from your eyes
+    "DASH_TILE_RADIUS": (2.7, 0.8, 6.0),            # metres from your head to the tiles' corners
+    "DASH_TILE_PX_PER_DEG": (48.0, 15.0, 120.0),    # a panel's natural size: this many of its pixels a degree
+    "DASH_TILE_WALL_DEG": (120.0, 30.0, 300.0),     # how wide the desk gets before new panels stack up
 }
 
 
@@ -68,12 +68,12 @@ class DashTiles(QObject):
         self._set_value(GSAPPS, "1" if on else "0")
 
     @Property(float, notify=changed)
-    def raiseDeg(self):
-        return self.number("DASH_TILE_RAISE_DEG")
+    def deskDeg(self):
+        return self.number("DASH_TILE_DESK_DEG")
 
     @Slot(float)
-    def setRaiseDeg(self, deg):
-        self.set_number("DASH_TILE_RAISE_DEG", deg)
+    def setDeskDeg(self, deg):
+        self.set_number("DASH_TILE_DESK_DEG", deg)
 
     @Property(float, notify=changed)
     def radius(self):
@@ -84,17 +84,17 @@ class DashTiles(QObject):
         self.set_number("DASH_TILE_RADIUS", metres)
 
     @Property(float, notify=changed)
-    def heightDeg(self):
-        return self.number("DASH_TILE_HEIGHT_DEG")
+    def pxPerDeg(self):
+        return self.number("DASH_TILE_PX_PER_DEG")
 
     @Slot(float)
-    def setHeightDeg(self, deg):
-        self.set_number("DASH_TILE_HEIGHT_DEG", deg)
+    def setPxPerDeg(self, px):
+        self.set_number("DASH_TILE_PX_PER_DEG", px)
 
     @Property(float, notify=changed)
-    def maxTopDeg(self):
-        return self.number("DASH_TILE_MAX_TOP_DEG")
+    def wallDeg(self):
+        return self.number("DASH_TILE_WALL_DEG")
 
     @Slot(float)
-    def setMaxTopDeg(self, deg):
-        self.set_number("DASH_TILE_MAX_TOP_DEG", deg)
+    def setWallDeg(self, deg):
+        self.set_number("DASH_TILE_WALL_DEG", deg)

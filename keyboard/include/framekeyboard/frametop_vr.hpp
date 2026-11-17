@@ -71,6 +71,10 @@ class FrametopVr {
     // Controllers get lasers for the panel with the dashboard closed too, as for Frametop's screens.
     bool lasers() const { return link_ != nullptr; }
     void place(PanelPlacement& placement) const;
+    // The overlay Steam's main page shows on while ft-screens tiles Steam's dashboard: the panel
+    // mounts below it, not below Steam's own main overlay, which then shows nothing. When the
+    // tiles aren't up it isn't there, and upstream's mount stands. Null without Frametop.
+    const char* steam_tile() const { return link_ ? "frametop.steamdash" : nullptr; }
 
     // Each frame before the lifecycle: read the relay and take its show/hide/toggle. `relaunch`:
     // upstream's (a recenter); `visible`: the panel is up now. Returns the relaunch to use.

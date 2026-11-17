@@ -1009,9 +1009,13 @@ int run_vr(App& app, VrInstance& instance, NativeReplacement& replacement, doubl
                 if (recenter_pending) {
                     dashboard_anchor = {}; // Recalibrate the mount only on an explicit reset.
                 }
+                // Frametop: below its tile of Steam's page when there's one (FrametopVr::steam_tile).
+                const auto tile = hooks.steam_tile() ? panel.read_dashboard(hooks.steam_tile(), true)
+                                                     : std::optional<Transform>{};
                 const auto dashboard =
-                    dashboard_anchor.update(panel.read_dashboard("valve.steam.gamepadui.main", true),
-                                            panel.read_dashboard("valve.steam.gamepadui.bar", false));
+                    tile ? tile
+                         : dashboard_anchor.update(panel.read_dashboard("valve.steam.gamepadui.main", true),
+                                                   panel.read_dashboard("valve.steam.gamepadui.bar", false));
                 if (!adjustments.empty()) {
                     stop_drag();
                 }

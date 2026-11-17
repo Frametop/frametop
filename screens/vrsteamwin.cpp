@@ -12,7 +12,8 @@
 //
 // What the spike is there to find out (docs/design.md, HEADSET-TESTS.md): whether Steam tags its
 // windows back itself (each time is logged, and after steamwin::kMaxRetakes in a row it's given
-// back). Keys aren't sent to them yet (Steam's own keyboard, a follower, types into them). Steam's own panels are
+// back). Keys aren't sent to them: a click in a text field opens Steam's keyboard (with Frametop,
+// Full Keyboard, mounted below the dashboard tile; FrametopVr::steam_tile). Steam's own panels are
 // left alone: with a window ours they have no texture (gamescope forwards to one overlay), so they
 // draw nothing, and Steam paints only while its panel counts as visible (alpha 0 = a black tile).
 
@@ -262,7 +263,7 @@ void SteamDashEvents(Screen &s, int index) {
                 g_pages->Wheel(page, int(std::lround(ev.data.scroll.ydelta)));
                 break;
             case vr::VREvent_FocusLeave:
-                if (s.drag == Drag::None) LetGo();
+                if (s.drag == Drag::None) g_pages->Leave(page);
                 break;
             default:
                 break;

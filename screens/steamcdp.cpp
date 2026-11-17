@@ -99,7 +99,7 @@ int Bit(Button b) { return b == Button::Left ? 1 : b == Button::Right ? 2 : 4; }
 const char *Held(int buttons) { return buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none"; }
 
 struct Send {
-    enum Type { Move, Press, Wheel, LetGo } type = Move;
+    enum Type { Move, Press, Wheel, Leave, LetGo } type = Move;
     std::string title;
     int x = 0, y = 0, n = 0;   // n: Wheel's notches
     Button b = Button::Left;
@@ -215,12 +215,24 @@ struct Pages::D {
         Write(p, cdpwire::MouseEvent(p.nextId++, type, p.x / p.dpr, p.y / p.dpr, button, p.buttons, dy));
     }
 
+    // Its buttons held up, where it was last.
+    void Release(Page &p) {
+        for (Button b : {Button::Left, Button::Right, Button::Middle})
+            if (p.buttons & Bit(b) && p.fd >= 0) p.buttons &= ~Bit(b), Mouse(p, cdpwire::Mouse::Released, Name(b));
+        p.buttons = 0;
+    }
+
     void Do(const Send &s) {
         if (s.type == Send::LetGo) {
-            for (auto &[title, p] : pages)
-                for (Button b : {Button::Left, Button::Right, Button::Middle})
-                    if (p.buttons & Bit(b) && p.fd >= 0) p.buttons &= ~Bit(b), Mouse(p, cdpwire::Mouse::Released, Name(b));
-            for (auto &[title, p] : pages) p.buttons = 0;
+            for (auto &[title, p] : pages) Release(p);
+            return;
+        }
+        if (s.type == Send::Leave) {   // (a page not open has nothing to leave: none opened for it)
+            const auto it = pages.find(s.title);
+            if (it == pages.end() || it->second.fd < 0) return;
+            Release(it->second);
+            it->second.x = it->second.y = -1;   // off the page: what it hovered hears the mouse leave
+            Mouse(it->second, cdpwire::Mouse::Moved, "none");
             return;
         }
         Page *p = Ready(s.title);
@@ -236,6 +248,7 @@ struct Pages::D {
                 Mouse(*p, s.down ? cdpwire::Mouse::Pressed : cdpwire::Mouse::Released, Name(s.b));
                 break;
             case Send::Wheel: Mouse(*p, cdpwire::Mouse::Wheel, "none", -s.n * 100); break;
+            case Send::Leave:
             case Send::LetGo: break;
         }
     }
@@ -270,6 +283,7 @@ void Pages::Press(const std::string &title, int x, int y, Button b, bool down) {
     d_->Push({Send::Press, title, x, y, 0, b, down});
 }
 void Pages::Wheel(const std::string &title, int notches) { d_->Push({Send::Wheel, title, 0, 0, notches}); }
-void Pages::LetGo() { d_->Push({Send::LetGo}); }
+void Pages::Leave(const std::string &title) { d_->Push({Send::Leave, title}); }
+void Pages::LetGo() { d_->Push({Send::LetGo, {}}); }
 
 }  // namespace steamcdp

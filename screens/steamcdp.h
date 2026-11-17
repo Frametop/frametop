@@ -31,6 +31,9 @@ public:
     void Move(const std::string &title, int x, int y);
     void Press(const std::string &title, int x, int y, Button b, bool down);
     void Wheel(const std::string &title, int notches);   // where it was last; + up, as OpenVR's
+    // The laser left `title`: its buttons up where it was last, then its mouse off the page, so
+    // what it hovered (the menu's labels, a button's highlight) hears it leave.
+    void Leave(const std::string &title);
     void LetGo();   // the buttons held on any page up, where each was last
 
 private:

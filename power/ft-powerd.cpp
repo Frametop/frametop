@@ -267,7 +267,7 @@ int main() {
     auto graceUntil = now;  // after "off", nothing counts as use until then
     auto awaySince = now;  // when the headset's activity level last agreed with `away`
     auto awayAt = now;     // when SteamVR's standby began, or the last use during it
-    bool off = false, away = false;
+    bool off = false, away = false, wasDark = false;
     int restore = 0;  // the brightness to put back
 
     auto turnOff = [&](const char *why) {
@@ -383,7 +383,13 @@ int main() {
                 }
             }
 
-            if (off && ReadInt(kBacklight, -1) > 0) {
+            // Lit after dark (SteamVR leaving standby lights them a moment before its activity
+            // level says so): the 10 s before a standby's lit displays go off start again.
+            const int lit = ReadInt(kBacklight, -1);
+            if (lit > 0 && wasDark) awayAt = now;
+            wasDark = lit == 0;
+
+            if (off && lit > 0) {
                 // Something else lit them (SteamVR leaving standby, the brightness setting).
                 off = false;
                 std::remove(SavedPath().c_str());

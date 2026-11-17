@@ -7,7 +7,8 @@
 // One thread of its own (the sockets block), one socket a page, opened the first time it's needed
 // (the page found by title in GET /json) and again when Steam drops it. Coordinates are window
 // pixels from the top left; each page's devicePixelRatio (read when it opens) turns them into CSS
-// pixels. Moves are merged while the thread is behind. The wire: cdpwire.h.
+// pixels. Moves are merged while the thread is behind. The wire: cdpwire.h. It also asks a page
+// what part of itself it draws (AskDrawn: Steam's menu's panel shows only that, steamglue.h).
 #pragma once
 
 #include <cstdint>
@@ -35,6 +36,17 @@ public:
     // what it hovered (the menu's labels, a button's highlight) hears it leave.
     void Leave(const std::string &title);
     void LetGo();   // the buttons held on any page up, where each was last
+
+    // The part of `title`'s page it draws (steamglue.h): what its elements with a background, and
+    // its leaves, cover, in CSS pixels, with the page's pixel ratio. AskDrawn asks (one ask a page
+    // waits at a time); LastDrawn has the latest answer, and when it was asked (NowMs-like ms,
+    // steady clock). False: none yet.
+    struct Drawn {
+        double l = 0, t = 0, r = 0, b = 0, dpr = 1;
+        int64_t askedMs = 0;
+    };
+    void AskDrawn(const std::string &title);
+    bool LastDrawn(const std::string &title, Drawn *out) const;
 
 private:
     struct D;

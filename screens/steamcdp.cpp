@@ -24,6 +24,16 @@ namespace {
 constexpr int kPort = 8080;
 constexpr int kWaitMs = 1000;           // a reply, a connect: given up on after this
 constexpr int64_t kRetryMs = 1000;      // a page that couldn't be opened: tried again after this
+constexpr int kAskWaitMs = 300;         // AskDrawn's answer: given up on after this
+// What a page draws (Pages::AskDrawn), CSS pixels: its elements with a background, and its
+// leaves, that show. {} when nothing does.
+const char *const kDrawnJs =
+    "(()=>{let l=1e9,t=1e9,r=-1e9,b=-1e9;for(const e of document.body.querySelectorAll('*')){"
+    "const q=e.getBoundingClientRect();if(q.width<1||q.height<1)continue;const c=getComputedStyle(e);"
+    "if(c.visibility=='hidden'||c.opacity=='0')continue;const g=c.backgroundColor;"
+    "if(!((g&&g!='rgba(0, 0, 0, 0)')||e.children.length==0))continue;"
+    "l=Math.min(l,q.left);t=Math.min(t,q.top);r=Math.max(r,q.right);b=Math.max(b,q.bottom)}"
+    "return l<r?{drawnL:l,drawnT:t,drawnR:r,drawnB:b}:{}})()";
 
 int64_t Now() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -99,7 +109,7 @@ int Bit(Button b) { return b == Button::Left ? 1 : b == Button::Right ? 2 : 4; }
 const char *Held(int buttons) { return buttons & 1 ? "left" : buttons & 2 ? "right" : buttons & 4 ? "middle" : "none"; }
 
 struct Send {
-    enum Type { Move, Press, Wheel, Leave, LetGo } type = Move;
+    enum Type { Move, Press, Wheel, Leave, LetGo, Ask } type = Move;
     std::string title;
     int x = 0, y = 0, n = 0;   // n: Wheel's notches
     Button b = Button::Left;
@@ -119,8 +129,10 @@ struct Page {
 }  // namespace
 
 struct Pages::D {
-    std::mutex m;
+    mutable std::mutex m;
     std::condition_variable cv;
+    std::map<std::string, Drawn> drawn;   // AskDrawn's answers (under m)
+    std::map<std::string, bool> asking;   // ...an ask queued or under way (under m)
     std::deque<Send> q;
     bool stop = false;
     std::thread t;
@@ -130,6 +142,10 @@ struct Pages::D {
     void Push(Send s) {
         {
             std::lock_guard<std::mutex> l(m);
+            if (s.type == Send::Ask) {
+                if (asking[s.title]) return;
+                asking[s.title] = true;
+            }
             if (s.type == Send::Move && !q.empty() && q.back().type == Send::Move && q.back().title == s.title) q.back() = s;
             else q.push_back(std::move(s));
         }
@@ -222,7 +238,45 @@ struct Pages::D {
         p.buttons = 0;
     }
 
+    // What the page draws (kDrawnJs), waiting up to kAskWaitMs for it. Other replies on the way are dropped.
+    void Ask(const std::string &title) {
+        const int64_t asked = Now();
+        Page *p = Ready(title);
+        bool ok = false;
+        Drawn d;
+        if (p) {
+            const int id = p->nextId++;
+            if (Write(*p, cdpwire::Evaluate(id, kDrawnJs))) {
+                for (const int64_t until = asked + kAskWaitMs; p->fd >= 0;) {
+                    int op;
+                    std::string payload;
+                    if (cdpwire::TakeFrame(p->buf, &op, &payload)) {
+                        if (op == 8) {
+                            Close(*p);
+                            break;
+                        }
+                        if (op != 1 || !cdpwire::IsReply(payload, id)) continue;
+                        ok = cdpwire::NumberAfter(payload, "drawnL", &d.l) && cdpwire::NumberAfter(payload, "drawnT", &d.t) &&
+                             cdpwire::NumberAfter(payload, "drawnR", &d.r) && cdpwire::NumberAfter(payload, "drawnB", &d.b);
+                        break;
+                    }
+                    if (Now() >= until) break;
+                    if (!ReadSome(p->fd, &p->buf, int(until - Now()))) {
+                        Close(*p);
+                        break;
+                    }
+                }
+            }
+        }
+        std::lock_guard<std::mutex> l(m);
+        asking[title] = false;
+        if (!ok) return;
+        d.dpr = p->dpr, d.askedMs = asked;
+        drawn[title] = d;
+    }
+
     void Do(const Send &s) {
+        if (s.type == Send::Ask) return Ask(s.title);
         if (s.type == Send::LetGo) {
             for (auto &[title, p] : pages) Release(p);
             return;
@@ -249,7 +303,8 @@ struct Pages::D {
                 break;
             case Send::Wheel: Mouse(*p, cdpwire::Mouse::Wheel, "none", -s.n * 100); break;
             case Send::Leave:
-            case Send::LetGo: break;
+            case Send::LetGo:
+            case Send::Ask: break;
         }
     }
 
@@ -285,5 +340,13 @@ void Pages::Press(const std::string &title, int x, int y, Button b, bool down) {
 void Pages::Wheel(const std::string &title, int notches) { d_->Push({Send::Wheel, title, 0, 0, notches}); }
 void Pages::Leave(const std::string &title) { d_->Push({Send::Leave, title}); }
 void Pages::LetGo() { d_->Push({Send::LetGo, {}}); }
+void Pages::AskDrawn(const std::string &title) { d_->Push({Send::Ask, title}); }
+bool Pages::LastDrawn(const std::string &title, Drawn *out) const {
+    std::lock_guard<std::mutex> l(d_->m);
+    const auto it = d_->drawn.find(title);
+    if (it == d_->drawn.end()) return false;
+    *out = it->second;
+    return true;
+}
 
 }  // namespace steamcdp

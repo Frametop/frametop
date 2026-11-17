@@ -1,5 +1,5 @@
 // The dashboard tiles' policy (screens/dashtiles.h): anchoring, tearing off and dropping back,
-// the keys on fixed and resizable panels, profiles' grids, and what each app or display remembers.
+// the keys and a resize by hand sizing panels, profiles' grids, and what each app or display remembers.
 #include "../dashtiles.h"
 
 #include <cmath>
@@ -14,8 +14,9 @@ static bool near(double a, double b, double eps = 1e-6) { return std::fabs(a - b
 static const double kI[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
 
 int main() {
-    const auto desk = [](int) { return dashtiles::Info{16.0 / 9, true}; };
-    const auto info = [](int id) { return dashtiles::Info{id >= 10 ? 4.0 / 3 : 16.0 / 9, id < 10}; };
+    // (16:9 desktops about as big round you as the sphere made them, 66 degrees: the splits' cases need a strip that wide)
+    const auto desk = [](int) { return dashtiles::Info{3.5, 1.97}; };
+    const auto info = [](int id) { return dashtiles::Info{id >= 10 ? 1.2 : 1.6, 0.9}; };
     // --- the group frame
     {
         double g[3][4];
@@ -140,7 +141,7 @@ int main() {
         b.Unanchor(4);
         b.Arrange(desk);
         check("split: unanchored, the others stay", side(3) == -1 && side(2) == 1);
-        check("split: Meta+Right steps across the menu", b.Press(3, dashtiles::Key::Right, desk(3)) && (b.Arrange(desk), side(3) == 1) &&
+        check("split: Meta+Right steps across the menu", b.Press(3, dashtiles::Key::Right) && (b.Arrange(desk), side(3) == 1) &&
                                                              side(1) == -1 && side(2) == 1);
         d = b.DropFor(3, -5, 0, desk);   // (in the slot, left of its middle)
         b.Drop(3, d, rel);
@@ -188,7 +189,7 @@ int main() {
         const tiling::Placed *seven = b.PlacedOf(7);
         check("split: a new panel then: beside the menu in front, not past it", seven && std::fabs(seven->az0 + seven->az1) / 2 < 90 &&
                                                                                        (seven->az1 <= -33 + 1e-9 || seven->az0 >= 33 - 1e-9));
-        const auto floating = [](int) { dashtiles::Info i; i.aspect = 16.0 / 9, i.fixed = false; return i; };
+        const auto floating = [](int) { return dashtiles::Info{2.0, 1.25}; };
         // one panel alone, let go left of the menu: it goes left, and stays when let go on itself
         // (council, 2026-11-16: the drop's Remove emptied the grid and cleared the split)
         dashtiles::Board one;
@@ -225,7 +226,7 @@ int main() {
         same.Anchor(1, -1, false);
         same.Arrange(desk);
         for (int i = 2; i <= 4; ++i) same.Anchor(i, 1, false), same.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
-        const bool swapped = same.Press(3, dashtiles::Key::Right, desk(3));
+        const bool swapped = same.Press(3, dashtiles::Key::Right);
         same.Arrange(desk);
         const tiling::Placed *p4 = same.PlacedOf(4);
         same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), rel);   // (let go where it was)
@@ -260,13 +261,13 @@ int main() {
         const double at3 = p3 ? (p3->az0 + p3->az1) / 2 : 0;
         dock.TearOff(3, rel);
         dock.Arrange(desk);
-        dock.Drop(3, dock.DropFor(3, at3, 0, desk), rel);
+        dock.Drop(3, dock.DropFor(3, at3 - 30, 0, desk), rel);   // (by its old left edge: a column of its own again)
         dock.Arrange(desk);
         const bool docked = dock.Grid().Has(3) && dock.Grid().Split(0) == 0;
         dock.SlotMoved();
         dock.Arrange(desk);
         check("split: torn off and docked again: still chosen again on the next open",
-              docked && dock.Grid().Split(0) == 1 && slotsplit::Off(dock.Last()) < 30);
+              docked && dock.Grid().Split(0) == 2 && slotsplit::Off(dock.Last()) < 30);   // (four the same: two each side)
         // a drop across the menu makes the split yours
         dashtiles::Board across;
         across.params.reserveAzDeg = 0, across.params.reserveDeg = 66;
@@ -295,7 +296,7 @@ int main() {
         check("split: chosen with the menu aside, followed from the second open in front",
               firstKept && aside.Grid().Split(0) != atSide && slotsplit::Off(aside.Last()) < 15);
         // ...but not one you set
-        drift.Press(4, dashtiles::Key::Right, desk(4));   // ([ 1 ][ 4 ] S [ 3 ][ 2 ]: 4 steps across)
+        drift.Press(4, dashtiles::Key::Right);   // ([ 1 ][ 4 ] S [ 3 ][ 2 ]: 4 steps across)
         drift.Arrange(desk);
         const bool pushed = drift.Grid().Split(0) == 1 && slotsplit::Off(drift.Last()) > 30 + 1;
         drift.SlotMoved();
@@ -335,7 +336,6 @@ int main() {
     // --- tear off and back
     {
         dashtiles::Board b;
-        b.params.heightDeg = 25;   // (full-height desktops at the default band take most of a turn)
         for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
         const auto &l = b.Arrange(desk);
         const double rel[3][4] = {{1, 0, 0, 0.5}, {0, 1, 0, 2}, {0, 0, 1, -1}};
@@ -362,7 +362,6 @@ int main() {
     // the dragged one, so a drop on the middle column's middle made a new column)
     {
         dashtiles::Board b;
-        b.params.heightDeg = 25;
         for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         b.Arrange(desk);
@@ -381,23 +380,23 @@ int main() {
     // --- the keys
     {
         dashtiles::Board b;
-        b.Anchor(1, -1, false);    // a desktop screen
-        b.Anchor(10, 1, false);    // a floating window
+        b.Anchor(1, -1, false);
+        b.Anchor(10, 1, false);
         b.Arrange(info);
-        const double before = b.PlacedOf(10)->az1 - b.PlacedOf(10)->az0;
-        check("wider, resizable: its column", b.Press(10, dashtiles::Key::Wider, info(10)));
+        const double before = b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM;   // (its size seen from you)
+        check("bigger: Meta+Ctrl+Right", b.Press(10, dashtiles::Key::Wider) && near(b.Grid().CellOf(10)->scale, tilegrid::kStep));
         b.Arrange(info);
-        check("...10% wider", near(b.PlacedOf(10)->az1 - b.PlacedOf(10)->az0, before * tilegrid::kStep, 1e-6));
-        check("wider, fixed, already its row's height: nothing", !b.Press(1, dashtiles::Key::Wider, info(1)));
-        check("narrower, fixed: smaller in its row", b.Press(1, dashtiles::Key::Narrower, info(1)) &&
-                                                         b.Grid().CellOf(1)->scale < 1);
-        check("taller, fixed, alone: back up", b.Press(1, dashtiles::Key::Taller, info(1)) && near(b.Grid().CellOf(1)->scale, 1));
-        check("taller, resizable, alone: nothing", !b.Press(10, dashtiles::Key::Taller, info(10)));
-        check("left: the columns swap", b.Press(10, dashtiles::Key::Left, info(10)) && b.Grid().Cols()[0].cells[0].id == 10);
-        check("down alone: nothing", !b.Press(10, dashtiles::Key::Down, info(10)));
+        check("...10% bigger, its shape kept", near(b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM / before, tilegrid::kStep) &&
+                                                   near(b.PlacedOf(10)->widthM / b.PlacedOf(10)->heightM, 1.2 / 0.9, 1e-6));
+        check("bigger: Meta+Ctrl+Up too", b.Press(10, dashtiles::Key::Taller) && near(b.Grid().CellOf(10)->scale, 1.21));
+        check("smaller: Meta+Ctrl+Left and Down", b.Press(10, dashtiles::Key::Narrower) && b.Press(10, dashtiles::Key::Shorter) &&
+                                                     near(b.Grid().CellOf(10)->scale, 1));
+        check("smaller: below natural size too", b.Press(1, dashtiles::Key::Narrower) && b.Grid().CellOf(1)->scale < 1);
+        check("left: the columns swap", b.Press(10, dashtiles::Key::Left) && b.Grid().Cols()[0].cells[0].id == 10);
+        check("down alone: nothing", !b.Press(10, dashtiles::Key::Down));
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         b.TearOff(10, rel);
-        check("a satellite: the keys do nothing", !b.Press(10, dashtiles::Key::Right, info(10)));
+        check("a satellite: the keys do nothing", !b.Press(10, dashtiles::Key::Right));
         dashtiles::Key k;
         check("key names", dashtiles::ParseKey("shorter", &k) && k == dashtiles::Key::Shorter && !dashtiles::ParseKey("x", &k));
     }
@@ -408,10 +407,35 @@ int main() {
         b.Anchor(11, 10, false);
         b.Drop(11, {tiling::Drop::Into, 0, 1}, kI);
         b.Arrange(info);
-        const double w = b.PlacedOf(10)->az1 - b.PlacedOf(10)->az0;
-        check("resized by hand: column and row", b.Resized(10, 1.5, 1.2, info(10)) && b.Grid().CellOf(10)->weight > 1);
+        const double h = b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM;   // (its size seen from you)
+        check("resized by hand: its size", b.Resized(10, 1.5) && near(b.Grid().CellOf(10)->scale, 1.5));
         b.Arrange(info);
-        check("...its column 1.5 times as wide", near(b.PlacedOf(10)->az1 - b.PlacedOf(10)->az0, w * 1.5, 1e-6));
+        check("...1.5 times as big", near(b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM / h, 1.5));
+        check("...the one under it as it was", near(b.Grid().CellOf(11)->scale, 1));
+        check("a size that isn't one: nothing", !b.Resized(10, 0) && !b.Resized(10, NAN));
+    }
+    // --- the desk full: a new panel goes on top of the lowest column
+    {
+        dashtiles::Board b;
+        b.params.wallDeg = 100;
+        const auto sized = [](int id) { return id == 2 ? dashtiles::Info{1.2, 1.6} : dashtiles::Info{1.6, 0.9}; };
+        for (int i = 1; i <= 3; ++i) {
+            const dashtiles::Info in = sized(i);
+            b.Anchor(i, i - 1, false, -1, &in), b.Arrange(sized);
+        }
+        check("desk: three side by side while there's room", b.Grid().Cols().size() == 3);
+        const dashtiles::Info in = sized(4);
+        b.Anchor(4, 3, false, -1, &in);
+        b.Arrange(sized);
+        check("desk: full, the next one on top of the lowest column (not the tall middle one)",
+              b.Grid().Cols().size() == 3 && b.Grid().Cols()[1].cells.size() == 1 &&
+                  ((b.Grid().Cols()[0].cells.size() == 2 && b.Grid().Cols()[0].cells[0].id == 4) ||
+                   (b.Grid().Cols()[2].cells.size() == 2 && b.Grid().Cols()[2].cells[0].id == 4)));
+        const tiling::Placed *four = b.PlacedOf(4);
+        const tiling::Placed *under = four ? b.PlacedOf(b.Grid().Cols()[size_t(four->col)].cells[1].id) : nullptr;
+        check("desk: ...resting on it", four && under && near(four->el0, under->el1 + b.params.gapDeg));
+        dashtiles::Board fresh;
+        check("desk: a first panel: a column", (fresh.Anchor(1, -1, false, -1, &in), fresh.Grid().Cols().size() == 1));
     }
     // --- memory
     {
@@ -484,13 +508,13 @@ int main() {
     {
         dashtiles::Board b;
         b.Anchor(199, -1, true);
-        auto line = [](int col, int row, int alone, double width) {
+        auto line = [](int col, int row, int alone, double scale) {
             char t[96];
-            std::snprintf(t, sizeof t, "tile 0 %d %d %d 1.000 1.000 %.2f", col, row, alone, width);
+            std::snprintf(t, sizeof t, "tile 0 %d %d %d %.3f", col, row, alone, scale);
             return std::string(t);
         };
-        b.RestoreAll({{10, line(0, 0, 1, 0)}, {11, line(1, 0, 1, 0)}, {12, line(2, 0, 0, 53.24)}});
-        b.RestoreAll({{13, line(2, 1, 0, 53.24)}, {14, line(3, 0, 1, 0)}}, true);
+        b.RestoreAll({{10, line(0, 0, 1, 1)}, {11, line(1, 0, 1, 1)}, {12, line(2, 0, 0, 1.5)}});
+        b.RestoreAll({{13, line(2, 1, 0, 1)}, {14, line(3, 0, 1, 1)}}, true);
         std::string order;
         for (const auto &c : b.Grid().Cols()) {
             order += "[";
@@ -499,8 +523,8 @@ int main() {
         }
         check("split restore: columns in the profile's order, the app after them",
               order == "[ 10 ][ 11 ][ 12 13 ][ 14 ][ 199 ]");
-        check("split restore: a stacked column keeps its width", std::fabs(b.Grid().Cols()[2].widthDeg - 53.24) < 1e-6);
-        b.RestoreAll({{14, line(0, 0, 1, 0)}});   // a set again: a new profile, its columns first
+        check("split restore: a stacked panel keeps its size", near(b.Grid().CellOf(12)->scale, 1.5));
+        b.RestoreAll({{14, line(0, 0, 1, 1)}});   // a set again: a new profile, its columns first
         check("a set again starts over", b.Grid().Cols()[0].cells[0].id == 14);
     }
     // --- council pass 3: saved columns with gaps (panels the profile doesn't keep), and changes between set and add
@@ -541,8 +565,7 @@ int main() {
         dashtiles::Board m;
         for (int id : {10, 11, 12, 20}) m.Anchor(id, -1, false);
         m.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
-        dashtiles::Info info;
-        m.Press(12, dashtiles::Key::Left, info), m.Press(12, dashtiles::Key::Left, info);
+        m.Press(12, dashtiles::Key::Left), m.Press(12, dashtiles::Key::Left);
         check("moved: [ 12 ][ 10 ][ 11 ]", order(m).rfind("[ 12 ][ 10 ][ 11 ]", 0) == 0);
         m.RestoreAll({{20, line(3, 0, 1)}}, true);
         check("an add after a move keeps the move, its tile after", order(m) == "[ 12 ][ 10 ][ 11 ][ 20 ]");
@@ -562,7 +585,7 @@ int main() {
         dashtiles::Board n;
         for (int id : {10, 11, 12, 99}) n.Anchor(id, -1, false);
         n.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}});
-        n.Press(10, dashtiles::Key::Left, info);   // (the first column: nothing moves)
+        n.Press(10, dashtiles::Key::Left);   // (the first column: nothing moves)
         n.RestoreAll({{12, line(2, 0, 1)}}, true);
         check("a key that changes nothing keeps the set going", order(n).rfind("[ 10 ][ 11 ][ 12 ]", 0) == 0);
         dashtiles::Board e;
@@ -590,10 +613,13 @@ int main() {
             return o;
         };
         dashtiles::State s;
-        check("state: tabs and doubled spaces parse", dashtiles::Parse(" tile\t1  2 0 1   1.5 1 40 \n", &s) &&
+        check("state: tabs and doubled spaces parse", dashtiles::Parse(" tile\t1  2 0 1   1.5 \n", &s) &&
                                                           s.kind == dashtiles::State::Kind::Tile && s.stay && s.col == 2 &&
-                                                          s.row == 0 && s.alone && near(s.weight, 1.5) && near(s.width, 40));
-        check("state: text round trip", dashtiles::Text(s) == "tile 1 2 0 1 1.500 1.000 40.00");
+                                                          s.row == 0 && s.alone && near(s.scale, 1.5));
+        check("state: text round trip", dashtiles::Text(s) == "tile 1 2 0 1 1.500");
+        check("state: the sphere's older form: its scale the size, its weight and width dropped",
+              dashtiles::Parse("tile 0 3 1 0 2.5 0.8 40.00", &s) && s.col == 3 && s.row == 1 && !s.alone && near(s.scale, 0.8) &&
+                  dashtiles::Text(s) == "tile 0 3 1 0 0.800");
         bool junk = false;
         for (const char *bad : {"tile 0 1 0 1 1 1 0 x", "tile 0 a 0 1 1 1 0", "tile 0 1 0 1 nan 1 0", "sat 1", "off off",
                                 "tile 0 1 0 1 1 1", "", "tile 0 1.5 0 1 1 1 0", "sat 1 1 0 0 0 0 1 0 0 0 0 1 inf"})

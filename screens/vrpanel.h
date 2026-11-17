@@ -171,6 +171,9 @@ struct Screen {
     uint32_t gsWin = 0;           // ...which X window
     bool gsSeen = false;          // ...shown before (mapped again after an unmap: not anchored again)
     bool steamDash = false;       // ...Steam's own dashboard window (vrsteamwin.cpp; its input there, its size fixed)
+    // Glued flush left of this panel (Steam's menu to its page, steamglue.h): moved, shown and tiled
+    // with it, no controls of its own, cropX..cropH the part of its window it shows. -1: not glued.
+    int glueTo = -1;
     int gsX = 0, gsY = 0;         // ...where it is on the X screen (its popups go by it, PlaceSubs)
     std::string label;            // its name (MakePanel's: "Screen 1", "host: display", "Floating window 2")
     bool floatOn = false;         // ft-floatd has a window on it ("float" .. "unfloat")
@@ -232,7 +235,7 @@ struct Screen {
     int64_t focusUntil = 0, viewUntil = 0;
     double heightMetres() const {
         if (stretchW > 0) return metres * stretchH / stretchW;   // (a floating window or a PC window's panel)
-        if (floating && cropW > 0) return metres * cropH / cropW;
+        if ((floating || glueTo >= 0) && cropW > 0) return metres * cropH / cropW;
         return width > 0 ? metres * height / width : metres * 9 / 16;
     }
     // Buffer pixels from OpenVR's mouse position on the panel (its origin is bottom left).
@@ -247,8 +250,8 @@ struct Screen {
     }
     // Whether its kind has control k (Controls()' order), whether or not it holds a set of them now
     // (chromepool.h): a floating window has dock and close, a desktop screen or remote display reset,
-    // pin and layout, a gamescope app none of those; every kind the anchor.
-    bool HasControl(int k) const { return k < 4 || k == 9 || (!gsapp && (floating ? k < 6 : k >= 6)); }
+    // pin and layout, a gamescope app none of those; every kind the anchor. A glued one has none.
+    bool HasControl(int k) const { return glueTo < 0 && (k < 4 || k == 9 || (!gsapp && (floating ? k < 6 : k >= 6))); }
     // One of KWin's outputs: a desktop screen (not a floating window's, a remote display or an app's).
     bool Desktop() const { return !floating && !remote && !gsapp; }
 };
@@ -340,7 +343,7 @@ bool TileAnchored(int i);
 bool TileTiled(int i);
 bool TileStayDefault();   // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
 void SetTileStayDefault(bool on);
-void RetileDash(bool resize);
+void RetileDash();
 void TileAnchor(int i, bool stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
 void TileKnown(int i, const std::string &key);
@@ -369,6 +372,9 @@ void GsBlur();
 // ---------------------------------------------------------------- vrsteamwin.cpp's
 
 int SteamDashIndex();   // Steam's window's panel index while STEAM_DASH_PANEL is on, else -1
+// The window pixels glued left of panel `index` at its density (Steam's menu, steamglue.h): its
+// tile is that much wider. 0: none.
+int GluedPx(int index);
 void SteamDashStep();
 void SteamDashEvents(Screen &s, int index);
 void SteamDashSwitch(bool on);

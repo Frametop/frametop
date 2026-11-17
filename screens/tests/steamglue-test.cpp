@@ -1,0 +1,55 @@
+// Steam's menu glued to its page (screens/steamglue.h): the part it draws, and where it goes.
+#include "../steamglue.h"
+
+#include <cmath>
+#include <cstdio>
+
+static int failed = 0;
+static void check(const char *what, bool ok) {
+    failed += !ok;
+    std::printf("%s  %s\n", ok ? "ok  " : "FAIL", what);
+}
+static bool Near(double a, double b, double eps = 1e-9) { return std::fabs(a - b) < eps; }
+
+using namespace steamglue;
+
+int main() {
+    {   // Steam's menu as measured on the Frame (300 x 800 CSS at 1.5 in a 450 x 1200 window)
+        Rect r;
+        check("the strip", FromCss(246, 154.5, 300, 645.5, 1.5, 450, 1200, &r) && r.x == 369 && r.y == 231 && r.w == 81 &&
+                               r.h == 738);
+        check("opened, its labels too", FromCss(57.6, 154.5, 300, 645.5, 1.5, 450, 1200, &r) && r.x == 86 && r.w == 364);
+        check("clipped to the window", FromCss(-10, -5, 400, 900, 1.5, 450, 1200, &r) && r.x == 0 && r.y == 0 && r.w == 450 &&
+                                           r.h == 1200);
+        check("nothing drawn: none", !FromCss(1e9, 1e9, -1e9, -1e9, 1.5, 450, 1200, &r));
+        check("off the window: none", !FromCss(500, 0, 600, 10, 1.5, 450, 1200, &r));
+        check("no pixel ratio: none", !FromCss(0, 0, 10, 10, 0, 450, 1200, &r));
+        check("NaN: none", !FromCss(std::nan(""), 0, 10, 10, 1, 450, 1200, &r));
+        check("no window: none", !FromCss(0, 0, 10, 10, 1, 0, 1200, &r));
+    }
+    {   // flat: flush left, level, facing the same way
+        double m[3][4];
+        Beside(1.6, 0, 0.1, 0.02, m);
+        check("its middle half of both widths left", Near(m[0][3], -0.85) && Near(m[1][3], 0.02) && Near(m[2][3], 0));
+        check("not turned", Near(m[0][0], 1) && Near(m[2][2], 1) && Near(m[0][2], 0));
+        // its right edge (x + w/2 along its own x) on the page's left edge
+        check("its right edge on the page's left edge", Near(m[0][3] + m[0][0] * 0.05, -0.8));
+    }
+    {   // curved: on round the page's circle
+        const double R = 2, pageW = 1.6, w = 0.1;
+        double m[3][4];
+        Beside(pageW, R, w, 0, m);
+        // the circle's centre is (0, 0, R) in the page's frame: the glued one's middle is R from it
+        const double dx = m[0][3], dz = m[2][3] - R;
+        check("on the circle", Near(std::hypot(dx, dz), R, 1e-12));
+        const double a = std::atan2(-dx, -dz);   // round from the page's middle (0, 0, 0)
+        check("as far round as both half widths", Near(a, (pageW + w) / (2 * R), 1e-12));
+        // its front (its z axis) points at the circle's centre
+        const double fx = m[0][2], fz = m[2][2];
+        check("facing the centre", Near(fx * -dx + fz * -dz, R, 1e-12));
+        check("upright", Near(m[1][1], 1) && Near(m[1][0], 0) && Near(m[0][1], 0));
+        check("a rotation", Near(m[0][0] * m[0][0] + m[2][0] * m[2][0], 1, 1e-12));
+    }
+    std::printf("%s\n", failed ? "FAILED" : "all ok");
+    return failed != 0;
+}

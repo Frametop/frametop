@@ -31,7 +31,6 @@ Mat g_tileGroupRel = Identity();          // the dashboard's frame (DashFrame) -
 bool g_tileGroupSet = false;              // ...since the dashboard was first seen with a panel anchored
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
 bool g_dashWasUp = false;
-double g_tileRaiseDeg = 0;                // DASH_TILE_RAISE_DEG: the band's middle this far above your eyes
 bool g_tileStayDefault = false;           // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
@@ -93,14 +92,21 @@ void RememberTiles() {
 }  // namespace
 
 namespace {
+// Its natural size on the wall: its pixels at the wall's density (a floating window's, an app's: as
+// many as it has now; the wall doesn't resize them), with what's glued left of it (GluedPx).
 dashtiles::Info TileInfo(int id) {
     dashtiles::Info info;
     const auto it = g_screens.find(id);
     if (it == g_screens.end()) return info;
-    const Screen &s = it->second;
-    info.aspect = s.metres / std::max(1e-6, s.heightMetres());
-    info.fixed = (!s.floating && !s.gsapp) || s.steamDash;   // a desktop screen, a remote display, Steam's window: their own size
+    const int pw = PictureW(it->second) + GluedPx(id), ph = PictureH(it->second);
+    const double mpp = tiling::MetresPerPx(g_tiles.params);
+    if (pw > 0 && ph > 0) info.widthM = pw * mpp, info.heightM = ph * mpp;
     return info;
+}
+// The part of a tile's width that's the panel's own (the rest is glued left of it), 0..1.
+double OwnShare(int id, const Screen &s) {
+    const int own = PictureW(s), glued = GluedPx(id);
+    return own > 0 && glued > 0 ? double(own) / (own + glued) : 1;
 }
 }  // namespace
 
@@ -124,49 +130,28 @@ Mat ToMat(const double m[3][4]) {
 }
 }  // namespace
 
-// Each tiled panel pinned to its place, sized for it (a floating window or an app gets the pixels: `resize`),
-// and each satellite at its own. Nothing until the group has a frame (the dashboard seen).
-void RetileDash(bool resize) {
-    g_tiles.params.middleDeg = g_tileRaiseDeg;   // (read at start, and set live)
+// Each tiled panel pinned to its place at its size there, and each satellite at its own. Nothing
+// until the group has a frame (the dashboard seen).
+void RetileDash() {
     FlattenTiles();
     if (!g_tileGroupSet || !Dash().ever) return;
     const auto &l = g_tiles.Arrange(TileInfo);
-    const Mat group = Mul(DashFrame(), g_tileGroupRel);   // (its origin: the centre)
     for (const tiling::Placed &p : l.tiles) {
         auto it = g_screens.find(p.id);
         if (it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
-        const int pw = PictureW(s), ph = PictureH(s);
-        if ((!s.floating && !s.gsapp) || s.steamDash) {
-            if (std::fabs(s.metres - p.widthM) > 0.002) SetWidth(s, p.widthM);
-        } else if (pw > 0 && s.metres > 0) {
-            if (resize) {
-                // its pixels as many a degree as now: a tile nearer than it is gets fewer metres a pixel
-                Mat now;
-                const double d = ScreenPose(s, &now) ? std::hypot(now.m[0][3] - group.m[0][3], now.m[1][3] - group.m[1][3],
-                                                                  now.m[2][3] - group.m[2][3])
-                                                     : p.distM;
-                const double perPx = s.metres / pw * p.distM / std::max(0.1, d);
-                const int w = int(std::lround(p.widthM / perPx)), h = int(std::lround(p.heightM / perPx));
-                if (w > 0 && h > 0 && (std::abs(w - pw) > std::max(4, pw / 33) || std::abs(h - ph) > std::max(4, ph / 33))) {
-                    if (s.gsapp) {
-                        GsResize(p.id, w, h);   // (its new size comes back as the window's: GsGeometry)
-                    } else {
-                        s.mpp = p.widthM / w;   // (so the stretch makes it its tile's width)
-                        Stretch(s, w, h);
-                        SendStretch(s);
-                    }
-                }
-            }
-            // its tile's width with the pixels it has (an app's answer, or a resize too small to ask for)
-            if (s.stretchW <= 0 && std::fabs(s.metres - p.widthM) > 0.002) {
-                if (s.floating) s.mpp = p.widthM / pw;
-                SetWidth(s, p.widthM);
-            }
+        // (a floating window or an app with a stretch on its way: its width once its pixels are there)
+        const bool waits = (s.floating || s.gsapp) && !s.steamDash && s.stretchW > 0;
+        const double share = OwnShare(p.id, s), width = p.widthM * share;
+        if (!waits && std::fabs(s.metres - width) > 0.002) {
+            if (s.floating && PictureW(s) > 0) s.mpp = width / PictureW(s);
+            SetWidth(s, width);
         }
         double m[3][4];
         tiling::Pose(p.azDeg, p.elDeg, p.distM, m);
+        // (the right of the tile: what's glued to it goes left of it, steamglue.h; the tile is flat)
+        for (int r = 0; r < 3; ++r) m[r][3] += m[r][0] * p.widthM * (1 - share) / 2;
         PinIn(s, kDashboard, Mul(g_tileGroupRel, ToMat(m)), levelpin::Rigid);
     }
     for (const int id : g_tiles.Ids()) {
@@ -198,12 +183,12 @@ bool Regroup() {
     g_tiles.SlotMoved();
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
-    RetileDash(true);
+    RetileDash();
     const tiling::Layout &l = g_tiles.Last();
     // (the facing in the room, 0 its -Z, right positive; the bar from there)
     std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees; Steam's bar %.0f degrees "
                 "round, %.2f m wide, its slot %.0f degrees (0: none), %d columns left of it (-1: the strip doesn't reach it); "
-                "the band %.0f..%.0f degrees up, the strip %.0f..%.0f\n",
+                "the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
                 h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split, l.el0, l.el1,
                 l.az0, l.az1);
     return true;
@@ -212,11 +197,11 @@ bool Regroup() {
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
 std::array<TileSetting, 5> TileSettings() {
-    return {{{"DASH_TILE_RAISE_DEG", &g_tileRaiseDeg, -30, 30},   // the band's middle above your eyes
-             {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 4},   // the tiles' corners from you, metres
-             {"DASH_TILE_HEIGHT_DEG", &g_tiles.params.heightDeg, g_tiles.params.minHeightDeg, 120},
-             {"DASH_TILE_MAX_TOP_DEG", &g_tiles.params.maxTopDeg, 20, 80},   // the column height cap
-             {"DASH_TILE_GAP_DEG", &g_tiles.params.gapDeg, 0, 10}}};   // between tiles, round you and up
+    return {{{"DASH_TILE_DESK_DEG", &g_tiles.params.deskDeg, -40, 20},   // the desk line, up from your eyes
+             {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 6},   // the wall: the tiles' corners from you, metres
+             {"DASH_TILE_PX_PER_DEG", &g_tiles.params.pxPerDeg, 15, 120},   // a panel's natural size
+             {"DASH_TILE_GAP_DEG", &g_tiles.params.gapDeg, 0, 10},   // between tiles, round you and up
+             {"DASH_TILE_WALL_DEG", &g_tiles.params.wallDeg, 30, 300}}};   // the desk's width before panels stack
 }
 // One of them live: false if it isn't one, or out of its range. The tiles go round again.
 bool SetTileSetting(const char *name, double value) {
@@ -224,7 +209,7 @@ bool SetTileSetting(const char *name, double value) {
         if (std::strcmp(t.name, name) != 0) continue;
         if (!(value >= t.lo && value <= t.hi)) return false;
         *t.value = value;
-        RetileDash(true);
+        RetileDash();
         return true;
     }
     return false;
@@ -243,10 +228,11 @@ void TileAnchor(int i, bool stay, const char *by, int leftOf) {
     if (it == g_screens.end() || g_tiles.Anchored(i)) return;
     EndDrag(it->second);
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
-    g_tiles.Anchor(i, after, stay, leftOf);
+    const dashtiles::Info info = TileInfo(i);
+    g_tiles.Anchor(i, after, stay, leftOf, &info);
     LightAnchor(it->second);
     if (!g_tileGroupSet) g_tileRegroup = true;
-    RetileDash(true);
+    RetileDash();
     RememberTiles();
     std::printf("%s: anchored to the dashboard%s (%s)%s\n", TileLabel(i).c_str(), stay ? ", staying shown" : "", by,
                 g_tileGroupSet ? "" : "; it goes on when the dashboard opens");
@@ -261,7 +247,7 @@ void TileUnanchor(int i, const char *by) {
     g_tiles.Unanchor(i);
     LightAnchor(s);
     if (placed && s.pinned == kDashboard) SetAbsolute(s, p);   // left in the room where it is
-    RetileDash(true);
+    RetileDash();
     RememberTiles();
     std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
 }
@@ -298,7 +284,7 @@ void TileKnown(int i, const std::string &key) {
     LightAnchor(g_screens[i]);
     if (g_tiles.Anchored(i)) {
         if (!g_tileGroupSet) g_tileRegroup = true;
-        RetileDash(true);
+        RetileDash();
         std::printf("%s: back on the dashboard, as %s was (%s)\n", TileLabel(i).c_str(), k.c_str(), line.c_str());
     }
 }
@@ -308,7 +294,7 @@ void TileGone(int i) {
     if (k != g_tileKey.end() && g_tileMemory.Set(k->second, g_tiles.Remember(i))) SaveTileMemory();
     if (k != g_tileKey.end()) g_tileKey.erase(k);
     if (g_tileFocus == i) g_tileFocus = -1;
-    if (g_tiles.Unanchor(i)) RetileDash(true), RememberTiles();
+    if (g_tiles.Unanchor(i)) RetileDash(), RememberTiles();
 }
 
 // Anchored panels (dashtiles.h): shown with the dashboard, or always when they stay; the hide key
@@ -333,16 +319,15 @@ void TileDrop(Screen &s, int i) {
     g_tiles.Drop(i, d, rel);
     static const char *kinds[] = {"into column", "a new column at", "torn off (a satellite) at"};
     std::printf("%s: let go at %.0f, %.0f degrees: %s %d\n", TileLabel(i).c_str(), az, el, kinds[d.kind], d.col + 1);
-    RetileDash(true);
+    RetileDash();
     RememberTiles();
 }
-// Resized by its corner on the grid: its column and row take the new size.
+// Resized by its corner on the grid: that size from now on (the wall puts it back to its shape).
 void TileResized(Screen &s, int i) {
     const tiling::Placed *p = g_tiles.PlacedOf(i);
     if (!p || p->widthM <= 0 || p->heightM <= 0) return;
-    const double fw = s.metres / p->widthM, fh = s.heightMetres() / p->heightM;
-    g_tiles.Resized(i, fw, fh, TileInfo(i));
-    RetileDash(true);
+    g_tiles.Resized(i, std::sqrt(s.metres / p->widthM * s.heightMetres() / p->heightM));
+    RetileDash();
     RememberTiles();
 }
 
@@ -453,15 +438,20 @@ void TileGaps(char *reply, int size) {
         if (it == g_screens.end() || !ScreenPose(it->second, &pose)) continue;
         const Screen &s = it->second;
         Seen v{p.id, p.col, p.row, 1e9, -1e9, 1e9, -1e9, s.curve};
-        for (int i = 0; i <= 16; ++i)   // (its edges and middle line, along the arc when curved)
-            for (int j = 0; j <= 2; ++j) {
-                const Mat at = Mul(toGroup, Mul(pose, OnSurface(s, s.metres * (i / 16.0 - 0.5), s.heightMetres() * (j / 2.0 - 0.5), 0)));
-                const double pt[3] = {at.m[0][3], at.m[1][3], at.m[2][3]};
-                double az, el;
-                tiling::Direction(pt, &az, &el);
-                az = tiling::WrapNear(az, p.azDeg);
-                v.az0 = std::min(v.az0, az), v.az1 = std::max(v.az1, az), v.el0 = std::min(v.el0, el), v.el1 = std::max(v.el1, el);
-            }
+        const auto extend = [&](const Screen &e, const Mat &at0) {
+            for (int i = 0; i <= 16; ++i)   // (its edges and middle line, along the arc when curved)
+                for (int j = 0; j <= 2; ++j) {
+                    const Mat at = Mul(toGroup, Mul(at0, OnSurface(e, e.metres * (i / 16.0 - 0.5), e.heightMetres() * (j / 2.0 - 0.5), 0)));
+                    const double pt[3] = {at.m[0][3], at.m[1][3], at.m[2][3]};
+                    double az, el;
+                    tiling::Direction(pt, &az, &el);
+                    az = tiling::WrapNear(az, p.azDeg);
+                    v.az0 = std::min(v.az0, az), v.az1 = std::max(v.az1, az), v.el0 = std::min(v.el0, el), v.el1 = std::max(v.el1, el);
+                }
+        };
+        extend(s, pose);
+        for (const auto &[gi, g] : g_screens)   // (what's glued to it is part of its tile)
+            if (Mat gp; g.glueTo == p.id && g.visible && ScreenPose(g, &gp)) extend(g, gp);
         seen.push_back(v);
     }
     double gap = 1e9, slotL = 1e9, slotR = 1e9;
@@ -542,8 +532,8 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         if (!dashtiles::ParseKey(parsed.word, &key)) return (void)std::snprintf(reply, size, "error no such tiling key");
         const int i = g_tileFocus;
         if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
-        if (!g_tiles.Press(i, key, TileInfo(i))) return (void)std::snprintf(reply, size, "ok nothing to do");
-        RetileDash(true);
+        if (!g_tiles.Press(i, key)) return (void)std::snprintf(reply, size, "ok nothing to do");
+        RetileDash();
         RememberTiles();
         std::snprintf(reply, size, "ok %s", parsed.word);
         return;
@@ -604,7 +594,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         done += taken, bad += int(saved.size()) - taken;
         for (const auto &[i, state] : saved) LightAnchor(g_screens[i]);
         if (taken && !g_tileGroupSet) g_tileRegroup = true;
-        RetileDash(true);
+        RetileDash();
         RememberTiles();
         std::snprintf(reply, size, bad ? "ok %d set, %d not" : "ok %d set", done, bad);
         return;

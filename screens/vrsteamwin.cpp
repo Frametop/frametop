@@ -4,11 +4,11 @@
 // X's pointer doesn't reach Steam's windows). Steam's popups, the followers, are vrsteamfollow.cpp's.
 //
 // The tiles are screen 190 (Steam's dashboard window) and 191 (its menu), panels gamescope draws
-// (gsapp) at their windows' sizes, anchored to the dashboard the first time (shown with it, not
-// staying; the menu left of the dashboard window), then as they were (tile memory, keys
-// "steam:dashboard" and "steam:menu"). They're fixed-size tiles: their windows aren't resized. With
-// the dashboard window tiled, the dashboard tiles keep no slot for Steam's menu (vrtiles.cpp's
-// Regroup).
+// (gsapp) at their windows' sizes. The dashboard window's is anchored to the dashboard the first
+// time (shown with it, not staying), then as it was (tile memory, key "steam:dashboard"); it's a
+// fixed-size tile: its window isn't resized. The menu's is glued to it (steamglue.h: flush left of
+// it, only the part Steam draws, moved, shown and tiled with it; GlueStep). With the dashboard
+// window tiled, the dashboard tiles keep no slot for Steam's menu (vrtiles.cpp's Regroup).
 //
 // What the spike is there to find out (docs/design.md, HEADSET-TESTS.md): whether Steam tags its
 // windows back itself (each time is logged, and after steamwin::kMaxRetakes in a row it's given
@@ -21,6 +21,7 @@
 #include "gsdisplay.h"
 #include "gslink.h"
 #include "steamcdp.h"
+#include "steamglue.h"
 #include "steamwin.h"
 #include "vrsteamfollow.h"
 
@@ -43,6 +44,22 @@ bool g_on = false;
 uint32_t g_pid = 0;                 // gamescope's (the panels' renderer)
 int64_t g_findAt = 0;
 std::unique_ptr<steamcdp::Pages> g_pages;   // the laser on them, to their pages
+
+// The menu glued to the dashboard window's panel (steamglue.h, GlueStep).
+constexpr int kMenu = kIndex + 1;
+constexpr int64_t kAskOnMs = 50;      // what it draws asked this often while the laser's on it (its labels open and close)
+constexpr int64_t kAskOffMs = 1000;   // ...and with nobody on it
+constexpr int64_t kSettleMs = 450;    // its labels closed this long after the laser left (Steam's animation: 300 ms)
+constexpr uint32_t kGlueSortOrder = 5;   // over the tiles (its open labels go over the next one), under the controls
+struct Glue {
+    steamglue::Rect crop;          // what it draws now (w 0: not known yet, all of it shown)
+    int restW = 0;                 // ...its width with nobody on it: what the tiles count (GluedPx)
+    bool on = false;               // the laser is on it
+    int64_t leftMs = 0;            // ...left it then
+    int64_t askAt = 0, seenMs = 0;   // the next ask; the last answer taken (when it was asked)
+    steamglue::Rect shownCrop;     // the crop set on its overlay
+    int shownW = 0, shownH = 0;    // ...for a window this size
+} g_glue;
 const char g_frames = 0;            // (Screen::shown: gamescope's frames, no buffer of ours)
 
 uint64_t FindSteams(const std::string &key) {
@@ -60,6 +77,11 @@ uint64_t MakeTile(const steamwin::Spec &spec, const gsforward::Window &w) {
     const char *prefix = kPrefixes[spec.slot];
     if (!MakePanel(s, prefix, kLabels[spec.slot])) return g_screens.erase(index), 0;
     AnnounceOverlay(prefix);
+    if (index == kMenu) {
+        s.glueTo = kIndex;
+        g_glue = {};
+        vr::VROverlay()->SetOverlaySortOrder(s.overlay, kGlueSortOrder);
+    }
     vr::VROverlay()->SetOverlayRenderingPid(s.overlay, g_pid);   // (only its renderer may set its texture)
     Mat head;
     if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) head = Identity();
@@ -79,9 +101,11 @@ void ShowTile(const steamwin::Spec &spec, const gsforward::Window &w) {
     vr::VROverlay()->SetOverlayName(s.overlay, kLabels[spec.slot]);
     GsGeometry(s, index, w);
     s.shown = &g_frames;
-    const bool known = !g_tileMemory.Get(spec.tileKey).empty();
-    TileKnown(index, spec.tileKey);
-    if (!known && !s.gsSeen) TileAnchor(index, false, kLabels[spec.slot], spec.slot == 1 ? kIndex : -1);
+    if (s.glueTo < 0) {   // (a glued one goes with what it's glued to)
+        const bool known = !g_tileMemory.Get(spec.tileKey).empty();
+        TileKnown(index, spec.tileKey);
+        if (!known && !s.gsSeen) TileAnchor(index, false, kLabels[spec.slot]);
+    }
     std::printf("screen %d: %s's window (0x%x, %dx%d)%s\n", index + 1, kLabels[spec.slot], w.id, w.w, w.h,
                 s.gsSeen ? ", mapped again" : "");
     s.gsSeen = true;
@@ -179,9 +203,77 @@ void Lost() {
         Do(g_fleet.Lost(id));
     }
 }
+bool Differ(const Mat &a, const Mat &b) {
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c)
+            if (std::fabs(a.m[r][c] - b.m[r][c]) > 1e-5f) return true;
+    return false;
+}
+
+// The menu's panel glued to the dashboard window's (steamglue.h): what its page draws asked for
+// (often while the laser's on it), its overlay cropped to that at the dashboard window's density,
+// and put flush left of it: pinned as it's pinned (riding with it), or where it is in the room.
+void GlueStep() {
+    const auto mit = g_screens.find(kMenu), pit = g_screens.find(kIndex);
+    if (mit == g_screens.end() || pit == g_screens.end()) return;
+    Screen &m = mit->second;
+    const Screen &p = pit->second;
+    if (m.width <= 0 || m.height <= 0 || p.width <= 0 || m.overlay == vr::k_ulOverlayHandleInvalid) return;
+    const int64_t now = NowMs();
+    const steamwin::Tracker *t = m.gsWin ? g_fleet.Find(m.gsWin) : nullptr;
+    const bool settling = g_glue.on || now - g_glue.leftMs < kSettleMs;
+    if (g_pages && t) {
+        const std::string &page = t->Win().title;
+        if (now >= g_glue.askAt) g_pages->AskDrawn(page), g_glue.askAt = now + (settling ? kAskOnMs : kAskOffMs);
+        steamcdp::Pages::Drawn d;
+        steamglue::Rect r;
+        if (g_pages->LastDrawn(page, &d) && d.askedMs > g_glue.seenMs) {
+            g_glue.seenMs = d.askedMs;
+            if (steamglue::FromCss(d.l, d.t, d.r, d.b, d.dpr, m.width, m.height, &r)) {
+                g_glue.crop = r;
+                if (!g_glue.on && d.askedMs >= g_glue.leftMs + kSettleMs && r.w != g_glue.restW) {
+                    std::printf("screen %d: Steam's menu draws %dx%d at %d,%d of its window (glued to screen %d)\n", kMenu + 1,
+                                r.w, r.h, r.x, r.y, kIndex + 1);
+                    g_glue.restW = r.w;
+                    if (TileAnchored(kIndex)) RetileDash();
+                }
+            }
+        }
+    }
+    const steamglue::Rect c = g_glue.crop.w > 0 ? g_glue.crop : steamglue::Rect{0, 0, m.width, m.height};
+    if (c.x != g_glue.shownCrop.x || c.y != g_glue.shownCrop.y || c.w != g_glue.shownCrop.w || c.h != g_glue.shownCrop.h ||
+        m.width != g_glue.shownW || m.height != g_glue.shownH) {
+        // (fractions of the texture, v from the top; the mouse stays in the whole window's pixels)
+        const vr::VRTextureBounds_t b = {float(c.x) / m.width, float(c.y) / m.height, float(c.x + c.w) / m.width,
+                                         float(c.y + c.h) / m.height};
+        vr::VROverlay()->SetOverlayTextureBounds(m.overlay, &b);
+        g_glue.shownCrop = c, g_glue.shownW = m.width, g_glue.shownH = m.height;
+        m.cropX = c.x, m.cropY = c.y, m.cropW = c.w, m.cropH = c.h;
+    }
+    m.mpp = p.metres / p.width;   // (the dashboard window's density: the same size of text)
+    const double width = c.w * m.mpp;
+    if (std::fabs(m.metres - width) > 1e-4 || m.curve != p.curve) {
+        m.metres = width, m.curve = p.curve;
+        vr::VROverlay()->SetOverlayWidthInMeters(m.overlay, float(width));
+        ApplyCurve(m);
+    }
+    double off[3][4];   // (its middle level with the window's middle: Steam centres what it draws in it)
+    steamglue::Beside(p.metres, p.curve, width, (m.height / 2.0 - (c.y + c.h / 2.0)) * m.mpp, off);
+    Mat rel;
+    for (int r = 0; r < 3; ++r)
+        for (int k = 0; k < 4; ++k) rel.m[r][k] = float(off[r][k]);
+    if (p.pinned != kNone) {
+        const Mat want = Mul(p.pinRel, rel);
+        if (m.pinned != p.pinned || m.pinMode != p.pinMode || Differ(m.pinRel, want)) PinIn(m, p.pinned, want, p.pinMode);
+    } else if (Mat at; ScreenPose(p, &at)) {
+        const Mat want = Mul(at, rel);
+        if (m.pinned != kNone || Differ(m.pose, want)) SetAbsolute(m, want, p.universe);
+    }
+}
 }  // namespace
 
 int SteamDashIndex() { return g_on ? kIndex : -1; }
+int GluedPx(int index) { return index == kIndex && g_screens.count(kMenu) ? g_glue.restW : 0; }
 
 // Each tick: Steam's display's news (its thread opens it, again every AsyncLink::kRetryMs).
 void SteamDashStep() {
@@ -214,6 +306,7 @@ void SteamDashStep() {
     if (all || fresh) Find(all);
     Lost();
     if (g_pages) steamfollow::Step(g_fleet, *g_pages);
+    GlueStep();
 }
 
 // The laser on a tile: its page's mouse (steamcdp.h), at the window's pixels it points at.
@@ -227,6 +320,14 @@ void SteamDashEvents(Screen &s, int index) {
         if (ev.eventType != vr::VREvent_FocusLeave) {
             s.inputMs = now;
             if (FromLaser(ev)) s.laserMs = now, s.laserDevice = ev.trackedDeviceIndex;
+        }
+        if (s.glueTo >= 0) {   // the laser on the menu or off it: its labels open or close (GlueStep asks often)
+            const bool on = ev.eventType == vr::VREvent_MouseMove, off = ev.eventType == vr::VREvent_FocusLeave;
+            if ((on && !g_glue.on) || (off && g_glue.on)) {
+                g_glue.on = on;
+                if (off) g_glue.leftMs = now;
+                g_glue.askAt = 0;
+            }
         }
         const int ours = OurPointer(ev.trackedDeviceIndex);
         if (ev.eventType == vr::VREvent_FocusLeave) {
@@ -249,7 +350,9 @@ void SteamDashEvents(Screen &s, int index) {
                     EndDragsBy(ev.trackedDeviceIndex);
                 } else {
                     s.useMs = now;
-                    if (ModCarry(s, index, ev.trackedDeviceIndex, button, ev.data.mouse.x, s.height - ev.data.mouse.y)) break;
+                    if (s.glueTo < 0 &&   // (a glued one isn't carried on its own)
+                        ModCarry(s, index, ev.trackedDeviceIndex, button, ev.data.mouse.x, s.height - ev.data.mouse.y))
+                        break;
                 }
                 steamcdp::Button b;
                 if (!steamcdp::FromLinux(button, &b)) break;

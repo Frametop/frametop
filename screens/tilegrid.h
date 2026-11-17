@@ -1,13 +1,13 @@
 // The dashboard tiles' order and sizes (tiling.h places them): columns left to right, each with its
-// panels top to bottom, and each panel's share of its column's height. What the tiling keys, a
-// drag and the anchor button change (vr.cpp's dashboard tiling). Panels are their ft-screens
-// numbers (0-based); it doesn't know what kind each is.
+// panels top to bottom (the last one on the desk), and each panel's size, times its natural one.
+// What the tiling keys, a drag and the anchor button change (vr.cpp's dashboard tiling). Panels
+// are their ft-screens numbers (0-based); it doesn't know what kind each is.
 //
 // The keys (user, 2026-11-16, like Omarchy's, rebindable): Meta+Left/Right moves the focused panel
 // to the next column that way (alone in its column: the columns swap; with others: it joins the
-// next one, or at the end, a new column of its own), Meta+Up/Down moves it within its column,
-// Meta+Ctrl+Left/Right makes its column narrower or wider, Meta+Ctrl+Up/Down its row taller or
-// shorter. A panel anchored gets a column of its own right of the focused one.
+// next one, or at the end, a new column of its own), Meta+Up/Down moves it within its column, and
+// Meta+Ctrl+arrows make it bigger or smaller (dashtiles.h). A panel anchored gets a column of its
+// own right of the focused one (or goes on top of one: dashtiles.h's Board).
 //
 // Steam's menu is a slot in the strip (tiling.h): a split is how many columns are left of it, one
 // for each place the menu opens (kSplits: in front, as the Steam button opens it, and off to the
@@ -32,20 +32,16 @@
 
 namespace tilegrid {
 
-constexpr double kStep = 1.1;         // one key press: 10% wider, taller, narrower or shorter
-constexpr double kMinWeight = 0.2, kMaxWeight = 5;
-constexpr double kMinWidthDeg = 12, kMaxWidthDeg = 160;
-constexpr double kMinScale = 0.3;     // a fixed panel at least this much of its row (never more than all of it)
+constexpr double kStep = 1.1;            // one key press: 10% bigger or smaller
+constexpr double kMinScale = 0.25, kMaxScale = 6;   // a panel's size, times its natural one
 constexpr int kSplits = 3;            // a split round Steam's menu for each place it opens
 
 struct Cell {
     int id = 0;
-    double weight = 1;
-    double scale = 1;   // a fixed panel's size in its row (tiling::Tile::scale)
+    double scale = 1;   // its size, times its natural one
 };
 struct Col {
     std::vector<Cell> cells;
-    double widthDeg = 0;   // 0: the default width
 };
 
 // Where a panel is: its column and row, or -1s.
@@ -69,30 +65,29 @@ public:
 
     // A new column of its own, right of `after`'s, on its side of each split (none, or not in the
     // grid: at the right end).
-    void Add(int id, int after = -1, double widthDeg = 0) {
+    void Add(int id, int after = -1) {
         if (Has(id)) return;
         const Where w = Find(after);
-        if (!w.ok()) return AddAtEnd(id, false, widthDeg);
-        InsertCol(w.col + 1, Col{{Cell{id, 1}}, widthDeg}, true);   // (at a split: `after` is left of it)
+        if (!w.ok()) return AddAtEnd(id, false);
+        InsertCol(w.col + 1, Col{{Cell{id, 1}}}, true);   // (at a split: `after` is left of it)
     }
     // A new column of its own at the left end or the right one.
-    void AddAtEnd(int id, bool left, double widthDeg = 0) {
+    void AddAtEnd(int id, bool left) {
         if (Has(id)) return;
-        InsertCol(left ? 0 : int(cols_.size()), Col{{Cell{id, 1}}, widthDeg}, left);
+        InsertCol(left ? 0 : int(cols_.size()), Col{{Cell{id, 1}}}, left);
     }
     // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such
     // column (at the split: left of Steam's slot when `leftOfSlot`).
-    void Insert(int id, int col, int row, bool newColumn, double weight = 1, double widthDeg = 0, double scale = 1,
-                bool leftOfSlot = false) {
+    void Insert(int id, int col, int row, bool newColumn, double scale = 1, bool leftOfSlot = false) {
         Take(id);   // (moved: the splits stay, even with the grid empty for a moment)
         col = std::clamp(col, 0, int(cols_.size()));
         if (newColumn || col == int(cols_.size())) {
-            InsertCol(col, Col{{Cell{id, Clamp(weight), Sc(scale)}}, widthDeg}, leftOfSlot);
+            InsertCol(col, Col{{Cell{id, Sc(scale)}}}, leftOfSlot);
             return;
         }
         auto &cells = cols_[col].cells;
         row = std::clamp(row, 0, int(cells.size()));
-        cells.insert(cells.begin() + row, Cell{id, Clamp(weight), Sc(scale)});
+        cells.insert(cells.begin() + row, Cell{id, Sc(scale)});
     }
     // Out of the grid (its column goes when it was the last in it; the splits with the last
     // panel). False if it wasn't in it.
@@ -123,16 +118,16 @@ public:
         col.cells.erase(col.cells.begin() + w.row);
         if (across) {
             // across the slot: into a column of its own, the slot's nearest that side
-            InsertCol(split, Col{{Cell{cell.id, 1, cell.scale}}, 0}, dir < 0);
+            InsertCol(split, Col{{cell}}, dir < 0);
             return true;
         }
         if (next < 0 || next >= int(cols_.size())) {
             // at the end: out into a column of its own that side
-            InsertCol(next < 0 ? 0 : int(cols_.size()), Col{{Cell{cell.id, 1, cell.scale}}, 0}, next < 0);
+            InsertCol(next < 0 ? 0 : int(cols_.size()), Col{{cell}}, next < 0);
             return true;
         }
         auto &into = cols_[next].cells;
-        into.insert(into.begin() + std::min(w.row, int(into.size())), Cell{cell.id, 1, cell.scale});
+        into.insert(into.begin() + std::min(w.row, int(into.size())), cell);
         return true;
     }
     // Meta+Up (-1) / Meta+Down (+1): one row up or down its column.
@@ -145,32 +140,12 @@ public:
         std::swap(cells[w.row], cells[to]);
         return true;
     }
-    // Its column `factor` times as wide, from `nowDeg` (its width as laid out).
-    bool Widen(int id, double factor, double nowDeg) {
-        const Where w = Find(id);
-        if (!w.ok()) return false;
-        const double to = std::clamp(nowDeg * factor, kMinWidthDeg, kMaxWidthDeg);
-        if (std::fabs(to - nowDeg) < 1e-6) return false;
-        cols_[w.col].widthDeg = to;
-        return true;
-    }
-    // Its row `factor` times as tall within its column (the others share the rest). False alone in it.
-    bool Heighten(int id, double factor) {
-        const Where w = Find(id);
-        if (!w.ok() || cols_[w.col].cells.size() < 2) return false;
-        double &wt = cols_[w.col].cells[w.row].weight;
-        const double to = Clamp(wt * factor);
-        if (std::fabs(to - wt) < 1e-9) return false;
-        wt = to;
-        return true;
-    }
-
-    // A fixed panel's size in its row `factor` times (at most all of it). False when nothing changed.
+    // Its size `factor` times. False when nothing changed.
     bool Scale(int id, double factor) {
         const Where w = Find(id);
-        if (!w.ok()) return false;
+        if (!w.ok() || !(factor > 0)) return false;
         double &sc = cols_[w.col].cells[w.row].scale;
-        const double to = std::clamp(sc * factor, kMinScale, 1.0);
+        const double to = Sc(sc * factor);
         if (std::fabs(to - sc) < 1e-9) return false;
         sc = to;
         return true;
@@ -180,12 +155,6 @@ public:
         const Where w = Find(id);
         return w.ok() ? &cols_[w.col].cells[w.row] : nullptr;
     }
-    // Its column's width as asked (0: the default).
-    double WidthOf(int id) const {
-        const Where w = Find(id);
-        return w.ok() ? cols_[w.col].widthDeg : 0;
-    }
-
     // The columns left of Steam's slot where the menu opens at `key` (-1: not chosen yet).
     int Split(int key) const { return key >= 0 && key < kSplits ? split_[size_t(key)] : -1; }
     void SetSplit(int key, int split) {
@@ -197,8 +166,7 @@ public:
     }
 
 private:
-    static double Clamp(double w) { return std::clamp(w, kMinWeight, kMaxWeight); }
-    static double Sc(double s) { return std::clamp(s, kMinScale, 1.0); }
+    static double Sc(double s) { return std::isfinite(s) ? std::clamp(s, kMinScale, kMaxScale) : 1; }
     // Out of its cell (its column too when it was the last in it), the splits counting columns.
     bool Take(int id) {
         const Where w = Find(id);

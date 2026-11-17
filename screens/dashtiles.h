@@ -37,11 +37,9 @@ struct Spot {
     double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // a satellite's: group frame -> panel
 };
 
-// What the host says about a panel: its shape now, and whether it keeps it (a desktop screen or a
-// remote display: its resolution is the other machine's) or takes the cell's (a floating window).
+// What the host says about a panel: its natural size at the wall (its pixels, tiling::MetresPerPx each).
 struct Info {
-    double aspect = 16.0 / 9;
-    bool fixed = true;
+    double widthM = 1.6, heightM = 0.9;
 };
 
 enum class Key { Left, Right, Up, Down, Wider, Narrower, Taller, Shorter };
@@ -117,12 +115,13 @@ public:
 
     // Anchored (already: nothing): a column of its own right of `focused`'s (not tiled: at the
     // strip's end that brings its middle nearer in front of you, the left one when Steam's slot has
-    // pushed it right).
+    // pushed it right). On a full desk (OnTopOf, with its `info`): on top of the lowest column.
     // With `leftOf` tiled: a column of its own just left of its.
-    void Anchor(int id, int focused, bool stay, int leftOf = -1) {
+    void Anchor(int id, int focused, bool stay, int leftOf = -1, const Info *info = nullptr) {
         if (Anchored(id)) return;
         spots_[id].stay = stay;
         if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
+        if (const int c = info ? OnTopOf(*info) : -1; c >= 0) return grid_.Insert(id, c, 0, false);
         if (grid_.Has(focused)) return grid_.Add(id, focused);
         // none: the end that brings the strip's middle nearer in front (its left one when it leans
         // right; centred, the right one, however the sums round)
@@ -164,30 +163,25 @@ public:
         EndBatch();
         spots_[id].satellite = false;
         slot_.Move(grid_, id, [&] {   // (Insert moves it)
-            grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale, d.leftOfSlot);
+            grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, scale, d.leftOfSlot);
             return true;
         });
     }
 
-    // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed. A fixed
-    // panel fills its row's height already, so wider and narrower size it in its row instead.
-    bool Press(int id, Key k, const Info &info) {
+    // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed.
+    bool Press(int id, Key k) {
         if (!grid_.Has(id)) return false;
-        return Changed(Pressed(id, k, info));
+        return Changed(Pressed(id, k));
     }
-    // Resized by its corner on the grid: `fw`, `fh` times as wide and tall as its tile was.
-    bool Resized(int id, double fw, double fh, const Info &info) {
-        if (!grid_.Has(id) || !(fw > 0) || !(fh > 0)) return false;
-        if (info.fixed) return Changed(grid_.Scale(id, fw));
-        const bool w = grid_.Widen(id, fw, NowWidth(id));
-        const bool h = grid_.Heighten(id, fh);
-        return Changed(w || h);
+    // Resized by its corner on the grid: `factor` times as big as its tile was.
+    bool Resized(int id, double factor) {
+        if (!grid_.Has(id) || !(factor > 0)) return false;
+        return Changed(grid_.Scale(id, factor));
     }
 
 private:
-    bool Pressed(int id, Key k, const Info &info) {
-        const bool grow = k == Key::Wider || k == Key::Taller;
-        const double f = grow ? tilegrid::kStep : 1 / tilegrid::kStep;
+    // Meta+Ctrl+Right or Up: bigger; Left or Down: smaller (its natural shape kept).
+    bool Pressed(int id, Key k) {
         switch (k) {
             case Key::Left:
             case Key::Right: {
@@ -196,11 +190,32 @@ private:
             case Key::Up: return grid_.MoveUpDown(id, -1);
             case Key::Down: return grid_.MoveUpDown(id, +1);
             case Key::Wider:
-            case Key::Narrower: return info.fixed ? grid_.Scale(id, f) : grid_.Widen(id, f, NowWidth(id));
-            case Key::Taller:
-            case Key::Shorter: return grid_.Heighten(id, f) || (info.fixed && grid_.Scale(id, f));
+            case Key::Taller: return grid_.Scale(id, tilegrid::kStep);
+            case Key::Narrower:
+            case Key::Shorter: return grid_.Scale(id, 1 / tilegrid::kStep);
         }
         return false;
+    }
+    // The desk full (another column would take the strip past params.wallDeg): the column a new
+    // panel `info` goes on top of, the one whose top is lowest (of two, the nearer in front); -1
+    // while there's room, or before the grid has been laid out.
+    int OnTopOf(const Info &info) const {
+        if (grid_.Empty() || last_.tiles.empty()) return -1;
+        const double span = tiling::Deg(2 * std::atan2(info.widthM / 2, params.radius));
+        if (last_.az1 - last_.az0 + params.gapDeg + span <= params.wallDeg) return -1;
+        std::map<int, double> tops;   // column -> its top
+        for (const tiling::Placed &p : last_.tiles) {
+            const auto [it, added] = tops.try_emplace(p.col, p.el1);
+            if (!added) it->second = std::max(it->second, p.el1);
+        }
+        int best = -1;
+        double low = 1e9, front = 1e9;
+        for (const tiling::Placed &p : last_.tiles) {
+            const double top = tops[p.col], off = std::fabs(tiling::WrapNear(p.azDeg, 0));
+            if (p.col >= int(grid_.Cols().size())) continue;
+            if (top < low - 1e-6 || (top < low + 1e-6 && off < front)) best = p.col, low = top, front = off;
+        }
+        return best;
     }
     bool Changed(bool changed) {
         if (changed) EndBatch();
@@ -214,10 +229,9 @@ public:
         std::vector<tiling::Column> cols;
         for (const tilegrid::Col &gc : grid_.Cols()) {
             tiling::Column c;
-            c.widthDeg = gc.widthDeg;
             for (const tilegrid::Cell &cell : gc.cells) {
                 const Info i = info(cell.id);
-                c.tiles.push_back({cell.id, i.aspect, i.fixed, cell.weight, cell.scale});
+                c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale});
             }
             cols.push_back(c);
         }
@@ -256,7 +270,7 @@ public:
         const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
         const tilegrid::Cell &cell = col.cells[size_t(w.row)];
         st.kind = State::Kind::Tile, st.col = w.col, st.row = w.row, st.alone = col.cells.size() == 1;
-        st.weight = cell.weight, st.scale = cell.scale, st.width = col.widthDeg;
+        st.scale = cell.scale;
         return st;
     }
     // Back as it was remembered (`focused`: a new tile's neighbour when its column is gone). False
@@ -276,8 +290,7 @@ public:
             return;
         }
         if (!st.Placed()) return grid_.Add(id, focused);
-        const double width = st.width > 0 ? std::clamp(st.width, tilegrid::kMinWidthDeg, tilegrid::kMaxWidthDeg) : 0;
-        grid_.Insert(id, st.col, st.row, st.alone, st.weight, width, st.scale);   // (the width: if it makes the column)
+        grid_.Insert(id, st.col, st.row, st.alone, st.scale);
     }
     // The profile put back last is done with: an add after this goes after the other tiles.
     void EndRestore() { batch_.End(); }
@@ -343,7 +356,7 @@ private:
     static void AppendColumn(tilegrid::Grid &g, const tilegrid::Col &c) {
         const int at = int(g.Cols().size());
         for (size_t r = 0; r < c.cells.size(); ++r)
-            g.Insert(c.cells[r].id, at, int(r), r == 0, c.cells[r].weight, r == 0 ? c.widthDeg : 0, c.cells[r].scale);
+            g.Insert(c.cells[r].id, at, int(r), r == 0, c.cells[r].scale);
     }
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
     static tiling::Drop Without(const tilegrid::Grid &g, int id, tiling::Drop d) {
@@ -358,13 +371,6 @@ private:
         if (alone && w.col < d.col) --d.col;
         return d;
     }
-    // A tiled panel's column width now (as laid out, before any shrink), in degrees.
-    double NowWidth(int id) const {
-        if (const tiling::Placed *p = PlacedOf(id)) return (p->az1 - p->az0) / std::max(1e-6, last_.shrink);
-        const double w = grid_.WidthOf(id);
-        return w > 0 ? w : params.columnDeg;
-    }
-
     std::map<int, Spot> spots_;
     tilegrid::Grid grid_;
     tiling::Layout last_;

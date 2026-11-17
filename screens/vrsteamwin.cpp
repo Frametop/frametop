@@ -1,7 +1,7 @@
 // Steam's own windows as panels of ours (steamwin.h has why and how; a spike, STEAM_DASH_PANEL, off
 // by default). This file is its X link (Steam's own display, gsforward::Role::Steam, on a thread of
-// its own: gslink.h), the tiles on OpenVR, and the laser on them as X's pointer. Steam's popups,
-// the followers, are vrsteamfollow.cpp's.
+// its own: gslink.h), the tiles on OpenVR, and the laser on them as their pages' mouse (steamcdp.h:
+// X's pointer doesn't reach Steam's windows). Steam's popups, the followers, are vrsteamfollow.cpp's.
 //
 // The tiles are screen 190 (Steam's dashboard window) and 191 (its menu), panels gamescope draws
 // (gsapp) at their windows' sizes, anchored to the dashboard the first time (shown with it, not
@@ -12,13 +12,14 @@
 //
 // What the spike is there to find out (docs/design.md, HEADSET-TESTS.md): whether Steam tags its
 // windows back itself (each time is logged, and after steamwin::kMaxRetakes in a row it's given
-// back) and whether the X pointer reaches them. Keys aren't sent to them yet. Steam's own panels are
+// back). Keys aren't sent to them yet (Steam's own keyboard, a follower, types into them). Steam's own panels are
 // left alone: with a window ours they have no texture (gamescope forwards to one overlay), so they
 // draw nothing, and Steam paints only while its panel counts as visible (alpha 0 = a black tile).
 
 #include "vrpanel.h"
 #include "gsdisplay.h"
 #include "gslink.h"
+#include "steamcdp.h"
 #include "steamwin.h"
 #include "vrsteamfollow.h"
 
@@ -40,8 +41,7 @@ steamwin::Fleet g_fleet;
 bool g_on = false;
 uint32_t g_pid = 0;                 // gamescope's (the panels' renderer)
 int64_t g_findAt = 0;
-uint32_t g_buttons = 0;             // X buttons held on a tile (bit b: button b)
-uint32_t g_raised = 0;              // the window of Steam's raised last
+std::unique_ptr<steamcdp::Pages> g_pages;   // the laser on them, to their pages
 const char g_frames = 0;            // (Screen::shown: gamescope's frames, no buffer of ours)
 
 uint64_t FindSteams(const std::string &key) {
@@ -88,10 +88,7 @@ void ShowTile(const steamwin::Spec &spec, const gsforward::Window &w) {
 }
 
 void LetGo() {
-    for (uint8_t b = 1; b < 32; ++b)
-        if (g_buttons & 1u << b) g_link->Button(b, false);
-    g_buttons = 0;
-    steamfollow::LetGo(*g_link);
+    if (g_pages) g_pages->LetGo();
 }
 
 const char *What(const steamwin::Spec &spec) { return spec.role == steamwin::Spec::Tile ? kLabels[spec.slot] : "Steam popup"; }
@@ -215,15 +212,16 @@ void SteamDashStep() {
     if (all) g_findAt = now + kFindMs;
     if (all || fresh) Find(all);
     Lost();
-    steamfollow::Step(g_fleet, *g_link, &g_raised);
+    if (g_pages) steamfollow::Step(g_fleet, *g_pages);
 }
 
-// The laser on a tile: X's pointer, buttons and wheel there (its window raised first: Steam's
-// windows all sit at the top left of its screen, and the pointer goes to the top one).
+// The laser on a tile: its page's mouse (steamcdp.h), at the window's pixels it points at.
 void SteamDashEvents(Screen &s, int index) {
     vr::VREvent_t ev;
     while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) {
-        if (!g_link || !s.gsWin) continue;
+        const steamwin::Tracker *t = s.gsWin ? g_fleet.Find(s.gsWin) : nullptr;
+        if (!g_pages || !t) continue;
+        const std::string &page = t->Win().title;
         const int64_t now = NowMs();
         if (ev.eventType != vr::VREvent_FocusLeave) {
             s.inputMs = now;
@@ -235,15 +233,11 @@ void SteamDashEvents(Screen &s, int index) {
         } else if (ours > 0) {
             g_mouseScreen = index, g_mouseDevice = ev.trackedDeviceIndex;
         }
-        const int x = s.gsX + int(std::lround(ev.data.mouse.x)), y = s.gsY + s.height - int(std::lround(ev.data.mouse.y));
-        auto point = [&] {
-            if (g_raised != s.gsWin) g_link->Raise(s.gsWin), g_raised = s.gsWin;
-            g_link->Pointer(x, y);
-        };
+        const int x = int(std::lround(ev.data.mouse.x)), y = s.height - int(std::lround(ev.data.mouse.y));
         switch (ev.eventType) {
             case vr::VREvent_MouseMove:
                 if (s.toggleCarry || s.drag != Drag::None) break;
-                point();
+                g_pages->Move(page, x, y);
                 break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
@@ -256,21 +250,19 @@ void SteamDashEvents(Screen &s, int index) {
                     s.useMs = now;
                     if (ModCarry(s, index, ev.trackedDeviceIndex, button, ev.data.mouse.x, s.height - ev.data.mouse.y)) break;
                 }
-                const uint8_t xb = gsforward::XButton(int(button));
+                steamcdp::Button b;
+                if (!steamcdp::FromLinux(button, &b)) break;
                 if (down) std::printf("screen %d: a click at %d,%d on Steam's window 0x%x\n", index + 1, x, y, s.gsWin);
-                point();
-                g_link->Button(xb, down);
-                if (xb < 32) g_buttons = down ? g_buttons | 1u << xb : g_buttons & ~(1u << xb);
+                g_pages->Press(page, x, y, b, down);
                 break;
             }
             case vr::VREvent_ScrollDiscrete:
                 if (CarryScroll(ev)) break;
                 s.useMs = now;
-                g_link->Scroll(int(std::lround(ev.data.scroll.ydelta)));
+                g_pages->Wheel(page, int(std::lround(ev.data.scroll.ydelta)));
                 break;
             case vr::VREvent_FocusLeave:
-                if (g_raised == s.gsWin) g_raised = 0;
-                if (g_buttons && s.drag == Drag::None) LetGo();
+                if (s.drag == Drag::None) LetGo();
                 break;
             default:
                 break;
@@ -287,6 +279,7 @@ void SteamDashSwitch(bool on) {
         if (!on) return;
         g_link = std::make_unique<gsforward::AsyncLink>(gsforward::SteamDisplays, true, gsforward::Role::Steam);
         g_link->SetOn(true);   // (kept open when it's off again: Steam's windows go back to it, and stay)
+        g_pages = std::make_unique<steamcdp::Pages>();
     }
     std::printf("Steam's windows: %s (STEAM_DASH_PANEL)\n", on ? "Frametop's when they map" : "Steam's own");
     Do(g_fleet.Switch(on));
@@ -296,6 +289,7 @@ void SteamDashSwitch(bool on) {
 void SteamDashShutdown() {
     if (!g_link) return;
     LetGo();
+    g_pages.reset();   // (the buttons up first)
     Do(g_fleet.Shutdown());
     g_link->Stop(500);
 }

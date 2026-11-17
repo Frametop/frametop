@@ -312,6 +312,8 @@ test-c:
     run screens/tests/steamwin-test.cpp build/tests/steamwin-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/steamplace-test.cpp -o build/tests/steamplace-test
     run screens/tests/steamplace-test.cpp build/tests/steamplace-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/cdpwire-test.cpp -o build/tests/cdpwire-test
+    run screens/tests/cdpwire-test.cpp build/tests/cdpwire-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gscontrol-test.cpp -o build/tests/gscontrol-test
     run screens/tests/gscontrol-test.cpp build/tests/gscontrol-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Iscreens screens/tests/gslink-test.cpp screens/gslink.cpp screens/gsforward.cpp \

@@ -15,7 +15,6 @@ namespace steamfollow {
 namespace {
 constexpr int64_t kPlaceMs = 50;     // placed again this often (Steam's popups and our tiles move)
 constexpr uint32_t kSortOrder = 11;  // over the tiles, under the gaze ring
-uint32_t g_buttons = 0;              // X buttons held on one (bit b: button b)
 int64_t g_placeAt = 0;
 
 using steamplace::Frame;
@@ -74,32 +73,24 @@ bool Place(const steamwin::Tracker &t, const steamwin::Fleet &fleet) {
     return true;
 }
 
-void Events(const steamwin::Tracker &t, gsforward::AsyncLink &link, uint32_t *raised) {
+void Events(const steamwin::Tracker &t, steamcdp::Pages &pages) {
     vr::VREvent_t ev;
     const gsforward::Window &w = t.Win();
     while (vr::VROverlay()->PollNextOverlayEvent(t.Panel(), &ev, sizeof ev)) {
-        const int x = w.x + int(std::lround(ev.data.mouse.x)), y = w.y + w.h - int(std::lround(ev.data.mouse.y));
-        auto point = [&] {
-            if (*raised != w.id) link.Raise(w.id), *raised = w.id;
-            link.Pointer(x, y);
-        };
+        const int x = int(std::lround(ev.data.mouse.x)), y = w.h - int(std::lround(ev.data.mouse.y));
         switch (ev.eventType) {
-            case vr::VREvent_MouseMove: point(); break;
+            case vr::VREvent_MouseMove: pages.Move(w.title, x, y); break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
-                const uint8_t xb = gsforward::XButton(int(LinuxButton(ev.data.mouse.button)));
+                steamcdp::Button b;
+                if (!steamcdp::FromLinux(LinuxButton(ev.data.mouse.button), &b)) break;
                 if (down) std::printf("Steam popup 0x%x: a click at %d,%d\n", w.id, x, y);
-                point();
-                link.Button(xb, down);
-                if (xb < 32) g_buttons = down ? g_buttons | 1u << xb : g_buttons & ~(1u << xb);
+                pages.Press(w.title, x, y, b, down);
                 break;
             }
-            case vr::VREvent_ScrollDiscrete: link.Scroll(int(std::lround(ev.data.scroll.ydelta))); break;
-            case vr::VREvent_FocusLeave:
-                if (*raised == w.id) *raised = 0;
-                LetGo(link);
-                break;
+            case vr::VREvent_ScrollDiscrete: pages.Wheel(w.title, int(std::lround(ev.data.scroll.ydelta))); break;
+            case vr::VREvent_FocusLeave: pages.LetGo(); break;
             default: break;
         }
     }
@@ -132,7 +123,7 @@ void Size(uint64_t overlay, const gsforward::Window &w) {
 
 void Drop(uint64_t overlay) { vr::VROverlay()->DestroyOverlay(overlay); }
 
-void Step(const steamwin::Fleet &fleet, gsforward::AsyncLink &link, uint32_t *raised) {
+void Step(const steamwin::Fleet &fleet, steamcdp::Pages &pages) {
     const int64_t now = NowMs();
     const bool place = now >= g_placeAt;
     if (place) g_placeAt = now + kPlaceMs;
@@ -142,14 +133,8 @@ void Step(const steamwin::Fleet &fleet, gsforward::AsyncLink &link, uint32_t *ra
             if (Place(t, fleet)) vr::VROverlay()->ShowOverlay(t.Panel());
             else vr::VROverlay()->HideOverlay(t.Panel());
         }
-        Events(t, link, raised);
+        Events(t, pages);
     }
-}
-
-void LetGo(gsforward::AsyncLink &link) {
-    for (uint8_t b = 1; b < 32; ++b)
-        if (g_buttons & 1u << b) link.Button(b, false);
-    g_buttons = 0;
 }
 
 }  // namespace steamfollow

@@ -149,7 +149,7 @@ main() {
     [ -n "$cmd_link" ] && echo "  - $cmd_link (your commands' aliases stop working)"
     [ -n "$ondesktop_link" ] && echo "  - $ondesktop_link (take it out of your Steam games' launch options)"
     [ "$bashrc_lines" = 1 ] && echo "  - the two lines in ~/.bashrc that read your commands' aliases"
-    [ -n "$eye_rate" ] && echo "  - gaze mode's SteamVR setting for 90 fps eye cameras (steamvr.gazeDepEyeToHeadEnable)"
+    [ -n "$eye_rate" ] && echo "  - gaze mode's SteamVR setting for 90 fps eye cameras (steamvr.gazeDepEyeToHeadEnable2, or gazeDepEyeToHeadEnable before SteamOS 0.5)"
     [ -n "$dash_debugger" ] && echo "  - SteamVR's dashboard debugger, which the 3D mouse's window moves use (VRWebHelper.DebuggerEnabled)"
     [ -n "$camd_caps" ] && echo "  - the hand camera broker's file capabilities (needs your password)"
     exists "${eyegrab_files[@]}" && echo "  - our eye tracker's frame grabber (a system service: needs your password)"

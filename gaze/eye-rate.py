@@ -9,7 +9,10 @@ own tracker copes, but our tracker gets 8 or 9 frames in a calibration dot's 0.6
 needs 15, so it can never calibrate, and the gaze pointer would move 15 times a second.
 With steamvr.gazeDepEyeToHeadEnable on, SteamVR asks for 90 (seen 2026-10-10: a headset with
 it on asks for 90 at every start; a user's with it off, at 15, calibrated once it was on).
-SteamVR's settings have no switch for it.
+SteamOS 0.5's driver (driver_cv.so) reads steamvr.gazeDepEyeToHeadEnable2 instead and ignores the
+old name (seen 2026-11-17: 15 at every start with the old one on; with the new one on, the 15 was
+no longer asked for), so this sets the name the installed driver reads. SteamVR's settings have
+no switch for either.
 
   gaze/eye-rate.py on      # turn it on (gaze/run.sh install); it counts from SteamVR's next start
   gaze/eye-rate.py off     # turn it off again, if this turned it on (gaze/run.sh uninstall)
@@ -22,17 +25,21 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "conf"))
 import ft_vrsettings  # noqa: E402  (SteamVR's settings: vrcmd's output and the file)
 
 HOME = Path.home()
-SECTION, KEY = "steamvr", "gazeDepEyeToHeadEnable"
+SECTION = "steamvr"
+OLD_KEY, NEW_KEY = "gazeDepEyeToHeadEnable", "gazeDepEyeToHeadEnable2"  # SteamOS 0.4's, 0.5's
+DRIVER = Path("/opt/steamvr/drivers/cv/bin/linuxarm64/driver_cv.so")  # the Frame's tracking driver
 STEAMVR_BIN = "/opt/steamvr/bin/linuxarm64"
 # The first that exists is SteamVR's (as gaze/gazecal.py reads them).
 STEAMVR_SETTINGS = ft_vrsettings.FILES
-# There when this turned the setting on (it was off), so `off` leaves a setting someone chose alone.
+# There when this turned a setting on (it was off), so `off` leaves a setting someone chose alone:
+# one line per setting, "steamvr.<key> was off; Frametop turned it on".
 MARK = HOME / ".local/state/frametop/gaze/steamvr-eye-rate"
 EYE_LOG = HOME / ".local/share/Steam/logs/eyetracking.txt"
 # A terminal in the desktop has the desktop's own config folder, where SteamVR's path registry
@@ -53,22 +60,58 @@ def settings_file():
     return ft_vrsettings.settings_file(STEAMVR_SETTINGS)
 
 
-def get():
+def key():
+    """The setting's name in the installed driver: SteamOS 0.5's when the driver has that name in
+    it, else 0.4's. Unreadable (no SteamVR): 0.5's, the current one."""
+    try:
+        return NEW_KEY if (NEW_KEY + "\0").encode() in DRIVER.read_bytes() else OLD_KEY
+    except OSError:
+        return NEW_KEY
+
+
+def get(name=None):
     """The setting: True, False, or None when SteamVR isn't running and its file doesn't say
     (then the driver's default, off)."""
+    name = name or key()
     if steamvr_up():
-        # vrcmd prints "steamvr.gazeDepEyeToHeadEnable=true"
-        return ft_vrsettings.vrcmd_bool(vrcmd("--settings-bool", f"{SECTION}.{KEY}"), SECTION, KEY)
+        # vrcmd prints "steamvr.gazeDepEyeToHeadEnable2=true"
+        return ft_vrsettings.vrcmd_bool(vrcmd("--settings-bool", f"{SECTION}.{name}"), SECTION, name)
     s = ft_vrsettings.read_section(settings_file(), SECTION)
-    value = s.get(KEY) if isinstance(s, dict) else None
+    value = s.get(name) if isinstance(s, dict) else None
     return value if isinstance(value, bool) else None
 
 
-def put(on):
+def put(name, on):
     if steamvr_up():
-        vrcmd("--set-settings-bool", f"{SECTION}.{KEY}", ft_vrsettings.bool_arg(on))
-        return get() is on
-    return ft_vrsettings.write_values(settings_file(), SECTION, {KEY: on})
+        vrcmd("--set-settings-bool", f"{SECTION}.{name}", ft_vrsettings.bool_arg(on))
+        return get(name) is on
+    return ft_vrsettings.write_values(settings_file(), SECTION, {name: on})
+
+
+def marked():
+    """The settings this turned on, from MARK (an older mark names 0.4's)."""
+    try:
+        lines = MARK.read_text().splitlines()
+    except OSError:
+        return []
+    names = [line.split()[0].removeprefix(SECTION + ".") for line in lines if line.strip()]
+    return [n for n in names if n in (OLD_KEY, NEW_KEY)]
+
+
+def last_start():
+    """When the eye tracker last started (eyetracking.txt's clock, local time) as a Unix time, or
+    None without the log or a start in it."""
+    try:
+        lines = EYE_LOG.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if " startup with PID" in line:
+            try:  # "Mon Nov 16 2026 12:24:34.650276 [Info] - eyetracking 2.19.3 startup with PID=..."
+                return time.mktime(time.strptime(line[:24], "%a %b %d %Y %H:%M:%S"))
+            except ValueError:
+                return None
+    return None
 
 
 def camera_rate():
@@ -88,33 +131,38 @@ def camera_rate():
 
 def main():
     what = sys.argv[1] if len(sys.argv) == 2 else ""
+    name = key()
     if what == "on":
-        if get():
-            print(f"SteamVR's eye cameras: {SECTION}.{KEY} is on already, so they run at 90 fps")
+        if get(name):
+            print(f"SteamVR's eye cameras: {SECTION}.{name} is on already, so they run at 90 fps")
             return 0
-        if not put(True):
-            print(f"couldn't turn on {SECTION}.{KEY}: the eye cameras may stay at 15 fps, and our eye "
+        if not put(name, True):
+            print(f"couldn't turn on {SECTION}.{name}: the eye cameras may stay at 15 fps, and our eye "
                   "tracker can't calibrate at that. Try again with: gaze/eye-rate.py on", file=sys.stderr)
             return 1
         MARK.parent.mkdir(parents=True, exist_ok=True)
-        MARK.write_text(f"{SECTION}.{KEY} was off; Frametop turned it on\n")
-        print(f"SteamVR's eye cameras: turned on {SECTION}.{KEY}, so they run at 90 fps, not 15, "
+        with MARK.open("a") as f:
+            f.write(f"{SECTION}.{name} was off; Frametop turned it on\n")
+        print(f"SteamVR's eye cameras: turned on {SECTION}.{name}, so they run at 90 fps, not 15, "
               "once SteamVR restarts")
         return 0
     if what == "off":
-        if not MARK.exists():
-            print(f"SteamVR's eye cameras: left as they are (Frametop didn't turn on {SECTION}.{KEY})")
+        names = marked()
+        if not names:
+            print(f"SteamVR's eye cameras: left as they are (Frametop didn't turn on {SECTION}.{name})")
             return 0
-        if not put(False):
-            print(f"couldn't turn off {SECTION}.{KEY}. Try again with: gaze/eye-rate.py off", file=sys.stderr)
-            return 1
+        for n in dict.fromkeys(names):
+            if not put(n, False):
+                print(f"couldn't turn off {SECTION}.{n}. Try again with: gaze/eye-rate.py off", file=sys.stderr)
+                return 1
         MARK.unlink()
-        print(f"SteamVR's eye cameras: turned {SECTION}.{KEY} off again (back to 15 fps once SteamVR restarts)")
+        print(f"SteamVR's eye cameras: turned {', '.join(f'{SECTION}.{n}' for n in dict.fromkeys(names))} "
+              "off again (back to 15 fps once SteamVR restarts)")
         return 0
     if what == "status":
-        value = get()
+        value = get(name)
         rate = camera_rate()
-        print(f"{SECTION}.{KEY}: {'on' if value else 'off'}" + (" (set by Frametop)" if MARK.exists() else ""))
+        print(f"{SECTION}.{name}: {'on' if value else 'off'}" + (" (set by Frametop)" if name in marked() else ""))
         print("eye cameras: " + (f"{rate:g} fps since the eye tracker started" if rate else "unknown (no eyetracking.txt)"))
         return 0
     print("usage: gaze/eye-rate.py on|off|status", file=sys.stderr)

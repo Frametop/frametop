@@ -10,11 +10,12 @@
 // top and bottom"). Each column is as wide as the widest of its panels needs at the panel's
 // farthest corner, so they never touch there, and the strip of columns is centred in front of
 // you. Steam's menu is part of it (user, 2026-11-16: "the steam menu should ... be part of the
-// tiling system"): when the strip would reach it, a slot is kept clear where it is (`reserveDeg`
-// wide at `reserveAzDeg`), a split's worth of columns left of it and the rest right. The split is
-// the grid's (tilegrid.h: inserts, drops and moves keep each column on its side); one not chosen
-// yet is the one that puts the strip's middle nearest in front of you. Past a full turn round you
-// everything shrinks until it fits.
+// tiling system"): a slot kept clear where it is (`reserveDeg` wide at `reserveAzDeg`), a split's
+// worth of columns left of it and the rest right. The split is the grid's (tilegrid.h: inserts,
+// drops and moves keep each column on its side), and with one the slot is always in the strip.
+// Without one (none chosen yet: dashtiles.h's Board keeps the one chosen), the slot is there only
+// when the strip centred in front of you would reach it, with the split that puts the strip's
+// middle nearest in front of you. Past a full turn round you everything shrinks until it fits.
 //
 // A panel with pixels of its own to change (a floating window, an app gamescope hands us) fills
 // its cell: its width is the column's. A panel at a fixed resolution (a desktop screen, a remote
@@ -175,7 +176,7 @@ inline Fit FitStrip(const std::vector<Column> &cols, const Params &p, double bot
         // within a few percent of the largest, which is fine. Everything goes to nothing with k,
         // so one fits, down to hundreds of columns in a band at the clamps' far end, -85.)
         double lo = 0, hi = 1;
-        for (int i = 0; i < 40; ++i) {
+        for (int i = 0; i < 24; ++i) {   // (to within 1e-7 of the size)
             const double mid = (lo + hi) / 2;
             double t;
             spansAt(mid, &t);
@@ -204,17 +205,19 @@ inline int CentredSplit(const std::vector<double> &spans, double gap, double az)
     return split;
 }
 
-// `split`: the columns left of Steam's slot, when one is kept (the grid's: -1 for one not chosen yet).
+// `split`: the columns left of Steam's slot (the grid's: -1 for one not chosen yet).
 inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int split = -1) {
     Layout out;
     double bottom, band;
     Band(p, &bottom, &band);
-    // Steam's slot, when the strip centred in front of you would reach it (a gap's width short of it)
+    // Steam's slot: with a split, always; without, when the strip centred in front of you would
+    // reach it (a gap's width short of it)
     const double slot = std::min(p.reserveDeg, p.maxSpanDeg / 2);
     const double slotAz = WrapNear(p.reserveAzDeg, 0);
-    Fit f = FitStrip(cols, p, bottom, band, 0);
-    const bool reserve = slot > 0 && !cols.empty() && std::fabs(slotAz) - slot / 2 < f.total / 2 + p.gapDeg * f.k;
-    if (reserve) f = FitStrip(cols, p, bottom, band, slot);
+    const bool has = slot > 0 && !cols.empty();
+    Fit f = FitStrip(cols, p, bottom, band, has && split >= 0 ? slot : 0);
+    const bool reserve = has && (split >= 0 || std::fabs(slotAz) - slot / 2 < f.total / 2 + p.gapDeg * f.k);
+    if (reserve && split < 0) f = FitStrip(cols, p, bottom, band, slot);
     const double k = f.k, total = f.total;
     const std::vector<double> &spans = f.spans;
     out.shrink = k;

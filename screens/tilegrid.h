@@ -60,12 +60,13 @@ public:
     }
     bool Has(int id) const { return Find(id).ok(); }
 
-    // A new column of its own, right of `after`'s (none, or not in the grid: at the right end).
-    void Add(int id, int after = -1, double widthDeg = 0) {
+    // A new column of its own, right of `after`'s (none, or not in the grid: at an end, the right
+    // one unless `leftEnd`).
+    void Add(int id, int after = -1, double widthDeg = 0, bool leftEnd = false) {
         if (Has(id)) return;
         const Where w = Find(after);
-        const int at = w.ok() ? w.col + 1 : int(cols_.size());
-        InsertCol(at, Col{{Cell{id, 1}}, widthDeg}, w.ok() && w.col < split_);
+        if (!w.ok()) return InsertCol(leftEnd ? 0 : int(cols_.size()), Col{{Cell{id, 1}}, widthDeg}, leftEnd);
+        InsertCol(w.col + 1, Col{{Cell{id, 1}}, widthDeg}, w.col < split_);
     }
     // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such
     // column (at the split: left of Steam's slot when `leftOfSlot`).

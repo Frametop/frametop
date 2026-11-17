@@ -137,11 +137,46 @@ int main() {
         check("split: let go in the slot left of its middle, it goes left", side(3) == -1 && side(2) == 1);
         b.SlotMoved();
         b.Arrange(desk);
-        check("split: the dashboard opened again: chosen again", b.Grid().Split() == 1);
+        check("split: the dashboard opened again, the menu where it was: kept", b.Grid().Split() == 2 && side(3) == -1);
+        bool steady = true;   // (council, 2026-11-16: a fresh choice flipped on the sign of a degree's head turn)
+        for (double az : {0.3, -0.3, 1.0, -1.0, 4.0, -4.0}) {
+            b.params.reserveAzDeg = az;
+            b.SlotMoved();
+            b.Arrange(desk);
+            steady = steady && b.Grid().Split() == 2;
+        }
+        check("split: opened again a few degrees either way: kept", steady);
+        b.params.reserveAzDeg = 110;   // (the palm menu's, after the Steam button's)
+        b.SlotMoved();
+        b.Arrange(desk);
+        const auto clearOf = [&](double a0, double a1) {
+            for (const auto &t : b.Last().tiles)
+                if (t.az1 > a0 && t.az0 < a1) return false;
+            return true;
+        };
+        check("split: opened with the menu off to the side: chosen again, the strip nearer in front",
+              b.Grid().Split() == 3 && clearOf(77, 143) && std::fabs(b.Last().az0 + b.Last().az1) / 2 < 30);
+        b.Unanchor(1);
+        b.Arrange(desk);
+        check("split: a panel gone, the strip short of the menu now: the slot stays (no one crosses it)",
+              b.Last().split == 2 && clearOf(77, 143));
         b.params.reserveAzDeg = 160;   // (behind you)
         b.SlotMoved();
         b.Arrange(desk);
         check("split: a menu the strip doesn't reach: no slot, centred", b.Last().split == -1 && near(b.Last().az0, -b.Last().az1));
+        // anchored with nothing tiled in focus (the anchor button: the focus is the panel itself):
+        // at the end that brings the strip's middle nearer in front of you, not always the right
+        dashtiles::Board e;
+        e.params.reserveAzDeg = 0, e.params.reserveDeg = 66;
+        for (int i = 1; i <= 3; ++i) e.Anchor(i, i - 1, false);
+        e.Arrange(desk);   // [ 1 ] S [ 2 ][ 3 ]: pushed right
+        e.Anchor(4, 4, false);
+        e.Arrange(desk);
+        check("split: a new panel, nothing in focus: the left end when the strip leans right",
+              e.Grid().Cols()[0].cells[0].id == 4 && e.Grid().Split() == 2 && near(e.Last().az0, -e.Last().az1));
+        e.Anchor(5, 5, false);
+        e.Arrange(desk);
+        check("split: ...and the right end when it doesn't", e.Grid().Cols().back().cells[0].id == 5 && e.Grid().Split() == 2);
     }
     // --- anchoring
     {

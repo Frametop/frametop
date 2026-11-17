@@ -177,6 +177,7 @@ int main() {
         const tiling::Placed *seven = b.PlacedOf(7);
         check("split: a new panel then: beside the menu in front, not past it", seven && std::fabs(seven->az0 + seven->az1) / 2 < 90 &&
                                                                                        (seven->az1 <= -33 + 1e-9 || seven->az0 >= 33 - 1e-9));
+        const auto floating = [](int) { dashtiles::Info i; i.aspect = 16.0 / 9, i.fixed = false; return i; };
         // one panel alone, let go left of the menu: it goes left, and stays when let go on itself
         // (council, 2026-11-16: the drop's Remove emptied the grid and cleared the split)
         dashtiles::Board one;
@@ -226,7 +227,6 @@ int main() {
         // where the menu happens to open doesn't flip a default split (council, 2026-11-17)
         dashtiles::Board flip;
         flip.params.reserveAzDeg = 0, flip.params.reserveDeg = 66;
-        const auto floating = [](int) { dashtiles::Info i; i.aspect = 16.0 / 9, i.fixed = false; return i; };
         flip.Anchor(1, -1, false);
         for (int i = 2; i <= 6; ++i) flip.Anchor(i, i - 1, false);
         flip.Arrange(floating);
@@ -239,6 +239,50 @@ int main() {
             flat = flat && flip.Grid().Split(0) == first;
         }
         check("split: the menu opening 40 degrees either way: no panel crosses it", first >= 0 && flat);
+        // torn off and docked again: a new panel, the split still only chosen for you
+        dashtiles::Board dock;
+        dock.params.reserveAzDeg = 0, dock.params.reserveDeg = 66;
+        dock.Anchor(1, -1, false);
+        dock.Arrange(desk);
+        for (int i = 2; i <= 4; ++i) dock.Anchor(i, 1, false), dock.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
+        const tiling::Placed *p3 = dock.PlacedOf(3);
+        const double at3 = (p3->az0 + p3->az1) / 2;
+        dock.TearOff(3, rel);
+        dock.Arrange(desk);
+        dock.Drop(3, dock.DropFor(3, at3, 0, desk), rel);
+        dock.Arrange(desk);
+        const bool docked = dock.Grid().Has(3) && dock.Grid().Split(0) == 0;
+        dock.SlotMoved();
+        dock.Arrange(desk);
+        check("split: torn off and docked again: still chosen again on the next open",
+              docked && dock.Grid().Split(0) == 1 && slotsplit::Off(dock.Last()) < 30);
+        // a drop across the menu makes the split yours
+        dashtiles::Board across;
+        across.params.reserveAzDeg = 0, across.params.reserveDeg = 66;
+        for (int i = 1; i <= 2; ++i) across.Anchor(i, i - 1, false), across.Arrange(desk);   // S [ 1 ][ 2 ]
+        across.Drop(2, across.DropFor(2, -40, 0, desk), rel);   // (left of the menu)
+        across.Arrange(desk);
+        const bool crossed = across.Grid().Split(0) == 1;   // [ 2 ] S [ 1 ]
+        for (int i = 3; i <= 4; ++i) across.Anchor(i, 1, false), across.Arrange(desk);   // (next to 1: right)
+        const bool leans = slotsplit::Off(across.Last()) > 60;
+        across.SlotMoved();
+        across.Arrange(desk);
+        check("split: a drop across the menu is yours: kept on the next open", crossed && leans && across.Grid().Split(0) == 1);
+        // the first choice made with the menu off to one side: followed from the second open in front
+        dashtiles::Board aside;
+        aside.params.reserveAzDeg = 35, aside.params.reserveDeg = 66;
+        aside.SlotMoved();
+        for (int i = 1; i <= 4; ++i) aside.Anchor(i, i - 1, false);
+        aside.Arrange(floating);
+        const int atSide = aside.Grid().Split(0);
+        aside.params.reserveAzDeg = 0;
+        aside.SlotMoved();
+        aside.Arrange(floating);
+        const bool firstKept = aside.Grid().Split(0) == atSide;
+        aside.SlotMoved();
+        aside.Arrange(floating);
+        check("split: chosen with the menu aside, followed from the second open in front",
+              firstKept && aside.Grid().Split(0) != atSide && slotsplit::Off(aside.Last()) < 15);
         // ...but not one you set
         drift.Press(4, dashtiles::Key::Right, desk(4));   // ([ 1 ][ 4 ] S [ 3 ][ 2 ]: 4 steps across)
         drift.Arrange(desk);

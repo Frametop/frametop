@@ -160,9 +160,10 @@ public:
         const double scale = c ? c->scale : 1;
         EndBatch();
         spots_[id].satellite = false;
-        const int was = slot_.SideOf(grid_, id);
-        grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale, d.leftOfSlot);   // (moves it)
-        slot_.Crossed(grid_, id, was);
+        slot_.Move(grid_, id, [&] {   // (Insert moves it)
+            grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale, d.leftOfSlot);
+            return true;
+        });
     }
 
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed. A fixed
@@ -187,10 +188,7 @@ private:
         switch (k) {
             case Key::Left:
             case Key::Right: {
-                const int was = slot_.SideOf(grid_, id);
-                const bool moved = grid_.MoveSide(id, k == Key::Left ? -1 : +1, slot_.Key());
-                slot_.Crossed(grid_, id, was);
-                return moved;
+                return slot_.Move(grid_, id, [&] { return grid_.MoveSide(id, k == Key::Left ? -1 : +1, slot_.Key()); });
             }
             case Key::Up: return grid_.MoveUpDown(id, -1);
             case Key::Down: return grid_.MoveUpDown(id, +1);

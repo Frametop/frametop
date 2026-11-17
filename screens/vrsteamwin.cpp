@@ -257,6 +257,7 @@ void SteamDashEvents(Screen &s, int index) {
                     if (ModCarry(s, index, ev.trackedDeviceIndex, button, ev.data.mouse.x, s.height - ev.data.mouse.y)) break;
                 }
                 const uint8_t xb = gsforward::XButton(int(button));
+                if (down) std::printf("screen %d: a click at %d,%d on Steam's window 0x%x\n", index + 1, x, y, s.gsWin);
                 point();
                 g_link->Button(xb, down);
                 if (xb < 32) g_buttons = down ? g_buttons | 1u << xb : g_buttons & ~(1u << xb);

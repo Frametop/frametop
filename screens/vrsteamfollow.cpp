@@ -89,6 +89,7 @@ void Events(const steamwin::Tracker &t, gsforward::AsyncLink &link, uint32_t *ra
             case vr::VREvent_MouseButtonUp: {
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
                 const uint8_t xb = gsforward::XButton(int(LinuxButton(ev.data.mouse.button)));
+                if (down) std::printf("Steam popup 0x%x: a click at %d,%d\n", w.id, x, y);
                 point();
                 link.Button(xb, down);
                 if (xb < 32) g_buttons = down ? g_buttons | 1u << xb : g_buttons & ~(1u << xb);

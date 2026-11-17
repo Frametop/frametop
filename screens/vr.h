@@ -74,6 +74,9 @@ bool ft_vr_carry_wheel(int notches);
 // ft_vr_screen_present, and its input arrives as events for its index. *restored: it's back
 // where it was when its stream last stopped in this run (Remote Displays' Disconnect).
 bool ft_vr_remote_create(int index, const char *label, double metres, bool *restored);
+// What the remote screen shows (its host and app, each time they're set): its dashboard tile's
+// memory key. Another display on the same panel is another key.
+void ft_vr_remote_named(int index, const char *host, const char *app);
 // A remote screen's host ("192.0.2.61" or with ":PORT") and app ("display:DP-2", "window:0x...",
 // "Desktop"), as ft-layout started it (remote.c); NULL for a screen that isn't a remote one.
 const char *ft_remote_host(int index);

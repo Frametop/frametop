@@ -593,6 +593,7 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
     memcpy(r->host, c.host, sizeof r->host);
     memcpy(r->app, c.app, sizeof r->app);
     memcpy(r->label, c.label, sizeof r->label);
+    ft_vr_remote_named(index, r->host, r->app);   // (a new slot, or new settings on this one)
     r->width = c.width, r->height = c.height, r->fps = c.fps, r->bitrate = c.bitrate, r->metres = c.metres;
     if (peer && !*g_peerpanel) return snprintf(reply, size, "error no ft-peerpanel (together/build, or $FT_PEERPANEL)"), true;
     if (!peer && !*g_stream) return snprintf(reply, size, "error no ft-stream next to ft-screens (or $FT_STREAM)"), true;

@@ -45,13 +45,14 @@ inline bool Rotation(const float m[3][4]) {
     return true;
 }
 
-// m with its scale taken out into out: the axes divided by their mean length. False when they're
-// too short to have a direction. Unequal axes stay unequal (Rotation then rejects them).
-inline bool Unscaled(const float m[3][4], float out[3][4]) {
+// m with its scale taken out into out: the axes divided by their mean length (into `scale`). False
+// when they're too short to have a direction. Unequal axes stay unequal (Rotation then rejects them).
+inline bool Unscaled(const float m[3][4], float out[3][4], double *scale = nullptr) {
     double len = 0;
     for (int c = 0; c < 3; ++c)
         len += std::sqrt(double(m[0][c]) * m[0][c] + double(m[1][c]) * m[1][c] + double(m[2][c]) * m[2][c]) / 3;
     if (!(len > kMinScale)) return false;
+    if (scale) *scale = len;
     for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) out[r][c] = float(m[r][c] / len);
         out[r][3] = m[r][3];
@@ -61,6 +62,7 @@ inline bool Unscaled(const float m[3][4], float out[3][4]) {
 
 struct Anchor {
     float frame[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // the last good one (valid once `ever`)
+    double scale = 1;       // the bar's scale in the last read that counted (Steam draws it scaled)
     bool ever = false;      // a good read came this run: dashboard pins have a frame
     int shownReads = 0;     // good reads in a row (up to kSettleReads)
     const char *why = "no read yet";   // the last read's verdict: why it didn't count, or nullptr (it did)
@@ -69,8 +71,9 @@ struct Anchor {
     // standing universe), and the transform. True when the frame changed (the pins move).
     bool Feed(bool shown, bool read, const float raw[3][4]) {
         float m[3][4];
+        double sc = 1;
         why = !shown ? "hidden" : !read ? "unreadable" : !Finite(raw) ? "not finite" : Identity(raw) ? "identity"
-            : !Unscaled(raw, m) || !Rotation(m) ? "not a rotation" : nullptr;
+            : !Unscaled(raw, m, &sc) || !Rotation(m) ? "not a rotation" : nullptr;
         if (why) {
             shownReads = 0;
             return false;
@@ -78,6 +81,7 @@ struct Anchor {
         if (shownReads < kSettleReads) ++shownReads;
         if (shownReads < kSettleReads) return why = "settling", false;
         why = nullptr;
+        scale = sc;
         bool same = ever;
         for (int r = 0; r < 3 && same; ++r)
             for (int c = 0; c < 4 && same; ++c) same = std::fabs(frame[r][c] - m[r][c]) <= kMoveEps;

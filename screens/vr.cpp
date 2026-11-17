@@ -794,6 +794,15 @@ struct DashAnchor {
 DashAnchor g_dash;
 const dashanchor::Anchor &Dash() { return g_dash.a; }
 
+// The bar's width in the room, metres (its overlay's width at its scale), 0 when it isn't known.
+double DashWidth() {
+    float w = 0;
+    if (g_dash.bar == vr::k_ulOverlayHandleInvalid || !g_dash.a.ever ||
+        vr::VROverlay()->GetOverlayWidthInMeters(g_dash.bar, &w) != vr::VROverlayError_None || !(w > 0))
+        return 0;
+    return w * g_dash.a.scale;
+}
+
 Mat DashFrame() {
     Mat m;
     std::memcpy(m.m, g_dash.a.frame, sizeof m.m);
@@ -6972,9 +6981,12 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         UpdateVisibility();
         *restored = true;
     }
-    const char *host = ft_remote_host(index), *app = ft_remote_app(index);
-    TileKnown(index, std::string("remote:") + (host ? host : "?") + "/" + (app ? app : "?"));
     return true;
+}
+
+void ft_vr_remote_named(int index, const char *host, const char *app) {
+    if (!g_vr || !g_screens.count(index)) return;
+    TileKnown(index, std::string("remote:") + (host && *host ? host : "?") + "/" + (app && *app ? app : "?"));
 }
 
 void ft_vr_beside(void) { g_beside = true; }

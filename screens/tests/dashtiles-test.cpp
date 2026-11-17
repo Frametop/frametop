@@ -18,19 +18,294 @@ int main() {
     const auto info = [](int id) { return dashtiles::Info{id >= 10 ? 4.0 / 3 : 16.0 / 9, id < 10}; };
     // --- the group frame
     {
-        double g[3][4], el;
-        const double head[3] = {1, 1.6, 0}, bar[3] = {1, 1.2, -1.5}, back[3] = {0, 0, 1};
-        dashtiles::GroupFrame(head, bar, back, g, &el);
+        double g[3][4];
+        const double head[3] = {1, 1.6, 0}, ahead[3] = {0, 0, -1}, up[3] = {0, 1, 0};
+        dashtiles::GroupFrame(head, ahead, up, g);
         check("group: at the head", near(g[0][3], 1) && near(g[1][3], 1.6) && near(g[2][3], 0));
-        check("group: -Z towards the bar", near(g[2][2], 1) && near(g[0][2], 0));
+        check("group: -Z the way the head faces", near(g[2][2], 1) && near(g[0][2], 0));
         check("group: level", near(g[1][1], 1) && near(g[1][0], 0) && near(g[1][2], 0));
-        check("group: the bar's elevation", near(el, tiling::Deg(std::atan2(-0.4, 1.5))));
-        const double right[3] = {2.5, 1.6, 0};
-        dashtiles::GroupFrame(head, right, back, g, &el);
-        check("group: turned to a bar on the right (-Z is +X)", near(g[0][2], -1) && near(g[0][0], 0) && near(g[2][0], 1));
-        const double over[3] = {1, 2.5, 0}, tilted[3] = {0, 0.3, 1};
-        dashtiles::GroupFrame(head, over, tilted, g, &el);
-        check("group: a bar right overhead faces its back", near(g[2][2], 1) && near(el, 90, 1e-3));
+        // the way the head faces, level, at any pitch, with or without roll: yaw 20 degrees right
+        const double yaw = tiling::Rad(20);
+        bool steady = true;
+        for (double pitchDeg : {-89.0, -80.0, -76.0, -75.0, -40.0, 0.0, 40.0, 80.0, 89.0})
+            for (double rollDeg : {0.0, 30.0, 60.0}) {
+                const double pt = tiling::Rad(pitchDeg), rl = tiling::Rad(rollDeg);
+                // the head's axes: yaw (about Y), then pitch (about X), then roll (about Z)
+                const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pt), sp = std::sin(pt), cr = std::cos(rl), sr = std::sin(rl);
+                // yaw Ry, pitch Rx, roll Rz: M = Ry * Rx * Rz; forward = M * (0,0,-1), up = M * (0,1,0)
+                const double Ry[3][3] = {{cy, 0, -sy}, {0, 1, 0}, {sy, 0, cy}};
+                const double Rx[3][3] = {{1, 0, 0}, {0, cp, -sp}, {0, sp, cp}};
+                const double Rz[3][3] = {{cr, -sr, 0}, {sr, cr, 0}, {0, 0, 1}};
+                double A[3][3] = {}, M[3][3] = {};
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        for (int k = 0; k < 3; ++k) A[i][j] += Ry[i][k] * Rx[k][j];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        for (int k = 0; k < 3; ++k) M[i][j] += A[i][k] * Rz[k][j];
+                const double f[3] = {-M[0][2], -M[1][2], -M[2][2]}, u[3] = {M[0][1], M[1][1], M[2][1]};
+                dashtiles::GroupFrame(head, f, u, g);
+                const double fx = -g[0][2], fz = -g[2][2];   // the group's -Z
+                const double want = std::atan2(-Ry[0][2], -Ry[2][2]);   // (where the yaw alone turns -Z)
+                double err = std::fabs(std::atan2(fx, fz) - want);
+                err = std::min(err, 2 * tiling::kPi - err);
+                // exact within 75 degrees of level at any roll, and at any pitch without roll; past
+                // 75 with roll, near (looking straight down, a rolled head's way is its up's)
+                const double tol = std::fabs(pitchDeg) <= dashtiles::kUpFromDeg || rollDeg == 0 ? 1e-6 : tiling::Rad(rollDeg) + 1e-6;
+                steady = steady && err <= tol && near(g[1][2], 0);
+            }
+        check("group: the head's way at every pitch to 89 degrees and roll to 60 (no turn to the bar)", steady);
+        // and it turns smoothly with the pitch, rolled (council, 2026-11-16: it jumped 20 degrees at 60)
+        double worst = 0, last = 0;
+        for (double rollDeg : {10.0, 30.0, 60.0})
+            for (int i = 0; i <= 1798; ++i) {
+                const double pt = tiling::Rad(-89.9 + i * 0.1), rl = tiling::Rad(rollDeg);
+                // pitch then roll, facing -Z: forward = Rx * Rz * (0,0,-1), up = Rx * Rz * (0,1,0)
+                const double f[3] = {0, std::sin(pt), -std::cos(pt)};
+                const double u[3] = {-std::sin(rl), std::cos(rl) * std::cos(pt), std::cos(rl) * std::sin(pt)};
+                dashtiles::GroupFrame(head, f, u, g);
+                const double way = tiling::Deg(std::atan2(-g[0][2], g[2][2]));   // (0: -Z)
+                if (i > 0) worst = std::max(worst, std::fabs(tiling::WrapNear(way - last, 0)));
+                last = way;
+            }
+        // (a rolled head's way goes from its forward's to its up's over the ease: steepest at a 60
+        // degree roll, 1.6 degrees a tenth of a degree, against the 20 of the jump)
+        check("group: no jump as the pitch goes (under 2 degrees a tenth of a degree)", worst < 2);
+        const double nan = std::nan(""), bad[3] = {nan, 0, -1};
+        dashtiles::GroupFrame(head, bad, up, g);
+        check("group: a forward that isn't finite: -Z", near(g[2][2], 1) && near(g[0][2], 0));
+        const double sideways[3] = {1, 0, 0}, down[3] = {0, -1, 0};   // rolled onto its side, looking ahead
+        dashtiles::GroupFrame(head, ahead, sideways, g);
+        check("group: a head on its side takes its forward", near(g[2][2], 1));
+        dashtiles::GroupFrame(head, down, down, g);   // (not a head pose: no way at all)
+        check("group: no way at all: -Z", near(g[2][2], 1));
+    }
+    // --- Steam's slot: wherever the menu is round you (the strip keeps it only when it reaches it)
+    {
+        double g[3][4];
+        const double head[3] = {0, 1.6, 0}, ahead[3] = {0, 0, -1}, up[3] = {0, 1, 0};
+        dashtiles::GroupFrame(head, ahead, up, g);
+        double az = 99, span = 0;
+        const double front[3] = {0, 1.0, -1.2};   // a Steam-button open: ahead, low
+        check("slot: Steam's menu ahead is one", dashtiles::SteamSlot(g, front, 1.0, &az, &span) && near(az, 0) &&
+                                                     near(span, 2 * tiling::Deg(std::atan2(0.5, 1.2))));
+        const double palm[3] = {0.8, 1.05, 0.64};   // the palm menu's: low, right and behind
+        check("slot: the palm menu's, off to the side, is one too", dashtiles::SteamSlot(g, palm, 1.0, &az, &span) && az > 90);
+        const double right[3] = {0.6, 1.2, -1.2};
+        check("slot: a little to the right, at its place", dashtiles::SteamSlot(g, right, 1.0, &az, &span) &&
+                                                               near(az, tiling::Deg(std::atan2(0.6, 1.2))));
+        check("slot: no width, none", !dashtiles::SteamSlot(g, front, 0, &az, &span));
+        const double over[3] = {0.05, 2.5, 0};
+        check("slot: right over the head, none", !dashtiles::SteamSlot(g, over, 1.0, &az, &span));
+        const double nan = std::nan(""), lost[3] = {nan, 1, -1};
+        check("slot: a bar that isn't finite, none", !dashtiles::SteamSlot(g, lost, 1.0, &az, &span));
+        check("slot: a width that isn't finite, none", !dashtiles::SteamSlot(g, front, nan, &az, &span) &&
+                                                           !dashtiles::SteamSlot(g, front, INFINITY, &az, &span));
+        const double close[3] = {0, 1.2, -0.25};
+        check("slot: a bar right in front of you, at most kMaxSlotDeg", dashtiles::SteamSlot(g, close, 1.2, &az, &span) &&
+                                                                            near(span, dashtiles::kMaxSlotDeg));
+    }
+    // --- the slot's side stays put (council, 2026-11-16: it was the column count's middle, so an
+    // anchor or a drop moved panels across Steam's menu)
+    {
+        dashtiles::Board b;
+        b.params.reserveAzDeg = 0, b.params.reserveDeg = 66;
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        const auto side = [&](int id) {   // -1 left of the slot, +1 right
+            const tiling::Placed *p = b.PlacedOf(id);
+            return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
+        };
+        b.Arrange(desk);
+        check("split: three round a slot in front: one left, two right, none in it",
+              b.Grid().Split(0) == 1 && side(1) == -1 && side(2) == 1 && side(3) == 1);
+        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+        auto d = b.DropFor(3, -40, 0, desk);   // (on 1's right quarter, left of Steam's menu)
+        b.Drop(3, d, rel);
+        b.Arrange(desk);
+        check("split: let go left of the menu, it goes left", side(1) == -1 && side(3) == -1 && side(2) == 1);
+        b.Anchor(4, 3, false);
+        b.Arrange(desk);
+        check("split: anchored next to a left one, it goes left; the others stay", side(4) == -1 && side(2) == 1 && side(1) == -1);
+        b.Unanchor(4);
+        b.Arrange(desk);
+        check("split: unanchored, the others stay", side(3) == -1 && side(2) == 1);
+        check("split: Meta+Right steps across the menu", b.Press(3, dashtiles::Key::Right, desk(3)) && (b.Arrange(desk), side(3) == 1) &&
+                                                             side(1) == -1 && side(2) == 1);
+        d = b.DropFor(3, -5, 0, desk);   // (in the slot, left of its middle)
+        b.Drop(3, d, rel);
+        b.Arrange(desk);
+        check("split: let go in the slot left of its middle, it goes left", side(3) == -1 && side(2) == 1);
+        b.SlotMoved();
+        b.Arrange(desk);
+        check("split: the dashboard opened again, the menu where it was: kept", b.Grid().Split(0) == 2 && side(3) == -1);
+        bool steady = true;   // (council, 2026-11-16: a fresh choice flipped on the sign of a degree's head turn)
+        for (double az : {0.3, -0.3, 1.0, -1.0, 4.0, -4.0}) {
+            b.params.reserveAzDeg = az;
+            b.SlotMoved();
+            b.Arrange(desk);
+            steady = steady && b.Grid().Split(0) == 2 && b.Split() == 2;
+        }
+        check("split: opened again a few degrees either way: kept", steady);
+        b.params.reserveAzDeg = 110;   // (the palm menu's, after the Steam button's)
+        b.SlotMoved();
+        b.Arrange(desk);
+        const auto clearOf = [&](double a0, double a1) {
+            for (const auto &t : b.Last().tiles)
+                if (t.az1 > a0 && t.az0 < a1) return false;
+            return true;
+        };
+        check("split: opened with the palm menu on the right: its own split, the strip nearer in front",
+              b.Grid().Split(1) == 3 && b.Split() == 3 && clearOf(77, 143) && std::fabs(b.Last().az0 + b.Last().az1) / 2 < 30);
+        check("split: ...the front one kept", b.Grid().Split(0) == 2);
+        b.Unanchor(1);
+        b.Arrange(desk);
+        check("split: a panel gone, the strip short of the menu now: the slot stays (no one crosses it)",
+              b.Last().split == 2 && clearOf(77, 143));
+        b.params.reserveAzDeg = 160;   // (behind you)
+        b.SlotMoved();
+        b.Arrange(desk);
+        check("split: a menu the strip doesn't reach: no slot, centred", b.Last().split == -1 && near(b.Last().az0, -b.Last().az1));
+        check("split: ...the splits kept for when it does (council, 2026-11-16)", b.Grid().Split(1) == 2 && b.Grid().Split(0) == 1);
+        b.params.reserveAzDeg = 0;   // (the Steam button's again, after the palm menu's)
+        b.SlotMoved();
+        b.Arrange(desk);
+        check("split: in front again: the front split, each panel on the side it was put", b.Split() == 1 && side(3) == -1 && side(2) == 1);
+        b.Unanchor(2), b.Unanchor(3);
+        check("split: all gone: no splits", b.Grid().Split(0) == -1 && b.Grid().Split(1) == -1);
+        b.Anchor(7, 7, false);
+        b.Arrange(desk);
+        const tiling::Placed *seven = b.PlacedOf(7);
+        check("split: a new panel then: beside the menu in front, not past it", seven && std::fabs(seven->az0 + seven->az1) / 2 < 90 &&
+                                                                                       (seven->az1 <= -33 + 1e-9 || seven->az0 >= 33 - 1e-9));
+        const auto floating = [](int) { dashtiles::Info i; i.aspect = 16.0 / 9, i.fixed = false; return i; };
+        // one panel alone, let go left of the menu: it goes left, and stays when let go on itself
+        // (council, 2026-11-16: the drop's Remove emptied the grid and cleared the split)
+        dashtiles::Board one;
+        one.params.reserveAzDeg = 0, one.params.reserveDeg = 66;
+        one.Anchor(1, -1, false);
+        one.Arrange(desk);
+        const auto sideIn = [](const dashtiles::Board &x, int id) {
+            const tiling::Placed *p = x.PlacedOf(id);
+            return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
+        };
+        const bool rightFirst = sideIn(one, 1) == 1;
+        one.Drop(1, one.DropFor(1, -20, 0, desk), rel);
+        one.Arrange(desk);
+        const bool wentLeft = sideIn(one, 1) == -1;
+        const tiling::Placed *p1 = one.PlacedOf(1);
+        one.Drop(1, one.DropFor(1, p1 ? (p1->az0 + p1->az1) / 2 : 0, 0, desk), rel);
+        one.Arrange(desk);
+        check("split: one panel let go left of the menu goes left, and stays on itself",
+              rightFirst && wentLeft && sideIn(one, 1) == -1 && one.Grid().Split(0) == 1);
+        // splits only chosen for you: chosen again when a fresh one is much nearer in front
+        dashtiles::Board drift;
+        drift.params.reserveAzDeg = 0, drift.params.reserveDeg = 66;
+        drift.Anchor(1, -1, false);
+        drift.Arrange(desk);
+        for (int i = 2; i <= 4; ++i) drift.Anchor(i, 1, false), drift.Arrange(desk);   // (all next to 1: right of the menu)
+        const bool lopsided = drift.Grid().Split(0) == 0 && slotsplit::Off(drift.Last()) > 90;
+        drift.SlotMoved();
+        drift.Arrange(desk);
+        check("split: adds all went one side: the next open chooses again, the strip in front",
+              lopsided && drift.Grid().Split(0) == 2 && slotsplit::Off(drift.Last()) < 1);
+        // a reorder on one side doesn't make it yours (council, 2026-11-17)
+        dashtiles::Board same;
+        same.params.reserveAzDeg = 0, same.params.reserveDeg = 66;
+        same.Anchor(1, -1, false);
+        same.Arrange(desk);
+        for (int i = 2; i <= 4; ++i) same.Anchor(i, 1, false), same.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
+        const bool swapped = same.Press(3, dashtiles::Key::Right, desk(3));
+        same.Arrange(desk);
+        const tiling::Placed *p4 = same.PlacedOf(4);
+        same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), rel);   // (let go where it was)
+        same.Arrange(desk);
+        const bool stillLopsided = same.Grid().Split(0) == 0;
+        same.SlotMoved();
+        same.Arrange(desk);
+        check("split: moves on one side of the menu: still chosen again on the next open",
+              swapped && stillLopsided && same.Grid().Split(0) == 2 && slotsplit::Off(same.Last()) < 1);
+        // where the menu happens to open doesn't flip a default split (council, 2026-11-17)
+        dashtiles::Board flip;
+        flip.params.reserveAzDeg = 0, flip.params.reserveDeg = 66;
+        flip.Anchor(1, -1, false);
+        for (int i = 2; i <= 6; ++i) flip.Anchor(i, i - 1, false);
+        flip.Arrange(floating);
+        const int first = flip.Grid().Split(0);
+        bool flat = true;
+        for (double az : {40.0, 0.0, -40.0, 0.0, 44.0, -44.0}) {
+            flip.params.reserveAzDeg = az;
+            flip.SlotMoved();
+            flip.Arrange(floating);
+            flat = flat && flip.Grid().Split(0) == first;
+        }
+        check("split: the menu opening 40 degrees either way: no panel crosses it", first >= 0 && flat);
+        // torn off and docked again: a new panel, the split still only chosen for you
+        dashtiles::Board dock;
+        dock.params.reserveAzDeg = 0, dock.params.reserveDeg = 66;
+        dock.Anchor(1, -1, false);
+        dock.Arrange(desk);
+        for (int i = 2; i <= 4; ++i) dock.Anchor(i, 1, false), dock.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
+        const tiling::Placed *p3 = dock.PlacedOf(3);
+        const double at3 = p3 ? (p3->az0 + p3->az1) / 2 : 0;
+        dock.TearOff(3, rel);
+        dock.Arrange(desk);
+        dock.Drop(3, dock.DropFor(3, at3, 0, desk), rel);
+        dock.Arrange(desk);
+        const bool docked = dock.Grid().Has(3) && dock.Grid().Split(0) == 0;
+        dock.SlotMoved();
+        dock.Arrange(desk);
+        check("split: torn off and docked again: still chosen again on the next open",
+              docked && dock.Grid().Split(0) == 1 && slotsplit::Off(dock.Last()) < 30);
+        // a drop across the menu makes the split yours
+        dashtiles::Board across;
+        across.params.reserveAzDeg = 0, across.params.reserveDeg = 66;
+        for (int i = 1; i <= 2; ++i) across.Anchor(i, i - 1, false), across.Arrange(desk);   // S [ 1 ][ 2 ]
+        across.Drop(2, across.DropFor(2, -40, 0, desk), rel);   // (left of the menu)
+        across.Arrange(desk);
+        const bool crossed = across.Grid().Split(0) == 1;   // [ 2 ] S [ 1 ]
+        for (int i = 3; i <= 4; ++i) across.Anchor(i, 1, false), across.Arrange(desk);   // (next to 1: right)
+        const bool leans = slotsplit::Off(across.Last()) > 60;
+        across.SlotMoved();
+        across.Arrange(desk);
+        check("split: a drop across the menu is yours: kept on the next open", crossed && leans && across.Grid().Split(0) == 1);
+        // the first choice made with the menu off to one side: followed from the second open in front
+        dashtiles::Board aside;
+        aside.params.reserveAzDeg = 35, aside.params.reserveDeg = 66;
+        aside.SlotMoved();
+        for (int i = 1; i <= 4; ++i) aside.Anchor(i, i - 1, false);
+        aside.Arrange(floating);
+        const int atSide = aside.Grid().Split(0);
+        aside.params.reserveAzDeg = 0;
+        aside.SlotMoved();
+        aside.Arrange(floating);
+        const bool firstKept = aside.Grid().Split(0) == atSide;
+        aside.SlotMoved();
+        aside.Arrange(floating);
+        check("split: chosen with the menu aside, followed from the second open in front",
+              firstKept && aside.Grid().Split(0) != atSide && slotsplit::Off(aside.Last()) < 15);
+        // ...but not one you set
+        drift.Press(4, dashtiles::Key::Right, desk(4));   // ([ 1 ][ 4 ] S [ 3 ][ 2 ]: 4 steps across)
+        drift.Arrange(desk);
+        const bool pushed = drift.Grid().Split(0) == 1 && slotsplit::Off(drift.Last()) > 30 + 1;
+        drift.SlotMoved();
+        drift.Arrange(desk);
+        check("split: one you set is kept on the next open", pushed && drift.Grid().Split(0) == 1);
+        check("split keys: in front, right, left, wrapped", slotsplit::KeyOf(0) == 0 && slotsplit::KeyOf(44) == 0 &&
+                                                               slotsplit::KeyOf(110) == 1 && slotsplit::KeyOf(-110) == 2 &&
+                                                               slotsplit::KeyOf(370) == 0 && slotsplit::KeyOf(250) == 2);
+        // anchored with nothing tiled in focus (the anchor button: the focus is the panel itself):
+        // at the end that brings the strip's middle nearer in front of you, not always the right
+        dashtiles::Board e;
+        e.params.reserveAzDeg = 0, e.params.reserveDeg = 66;
+        for (int i = 1; i <= 3; ++i) e.Anchor(i, i - 1, false);
+        e.Arrange(desk);   // [ 1 ] S [ 2 ][ 3 ]: pushed right
+        e.Anchor(4, 4, false);
+        e.Arrange(desk);
+        check("split: a new panel, nothing in focus: the left end when the strip leans right",
+              e.Grid().Cols()[0].cells[0].id == 4 && e.Grid().Split(0) == 2 && near(e.Last().az0, -e.Last().az1));
+        e.Anchor(5, 5, false);
+        e.Arrange(desk);
+        check("split: ...and the right end when it doesn't", e.Grid().Cols().back().cells[0].id == 5 && e.Grid().Split(0) == 2);
     }
     // --- anchoring
     {

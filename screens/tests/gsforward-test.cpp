@@ -152,7 +152,19 @@ static void WithX() {
 
     link.Tag(w, 0x0000000500000007ull);
     xcb_intern_atom_reply_t *a = xcb_intern_atom_reply(app, xcb_intern_atom(app, 0, 32, "STEAM_GAMESCOPE_VROVERLAY_TARGET"), nullptr);
-    xcb_get_property_reply_t *p = xcb_get_property_reply(app, xcb_get_property(app, 0, w, a->atom, XCB_ATOM_CARDINAL, 0, 2), nullptr);
+    // The tag as the app sees it, once it's `set` (or gone), within a second: Link's connection
+    // flushes but doesn't wait, so the X server may answer this one first.
+    const auto tagged = [&](bool set) {
+        xcb_get_property_reply_t *r = nullptr;
+        for (int i = 0; i < 200; ++i) {
+            std::free(r);
+            r = xcb_get_property_reply(app, xcb_get_property(app, 0, w, a->atom, XCB_ATOM_CARDINAL, 0, 2), nullptr);
+            if (r && (set ? xcb_get_property_value_length(r) == 8 : r->type == XCB_ATOM_NONE)) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return r;
+    };
+    xcb_get_property_reply_t *p = tagged(true);
     CHECK(p && xcb_get_property_value_length(p) == 8);
     if (p && xcb_get_property_value_length(p) == 8) {
         const uint32_t *v = static_cast<const uint32_t *>(xcb_get_property_value(p));
@@ -160,7 +172,7 @@ static void WithX() {
     }
     std::free(p);
     link.Untag(w);
-    p = xcb_get_property_reply(app, xcb_get_property(app, 0, w, a->atom, XCB_ATOM_CARDINAL, 0, 2), nullptr);
+    p = tagged(false);
     CHECK(p && p->type == XCB_ATOM_NONE);
     std::free(p), std::free(a);
 

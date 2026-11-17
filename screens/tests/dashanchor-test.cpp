@@ -85,6 +85,7 @@ int main() {
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c) close = close && std::fabs(d.frame[r][c] - b[r][c]) < 1e-5;
         check("...with the scale taken out", close);
+        check("...and kept (the bar's width in the room)", std::fabs(d.scale - 0.369) < 1e-5);
     }
     {
         // tilt is kept: the frame is the bar's whole pose

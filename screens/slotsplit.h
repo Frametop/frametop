@@ -91,7 +91,8 @@ private:
     std::array<bool, tilegrid::kSplits> userSet_{};      // each split, set by you (not just chosen for you)
     std::array<double, tilegrid::kSplits> lastAz_{};   // where Steam's menu was the open before, at each
     // (A split's value is the grid's, its flags these: a split only goes from none to one in
-    // Arrange, which clears userSet_. Splits put back from somewhere else would need them too.)
+    // Arrange, which clears userSet_, or in Board::RestoreAll's KeepSplits, which copies the same
+    // board's. Splits put back from somewhere else would need their flags too.)
 };
 
 }  // namespace slotsplit

@@ -193,7 +193,7 @@ int main() {
         one.Arrange(desk);
         const bool wentLeft = sideIn(one, 1) == -1;
         const tiling::Placed *p1 = one.PlacedOf(1);
-        one.Drop(1, one.DropFor(1, (p1->az0 + p1->az1) / 2, 0, desk), rel);
+        one.Drop(1, one.DropFor(1, p1 ? (p1->az0 + p1->az1) / 2 : 0, 0, desk), rel);
         one.Arrange(desk);
         check("split: one panel let go left of the menu goes left, and stays on itself",
               rightFirst && wentLeft && sideIn(one, 1) == -1 && one.Grid().Split(0) == 1);
@@ -217,7 +217,7 @@ int main() {
         const bool swapped = same.Press(3, dashtiles::Key::Right, desk(3));
         same.Arrange(desk);
         const tiling::Placed *p4 = same.PlacedOf(4);
-        same.Drop(4, same.DropFor(4, (p4->az0 + p4->az1) / 2, 0, desk), rel);   // (let go where it was)
+        same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), rel);   // (let go where it was)
         same.Arrange(desk);
         const bool stillLopsided = same.Grid().Split(0) == 0;
         same.SlotMoved();
@@ -246,7 +246,7 @@ int main() {
         dock.Arrange(desk);
         for (int i = 2; i <= 4; ++i) dock.Anchor(i, 1, false), dock.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
         const tiling::Placed *p3 = dock.PlacedOf(3);
-        const double at3 = (p3->az0 + p3->az1) / 2;
+        const double at3 = p3 ? (p3->az0 + p3->az1) / 2 : 0;
         dock.TearOff(3, rel);
         dock.Arrange(desk);
         dock.Drop(3, dock.DropFor(3, at3, 0, desk), rel);

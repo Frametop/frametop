@@ -177,6 +177,43 @@ int main() {
         const tiling::Placed *seven = b.PlacedOf(7);
         check("split: a new panel then: beside the menu in front, not past it", seven && std::fabs(seven->az0 + seven->az1) / 2 < 90 &&
                                                                                        (seven->az1 <= -33 + 1e-9 || seven->az0 >= 33 - 1e-9));
+        // one panel alone, let go left of the menu: it goes left, and stays when let go on itself
+        // (council, 2026-11-16: the drop's Remove emptied the grid and cleared the split)
+        dashtiles::Board one;
+        one.params.reserveAzDeg = 0, one.params.reserveDeg = 66;
+        one.Anchor(1, -1, false);
+        one.Arrange(desk);
+        const auto sideIn = [](const dashtiles::Board &x, int id) {
+            const tiling::Placed *p = x.PlacedOf(id);
+            return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
+        };
+        const bool rightFirst = sideIn(one, 1) == 1;
+        one.Drop(1, one.DropFor(1, -20, 0, desk), rel);
+        one.Arrange(desk);
+        const bool wentLeft = sideIn(one, 1) == -1;
+        const tiling::Placed *p1 = one.PlacedOf(1);
+        one.Drop(1, one.DropFor(1, (p1->az0 + p1->az1) / 2, 0, desk), rel);
+        one.Arrange(desk);
+        check("split: one panel let go left of the menu goes left, and stays on itself",
+              rightFirst && wentLeft && sideIn(one, 1) == -1 && one.Grid().Split(0) == 1);
+        // splits only chosen for you: chosen again when a fresh one is much nearer in front
+        dashtiles::Board drift;
+        drift.params.reserveAzDeg = 0, drift.params.reserveDeg = 66;
+        drift.Anchor(1, -1, false);
+        drift.Arrange(desk);
+        for (int i = 2; i <= 4; ++i) drift.Anchor(i, 1, false), drift.Arrange(desk);   // (all next to 1: right of the menu)
+        const bool lopsided = drift.Grid().Split(0) == 0 && dashtiles::Board::Off(drift.Last()) > 90;
+        drift.SlotMoved();
+        drift.Arrange(desk);
+        check("split: adds all went one side: the next open chooses again, the strip in front",
+              lopsided && drift.Grid().Split(0) == 2 && dashtiles::Board::Off(drift.Last()) < 1);
+        // ...but not one you set
+        drift.Press(4, dashtiles::Key::Right, desk(4));   // ([ 1 ][ 4 ] S [ 3 ][ 2 ]: 4 steps across)
+        drift.Arrange(desk);
+        const bool pushed = drift.Grid().Split(0) == 1 && dashtiles::Board::Off(drift.Last()) > 30 + 1;
+        drift.SlotMoved();
+        drift.Arrange(desk);
+        check("split: one you set is kept on the next open", pushed && drift.Grid().Split(0) == 1);
         // anchored with nothing tiled in focus (the anchor button: the focus is the panel itself):
         // at the end that brings the strip's middle nearer in front of you, not always the right
         dashtiles::Board e;

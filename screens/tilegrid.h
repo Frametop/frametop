@@ -12,11 +12,12 @@
 // Steam's menu is a slot in the strip (tiling.h): a split is how many columns are left of it, one
 // for each place the menu opens (kSplits: in front, as the Steam button opens it, and off to the
 // right or the left, as the palm menu does; dashtiles.h's SplitKey), so a palm-menu open leaves
-// the front one as it was. Each column stays on its side of each: a new one next to the focused
-// one goes on its side, a drop on the side it was let go, and Meta+Left/Right steps a panel
-// across the slot shown (alone in its column: the column goes; with others: out into a column of
-// its own) rather than past it. -1: not chosen yet (the tiling chooses one, Board keeps it); an
-// emptied grid has none.
+// the front one as it was. A column stays on its side of the slot shown: a new one next to the
+// focused one goes on its side (of each split), a drop on the side it was let go, and
+// Meta+Left/Right steps a panel across the slot (alone in its column: the column goes; with
+// others: out into a column of its own) rather than past it. A swap of two columns round another
+// place's slot moves them both across it: splits count columns, so one order can't keep them all.
+// -1: not chosen yet (the tiling chooses one, Board keeps it); a grid emptied by Remove has none.
 //
 // Header only, so its test runs anywhere.
 #pragma once
@@ -82,7 +83,7 @@ public:
     // column (at the split: left of Steam's slot when `leftOfSlot`).
     void Insert(int id, int col, int row, bool newColumn, double weight = 1, double widthDeg = 0, double scale = 1,
                 bool leftOfSlot = false) {
-        if (Has(id)) Remove(id);
+        Take(id);   // (moved: the splits stay, even with the grid empty for a moment)
         col = std::clamp(col, 0, int(cols_.size()));
         if (newColumn || col == int(cols_.size())) {
             InsertCol(col, Col{{Cell{id, Clamp(weight), Sc(scale)}}, widthDeg}, leftOfSlot);
@@ -92,16 +93,11 @@ public:
         row = std::clamp(row, 0, int(cells.size()));
         cells.insert(cells.begin() + row, Cell{id, Clamp(weight), Sc(scale)});
     }
-    // Out of the grid (its column goes when it was the last in it). False if it wasn't in it.
+    // Out of the grid (its column goes when it was the last in it; the splits with the last
+    // panel). False if it wasn't in it.
     bool Remove(int id) {
-        const Where w = Find(id);
-        if (!w.ok()) return false;
-        auto &cells = cols_[w.col].cells;
-        cells.erase(cells.begin() + w.row);
-        if (cells.empty()) {
-            cols_.erase(cols_.begin() + w.col);
-            for (int &s : split_) s = cols_.empty() ? -1 : s - (w.col < s);
-        }
+        if (!Take(id)) return false;
+        if (cols_.empty()) split_.fill(-1);
         return true;
     }
 
@@ -113,7 +109,8 @@ public:
         dir = dir < 0 ? -1 : 1;
         Col &col = cols_[w.col];
         const int next = w.col + dir;
-        int none = -1, &split = key >= 0 && key < kSplits ? split_[size_t(key)] : none;
+        int none = -1;
+        int &split = key >= 0 && key < kSplits ? split_[size_t(key)] : none;
         const bool across = split >= 0 && w.col == (dir > 0 ? split - 1 : split);
         if (col.cells.size() == 1) {
             if (across) return split -= dir, true;   // its column steps across the slot
@@ -201,6 +198,18 @@ public:
 private:
     static double Clamp(double w) { return std::clamp(w, kMinWeight, kMaxWeight); }
     static double Sc(double s) { return std::clamp(s, kMinScale, 1.0); }
+    // Out of its cell (its column too when it was the last in it), the splits counting columns.
+    bool Take(int id) {
+        const Where w = Find(id);
+        if (!w.ok()) return false;
+        auto &cells = cols_[w.col].cells;
+        cells.erase(cells.begin() + w.row);
+        if (cells.empty()) {
+            cols_.erase(cols_.begin() + w.col);
+            for (int &s : split_) s -= w.col < s;
+        }
+        return true;
+    }
     // A new column at `at` (at a split: left of its slot when `left`).
     void InsertCol(int at, Col c, bool left) {
         cols_.insert(cols_.begin() + at, std::move(c));

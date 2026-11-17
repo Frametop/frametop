@@ -20,6 +20,7 @@
 #include "tiling.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -158,9 +159,9 @@ public:
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
         EndBatch();
-        grid_.Remove(id);
         spots_[id].satellite = false;
-        grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale, d.leftOfSlot);
+        grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale, d.leftOfSlot);   // (moves it)
+        if (inUse_) userSet_[size_t(key_)] = true;
     }
 
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed. A fixed
@@ -183,8 +184,12 @@ private:
         const bool grow = k == Key::Wider || k == Key::Taller;
         const double f = grow ? tilegrid::kStep : 1 / tilegrid::kStep;
         switch (k) {
-            case Key::Left: return grid_.MoveSide(id, -1, inUse_ ? key_ : -1);
-            case Key::Right: return grid_.MoveSide(id, +1, inUse_ ? key_ : -1);
+            case Key::Left:
+            case Key::Right: {
+                const bool moved = grid_.MoveSide(id, k == Key::Left ? -1 : +1, inUse_ ? key_ : -1);
+                if (moved && inUse_) userSet_[size_t(key_)] = true;
+                return moved;
+            }
             case Key::Up: return grid_.MoveUpDown(id, -1);
             case Key::Down: return grid_.MoveUpDown(id, +1);
             case Key::Wider:
@@ -218,18 +223,25 @@ public:
     // Laid out. Until the strip centred in front of you reaches Steam's menu, it stays centred
     // and has no slot. Once it does, the slot stays for this open, with the grid's split for where
     // the menu opened (SplitKey): the one kept from an earlier open there, else the tiling's
-    // choice, kept from then on (tilegrid.h keeps each column on its side). Nothing compares or
-    // replaces a kept split, so the side a panel was put on stays (council, 2026-11-16).
+    // choice, kept from then on (tilegrid.h keeps each column on its side). A split you set there
+    // (a drop, or Meta+Left/Right) is never replaced (council, 2026-11-16). One only chosen for
+    // you is chosen again when an open finds a fresh choice puts the strip's middle more than
+    // kResplitDeg nearer in front (adds next to the focused panel all went one side), and kept
+    // otherwise, so no panel crosses the menu on a degree of head turn.
+    static constexpr double kResplitDeg = 30;
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
         const auto cols = Columns(info);
         if (!inUse_) {
-            last_ = tiling::Arrange(cols, params);
-            if (last_.split < 0) return last_;
+            const tiling::Layout probe = tiling::Arrange(cols, params);
+            if (probe.split < 0) return last_ = probe;
             inUse_ = true;
+            const int kept = grid_.Split(key_);
+            if (kept >= 0 && !userSet_[size_t(key_)] && Off(tiling::Arrange(cols, params, kept)) > Off(probe) + kResplitDeg)
+                grid_.SetSplit(key_, probe.split);
         }
         last_ = tiling::Arrange(cols, params, Split());
-        if (last_.split >= 0 && Split() < 0) grid_.SetSplit(key_, last_.split);
+        if (last_.split >= 0 && Split() < 0) grid_.SetSplit(key_, last_.split), userSet_[size_t(key_)] = false;
         return last_;
     }
     // Which of the grid's splits a menu `azDeg` round opens with: in front (the Steam button's,
@@ -240,6 +252,8 @@ public:
     void SlotMoved() { key_ = SplitKey(tiling::WrapNear(params.reserveAzDeg, 0)), inUse_ = false; }
     // The split in use now (-1: no slot in the strip, or not chosen yet).
     int Split() const { return inUse_ ? grid_.Split(key_) : -1; }
+    // How far the strip's middle is from in front of you, in degrees.
+    static double Off(const tiling::Layout &l) { return std::fabs(tiling::WrapNear((l.az0 + l.az1) / 2, 0)); }
     const tiling::Layout &Last() const { return last_; }
     const tiling::Placed *PlacedOf(int id) const {
         for (const auto &p : last_.tiles)
@@ -378,6 +392,7 @@ private:
     tiling::Layout last_;
     int key_ = 0;           // SplitKey of Steam's menu now
     bool inUse_ = false;    // the slot is in the strip, this open
+    std::array<bool, tilegrid::kSplits> userSet_{};   // each split, set by you (not just chosen for you)
 };
 
 }  // namespace dashtiles

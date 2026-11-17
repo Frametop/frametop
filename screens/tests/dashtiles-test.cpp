@@ -117,7 +117,7 @@ int main() {
         };
         b.Arrange(desk);
         check("split: three round a slot in front: one left, two right, none in it",
-              b.Grid().Split() == 1 && side(1) == -1 && side(2) == 1 && side(3) == 1);
+              b.Grid().Split(0) == 1 && side(1) == -1 && side(2) == 1 && side(3) == 1);
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         auto d = b.DropFor(3, -40, 0, desk);   // (on 1's right quarter, left of Steam's menu)
         b.Drop(3, d, rel);
@@ -137,13 +137,13 @@ int main() {
         check("split: let go in the slot left of its middle, it goes left", side(3) == -1 && side(2) == 1);
         b.SlotMoved();
         b.Arrange(desk);
-        check("split: the dashboard opened again, the menu where it was: kept", b.Grid().Split() == 2 && side(3) == -1);
+        check("split: the dashboard opened again, the menu where it was: kept", b.Grid().Split(0) == 2 && side(3) == -1);
         bool steady = true;   // (council, 2026-11-16: a fresh choice flipped on the sign of a degree's head turn)
         for (double az : {0.3, -0.3, 1.0, -1.0, 4.0, -4.0}) {
             b.params.reserveAzDeg = az;
             b.SlotMoved();
             b.Arrange(desk);
-            steady = steady && b.Grid().Split() == 2;
+            steady = steady && b.Grid().Split(0) == 2 && b.Split() == 2;
         }
         check("split: opened again a few degrees either way: kept", steady);
         b.params.reserveAzDeg = 110;   // (the palm menu's, after the Steam button's)
@@ -154,8 +154,9 @@ int main() {
                 if (t.az1 > a0 && t.az0 < a1) return false;
             return true;
         };
-        check("split: opened with the menu off to the side: chosen again, the strip nearer in front",
-              b.Grid().Split() == 3 && clearOf(77, 143) && std::fabs(b.Last().az0 + b.Last().az1) / 2 < 30);
+        check("split: opened with the palm menu on the right: its own split, the strip nearer in front",
+              b.Grid().Split(1) == 3 && b.Split() == 3 && clearOf(77, 143) && std::fabs(b.Last().az0 + b.Last().az1) / 2 < 30);
+        check("split: ...the front one kept", b.Grid().Split(0) == 2);
         b.Unanchor(1);
         b.Arrange(desk);
         check("split: a panel gone, the strip short of the menu now: the slot stays (no one crosses it)",
@@ -164,6 +165,18 @@ int main() {
         b.SlotMoved();
         b.Arrange(desk);
         check("split: a menu the strip doesn't reach: no slot, centred", b.Last().split == -1 && near(b.Last().az0, -b.Last().az1));
+        check("split: ...the splits kept for when it does (council, 2026-11-16)", b.Grid().Split(1) == 2 && b.Grid().Split(0) == 1);
+        b.params.reserveAzDeg = 0;   // (the Steam button's again, after the palm menu's)
+        b.SlotMoved();
+        b.Arrange(desk);
+        check("split: in front again: the front split, each panel on the side it was put", b.Split() == 1 && side(3) == -1 && side(2) == 1);
+        b.Unanchor(2), b.Unanchor(3);
+        check("split: all gone: no splits", b.Grid().Split(0) == -1 && b.Grid().Split(1) == -1);
+        b.Anchor(7, 7, false);
+        b.Arrange(desk);
+        const tiling::Placed *seven = b.PlacedOf(7);
+        check("split: a new panel then: beside the menu in front, not past it", seven && std::fabs(seven->az0 + seven->az1) / 2 < 90 &&
+                                                                                       (seven->az1 <= -33 + 1e-9 || seven->az0 >= 33 - 1e-9));
         // anchored with nothing tiled in focus (the anchor button: the focus is the panel itself):
         // at the end that brings the strip's middle nearer in front of you, not always the right
         dashtiles::Board e;
@@ -173,10 +186,10 @@ int main() {
         e.Anchor(4, 4, false);
         e.Arrange(desk);
         check("split: a new panel, nothing in focus: the left end when the strip leans right",
-              e.Grid().Cols()[0].cells[0].id == 4 && e.Grid().Split() == 2 && near(e.Last().az0, -e.Last().az1));
+              e.Grid().Cols()[0].cells[0].id == 4 && e.Grid().Split(0) == 2 && near(e.Last().az0, -e.Last().az1));
         e.Anchor(5, 5, false);
         e.Arrange(desk);
-        check("split: ...and the right end when it doesn't", e.Grid().Cols().back().cells[0].id == 5 && e.Grid().Split() == 2);
+        check("split: ...and the right end when it doesn't", e.Grid().Cols().back().cells[0].id == 5 && e.Grid().Split(0) == 2);
     }
     // --- anchoring
     {

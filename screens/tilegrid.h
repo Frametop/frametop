@@ -9,16 +9,20 @@
 // Meta+Ctrl+Left/Right makes its column narrower or wider, Meta+Ctrl+Up/Down its row taller or
 // shorter. A panel anchored gets a column of its own right of the focused one.
 //
-// Steam's menu is a slot in the strip when the strip reaches it (tiling.h): the split is how many
-// columns are left of it. Each column stays on its side: a new one next to the focused one goes on
-// its side, a drop on the side it was let go, and Meta+Left/Right steps a panel across the slot
-// (alone in its column: the column goes; with others: out into a column of its own) rather than
-// past it. -1: not chosen yet (the tiling chooses one, Board keeps it).
+// Steam's menu is a slot in the strip (tiling.h): a split is how many columns are left of it, one
+// for each place the menu opens (kSplits: in front, as the Steam button opens it, and off to the
+// right or the left, as the palm menu does; dashtiles.h's SplitKey), so a palm-menu open leaves
+// the front one as it was. Each column stays on its side of each: a new one next to the focused
+// one goes on its side, a drop on the side it was let go, and Meta+Left/Right steps a panel
+// across the slot shown (alone in its column: the column goes; with others: out into a column of
+// its own) rather than past it. -1: not chosen yet (the tiling chooses one, Board keeps it); an
+// emptied grid has none.
 //
 // Header only, so its test runs anywhere.
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -30,6 +34,7 @@ constexpr double kStep = 1.1;         // one key press: 10% wider, taller, narro
 constexpr double kMinWeight = 0.2, kMaxWeight = 5;
 constexpr double kMinWidthDeg = 12, kMaxWidthDeg = 160;
 constexpr double kMinScale = 0.3;     // a fixed panel at least this much of its row (never more than all of it)
+constexpr int kSplits = 3;            // a split round Steam's menu for each place it opens
 
 struct Cell {
     int id = 0;
@@ -60,13 +65,18 @@ public:
     }
     bool Has(int id) const { return Find(id).ok(); }
 
-    // A new column of its own, right of `after`'s (none, or not in the grid: at an end, the right
-    // one unless `leftEnd`).
-    void Add(int id, int after = -1, double widthDeg = 0, bool leftEnd = false) {
+    // A new column of its own, right of `after`'s, on its side of each split (none, or not in the
+    // grid: at the right end).
+    void Add(int id, int after = -1, double widthDeg = 0) {
         if (Has(id)) return;
         const Where w = Find(after);
-        if (!w.ok()) return InsertCol(leftEnd ? 0 : int(cols_.size()), Col{{Cell{id, 1}}, widthDeg}, leftEnd);
-        InsertCol(w.col + 1, Col{{Cell{id, 1}}, widthDeg}, w.col < split_);
+        if (!w.ok()) return AddAtEnd(id, false, widthDeg);
+        InsertCol(w.col + 1, Col{{Cell{id, 1}}, widthDeg}, true);   // (at a split: `after` is left of it)
+    }
+    // A new column of its own at the left end or the right one.
+    void AddAtEnd(int id, bool left, double widthDeg = 0) {
+        if (Has(id)) return;
+        InsertCol(left ? 0 : int(cols_.size()), Col{{Cell{id, 1}}, widthDeg}, left);
     }
     // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such
     // column (at the split: left of Steam's slot when `leftOfSlot`).
@@ -90,21 +100,23 @@ public:
         cells.erase(cells.begin() + w.row);
         if (cells.empty()) {
             cols_.erase(cols_.begin() + w.col);
-            if (w.col < split_) --split_;
+            for (int &s : split_) s = cols_.empty() ? -1 : s - (w.col < s);
         }
         return true;
     }
 
-    // Meta+Left (-1) / Meta+Right (+1), `slot` when Steam's slot is in the strip. False when nothing changed.
-    bool MoveSide(int id, int dir, bool slot = false) {
+    // Meta+Left (-1) / Meta+Right (+1), `key` the split whose slot is in the strip (-1: none). False
+    // when nothing changed.
+    bool MoveSide(int id, int dir, int key = -1) {
         const Where w = Find(id);
         if (!w.ok() || dir == 0) return false;
         dir = dir < 0 ? -1 : 1;
         Col &col = cols_[w.col];
         const int next = w.col + dir;
-        const bool across = slot && split_ >= 0 && w.col == (dir > 0 ? split_ - 1 : split_);
+        int none = -1, &split = key >= 0 && key < kSplits ? split_[size_t(key)] : none;
+        const bool across = split >= 0 && w.col == (dir > 0 ? split - 1 : split);
         if (col.cells.size() == 1) {
-            if (across) return split_ -= dir, true;   // its column steps across the slot
+            if (across) return split -= dir, true;   // its column steps across the slot
             if (next < 0 || next >= int(cols_.size())) return false;
             std::swap(cols_[w.col], cols_[next]);
             return true;
@@ -113,7 +125,7 @@ public:
         col.cells.erase(col.cells.begin() + w.row);
         if (across) {
             // across the slot: into a column of its own, the slot's nearest that side
-            InsertCol(split_, Col{{Cell{cell.id, 1, cell.scale}}, 0}, dir < 0);
+            InsertCol(split, Col{{Cell{cell.id, 1, cell.scale}}, 0}, dir < 0);
             return true;
         }
         if (next < 0 || next >= int(cols_.size())) {
@@ -176,20 +188,27 @@ public:
         return w.ok() ? cols_[w.col].widthDeg : 0;
     }
 
-    // The columns left of Steam's slot (-1: not chosen yet).
-    int Split() const { return split_; }
-    void SetSplit(int split) { split_ = split < 0 ? -1 : std::min(split, int(cols_.size())); }
+    // The columns left of Steam's slot where the menu opens at `key` (-1: not chosen yet).
+    int Split(int key) const { return key >= 0 && key < kSplits ? split_[size_t(key)] : -1; }
+    void SetSplit(int key, int split) {
+        if (key >= 0 && key < kSplits) split_[size_t(key)] = split < 0 || cols_.empty() ? -1 : std::min(split, int(cols_.size()));
+    }
+    // Another grid's splits, for these columns (RestoreAll's: its columns, then more).
+    void KeepSplits(const Grid &from) {
+        for (int k = 0; k < kSplits; ++k) SetSplit(k, from.Split(k));
+    }
 
 private:
     static double Clamp(double w) { return std::clamp(w, kMinWeight, kMaxWeight); }
     static double Sc(double s) { return std::clamp(s, kMinScale, 1.0); }
-    // A new column at `at` (at the split: left of the slot when `left`).
+    // A new column at `at` (at a split: left of its slot when `left`).
     void InsertCol(int at, Col c, bool left) {
         cols_.insert(cols_.begin() + at, std::move(c));
-        if (split_ >= 0 && (at < split_ || (at == split_ && left))) ++split_;
+        for (int &s : split_)
+            if (s >= 0 && (at < s || (at == s && left))) ++s;
     }
     std::vector<Col> cols_;
-    int split_ = -1;
+    std::array<int, kSplits> split_ = {-1, -1, -1};
 };
 
 }  // namespace tilegrid

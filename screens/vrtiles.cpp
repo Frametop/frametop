@@ -153,7 +153,7 @@ void RetileDash(bool resize) {
 
 namespace {
 // The group to where the dashboard is now, in front of your head, with Steam's menu a slot in it
-// when the strip reaches it (its split looked at again: Board::Arrange): false without a head pose.
+// when the strip reaches it (the split kept for where it opened: Board::SlotMoved): false without a head pose.
 bool Regroup() {
     Mat head;
     if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;

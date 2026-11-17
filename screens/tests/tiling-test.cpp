@@ -296,7 +296,7 @@ int main() {
         check("add: twice is once", g.Cols().size() == 3);
         check("move right alone: columns swap", g.MoveSide(1, +1) && g.Cols()[0].cells[0].id == 3 && g.Cols()[1].cells[0].id == 1);
         check("move left at the left end alone: nothing", !g.MoveSide(3, -1));
-        check("split: none chosen yet", g.Split() == -1);
+        check("split: none chosen yet", g.Split(0) == -1 && g.Split(1) == -1 && g.Split(2) == -1);
         g.Insert(4, 1, 1, false);   // under 1
         check("insert: into a column at a row", g.Cols()[1].cells.size() == 2 && g.Cols()[1].cells[1].id == 4);
         check("move right with company: joins the next column", g.MoveSide(4, +1) && g.Cols()[2].cells.size() == 2 &&
@@ -317,18 +317,20 @@ int main() {
     {
         tilegrid::Grid g;
         for (int id = 1; id <= 4; ++id) g.Add(id, id - 1);   // [ 1 ][ 2 ] S [ 3 ][ 4 ]
-        g.SetSplit(2);
-        const auto ids = [&]() {
+        g.SetSplit(0, 2);
+        const auto ids = [&](int key = 0) {
             std::string s;
             for (size_t c = 0; c < g.Cols().size(); ++c) {
-                if (int(c) == g.Split()) s += "S ";
+                if (int(c) == g.Split(key)) s += "S ";
                 for (const auto &cell : g.Cols()[c].cells) s += std::to_string(cell.id);
                 s += " ";
             }
-            if (g.Split() == int(g.Cols().size())) s += "S ";
+            if (g.Split(key) == int(g.Cols().size())) s += "S ";
             return s;
         };
         check("split: set", ids() == "1 2 S 3 4 ");
+        g.SetSplit(1, 4);   // (the palm menu's on the right: all four left of it)
+        check("split: another place's split, the first one as it was", ids(1) == "1 2 3 4 S " && ids() == "1 2 S 3 4 ");
         g.Add(5, 2);
         check("split: a new one next to a left one goes left", ids() == "1 2 5 S 3 4 ");
         g.Add(6, 3);
@@ -343,18 +345,28 @@ int main() {
         check("split: a new column at the slot, left of it", ids() == "2 5 8 S 3 4 7 ");
         g.Insert(9, 3, 0, true, 1, 0, 1, false);
         check("split: ...right of it", ids() == "2 5 8 S 9 3 4 7 ");
-        check("split: alone, Meta+Right steps across the slot", g.MoveSide(8, +1, true) && ids() == "2 5 S 8 9 3 4 7 ");
-        check("split: ...and Meta+Left back", g.MoveSide(8, -1, true) && ids() == "2 5 8 S 9 3 4 7 ");
-        check("split: no slot in the strip: a plain swap", g.MoveSide(8, +1, false) && ids() == "2 5 9 S 8 3 4 7 ");
+        check("split: the other place's kept through the adds and removes", ids(1) == "2 5 8 9 3 4 S 7 ");
+        check("split: alone, Meta+Right steps across the slot", g.MoveSide(8, +1, 0) && ids() == "2 5 S 8 9 3 4 7 ");
+        check("split: ...the other place's split as it was", ids(1) == "2 5 8 9 3 4 S 7 ");
+        check("split: ...and Meta+Left back", g.MoveSide(8, -1, 0) && ids() == "2 5 8 S 9 3 4 7 ");
+        check("split: no slot in the strip: a plain swap", g.MoveSide(8, +1, -1) && ids() == "2 5 9 S 8 3 4 7 ");
         g.Insert(10, 2, 1, false);   // under 9
-        check("split: with company, Meta+Right: a column of its own past the slot", g.MoveSide(10, +1, true) &&
+        check("split: with company, Meta+Right: a column of its own past the slot", g.MoveSide(10, +1, 0) &&
                                                                                    ids() == "2 5 9 S 10 8 3 4 7 ");
         g.Insert(11, 3, 1, false);   // under 10
-        check("split: ...Meta+Left: one of its own left of it", g.MoveSide(11, -1, true) && ids() == "2 5 9 11 S 10 8 3 4 7 ");
-        g.SetSplit(99);
-        check("split: past the columns: all of them", g.Split() == int(g.Cols().size()));
-        g.SetSplit(-5);
-        check("split: none", g.Split() == -1 && (g.Add(12, 2), g.Split() == -1));
+        check("split: ...Meta+Left: one of its own left of it", g.MoveSide(11, -1, 0) && ids() == "2 5 9 11 S 10 8 3 4 7 ");
+        g.SetSplit(0, 99);
+        check("split: past the columns: all of them", g.Split(0) == int(g.Cols().size()));
+        g.SetSplit(0, -5);
+        check("split: none", g.Split(0) == -1 && (g.Add(12, 2), g.Split(0) == -1));
+        g.AddAtEnd(13, true);
+        check("split: at the left end, left of the slots", g.Cols()[0].cells[0].id == 13 && ids(1) == "13 2 12 5 9 11 10 8 3 4 S 7 ");
+        check("split: a key that isn't one: none", g.Split(3) == -1 && g.Split(-1) == -1);
+        for (int id = 2; id <= 13; ++id) g.Remove(id);
+        check("split: the grid emptied, no splits (a new panel isn't put past a slot)",
+              g.Cols().empty() && g.Split(0) == -1 && g.Split(1) == -1);
+        g.SetSplit(1, 0);
+        check("split: none set on an empty grid", g.Split(1) == -1);
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

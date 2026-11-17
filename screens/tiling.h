@@ -13,7 +13,7 @@
 // tiling system"): a slot kept clear where it is (`reserveDeg` wide at `reserveAzDeg`), a split's
 // worth of columns left of it and the rest right. The split is the grid's (tilegrid.h: inserts,
 // drops and moves keep each column on its side), and with one the slot is always in the strip.
-// Without one (none chosen yet: dashtiles.h's Board keeps the one chosen), the slot is there only
+// Without one (none chosen yet: dashtiles.h's Board keeps one for each place the menu opens), the slot is there only
 // when the strip centred in front of you would reach it, with the split that puts the strip's
 // middle nearest in front of you. Past a full turn round you everything shrinks until it fits.
 //

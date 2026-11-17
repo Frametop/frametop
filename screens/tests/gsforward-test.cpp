@@ -4,11 +4,13 @@
 // when there's no Xvfb.
 //
 //   g++ -std=c++17 -Iscreens screens/tests/gsforward-test.cpp screens/gsforward.cpp $(pkg-config --libs xcb xcb-xtest xcb-icccm)
+#include "gsdisplay.h"
 #include "gsforward.h"
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_icccm.h>
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -106,6 +108,26 @@ static void WithX() {
     std::string why;
     CHECK(!link.Open(display, true, &why));   // not a gamescope
     CHECK(why.find("forwards") != std::string::npos);
+    {   // as gamescope's: its first Xwayland (Steam's) refused, another taken
+        auto atom = [&](const char *n) {
+            auto r = xcb_intern_atom_reply(app, xcb_intern_atom(app, 0, uint16_t(std::strlen(n)), n), nullptr);
+            const xcb_atom_t a = r ? r->atom : xcb_atom_t(XCB_ATOM_NONE);
+            std::free(r);
+            return a;
+        };
+        auto set = [&](const char *n, uint32_t v) {
+            xcb_change_property(app, XCB_PROP_MODE_REPLACE, scr->root, atom(n), XCB_ATOM_CARDINAL, 32, 1, &v);
+            std::free(xcb_get_input_focus_reply(app, xcb_get_input_focus(app), nullptr));
+        };
+        set("GAMESCOPE_VROVERLAY_FORWARDING", 3), set("GAMESCOPE_PID", 4242), set("GAMESCOPE_XWAYLAND_SERVER_ID", 0);
+        CHECK(!link.Open(display, true, &why) && why.find("Steam's own") != std::string::npos);
+        set("GAMESCOPE_XWAYLAND_SERVER_ID", 1);
+        CHECK(link.Open(display, true, &why) && link.GamescopePid() == 4242);
+        link.Close();
+        for (const char *n : {"GAMESCOPE_VROVERLAY_FORWARDING", "GAMESCOPE_PID", "GAMESCOPE_XWAYLAND_SERVER_ID"})
+            xcb_delete_property(app, scr->root, atom(n));
+        xcb_flush(app);
+    }
     CHECK(link.Open(display, false, &why));
     CHECK(link.Poll().empty());
 
@@ -183,6 +205,27 @@ static void WithX() {
     xcb_flush(app);
     CHECK(Wait(link, Event::Gone, menu));
 
+    // Reparented (an app embedding a window): gone from the top level; given back: new, and mapped
+    const xcb_window_t holder = xcb_generate_id(app), kid = xcb_generate_id(app);
+    xcb_create_window(app, XCB_COPY_FROM_PARENT, holder, scr->root, 0, 0, 400, 400, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                      scr->root_visual, 0, nullptr);
+    xcb_create_window(app, XCB_COPY_FROM_PARENT, kid, scr->root, 0, 0, 200, 200, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                      scr->root_visual, 0, nullptr);
+    xcb_map_window(app, kid);
+    xcb_flush(app);
+    CHECK(Wait(link, Event::Mapped, kid));
+    xcb_reparent_window(app, kid, holder, 10, 10);
+    xcb_flush(app);
+    CHECK(Wait(link, Event::Gone, kid));
+    xcb_reparent_window(app, kid, scr->root, 20, 30);
+    xcb_flush(app);
+    CHECK(Wait(link, Event::Mapped, kid, &e));
+    CHECK(e.win.kind == Kind::Main && e.win.x == 20 && e.win.y == 30);
+    xcb_destroy_window(app, kid);
+    xcb_destroy_window(app, holder);
+    xcb_flush(app);
+    CHECK(Wait(link, Event::Gone, kid));
+
     xcb_unmap_window(app, w);
     xcb_flush(app);
     CHECK(Wait(link, Event::Unmapped, w));
@@ -211,8 +254,29 @@ static void WithX() {
     CHECK(!link.IsOpen());
 }
 
+// Which display the apps are on: Steam's STEAM_GAME_DISPLAY_0, only a display's name taken
+static void DisplaysToTry() {
+    using namespace std::string_literals;
+    CHECK(GameDisplayFrom("HOME=/home/a\0STEAM_GAME_DISPLAY_0=:3\0DISPLAY=:0\0"s) == ":3");
+    CHECK(GameDisplayFrom("STEAM_GAME_DISPLAY_0=:12.0"s) == ":12.0");
+    CHECK(GameDisplayFrom("XSTEAM_GAME_DISPLAY_0=:4\0DISPLAY=:0\0"s).empty());
+    CHECK(GameDisplayFrom("STEAM_GAME_DISPLAY_0=host:1\0"s).empty());
+    CHECK(GameDisplayFrom("STEAM_GAME_DISPLAY_0=:\0"s).empty() && GameDisplayFrom(""s).empty());
+    CHECK(!DisplayName(":1.") && !DisplayName(":a") && !DisplayName("1") && DisplayName(":0"));
+    using V = std::vector<std::string>;
+    CHECK(Candidates(":7", ":3", {"X0", "X1"}) == V{":7"});   // GSAPP_DISPLAY alone
+    CHECK(Candidates(nullptr, ":3", {".", "..", "X10", "X2", "X0", "Xjunk", "X3"}) == (V{":3", ":0", ":2", ":10", ":1"}));
+    CHECK(Candidates("junk", "", {}) == V{":1"});
+    setenv("GSAPP_DISPLAY", ":7", 1);
+    CHECK(AppDisplays() == V{":7"});
+    unsetenv("GSAPP_DISPLAY");
+    const V found = AppDisplays();
+    CHECK(std::find(found.begin(), found.end(), ":1") != found.end());   // (the default, if no socket said so)
+}
+
 int main() {
     Policy();
+    DisplaysToTry();
     if (HaveXvfb()) WithX();
     else std::printf("gsforward-test: no Xvfb, the X half skipped\n");
     if (failures) return std::printf("gsforward-test: %d failed\n", failures), 1;

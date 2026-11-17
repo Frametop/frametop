@@ -10,6 +10,7 @@
 #include "gsforward.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,16 +23,22 @@ struct Update {
     Event event;          // Window: one of the display's
     uint32_t pid = 0;     // Opened: gamescope's
     std::string why;      // Closed: why (or why it didn't open; said again only when it changes)
+    std::string display;  // Opened: which
 };
 
 class AsyncLink : public XSide {
 public:
     static constexpr int kRetryMs = 10000;
     static constexpr size_t kMaxQueued = 4096;   // sends waiting at most (a pointer move replaces the last one;
-                                                 // past it moves and presses drop, never a release or a tag)
+                                                 // past it moves and presses drop, never a release or a tag;
+                                                 // a raise or a resize replaces the last one queued)
 
-    // `display`: the app display; `needForwarding` as Link::Open's.
-    AsyncLink(std::string display, bool needForwarding);
+    // `displays`: the displays to try, in order (the first that opens is the app display), asked
+    // again before each try (gamescope picks them as it starts: gsdisplay.h); `needForwarding` as
+    // Link::Open's.
+    AsyncLink(std::function<std::vector<std::string>()> displays, bool needForwarding);
+    AsyncLink(std::string display, bool needForwarding)
+        : AsyncLink([display] { return std::vector<std::string>{display}; }, needForwarding) {}
     ~AsyncLink() override;   // Stop(0) if not stopped
     AsyncLink(const AsyncLink &) = delete;
     AsyncLink &operator=(const AsyncLink &) = delete;

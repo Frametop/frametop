@@ -1,19 +1,21 @@
-// The gamescope apps (vr.cpp's "gamescope apps"), between the X side and the panels: what
+// The gamescope apps (screens/vrgsapps.cpp), between the X side and the panels: what
 // gsapps::Book says to do with each window, done (a panel made, its window tagged; dropped,
 // untagged), and the laser and the keys on an app's panel as X's. Pure: the X side
-// (gsforward::XSide: gslink.h's AsyncLink) and the panels (Panels: vr.cpp's, on OpenVR) come in,
+// (gsforward::XSide: gslink.h's AsyncLink) and the panels (Panels: vrgsapps.cpp's, on OpenVR) come in,
 // so its test (screens/tests/gscontrol-test.cpp) runs with fakes of both.
 //
 // The laser on a panel or a popup over it moves the X pointer there, and raises that window
 // first: apps overlap on gamescope's one screen, and the X pointer goes to the top one. A press
 // gives that window the typing (a dialog's own, not its app's), until a click somewhere that isn't
 // an app (Blur). A dialog the window with the typing opens takes it, as a window manager gives it
-// one (not a menu or a tooltip: override-redirect, a window manager never focuses those). When a
+// one (not a menu or a tooltip: override-redirect, a window manager never focuses those), also
+// when its menu still has the typing (an item that opens a dialog: the app maps it first). When a
 // dialog with the typing goes, the window it's for has it again (as a window manager does), else
 // the one that had it before, else its app's; when a menu goes, the one that had it before (a
 // dialog's menu: the dialog), else the one it's for, else its app's. Keys go only
 // while the panel of the window with the typing is shown. A window that goes takes nothing held
-// with it: a button pressed on it and keys down on it are let go of.
+// with it: a button pressed on it and keys down on it are let go of. One that unmaps is hidden,
+// still tagged, and shown again if it maps within gsapps::kMapWaitMs (dropped otherwise).
 #pragma once
 
 #include "gsapps.h"
@@ -25,7 +27,7 @@
 
 namespace gsapps {
 
-// The panels, as vr.cpp makes them.
+// The panels, as vrgsapps.cpp makes them.
 struct Panels {
     virtual ~Panels() = default;
     // A hidden panel for an app's window at `index`: its overlay's handle, gamescope (`pid`) its
@@ -33,6 +35,7 @@ struct Panels {
     virtual uint64_t Make(int index, const gsforward::Window &w, uint32_t pid) = 0;
     virtual void Show(int index, const gsforward::Window &w) = 0;   // it mapped: named, sized, placed
     virtual void Move(int index, const gsforward::Window &w) = 0;   // its size or place on X's screen
+    virtual void Hide(int index) = 0;   // it unmapped: hidden until Show again (or Drop)
     virtual void Drop(int index) = 0;
     // A popup's overlay (number `sub` over the panel at `index`), as Make's.
     virtual uint64_t MakePopup(int index, int sub, const gsforward::Window &w, uint32_t pid) = 0;
@@ -67,10 +70,10 @@ public:
     }
     void On(const gsforward::Event &e, int64_t nowMs) {
         Do(book_.On(e, nowMs));
-        // a dialog for the window with the typing: the typing goes to it
-        const uint32_t t = keys_.Target();
-        if (e.type == gsforward::Event::Mapped && !e.win.overrideRedirect && e.win.transientFor && t &&
-            t == e.win.transientFor && book_.PanelOf(e.win.id) >= 0)
+        // a dialog for the window with the typing (or with it under the menus that have it): the
+        // typing goes to it
+        if (e.type == gsforward::Event::Mapped && !e.win.overrideRedirect && e.win.transientFor &&
+            Typed() == e.win.transientFor && book_.PanelOf(e.win.id) >= 0)
             TypeIn(e.win.id);
     }
     void Tick(int64_t nowMs) { Do(book_.Tick(nowMs)); }
@@ -143,25 +146,43 @@ private:
         const int index = keys_.Target() ? book_.PanelOf(keys_.Target()) : -1;
         return index >= 0 && panels_.Shown(index);
     }
+    // The window with the typing, past the menus that have it (each to the one it took it from).
+    uint32_t Typed() const {
+        uint32_t t = keys_.Target();
+        for (int hops = 0; t && book_.Menu(t) && hops < 16; ++hops) {
+            const auto b = typedBefore_.find(t);
+            if (b == typedBefore_.end()) break;
+            t = b->second;
+        }
+        return t;
+    }
     // The typing to popup `w`, the app window it leaves remembered (off the apps since a Blur, with
     // no press on an app after it: the one that had it before the Blur).
     void TypeIn(uint32_t w) {
         if (const uint32_t t = keys_.Target() ? keys_.Target() : blurredFrom_; t && t != w) typedBefore_[w] = t;
         keys_.Focus(w);
     }
+    // What's held on `win` let go of (its overlay's gone or hidden: no release comes from it).
+    void LetGoOf(uint32_t win) {
+        if (buttons_ && pressedOn_ == win) LetGo();
+        for (const auto &[code, w] : keys_.Down())
+            if (w == win) x_.Key(win, gsforward::XKeycode(code), 0, false);
+        keys_.Released(win);
+    }
     // `win`'s panel or popup went; for a popup's, `forWin` the window it's for, `owner` its app's
     // (0 for an app's own), `menu` whether it was override-redirect.
     void Gone(uint32_t win, uint32_t forWin, uint32_t owner, bool menu) {
         if (tagging_) {
-            if (buttons_ && pressedOn_ == win) LetGo();   // (its overlay's gone: no release comes from it)
-            for (const auto &[code, w] : keys_.Down())
-                if (w == win) x_.Key(win, gsforward::XKeycode(code), 0, false);
+            LetGoOf(win);
             x_.Untag(win);
         }
         const bool typing = keys_.Target() == win;
         keys_.Gone(win);
         uint32_t before = 0;
         if (auto b = typedBefore_.find(win); b != typedBefore_.end()) before = b->second, typedBefore_.erase(b);
+        for (auto &[popup, from] : typedBefore_)   // (a submenu's parent went first: the submenu goes back past it)
+            if (from == win) from = before;
+        for (auto b = typedBefore_.begin(); b != typedBefore_.end();) b = b->second ? std::next(b) : typedBefore_.erase(b);
         if (typing && owner) {   // a menu item picked, a dialog closed: back where it was
             auto known = [&](uint32_t w) { return w && w != win && book_.PanelOf(w) >= 0; };
             const uint32_t first = menu ? before : forWin, then = menu ? forWin : before;
@@ -179,6 +200,11 @@ private:
                     break;
                 case Action::Show: panels_.Show(a.index, a.win); break;
                 case Action::Move: panels_.Move(a.index, a.win); break;
+                case Action::Hide:
+                    LetGoOf(a.win.id);
+                    if (raised_ == a.win.id) raised_ = 0;   // (raised again when it's pointed at)
+                    panels_.Hide(a.index);
+                    break;
                 case Action::Drop: Gone(a.win.id, 0, 0, false), panels_.Drop(a.index); break;
                 case Action::MakePopup:
                     if (const uint64_t o = panels_.MakePopup(a.index, a.sub, a.win, pid_)) x_.Tag(a.win.id, o);

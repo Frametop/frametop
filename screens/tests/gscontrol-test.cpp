@@ -59,6 +59,7 @@ struct FakePanels : Panels {
     }
     void Show(int index, const Window &) override { shown.insert(index); }
     void Move(int, const Window &) override {}
+    void Hide(int index) override { shown.erase(index); }
     void Drop(int index) override { made.erase(index), shown.erase(index); }
     uint64_t MakePopup(int index, int sub, const Window &, uint32_t) override {
         if (refusePopups) return 0;
@@ -96,7 +97,12 @@ int main() {
         CHECK(p.made.count(kFirst) && x.tags[10] == 1000 + uint64_t(kFirst) && p.pid == 77);
         c.On(Ev(Event::Mapped, Win(10, Kind::Main)), 0);
         CHECK(p.shown.count(kFirst));
+        // unmapped: hidden, still tagged (a remap shows it at once: no gamescope panel between)
         c.On(Ev(Event::Unmapped, Win(10, Kind::Main)), 0);
+        CHECK(p.made.count(kFirst) && !p.shown.count(kFirst) && x.tags.count(10));
+        c.On(Ev(Event::Mapped, Win(10, Kind::Main)), 1);
+        CHECK(p.made.count(kFirst) && p.shown.count(kFirst) && x.tags[10] == 1000 + uint64_t(kFirst));
+        c.On(Ev(Event::Gone, Win(10, Kind::Main)), 2);
         CHECK(!p.made.count(kFirst) && !x.tags.count(10));
         // a panel that couldn't be made: the window forgotten (its index free for the next)
         p.refuse = true;
@@ -187,6 +193,9 @@ int main() {
         x.log.clear();
         c.On(Ev(Event::Unmapped, Win(1, Kind::Main)), 0);
         CHECK(x.Logged("key 1 25 0 up") && !c.Typing());
+        CHECK(!c.Key(17, 0, false, {}));   // (its own release later: let go of already)
+        c.On(Ev(Event::Mapped, Win(1, Kind::Main)), 1);
+        CHECK(c.Typing());   // (the typing stayed with it)
     }
     // --- a dialog's own menu (council pass 3): the typing back to the dialog, not the app behind it
     {
@@ -285,6 +294,55 @@ int main() {
         x.log.clear();
         CHECK(c.Key(30, 1, false, {}) && x.Logged("key 3 38 0 down"));
         c.Key(30, 0, false, {});
+    }
+    // --- follow-ups: a submenu chain unmapping parent first; a dialog mapped before its menu
+    // unmaps; a dialog's dialog over its own app's panel
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        for (uint32_t id : {1u, 2u}) c.On(Ev(Event::Created, Win(id, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(id, Kind::Main)), 0);
+        const int i1 = c.Windows().PanelOf(1), i2 = c.Windows().PanelOf(2);
+        auto subOf = [&](int index, uint32_t win) {
+            for (int s = 1; s < 64; ++s)
+                if (c.Windows().PopupWindow(index, s) == win) return s;
+            return 0;
+        };
+        auto click = [&](int index, int sub) { c.Press(index, sub, 1, true, 5, 5), c.Press(index, sub, 1, false, 5, 5); };
+        auto keyTo = [&](uint32_t win) {
+            x.log.clear();
+            const bool went = c.Key(30, 1, false, {}) && x.Logged("key " + std::to_string(win) + " 38 0 down");
+            c.Key(30, 0, false, {});
+            return went;
+        };
+        // N2d: dialog 6, its menu 7, the submenu 8; an item picked: 7 unmaps, then 8: back to the dialog
+        c.On(Ev(Event::Created, Win(6, Kind::Popup, 400, 300, 1)), 0), c.On(Ev(Event::Mapped, Win(6, Kind::Popup, 400, 300, 1)), 0);
+        click(i1, subOf(i1, 6));
+        c.On(Ev(Event::Created, Menu(7, 150, 80)), 0), c.On(Ev(Event::Mapped, Menu(7, 150, 80)), 0);
+        click(i1, subOf(i1, 7));
+        c.On(Ev(Event::Created, Menu(8, 150, 80, 7)), 0), c.On(Ev(Event::Mapped, Menu(8, 150, 80, 7)), 0);
+        CHECK(subOf(i1, 8) != 0);
+        click(i1, subOf(i1, 8));
+        c.On(Ev(Event::Unmapped, Menu(7, 150, 80)), 0);
+        c.On(Ev(Event::Unmapped, Menu(8, 150, 80, 7)), 0);
+        CHECK(keyTo(6));
+        c.On(Ev(Event::Gone, Win(6, Kind::Popup, 400, 300, 1)), 0);
+        CHECK(keyTo(1));
+        // N6: app 1's menu clicked, its item opens dialog 3, mapped before the menu unmaps: the dialog types
+        c.On(Ev(Event::Created, Menu(7, 150, 80)), 0), c.On(Ev(Event::Mapped, Menu(7, 150, 80)), 0);
+        click(i1, subOf(i1, 7));
+        c.On(Ev(Event::Created, Win(3, Kind::Popup, 400, 300, 1)), 0), c.On(Ev(Event::Mapped, Win(3, Kind::Popup, 400, 300, 1)), 0);
+        c.On(Ev(Event::Unmapped, Menu(7, 150, 80)), 0);
+        CHECK(keyTo(3));
+        // N5: the dialog's own dialog, with the laser last on app 2: over app 1's panel
+        c.Point(i2, 0, 1, 1);
+        c.On(Ev(Event::Created, Win(4, Kind::Popup, 200, 100, 3)), 0), c.On(Ev(Event::Mapped, Win(4, Kind::Popup, 200, 100, 3)), 0);
+        CHECK(c.Windows().PanelOf(4) == i1);
+        CHECK(keyTo(4));
+        c.On(Ev(Event::Gone, Win(4, Kind::Popup, 200, 100, 3)), 0);
+        CHECK(keyTo(3));
+        c.On(Ev(Event::Gone, Win(3, Kind::Popup, 400, 300, 1)), 0);
+        CHECK(keyTo(1));
     }
     // --- off: buttons and keys held let go of, windows untagged
     {

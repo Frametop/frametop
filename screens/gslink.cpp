@@ -25,7 +25,7 @@ struct Send {
 }  // namespace
 
 struct AsyncLink::Shared {
-    std::string display;
+    std::function<std::vector<std::string>()> displays;
     bool needForwarding = true;
     std::mutex m;
     std::condition_variable done;
@@ -46,6 +46,8 @@ struct AsyncLink::Shared {
     }
     // What may be dropped with the queue full (a hung gamescope): moves, presses, the wheel. Never
     // a release, a tag or an untag: a button or key left down, or a window on a gone overlay, stays so.
+    // A raise or a resize isn't dropped but takes the place of the last one queued (a resize: the
+    // same window's), so the window raised last is the one on top, and the size the last asked for.
     static bool Droppable(const Send &s) {
         switch (s.type) {
             case Send::Pointer: case Send::Raise: case Send::Scroll: case Send::Resize: return true;
@@ -58,8 +60,17 @@ struct AsyncLink::Shared {
             std::lock_guard<std::mutex> l(m);
             if (s.type == Send::Pointer && !sends.empty() && sends.back().type == Send::Pointer) sends.back() = s;
             else if (sends.size() < kMaxQueued || !Droppable(s)) sends.push_back(s);
+            else if (s.type == Send::Raise || s.type == Send::Resize) Replace(s);
         }
         Wake();
+    }
+    void Replace(const Send &s) {   // (m held; one over the cap at most for each kind and window)
+        for (auto it = sends.rbegin(); it != sends.rend(); ++it)
+            if (it->type == s.type && (s.type == Send::Raise || it->win == s.win)) {
+                sends.erase(std::next(it).base());
+                break;
+            }
+        sends.push_back(s);
     }
     void Say(Update u) {
         std::lock_guard<std::mutex> l(m);
@@ -111,12 +122,22 @@ struct AsyncLink::Shared {
             const auto now = std::chrono::steady_clock::now();
             if (wantOn && !link.IsOpen() && now >= nextTry) {
                 nextTry = now + std::chrono::milliseconds(kRetryMs);
-                std::string why;
-                if (link.Open(display.c_str(), needForwarding, &why)) {
+                std::string why, at;
+                bool opened = false;
+                for (const std::string &d : displays()) {
+                    std::string whyNot;
+                    if ((opened = link.Open(d.c_str(), needForwarding, &whyNot))) {
+                        at = d;
+                        break;
+                    }
+                    why += (why.empty() ? "" : "; ") + whyNot;
+                }
+                if (why.empty()) why = "no X display to try";
+                if (opened) {
                     lastWhy.clear();
                     wasOpen = true;   // (gone again before this pass ends: its Closed is said below)
                     Update u;
-                    u.type = Update::Opened, u.pid = link.GamescopePid();
+                    u.type = Update::Opened, u.pid = link.GamescopePid(), u.display = at;
                     Say(u);
                 } else if (why != lastWhy) {
                     lastWhy = why;
@@ -164,8 +185,9 @@ struct AsyncLink::Shared {
     }
 };
 
-AsyncLink::AsyncLink(std::string display, bool needForwarding) : d_(std::make_shared<Shared>()) {
-    d_->display = std::move(display);
+AsyncLink::AsyncLink(std::function<std::vector<std::string>()> displays, bool needForwarding)
+    : d_(std::make_shared<Shared>()) {
+    d_->displays = std::move(displays);
     d_->needForwarding = needForwarding;
     d_->wake = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     std::thread([d = d_] { d->Run(); }).detach();

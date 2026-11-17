@@ -6,7 +6,7 @@ dashboard (Steam's gamescope session) come up as Frametop panels (GSAPP_PANELS; 
 "Gamescope apps"), which go on the dashboard the first time.
 
 The QML reaches it as backend.dashTiles. The numbers' ranges are ft-screens' own
-(TileSettings() in screens/vr.cpp): a value outside one is refused there, so it's clamped here.
+(TileSettings() in screens/vrtiles.cpp): a value outside one is refused there, so it's clamped here.
 """
 import math
 import os
@@ -20,7 +20,7 @@ from ft_layout import ft_conf  # noqa: E402
 
 STAY = "DASH_TILE_STAY"
 GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
-# key: (default, lo, hi), as screens/vr.cpp's TileSettings() and tiling::Params have them
+# key: (default, lo, hi), as screens/vrtiles.cpp's TileSettings() and tiling::Params have them
 NUMBERS = {
     "DASH_TILE_RAISE_DEG": (30.0, -30.0, 60.0),    # the band's bottom above the dashboard's bar
     "DASH_TILE_RADIUS": (1.6, 0.8, 4.0),           # metres from your head

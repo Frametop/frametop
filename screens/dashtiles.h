@@ -1,4 +1,4 @@
-// The dashboard tiles' policy (vr.cpp's "Dashboard tiles" does the OpenVR side): which panels are
+// The dashboard tiles' policy (screens/vrtiles.cpp does the OpenVR side): which panels are
 // anchored to the SteamVR dashboard, which of those tile (tilegrid.h keeps their order and sizes,
 // tiling.h places them) and which are satellites, which stay shown with the dashboard closed, what
 // the tiling keys do, and each app's or display's last state (Memory).
@@ -15,13 +15,14 @@
 #pragma once
 
 #include "tilegrid.h"
+#include "tilememory.h"
+#include "tilestate.h"
 #include "tiling.h"
 
 #include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <map>
 #include <string>
@@ -107,9 +108,7 @@ public:
     void SetStay(int id, bool on) {
         if (!Anchored(id)) return;
         spots_[id].stay = on;
-        for (auto &[i, line] : batch_)   // (its line's stay, the word after "tile" or "sat")
-            if (const size_t a = line.find(' '), b = line.find(' ', a + 1); i == id && a != std::string::npos)
-                line.replace(a + 1, (b == std::string::npos ? line.size() : b) - a - 1, on ? "1" : "0");
+        batch_.SetStay(id, on);
     }
     // Off the grid, a satellite at `rel` (the group frame's -> the panel's).
     void TearOff(int id, const double rel[3][4]) {
@@ -203,63 +202,48 @@ public:
         return nullptr;
     }
 
-    // A panel's state, to remember it: "off", "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" or
-    // "sat STAY" and its 12 numbers.
-    std::string Remember(int id) const {
+    // A panel's state, to remember it (tilestate.h's text).
+    std::string Remember(int id) const { return Text(StateOf(id)); }
+    State StateOf(int id) const {
+        State st;
         const Spot *s = SpotOf(id);
-        if (!s) return "off";
-        char b[512];
+        if (!s) return st;
+        st.stay = s->stay;
         if (s->satellite) {
-            int n = std::snprintf(b, sizeof b, "sat %d", s->stay ? 1 : 0);
-            for (int r = 0; r < 3; ++r)
-                for (int c = 0; c < 4; ++c) n += std::snprintf(b + n, sizeof b - n, " %.4f", s->rel[r][c]);
-            return b;
+            st.kind = State::Kind::Sat;
+            std::memcpy(st.rel, s->rel, sizeof st.rel);
+            return st;
         }
         const tilegrid::Where w = grid_.Find(id);
-        if (!w.ok()) return "off";
-        const tilegrid::Col &col = grid_.Cols()[w.col];
-        const tilegrid::Cell &cell = col.cells[w.row];
-        std::snprintf(b, sizeof b, "tile %d %d %d %d %.3f %.3f %.2f", s->stay ? 1 : 0, w.col, w.row,
-                      col.cells.size() == 1 ? 1 : 0, cell.weight, cell.scale, col.widthDeg);
-        return b;
+        if (!w.ok()) return State{};
+        const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
+        const tilegrid::Cell &cell = col.cells[size_t(w.row)];
+        st.kind = State::Kind::Tile, st.col = w.col, st.row = w.row, st.alone = col.cells.size() == 1;
+        st.weight = cell.weight, st.scale = cell.scale, st.width = col.widthDeg;
+        return st;
     }
     // Back as it was remembered (`focused`: a new tile's neighbour when its column is gone). False
     // (and nothing changed) for a line that isn't one.
     bool Restore(int id, const std::string &line, int focused) {
-        int stay = 0, col = 0, row = 0, alone = 1, n = 0;
-        double weight = 1, scale = 1, width = 0;
-        if (line == "off") return Unanchor(id), true;
-        if (std::sscanf(line.c_str(), "tile %d %d %d %d %lf %lf %lf%n", &stay, &col, &row, &alone, &weight, &scale, &width,
-                        &n) == 7 &&
-            n == int(line.size())) {
-            if (!std::isfinite(weight) || !std::isfinite(scale) || !std::isfinite(width)) return false;
-            Unanchor(id);
-            spots_[id].stay = stay != 0;
-            if (col < 0 || row < 0) return grid_.Add(id, focused), true;
-            if (width > 0) width = std::clamp(width, tilegrid::kMinWidthDeg, tilegrid::kMaxWidthDeg);
-            else width = 0;
-            grid_.Insert(id, col, row, alone != 0, weight, width, scale);   // (the width: if it makes the column)
-            return true;
-        }
-        double m[3][4];
-        if (std::sscanf(line.c_str(), "sat %d%n", &stay, &n) == 1) {
-            const char *p = line.c_str() + n;
-            for (int r = 0; r < 3; ++r)
-                for (int c = 0; c < 4; ++c) {
-                    int k = 0;
-                    if (std::sscanf(p, " %lf%n", &m[r][c], &k) != 1 || !std::isfinite(m[r][c])) return false;
-                    p += k;
-                }
-            if (*p) return false;
-            Unanchor(id);
-            Spot &s = spots_[id];
-            s.stay = stay != 0;
-            s.satellite = true;
-            std::memcpy(s.rel, m, sizeof m);
-            return true;
-        }
-        return false;
+        State s;
+        return Parse(line, &s) && (Restore(id, s, focused), true);
     }
+    void Restore(int id, const State &st, int focused) {
+        Unanchor(id);
+        if (st.kind == State::Kind::Off) return;
+        Spot &s = spots_[id];
+        s.stay = st.stay;
+        if (st.kind == State::Kind::Sat) {
+            s.satellite = true;
+            std::memcpy(s.rel, st.rel, sizeof s.rel);
+            return;
+        }
+        if (!st.Placed()) return grid_.Add(id, focused);
+        const double width = st.width > 0 ? std::clamp(st.width, tilegrid::kMinWidthDeg, tilegrid::kMaxWidthDeg) : 0;
+        grid_.Insert(id, st.col, st.row, st.alone, st.weight, width, st.scale);   // (the width: if it makes the column)
+    }
+    // The profile put back last is done with: an add after this goes after the other tiles.
+    void EndRestore() { batch_.End(); }
 
     // A profile's tiles back, each (panel, Remember's line) in the order given (by column and
     // row): its columns first, as it saved them, then the tiles it doesn't name, each column as it
@@ -270,72 +254,51 @@ public:
     // off, an add puts its tiles after the others. A line that isn't one leaves that panel as it is. The
     // number of lines taken.
     int RestoreAll(const std::vector<std::pair<int, std::string>> &saved, bool more = false) {
-        const bool after = more && batchMode_ != BatchMode::First;   // an add on its own: after the others
-        std::vector<std::pair<int, std::string>> good;
+        const bool after = more && batch_.mode() != Batch::Mode::First;   // an add on its own: after the others
+        std::vector<std::pair<int, State>> good;
         if (more)
-            for (const auto &[id, line] : batch_)
-                if (Anchored(id)) good.push_back({id, line});   // (the ones gone since: left out)
+            for (const auto &[id, s] : batch_.States())
+                if (Anchored(id)) good.push_back({id, s});   // (the ones gone since: left out)
         int taken = 0;
         for (const auto &[id, line] : saved) {
-            Board scratch;
-            if (!scratch.Restore(id, line, -1)) continue;
+            State s;
+            if (!Parse(line, &s)) continue;
             ++taken;
             for (auto g = good.begin(); g != good.end();) g = g->first == id ? good.erase(g) : std::next(g);
-            if (line == "off") Unanchor(id);   // (now, and not kept: anchoring it again later stays)
-            else good.push_back({id, line});
+            if (s.kind == State::Kind::Off) Unanchor(id);   // (now, and not kept: anchoring it again later stays)
+            else good.push_back({id, s});
         }
         tilegrid::Grid rest = grid_;
-        for (const auto &[id, line] : good) rest.Remove(id);
+        for (const auto &[id, s] : good) rest.Remove(id);
         grid_ = tilegrid::Grid{};
         if (after)
             for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
-        // saved column -> its column now; the lines by column and row, however they came
-        const std::map<int, int> cols = Ranks(good, after ? int(grid_.Cols().size()) : 0);
-        std::vector<std::pair<int, std::string>> sorted = good;
+        // saved column -> its column now (placed tiles only); the states by column and row, however they came
+        std::map<int, int> cols;
+        for (const auto &[id, s] : good)
+            if (s.Placed()) cols[s.col] = 0;
+        int rank = after ? int(grid_.Cols().size()) : 0;
+        for (auto &[col, now] : cols) now = rank++;
+        std::vector<std::pair<int, State>> sorted = good;
         std::stable_sort(sorted.begin(), sorted.end(),
                          [](const auto &a, const auto &b) { return RestoreOrder(a.second) < RestoreOrder(b.second); });
-        for (const auto &[id, line] : sorted) Restore(id, Closed(line, cols), -1);
+        for (auto [id, s] : sorted) {
+            if (s.Placed()) s.col = cols.at(s.col);
+            Restore(id, s, -1);
+        }
         if (!after)
             for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
-        batch_ = good, batchMode_ = after ? BatchMode::After : BatchMode::First;   // (after: Restore forgets)
+        batch_.Start(std::move(good), after ? Batch::Mode::After : Batch::Mode::First);   // (after: Restore forgets)
         return taken;
     }
 
 private:
-    // RestoreAll: the profile put back last (a panel unanchored since: its line forgotten), until
-    // a tile is moved, resized or torn off (an add after that would undo it). Its mode: whether its
-    // tiles went first (a set) or after the others (an add on its own).
-    enum class BatchMode { None, First, After };
-    std::vector<std::pair<int, std::string>> batch_;
-    BatchMode batchMode_ = BatchMode::None;
-    void EndBatch() { batch_.clear(), batchMode_ = BatchMode::None; }
-    void Forget(int id) {
-        for (auto b = batch_.begin(); b != batch_.end();) b = b->first == id ? batch_.erase(b) : std::next(b);
-    }
-    // A line's place for restoring in order: a tile's (column, row); others after, as they came.
-    static std::pair<int, int> RestoreOrder(const std::string &line) {
-        int stay = 0, col = 0, row = 0;
-        if (std::sscanf(line.c_str(), "tile %d %d %d", &stay, &col, &row) == 3 && col >= 0 && row >= 0) return {col, row};
-        return {INT_MAX, 0};
-    }
-
-    // The saved columns the tile lines name, each numbered by its rank among them (gaps closed up),
-    // from `first`.
-    static std::map<int, int> Ranks(const std::vector<std::pair<int, std::string>> &lines, int first) {
-        std::map<int, int> cols;
-        for (const auto &[id, line] : lines) {
-            int stay = 0, col = 0;
-            if (std::sscanf(line.c_str(), "tile %d %d", &stay, &col) == 2 && col >= 0) cols[col] = 0;
-        }
-        int rank = first;
-        for (auto &[col, now] : cols) now = rank++;
-        return cols;
-    }
-    // A tile line with its saved column as its rank (Ranks').
-    static std::string Closed(const std::string &line, const std::map<int, int> &cols) {
-        int stay = 0, col = 0, n = 0;
-        if (std::sscanf(line.c_str(), "tile %d %d%n", &stay, &col, &n) != 2 || col < 0) return line;
-        return "tile " + std::to_string(stay) + " " + std::to_string(cols.at(col)) + line.substr(size_t(n));
+    Batch batch_;   // RestoreAll's (a panel unanchored since: forgotten)
+    void EndBatch() { batch_.End(); }
+    void Forget(int id) { batch_.Forget(id); }
+    // A state's place for restoring in order: a placed tile's (column, row); others after, as they came.
+    static std::pair<int, int> RestoreOrder(const State &s) {
+        return s.Placed() ? std::pair<int, int>{s.col, s.row} : std::pair<int, int>{INT_MAX, 0};
     }
 
     static void AppendColumn(tilegrid::Grid &g, const tilegrid::Col &c) {
@@ -366,78 +329,6 @@ private:
     std::map<int, Spot> spots_;
     tilegrid::Grid grid_;
     tiling::Layout last_;
-};
-
-// Each app's or display's last state (Board::Remember), by a key of the host's ("screen:2",
-// "app:org.kde.dolphin", "remote:ID"): ft-screens' ~/.config/frametop-tiles.txt, a line each,
-// "KEY<TAB>STATE".
-class Memory {
-public:
-    static constexpr size_t kMax = 500;   // entries at most (the one used longest ago goes)
-
-    // Spaces and control characters out (a key is one word), at most 200 bytes.
-    static std::string Clean(const std::string &key) {
-        std::string k;
-        for (unsigned char c : key) k += c <= ' ' || c == 0x7f ? '_' : char(c);
-        return k.substr(0, 200);
-    }
-    std::string Get(const std::string &key) const {
-        const auto it = m_.find(Clean(key));
-        return it == m_.end() ? std::string() : it->second.state;
-    }
-    // Its app or display is here again: the last to go when the memory is full.
-    // False if it isn't remembered.
-    bool Used(const std::string &key) {
-        const auto it = m_.find(Clean(key));
-        return it != m_.end() && (it->second.seq = ++seq_);
-    }
-    // True when it changed (the same again only counts as a use).
-    bool Set(const std::string &key, const std::string &state) {
-        const std::string k = Clean(key);
-        if (k.empty() || state.find_first_of("\t\n") != std::string::npos) return false;
-        auto it = m_.find(k);
-        if (it != m_.end() && it->second.state == state) return it->second.seq = ++seq_, false;
-        m_[k] = {state, ++seq_};
-        while (m_.size() > kMax) {
-            auto old = m_.begin();
-            for (auto e = m_.begin(); e != m_.end(); ++e)
-                if (e->second.seq < old->second.seq) old = e;
-            m_.erase(old);
-        }
-        return true;
-    }
-    // Used longest ago first (Load keeps that order).
-    std::string Text() const {
-        std::vector<std::pair<uint64_t, const std::string *>> order;
-        for (const auto &[k, e] : m_) order.push_back({e.seq, &k});
-        std::sort(order.begin(), order.end());
-        std::string s;
-        for (const auto &[seq, k] : order) s += *k + "\t" + m_.at(*k).state + "\n";
-        return s;
-    }
-    void Load(const std::string &text) {
-        m_.clear();
-        seq_ = 0;
-        size_t at = 0;
-        while (at < text.size()) {
-            size_t end = text.find('\n', at);
-            if (end == std::string::npos) end = text.size();
-            const std::string line = text.substr(at, end - at);
-            at = end + 1;
-            const size_t tab = line.find('\t');
-            if (tab == std::string::npos || tab == 0) continue;
-            Set(line.substr(0, tab), line.substr(tab + 1));
-        }
-    }
-    size_t Size() const { return m_.size(); }
-
-private:
-    struct Entry {
-        std::string state;
-        uint64_t seq = 0;   // when it was set or used last (the one used longest ago goes first)
-    };
-    std::map<std::string, Entry> m_;
-    uint64_t seq_ = 0;
 };
 
 }  // namespace dashtiles

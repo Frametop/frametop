@@ -147,7 +147,8 @@ int main() {
     kill(x, SIGSTOP);
     link.Pointer(20, 20);
     link.Button(1, true);
-    for (size_t i = 0; i < AsyncLink::kMaxQueued + 500; ++i) link.Raise(i % 2 ? w : stale);
+    for (size_t i = 0; i < AsyncLink::kMaxQueued + 500; ++i) link.Raise(w);
+    link.Raise(stale);   // past the cap: it takes the last raise's place, not dropped (follow-up)
     link.Button(1, false);
     kill(x, SIGCONT);
     auto held = [&] {
@@ -161,6 +162,19 @@ int main() {
     while (MsSince(t3) < 3000 && !(sawUp = !held())) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     std::this_thread::sleep_for(std::chrono::milliseconds(200));   // (all of the queue through)
     CHECK(sawUp && !held());
+    {
+        xcb_query_tree_reply_t *tree = xcb_query_tree_reply(app, xcb_query_tree(app, scr->root), nullptr);
+        int atW = -1, atStale = -1;
+        if (tree) {
+            const xcb_window_t *kids = xcb_query_tree_children(tree);
+            for (int i = 0; i < xcb_query_tree_children_length(tree); ++i) {
+                if (kids[i] == w) atW = i;
+                if (kids[i] == stale) atStale = i;
+            }
+        }
+        std::free(tree);
+        CHECK(atW >= 0 && atStale > atW);   // (bottom to top: the raise past the cap went through)
+    }
 
     // off: closed; on again: open again, the windows there again
     link.SetOn(false);

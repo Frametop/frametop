@@ -4674,17 +4674,44 @@ void TestPinButton() {
     const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
     p.controls[4].u = -(chrome / 2 + gap + grip / 2);
     p.controls.push_back({Control::Pin, -(chrome / 2 + gap * 2 + grip * 1.5), v, grip / 2, grip / 2});
-    const Spot reset = p.controls[4], pin = p.controls[5];
+    p.controls.push_back({Control::Anchor, chrome / 2 + gap * 3 + grip * 2.5, v, grip / 2, grip / 2});
+    const Spot reset = p.controls[4], pin = p.controls[5], anchor = p.controls[6];
     CHECK(PressableButton(Control::Pin));
+    CHECK(PressableButton(Control::Anchor));   // (a hand presses the anchor button too: follow-up)
     CHECK(ControlAt(p, pin.u + 0.002, v, 0.005, 0.015) == Control::Pin);
     CHECK(ControlAt(p, reset.u - 0.002, v, 0.005, 0.015) == Control::Reset);
-    for (const Spot *at : {&pin, &reset}) {
+    for (const Spot *at : {&pin, &reset, &anchor}) {
         Rig r;
         r.panels = {p};
         for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(at->u + 0.002, v, mm / 1000.0)});
         CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == at->kind && r.Count(Event::Press) == 0);
         std::printf("buttons: a poke 2 mm right of %s: %s\n", ControlName(at->kind),
                     r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
+    }
+}
+
+// The anchor button held by a hand (vr.cpp's UpdateAnchorHold): pulled back off it is a let-go,
+// the hand lost on it is not (controlPressLost), so a loss doesn't anchor or let go of a panel.
+void TestAnchorLost() {
+    Panel p = LivePanel();
+    const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
+    p.controls.push_back({Control::Anchor, chrome / 2 + gap * 3 + grip * 2.5, v, grip / 2, grip / 2});
+    const Spot anchor = p.controls.back();
+    for (const bool lose : {false, true}) {
+        Rig r;
+        r.panels = {p};
+        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(anchor.u + 0.002, v, mm / 1000.0)});
+        CHECK(r.in.pressControl(1) == Control::Anchor);
+        if (lose) {
+            SynthHand gone;
+            gone.present = false;
+            for (int k = 0; k < 15; ++k) r.Frame({gone});
+        } else {
+            for (int mm = -15; mm <= 80; mm += 10) r.Frame({TipAt(anchor.u + 0.002, v, mm / 1000.0)});
+        }
+        CHECK(r.in.pressControl(1) == Control::None);
+        CHECK(r.in.controlPressLost(1) == lose);
+        std::printf("anchor held: %s: lost %d\n", lose ? "the hand lost" : "pulled back", int(r.in.controlPressLost(1)));
     }
 }
 
@@ -5662,6 +5689,7 @@ int main(int argc, char **argv) {
     TestGrabThatAfterThrow();
     TestButtons();
     TestPinButton();
+    TestAnchorLost();
     TestRollButton();
     TestTouchDot();
     TestGuides();

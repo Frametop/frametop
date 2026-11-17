@@ -1,4 +1,4 @@
-// Where the dashboard's tiles go (vr.cpp's dashboard tiling; tilegrid.h holds their order and sizes).
+// Where the dashboard's tiles go (screens/vrtiles.cpp's dashboard tiling; tilegrid.h holds their order and sizes).
 //
 // Panels anchored to the SteamVR dashboard tile on a sphere round your head, like one 360 degree
 // monitor (user, 2026-11-16): columns side by side round you, each one's panels stacked in it with
@@ -104,20 +104,27 @@ inline void Band(const Params &p, double *bottom, double *height) {
     *height = std::max(p.minHeightDeg, std::min(b + p.heightDeg, cap) - b);
 }
 
-// Each column's span round you that its fixed panels need, in a band `h` tall from `bottom`.
-inline std::vector<double> Spans(const std::vector<Column> &cols, const Params &p, double bottom, double h) {
+// The rows' share of a column `h` tall with `gap` between them (at least a degree, or all of a
+// band shrunk smaller: the rows stay in the band, not below it, nearer the pole).
+inline double RowsAvail(double h, double gap, size_t rows) {
+    return std::max(std::min(1.0, h), h - gap * (double(rows) - 1));
+}
+
+// Each column's span round you that its fixed panels need, in a band `h` tall from `bottom`,
+// `gap` between its rows.
+inline std::vector<double> Spans(const std::vector<Column> &cols, const Params &p, double bottom, double h, double gap) {
     std::vector<double> spans(cols.size());
     for (size_t c = 0; c < cols.size(); ++c) {
         const Column &col = cols[c];
         double span = 0;
         double sum = 0;
         for (const Tile &t : col.tiles) sum += std::max(0.05, t.weight);
-        const double avail = std::max(1.0, h - p.gapDeg * (double(col.tiles.size()) - 1));
+        const double avail = RowsAvail(h, gap, col.tiles.size());
         double elTop = bottom + h;
         for (const Tile &t : col.tiles) {
             const double rowDeg = avail * std::max(0.05, t.weight) / std::max(0.05, sum);
             const double e1 = elTop, e0 = elTop - rowDeg;
-            elTop = e0 - p.gapDeg;
+            elTop = e0 - gap;
             if (!t.fixed) continue;
             const double hm = Chord(p.radius, rowDeg) * Scale(t);
             span = std::max(span, SpanFor(p.radius, t.aspect * hm, hm, (e0 + e1) / 2));
@@ -131,12 +138,12 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     Layout out;
     double bottom, band;
     Band(p, &bottom, &band);
-    // (a gap between each two, and one where the strip's ends would meet behind you)
-    const double room = p.maxSpanDeg - p.gapDeg * double(cols.size());
-    // the strip at size k: the columns' own widths scale with it, fixed panels' spans from their rows
+    // the strip at size k: the band, the gaps and the columns' own widths scale with it, fixed
+    // panels' spans from their rows; a gap between each two columns, and one where the strip's ends
+    // would meet behind you
     auto spansAt = [&](double k, double *total) {
-        std::vector<double> s = Spans(cols, p, bottom, band * k);
-        *total = 0;
+        std::vector<double> s = Spans(cols, p, bottom, band * k, p.gapDeg * k);
+        *total = p.gapDeg * k * double(cols.size());
         for (size_t c = 0; c < cols.size(); ++c) {
             s[c] = std::max(s[c], (cols[c].widthDeg > 0 ? cols[c].widthDeg : p.columnDeg) * k);
             *total += s[c];
@@ -145,11 +152,12 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
     };
     double k = 1, total = 0;
     std::vector<double> spans = spansAt(1, &total);
+    const double room = p.maxSpanDeg;
     if (total > room && !cols.empty()) {
         // past a turn: a k that fits, by halving. (The strip grows with k nearly everywhere: rows
         // that shrink move the panels' centres, so it can dip a little, and halving then finds one
-        // within a few percent of the largest, which is fine. Past the clamps' far ends, a band at
-        // -85 with dozens of columns, nothing fits and the smallest k is used.)
+        // within a few percent of the largest, which is fine. Everything goes to nothing with k,
+        // so one fits, down to hundreds of columns in a band at the clamps' far end, -85.)
         double lo = 0, hi = 1;
         for (int i = 0; i < 40; ++i) {
             const double mid = (lo + hi) / 2;
@@ -161,18 +169,18 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
         spans = spansAt(k, &total);
     }
     out.shrink = k;
-    const double h = band * k;
+    const double h = band * k, gap = p.gapDeg * k;
     out.el0 = bottom, out.el1 = bottom + h;
-    total += p.gapDeg * std::max(0.0, double(cols.size()) - 1);
+    total = cols.empty() ? 0 : total - gap;   // (the one behind you isn't in the strip; no columns, no strip)
     double az = -total / 2;
     out.az0 = az, out.az1 = az + total;
     for (size_t c = 0; c < cols.size(); ++c) {
         const Column &col = cols[c];
         const double a0 = az, a1 = az + spans[c];
-        az = a1 + p.gapDeg;
+        az = a1 + gap;
         double sum = 0;
         for (const Tile &t : col.tiles) sum += std::max(0.05, t.weight);
-        const double avail = std::max(1.0, h - p.gapDeg * (double(col.tiles.size()) - 1));
+        const double avail = RowsAvail(h, gap, col.tiles.size());
         double elTop = bottom + h;
         for (size_t r = 0; r < col.tiles.size(); ++r) {
             const Tile &t = col.tiles[r];
@@ -180,7 +188,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p) {
             Placed pl;
             pl.id = t.id, pl.col = int(c), pl.row = int(r);
             pl.el1 = elTop, pl.el0 = elTop - rowDeg;
-            elTop = pl.el0 - p.gapDeg;
+            elTop = pl.el0 - gap;
             pl.az0 = a0, pl.az1 = a1;
             pl.azDeg = (a0 + a1) / 2, pl.elDeg = (pl.el0 + pl.el1) / 2;
             pl.heightM = Chord(p.radius, rowDeg);

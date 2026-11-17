@@ -191,7 +191,8 @@ int main() {
         const auto l = tiling::Arrange({col({{1, 16.0 / 9, true, 1}})}, q);
         check("band: a low cap keeps it within +-20", near(l.el1, 20) && near(l.el0, -20));
     }
-    // --- Steam's menu, a slot in the strip: half the columns either side of it, none in it
+    // --- Steam's menu, a slot in the strip when the strip reaches it: the split's columns left of
+    // it, the rest right, none in it
     {
         const auto clear = [](const tiling::Layout &l, double az0, double az1) {
             for (const auto &t : l.tiles)
@@ -211,19 +212,51 @@ int main() {
         q.reserveAzDeg = 30;
         std::vector<tiling::Column> three = {col({{1, 16.0 / 9, true, 1}}), col({{2, 1, false, 1}}, 30), col({{3, 4.0 / 3, true, 1}})};
         const auto off = tiling::Arrange(three, q);
-        check("slot: where the menu is (30 degrees round), clear", clear(off, 10, 50) && off.tiles[0].az1 <= 10 && off.tiles[1].az0 >= 50);
+        const auto mid = [](const tiling::Layout &l) { return std::fabs(l.az0 + l.az1) / 2; };
+        check("slot: where the menu is (30 degrees round), clear", clear(off, 10, 50) && off.split >= 0);
+        check("slot: the split puts the strip's middle nearest in front",
+              off.split == 2 && mid(off) <= mid(tiling::Arrange(three, q, 1)) && mid(off) <= mid(tiling::Arrange(three, q, 3)) &&
+                  mid(off) <= mid(tiling::Arrange(three, q, 0)));
+        const auto kept = tiling::Arrange(three, q, 0);
+        check("slot: a split given is kept (the grid's)", kept.split == 0 && clear(kept, 10, 50) && kept.tiles[0].az0 >= 50);
+        check("slot: a split past the columns is all of them", tiling::Arrange(three, q, 7).split == 3);
         std::vector<tiling::Column> many;
         for (int i = 0; i < 20; ++i) many.push_back(col({{i + 1, 16.0 / 9, true, 1}}));
         const auto full = tiling::Arrange(many, q);
         check("slot: past a turn the columns shrink, the slot doesn't", full.shrink < 1 && clear(full, 10, 50) &&
                                                                           full.az1 - full.az0 <= q.maxSpanDeg + 1e-6 &&
                                                                           cornersInColumns(full, q.radius));
-        const auto &last = full.tiles.back();   // (past 180 degrees: seen from the head, -180 + ...)
-        d = tiling::DropAt(full, many, last.azDeg - 360, last.elDeg);
+        const auto right = tiling::Arrange(many, q, 0);   // (all right of the menu: the strip runs past 180)
+        const auto &last = right.tiles.back();   // (past 180 degrees: seen from the head, -180 + ...)
+        d = tiling::DropAt(right, many, last.azDeg - 360, last.elDeg);
         check("slot: a drop on a tile past 180 degrees finds it", last.az1 > 180 && d.kind == tiling::Drop::Into && d.col == 19);
+        q.reserveAzDeg = 0;
+        d = tiling::DropAt(l, two, -3, 0);
+        check("slot: let go in it left of its middle: a new column there, left", d.kind == tiling::Drop::NewColumn && d.col == 1 && d.leftOfSlot);
+        d = tiling::DropAt(l, two, 3, 0);
+        check("slot: ...right of it: there, right", d.kind == tiling::Drop::NewColumn && d.col == 1 && !d.leftOfSlot);
+        // a menu the strip doesn't reach is no slot: the strip stays centred in front of you
+        q.reserveAzDeg = 100;
+        const auto far = tiling::Arrange(two, q);
+        check("slot: a menu past the strip: none, centred", far.split == -1 && near(far.az0, -far.az1));
+        check("slot: no slot, a drop isn't left of one", !tiling::DropAt(far, two, far.az0 + 1, 0).leftOfSlot);
+        q.reserveAzDeg = 50, q.reserveDeg = 62;   // (council, 2026-11-16: past the old 45 degree gate, covered)
+        const auto fifty = tiling::Arrange(two, q);
+        check("slot: a menu 50 degrees round the strip reaches: kept clear", fifty.split >= 0 && clear(fifty, 19, 81));
+        q.reserveAzDeg = 110, q.reserveDeg = 52;   // (the palm menu's, off to the side, with four columns)
+        std::vector<tiling::Column> four = three;
+        four.push_back(col({{4, 1, false, 1}}, 40));
+        const auto palm = tiling::Arrange(four, q);
+        check("slot: the palm menu's, the strip reaching it: kept clear", palm.split >= 0 && clear(palm, 84, 136));
+        q.reserveAzDeg = -170, q.reserveDeg = 40;   // (behind you: the strip's ends wrap round to it)
+        const auto behind = tiling::Arrange(many, q);
+        bool wrapClear = true;
+        for (const auto &t : behind.tiles)
+            for (double a : {t.az0 + 1e-6, t.az1 - 1e-6, t.azDeg}) wrapClear = wrapClear && std::fabs(tiling::WrapNear(a - -170, 0)) >= 20 - 1e-6;
+        check("slot: behind you, a full strip keeps it clear too", behind.split >= 0 && wrapClear);
         q.reserveDeg = 0;
         const auto none = tiling::Arrange(two, q);
-        check("slot: none, the strip centred in front again", near(none.az0, -none.az1));
+        check("slot: none, the strip centred in front again", near(none.az0, -none.az1) && none.split == -1);
     }
     // --- drops
     {
@@ -263,6 +296,7 @@ int main() {
         check("add: twice is once", g.Cols().size() == 3);
         check("move right alone: columns swap", g.MoveSide(1, +1) && g.Cols()[0].cells[0].id == 3 && g.Cols()[1].cells[0].id == 1);
         check("move left at the left end alone: nothing", !g.MoveSide(3, -1));
+        check("split: none chosen yet", g.Split() == -1);
         g.Insert(4, 1, 1, false);   // under 1
         check("insert: into a column at a row", g.Cols()[1].cells.size() == 2 && g.Cols()[1].cells[1].id == 4);
         check("move right with company: joins the next column", g.MoveSide(4, +1) && g.Cols()[2].cells.size() == 2 &&
@@ -278,6 +312,49 @@ int main() {
         check("narrower: never below the minimum", g.Widen(1, 0.01, 44) && near(g.Cols()[1].widthDeg, tilegrid::kMinWidthDeg));
         check("remove: its column goes with its last panel", g.Remove(1) && !g.Has(1) && g.Cols().size() == 3);
         check("remove: not there", !g.Remove(1));
+    }
+    // --- the grid's split round Steam's slot: each column stays on its side
+    {
+        tilegrid::Grid g;
+        for (int id = 1; id <= 4; ++id) g.Add(id, id - 1);   // [ 1 ][ 2 ] S [ 3 ][ 4 ]
+        g.SetSplit(2);
+        const auto ids = [&]() {
+            std::string s;
+            for (size_t c = 0; c < g.Cols().size(); ++c) {
+                if (int(c) == g.Split()) s += "S ";
+                for (const auto &cell : g.Cols()[c].cells) s += std::to_string(cell.id);
+                s += " ";
+            }
+            if (g.Split() == int(g.Cols().size())) s += "S ";
+            return s;
+        };
+        check("split: set", ids() == "1 2 S 3 4 ");
+        g.Add(5, 2);
+        check("split: a new one next to a left one goes left", ids() == "1 2 5 S 3 4 ");
+        g.Add(6, 3);
+        check("split: next to a right one, right", ids() == "1 2 5 S 3 6 4 ");
+        g.Add(7);
+        check("split: none focused: the right end", ids() == "1 2 5 S 3 6 4 7 ");
+        g.Remove(1);
+        check("split: a left column gone: one fewer left", ids() == "2 5 S 3 6 4 7 ");
+        g.Remove(6);
+        check("split: a right one gone: the same", ids() == "2 5 S 3 4 7 ");
+        g.Insert(8, 2, 0, true, 1, 0, 1, true);
+        check("split: a new column at the slot, left of it", ids() == "2 5 8 S 3 4 7 ");
+        g.Insert(9, 3, 0, true, 1, 0, 1, false);
+        check("split: ...right of it", ids() == "2 5 8 S 9 3 4 7 ");
+        check("split: alone, Meta+Right steps across the slot", g.MoveSide(8, +1, true) && ids() == "2 5 S 8 9 3 4 7 ");
+        check("split: ...and Meta+Left back", g.MoveSide(8, -1, true) && ids() == "2 5 8 S 9 3 4 7 ");
+        check("split: no slot in the strip: a plain swap", g.MoveSide(8, +1, false) && ids() == "2 5 9 S 8 3 4 7 ");
+        g.Insert(10, 2, 1, false);   // under 9
+        check("split: with company, Meta+Right: a column of its own past the slot", g.MoveSide(10, +1, true) &&
+                                                                                   ids() == "2 5 9 S 10 8 3 4 7 ");
+        g.Insert(11, 3, 1, false);   // under 10
+        check("split: ...Meta+Left: one of its own left of it", g.MoveSide(11, -1, true) && ids() == "2 5 9 11 S 10 8 3 4 7 ");
+        g.SetSplit(99);
+        check("split: past the columns: all of them", g.Split() == int(g.Cols().size()));
+        g.SetSplit(-5);
+        check("split: none", g.Split() == -1 && (g.Add(12, 2), g.Split() == -1));
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

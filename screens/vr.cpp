@@ -790,7 +790,6 @@ struct DashAnchor {
     long retryAt = 0;          // missing: g_tick to look for it again at
     bool missingLogged = false;
     dashanchor::Anchor a;      // a.ever: dashboard pins have a frame
-    double scale = 1;          // the bar's scale in its last good read (Steam draws it scaled)
 };
 DashAnchor g_dash;
 const dashanchor::Anchor &Dash() { return g_dash.a; }
@@ -801,7 +800,7 @@ double DashWidth() {
     if (g_dash.bar == vr::k_ulOverlayHandleInvalid || !g_dash.a.ever ||
         vr::VROverlay()->GetOverlayWidthInMeters(g_dash.bar, &w) != vr::VROverlayError_None || !(w > 0))
         return 0;
-    return w * g_dash.scale;
+    return w * g_dash.a.scale;
 }
 
 Mat DashFrame() {
@@ -839,8 +838,6 @@ bool UpdateDashAnchor() {
     const bool first = !g_dash.a.ever;
     const char *before = g_dash.a.why;
     const bool moved = g_dash.a.Feed(shown, err == vr::VROverlayError_None && origin == vr::TrackingUniverseStanding, m.m);
-    if (!g_dash.a.why)
-        g_dash.scale = std::sqrt(double(m.m[0][0]) * m.m[0][0] + double(m.m[1][0]) * m.m[1][0] + double(m.m[2][0]) * m.m[2][0]);
     // Each change of verdict, with what was read (why a read didn't count shows in the log).
     if (g_dash.a.why != before) {
         double ax[3];

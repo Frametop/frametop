@@ -53,15 +53,19 @@ inline bool ParseKey(const char *word, Key *k) {
 
 // The group frame in the room, from the head's pose: at the head, level, its -Z the way the head
 // faces, so the strip is in front of you wherever Steam put its bar (the palm menu's Steam menu
-// opens it low and to the side). The way is the forward's, level (right whatever the roll); more
-// than 60 degrees up or down, where that gets shaky, the up's level part joins it (fwd - up * fwd.y:
-// the forward with the pitch taken out, right without roll), so looking straight down at a palm or
-// straight up still faces the same way. `headFwd`, `headUp`: the head's -Z and +Y.
+// opens it low and to the side). The way is the forward's, level (right whatever the roll). Near
+// straight up or down, where the forward's level part goes to nothing, the up's level part joins
+// it, eased in from kUpFromDeg to kUpFullDeg of pitch (fwd - up * fwd.y: the forward with the pitch
+// taken out, right without roll; eased, the way turns smoothly with the pitch, no jump), so looking
+// straight down at a palm or straight up still faces the same way. `headFwd`, `headUp`: the head's
+// -Z and +Y. A pose that isn't finite, or has no way at all, faces -Z.
+constexpr double kUpFromDeg = 75, kUpFullDeg = 88;
 inline void GroupFrame(const double head[3], const double headFwd[3], const double headUp[3], double out[3][4]) {
-    double fx = headFwd[0], fz = headFwd[2];
-    if (std::hypot(fx, fz) < 0.5) fx -= headUp[0] * headFwd[1], fz -= headUp[2] * headFwd[1];
+    const double s0 = std::sin(tiling::Rad(kUpFromDeg)), s1 = std::sin(tiling::Rad(kUpFullDeg));
+    const double t = std::clamp((std::fabs(headFwd[1]) - s0) / (s1 - s0), 0.0, 1.0), w = t * t * (3 - 2 * t);
+    double fx = headFwd[0] - w * headUp[0] * headFwd[1], fz = headFwd[2] - w * headUp[2] * headFwd[1];
     const double n = std::hypot(fx, fz);
-    if (n < 1e-9) fx = 0, fz = -1;
+    if (!(n >= 1e-9) || !std::isfinite(n)) fx = 0, fz = -1;
     else fx /= n, fz /= n;
     const double x[3] = {-fz, 0, fx}, y[3] = {0, 1, 0}, z[3] = {-fx, 0, -fz};
     for (int r = 0; r < 3; ++r) out[r][0] = x[r], out[r][1] = y[r], out[r][2] = z[r], out[r][3] = head[r];
@@ -69,17 +73,18 @@ inline void GroupFrame(const double head[3], const double headFwd[3], const doub
 
 // Steam's menu as a slot in the strip (tiling.h's reserve), from the group frame `g`, the bar's
 // position and its width in metres (the menu over it is about as wide): the slot's middle round
-// you (`azDeg`, in the group frame: also set when there's no slot) and its width (`spanDeg`).
-// False, no slot, when the menu isn't near the front (past kSlotWithinDeg: the palm menu's, off to
-// the side, leaves the strip centred in front of you), its width isn't known, or it's over your head.
-constexpr double kSlotWithinDeg = 45;
+// you (`azDeg`, in the group frame: also set when there's no slot) and its width (`spanDeg`, at
+// most kMaxSlotDeg). Wherever it is round you (the Steam button opens it in front, the palm menu
+// off to the side): the strip keeps the slot only when it would reach it (tiling.h). False, no
+// slot, when its width isn't known, it's over your head, or anything isn't finite.
+constexpr double kMaxSlotDeg = 90;
 inline bool SteamSlot(const double g[3][4], const double bar[3], double barWidthM, double *azDeg, double *spanDeg) {
     const double d[3] = {bar[0] - g[0][3], bar[1] - g[1][3], bar[2] - g[2][3]};
     const double x = d[0] * g[0][0] + d[1] * g[1][0] + d[2] * g[2][0], z = d[0] * g[0][2] + d[1] * g[1][2] + d[2] * g[2][2];
     const double flat = std::hypot(x, z);
     *azDeg = tiling::Deg(std::atan2(x, -z));
-    if (!(barWidthM > 0) || flat < 0.2 || std::fabs(*azDeg) > kSlotWithinDeg) return false;
-    *spanDeg = 2 * tiling::Deg(std::atan2(barWidthM / 2, flat));
+    if (!(barWidthM > 0) || !std::isfinite(barWidthM) || !(flat >= 0.2) || !std::isfinite(*azDeg)) return false;
+    *spanDeg = std::min(kMaxSlotDeg, 2 * tiling::Deg(std::atan2(barWidthM / 2, flat)));
     return true;
 }
 
@@ -139,7 +144,7 @@ public:
     template <typename InfoOf>
     tiling::Drop DropFor(int id, double az, double el, InfoOf info) const {
         const auto cols = Columns(info);
-        return Without(grid_, id, tiling::DropAt(tiling::Arrange(cols, params), cols, az, el));
+        return Without(grid_, id, tiling::DropAt(tiling::Arrange(cols, params, grid_.Split()), cols, az, el));
     }
     // Let go: where DropFor said (a column's indices are the grid's without it), or torn off at `rel`.
     void Drop(int id, const tiling::Drop &d, const double rel[3][4]) {
@@ -150,7 +155,7 @@ public:
         EndBatch();
         grid_.Remove(id);
         spots_[id].satellite = false;
-        grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale);
+        grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, 1, 0, scale, d.leftOfSlot);
     }
 
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed. A fixed
@@ -173,8 +178,8 @@ private:
         const bool grow = k == Key::Wider || k == Key::Taller;
         const double f = grow ? tilegrid::kStep : 1 / tilegrid::kStep;
         switch (k) {
-            case Key::Left: return grid_.MoveSide(id, -1);
-            case Key::Right: return grid_.MoveSide(id, +1);
+            case Key::Left: return grid_.MoveSide(id, -1, last_.split >= 0);
+            case Key::Right: return grid_.MoveSide(id, +1, last_.split >= 0);
             case Key::Up: return grid_.MoveUpDown(id, -1);
             case Key::Down: return grid_.MoveUpDown(id, +1);
             case Key::Wider:
@@ -205,11 +210,15 @@ public:
         }
         return cols;
     }
+    // Laid out (a split round Steam's slot chosen now is kept: tilegrid.h keeps each column on its side).
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
-        last_ = tiling::Arrange(Columns(info), params);
+        last_ = tiling::Arrange(Columns(info), params, grid_.Split());
+        if (last_.split >= 0 && grid_.Split() < 0) grid_.SetSplit(last_.split);
         return last_;
     }
+    // Steam's menu is somewhere new (the dashboard opened again): the split is chosen again.
+    void SlotMoved() { grid_.SetSplit(-1); }
     const tiling::Layout &Last() const { return last_; }
     const tiling::Placed *PlacedOf(int id) const {
         for (const auto &p : last_.tiles)

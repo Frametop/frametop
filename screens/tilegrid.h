@@ -9,12 +9,19 @@
 // Meta+Ctrl+Left/Right makes its column narrower or wider, Meta+Ctrl+Up/Down its row taller or
 // shorter. A panel anchored gets a column of its own right of the focused one.
 //
+// Steam's menu is a slot in the strip when the strip reaches it (tiling.h): the split is how many
+// columns are left of it. Each column stays on its side: a new one next to the focused one goes on
+// its side, a drop on the side it was let go, and Meta+Left/Right steps a panel across the slot
+// (alone in its column: the column goes; with others: out into a column of its own) rather than
+// past it. -1: not chosen yet (the tiling chooses one, Board keeps it).
+//
 // Header only, so its test runs anywhere.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace tilegrid {
@@ -58,14 +65,16 @@ public:
         if (Has(id)) return;
         const Where w = Find(after);
         const int at = w.ok() ? w.col + 1 : int(cols_.size());
-        cols_.insert(cols_.begin() + at, Col{{Cell{id, 1}}, widthDeg});
+        InsertCol(at, Col{{Cell{id, 1}}, widthDeg}, w.ok() && w.col < split_);
     }
-    // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such column.
-    void Insert(int id, int col, int row, bool newColumn, double weight = 1, double widthDeg = 0, double scale = 1) {
+    // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such
+    // column (at the split: left of Steam's slot when `leftOfSlot`).
+    void Insert(int id, int col, int row, bool newColumn, double weight = 1, double widthDeg = 0, double scale = 1,
+                bool leftOfSlot = false) {
         if (Has(id)) Remove(id);
         col = std::clamp(col, 0, int(cols_.size()));
         if (newColumn || col == int(cols_.size())) {
-            cols_.insert(cols_.begin() + col, Col{{Cell{id, Clamp(weight), Sc(scale)}}, widthDeg});
+            InsertCol(col, Col{{Cell{id, Clamp(weight), Sc(scale)}}, widthDeg}, leftOfSlot);
             return;
         }
         auto &cells = cols_[col].cells;
@@ -78,27 +87,37 @@ public:
         if (!w.ok()) return false;
         auto &cells = cols_[w.col].cells;
         cells.erase(cells.begin() + w.row);
-        if (cells.empty()) cols_.erase(cols_.begin() + w.col);
+        if (cells.empty()) {
+            cols_.erase(cols_.begin() + w.col);
+            if (w.col < split_) --split_;
+        }
         return true;
     }
 
-    // Meta+Left (-1) / Meta+Right (+1). False when nothing changed.
-    bool MoveSide(int id, int dir) {
+    // Meta+Left (-1) / Meta+Right (+1), `slot` when Steam's slot is in the strip. False when nothing changed.
+    bool MoveSide(int id, int dir, bool slot = false) {
         const Where w = Find(id);
         if (!w.ok() || dir == 0) return false;
         dir = dir < 0 ? -1 : 1;
         Col &col = cols_[w.col];
         const int next = w.col + dir;
+        const bool across = slot && split_ >= 0 && w.col == (dir > 0 ? split_ - 1 : split_);
         if (col.cells.size() == 1) {
+            if (across) return split_ -= dir, true;   // its column steps across the slot
             if (next < 0 || next >= int(cols_.size())) return false;
             std::swap(cols_[w.col], cols_[next]);
             return true;
         }
         const Cell cell = col.cells[w.row];
         col.cells.erase(col.cells.begin() + w.row);
+        if (across) {
+            // across the slot: into a column of its own, the slot's nearest that side
+            InsertCol(split_, Col{{Cell{cell.id, 1, cell.scale}}, 0}, dir < 0);
+            return true;
+        }
         if (next < 0 || next >= int(cols_.size())) {
             // at the end: out into a column of its own that side
-            cols_.insert(cols_.begin() + (next < 0 ? 0 : int(cols_.size())), Col{{Cell{cell.id, 1, cell.scale}}, 0});
+            InsertCol(next < 0 ? 0 : int(cols_.size()), Col{{Cell{cell.id, 1, cell.scale}}, 0}, next < 0);
             return true;
         }
         auto &into = cols_[next].cells;
@@ -156,10 +175,20 @@ public:
         return w.ok() ? cols_[w.col].widthDeg : 0;
     }
 
+    // The columns left of Steam's slot (-1: not chosen yet).
+    int Split() const { return split_; }
+    void SetSplit(int split) { split_ = split < 0 ? -1 : std::min(split, int(cols_.size())); }
+
 private:
     static double Clamp(double w) { return std::clamp(w, kMinWeight, kMaxWeight); }
     static double Sc(double s) { return std::clamp(s, kMinScale, 1.0); }
+    // A new column at `at` (at the split: left of the slot when `left`).
+    void InsertCol(int at, Col c, bool left) {
+        cols_.insert(cols_.begin() + at, std::move(c));
+        if (split_ >= 0 && (at < split_ || (at == split_ && left))) ++split_;
+    }
     std::vector<Col> cols_;
+    int split_ = -1;
 };
 
 }  // namespace tilegrid

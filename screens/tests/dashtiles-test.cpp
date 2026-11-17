@@ -49,19 +49,38 @@ int main() {
                 const double want = std::atan2(-Ry[0][2], -Ry[2][2]);   // (where the yaw alone turns -Z)
                 double err = std::fabs(std::atan2(fx, fz) - want);
                 err = std::min(err, 2 * tiling::kPi - err);
-                // exact within 60 degrees of level at any roll, and at any pitch without roll; past
-                // 60 with roll, near (looking straight down, a rolled head's way is its up's)
-                const double tol = std::fabs(pitchDeg) <= 60 || rollDeg == 0 ? 1e-6 : tiling::Rad(rollDeg) + 1e-6;
+                // exact within 75 degrees of level at any roll, and at any pitch without roll; past
+                // 75 with roll, near (looking straight down, a rolled head's way is its up's)
+                const double tol = std::fabs(pitchDeg) <= dashtiles::kUpFromDeg || rollDeg == 0 ? 1e-6 : tiling::Rad(rollDeg) + 1e-6;
                 steady = steady && err <= tol && near(g[1][2], 0);
             }
         check("group: the head's way at every pitch to 89 degrees and roll to 60 (no turn to the bar)", steady);
+        // and it turns smoothly with the pitch, rolled (council, 2026-11-16: it jumped 20 degrees at 60)
+        double worst = 0, last = 0;
+        for (double rollDeg : {10.0, 30.0, 60.0})
+            for (int i = 0; i <= 1798; ++i) {
+                const double pt = tiling::Rad(-89.9 + i * 0.1), rl = tiling::Rad(rollDeg);
+                // pitch then roll, facing -Z: forward = Rx * Rz * (0,0,-1), up = Rx * Rz * (0,1,0)
+                const double f[3] = {0, std::sin(pt), -std::cos(pt)};
+                const double u[3] = {-std::sin(rl), std::cos(rl) * std::cos(pt), std::cos(rl) * std::sin(pt)};
+                dashtiles::GroupFrame(head, f, u, g);
+                const double way = tiling::Deg(std::atan2(-g[0][2], g[2][2]));   // (0: -Z)
+                if (i > 0) worst = std::max(worst, std::fabs(tiling::WrapNear(way - last, 0)));
+                last = way;
+            }
+        // (a rolled head's way goes from its forward's to its up's over the ease: steepest at a 60
+        // degree roll, 1.6 degrees a tenth of a degree, against the 20 of the jump)
+        check("group: no jump as the pitch goes (under 2 degrees a tenth of a degree)", worst < 2);
+        const double nan = std::nan(""), bad[3] = {nan, 0, -1};
+        dashtiles::GroupFrame(head, bad, up, g);
+        check("group: a forward that isn't finite: -Z", near(g[2][2], 1) && near(g[0][2], 0));
         const double sideways[3] = {1, 0, 0}, down[3] = {0, -1, 0};   // rolled onto its side, looking ahead
         dashtiles::GroupFrame(head, ahead, sideways, g);
         check("group: a head on its side takes its forward", near(g[2][2], 1));
         dashtiles::GroupFrame(head, down, down, g);   // (not a head pose: no way at all)
         check("group: no way at all: -Z", near(g[2][2], 1));
     }
-    // --- Steam's slot: the menu near the front is one, off to the side it isn't
+    // --- Steam's slot: wherever the menu is round you (the strip keeps it only when it reaches it)
     {
         double g[3][4];
         const double head[3] = {0, 1.6, 0}, ahead[3] = {0, 0, -1}, up[3] = {0, 1, 0};
@@ -71,13 +90,58 @@ int main() {
         check("slot: Steam's menu ahead is one", dashtiles::SteamSlot(g, front, 1.0, &az, &span) && near(az, 0) &&
                                                      near(span, 2 * tiling::Deg(std::atan2(0.5, 1.2))));
         const double palm[3] = {0.8, 1.05, 0.64};   // the palm menu's: low, right and behind
-        check("slot: the palm menu's, off to the side, isn't", !dashtiles::SteamSlot(g, palm, 1.0, &az, &span) && az > 90);
+        check("slot: the palm menu's, off to the side, is one too", dashtiles::SteamSlot(g, palm, 1.0, &az, &span) && az > 90);
         const double right[3] = {0.6, 1.2, -1.2};
         check("slot: a little to the right, at its place", dashtiles::SteamSlot(g, right, 1.0, &az, &span) &&
                                                                near(az, tiling::Deg(std::atan2(0.6, 1.2))));
         check("slot: no width, none", !dashtiles::SteamSlot(g, front, 0, &az, &span));
         const double over[3] = {0.05, 2.5, 0};
         check("slot: right over the head, none", !dashtiles::SteamSlot(g, over, 1.0, &az, &span));
+        const double nan = std::nan(""), lost[3] = {nan, 1, -1};
+        check("slot: a bar that isn't finite, none", !dashtiles::SteamSlot(g, lost, 1.0, &az, &span));
+        check("slot: a width that isn't finite, none", !dashtiles::SteamSlot(g, front, nan, &az, &span) &&
+                                                           !dashtiles::SteamSlot(g, front, INFINITY, &az, &span));
+        const double close[3] = {0, 1.2, -0.25};
+        check("slot: a bar right in front of you, at most kMaxSlotDeg", dashtiles::SteamSlot(g, close, 1.2, &az, &span) &&
+                                                                            near(span, dashtiles::kMaxSlotDeg));
+    }
+    // --- the slot's side stays put (council, 2026-11-16: it was the column count's middle, so an
+    // anchor or a drop moved panels across Steam's menu)
+    {
+        dashtiles::Board b;
+        b.params.reserveAzDeg = 0, b.params.reserveDeg = 66;
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        const auto side = [&](int id) {   // -1 left of the slot, +1 right
+            const tiling::Placed *p = b.PlacedOf(id);
+            return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
+        };
+        b.Arrange(desk);
+        check("split: three round a slot in front: one left, two right, none in it",
+              b.Grid().Split() == 1 && side(1) == -1 && side(2) == 1 && side(3) == 1);
+        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+        auto d = b.DropFor(3, -40, 0, desk);   // (on 1's right quarter, left of Steam's menu)
+        b.Drop(3, d, rel);
+        b.Arrange(desk);
+        check("split: let go left of the menu, it goes left", side(1) == -1 && side(3) == -1 && side(2) == 1);
+        b.Anchor(4, 3, false);
+        b.Arrange(desk);
+        check("split: anchored next to a left one, it goes left; the others stay", side(4) == -1 && side(2) == 1 && side(1) == -1);
+        b.Unanchor(4);
+        b.Arrange(desk);
+        check("split: unanchored, the others stay", side(3) == -1 && side(2) == 1);
+        check("split: Meta+Right steps across the menu", b.Press(3, dashtiles::Key::Right, desk(3)) && (b.Arrange(desk), side(3) == 1) &&
+                                                             side(1) == -1 && side(2) == 1);
+        d = b.DropFor(3, -5, 0, desk);   // (in the slot, left of its middle)
+        b.Drop(3, d, rel);
+        b.Arrange(desk);
+        check("split: let go in the slot left of its middle, it goes left", side(3) == -1 && side(2) == 1);
+        b.SlotMoved();
+        b.Arrange(desk);
+        check("split: the dashboard opened again: chosen again", b.Grid().Split() == 1);
+        b.params.reserveAzDeg = 160;   // (behind you)
+        b.SlotMoved();
+        b.Arrange(desk);
+        check("split: a menu the strip doesn't reach: no slot, centred", b.Last().split == -1 && near(b.Last().az0, -b.Last().az1));
     }
     // --- anchoring
     {

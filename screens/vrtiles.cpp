@@ -153,7 +153,7 @@ void RetileDash(bool resize) {
 
 namespace {
 // The group to where the dashboard is now, in front of your head, with Steam's menu a slot in it
-// when it's in front too: false without a head pose.
+// when the strip reaches it (its split chosen again): false without a head pose.
 bool Regroup() {
     Mat head;
     if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
@@ -166,14 +166,17 @@ bool Regroup() {
     double barAz = 0, slot = 0;
     if (!dashtiles::SteamSlot(g, b, barW, &barAz, &slot)) slot = 0;
     g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
+    g_tiles.SlotMoved();
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
     RetileDash(true);
     const tiling::Layout &l = g_tiles.Last();
     // (the facing in the room, 0 its -Z, right positive; the bar from there)
     std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees; Steam's bar %.0f degrees "
-                "round, %.2f m wide, its slot %.0f degrees (0: none); the band %.0f..%.0f degrees up, the strip %.0f..%.0f\n",
-                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.el0, l.el1, l.az0, l.az1);
+                "round, %.2f m wide, its slot %.0f degrees (0: none), %d columns left of it (-1: the strip doesn't reach it); "
+                "the band %.0f..%.0f degrees up, the strip %.0f..%.0f\n",
+                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split, l.el0, l.el1,
+                l.az0, l.az1);
     return true;
 }
 }  // namespace

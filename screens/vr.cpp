@@ -1563,7 +1563,18 @@ bool RayOnSurface(const Screen &s, const Mat &p, const Mat &laser, double *u, do
 // The corner a laser (or, with HANDS_EDGE_GLOW off, a hand) aims at this tick, the closest on any panel:
 // its soft glow (UpdateHandGuides).
 handinput::Guide g_laserCorner, g_laserCornerNext;
+// A panel glued to `index` (Steam's menu, flush left of Steam's tile: vrsteamwin.cpp).
+bool HasGlued(int index) {
+    for (const auto &[i, g] : g_screens)
+        if (g.glueTo == index) return true;
+    return false;
+}
+// No resize corner on a glued panel (it's sized by what it's glued to), nor on the side of a panel
+// something is glued to: their reach lay over Steam's menu, so aiming at its icons lit a corner and a
+// press resized Steam's tile (user, 2026-11-18: "the sidebar should not be resizable manually").
 void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
+    if (s.glueTo >= 0) return;
+    const bool gluedLeft = HasGlued(ScreenIndexOf(s));
     const double W = s.metres, H = s.heightMetres();
     const double zone = g_resizeCorner.sharp ? std::max(g_resizeCorner.reachCm / 100, HandleSize(s) * 1.42)
                                             : resizecorner::LegacyZone(W, H);
@@ -1581,6 +1592,7 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
             if (!RayOnSurface(s, p, d, &u, &v)) continue;
             for (int x : {1, -1})
                 for (int y : {-1, 1}) {
+                    if (x < 0 && gluedLeft) continue;
                     const double du = u - x * W / 2, dv = v - y * H / 2;
                     const double dist = std::hypot(du, dv), canvas = HandleSize(s);
                     const bool on = overlayregion::Contains(ResizeRegion(x, y), 0.5 + du / canvas, 0.5 + dv / canvas);
@@ -1592,7 +1604,7 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
         }
         const auto &hc = g_handInput.corners();
         const auto it = handGlow ? hc.end() : hc.find(ScreenIndexOf(s));
-        if (it != hc.end() && it->second.closeness >= best)
+        if (it != hc.end() && !(gluedLeft && it->second.sx < 0) && it->second.closeness >= best)
             best = it->second.closeness, cx = it->second.sx, cy = it->second.sy, held = it->second.held;
     }
     // A true hover/held target must stay obvious even outside the proximity fade.
@@ -1846,6 +1858,7 @@ void BeginResizeFacing(Screen &s, const Mat &p) {
 
 bool HandRay(uint32_t d);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
+    if (mode == Drag::Resize && s.glueTo >= 0) return;   // (sized by what it's glued to: UpdateCorner)
     Mat d, p;
     if (dev == kNone || !DevicePose(dev, &d) || !ScreenPose(s, &p)) {
         std::printf("screen %d: %s not started: no pose for the %s or the screen\n", ScreenIndexOf(s) + 1,

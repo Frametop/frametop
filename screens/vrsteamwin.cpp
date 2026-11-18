@@ -203,6 +203,21 @@ void Find(bool all) {
     for (const auto &[id, h] : found) Do(g_fleet.SetSteams(id, h));
 }
 
+// Steam's menu: of its menu windows, the one whose overlay Steam shows (it paints only that one; the
+// others are black). The one held now first, if Steam shows that one too; none shown (the dashboard
+// closed), the one held stays.
+void PickMenu() {
+    uint32_t pick = 0;
+    for (const auto &[id, t] : g_fleet.Windows()) {
+        if (t.What().role != steamwin::Spec::Tile || t.What().slot != 1 || !t.Steams()) continue;
+        if (vr::VROverlay()->IsOverlayVisible(t.Steams()) && (!pick || t.Held())) pick = id;
+    }
+    const steamwin::Tracker *held = g_fleet.TileIn(1);
+    if (!pick || (held && held->Window() == pick)) return;
+    std::printf("Steam menu: Steam shows 0x%x's (was 0x%x's): that one is the tile\n", pick, held ? held->Window() : 0);
+    Do(g_fleet.Showing(1, pick));
+}
+
 // A tile closed from Frametop's side (its panel gone, the window still ours): the window back to Steam.
 void Lost() {
     std::vector<uint32_t> lost;
@@ -331,6 +346,7 @@ void SteamDashStep() {
     if (dashUp && !g_dashWasUp && g_fleet.On() && GsInTheater()) SendDashpatch("steamtab");
     g_dashWasUp = dashUp;
     if (all || fresh) Find(all);
+    if (all || fresh) PickMenu();
     Lost();
     steamhit::Step(g_fleet, all);
     if (g_pages) steamfollow::Step(g_fleet, *g_pages);

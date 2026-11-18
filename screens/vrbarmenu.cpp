@@ -11,7 +11,8 @@
 // Its panel's controls stay shown while it's open.
 //   Steam's tile adds a fifth row, View in Theater: its window shown in SteamVR's theater, SteamVR's
 // own way (vrsteamwin.cpp: SteamDashToTheater). Steam's page hides SteamVR's own button for that
-// while it is a tile (pointer/dashpatch/steampage.py), so this is where it went.
+// while it is a tile (pointer/dashpatch/steampage.py), so this is where it went. A Steam game's
+// panel has it too: the game's window lent to SteamVR's theater (vrgsapps.cpp: GsToTheater).
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
@@ -59,7 +60,7 @@ constexpr int kMenuText = 30;
 struct {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     int panel = -1;            // the panel it's for, -1 closed
-    int rows = barside::kSides;  // the edges, and View in Theater on Steam's tile
+    int rows = barside::kSides;  // the edges, and View in Theater on Steam's tile and a game's panel
     double along = 0;          // where on its bar it was opened (metres from the bar's middle)
     int hover = -1;            // the row under a laser, -1 none
     int64_t usedMs = -1;       // opened, or a laser moved on it, then
@@ -166,7 +167,7 @@ void OpenBarMenu(int i, double along) {
     }
     if (g_menu.panel >= 0) CloseMenu("another bar's opened");
     g_menu.panel = i, g_menu.along = along, g_menu.hover = -1, g_menu.usedMs = NowMs(), g_menu.drawnHover = -2;
-    g_menu.rows = barside::kSides + (i == SteamDashIndex() ? 1 : 0);
+    g_menu.rows = barside::kSides + (i == SteamDashIndex() || GsCanTheater(i) ? 1 : 0);
     std::printf("screen %d: grab bar menu open (its bar on the %s)\n", i + 1, barside::Name(g_screens[i].barSide));
     std::fflush(stdout);
     UpdateBarMenu();
@@ -201,7 +202,7 @@ void UpdateBarMenu() {
 }
 
 // Its input: a laser over a row lights it, a click there moves the bar to that edge (or, on
-// Steam's tile, puts Steam's page in SteamVR's theater).
+// Steam's tile, puts Steam's page in SteamVR's theater; on a game's panel, the game).
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
     while (g_menu.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_menu.overlay, &ev, sizeof ev)) {
@@ -216,7 +217,8 @@ void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
             if (row < 0 || panel < 0) continue;
             if (row >= barside::kSides) {
                 CloseMenu("View in Theater");
-                SteamDashToTheater();
+                if (panel == SteamDashIndex()) SteamDashToTheater();
+                else GsToTheater(panel);
                 continue;
             }
             SetBarSide(panel, barside::kAll[row], "its bar's menu");

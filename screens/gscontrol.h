@@ -19,6 +19,10 @@
 // while the panel of the window with the typing is shown. A window that goes takes nothing held
 // with it: a button pressed on it and keys down on it are let go of. One that unmaps is hidden,
 // still tagged, and shown again if it maps within gsapps::kMapWaitMs (dropped otherwise).
+// View in Theater lends an app's window (and its popups) to SteamVR's theater: untagged, so
+// gamescope gives it its own overlay, which SteamVR takes into its theater (gstheater.h has when it
+// comes back). Its panel hides meanwhile, and a popup it opens isn't tagged ours; Reclaim tags
+// them all again and shows the panel if the window's mapped.
 #pragma once
 
 #include "gsapps.h"
@@ -26,6 +30,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace gsapps {
@@ -59,7 +64,7 @@ public:
         Do(book_.Clear());
         tagging_ = true;
         buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, keys_ = Keys();
-        typedBefore_.clear();
+        typedBefore_.clear(), lent_.clear();
     }
     // Off (GSAPP_PANELS, or ft-screens going): buttons and keys held let go of, each window back to
     // gamescope's own panel.
@@ -69,7 +74,7 @@ public:
         keys_ = Keys();
         Do(book_.Clear());
         raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0;
-        typedBefore_.clear();
+        typedBefore_.clear(), lent_.clear();
     }
     void On(const gsforward::Event &e, int64_t nowMs) {
         Do(book_.On(e, nowMs));
@@ -131,6 +136,38 @@ public:
     }
     const Book &Windows() const { return book_; }
 
+    // View in Theater: the app window at `index` and its popups untagged (gamescope's own overlay
+    // has them, SteamVR's theater shows it), what's held on them let go of, its panel hidden. The
+    // window lent, or 0 (no app there, or it's lent already).
+    uint32_t Lend(int index) {
+        const uint32_t win = book_.WindowOf(index);
+        if (!win || lent_.count(win)) return 0;
+        lent_.insert(win);
+        for (const auto &[w, o] : overlays_)
+            if (book_.PanelOf(w) == index) {
+                LetGoOf(w), x_.Untag(w);
+                if (raised_ == w) raised_ = 0;
+                if (focused_ == w) focused_ = 0;   // (gamescope focuses it in the theater: again when it's back)
+            }
+        panels_.Hide(index);
+        return win;
+    }
+    // A lent window back on its panel: it and its popups tagged ours again, the panel shown if it's
+    // mapped. False if it isn't lent (it went meanwhile).
+    bool Reclaim(uint32_t win) {
+        if (!lent_.erase(win)) return false;
+        const int index = book_.PanelOf(win);
+        if (index < 0) return false;
+        for (const auto &[w, o] : overlays_)
+            if (book_.PanelOf(w) == index) x_.Tag(w, o);
+        if (const gsforward::Window *r = book_.MainRect(index); r && book_.Mapped(index)) panels_.Show(index, *r);
+        return true;
+    }
+    bool Lent(int index) const {
+        const uint32_t win = book_.WindowOf(index);
+        return win && lent_.count(win);
+    }
+
 private:
     gsforward::XSide &x_;
     Panels &panels_;
@@ -144,6 +181,8 @@ private:
     // a popup that had the typing -> the app window that had it before (erased when the popup goes)
     std::map<uint32_t, uint32_t> typedBefore_;
     uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur (0 after a press)
+    std::map<uint32_t, uint64_t> overlays_;   // each window with a panel or popup -> its overlay (its tag)
+    std::set<uint32_t> lent_;                 // app windows lent to SteamVR's theater (untagged)
     bool tagging_ = true;     // (false: the display's gone, nobody to untag at)
 
     void FocusOn(uint32_t w) {
@@ -186,6 +225,7 @@ private:
             LetGoOf(win);
             x_.Untag(win);
         }
+        overlays_.erase(win), lent_.erase(win);
         const bool typing = keys_.Target() == win;
         keys_.Gone(win);
         uint32_t before = 0;
@@ -206,10 +246,12 @@ private:
     void Do(const std::vector<Action> &actions) {
         for (const Action &a : actions) switch (a.type) {
                 case Action::Make:
-                    if (const uint64_t o = panels_.Make(a.index, a.win, pid_)) x_.Tag(a.win.id, o);
+                    if (const uint64_t o = panels_.Make(a.index, a.win, pid_)) overlays_[a.win.id] = o, x_.Tag(a.win.id, o);
                     else Do(book_.Lose(a.win.id));
                     break;
-                case Action::Show: panels_.Show(a.index, a.win); break;
+                case Action::Show:
+                    if (!lent_.count(a.win.id)) panels_.Show(a.index, a.win);   // (lent: Reclaim shows it)
+                    break;
                 case Action::Move: panels_.Move(a.index, a.win); break;
                 case Action::Hide:
                     LetGoOf(a.win.id);
@@ -219,8 +261,12 @@ private:
                     break;
                 case Action::Drop: Gone(a.win.id, 0, 0, false), panels_.Drop(a.index); break;
                 case Action::MakePopup:
-                    if (const uint64_t o = panels_.MakePopup(a.index, a.sub, a.win, pid_)) x_.Tag(a.win.id, o);
-                    else Do(book_.Lose(a.win.id));
+                    if (const uint64_t o = panels_.MakePopup(a.index, a.sub, a.win, pid_)) {
+                        overlays_[a.win.id] = o;
+                        if (!lent_.count(book_.WindowOf(a.index))) x_.Tag(a.win.id, o);   // (lent: in the theater with its app)
+                    } else {
+                        Do(book_.Lose(a.win.id));
+                    }
                     break;
                 case Action::MovePopup: panels_.MovePopup(a.index, a.sub, a.win); break;
                 case Action::DropPopup:

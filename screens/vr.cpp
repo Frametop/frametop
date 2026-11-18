@@ -8187,6 +8187,7 @@ static void VisibilityCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
         g_steamvr.gamepad = pad, g_steamvr.theater = app, g_steamvr.mine = mine, g_steamvr.atMs = NowMs();
         // (no lapse: with ft-dashpatch gone mid-theater Steam's windows just stay Steam's)
         SteamDashTheater(parsed.steamTheater != 0);
+        GsTheaterWord(parsed.gameTheater);
         UpdateLasers();
         std::snprintf(reply, size, "ok");
         return;
@@ -8643,11 +8644,13 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //   conceal <screen|all> | reveal <screen|all>   a screen hidden on its own, whatever the mode
 //   concealed     -> "ok [<screen> ...]"   the screens hidden on their own
 //   controllers always|outside_games|dashboard   when controllers' lasers work the screens
-//   steamvrmode <gamepad 0|1> <theater app id|0> <ours 0|1> [<steam page in theater 0|1>]   ft-dashpatch:
+//   steamvrmode <gamepad 0|1> <theater app id|0> <ours 0|1> [<steam page in theater 0|1> [<game in theater app id|0>]]   ft-dashpatch:
 //                             SteamVR's controllers in Gamepad mode, the Steam game in a theater window,
 //                             whether the Gamepad mode is ours (frametop.gamepad's; on change and every
 //                             second; older than 5 s it lapses), and whether SteamVR shows Steam's own
-//                             page in its theater (Steam's windows then Steam's: vrsteamwin.cpp)
+//                             page in its theater (Steam's windows then Steam's: vrsteamwin.cpp), and the
+//                             game whose frame SteamVR's theater shows (a lent app's comes back when it
+//                             leaves: gstheater.h)
 //   gamepadpill   -> "ok over <panel> shown <panel> pad <panel> ours 0|1 lasers 0|1 hover 0|1"   the
 //                    gamepad pill and gamepad mode (0: none)
 //   ingames hide|visible      during a VR game, "always" acts like "only with the dashboard"

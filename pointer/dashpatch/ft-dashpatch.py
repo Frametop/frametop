@@ -147,6 +147,8 @@ SCREENS = "\0ft_screens"
 # The third word: Gamepad mode is Frametop's, SteamVR's controllers going to frametop.gamepad's owner
 # (ft-screens) with no Steam app's input in the way (2026-10-24: in a probe's, Steam Input 0; while the
 # Steam UI's panel took it, 769).
+# The fourth: the app id of the game whose frame SteamVR's theater shows (0 for none). A game on a
+# Frametop panel lent to the theater (View in Theater, screens/gstheater.h) comes back when it isn't.
 GAMEPAD_KEY = "frametop.gamepad"
 STEAMVR_STATE = """(() => {
   const f = window.inputFocusStore && window.inputFocusStore.computedInputFocus;
@@ -174,7 +176,16 @@ STEAMVR_STATE = """(() => {
     }
   const pad = f.m_eSystemPanelInteractionMode == 2 && !ours;
   const mine = pad && pid && f.m_unPIDForVRInput == pid && !f.m_unSteamInputAppID;
-  return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0) + ' ' + key;
+  const inTheater = new Set(((window.DashboardStore && window.DashboardStore.m_rgTheaterFrameStack) || [])
+                            .map(t => t && t.m_unFrameID).filter(Boolean));
+  let shown = 0;
+  for (const fr of (window.FrameStore && window.FrameStore.frames) || [])
+    if (inTheater.has(fr.m_unFrameID))
+      for (const p of fr.pages || []) {
+        const m = /^valve\\.steam\\.desktopgame\\.(\\d+)$/.exec(p.summonOverlayKey || '');
+        if (m && +m[1] > 0) shown = +m[1];
+      }
+  return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0) + ' ' + shown + ' ' + key;
 })()""" % GAMEPAD_KEY
 # The gamepad pill's click: frametop.gamepad's page takes SteamVR's input focus, and the dashboard
 # closes, which puts SteamVR's controllers in Gamepad mode for it (SteamVR's own pill does the same
@@ -240,7 +251,7 @@ def watch_steamvr():
                     continue
                 ws = _WebSocket(url)
             rid += 1
-            # "<Steam's page in theater> <pad> <app> <mine> <key>"
+            # "<Steam's page in theater> <pad> <app> <mine> <game in theater> <key>"
             expression = f"{steampage.expression(STRIP.held(time.monotonic()))} + ' ' + {STEAMVR_STATE}"
             ws.send(json.dumps({"id": rid, "method": "Runtime.evaluate",
                                 "params": {"expression": expression, "returnByValue": True}}))
@@ -257,20 +268,21 @@ def watch_steamvr():
                     pass
             ws = None
             continue
-        if not isinstance(value, str) or not re.fullmatch(r"[01] [01] \d+ [01] \S+", value):
+        if not isinstance(value, str) or not re.fullmatch(r"[01] [01] \d+ [01] \d+ \S+", value):
             continue
         value, key = value.rsplit(" ", 1)
-        theater, value = value.split(" ", 1)
-        value = f"{value} {theater}"  # ft-screens: "steamvrmode <pad> <app> <mine> <Steam's page in theater>"
+        theater, pad, app, mine, shown = value.split(" ")
+        # ft-screens: "steamvrmode <pad> <app> <mine> <Steam's page in theater> <game in theater>"
+        value = f"{pad} {app} {mine} {theater} {shown}"
         focus.update(key, out)
         now = time.monotonic()
         if value != last or now - sent >= 1:
             if value != last:
-                gamepad, app, mine, theater = value.split()
-                print(f"SteamVR: {'gamepad' if gamepad == '1' else 'laser'} mode"
+                print(f"SteamVR: {'gamepad' if pad == '1' else 'laser'} mode"
                       f"{' (for a Frametop panel)' if mine == '1' else ''}, "
                       f"{'theater game ' + app if app != '0' else 'no theater game'}"
-                      f"{', Steam page in theater' if theater == '1' else ''}", flush=True)
+                      f"{', Steam page in theater' if theater == '1' else ''}"
+                      f"{', game ' + shown + ' shown in the theater' if shown != '0' else ''}", flush=True)
             try:
                 out.sendto(f"steamvrmode {value}".encode(), SCREENS)
             except OSError:

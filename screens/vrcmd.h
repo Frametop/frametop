@@ -34,7 +34,7 @@ struct Cmd {
     char word[16] = {}, hand[16] = {};
     float r[12] = {};
     int got = 0;                          // pin: how many it scanned (2, or 14 with a pose)
-    unsigned pad = 0, app = 0, mine = 0, steamTheater = 0;  // steamvrmode (the fourth: optional, 0)
+    unsigned pad = 0, app = 0, mine = 0, steamTheater = 0, gameTheater = 0;  // steamvrmode (the fourth and fifth: optional, 0)
     char key[48] = {};                    // handsetting
     double m = 0;                         // spindistance
     char sl[16] = {}, sr[16] = {};        // hands
@@ -113,7 +113,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
         return HideShowToggle;
     if (std::sscanf(cmd, "pause %15s", c.word) == 1) return Pause;
     if (std::sscanf(cmd, "ingames %15s", c.word) == 1) return InGames;
-    if (std::sscanf(cmd, "steamvrmode %u %u %u %u", &c.pad, &c.app, &c.mine, &c.steamTheater) >= 3) return SteamvrMode;
+    if (std::sscanf(cmd, "steamvrmode %u %u %u %u %u", &c.pad, &c.app, &c.mine, &c.steamTheater, &c.gameTheater) >= 3) return SteamvrMode;
     if (std::sscanf(cmd, "controllers %15s", c.word) == 1) return Controllers;
     if (!std::strncmp(cmd, "handsetting ", 12) && std::sscanf(cmd, "handsetting %47s %15s", c.key, c.word) == 2)
         return HandSetting;

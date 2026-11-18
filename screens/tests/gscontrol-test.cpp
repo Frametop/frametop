@@ -102,6 +102,51 @@ static Event Ev(Event::Type type, const Window &w) {
 }
 
 int main() {
+    // --- View in Theater: an app's window and its popups lent to SteamVR's theater (untagged, its
+    // panel hidden), and back
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        c.On(Ev(Event::Created, Win(1, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+        c.On(Ev(Event::Created, Win(2, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(2, Kind::Main)), 0);
+        c.On(Ev(Event::Created, Win(9, Kind::Popup, 300, 200, 1)), 0), c.On(Ev(Event::Mapped, Win(9, Kind::Popup, 300, 200, 1)), 0);
+        const uint64_t mainTag = x.tags[1], popupTag = x.tags[9];
+        CHECK(mainTag && popupTag && p.shown.count(kFirst));
+        c.Press(kFirst, 0, 1, true, 5, 5);   // held on it as it goes: let go of
+        CHECK(c.Lend(kFirst) == 1 && c.Lent(kFirst) && !c.Lent(kFirst + 1));
+        CHECK(!x.tags.count(1) && !x.tags.count(9) && x.tags.count(2) && !p.shown.count(kFirst) && x.held.empty());
+        CHECK(c.Lend(kFirst) == 0 && c.Lend(kFirst + 5) == 0);   // (lent already; nothing there)
+        // a popup it opens meanwhile: still SteamVR's (gamescope's overlay has it)
+        c.On(Ev(Event::Created, Win(10, Kind::Popup, 300, 200, 1)), 2);
+        CHECK(!p.shown.count(kFirst) && !x.tags.count(1) && !x.tags.count(10));
+        // back: all tagged ours again with the same overlays, its panel shown, and the laser hands it gamescope's focus again
+        x.log.clear();
+        CHECK(c.Reclaim(1) && !c.Lent(kFirst));
+        CHECK(x.tags[1] == mainTag && x.tags[9] == popupTag && x.tags.count(10) && p.shown.count(kFirst));
+        c.Point(kFirst, 0, 3, 3);
+        CHECK(x.Before("focus 1", "at 3,3"));
+        CHECK(!c.Reclaim(1));   // (once)
+        // lent, unmapped and mapped again: not shown, not tagged; back unmapped: tagged, shown when it maps
+        c.Lend(kFirst + 1);
+        c.On(Ev(Event::Unmapped, Win(2, Kind::Main)), 3), c.On(Ev(Event::Mapped, Win(2, Kind::Main)), 3);
+        CHECK(!p.shown.count(kFirst + 1) && !x.tags.count(2) && c.Lent(kFirst + 1));
+        c.On(Ev(Event::Unmapped, Win(2, Kind::Main)), 3);
+        CHECK(c.Reclaim(2) && x.tags.count(2) && !p.shown.count(kFirst + 1));
+        c.On(Ev(Event::Mapped, Win(2, Kind::Main)), 4);
+        CHECK(p.shown.count(kFirst + 1));
+        // lent and gone (the game closed in the theater): nothing to take back
+        c.Lend(kFirst);
+        c.On(Ev(Event::Gone, Win(1, Kind::Main)), 5);
+        CHECK(!c.Reclaim(1) && !x.tags.count(1));
+        // a new window on the same panel isn't lent
+        c.On(Ev(Event::Created, Win(3, Kind::Main)), 6), c.On(Ev(Event::Mapped, Win(3, Kind::Main)), 6);
+        CHECK(c.Windows().PanelOf(3) == kFirst && !c.Lent(kFirst) && x.tags.count(3) && p.shown.count(kFirst));
+        // off with one lent: nothing kept, nothing tagged
+        CHECK(c.Lend(kFirst) == 3);
+        c.Off();
+        CHECK(!c.Lent(kFirst) && x.tags.empty() && c.Windows().Panels() == 0);
+    }
     // --- gamescope's focus: its pointer goes only to a window it focused, and it never focuses a
     // tagged one (Slay the Spire 2's clicks went nowhere, 2026-11-18)
     {

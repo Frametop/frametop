@@ -88,10 +88,13 @@ int main() {
                                             !std::strcmp(c.key, "HANDS_GRAB_THAT") && !std::strcmp(c.word, "0"));
     c = {};
     check("steamvrmode: three numbers", Parse("steamvrmode 1 2 3", c) == SteamvrMode && c.pad == 1 && c.app == 2 &&
-                                            c.mine == 3 && c.steamTheater == 0);
+                                            c.mine == 3 && c.steamTheater == 0 && c.gameTheater == 0);
     c = {};
     check("steamvrmode: Steam's page in theater, the fourth", Parse("steamvrmode 0 0 0 1", c) == SteamvrMode &&
                                                                  c.steamTheater == 1);
+    c = {};
+    check("steamvrmode: the game in SteamVR's theater, the fifth", Parse("steamvrmode 0 7 0 0 7", c) == SteamvrMode &&
+                                                                     c.app == 7 && c.steamTheater == 0 && c.gameTheater == 7);
 
     // The order, and prefixes, as they have always been.
     c = {};

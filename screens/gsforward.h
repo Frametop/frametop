@@ -18,9 +18,10 @@
 // it maps) gets none, and the laser's clicks went nowhere (Slay the Spire 2, 2026-11-18). So the
 // laser coming onto an app first, and a press on another one, hand it gamescope's focus first
 // (XSide::Focus: its tag off until gamescope names it focused, about 10 ms, then on again).
-// Keys don't go that way: gamescope's keyboard focus (where XTest keys, and a libei client's such
-// as Frametop's VR keyboard, land) isn't moved by it the same way (the spike's open question). Keys go as synthetic events straight to the window instead: most apps take
-// them; ones that refuse synthetic events (xterm by default, games reading raw input) don't.
+// Keys still go as synthetic events straight to the window: most apps take them (Slay the Spire 2's
+// Escape did, 2026-11-18); ones that refuse synthetic events (xterm by default, games reading raw
+// input) don't. The handoff moves gamescope's keyboard focus too (an XTest key reached a handed-off
+// xev window, not synthetic), so XTest keys are the way to reach those if one turns up.
 //
 // Two halves: the policy here (pure, tested by screens/tests/gsforward-test.cpp), and Link, the
 // X connection (gsforward.cpp, xcb; tested against Xvfb by the same test). Its replies wait for the

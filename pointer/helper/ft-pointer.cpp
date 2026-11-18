@@ -1614,8 +1614,9 @@ struct Pointer {
     }
     auto pressLeft() {
         // ft-screens sends the keyboard to the panel clicked last; it sees clicks on
-        // its own screens, but only we know when one lands on another panel.
-        SendTo(out, FT_SOCK_SCREENS, "click " + (lastHit.empty() ? std::string("-") : lastHit));
+        // its own screens, but only we know when one lands on another panel. SteamVR's Settings
+        // page is one: lastHit is then the panel behind it, which the click never reached.
+        SendTo(out, FT_SOCK_SCREENS, "click " + (lastHit.empty() || onVrSettings ? std::string("-") : lastHit));
         lessonSaid.clear();
         // A click after nudging the gaze-placed pointer: the nudge is a lesson, or past
         // POINTER_GAZE_NUDGE_MAX, a quick check (see the top).
@@ -3886,14 +3887,14 @@ void Pointer::RayPress() {
         gazeBack = false;
         pressRight = hold.rayKind == 2;
         pressLeft();
-        hold.pressHit = lastHit;
+        hold.pressHit = onVrSettings ? "SteamVR's Settings page" : lastHit;
         if (hold.released) {
             hold.releaseAt = fr.tnow + std::chrono::milliseconds(40);
         } else {
             // push and pull: on a carry (a press on no panel's content: a grab bar, a scene-graph
             // control, an edge, one of ft-screens' controls); a panel that starts to move turns it on below
             hold.h0 = rays[hold.raySlot].Reach(), hold.d0 = lastDistance;
-            hold.pushOn = rayPush && (lastHit.empty() || pass.onEdge || pass.scene || (lastHit.rfind("frametop.", 0) == 0 && !FramePanel(lastHit)));
+            hold.pushOn = rayPush && !onVrSettings && (lastHit.empty() || pass.onEdge || pass.scene || (lastHit.rfind("frametop.", 0) == 0 && !FramePanel(lastHit)));
         }
     }
     if (hold.src == Src::Ray && hold.released && hold.pressed && fr.tnow >= hold.releaseAt) {

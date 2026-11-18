@@ -96,11 +96,17 @@ public:
     explicit Tracker(Spec spec = {}) : spec_(std::move(spec)) {}
 
     // Steam's overlay for it found (0: not, or gone). Nothing is taken without it: there'd be
-    // nothing to give the window back to.
+    // nothing to give the window back to. Off, a tag of ours left behind goes back now: at start
+    // the windows map before Steam's overlays are looked up (2026-11-18: an ft-screens killed by a
+    // restart left Steam's page blank, with SteamVR's controls for it over the tiles).
     std::vector<Action> SetSteams(uint64_t steams) {
         std::vector<Action> out;
         steams_ = steams;
         if (on_ && !gaveUp_ && mapped_) Take(&out);
+        else if (!made_ && mapped_ && Stale(win_.target)) {
+            out.push_back(A(Action::Tag, steams_));
+            win_.target = steams_;
+        }
         return out;
     }
     // Its display went: ours goes (nothing to tag back on a display that's gone).
@@ -145,6 +151,7 @@ public:
                     else out.push_back(A(Action::Show));
                 } else if (Stale(e.win.target)) {
                     out.push_back(A(Action::Tag, steams_));   // a tag of ours left behind
+                    win_.target = steams_;
                 }
                 break;
             case gsforward::Event::Moved:

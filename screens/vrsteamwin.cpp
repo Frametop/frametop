@@ -396,14 +396,19 @@ void SteamDashEvents(Screen &s, int index) {
 
 namespace {
 // Steam's windows ours (STEAM_DASH_PANEL on and Steam's page not in SteamVR's theater) or Steam's.
+void Watch() {
+    if (g_link) return;
+    g_link = std::make_unique<gsforward::AsyncLink>(gsforward::SteamDisplays, true, gsforward::Role::Steam);
+    g_link->SetOn(true);   // (kept open when it's off again: Steam's windows go back to it, and stay)
+    g_pages = std::make_unique<steamcdp::Pages>();
+}
+
 void Apply(const char *why) {
     const bool on = g_on && !g_theater;
     if (on == g_fleet.On()) return;
     if (!g_link) {
         if (!on) return;
-        g_link = std::make_unique<gsforward::AsyncLink>(gsforward::SteamDisplays, true, gsforward::Role::Steam);
-        g_link->SetOn(true);   // (kept open when it's off again: Steam's windows go back to it, and stay)
-        g_pages = std::make_unique<steamcdp::Pages>();
+        Watch();
     }
     std::printf("Steam's windows: %s (%s)\n", on ? "Frametop's when they map" : "Steam's own", why);
     Do(g_fleet.Switch(on));
@@ -415,7 +420,13 @@ void Apply(const char *why) {
 // they're Steam's again.
 void SteamDashSwitch(bool on) {
     static bool swept = false;   // (at start, switched on or not)
-    if (!swept) swept = true, steamhit::Sweep();
+    if (!swept) {
+        swept = true, steamhit::Sweep();
+        // Steam's display watched even with the switch off: a tag of ours on its windows from an
+        // ft-screens that was killed goes back to Steam (steamwin.h: Tracker::SetSteams), or Steam's
+        // page stays blank with SteamVR's controls for it standing over the tiles.
+        Watch();
+    }
     g_on = on;
     Apply("STEAM_DASH_PANEL");
 }

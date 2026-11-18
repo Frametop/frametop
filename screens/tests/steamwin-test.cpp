@@ -40,6 +40,16 @@ int main() {
         v.SetSteams(steams);
         a = v.On(Ev(Event::Mapped, 6, "SteamVR", 0), 0);
         check("off: an untagged one isn't tagged (gamescope's own panel is Steam's business)", a.empty());
+        steamwin::Tracker w;   // at start: mapped before Steam's overlay is looked up
+        a = w.On(Ev(Event::Mapped, 7, "SteamVR", 0x1234), 0);
+        check("off, at start: nothing before Steam's overlay is known", a.empty());
+        a = w.SetSteams(steams);
+        check("off, at start: the stale tag back to Steam's overlay once it's found", a.size() == 1 && Has(a, Action::Tag, steams));
+        a = w.SetSteams(steams);
+        check("off, at start: only once", a.empty());
+        steamwin::Tracker x;
+        x.On(Ev(Event::Mapped, 8, "SteamVR", steams), 0);
+        check("off, at start: Steam's own tag left alone", x.SetSteams(steams).empty());
     }
     {   // on: made, tagged, shown; other windows ignored
         steamwin::Tracker t;

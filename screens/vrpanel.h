@@ -5,6 +5,7 @@
 
 #include "vr.h"
 #include "barhit.h"
+#include "barside.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
 #include "gsforward.h"
@@ -161,6 +162,7 @@ struct Screen {
     bool cutting = false;         // showing a cutout buffer (side by side) instead
     vr::SharedTextureHandle_t cutShown = 0;  // ...this one
     double chrome = 0.3;          // the bar's width; the other controls follow it (ChromeSize)
+    barside::Side barSide = barside::Side::Bottom;   // the edge its bar and buttons are on (vrbarmenu.cpp)
     double grip = 0.04;           // the corner tab's and the round buttons' size
     // A floating window's panel (see the top): the window's rectangle in the buffer, its
     // title bar's height there, and the density.
@@ -325,6 +327,11 @@ int OurPointer(uint32_t d);
 bool ModCarry(Screen &s, int index, vr::TrackedDeviceIndex_t dev, uint32_t button, double x, double y);
 bool CarryScroll(const vr::VREvent_t &ev);
 bool CarryClick(const vr::VREvent_t &ev);
+void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *), void *data);
+void FillRound(std::vector<uint8_t> &px, int w, int h, int x0, int y0, int x1, int y1, int r, const uint8_t c[4]);
+double Apart(const Mat &a, const Mat &b);
+double BarOut(const Screen &s);   // the bar row's line, metres out from the panel's edge
+extern double g_barPaddingX, g_barPaddingY;   // the grab bar's hit padding (GRAB_BAR_PADDING_X/Y, cm)
 
 // ---------------------------------------------------------------- vrtiles.cpp's
 
@@ -359,6 +366,18 @@ void PlaceTileBorder();
 void AnchorButtonUp(int i, const char *by);
 void LightAnchor(Screen &s);
 void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size);
+
+// ---------------------------------------------------------------- vrbarmenu.cpp's
+
+// Each panel's bar edge (barside.h), remembered by its key (TileKnown's) in ~/.config/frametop-bars.txt.
+void LoadBarSides();
+void BarSideKnown(int i, const std::string &key);   // its key now: its remembered edge, if any
+void BarSideGone(int i);
+bool SetBarSide(int i, barside::Side side, const char *by);   // false: no such panel
+void OpenBarMenu(int i, double along);   // a right click on its bar, `along` metres from the bar's middle
+bool BarMenuOn(int i);   // its menu is open (its controls stay)
+void UpdateBarMenu();
+void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data);
 
 // ---------------------------------------------------------------- vrgsapps.cpp's
 

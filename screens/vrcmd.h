@@ -22,7 +22,7 @@ enum Verb {
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
     WindowDrag, Pulled,
     Spin, Shift, ShiftBack,
-    Anchor, Stay, Tile, Tiles, FloatApp,
+    Anchor, Stay, Tile, Tiles, FloatApp, BarSide,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
 constexpr Verb kLastVerb = State;
@@ -60,7 +60,7 @@ enum Group { NoGroup, PanelGroup, ReadoutGroup, VisibilityGroup, HelperWordGroup
 
 inline Group GroupOf(Verb v) {
     switch (v) {
-    case Place: case Width: case CurveOnOff: case Curve: case Pin: case Unpin: case Get: case Pose: case Front:
+    case Place: case Width: case CurveOnOff: case Curve: case Pin: case Unpin: case Get: case Pose: case Front: case BarSide:
         return PanelGroup;
     case Screens: case Universe: case Head: case Reach: case GamepadPill: case Concealed: case Debug: case State:
         return ReadoutGroup;
@@ -160,6 +160,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
         return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..." ("add": more of the same set)
     if (std::sscanf(cmd, "tile %15s", c.word) == 1) return Tile;
     if (std::sscanf(cmd, "floatapp %d %127s", &c.n, c.appId) == 2) return FloatApp;
+    if (std::sscanf(cmd, "barside %d %15s", &c.n, c.word) == 2) return BarSide;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;
     if (std::strcmp(cmd, "debug") == 0) return Debug;
     if (std::strncmp(cmd, "state", 5) == 0) return State;

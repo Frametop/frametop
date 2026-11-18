@@ -998,8 +998,13 @@ void PaintResizeMask(Screen &s) {
     }
     s.resizePaintedVersion = g_resizeVersion, s.resizePaintedX = s.cornerX, s.resizePaintedY = s.cornerY;
 }
-double BarY(const Screen &s) { return -(s.heightMetres() / 2 + barhit::Below(s.chrome, s.grip, g_barPaddingY)); }
-Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
+// The bar row's line out from the panel's edge (barhit::Below), on the edge the panel's bar is on (barside.h).
+double BarOut(const Screen &s) { return barhit::Below(s.chrome, s.grip, g_barPaddingY); }
+barside::UV BarSpot(const Screen &s, double along) { return barside::Place(s.barSide, s.metres, s.heightMetres(), BarOut(s), along); }
+Mat BarOffset(const Screen &s) {
+    const barside::UV c = BarSpot(s, 0);
+    return OnSurface(s, c.u, c.v, 0.003);
+}
 
 // Put the bar, the curve button, and the corner tab under the screen (same parent: the
 // room or the controller), sized for the screen and its distance, and on its surface.
@@ -1011,8 +1016,10 @@ Mat BarOffset(const Screen &s) { return OnSurface(s, 0, BarY(s), 0.003); }
 //   Between the bar and a button, and button and button, a button's width or more (user, 2026-10-13:
 // "farther apart so it's harder to accidentally click"; was 6% of the bar's width, about a third of a
 // button). It grows with them as a hand comes (ChromeSize).
-void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
-    const double h = s.heightMetres(), bar = barhit::Width(s.chrome, g_barPaddingX), button = s.grip;
+//   On another edge (s.barSide; barside.h's Place) the same row, turned to run along that edge.
+// Along the row (`along`: from the bar's middle, the curve and roll side positive); the tab's is its u.
+void ControlAlong(const Screen &s, double along[kControls]) {
+    const double bar = barhit::Width(s.chrome, g_barPaddingX), button = s.grip;
     const double gap = std::max(s.chrome * 0.06, button);
     const double uu[kControls] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
                            // Visual, preview and hit-mask canvases share the screen's actual corner.
@@ -1020,7 +1027,16 @@ void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
                           -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5), -(bar / 2 + gap * 3 + button * 2.5),
                           // the anchor: outermost on the left (a floating window's after its dock and close)
                           -(bar / 2 + gap * (s.floating ? 3 : 4) + button * (s.floating ? 2.5 : 3.5))};
-    for (int k = 0; k < kControls; ++k) u[k] = uu[k], v[k] = k == 3 ? s.cornerY * (h / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)) : BarY(s);
+    std::copy(std::begin(uu), std::end(uu), along);
+}
+void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
+    double along[kControls];
+    ControlAlong(s, along);
+    for (int k = 0; k < kControls; ++k) {
+        const barside::UV c = BarSpot(s, along[k]);
+        u[k] = k == 3 ? along[k] : c.u;
+        v[k] = k == 3 ? s.cornerY * (s.heightMetres() / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)) : c.v;
+    }
 }
 Mat RollZ(double rad);
 std::array<Mat, kControls> ControlOffsets(const Screen &s) {
@@ -1028,6 +1044,8 @@ std::array<Mat, kControls> ControlOffsets(const Screen &s) {
     ControlUV(s, u, v);
     std::array<Mat, kControls> m;
     for (int k = 0; k < kControls; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
+    // Down a side the bar stands on end (its texture and mouse x turn with it); the round buttons need no turn.
+    if (barside::Vertical(s.barSide)) m[0] = Mul(m[0], RollZ(barside::Roll(s.barSide)));
     // The handle's texture is clear; orientation lives in its mask, not the transform.
     // The shaped mask already encodes the selected corner; do not rotate its canvas.
     return m;
@@ -1093,8 +1111,10 @@ void PlaceChrome(Screen &s) {
     }
     vr::VROverlay()->SetOverlayWidthInMeters(s.anchorButton, float(button));
     LightAnchor(s);
-    // Curved, the bar bends with the screen's bottom edge.
-    vr::VROverlay()->SetOverlayCurvature(s.bar, s.curve > 0 ? float(std::min(1.0, targetWidth / (2 * M_PI * s.curve))) : 0.f);
+    // Curved, the bar bends with the screen's bottom (or top) edge; standing down a side, it stays flat (an
+    // overlay bends along its own width, which runs up and down there).
+    const bool bends = s.curve > 0 && !barside::Vertical(s.barSide);
+    vr::VROverlay()->SetOverlayCurvature(s.bar, bends ? float(std::min(1.0, targetWidth / (2 * M_PI * s.curve))) : 0.f);
     PlaceParts(s, ChromeParts(s, offsets));
 }
 
@@ -1612,8 +1632,10 @@ void UpdateControls() {
             // `reach` of one of them is close.
             std::vector<Mat> spots;
             const auto offsets = ControlOffsets(s);
-            for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5})
-                spots.push_back(Mul(p, OnSurface(s, f * barhit::Width(s.chrome, g_barPaddingX), BarY(s), 0.003)));
+            for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5}) {
+                const barside::UV c = BarSpot(s, f * barhit::Width(s.chrome, g_barPaddingX));
+                spots.push_back(Mul(p, OnSurface(s, c.u, c.v, 0.003)));
+            }
             for (int k = 1; k < kControls; ++k)
                 if (s.HasControl(k)) spots.push_back(Mul(p, offsets[k]));
             UpdateCorner(s, p, lasers);
@@ -1630,6 +1652,7 @@ void UpdateControls() {
                 }
             }
         }
+        if (BarMenuOn(i)) s.nearUntil = g_tick + kControlsLinger;   // (its bar stays while its menu is open)
     }
     StepChromePool();
     for (auto &[i, s] : g_screens) {
@@ -3231,16 +3254,16 @@ void UpdateAim() {
             continue;
         }
         const double m = s.grip * (g_tick < s.aimUntil ? 2.0 : 0.25), h = s.heightMetres();
-        // The panel and its controls: the bar row under it, the resize tab off its corner.
-        const double gap = std::max(s.chrome * 0.06, s.grip);
-        const double halfW = std::max(s.metres / 2 + HandleSize(s), barhit::Width(s.chrome, g_barPaddingX) / 2 + gap * 2 + s.grip * 2) + m;
-        const double top = h / 2 + HandleSize(s) + m;
-        const double bottom = std::min(BarY(s) - std::max(s.grip, barhit::Height(s.chrome, g_barPaddingY) / 2),
-                                       -(h / 2 + HandleSize(s))) - m;
+        // The panel and its controls: the bar row along its edge (under it unless moved: barside.h), the
+        // resize tab off its corner.
+        const double gap = std::max(s.chrome * 0.06, s.grip), reach = barhit::Width(s.chrome, g_barPaddingX) / 2 + gap * 2 + s.grip * 2;
+        const double hw = s.metres / 2 + HandleSize(s), hh = h / 2 + HandleSize(s);
+        const barside::Box box = barside::Union({-hw, hw, -hh, hh},
+            barside::Row(s.barSide, s.metres, h, BarOut(s), -reach, reach, std::max(s.grip, barhit::Height(s.chrome, g_barPaddingY) / 2)));
         for (const Mat &l : lasers) {
             double u, v;
             if (!RayOnSurface(s, p, l, &u, &v)) continue;
-            bool on = std::fabs(u) <= halfW && v <= top && v >= bottom;
+            bool on = u >= box.u0 - m && u <= box.u1 + m && v >= box.v0 - m && v <= box.v1 + m;
             for (const auto &[k, sub] : s.subs) {
                 if (on || s.cropW <= 0) break;
                 const double su = (sub.x + sub.w / 2.0 - (s.cropX + s.cropW / 2.0)) * s.mpp;
@@ -3451,7 +3474,9 @@ handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
         if (!s.HasControl(k)) continue;   // (by its kind: a set comes once a hand is near, StepChromePool)
         if (k == 3 && g_resizeCorner.sharp) continue;  // legacy retains its original near-hand tab
         const double c = k == 3 ? HandleSize(s) : s.grip;
-        const double hw = k == 0 ? s.chrome / 2 : c / 2, hh = k == 0 ? s.chrome * 12 / 256 : c / 2;
+        const bool upright = k == 0 && barside::Vertical(s.barSide);   // (the bar standing down a side)
+        const double along = k == 0 ? s.chrome / 2 : c / 2, across = k == 0 ? s.chrome * 12 / 256 : c / 2;
+        const double hw = upright ? across : along, hh = upright ? along : across;
         P.controls.push_back({kind, u[k], v[k], hw, hh});
     }
     if (s.floating && s.mpp > 0)
@@ -4671,8 +4696,9 @@ bool PlaceResetAsk(Screen &s) {
     g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
     double u[kControls], v[kControls];
     ControlUV(s, u, v);
-    const double at = v[6] - s.grip / 2 - std::max(s.grip, s.chrome * 0.06) - g_resetAsk.h / 2;
-    g_resetAsk.pose = Mul(p, OnSurface(s, u[6], at, 0.004));
+    // (out past the button, away from the panel, on whichever edge the row is)
+    const barside::UV at = barside::MenuAt(s.barSide, {u[6], v[6]}, s.grip / 2, std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
+    g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, 0.004));
     const vr::VROverlayHandle_t o = g_resetAsk.overlay;
     vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));
     vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &g_resetAsk.pose);
@@ -6158,6 +6184,7 @@ bool ft_vr_init(void) {
     SetTileStayDefault(handcut::Setting("DASH_TILE_STAY", "0") == "1");
     SetTileAtBar(handcut::Setting("DASH_TILE_AT_BAR", "1") != "0");   // the wall at Steam's bar
     LoadTileMemory();
+    LoadBarSides();
     GsSwitch(handcut::Setting("GSAPP_PANELS", "1") != "0");   // the gamescope apps as panels of ours
     SteamDashSwitch(handcut::Setting("STEAM_DASH_PANEL", "0") == "1");   // Steam's dashboard window as one (a spike)
     if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
@@ -7617,6 +7644,9 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 continue;
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 StartDrag(s, Drag::Move, ev.trackedDeviceIndex);
+            // A right click: the menu of edges the bar can go on (vrbarmenu.cpp), at the spot clicked along it.
+            else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Right && s.drag == Drag::None)
+                OpenBarMenu(index, ev.data.mouse.x / 1000.0 - barhit::Width(s.chrome, g_barPaddingX) / 2);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
                 EndDragsBy(ev.trackedDeviceIndex);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
@@ -7767,6 +7797,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
     UpdateLayoutGrab();   // (after the carried screen's own move, above)
     PollPill(handle, data);
+    PollBarMenu(handle, data);
     UpdateHandInput(handle, data);
     DockPushed(handle, data);   // (after UpdateHandInput's dock aims)
     PlacePulled();
@@ -7807,6 +7838,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateAim();
     UpdateLasers();
     UpdatePill();
+    UpdateBarMenu();
     UpdatePad();
     UpdateControls();
     UpdateGuides();
@@ -7878,6 +7910,15 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         if (!s) return (void)std::snprintf(reply, size, "error no screen %d", n);
         if ((s->curve > 0) != (word[1] == 'n')) ToggleCurve(*s);
         std::snprintf(reply, size, "ok %.3f", s->curve);
+        return;
+    }
+    case vrcmd::BarSide: {
+        if (!Find(n)) return (void)std::snprintf(reply, size, "error no screen %d", n);
+        barside::Side side;
+        if (!std::strcmp(word, "menu")) OpenBarMenu(n - 1, 0);
+        else if (!barside::Parse(word, &side)) return (void)std::snprintf(reply, size, "error bottom, top, left, right or menu");
+        else SetBarSide(n - 1, side, "command");
+        std::snprintf(reply, size, "ok");
         return;
     }
     case vrcmd::Curve: {
@@ -8577,6 +8618,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //   width <screen> <metres>
 //   curve <screen> <radius>   cylinder radius in metres; 0 = flat
 //   curve <screen> on|off     on: the radius is the head's distance to it now -> "ok <radius>"
+//   barside <screen> bottom|top|left|right|menu   the edge its grab bar and buttons are on (remembered
+//                             by the panel's key), or open the bar's right-click menu at its middle
 //   pin <screen|all> <left|right|head|dashboard> [12 numbers]   pin to that hand's controller,
 //                             the headset, or the SteamVR dashboard: as it is now, or at the given
 //                             device->screen transform (rows of a 3x4). The dashboard not seen yet

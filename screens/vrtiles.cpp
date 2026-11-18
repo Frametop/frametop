@@ -312,6 +312,7 @@ void TileKnown(int i, const std::string &key) {
         TileUnanchor(i, "another app on it");   // (left in the room, off the grid; nothing remembered for it)
     }
     g_tileKey[i] = k;
+    BarSideKnown(i, k);   // (its bar's edge is remembered by the same key)
     if (g_tileMemory.Used(k)) SaveTileMemory();   // (its use kept over a restart: the last to go when it's full)
     const std::string line = g_tileMemory.Get(k);
     if (line.empty()) return;
@@ -326,6 +327,7 @@ void TileKnown(int i, const std::string &key) {
 }
 // The panel goes (its window, its display): what it was is remembered under its key.
 void TileGone(int i) {
+    BarSideGone(i);
     const auto k = g_tileKey.find(i);
     if (k != g_tileKey.end() && g_tileMemory.Set(k->second, g_tiles.Remember(i))) SaveTileMemory();
     if (k != g_tileKey.end()) g_tileKey.erase(k);

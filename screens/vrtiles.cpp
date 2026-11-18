@@ -338,8 +338,11 @@ void TileGone(int i) {
 // Anchored panels (dashtiles.h): shown with the dashboard, or always when they stay; the hide key
 // (the manual switch in "always") and a panel's own conceal still hide them. The visibility mode
 // is the room's panels' (user, 2026-11-16).
+// While SteamVR's theater shows Steam's page the tiles step aside, as the rest of the dashboard
+// does then (user, 2026-11-18: "Hide while theater"); they're back when it docks again.
 bool TileShown(const Screen &s, int i, bool dashUp) {
     const bool hiddenByKey = EffectiveMode() == Mode::Always && g_manual;
+    if (SteamDashInTheater() && s.drag == Drag::None) return false;
     return !g_paused && s.shown && !s.alone && !hiddenByKey && (g_tiles.Stay(i) || dashUp || s.drag != Drag::None);
 }
 

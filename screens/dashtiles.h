@@ -114,6 +114,17 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
     return true;
 }
 
+// The group frame g turned round its +Y so what was `azDeg` round in it is straight ahead (azimuth
+// 0) now: at the bar, Steam's page (its window a tile: STEAM_DASH_PANEL) over its bar, as Steam's
+// own page stands over it, rather than the strip's middle.
+inline void TurnTo(double g[3][4], double azDeg) {
+    const double c = std::cos(tiling::Rad(azDeg)), s = std::sin(tiling::Rad(azDeg));
+    for (int r = 0; r < 3; ++r) {   // (columns x and z of g times a turn about y)
+        const double x = g[r][0], z = g[r][2];
+        g[r][0] = x * c - z * s, g[r][2] = x * s + z * c;
+    }
+}
+
 class Board {
 public:
     tiling::Params params;

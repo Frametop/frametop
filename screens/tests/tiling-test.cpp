@@ -43,6 +43,32 @@ static bool cornersInColumns(const tiling::Layout &l) {
     return true;
 }
 
+// Panels in different columns that share some height (a gap up or down counts) are at least a
+// gap apart round you, left to right in column order.
+static bool apart(const tiling::Layout &l, double gap) {
+    for (const auto &t : l.tiles)
+        for (const auto &u : l.tiles)
+            if (t.col < u.col && t.el0 < u.el1 + gap - 1e-9 && u.el0 < t.el1 + gap - 1e-9 && t.az1 + gap > u.az0 + 1e-9) return false;
+    return true;
+}
+// ...and no nearer than that: each column after the first has a panel exactly a gap from one
+// left of it (or reaches the strip's left end).
+static bool tight(const tiling::Layout &l, double gap) {
+    std::set<int> cols;
+    for (const auto &t : l.tiles) cols.insert(t.col);
+    for (int c : cols) {
+        bool touches = false;
+        for (const auto &u : l.tiles) {
+            if (u.col != c) continue;
+            if (near(u.az0, l.az0, 1e-9)) touches = true;
+            for (const auto &t : l.tiles)
+                if (t.col < c && t.el0 < u.el1 + gap - 1e-9 && u.el0 < t.el1 + gap - 1e-9 && near(t.az1 + gap, u.az0, 1e-9)) touches = true;
+        }
+        if (!touches) return false;
+    }
+    return true;
+}
+
 static tiling::Column col(std::initializer_list<tiling::Tile> tiles) {
     tiling::Column c;
     c.tiles = tiles;
@@ -101,8 +127,11 @@ int main() {
         check("desk: the one above rests on the one under it, a gap between", near(top.el0, under.el1 + p.gapDeg));
         check("desk: the tallest column's top is the layout's", near(l.el1, std::max(top.el1, l.tiles[2].el1)));
         check("desk: a narrow panel centred in its column", near(top.azDeg, (top.az0 + top.az1) / 2) && near(top.azDeg, under.azDeg));
-        check("desk: the column as wide as its widest", near(under.az1 - under.az0, tiling::SpanFor(p.radius, under.widthM / under.distM * p.radius,
-                                                                                                under.heightM / under.distM * p.radius, under.elDeg), 1e-6));
+        const auto ownSpan = [&](const tiling::Placed &t) {
+            return near(t.az1 - t.az0, tiling::SpanFor(p.radius, t.widthM / t.distM * p.radius, t.heightM / t.distM * p.radius, t.elDeg), 1e-6);
+        };
+        check("desk: each panel spans its own width round you, not its column's widest", ownSpan(under) && ownSpan(top) &&
+                                                                                          top.az1 - top.az0 < under.az1 - under.az0);
         check("desk: below your eyes by default (the bottom panels' tops above them)", p.deskDeg < 0 && under.el1 > 0);
     }
     // --- columns: centred, ordered, gaps, no corner overlap high up
@@ -111,17 +140,43 @@ int main() {
         for (int i = 0; i < 4; ++i) cols.push_back(col({px(i * 10 + 1, 1600, 1200), hd(i * 10 + 2), hd(i * 10 + 3)}));
         const auto l = tiling::Arrange(cols, p);
         check("columns: strip centred in front of you", near(l.az0, -l.az1));
-        bool ordered = true;
-        for (const auto &t : l.tiles)
-            for (const auto &u : l.tiles)
-                if (t.col + 1 == u.col) ordered = ordered && t.az1 + p.gapDeg * l.shrink - 1e-9 <= u.az0;
-        check("columns: left to right, a gap between", ordered);
+        check("columns: left to right, a gap between", apart(l, p.gapDeg * l.shrink) && tight(l, p.gapDeg * l.shrink));
         check("columns: no corner pokes into the next column, three high", cornersInColumns(l));
         bool stacked = true;
         for (const auto &t : l.tiles)
             for (const auto &u : l.tiles)
                 if (t.col == u.col && t.row + 1 == u.row) stacked = stacked && near(t.el0 - p.gapDeg * l.shrink, u.el1);
         check("rows: top down, a gap between", stacked);
+    }
+    // --- packed: as little room between monitors as their panels allow (user, 2026-11-17: "very
+    // large gaps between the left and right sides of the displays")
+    {
+        // a wide one on top of a narrow one, a short neighbour: the neighbour comes in under the
+        // wide one's overhang, a gap from the narrow one it shares height with
+        const std::vector<tiling::Column> cols = {col({px(1, 3440, 1440), px(2, 1280, 800)}), col({px(3, 1024, 600)})};
+        const auto l = tiling::Arrange(cols, p);
+        const auto &wide = l.tiles[0], &narrow = l.tiles[1], &shortOne = l.tiles[2];
+        check("packed: a short neighbour a gap from the panel beside it", near(shortOne.az0, narrow.az1 + p.gapDeg));
+        check("packed: ...under the wide one's overhang (apart up and down)", shortOne.az0 < wide.az1 && shortOne.el1 + p.gapDeg <= wide.el0);
+        check("packed: nothing nearer than a gap, the strip as narrow as that", apart(l, p.gapDeg) && tight(l, p.gapDeg) &&
+                                                                                    near(l.az1 - l.az0, std::max(wide.az1, shortOne.az1) - wide.az0));
+        // a neighbour as tall as the wide one: it can't come under, so the wide one sets the gap
+        const std::vector<tiling::Column> tall = {col({px(1, 3440, 1440), px(2, 1280, 800)}), col({px(3, 1080, 1920), hd(4)})};
+        const auto t = tiling::Arrange(tall, p);
+        check("packed: a neighbour reaching the wide one's height keeps a gap from it", apart(t, p.gapDeg) && tight(t, p.gapDeg) &&
+                                                                                            t.tiles[2].az0 >= t.tiles[0].az1 + p.gapDeg - 1e-9);
+        // three columns: a far column can't run into an earlier one past a short middle one
+        const std::vector<tiling::Column> three = {col({px(1, 3440, 1440), px(2, 800, 600)}), col({px(3, 640, 480)}),
+                                                   col({px(4, 3440, 1440), px(5, 800, 600)})};
+        const auto f = tiling::Arrange(three, p);
+        check("packed: past a short middle column, the high wide ones keep a gap", apart(f, p.gapDeg) && tight(f, p.gapDeg) &&
+                                                                                       f.tiles[3].az0 >= f.tiles[0].az1 + p.gapDeg - 1e-9);
+        check("packed: still centred, no corner overlap", near(f.az0, -f.az1) && cornersInColumns(f));
+        // a drop on the wide one's overhang, above the short neighbour: that wide one's column
+        const auto d = tiling::DropAt(l, cols, (wide.az1 + shortOne.az0) / 2 + 1, wide.elDeg);
+        check("packed: a drop on an overhang goes by the panel there", d.kind == tiling::Drop::NewColumn && d.col == 1);
+        const auto under = tiling::DropAt(l, cols, shortOne.azDeg, shortOne.elDeg);
+        check("packed: ...and under it, the short one's column", under.kind == tiling::Drop::Into && under.col == 1);
     }
     // --- past a full turn: shrinks to fit
     {

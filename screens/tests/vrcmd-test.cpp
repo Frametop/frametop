@@ -45,6 +45,7 @@ int main() {
         {"shift 0.25 -1.5 30", Shift}, {"shift back", ShiftBack},
         {"anchor focused toggle", Anchor}, {"stay 2 on", Stay}, {"tile left", Tile}, {"tiles", Tiles},
         {"tiles set 1 tile 0 0 0 1 1 1 0", Tiles}, {"floatapp 5 org.kde.dolphin", FloatApp},
+        {"barside 2 left", BarSide}, {"barside 2 menu", BarSide},
         {"front 2", Front}, {"debug", Debug}, {"state", State},
     };
     bool all = true;
@@ -128,6 +129,8 @@ int main() {
     check("stay is no state", V("state") == State && V("stay 1") == Unknown);
     { Cmd t; check("floatapp: panel and app", Parse("floatapp 7 org.kde.konsole", t) == FloatApp && t.n == 7 &&
                                                    !std::strcmp(t.appId, "org.kde.konsole")); }
+    { Cmd t; check("barside: panel and edge", Parse("barside 3 right", t) == BarSide && t.n == 3 && !std::strcmp(t.word, "right")); }
+    check("barside: an edge is needed", V("barside 3") == Unknown);
     check("groups: tiles", GroupOf(Anchor) == TileGroup && GroupOf(Tiles) == TileGroup && GroupOf(FloatApp) == TileGroup);
 
     // Which handler runs each verb (ft_vr_command's dispatch): every verb has one, Unknown none.

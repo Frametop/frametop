@@ -1529,8 +1529,15 @@ Item {
                         checked: backend.dashTiles.gsApps
                         onToggled: backend.dashTiles.setGsApps(checked)
                     }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "At Steam's bar:"
+                        text: "The middle panel just above Steam's bar, as far away as it is"
+                        checked: backend.dashTiles.atBar
+                        onToggled: backend.dashTiles.setAtBar(checked)
+                    }
                     RowLayout {
                         Kirigami.FormData.label: "Desk line:"
+                        enabled: !backend.dashTiles.atBar
                         Controls.Slider {
                             id: tileDesk
                             from: -40; to: 20; stepSize: 1
@@ -1567,6 +1574,7 @@ Item {
                     }
                     RowLayout {
                         Kirigami.FormData.label: "Distance:"
+                        enabled: !backend.dashTiles.atBar
                         Controls.Slider {
                             id: tileRadius
                             from: 0.8; to: 6; stepSize: 0.05
@@ -1594,8 +1602,10 @@ Item {
                           + "it first. Save as profile… (Layout) keeps pins.\n\nAnchor a screen to the dashboard: choose On "
                           + "the dashboard above, or press the anchor button under any screen, floating window or remote "
                           + "display. Anchored panels stand on a desk round you like monitors of their own sizes, text the same "
-                          + "size on each, in front of you when the dashboard opens, either side of Steam's menu when it's in "
-                          + "front. Once the desk is as wide as Desk width, a new panel goes on top of the lowest column. They "
+                          + "size on each. With At Steam's bar on, they stand just above Steam's bar, as far from you as it is, "
+                          + "centred over it (dragging the dashboard by its bar carries them); off, in front of you when the "
+                          + "dashboard opens, at the Desk line and Distance above. Either way they go either side of Steam's "
+                          + "page when it's in front. Once the desk is as wide as Desk width, a new panel goes on top of the lowest column. They "
                           + "show only with the dashboard open, unless Stay visible is on (a "
                           + "long press on the anchor button switches it for one panel). With the pointer or your gaze on "
                           + "one, Meta+arrows move it between columns and rows and Meta+Ctrl+arrows make it bigger or smaller; Meta+/ "

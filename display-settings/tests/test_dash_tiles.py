@@ -68,6 +68,16 @@ class DashTiles(unittest.TestCase):
         self.assertTrue(self.t.gsApps)
         self.assertEqual(self.asked[-1], "handsetting GSAPP_PANELS 1")
 
+    def test_at_steams_bar_on_unless_off(self):
+        self.assertTrue(self.t.atBar)
+        self.t.setAtBar(False)
+        self.assertIn("DASH_TILE_AT_BAR=0", self.conf())
+        self.assertFalse(self.t.atBar)
+        self.assertEqual(self.asked[-1], "handsetting DASH_TILE_AT_BAR 0")
+        self.t.setAtBar(True)
+        self.assertTrue(self.t.atBar)
+        self.assertEqual(self.asked[-1], "handsetting DASH_TILE_AT_BAR 1")
+
     def test_numbers_written_and_sent(self):
         self.t.setDeskDeg(-20)
         self.t.setRadius(2.25)

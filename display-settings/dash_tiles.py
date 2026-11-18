@@ -20,6 +20,7 @@ from ft_layout import ft_conf  # noqa: E402
 
 STAY = "DASH_TILE_STAY"
 GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
+AT_BAR = "DASH_TILE_AT_BAR"   # on unless "0": the wall at Steam's bar, its desk line and distance (not the two below)
 # key: (default, lo, hi), as screens/vrtiles.cpp's TileSettings() and tiling::Params have them
 NUMBERS = {
     "DASH_TILE_DESK_DEG": (-12.0, -40.0, 20.0),     # the desk line the columns stand on, up from your eyes
@@ -66,6 +67,14 @@ class DashTiles(QObject):
     @Slot(bool)
     def setGsApps(self, on):
         self._set_value(GSAPPS, "1" if on else "0")
+
+    @Property(bool, notify=changed)
+    def atBar(self):
+        return ft_layout.read_conf().get(AT_BAR, "1") != "0"
+
+    @Slot(bool)
+    def setAtBar(self, on):
+        self._set_value(AT_BAR, "1" if on else "0")
 
     @Property(float, notify=changed)
     def deskDeg(self):

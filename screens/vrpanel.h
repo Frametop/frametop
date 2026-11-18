@@ -316,6 +316,8 @@ const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dash
 Mat DashFrame();
 Mat OnSurface(const Screen &s, double u, double v, double dz);   // a point on its surface (along the arc when curved)
 double DashWidth();   // the bar's width in the room, metres (0: not known)
+double DashHeight();   // ...its height
+double SteamPageWidth();   // Steam's page over it, metres wide (0: not known)
 uint32_t ButtonBit(uint32_t linuxButton);
 uint32_t LinuxButton(uint32_t vrButton);
 bool FromLaser(const vr::VREvent_t &ev);
@@ -343,6 +345,7 @@ bool TileAnchored(int i);
 bool TileTiled(int i);
 bool TileStayDefault();   // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
 void SetTileStayDefault(bool on);
+void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (dashtiles.h's AtBar), else as set
 void RetileDash();
 void TileAnchor(int i, bool stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);

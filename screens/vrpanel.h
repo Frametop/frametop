@@ -292,6 +292,7 @@ bool DevicePose(vr::TrackedDeviceIndex_t dev, Mat *out);
 vr::EVROverlayError PinShow(vr::VROverlayHandle_t overlay);
 void SendRelay(const std::string &msg);
 void AnnounceOverlay(const char *key);
+void SendDashpatch(const std::string &msg);   // to ft-dashpatch (@ft_dashpatch)
 bool MakePanel(Screen &s, const char *prefix, const char *label);
 void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe = 0);
 void ApplyCurve(const Screen &s);
@@ -393,13 +394,15 @@ void GsBlur();
 
 // ---------------------------------------------------------------- vrsteamwin.cpp's
 
-int SteamDashIndex();   // Steam's window's panel index while STEAM_DASH_PANEL is on, else -1
+int SteamDashIndex();   // Steam's window's panel index while Steam's windows are ours, else -1
 // The window pixels glued left of panel `index` at its density (Steam's menu, steamglue.h): its
 // tile is that much wider. 0: none.
 int GluedPx(int index);
 void SteamDashStep();
 void SteamDashEvents(Screen &s, int index);
 void SteamDashSwitch(bool on);
+// Steam's page in SteamVR's theater or not (ft-dashpatch's "steamvrmode", its fourth number).
+void SteamDashTheater(bool on);
 void SteamDashShutdown();
 
 }  // namespace ftvr

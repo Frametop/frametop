@@ -82,7 +82,7 @@ int main() {
         dashtiles::GroupFrame(head, down, down, g);   // (not a head pose: no way at all)
         check("group: no way at all: -Z", near(g[2][2], 1));
     }
-    // --- the wall at Steam's bar: facing it, as far as it is, the desk just over its top edge
+    // --- the wall at Steam's bar: facing it, a little behind it, the desk just over its top edge
     {
         // the bar as read on the Frame (2026-11-18): 1.1 m out, half a metre down, off to the right, tilted back
         const double head[3] = {0, 1.1, 0}, bar[3] = {0.286, 0.564, -0.992}, up[3] = {0, 0.767, -0.642};
@@ -92,13 +92,14 @@ int main() {
         dashtiles::SteamSlot(g, bar, 0.37, &az, &span);
         check("at the bar: the strip's middle over it", near(az, 0, 1e-9));
         check("at the bar: level, at the head", near(g[1][1], 1) && near(g[1][2], 0) && near(g[1][3], 1.1));
-        check("at the bar: the wall as far as the bar", near(r, std::sqrt(0.286 * 0.286 + 0.536 * 0.536 + 0.992 * 0.992)));
+        const double barDist = std::sqrt(0.286 * 0.286 + 0.536 * 0.536 + 0.992 * 0.992);
+        check("at the bar: the wall a little behind the bar", near(r, barDist + dashtiles::kBehindBarM) && r > barDist + 0.2);
         const double barEl = tiling::Deg(std::atan2(-0.536, std::hypot(0.286, 0.992)));
         check("at the bar: the desk just over it", desk > barEl + 0.8 && desk < barEl + 0.8 + 1.0);
         double noH = 0;
         dashtiles::AtBar(head, bar, up, 0, 0.8, g, &r, &noH);
         check("at the bar: no height known, its middle", near(noH, barEl + 0.8, 1e-9));
-        const double close[3] = {0, 1.0, -0.3}, high[3] = {0, 3.5, -0.5};
+        const double close[3] = {0, 1.0, -0.25}, high[3] = {0, 3.5, -0.5};
         dashtiles::AtBar(head, close, up, 0, 0.8, g, &r, &desk);
         check("at the bar: no nearer than the wall's least", near(r, dashtiles::kWallMinM));
         dashtiles::AtBar(head, high, up, 0, 0.8, g, &r, &desk);

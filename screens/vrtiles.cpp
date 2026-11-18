@@ -194,7 +194,7 @@ bool Regroup() {
     if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
     ApplyWall();
     const double barW = DashWidth();
-    // (at the bar, Steam's page over it is as near as the tiles: the slot as wide as the page, or they'd cut into it)
+    // (at the bar, Steam's page over it, just in front of the tiles: the slot as wide as the page, or they'd show behind it)
     const double slotW = g_tileWallAtBar ? std::max(barW, SteamPageWidth()) : barW;
     double barAz = 0, slot = 0;
     if (!dashtiles::SteamSlot(g, b, slotW, &barAz, &slot)) slot = 0;

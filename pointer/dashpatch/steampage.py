@@ -10,7 +10,9 @@ invisible theater with no way back. So, read and written by ft-dashpatch's Steam
 - whether SteamVR shows Steam's page in its theater (ft-screens then gives Steam's windows back,
   so SteamVR's theater draws them with its own way out: the user's "Hand off to SteamVR"), and
 - the strip hidden while ft-screens holds Steam's window ("steamstrip 1" on @ft_dashpatch, again
-  every second; a lease, so with ft-screens gone the strip comes back by itself).
+  every second; a lease, so with ft-screens gone the strip comes back by itself), and
+- View in Theater, now from the grab bar menu of Frametop's Steam tile ("steamtheater"):
+  TO_THEATER, the same call as SteamVR's button.
 
 The strip is hidden with a style rule, not by changing SteamVR's state: its panel stays where it
 is, drawing nothing, and the laser goes through it (testbench, 2026-11-18: clicks there reached
@@ -39,6 +41,18 @@ JS = """((hide) => {
   if (rule && rule.textContent != css) rule.textContent = css;
   return theater;
 })""" % STEAM_PAGE
+
+# View in Theater from Frametop's Steam tile (its grab bar menu): what SteamVR's own button does.
+TO_THEATER = """(() => {
+  for (const f of (window.FrameStore && window.FrameStore.frames) || [])
+    if ((f.pages || []).some(p => p.summonOverlayKey == '%s')) {
+      f.docking.SetInTheater(false);
+      return "Steam's page in SteamVR's theater";
+    }
+  return "no Steam page in SteamVR's dashboard";
+})()""" % STEAM_PAGE
+
+THEATER_ASK = b"steamtheater"
 
 
 def expression(hide):

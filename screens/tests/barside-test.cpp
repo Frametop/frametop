@@ -74,6 +74,14 @@ int main() {
         check("every edge's menu is on its own panel", std::fabs(c.u) + 0.06 < w / 2 && std::fabs(c.v) + 0.05 < h / 2);
     }
 
+    const int five = barside::kSides + 1, h5 = barside::MenuH(five);
+    check("an added row is under the edges", barside::RowAt(10, barside::kMenuPad + 1, five) == barside::kSides);
+    for (int r = 0; r < five; ++r) {
+        const double yUp = h5 - barside::kMenuPad - (r + 0.5) * barside::kRowH;
+        check("with a row added, each row's middle is still that row", barside::RowAt(barside::kMenuW / 2, yUp, five) == r);
+    }
+    check("the edges alone have no fifth row", barside::RowAt(10, barside::kMenuPad + 1) == barside::kSides - 1);
+
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed != 0;
 }

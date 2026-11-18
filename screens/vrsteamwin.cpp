@@ -42,7 +42,12 @@ const char *const kPrefixes[steamwin::kTiles] = {"frametop.steamdash", "frametop
 
 std::unique_ptr<gsforward::AsyncLink> g_link;
 steamwin::Fleet g_fleet;
-bool g_on = false;
+bool g_on = false;                  // STEAM_DASH_PANEL
+// SteamVR shows Steam's page in its theater (its own View in Theater; ft-dashpatch tells us): Steam's
+// windows are Steam's meanwhile, so its theater draws them, with its own way out (user, 2026-11-18:
+// "Hand off to SteamVR"; kept, the page was shrunk to nothing there, an invisible theater with no way
+// back). Taken again once SteamVR docks it back.
+bool g_theater = false;
 uint32_t g_pid = 0;                 // gamescope's (the panels' renderer)
 int64_t g_findAt = 0;
 std::unique_ptr<steamcdp::Pages> g_pages;   // the laser on them, to their pages
@@ -281,7 +286,7 @@ void GlueStep() {
 }
 }  // namespace
 
-int SteamDashIndex() { return g_on ? kIndex : -1; }
+int SteamDashIndex() { return g_fleet.On() ? kIndex : -1; }
 int GluedPx(int index) { return index == kIndex && g_screens.count(kMenu) ? g_glue.rest.w : 0; }
 
 // Each tick: Steam's display's news (its thread opens it, again every AsyncLink::kRetryMs).
@@ -312,6 +317,10 @@ void SteamDashStep() {
     if (!g_link->IsOpen()) return steamhit::Clear();
     const bool all = now >= g_findAt;
     if (all) g_findAt = now + kFindMs;
+    // SteamVR's controls under Steam's page (View in Theater, Float in World...) hidden while its
+    // window is our tile: the page is shrunk to nothing, so they stood at its middle, over the tiles.
+    // A lease ft-dashpatch lets lapse after a few seconds (ft-screens gone: they come back).
+    if (all && g_fleet.On() && g_screens.count(kIndex) && g_screens[kIndex].shown) SendDashpatch("steamstrip 1");
     if (all || fresh) Find(all);
     Lost();
     steamhit::Step(g_fleet, all);
@@ -384,21 +393,36 @@ void SteamDashEvents(Screen &s, int index) {
     }
 }
 
-// STEAM_DASH_PANEL: on, Steam's windows become ours when they map (or now, if they are); off,
-// they're Steam's again.
-void SteamDashSwitch(bool on) {
-    static bool swept = false;   // (at start, switched on or not)
-    if (!swept) swept = true, steamhit::Sweep();
-    if (on == g_on) return;
-    g_on = on;
+namespace {
+// Steam's windows ours (STEAM_DASH_PANEL on and Steam's page not in SteamVR's theater) or Steam's.
+void Apply(const char *why) {
+    const bool on = g_on && !g_theater;
+    if (on == g_fleet.On()) return;
     if (!g_link) {
         if (!on) return;
         g_link = std::make_unique<gsforward::AsyncLink>(gsforward::SteamDisplays, true, gsforward::Role::Steam);
         g_link->SetOn(true);   // (kept open when it's off again: Steam's windows go back to it, and stay)
         g_pages = std::make_unique<steamcdp::Pages>();
     }
-    std::printf("Steam's windows: %s (STEAM_DASH_PANEL)\n", on ? "Frametop's when they map" : "Steam's own");
+    std::printf("Steam's windows: %s (%s)\n", on ? "Frametop's when they map" : "Steam's own", why);
     Do(g_fleet.Switch(on));
+    if (!on) SendDashpatch("steamstrip 0");   // (SteamVR's controls under its page back at once)
+}
+}  // namespace
+
+// STEAM_DASH_PANEL: on, Steam's windows become ours when they map (or now, if they are); off,
+// they're Steam's again.
+void SteamDashSwitch(bool on) {
+    static bool swept = false;   // (at start, switched on or not)
+    if (!swept) swept = true, steamhit::Sweep();
+    g_on = on;
+    Apply("STEAM_DASH_PANEL");
+}
+
+void SteamDashTheater(bool on) {
+    if (on == g_theater) return;
+    g_theater = on;
+    Apply(on ? "SteamVR shows Steam's page in its theater" : "Steam's page out of SteamVR's theater");
 }
 
 // ft-screens going: the windows back to Steam first (half a second at most).

@@ -12,8 +12,9 @@ Chrome DevTools Protocol, again whenever the dashboard's page is new (SteamVR re
 It also tells ft-screens (@ft_screens, "steamvrmode <gamepad> <theater app> <frametop>") what only the
 dashboard's page knows: whether SteamVR's controllers are in Gamepad mode (Enter Gamepad Mode, so
 the pad goes to a game), which Steam game shows in a theater window (a flatscreen game, which
-isn't a scene app), and whether the Gamepad mode is Frametop's (its hidden dashboard overlay
-frametop.gamepad has the pad). ft-screens then keeps its panels from turning SteamVR's laser on
+isn't a scene app), whether the Gamepad mode is Frametop's (its hidden dashboard overlay
+frametop.gamepad has the pad), and whether SteamVR's theater shows Steam's own page (steampage.py,
+which also hides SteamVR's controls under that page while ft-screens has Steam's window). ft-screens then keeps its panels from turning SteamVR's laser on
 while the pad is in a game (screens/vr.cpp, "controllers on the screens"), and in Frametop's own
 the input relay reads the pad for a panel (input/vrpad.py). That's read only, five times a second,
 on one connection. The one thing it does there is for ft-screens' gamepad pill: "gamepad" on
@@ -51,6 +52,8 @@ sys.path.insert(0, str(HERE.parent.parent / "steam"))
 from steamui import _WebSocket  # noqa: E402  (Frametop's small CDP client)
 sys.path.insert(0, str(HERE.parent.parent / "conf"))
 import ft_vrsettings  # noqa: E402  (SteamVR's settings: vrcmd's output and the file)
+sys.path.insert(0, str(HERE))
+import steampage  # noqa: E402  (Steam's page: in SteamVR's theater? its controls hidden)
 
 HOME = Path.home()
 SECTION = "VRWebHelper"
@@ -194,6 +197,7 @@ GAMEPAD_PUSH = """(() => {
   return focus + ', dashboard closed';
 })()""" % GAMEPAD_KEY
 DASHPATCH = "\0ft_dashpatch"
+STRIP = steampage.StripLease()  # ft-screens' "steamstrip" (listen), read by the watch
 
 
 class NativeFocus:
@@ -220,7 +224,9 @@ class NativeFocus:
 
 
 def watch_steamvr():
-    """Tells ft-screens SteamVR's Gamepad mode and theater game: on change and every second."""
+    """Tells ft-screens SteamVR's Gamepad mode, theater game and whether Steam's page is in the
+    theater: on change and every second. Also keeps SteamVR's controls under Steam's page hidden
+    while ft-screens holds the lease (steampage.py)."""
     out = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     ws, rid, last, sent = None, 0, None, 0.0
     focus = NativeFocus()
@@ -234,8 +240,10 @@ def watch_steamvr():
                     continue
                 ws = _WebSocket(url)
             rid += 1
+            # "<Steam's page in theater> <pad> <app> <mine> <key>"
+            expression = f"{steampage.expression(STRIP.held(time.monotonic()))} + ' ' + {STEAMVR_STATE}"
             ws.send(json.dumps({"id": rid, "method": "Runtime.evaluate",
-                                "params": {"expression": STEAMVR_STATE, "returnByValue": True}}))
+                                "params": {"expression": expression, "returnByValue": True}}))
             while True:
                 reply = json.loads(ws.recv())
                 if reply.get("id") == rid:
@@ -249,17 +257,20 @@ def watch_steamvr():
                     pass
             ws = None
             continue
-        if not isinstance(value, str) or not re.fullmatch(r"[01] \d+ [01] \S+", value):
+        if not isinstance(value, str) or not re.fullmatch(r"[01] [01] \d+ [01] \S+", value):
             continue
         value, key = value.rsplit(" ", 1)
+        theater, value = value.split(" ", 1)
+        value = f"{value} {theater}"  # ft-screens: "steamvrmode <pad> <app> <mine> <Steam's page in theater>"
         focus.update(key, out)
         now = time.monotonic()
         if value != last or now - sent >= 1:
             if value != last:
-                gamepad, app, mine = value.split()
+                gamepad, app, mine, theater = value.split()
                 print(f"SteamVR: {'gamepad' if gamepad == '1' else 'laser'} mode"
                       f"{' (for a Frametop panel)' if mine == '1' else ''}, "
-                      f"{'theater game ' + app if app != '0' else 'no theater game'}", flush=True)
+                      f"{'theater game ' + app if app != '0' else 'no theater game'}"
+                      f"{', Steam page in theater' if theater == '1' else ''}", flush=True)
             try:
                 out.sendto(f"steamvrmode {value}".encode(), SCREENS)
             except OSError:
@@ -268,8 +279,8 @@ def watch_steamvr():
 
 
 def listen():
-    """ft-screens' gamepad pill: "gamepad" on @ft_dashpatch, only from this user (it moves
-    SteamVR's input focus; SO_PASSCRED gives the sender's)."""
+    """ft-screens on @ft_dashpatch, only from this user (SO_PASSCRED gives the sender's): the
+    gamepad pill's "gamepad" (it moves SteamVR's input focus), and "steamstrip 1|0" (steampage.py)."""
     creds = struct.Struct("3i")  # pid, uid, gid
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
@@ -282,10 +293,13 @@ def listen():
         data, anc, _, _ = sock.recvmsg(256, socket.CMSG_SPACE(creds.size))
         uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
                     if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
-        if data.strip() != b"gamepad":
+        message = data.strip()
+        if message != b"gamepad" and not message.startswith(b"steamstrip"):
             continue
         if uid != os.getuid():
-            print(f"gamepad from another user ({uid}): ignored", flush=True)
+            print(f"{message[:16]!r} from another user ({uid}): ignored", flush=True)
+            continue
+        if STRIP.take(message, time.monotonic()):
             continue
         url = dashboard()
         try:

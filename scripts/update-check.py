@@ -1005,12 +1005,14 @@ def check_eye_rate():
 
 
 # What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;
-# ft-dashpatch's SteamVR watch reads the rest (Gamepad mode and the theater game, for ft-screens),
+# ft-dashpatch's SteamVR watch reads the rest (Gamepad mode, the theater game and Steam's page in the
+# theater, for ft-screens; steampage.py hides the controls under Steam's page by their frame's id),
 # and the gamepad pill's click uses the last line's.
 DASHBOARD_MARKERS = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
                      "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
                      "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput",
-                     "m_unSteamInputAppID", "PushInputFocus", "window.Dashboard="}
+                     "m_unSteamInputAppID", "PushInputFocus", "window.Dashboard=",
+                     "window.DashboardStore=", "m_rgTheaterFrameStack", "m_unFrameID", "legacy-frame-controls-"}
 # ...and the pill closes the dashboard with either of these: the first up to SteamVR 2.18, the
 # second from 2.19 (SteamOS 0.5).
 DASHBOARD_CLOSERS = {"hideDashboard", "showOrHideDashboardOrFrameInternal"}
@@ -1049,8 +1051,8 @@ def check_dashpatch():
     if missing:
         report("FAIL", label, f"SteamVR's dashboard lacks {', '.join(sorted(missing))}, so ft-dashpatch can't tell "
                "ft-screens about Gamepad mode or a theater game (pointing at a screen may take the pad from a game), "
-               "or give a panel Gamepad mode (the gamepad pill); STEAMVR_STATE and GAMEPAD_PUSH in "
-               "pointer/dashpatch/ft-dashpatch.py need updating")
+               "give a panel Gamepad mode (the gamepad pill), or hand Steam's page to SteamVR's theater; STEAMVR_STATE "
+               "and GAMEPAD_PUSH in pointer/dashpatch/ft-dashpatch.py or pointer/dashpatch/steampage.py need updating")
         return
     import urllib.request
     try:

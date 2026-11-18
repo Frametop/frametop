@@ -5,7 +5,8 @@ shrinks Steam's page (valve.steam.gamepadui.main) to nothing. SteamVR still stan
 for that page (Show Keyboard, Float in World, View in Theater, More Options) under the page's
 bottom edge, which then sits at its middle: a strip of four buttons over the tiles (user,
 2026-11-18: "it doesn't look good for it to be visible"), and View in Theater put the page into an
-invisible theater with no way back. So, read and written by ft-dashpatch's SteamVR watch:
+invisible theater with no way back. Its resize corner (the page's `_Panel.ResizeHandle` panel) was
+left over the tiles the same way (user, 2026-11-18: "the resize overlay ... is still present"). So, read and written by ft-dashpatch's SteamVR watch:
 
 - whether SteamVR shows Steam's page in its theater (ft-screens then gives Steam's windows back,
   so SteamVR's theater draws them with its own way out: the user's "Hand off to SteamVR"), and
@@ -23,7 +24,7 @@ STEAM_PAGE = "valve.steam.gamepadui.main"
 LAPSE_S = 3.0  # the lease without a renewal (ft-screens renews it every second)
 
 # (hide) -> 1 when SteamVR's theater shows Steam's page, else 0; puts in or takes out the rule
-# that hides the controls under it.
+# that hides the controls under it and its resize corner.
 JS = """((hide) => {
   let frame = null;
   for (const f of (window.FrameStore && window.FrameStore.frames) || [])
@@ -31,7 +32,8 @@ JS = """((hide) => {
   const id = frame && frame.m_unFrameID;
   const stack = (window.DashboardStore && window.DashboardStore.m_rgTheaterFrameStack) || [];
   const theater = id && stack.some(f => f && f.m_unFrameID == id) ? 1 : 0;
-  const css = hide && id ? '[id="legacy-frame-controls-' + id + '"] > * { visibility: hidden !important; }' : '';
+  const css = hide && id ? '[id="legacy-frame-controls-' + id + '"] > *, [id="system.standalone::%s_Panel.ResizeHandle"] > *'
+                            + ' { visibility: hidden !important; }' : '';
   let rule = document.getElementById('ft-steam-strip');
   if (css && !rule) {
     rule = document.createElement('style');
@@ -40,7 +42,7 @@ JS = """((hide) => {
   }
   if (rule && rule.textContent != css) rule.textContent = css;
   return theater;
-})""" % STEAM_PAGE
+})""" % (STEAM_PAGE, STEAM_PAGE)
 
 # View in Theater from Frametop's Steam tile (its grab bar menu): what SteamVR's own button does.
 TO_THEATER = """(() => {

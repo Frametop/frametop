@@ -46,6 +46,7 @@ class ExpressionTests(unittest.TestCase):
         self.assertIn("'valve.steam.gamepadui.main'", e)
         self.assertIn("legacy-frame-controls-", e)
         self.assertIn("m_rgTheaterFrameStack", e)
+        self.assertIn("valve.steam.gamepadui.main_Panel.ResizeHandle", e)
 
 
 class TheaterTests(unittest.TestCase):

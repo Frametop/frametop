@@ -461,6 +461,21 @@ static bool window_retry(void) {
     return true;
 }
 
+// Apple High Performance Screen Sharing apps ("apple:virtual@2") accept '@' and run ft-appless
+// ($FT_APPLESS), following the same one-stream-per-display and host_busy rules.
+static bool apple_backend(void) {
+    start(101, "192.0.2.7", "apple:virtual@2", 60);
+    run(300);
+    cmd("remote 101 stop");
+    start(101, "192.0.2.7", "apple:physical", 60);
+    run(1200);
+    read_log();
+    EXPECT(g_nprocs == 2);
+    EXPECT(!strcmp(g_procs[0].app, "apple:virtual@2") && !strcmp(g_procs[1].app, "apple:physical"));
+    EXPECT(g_procs[1].start >= g_procs[0].gone);
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc > 8 && !strcmp(argv[1], "stream")) {
         snprintf(g_log, sizeof g_log, "%s/events.log", getenv("XDG_RUNTIME_DIR"));
@@ -478,6 +493,7 @@ int main(int argc, char **argv) {
     if (n <= 0) return perror("readlink"), 2;
     self[n] = 0;
     setenv("FT_STREAM", self, 1);
+    setenv("FT_APPLESS", self, 1);
     setenv("FT_PEERPANEL", self, 1);
     unsetenv("FT_TOGETHER_SOCKET");
     setenv("XDG_RUNTIME_DIR", dir, 1);  // ft-stream's logs
@@ -487,6 +503,7 @@ int main(int argc, char **argv) {
         {"other host", other_host},      {"hung ft-stream", hung},       {"focus and blur", focus_blur},
         {"window closed", window_closed}, {"window retry", window_retry}, {"room panels", room_panels},
         {"room panel refused", room_panel_refused}, {"pointer leaves", pointer_leaves}, {"someone else", someone_else},
+        {"apple backend", apple_backend},
     };
     int failed = 0;
     for (size_t i = 0; i < sizeof all / sizeof *all; ++i) {

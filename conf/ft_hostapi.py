@@ -20,6 +20,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import ssl
 import subprocess
 
@@ -48,6 +49,12 @@ def own_token_path(address, port):
 
 def pin_path(address, port=0):
     return token_path(address, port)[:-len(".token")] + ".pin"
+
+
+def apple_path(address):
+    """Where ft-appless keeps a Mac's Screen Sharing login (stream/apple_hp.h)."""
+    clean = re.sub(r"[^A-Za-z0-9._-]", "", address) or "host"
+    return os.path.join(TOKEN_DIR, f"{clean}.apple")
 
 
 def web_ui_port(address, port=0):

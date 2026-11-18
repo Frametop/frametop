@@ -78,6 +78,7 @@ test-c:
       screens/tests/remote-test.c screens/remote.c screens/child.c $(pkg-config --cflags --libs wlroots-0.20 wayland-server) \
       -o build/tests/remote-test
     run screens/tests/remote-test.c build/tests/remote-test
+    run stream/tests/apple_hp_test.cpp scripts/test-apple-hp.sh
     # the share tap (a screen's pictures to an ft-sharepanel, for a Together room), the test being that program too
     gcc -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -DFT_SHARE_STUCK_MS=500 -Iscreens \
       screens/tests/share-test.c screens/share.c screens/child.c $(pkg-config --cflags --libs wlroots-0.20 wayland-server) \

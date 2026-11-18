@@ -1012,7 +1012,8 @@ DASHBOARD_MARKERS = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eS
                      "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
                      "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput",
                      "m_unSteamInputAppID", "PushInputFocus", "window.Dashboard=",
-                     "window.DashboardStore=", "m_rgTheaterFrameStack", "m_unFrameID", "legacy-frame-controls-"}
+                     "window.DashboardStore=", "m_rgTheaterFrameStack", "m_unFrameID", "legacy-frame-controls-",
+                     "SetInTheater"}
 # ...and the pill closes the dashboard with either of these: the first up to SteamVR 2.18, the
 # second from 2.19 (SteamOS 0.5).
 DASHBOARD_CLOSERS = {"hideDashboard", "showOrHideDashboardOrFrameInternal"}

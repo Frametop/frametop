@@ -425,6 +425,8 @@ void SteamDashTheater(bool on) {
     Apply(on ? "SteamVR shows Steam's page in its theater" : "Steam's page out of SteamVR's theater");
 }
 
+bool SteamDashInTheater() { return g_theater; }
+
 // View in Theater, from Steam's tile: SteamVR's own (dashpatch calls its frame's SetInTheater), so
 // its theater and its way out are SteamVR's; SteamDashTheater gives the windows back once it shows.
 void SteamDashToTheater() {

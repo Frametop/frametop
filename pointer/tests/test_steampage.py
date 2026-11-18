@@ -48,6 +48,11 @@ class ExpressionTests(unittest.TestCase):
         self.assertIn("m_rgTheaterFrameStack", e)
         self.assertIn("valve.steam.gamepadui.main_Panel.ResizeHandle", e)
 
+    def test_only_while_steams_page_is_the_one_shown(self):
+        e = steampage.expression(True)
+        self.assertIn("frame.activePage.summonOverlayKey == 'valve.steam.gamepadui.main'", e)
+        self.assertIn("hide && id && steams", e)
+
 
 class TheaterTests(unittest.TestCase):
     def test_it_asks_steamvr_as_its_own_button_does(self):

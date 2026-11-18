@@ -24,7 +24,9 @@ STEAM_PAGE = "valve.steam.gamepadui.main"
 LAPSE_S = 3.0  # the lease without a renewal (ft-screens renews it every second)
 
 # (hide) -> 1 when SteamVR's theater shows Steam's page, else 0; puts in or takes out the rule
-# that hides the controls under it and its resize corner.
+# that hides the controls under it and its resize corner. Only while Steam's page is the one its
+# frame shows: SteamVR's Settings page is another page of the same frame, and the controls under it
+# are its own (user, 2026-11-18: "VR settings doesn't work properly").
 JS = """((hide) => {
   let frame = null;
   for (const f of (window.FrameStore && window.FrameStore.frames) || [])
@@ -32,7 +34,8 @@ JS = """((hide) => {
   const id = frame && frame.m_unFrameID;
   const stack = (window.DashboardStore && window.DashboardStore.m_rgTheaterFrameStack) || [];
   const theater = id && stack.some(f => f && f.m_unFrameID == id) ? 1 : 0;
-  const css = hide && id ? '[id="legacy-frame-controls-' + id + '"] > *, [id="system.standalone::%s_Panel.ResizeHandle"] > *'
+  const steams = frame && frame.activePage && frame.activePage.summonOverlayKey == '%s';
+  const css = hide && id && steams ? '[id="legacy-frame-controls-' + id + '"] > *, [id="system.standalone::%s_Panel.ResizeHandle"] > *'
                             + ' { visibility: hidden !important; }' : '';
   let rule = document.getElementById('ft-steam-strip');
   if (css && !rule) {
@@ -42,7 +45,7 @@ JS = """((hide) => {
   }
   if (rule && rule.textContent != css) rule.textContent = css;
   return theater;
-})""" % (STEAM_PAGE, STEAM_PAGE)
+})""" % (STEAM_PAGE, STEAM_PAGE, STEAM_PAGE)
 
 # View in Theater from Frametop's Steam tile (its grab bar menu): what SteamVR's own button does.
 TO_THEATER = """(() => {

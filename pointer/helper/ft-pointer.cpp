@@ -1236,6 +1236,9 @@ struct Pointer {
     std::map<std::string, overlayregion::Region> hitRegions;
     std::map<std::string, bool> sceneGraph;  // no texture: plane test instead of ComputeOverlayIntersection
     std::map<std::string, bool> visible;  // refreshed every 50 ms
+    // SteamVR's own word, before a shrunk panel counts as hidden: what the Settings page check
+    // (OnVrSettingsPage) goes by, refreshed with `visible`.
+    std::map<std::string, bool> shown;
     Clock::time_point lastVisible{};
     Clock::time_point lastSlow{};
     unsigned listGeneration = 0;  // the overlay list the handles were looked up from
@@ -4068,13 +4071,14 @@ void Pointer::RefreshOverlays() {
 
     if (active && (now - lastVisible > std::chrono::milliseconds(50) || visible.size() != handles.size())) {
         lastVisible = now;
-        std::map<std::string, bool> seen;
+        std::map<std::string, bool> seen, up;
         for (const auto &[key, h] : handles) {
             float w = 1;   // (a shrunk one: hidden, see "Scene-graph overlays" at the top)
-            seen[key] = overlay->IsOverlayVisible(h) &&
-                        !(overlay->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w < kGoneWidthM);
+            up[key] = overlay->IsOverlayVisible(h);
+            seen[key] = up[key] && !(overlay->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w < kGoneWidthM);
         }
         if (seen != visible) visible.swap(seen), ++visibleGen;
+        if (up != shown) shown.swap(up), ++visibleGen;
     }
 }
 
@@ -4302,12 +4306,17 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
 
 bool Pointer::OnVrSettingsPage(const Vec3 &sight) {
     // SteamVR Settings (see the top): the dashboard's main panel is hidden and its
-    // scene-graph panel shows the page.
+    // scene-graph panel shows the page. By SteamVR's word (`shown`), not `visible`: while
+    // ft-screens shows Steam's window as a tile it shrinks both panels to nothing
+    // (screens/steamshrink.h), which `visible` counts as hidden, and the page went unnoticed: the
+    // laser went through most of it to the panels behind (user, 2026-11-18: "the laser just goes
+    // through it in certain parts"). The menu panel's transform, which places the page, isn't
+    // shrunk.
     bool on = false;
-    const auto mainIt = visible.find("valve.steam.gamepadui.main");
-    if (overlay->IsDashboardVisible() && !(mainIt != visible.end() && mainIt->second)) {
+    const auto mainIt = shown.find("valve.steam.gamepadui.main");
+    if (overlay->IsDashboardVisible() && !(mainIt != shown.end() && mainIt->second)) {
         for (const auto &[key, handle] : handles) {
-            if (!visible[key] || key.rfind("valve.steam.gamepadui.frame.menu.", 0) != 0) continue;
+            if (!shown[key] || key.rfind("valve.steam.gamepadui.frame.menu.", 0) != 0) continue;
             vr::ETrackingUniverseOrigin uo;
             vr::HmdMatrix34_t t{};
             if (overlay->GetOverlayTransformAbsolute(handle, &uo, &t) == vr::VROverlayError_None &&

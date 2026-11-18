@@ -391,6 +391,10 @@ void GsShutdown();
 bool GsTyping();
 bool GsKey(uint32_t code, int value, bool elsewhere, gsforward::Mods now);
 void GsBlur();
+bool GsCanTheater(int index);         // a Steam game's panel, not lent: its grab bar menu offers View in Theater
+void GsToTheater(int index);          // View in Theater: its window lent to SteamVR's theater (gstheater.h)
+void GsTheaterWord(unsigned app);     // ft-dashpatch: the game SteamVR's theater shows (0: none)
+bool GsInTheater();                   // SteamVR's theater shows a lent game (the tiles hide then)
 
 // ---------------------------------------------------------------- vrsteamwin.cpp's
 

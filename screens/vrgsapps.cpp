@@ -8,12 +8,14 @@
 // the dashboard tiles are a panel's like any other's (an app's has the bar, curve, roll, resize and
 // anchor). The first time an app is seen its panel is anchored to the dashboard, staying shown;
 // after that it comes back as the app was (TileKnown). GSAPP_PANELS=0 (Display Settings) leaves
-// every window to gamescope's own panels.
+// every window to gamescope's own panels. A Steam game's panel's grab bar menu has View in
+// Theater: its window lent to SteamVR's theater, back when it leaves (gstheater.h).
 
 #include "vrpanel.h"
 #include "gscontrol.h"
 #include "gsdisplay.h"
 #include "gslink.h"
+#include "gstheater.h"
 #include "../conf/ft_pinlock.h"
 
 #include <algorithm>
@@ -92,7 +94,7 @@ public:
         s.gsSeen = true;
         UpdateVisibility();
     }
-    // Unmapped: hidden where it is (its place on the grid kept) until it maps again.
+    // Unmapped, or lent to SteamVR's theater: hidden where it is (its place on the grid kept) until it's shown again.
     void Hide(int index) override {
         const auto it = g_screens.find(index);
         if (it == g_screens.end()) return;
@@ -100,7 +102,7 @@ public:
         g_gsPointer.PanelGone(index);
         EndDrag(it->second);
         it->second.shown = nullptr;
-        std::printf("screen %d: unmapped (a gamescope app): hidden until it maps again\n", index + 1);
+        std::printf("screen %d: hidden (a gamescope app: unmapped, or in SteamVR's theater) until it's shown again\n", index + 1);
         UpdateVisibility();
     }
     void Move(int index, const gsforward::Window &w) override {
@@ -166,6 +168,7 @@ GsPanels g_gsPanels;
 std::unique_ptr<gsforward::AsyncLink> g_gsLink;   // (made when first switched on: its thread)
 std::unique_ptr<gsapps::Control> g_gsControl;     // (after it: goes first)
 bool g_gsOn = false;                              // GSAPP_PANELS
+gsapps::Theater g_gsTheater;                      // windows lent to SteamVR's theater
 }  // namespace
 
 // Each tick: what happened on the app display since (gslink.h's thread opens it, every
@@ -180,6 +183,7 @@ void GsStep() {
                 break;
             case gsforward::Update::Closed:
                 g_gsControl->Closed();
+                g_gsTheater.Clear();
                 if (g_gsOn && u.why != "off")
                     std::printf("gamescope apps: %s (trying again every %d s)\n", u.why.c_str(), gsforward::AsyncLink::kRetryMs / 1000);
                 break;
@@ -189,6 +193,12 @@ void GsStep() {
                 break;
         }
     if (g_gsOn) g_gsControl->Tick(now);
+    for (const gsapps::Theater::Back &b : g_gsTheater.Due(now)) {
+        const bool back = g_gsControl->Reclaim(b.win);
+        if (back) std::printf("gamescope apps: window 0x%x back on screen %d (%s)\n", b.win, g_gsControl->Windows().PanelOf(b.win) + 1, b.why);
+        if (back) UpdateVisibility();
+        else std::printf("gamescope apps: window 0x%x %s, and it's gone\n", b.win, b.why);
+    }
 }
 
 // Laser events on an app's panel and its popups: the X pointer, buttons and wheel there.
@@ -268,7 +278,7 @@ void GsSwitch(bool on) {
         g_gsLink = std::make_unique<gsforward::AsyncLink>(gsforward::AppDisplays, true);
         g_gsControl = std::make_unique<gsapps::Control>(*g_gsLink, g_gsPanels);
     }
-    if (!on) g_gsControl->Off(), std::printf("gamescope apps: off (GSAPP_PANELS)\n");
+    if (!on) g_gsControl->Off(), g_gsTheater.Clear(), std::printf("gamescope apps: off (GSAPP_PANELS)\n");
     g_gsLink->SetOn(on);   // (off: closed after the untags)
 }
 
@@ -286,5 +296,30 @@ bool GsKey(uint32_t code, int value, bool elsewhere, gsforward::Mods now) {
 void GsBlur() {
     if (g_gsControl) g_gsControl->Blur();
 }
+
+namespace {
+uint32_t GsSteamApp(int index) {
+    const gsforward::Window *w = g_gsControl ? g_gsControl->Windows().MainRect(index) : nullptr;
+    return w ? gsapps::SteamAppOf(w->key) : 0;
+}
+}  // namespace
+
+bool GsCanTheater(int index) { return g_gsOn && GsSteamApp(index) && !g_gsControl->Lent(index); }
+
+// View in Theater from a game's grab bar menu: untagged, gamescope's own overlay for the game takes
+// it, and SteamVR shows that in its theater with its own controls; the panel hides meanwhile.
+void GsToTheater(int index) {
+    const uint32_t app = GsSteamApp(index);
+    if (!g_gsOn || !app) return;
+    const uint32_t win = g_gsControl->Lend(index);
+    if (!win) return;
+    g_gsTheater.Lent(win, app, NowMs());
+    std::printf("screen %d: View in Theater: window 0x%x (steam:%u) to SteamVR's theater\n", index + 1, win, app);
+    std::fflush(stdout);
+    UpdateVisibility();
+}
+
+void GsTheaterWord(unsigned app) { g_gsTheater.Heard(app); }
+bool GsInTheater() { return g_gsTheater.Showing(); }
 
 }  // namespace ftvr

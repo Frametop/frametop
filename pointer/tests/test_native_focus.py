@@ -47,9 +47,10 @@ class NativeFocusTests(unittest.TestCase):
 
     def test_watcher_keeps_mode_protocol_and_sends_native_focus_change(self):
         ws = Mock()
-        # (the first number: Steam's page in SteamVR's theater, steampage.py; it goes last to ft-screens)
-        states = ["1 0 0 0 frametop.float.1", "1 0 0 0 gamescope.gamescope-0.window.70",
-                  "1 0 0 0 gamescope.gamescope-0.window.70"]
+        # (the first number: Steam's page in SteamVR's theater, steampage.py; it goes fourth to
+        # ft-screens. The fifth: the game SteamVR's theater shows, screens/gstheater.h)
+        states = ["1 0 0 0 0 frametop.float.1", "1 0 0 0 0 gamescope.gamescope-0.window.70",
+                  "1 0 0 0 0 gamescope.gamescope-0.window.70"]
         import json
         ws.recv.side_effect = [json.dumps({"id": i, "result": {"result": {"value": v}}})
                                for i, v in enumerate(states, 1)]
@@ -61,7 +62,25 @@ class NativeFocusTests(unittest.TestCase):
             with self.assertRaises(StopIteration):
                 dashpatch.watch_steamvr()
         self.assertEqual([c.args[0] for c in self.out.sendto.call_args_list],
-                         [b"steamvrmode 0 0 0 1", b"click gamescope.gamescope-0.window.70"])
+                         [b"steamvrmode 0 0 0 1 0", b"click gamescope.gamescope-0.window.70"])
+
+    def test_watcher_passes_the_game_in_the_theater(self):
+        ws = Mock()
+        import json
+        ws.recv.side_effect = [json.dumps({"id": 1, "result": {"result": {"value": "0 0 2868840 0 2868840 -"}}})]
+        with patch.object(dashpatch.socket, "socket", return_value=self.out), \
+             patch.object(dashpatch, "dashboard", return_value="ws://test"), \
+             patch.object(dashpatch, "_WebSocket", return_value=ws), \
+             patch.object(dashpatch.time, "sleep", side_effect=[None, StopIteration]), \
+             patch.object(dashpatch.time, "monotonic", return_value=10):
+            with self.assertRaises(StopIteration):
+                dashpatch.watch_steamvr()
+        self.assertEqual([c.args[0] for c in self.out.sendto.call_args_list],
+                         [b"steamvrmode 0 2868840 0 0 2868840"])
+
+    def test_state_reads_the_theater_frames_games(self):
+        self.assertIn("m_rgTheaterFrameStack", dashpatch.STEAMVR_STATE)
+        self.assertIn("p.summonOverlayKey", dashpatch.STEAMVR_STATE)
 
 
 if __name__ == "__main__":

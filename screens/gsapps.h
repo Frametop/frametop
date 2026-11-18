@@ -142,6 +142,12 @@ public:
             if (p.index == index && p.sub == sub) return id;
         return 0;
     }
+    // Whether the app window at `index` is mapped (its panel shown, unless it's lent: gscontrol.h).
+    bool Mapped(int index) const {
+        for (const auto &[id, m] : mains_)
+            if (m.index == index) return m.mapped;
+        return false;
+    }
     const gsforward::Window *MainRect(int index) const {
         for (const auto &[id, m] : mains_)
             if (m.index == index) return &m.win;

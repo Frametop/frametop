@@ -397,8 +397,8 @@ private:
     // The turn for `l` (laid out centred: Arrange): Recentre's; else, after a change (user,
     // 2026-11-18: a panel moved from the right to the left "should put that monitor roughly where I
     // put it, but not shift all monitors around"; Arrange centres the strip, so it shifted them by the
-    // moved one's width), the one that keeps the others nearest where they were on average: moved to
-    // an end, they stay; into the middle, its neighbours make room both ways. The one moved counts only
+    // moved one's width), the one most of the others want to stay where they were: moved to an end,
+    // they stay; into the middle of two, both make room. The one moved counts only
     // when there are no others (it where it was let go; by a key, not at all: it pulled them a fifth
     // of its width when it did). Always with the strip still reaching straight ahead (what it's
     // centred round: Steam's bar, or where you faced).
@@ -409,20 +409,33 @@ private:
             for (const tiling::Placed &p : l.tiles)
                 if (p.id == centreOn_) pan = -p.azDeg;
         } else {
-            double sum = 0, alone = NAN;
-            int n = 0;
+            // (by their columns' middles, as most of them want: a column's narrower panels lean one
+            // way or the other, Lean, and one flipping took the column next to it 6 degrees the other
+            // way; a narrow one left alone when the wide one it leaned on moves away is in a column
+            // of its own somewhere new, and pulled the rest 9 degrees when the turn was their mean)
+            std::vector<double> want;
+            double alone = NAN;
             for (const tiling::Placed &p : l.tiles) {
                 if (p.id == moved_) {
                     if (!std::isnan(movedAz_)) alone = tiling::WrapNear(movedAz_ - p.azDeg, 0);
                     continue;
                 }
                 for (const tiling::Placed &q : last_.tiles)
-                    if (q.id == p.id) sum += tiling::WrapNear(q.azDeg - p.azDeg, 0), ++n;
+                    if (q.id == p.id) want.push_back(tiling::WrapNear(ColumnMid(last_, q.col) - ColumnMid(l, p.col), 0));
             }
-            if (n) pan = sum / n;
-            else if (!std::isnan(alone)) pan = alone;
+            if (const size_t n = want.size()) {   // (the median; of an even count, the middle two's mean: into
+                std::sort(want.begin(), want.end());   // the middle of two, both sides make room)
+                pan = (want[(n - 1) / 2] + want[n / 2]) / 2;
+            } else if (!std::isnan(alone)) pan = alone;
         }
         return std::clamp(pan, -l.az1, -l.az0);
+    }
+    // Column `col`'s middle round you: its widest panel's (the others lean against one of its edges).
+    static double ColumnMid(const tiling::Layout &l, int col) {
+        double a0 = 1e9, a1 = -1e9;
+        for (const tiling::Placed &p : l.tiles)
+            if (p.col == col) a0 = std::min(a0, p.az0), a1 = std::max(a1, p.az1);
+        return (a0 + a1) / 2;
     }
     double pan_ = 0;              // the strip turned this far from centred
     bool recentre_ = false;

@@ -4,10 +4,11 @@
 //   Each panel's edge is remembered by its key (TileKnown's: "screen:2", "app:ID", "remote:HOST/APP")
 // in ~/.config/frametop-bars.txt, a line each, "KEY<TAB>EDGE"; a panel with no key yet keeps its edge
 // for the session. The geometry is barside.h's; vr.cpp places the controls by Screen::barSide.
-//   The menu: four rows (Bottom, Top, Left, Right; the panel's own edge marked), out past the bar at
-// the spot clicked, a row lit under a laser or the pointer. A click on a row moves the bar there and
-// closes it; it closes on its own after kMenuIdleMs with nothing on it, when its panel hides, or on
-// another right click on the same bar. Its panel's controls stay shown while it's open.
+//   The menu: four rows (Bottom, Top, Left, Right; the panel's own edge marked), over the panel beside
+// the bar at the spot clicked (barside::MenuAt says why not past the edge), a row lit under a laser or
+// the pointer. A click on a row moves the bar there and closes it; it closes on its own after
+// kMenuIdleMs with nothing on it, when its panel hides, or on another right click on the same bar.
+// Its panel's controls stay shown while it's open.
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
@@ -184,7 +185,7 @@ void UpdateBarMenu() {
     const double half = barhit::Width(s.chrome, g_barPaddingX) / 2;
     const barside::UV at = barside::Place(s.barSide, s.metres, s.heightMetres(), BarOut(s), std::clamp(g_menu.along, -half, half));
     const barside::UV c = barside::MenuAt(s.barSide, at, barhit::Height(s.chrome, g_barPaddingY) / 2,
-                                          std::max(s.grip, s.chrome * 0.06), w, h);
+                                          std::max(s.grip, s.chrome * 0.06), w, h, true);
     const Mat m = Mul(p, OnSurface(s, c.u, c.v, 0.004));
     vr::VROverlay()->SetOverlayWidthInMeters(g_menu.overlay, float(w));
     vr::VROverlay()->SetOverlayTransformAbsolute(g_menu.overlay, vr::TrackingUniverseStanding, &m);

@@ -4696,8 +4696,10 @@ bool PlaceResetAsk(Screen &s) {
     g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
     double u[kControls], v[kControls];
     ControlUV(s, u, v);
-    // (out past the button, away from the panel, on whichever edge the row is)
-    const barside::UV at = barside::MenuAt(s.barSide, {u[6], v[6]}, s.grip / 2, std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
+    // (under a bottom row, as it always was; beside the button over the panel on the other edges,
+    // where the next tile would hide it: barside::MenuAt)
+    const barside::UV at = barside::MenuAt(s.barSide, {u[6], v[6]}, s.grip / 2, std::max(s.grip, s.chrome * 0.06), g_resetAsk.w,
+                                           g_resetAsk.h, s.barSide != barside::Side::Bottom);
     g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, 0.004));
     const vr::VROverlayHandle_t o = g_resetAsk.overlay;
     vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));

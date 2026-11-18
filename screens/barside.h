@@ -101,11 +101,14 @@ inline int RowAt(double x, double yUp) {
     return std::clamp(int(y / kRowH), 0, kSides - 1);
 }
 
-// Its centre on the panel's surface: out past the bar at the clicked spot, a gap clear of it.
+// Its centre on the panel's surface, beside the bar at the clicked spot, a gap clear of it: out past
+// the edge (`inward` false) or over the panel itself (`inward` true). Past a side or top edge is the
+// gap to the next tile, and the panel's plane runs on behind that tile (the tiles curve round the
+// head), so a popup there is hidden; over its own panel nothing covers it.
 // `at`: the clicked spot on the bar; `barHalf`: the bar's half thickness; mw, mh: its size.
-inline UV MenuAt(Side s, UV at, double barHalf, double gap, double mw, double mh) {
+inline UV MenuAt(Side s, UV at, double barHalf, double gap, double mw, double mh, bool inward) {
     const UV o = Outward(s);
-    const double reach = barHalf + gap + (Vertical(s) ? mw : mh) / 2;
+    const double reach = (barHalf + gap + (Vertical(s) ? mw : mh) / 2) * (inward ? -1 : 1);
     return {at.u + o.u * reach, at.v + o.v * reach};
 }
 

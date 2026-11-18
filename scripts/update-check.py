@@ -992,8 +992,9 @@ def check_eye_rate():
 # What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;
 # ft-dashpatch's SteamVR watch reads the rest (Gamepad mode, the theater game and Steam's page in the
 # theater, for ft-screens; steampage.py hides the controls under Steam's page by their frame's id),
-# and the gamepad pill's click uses the last line's.
-DASHBOARD_MARKERS = {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
+# and the gamepad pill's click (pointer/dashpatch/gamepadmode.py) uses GAMEPAD_MARKERS too.
+GAMEPAD_MARKERS = {"PushInputFocus", "summonOverlayKey", "mainPanelSGID", "m_entryAtTopOfStack", "m_unPanelSGID"}
+DASHBOARD_MARKERS = GAMEPAD_MARKERS | {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
                      "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
                      "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput",
                      "m_unSteamInputAppID", "PushInputFocus", "window.Dashboard=",

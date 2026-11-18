@@ -344,7 +344,8 @@ void TileGone(int i) {
 bool TileShown(const Screen &s, int i, bool dashUp) {
     const bool hiddenByKey = EffectiveMode() == Mode::Always && g_manual;
     if ((SteamDashInTheater() || GsInTheater()) && s.drag == Drag::None) return false;
-    return !g_paused && s.shown && !s.alone && !hiddenByKey && (g_tiles.Stay(i) || dashUp || s.drag != Drag::None);
+    return !g_paused && s.shown && !s.alone && !hiddenByKey &&
+           (g_tiles.Stay(i) || dashUp || s.drag != Drag::None || i == PadPanel());
 }
 
 // Let go after a move: where on the grid it goes, or torn off as a satellite where it is.

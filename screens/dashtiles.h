@@ -92,13 +92,17 @@ inline bool SteamSlot(const double g[3][4], const double bar[3], double barWidth
 // The wall at Steam's bar (user, 2026-11-18: "the same distance that the Steam menu is ... the
 // middle display should be positioned right above where the Steam menu bar is"; DASH_TILE_AT_BAR,
 // on unless "0"): the group frame at the head, level, facing the bar, so the strip is centred over
-// it; the wall (the tiles' corners) as far from the head as the bar is; and the desk line `gapDeg`
-// above the bar's top edge. `bar`: its middle, `barUp`: its +Y (a unit vector: Steam tilts it back,
+// it; the wall (the tiles' corners) kBehindBarM further from the head than the bar is (user,
+// 2026-11-18: "move the display's distance a little bit back ... I can't interact with the Steam
+// menu because it's covered by one of the displays": a flat tile's middle comes nearer than its
+// corners, and the laser starts at the hand, below the head, so a tile at the bar's distance stood
+// between the hand and the bar); and the desk line `gapDeg` above the bar's top edge, an angle, so
+// it stays clear of the bar however far back the wall is. `bar`: its middle, `barUp`: its +Y (a unit vector: Steam tilts it back,
 // so the top edge is a little further away too), `barHeightM` (0: not known, its middle counts).
 // Into the frame g, *radius (kWallMinM..kWallMaxM) and *deskDeg (kDeskMinDeg..kDeskMaxDeg), the
 // ranges DASH_TILE_RADIUS and DASH_TILE_DESK_DEG have. False, nothing set, with the bar under
 // kMinFlatM round from straight under or over the head, or anything not finite.
-constexpr double kWallMinM = 0.8, kWallMaxM = 6, kDeskMinDeg = -40, kDeskMaxDeg = 20, kMinFlatM = 0.2;
+constexpr double kWallMinM = 0.8, kWallMaxM = 6, kDeskMinDeg = -40, kDeskMaxDeg = 20, kMinFlatM = 0.2, kBehindBarM = 0.3;
 inline bool AtBar(const double head[3], const double bar[3], const double barUp[3], double barHeightM, double gapDeg,
                   double g[3][4], double *radius, double *deskDeg) {
     const double d[3] = {bar[0] - head[0], bar[1] - head[1], bar[2] - head[2]};
@@ -109,7 +113,7 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
     if (!(flat >= kMinFlatM) || !std::isfinite(dist + el)) return false;
     const double fwd[3] = {d[0] / flat, 0, d[2] / flat}, up[3] = {0, 1, 0};
     GroupFrame(head, fwd, up, g);
-    *radius = std::clamp(dist, kWallMinM, kWallMaxM);
+    *radius = std::clamp(dist + kBehindBarM, kWallMinM, kWallMaxM);
     *deskDeg = std::clamp(el, kDeskMinDeg, kDeskMaxDeg);
     return true;
 }

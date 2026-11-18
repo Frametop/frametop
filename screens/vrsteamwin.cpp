@@ -50,6 +50,7 @@ bool g_on = false;                  // STEAM_DASH_PANEL
 bool g_theater = false;
 uint32_t g_pid = 0;                 // gamescope's (the panels' renderer)
 int64_t g_findAt = 0;
+bool g_dashWasUp = false;          // SteamVR's dashboard open, last tick
 std::unique_ptr<steamcdp::Pages> g_pages;   // the laser on them, to their pages
 
 // The menu glued to the dashboard window's panel (steamglue.h, GlueStep).
@@ -322,6 +323,13 @@ void SteamDashStep() {
     // window is our tile: the page is shrunk to nothing, so they stood at its middle, over the tiles.
     // A lease ft-dashpatch lets lapse after a few seconds (ft-screens gone: they come back).
     if (all && g_fleet.On() && g_screens.count(kIndex) && g_screens[kIndex].shown) SendDashpatch("steamstrip 1");
+    // The dashboard opening over a game lent to SteamVR's theater opens on the game's tab, and Steam
+    // paints its window only while its own tab shows: the tile was black in front (user, 2026-11-18:
+    // "an invisible game scope window that is taking over the forward spot"). Steam's tab then,
+    // once each time it opens (steampage.py: only from a game's tab).
+    const bool dashUp = vr::VROverlay()->IsDashboardVisible();
+    if (dashUp && !g_dashWasUp && g_fleet.On() && GsInTheater()) SendDashpatch("steamtab");
+    g_dashWasUp = dashUp;
     if (all || fresh) Find(all);
     Lost();
     steamhit::Step(g_fleet, all);

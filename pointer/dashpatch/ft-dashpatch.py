@@ -321,7 +321,7 @@ def game_to_theater(app):
 
 def listen():
     """ft-screens on @ft_dashpatch, only from this user (SO_PASSCRED gives the sender's): the
-    gamepad pill's "gamepad" (gamepadmode.py), "steamstrip 1|0" and "steamtheater"
+    gamepad pill's "gamepad" (gamepadmode.py), "steamstrip 1|0", "steamtheater" and "steamtab"
     (steampage.py), and "gametheater <app id>" (gametheater.py)."""
     creds = struct.Struct("3i")  # pid, uid, gid
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -337,7 +337,7 @@ def listen():
                     if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
         message = data.strip()
         game = gametheater.ask(message)
-        if (message not in (b"gamepad", steampage.THEATER_ASK) and not message.startswith(b"steamstrip")
+        if (message != b"gamepad" and message not in steampage.ASKS and not message.startswith(b"steamstrip")
                 and game is None):
             continue
         if uid != os.getuid():
@@ -349,12 +349,13 @@ def listen():
             threading.Thread(target=game_to_theater if game is not None else gamepad_mode,
                              args=(game,) if game is not None else (), daemon=True).start()
             continue
+        what, expr = steampage.ASKS[message]
         url = dashboard()
         try:
-            said = evaluate(url, steampage.TO_THEATER) if url else "the dashboard is not reachable"
-            print(f"View in Theater: {said}", flush=True)
+            said = evaluate(url, expr) if url else "the dashboard is not reachable"
+            print(f"{what}: {said}", flush=True)
         except (OSError, ValueError) as e:
-            print(f"View in Theater: can't reach the dashboard ({e})", flush=True)
+            print(f"{what}: can't reach the dashboard ({e})", flush=True)
 
 
 def run():

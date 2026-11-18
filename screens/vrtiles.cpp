@@ -204,10 +204,10 @@ bool Regroup() {
     if (steam >= 0) slot = 0;
     g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
     g_tiles.SlotMoved();
-    // at the bar, Steam's page (tiled) over it as Steam's own stands, not the strip's middle
+    // the strip centred again (moves since kept it where it was): at the bar, Steam's page (tiled) over
+    // it as Steam's own stands, not the strip's middle
     g_tileSteamOverBar = g_tileWallAtBar && steam >= 0 && g_tiles.Tiled(steam);
-    if (g_tileSteamOverBar)
-        if (const tiling::Placed *p = (g_tiles.Arrange(TileInfo), g_tiles.PlacedOf(steam))) dashtiles::TurnTo(g, p->azDeg);
+    g_tiles.Recentre(g_tileSteamOverBar ? steam : -1);
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
     RetileDash();
@@ -352,10 +352,11 @@ void TileDrop(Screen &s, int i) {
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 4; ++c) rel[r][c] = q.m[r][c];
     const tiling::Drop d = g_tiles.DropFor(i, az, el, TileInfo);
-    g_tiles.Drop(i, d, rel);
+    g_tiles.Drop(i, d, rel, az);
     static const char *kinds[] = {"into column", "a new column at", "torn off (a satellite) at"};
-    std::printf("%s: let go at %.0f, %.0f degrees: %s %d\n", TileLabel(i).c_str(), az, el, kinds[d.kind], d.col + 1);
+    std::printf("%s: let go at %.0f, %.0f degrees: %s %d", TileLabel(i).c_str(), az, el, kinds[d.kind], d.col + 1);
     RetileDash();
+    std::printf("; the strip %.0f..%.0f (turned %.0f from centred)\n", g_tiles.Last().az0, g_tiles.Last().az1, g_tiles.PanDeg());
     RememberTiles();
 }
 // Resized by its corner on the grid: that size from now on (the wall puts it back to its shape).

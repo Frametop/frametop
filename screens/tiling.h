@@ -310,6 +310,13 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int spli
     return out;
 }
 
+// The layout turned `deg` round you, all of it (dashtiles.h's Board keeps the strip where it was
+// after a change this way: Arrange always centres it).
+inline void Turn(Layout *l, double deg) {
+    for (Placed &p : l->tiles) p.azDeg += deg, p.az0 += deg, p.az1 += deg;
+    l->az0 += deg, l->az1 += deg, l->slotAz += deg;
+}
+
 // A panel's pose in the group frame, at `radius` from its centre and facing it: rows of a 3x4.
 inline void Pose(double azDeg, double elDeg, double radius, double m[3][4]) {
     const double a = Rad(azDeg), e = Rad(elDeg);

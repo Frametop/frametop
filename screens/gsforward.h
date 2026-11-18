@@ -74,6 +74,28 @@ inline std::string AppKey(uint32_t steamGame, const std::string &wmClass, const 
     return "";
 }
 
+// Steam's app id in a process's command line (its NUL-separated arguments): Steam's reaper runs a
+// game as `reaper SteamLaunch AppId=<id> -- ...`, and gamescope names the game's own overlay
+// (valve.steam.desktopgame.<id>) from it when the window has no STEAM_GAME (Slay the Spire 2's
+// hasn't, 2026-11-18). 0 for none.
+inline uint32_t SteamLaunchApp(const std::string &cmdline) {
+    bool launch = false;
+    for (size_t at = 0; at < cmdline.size();) {
+        size_t end = cmdline.find('\0', at);
+        if (end == std::string::npos) end = cmdline.size();
+        const std::string arg = cmdline.substr(at, end - at);
+        if (arg == "SteamLaunch") launch = true;
+        else if (arg == "--") break;
+        else if (launch && arg.compare(0, 6, "AppId=") == 0 && arg.size() > 6 && arg.size() <= 16 &&
+                 arg.find_first_not_of("0123456789", 6) == std::string::npos) {
+            const unsigned long long id = std::stoull(arg.substr(6));
+            return id > 0 && id <= 0xffffffffULL ? uint32_t(id) : 0;
+        }
+        at = end + 1;
+    }
+    return 0;
+}
+
 // A Linux key code (linux/input-event-codes.h) as X's: Xwayland's keymap is evdev's, plus 8.
 inline uint8_t XKeycode(uint32_t evdev) { return evdev + 8 <= 255 ? uint8_t(evdev + 8) : 0; }
 
@@ -125,6 +147,8 @@ struct Window {
     uint32_t transientFor = 0;
     bool overrideRedirect = false;    // (a menu, a tooltip: no window manager focuses it)
     std::string key, title;           // AppKey's, and its title (read when it maps)
+    uint32_t steamApp = 0;            // Steam's app id (read when it maps): STEAM_GAME's, else the SteamLaunch
+                                      // of a process it runs under (SteamLaunchApp), 0 for none
     uint64_t target = 0;              // Role::Steam only: the overlay its target names (0: none)
 };
 

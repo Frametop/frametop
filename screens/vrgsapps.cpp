@@ -300,7 +300,7 @@ void GsBlur() {
 namespace {
 uint32_t GsSteamApp(int index) {
     const gsforward::Window *w = g_gsControl ? g_gsControl->Windows().MainRect(index) : nullptr;
-    return w ? gsapps::SteamAppOf(w->key) : 0;
+    return w ? w->steamApp : 0;
 }
 }  // namespace
 

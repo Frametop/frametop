@@ -4,7 +4,8 @@
 // tiles that caught the laser (user, 2026-11-18: "an invisible panel ... intercepting us
 // interacting with displays that are behind it"; Steam's page about 1.1 m out, the tiles 2.7).
 // Each is shrunk to nothing while its window is ours (steamshrink.h: still shown, so Steam still
-// paints), and given its width back when it's Steam's again.
+// paints) and given a laser mask that matches nothing (the dashboard sizes Steam's main page for
+// the laser itself, whatever its width), and given both back when it's Steam's again.
 #pragma once
 
 #include "steamwin.h"
@@ -18,7 +19,7 @@ void Step(const steamwin::Fleet &fleet, bool all);
 // None of them ours any more (ft-screens going, Steam's display gone): all given back.
 void Clear();
 // At start, switched on or not: every one of Steam's overlays an ft-screens that went (a crash)
-// left shrunk is given its width back.
+// left shrunk is given its width and the laser back.
 void Sweep();
 
 }  // namespace steamhit

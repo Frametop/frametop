@@ -1,5 +1,5 @@
 // The width Steam's own overlay gets while its window is ours (vrsteamhit.cpp): a ten-thousandth
-// of its own, so it's gone (nothing to catch the laser, gaze or hands) but still shown, and Steam
+// of its own, so it's gone (nothing to catch gaze or hands; the laser takes a mask too, vrsteamhit.cpp) but still shown, and Steam
 // keeps painting the window (it paints only while that overlay counts as visible; a tiny one
 // does, seen 2026-11-18: 90 frames a second at 1 mm). The shrunk width is also the record of the
 // real one: no file, and an ft-screens that crashed leaves nothing a new one can't put back.

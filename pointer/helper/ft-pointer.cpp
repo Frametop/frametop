@@ -93,6 +93,9 @@
 // Only absolutely placed 0x0 overlays count as scene-graph: gamescope's app panels (the
 // desktops) also report 0x0, but they're placed as dashboard tabs, stay up when the
 // dashboard closes, and ComputeOverlayIntersection hits them normally.
+// A panel under a millimetre wide (kGoneWidthM) counts as hidden: ft-screens shrinks Steam's own
+// panels to nothing while it shows their windows itself (screens/steamshrink.h), and the plane test
+// takes no width into account, so Steam's shrunk menu still caught the cursor 0.5 m round it.
 //
 // SteamVR Settings (a workaround for that page only): Steam's pages (Library and the rest)
 // are drawn in valve.steam.gamepadui.main, a dashboard overlay ComputeOverlayIntersection hits
@@ -955,6 +958,7 @@ Vec3 LimitPitch(Vec3 d, double maxDeg) {
 // SteamVR Settings page (see the top): the laser starts this far from the eye, the dot is
 // drawn this far out, and the laser-catching dot sits this far out (metres).
 constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 8.0;
+constexpr float kGoneWidthM = 1e-3f;   // a panel narrower: hidden (see "Scene-graph overlays" at the top)
 // A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
 // laser), and after a release the laser holds still this long (see "Touch" at the top).
 constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
@@ -4065,7 +4069,11 @@ void Pointer::RefreshOverlays() {
     if (active && (now - lastVisible > std::chrono::milliseconds(50) || visible.size() != handles.size())) {
         lastVisible = now;
         std::map<std::string, bool> seen;
-        for (const auto &[key, h] : handles) seen[key] = overlay->IsOverlayVisible(h);
+        for (const auto &[key, h] : handles) {
+            float w = 1;   // (a shrunk one: hidden, see "Scene-graph overlays" at the top)
+            seen[key] = overlay->IsOverlayVisible(h) &&
+                        !(overlay->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w < kGoneWidthM);
+        }
         if (seen != visible) visible.swap(seen), ++visibleGen;
     }
 }

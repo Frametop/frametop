@@ -344,7 +344,10 @@ Zone GrabZone(const Panel &p, const Hit &h, const Params &k, int *sx, int *sy, d
         }
     for (const Spot &s : p.controls)
         if (s.kind == Control::Bar) {
-            const double du = std::max(0.0, std::fabs(h.u - s.u) - s.hw), dv = h.v - s.v;
+            // along its length, the bar's own half; across, from its line (a bar down a side stands on end)
+            const bool upright = s.hh > s.hw;
+            const double du = std::max(0.0, std::fabs(h.u - s.u) - (upright ? 0 : s.hw));
+            const double dv = std::max(0.0, std::fabs(h.v - s.v) - (upright ? s.hh : 0));
             c.push_back({Zone::Bar, std::max(std::hypot(du, dv) - k.barReach, depth), 0, 0});
         }
     if (p.floating && p.titleH > 0 && p.cropH > 0) {
@@ -999,8 +1002,9 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     for (int f : {9, 13, 17}) straightest = std::max(straightest, FingerExtension(*h, f));
     const bool nearest = t.d + p_.nearest <= others || ext - straightest >= p_.pointing;
     double x = 0, y = 0;
-    bool over = ToBuffer(*P, t.u, t.v, &x, &y);
-    const Control ctl = over ? Control::None : ControlAt(*P, t.u, t.v, 0.01, p_.buttonReach);
+    // a control before the content under it: the bar row sits inside the panel's edge (vr.cpp's barside.h)
+    const Control ctl = ControlAt(*P, t.u, t.v, 0.01, p_.buttonReach);
+    bool over = ctl == Control::None && ToBuffer(*P, t.u, t.v, &x, &y);
     // just past the content's edge (not on a control): at the edge
     const bool edge = !over && ctl == Control::None && FromBorder(*P, t.u, t.v) <= p_.edgeSlack &&
                       ToBuffer(*P, std::clamp(t.u, -P->width / 2, P->width / 2), std::clamp(t.v, -P->height / 2, P->height / 2), &x, &y);
@@ -1738,8 +1742,7 @@ bool HandInput::PinchButton(int s, const Input &in, const std::vector<Panel> &pa
     for (const Panel &P : panels) {
         if (P.held) continue;
         const Hit b = Locate(P, h.contact);
-        double x, y;
-        if (std::fabs(b.d) > p_.bandDepth + p_.pinchSlack || ToBuffer(P, b.u, b.v, &x, &y)) continue;
+        if (std::fabs(b.d) > p_.bandDepth + p_.pinchSlack) continue;   // (over the content too: the buttons sit inside its edge)
         const Control c = ControlAt(P, b.u, b.v, 0.005, p_.buttonReach);
         if (PressableButton(c) && std::fabs(b.d) < key) key = std::fabs(b.d), best = &P, ctl = c;
     }
@@ -2714,8 +2717,7 @@ void HandInput::Guides(const Input &in, const std::vector<Panel> &panels) {
         double bs = 0;
         auto atButton = [&](const float pt[3], double front, double back) {
             const Hit t = Locate(*P, pt);
-            double x, y;
-            if (t.d > front || t.d < back || ToBuffer(*P, t.u, t.v, &x, &y)) return;
+            if (t.d > front || t.d < back) return;   // (over the content too: the buttons sit inside its edge)
             const Control c = ControlAt(*P, t.u, t.v, 0.005, p_.buttonReach);
             const double k = std::clamp(1 - std::max(0.0, t.d) / std::max(1e-3, front), 0.0, 1.0);
             if (PressableButton(c) && 0.4 + 0.6 * k > bs) bc = c, bs = 0.4 + 0.6 * k;

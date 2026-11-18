@@ -189,7 +189,7 @@ bool Regroup() {
                  fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, up[3] = {head.m[0][1], head.m[1][1], head.m[2][1]};
     const double barUp[3] = {bar.m[0][1], bar.m[1][1], bar.m[2][1]};
     double g[3][4];
-    g_tileWallAtBar = g_tileAtBar && dashtiles::AtBar(h, b, barUp, DashHeight(), g_tiles.params.gapDeg, g,
+    g_tileWallAtBar = g_tileAtBar && dashtiles::AtBar(h, b, barUp, DashHeight(), dashtiles::kOverBarDeg, g,
                                                       &g_tileWallBar.radius, &g_tileWallBar.deskDeg);
     if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
     ApplyWall();

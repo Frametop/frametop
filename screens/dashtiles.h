@@ -103,6 +103,11 @@ inline bool SteamSlot(const double g[3][4], const double bar[3], double barWidth
 // ranges DASH_TILE_RADIUS and DASH_TILE_DESK_DEG have. False, nothing set, with the bar under
 // kMinFlatM round from straight under or over the head, or anything not finite.
 constexpr double kWallMinM = 0.8, kWallMaxM = 6, kDeskMinDeg = -40, kDeskMaxDeg = 20, kMinFlatM = 0.2, kBehindBarM = 0.3;
+// The desk line's lift over the bar's top edge (the `gapDeg` callers pass): the bar draws over the
+// tiles whatever their depth, and at the tiles' gap (0.8 degrees) the front tile's bottom edge stood
+// under it (user, 2026-11-18: "it is just slightly above the dashboard bar and somewhat gets covered.
+// So we just want to rise that up just a little bit").
+constexpr double kOverBarDeg = 4;
 inline bool AtBar(const double head[3], const double bar[3], const double barUp[3], double barHeightM, double gapDeg,
                   double g[3][4], double *radius, double *deskDeg) {
     const double d[3] = {bar[0] - head[0], bar[1] - head[1], bar[2] - head[2]};

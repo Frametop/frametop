@@ -164,8 +164,9 @@ int main() {
         check("the footer's: a follower asked for", a.size() == 1 && a[0].spec.role == steamwin::Spec::Follow);
         a = f.Made(5, ours);
         check("made: tagged ours", Has(a, Action::Tag, ours) && f.TileIn(0) && f.TileIn(0)->Panel() == ours);
-        f.On(Ev(Event::Mapped, 8, "SteamVR", steams), 0);
-        check("a second dashboard window: the first one dropped", !f.Find(5) && f.Find(8) && f.TileIn(0)->Window() == 8);
+        a = f.On(Ev(Event::Mapped, 8, "SteamVR", steams), 0);
+        check("a second dashboard window: the first given back", Has(a, Action::Tag, steams) && Has(a, Action::Drop, ours));
+        check("...the newest is the tile", f.Find(5) && f.Find(8) && f.TileIn(0)->Window() == 8 && !f.Find(5)->Panel());
         a = f.On(Ev(Event::Gone, 6), 0);
         check("gone: forgotten", !f.Find(6));
         f.SetSteams(8, steams);
@@ -174,6 +175,36 @@ int main() {
         check("off: all given back", Has(a, Action::Tag, steams) && Has(a, Action::Drop));
         a = f.Closed();
         check("the display gone: nothing kept", f.Windows().empty());
+    }
+    {   // two menus (a game's page made another): only the one Steam shows is held
+        const char *m5 = "SteamVR - valve.steam.gamepadui.frame.menu.87440005 (87440005)";
+        const char *m7 = "SteamVR - valve.steam.gamepadui.frame.menu.87440007 (87440007)";
+        const uint64_t s5 = 0x4700000030ull, s7 = 0x41f00000076ull;
+        steamwin::Fleet f;
+        f.Switch(true);
+        f.On(Ev(Event::Mapped, 0x20, m5, s5), 0);
+        f.On(Ev(Event::Mapped, 0x4a, m7, s7), 0);
+        check("two menus: both known", f.InSlot(1) == 2 && f.Find(0x20) && f.Find(0x4a));
+        check("...the newest held at first", f.TileIn(1) && f.TileIn(1)->Window() == 0x4a);
+        auto a = f.SetSteams(0x20, s5);
+        check("...the other isn't taken when its overlay's found", a.empty());
+        a = f.SetSteams(0x4a, s7);
+        check("...the newest is", a.size() == 1 && a[0].type == Action::Make && a[0].win.id == 0x4a);
+        f.Made(0x4a, ours);
+        a = f.Showing(1, 0x20);
+        check("Steam shows the first: the newest back to Steam first", a.size() == 3 && a[0].type == Action::Tag &&
+                                                                     a[0].overlay == s7 && a[1].type == Action::Drop);
+        check("...then the first asked for", a[2].type == Action::Make && a[2].win.id == 0x20);
+        check("...and it's the tile", f.TileIn(1)->Window() == 0x20 && !f.Find(0x4a)->Panel());
+        f.Made(0x20, ours + 1);
+        check("the same again: nothing", f.Showing(1, 0x20).empty());
+        check("not a menu: nothing", f.Showing(1, 0x77).empty());
+        a = f.On(Ev(Event::Gone, 0x4a), 0);
+        check("the other gone: the tile kept", f.TileIn(1)->Window() == 0x20 && f.InSlot(1) == 1 && a.empty());
+        a = f.Switch(false);
+        check("off: the held one given back", Has(a, Action::Tag, s5) && Has(a, Action::Drop, ours + 1));
+        a = f.Switch(true);
+        check("on again: only the held one taken", a.size() == 1 && a[0].win.id == 0x20);
     }
     return failed ? 1 : 0;
 }

@@ -19,7 +19,10 @@
 // ft-screens going, and on opening when a tag of ours was left behind), and what to do when Steam
 // tags it again itself: tag it ours again, unless Steam keeps doing it (kMaxRetakes within
 // kRetakeWindowMs), then give it back and say so. Fleet keeps one per window and routes X's news to
-// them. Pure: vrsteamwin.cpp does what they say on X and OpenVR. Header only; tested by
+// them. Steam can have more than one menu window (one a frame: a game's page makes another), and it
+// paints only the one whose overlay it shows; the others draw black (user, 2026-11-18: "The sidebar
+// for the Steam menu ... is just black"). So a slot with several holds only the one Steam shows
+// (Fleet::Showing); the rest stay Steam's. Pure: vrsteamwin.cpp does what they say on X and OpenVR. Header only; tested by
 // screens/tests/steamwin-test.cpp.
 #pragma once
 
@@ -102,7 +105,7 @@ public:
     std::vector<Action> SetSteams(uint64_t steams) {
         std::vector<Action> out;
         steams_ = steams;
-        if (on_ && !gaveUp_ && mapped_) Take(&out);
+        if (Wanted() && mapped_) Take(&out);
         else if (!made_ && mapped_ && Stale(win_.target)) {
             out.push_back(A(Action::Tag, steams_));
             win_.target = steams_;
@@ -127,6 +130,17 @@ public:
         return out;
     }
 
+    // Whether it's the one of its slot to hold (Fleet::Showing). Not: given back, kept known.
+    std::vector<Action> Hold(bool held) {
+        std::vector<Action> out;
+        if (held == held_) return out;
+        held_ = held;
+        if (Wanted() && mapped_) Take(&out);
+        else if (!held) GiveBack(&out);
+        return out;
+    }
+    bool Held() const { return held_; }
+
     // What Make asked for: its overlay (0: none, the window stays Steam's).
     std::vector<Action> Made(uint64_t overlay) {
         std::vector<Action> out;
@@ -146,7 +160,7 @@ public:
             case gsforward::Event::Mapped:
                 win_ = e.win;
                 mapped_ = true;
-                if (on_ && !gaveUp_) {
+                if (Wanted()) {
                     if (!made_) Take(&out);
                     else out.push_back(A(Action::Show));
                 } else if (Stale(e.win.target)) {
@@ -210,12 +224,13 @@ public:
 private:
     Spec spec_;
     gsforward::Window win_;
-    bool mapped_ = false, on_ = false, gaveUp_ = false;
+    bool mapped_ = false, on_ = false, gaveUp_ = false, held_ = true;
     uint64_t made_ = 0, steams_ = 0;
     std::deque<int64_t> retakes_;
     int retaken_ = 0;
 
     Action A(Action::Type t, uint64_t overlay = 0) const { return {t, win_, overlay, spec_}; }
+    bool Wanted() const { return on_ && !gaveUp_ && held_; }
     // A target that's neither Steam's nor none: a tag of ours from an ft-screens that went.
     bool Stale(uint64_t target) const { return steams_ && target && target != steams_; }
     void Take(std::vector<Action> *out) {
@@ -252,14 +267,11 @@ public:
             }
             if (spec.role == Spec::Steams) return out;
             if (it == wins_.end()) {
-                if (spec.role == Spec::Tile) {   // (a second one in a tile's slot: the newest is it)
-                    for (auto o = wins_.begin(); o != wins_.end();) {
-                        if (o->second.What().role == Spec::Tile && o->second.What().slot == spec.slot)
-                            Add(&out, o->second.Closed()), o = wins_.erase(o);
-                        else
-                            ++o;
-                    }
-                }
+                // A second one in a tile's slot: the newest is it until Showing says which Steam
+                // shows; the others are given back and kept.
+                if (spec.role == Spec::Tile)
+                    for (auto &[id, o] : wins_)
+                        if (o.What().role == Spec::Tile && o.What().slot == spec.slot) Add(&out, o.Hold(false));
                 it = wins_.emplace(e.win.id, Tracker(spec)).first;
                 it->second.Switch(on_);   // (not mapped yet: nothing to do)
             }
@@ -267,6 +279,18 @@ public:
         if (it == wins_.end()) return out;
         Add(&out, it->second.On(e, nowMs));
         if (e.type == gsforward::Event::Gone) wins_.erase(it);
+        return out;
+    }
+
+    // Steam shows window `win`'s overlay, of those in tile slot `slot`: that one held, the others
+    // given back (first, so the slot's panel is free for it). Nothing if `win` isn't one of them.
+    std::vector<Action> Showing(int slot, uint32_t win) {
+        std::vector<Action> out;
+        const auto it = wins_.find(win);
+        if (it == wins_.end() || it->second.What().role != Spec::Tile || it->second.What().slot != slot) return out;
+        for (auto &[id, t] : wins_)
+            if (id != win && t.What().role == Spec::Tile && t.What().slot == slot) Add(&out, t.Hold(false));
+        Add(&out, it->second.Hold(true));
         return out;
     }
 
@@ -300,11 +324,17 @@ public:
         const auto it = wins_.find(win);
         return it == wins_.end() ? nullptr : &it->second;
     }
-    // The tile in `slot`, or none.
+    // The tile in `slot` (the one held), or none.
     const Tracker *TileIn(int slot) const {
         for (const auto &[id, t] : wins_)
-            if (t.What().role == Spec::Tile && t.What().slot == slot) return &t;
+            if (t.What().role == Spec::Tile && t.What().slot == slot && t.Held()) return &t;
         return nullptr;
+    }
+    // How many windows tile slot `slot` has (several menus: Showing picks).
+    int InSlot(int slot) const {
+        int n = 0;
+        for (const auto &[id, t] : wins_) n += t.What().role == Spec::Tile && t.What().slot == slot;
+        return n;
     }
 
 private:

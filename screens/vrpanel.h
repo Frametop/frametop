@@ -414,6 +414,12 @@ void SteamDashToTheater();   // Steam's page into SteamVR's theater (its tile's 
 bool SteamDashInTheater();   // SteamVR's theater shows Steam's page (the tiles hide then)
 void SteamDashShutdown();
 
+// ---------------------------------------------------------------- vr.cpp's gamepad pill
+
+// The panel Frametop's Gamepad mode drives now, -1 none. It stays shown while the dashboard is
+// diminished (SteamVR 2.19), which otherwise hides the dashboard's panels.
+int PadPanel();
+
 }  // namespace ftvr
 
 extern "C" int g_mouseScreen;                       // (vr.cpp's: the panel under the 3D mouse)

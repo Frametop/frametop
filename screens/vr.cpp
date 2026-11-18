@@ -1431,7 +1431,8 @@ void UpdateVisibility() {
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
     for (auto &[i, s] : g_screens) {
         if (s.glueTo >= 0) continue;   // (with what it's glued to, below)
-        bool visible = TileAnchored(i) ? TileShown(s, i, dashUp) : !g_paused && s.shown && (shared || s.drag != Drag::None) && !s.alone;
+        bool visible = TileAnchored(i) ? TileShown(s, i, dashUp)
+                                       : !g_paused && s.shown && (shared || s.drag != Drag::None || i == PadPanel()) && !s.alone;
         // A floating window's panel: while a window floats on it, its output is on, and the
         // window isn't minimized (and once it has a crop).
         if (s.floating) visible = visible && s.floatOn && s.outputOn && !s.minimized && s.cropW > 0;
@@ -4796,8 +4797,12 @@ void UpdateResetAsk() {
 // (2026-10-25 probes: without it no Enter Gamepad Mode, and SteamVR's controllers never come to us). While the
 // Steam menu is open, the pill shows over the panel typing goes to (compositor.c's keys_update: the desktop
 // screen or floating window KWin has keyboard focus on, or a remote display). A laser's click on it has
-// ft-dashpatch push SteamVR's input focus onto frametop.gamepad's page and close the menu, which puts the
-// controllers in Gamepad mode for it, as SteamVR's own pill does for a tab that isn't in front. ft-dashpatch then
+// ft-dashpatch give SteamVR's controllers to frametop.gamepad (pointer/dashpatch/gamepadmode.py): up to SteamVR
+// 2.18 its input focus and the menu closed; from 2.19 its tab in front and the dashboard diminished, the way
+// SteamVR's own pill does it for the tab in front (2.19 ignores the focus for a tab that isn't: headset,
+// 2026-11-18). That tab shows a card, which panel has the pad and how to leave (DrawPadCard), and the panel stays
+// shown though the dashboard is diminished (PadPanel). Not for a Steam game's panel: its View in Theater gives
+// SteamVR's theater the game, with Steam Input's pad (user, 2026-11-18). ft-dashpatch then
 // says the Gamepad mode is ours ("steamvrmode 1 <app> 1"), and while it is the input relay hears "gamepad
 // desktop|remote" every second (the panel clicked's kind; "gamepad off" as it ends). SteamVR sends no input to an
 // overlay in Gamepad mode, so the relay reads the controllers raw (input/vrpad.py). The grips end it, as
@@ -4815,12 +4820,14 @@ struct GamepadPill {
     bool hover = false;       // a laser is on it
     bool lasers = false;      // MakeOverlaysInteractiveIfVisible is set
     int px = 0;               // its texture's width
+    std::string card;         // the panel name frametop.gamepad's card shows ("" none drawn)
 } g_pill;
 constexpr int kPillH = 64, kPillText = 30;
 constexpr const char *kPillKey = "frametop.gamepad.pill", *kPillLabel = "Enter Gamepad Mode";
 constexpr const char *kPadKey = "frametop.gamepad";  // ft-dashpatch's GAMEPAD_KEY
 
 bool PadMine() { return SteamVRGamepad() && g_steamvr.mine; }
+int PadPanel() { return PadMine() ? g_pill.pad : -1; }
 
 // Once SteamVR's up, and again every 10 s while it fails.
 void EnsurePadOverlay() {
@@ -4835,13 +4842,33 @@ void EnsurePadOverlay() {
         std::fflush(stdout);
         return;
     }
-    std::vector<uint8_t> px(16 * 16 * 4, 0);  // never seen: it has no tab
-    vr::VROverlay()->SetOverlayRaw(g_pill.dash, px.data(), 16, 16, 4);
+    std::vector<uint8_t> px(16 * 16 * 4, 0);  // no tab: the card (DrawPadCard) shows only in its Gamepad mode
     vr::VROverlay()->SetOverlayRaw(thumb, px.data(), 16, 16, 4);
     vr::VROverlay()->SetOverlayFlag(g_pill.dash, vr::VROverlayFlags_NoDashboardTab, true);
     vr::VROverlay()->SetOverlayFlag(g_pill.dash, vr::VROverlayFlags(1 << 4), true);  // its page gets our pid for VR input
     std::printf("gamepad pill: made %s\n", kPadKey);
     std::fflush(stdout);
+}
+
+// frametop.gamepad's card: SteamVR 2.19 shows its tab, dimmed, for as long as its Gamepad mode lasts. Drawn
+// again when the panel it names changes.
+void DrawPadCard() {
+    const int panel = g_pill.pad >= 0 ? g_pill.pad : g_pill.clicked;
+    const auto it = g_screens.find(panel);
+    const std::string name = it != g_screens.end() && !it->second.label.empty() ? it->second.label : "a Frametop panel";
+    if (g_pill.dash == vr::k_ulOverlayHandleInvalid || name == g_pill.card) return;
+    const std::string line1 = "Gamepad mode: " + name;
+    const char *line2 = "The controllers drive this panel. Squeeze a grip for the lasers.";
+    constexpr int kBig = 44, kSmall = 28, H = 220;
+    const int W = std::max(900, std::max(label::Width(line1.c_str(), kBig), label::Width(line2, kSmall)) + 120);
+    std::vector<uint8_t> px(size_t(W) * H * 4, 0);
+    const uint8_t bg[4] = {24, 24, 30, 230}, fg[3] = {245, 245, 250}, dim[3] = {190, 190, 200};
+    FillRound(px, W, H, 2, 2, W - 2, H - 2, 28, bg);
+    label::Draw(px.data(), W, H, line1.c_str(), kBig, W / 2, H * 2 / 5, 255, fg);
+    label::Draw(px.data(), W, H, line2, kSmall, W / 2, H * 7 / 10, 255, dim);
+    overlaytex::Set(g_pill.dash, px.data(), W, H);
+    vr::VROverlay()->SetOverlayWidthInMeters(g_pill.dash, float(W) / H * 0.25f);
+    g_pill.card = name;
 }
 
 void HidePill() {
@@ -4867,6 +4894,7 @@ void DrawPill(bool lit) {
 // Each tick: over its panel's top edge, centred, while the Steam menu is open; or hidden.
 void UpdatePill() {
     EnsurePadOverlay();
+    DrawPadCard();
     const auto it = g_screens.find(g_pill.target);
     // (without ft-dashpatch's word its click would do nothing)
     if (g_pill.dash == vr::k_ulOverlayHandleInvalid || it == g_screens.end() || !it->second.visible || g_paused ||

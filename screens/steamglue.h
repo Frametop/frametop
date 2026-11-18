@@ -22,6 +22,16 @@ namespace steamglue {
 struct Rect {
     int x = 0, y = 0, w = 0, h = 0;   // window pixels, from the top left
 };
+inline bool operator==(const Rect &a, const Rect &b) { return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h; }
+inline bool operator!=(const Rect &a, const Rect &b) { return !(a == b); }
+
+// With the laser gone a while, whether what Steam's menu draws now is its new rest (what the tiles
+// count): not while it's still what it drew, open, as the laser left. Steam shuts it in its own
+// time, mostly 0.8 s but sometimes more (2026-11-18: taken as the rest after 1.1 s, the tiles were
+// retiled to its open width and it slid open again).
+inline bool NewRest(const Rect &drawn, const Rect &rest, const Rect &atLeave) {
+    return drawn != rest && !(rest.w > 0 && atLeave.w > rest.w && drawn == atLeave);
+}
 
 // The window pixels of a w x h window that CSS bounds l, t, r, b (at pixel ratio dpr) cover,
 // rounded outwards and clipped to the window. False when that's nothing.

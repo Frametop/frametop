@@ -59,6 +59,7 @@ struct Glue {
     steamglue::Slide slide;        // the crop shown, sliding to `crop` while the laser's on it, else to `rest`
     bool on = false;               // the laser is on it
     int64_t leftMs = 0;            // ...left it then
+    steamglue::Rect leftCrop;      // ...what it drew then (steamglue::NewRest)
     int64_t askAt = 0, seenMs = 0;   // the next ask; the last answer taken (when it was asked)
     steamglue::Rect shownCrop;     // the crop set on its overlay
     int shownW = 0, shownH = 0;    // ...for a window this size
@@ -235,8 +236,7 @@ void GlueStep() {
             if (steamglue::FromCss(d.l, d.t, d.r, d.b, d.dpr, m.width, m.height, &r)) {
                 g_glue.crop = r;
                 const steamglue::Rect &was = g_glue.rest;
-                if (!g_glue.on && d.askedMs >= g_glue.leftMs + kSettleMs &&
-                    (r.x != was.x || r.y != was.y || r.w != was.w || r.h != was.h)) {
+                if (!g_glue.on && d.askedMs >= g_glue.leftMs + kSettleMs && steamglue::NewRest(r, was, g_glue.leftCrop)) {
                     std::printf("screen %d: Steam's menu draws %dx%d at %d,%d of its window (glued to screen %d)\n", kMenu + 1,
                                 r.w, r.h, r.x, r.y, kIndex + 1);
                     const bool resized = r.w != was.w;   // (the tiles count its width)
@@ -335,7 +335,7 @@ void SteamDashEvents(Screen &s, int index) {
             const bool on = ev.eventType == vr::VREvent_MouseMove, off = ev.eventType == vr::VREvent_FocusLeave;
             if ((on && !g_glue.on) || (off && g_glue.on)) {
                 g_glue.on = on;
-                if (off) g_glue.leftMs = now;
+                if (off) g_glue.leftMs = now, g_glue.leftCrop = g_glue.crop;
                 g_glue.askAt = 0;
             }
         }

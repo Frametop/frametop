@@ -50,6 +50,15 @@ int main() {
         check("turned round without a jump", std::abs(s.At(5000 + 40).x - turnAt) <= 1 && mid == 86);
         check("then open again", s.At(5000 + 40 + kSlideMs).x == 86);
     }
+    {   // its rest, after the laser left: not Steam's open menu, however long Steam takes to shut it
+        const Rect rest{360, 231, 90, 738}, open{77, 231, 373, 738}, ring{356, 231, 94, 738}, none{};
+        check("still open as the laser left: not the rest", !NewRest(open, rest, open));
+        check("shut again: no change", !NewRest(rest, rest, open));
+        check("a new strip once it's shut: the rest", NewRest(ring, rest, open));
+        check("never opened: a new strip is the rest", NewRest(ring, rest, rest));
+        check("opened after the laser left (not what it drew then): the rest", NewRest(open, rest, rest));
+        check("no rest yet: the first is taken", NewRest(open, none, open));
+    }
     {   // flat: flush left, level, facing the same way
         double m[3][4];
         Beside(1.6, 0, 0.1, 0.02, m);

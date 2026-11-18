@@ -55,10 +55,17 @@ int main() {
     }
 
     const barside::UV click = at(Side::Bottom, 0.05);
-    const auto m = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1);
-    check("bottom: the menu hangs under the bar at the click", near(m.u, 0.05) && near(m.v, click.v - 0.02 - 0.01 - 0.05));
-    const auto r = barside::MenuAt(Side::Right, at(Side::Right, 0), 0.02, 0.01, 0.12, 0.1);
-    check("right: the menu sits right of the bar, clear of it", near(r.u, w / 2 + out + 0.02 + 0.01 + 0.06) && near(r.v, 0));
+    const auto m = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1, false);
+    check("bottom, out: it hangs under the bar at the click", near(m.u, 0.05) && near(m.v, click.v - 0.02 - 0.01 - 0.05));
+    const auto mi = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1, true);
+    check("bottom, in: it sits over the panel above the bar", near(mi.u, 0.05) && near(mi.v, click.v + 0.02 + 0.01 + 0.05) && mi.v > -h / 2);
+    const auto r = barside::MenuAt(Side::Right, at(Side::Right, 0), 0.02, 0.01, 0.12, 0.1, false);
+    check("right, out: right of the bar, clear of it", near(r.u, w / 2 + out + 0.02 + 0.01 + 0.06) && near(r.v, 0));
+    const auto ri = barside::MenuAt(Side::Right, at(Side::Right, 0.1), 0.02, 0.01, 0.12, 0.1, true);
+    check("right, in: over the panel left of the bar, at the click's height",
+          near(ri.u, w / 2 + out - 0.02 - 0.01 - 0.06) && ri.u < w / 2 && near(ri.v, -0.1));
+    const auto li = barside::MenuAt(Side::Left, at(Side::Left, 0), 0.02, 0.01, 0.12, 0.1, true);
+    check("left, in: over the panel right of the bar", li.u > -w / 2 && li.u - 0.06 > -(w / 2 + out) + 0.02);
 
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed != 0;

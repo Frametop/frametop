@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -178,7 +179,9 @@ bool Regroup() {
     double barAz = 0, slot = 0;
     if (!dashtiles::SteamSlot(g, b, barW, &barAz, &slot)) slot = 0;
     const int steam = SteamDashIndex();
-    if (steam >= 0 && g_tiles.Tiled(steam)) slot = 0;   // Steam's window is a tile itself: no slot kept for it
+    // Steam's window a tile itself (STEAM_DASH_PANEL), its menu glued to it: no slot kept (it isn't
+    // tiled yet when the dashboard opens, so not Tiled(steam): that kept a slot's gap in the strip)
+    if (steam >= 0) slot = 0;
     g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
     g_tiles.SlotMoved();
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
@@ -455,20 +458,29 @@ void TileGaps(char *reply, int size) {
         seen.push_back(v);
     }
     double gap = 1e9, slotL = 1e9, slotR = 1e9;
+    std::map<int, double> nearest;   // column -> its nearest approach to the next one, slot out (the widest of these: how loose)
     const double s0 = l.slotAz - g_tiles.params.reserveDeg / 2, s1 = l.slotAz + g_tiles.params.reserveDeg / 2;
     for (const Seen &a : seen) {
         if (l.split >= 0 && a.col == l.split - 1) slotL = std::min(slotL, s0 - a.az1);
         if (l.split >= 0 && a.col == l.split) slotR = std::min(slotR, a.az0 - s1);
         for (const Seen &b : seen) {
             if (b.col == a.col && b.row == a.row + 1) gap = std::min(gap, a.el0 - b.el1);   // (rows top down)
-            if (b.col == a.col + 1 && b.el0 < a.el1 && a.el0 < b.el1)
-                gap = std::min(gap, b.az0 - a.az1 - (l.split == b.col ? s1 - s0 + g_tiles.params.gapDeg : 0));
+            if (b.col == a.col + 1 && b.el0 < a.el1 && a.el0 < b.el1) {
+                const double g = b.az0 - a.az1 - (l.split == b.col ? s1 - s0 + g_tiles.params.gapDeg : 0);
+                gap = std::min(gap, g);
+                const auto [it, added] = nearest.try_emplace(a.col, g);
+                if (!added) it->second = std::min(it->second, g);
+            }
         }
     }
     std::string out;
-    char part[160];
-    std::snprintf(part, sizeof part, "ok smallest gap %.1f degrees (wanted %.1f; none: 1e9), Steam's slot clear by %.1f left, %.1f right",
-                  gap, g_tiles.params.gapDeg, slotL, slotR);
+    char part[256];
+    double widest = 0;
+    for (const auto &[c, g] : nearest) widest = std::max(widest, g);
+    std::snprintf(part, sizeof part,
+                  "ok smallest gap %.1f degrees (wanted %.1f; none: 1e9), widest between neighbouring columns %.1f, Steam's slot "
+                  "clear by %.1f left, %.1f right",
+                  gap, g_tiles.params.gapDeg, widest, slotL, slotR);
     out = part;
     for (const Seen &v : seen) {
         std::snprintf(part, sizeof part, "; %d: column %d row %d, %.1f..%.1f round, %.1f..%.1f up, curve %.2f m", v.id + 1, v.col,

@@ -7,9 +7,9 @@
 // times its own size, which you set (user: "the user gets to choose how big a display should be
 // and resize it"; no cap). The columns stand on a desk line `deskDeg` up from your eyes (below
 // them): a column's bottom panel's lower edge on it, the panels above resting on the one under
-// them, a gap between. A column is as wide round you as its widest panel needs at its farthest
-// corner (each is centred in it), and the strip of columns is centred in front of you, a gap
-// between each two. A new panel goes on top of the lowest column once the desk is `wallDeg` wide
+// them, a gap between. Each panel is centred in its column, and the columns pack as close as
+// their panels let them (Pack: a gap between panels that share some height, not between whole
+// columns), the strip centred in front of you. A new panel goes on top of the lowest column once the desk is `wallDeg` wide
 // (dashtiles.h's Board). Steam's menu is part of it (user, 2026-11-16: "the steam menu should ...
 // be part of the tiling system"): a slot kept clear where it is (`reserveDeg` wide at
 // `reserveAzDeg`), a split's worth of columns left of it and the rest right. The split is the
@@ -77,7 +77,7 @@ struct Placed {
     double azDeg = 0, elDeg = 0;          // its centre
     double widthM = 0, heightM = 0;       // its size, metres
     double distM = 0;                     // its middle from the centre (its corners: Params::radius)
-    double az0 = 0, az1 = 0;              // its column's span round you
+    double az0 = 0, az1 = 0;              // its own span round you (its column's middle between)
     double el0 = 0, el1 = 0;              // its own span up, bottom to top
 };
 
@@ -129,118 +129,129 @@ inline double SpanFor(double radius, double widthM, double heightM, double elDeg
 inline double WrapNear(double az, double centre) { return az - 360 * std::round((az - centre) / 360); }
 
 // A column's panels stacked on the desk at size `k` (index as its tiles: the last one on the desk):
-// each one's span up and its size, and the column's span round you.
+// each one's span up, its size, and its span round you.
 struct Stacked {
-    double el0 = 0, el1 = 0, widthM = 0, heightM = 0;
+    double el0 = 0, el1 = 0, widthM = 0, heightM = 0, spanDeg = 0;
 };
-inline std::vector<Stacked> Stack(const Column &c, const Params &p, double k, double *spanDeg) {
+inline std::vector<Stacked> Stack(const Column &c, const Params &p, double k) {
     std::vector<Stacked> out(c.tiles.size());
     double el = p.deskDeg;
-    *spanDeg = 0;
     for (size_t r = c.tiles.size(); r-- > 0;) {
         const Tile &t = c.tiles[r];
         Stacked &s = out[r];
         s.widthM = std::max(0.01, t.widthM) * k, s.heightM = std::max(0.01, t.heightM) * k;
         s.el0 = el, s.el1 = el + Deg(2 * std::atan2(s.heightM / 2, p.radius));
+        s.spanDeg = SpanFor(p.radius, s.widthM, s.heightM, (s.el0 + s.el1) / 2);
         el = s.el1 + p.gapDeg * k;
-        *spanDeg = std::max(*spanDeg, SpanFor(p.radius, s.widthM, s.heightM, (s.el0 + s.el1) / 2));
     }
     return out;
 }
 
-// The strip's columns at a size that fits in a turn and under kMaxTopDeg, with or without a slot
-// `slot` wide: each column's span and the strip's width (its gaps in, the one behind you out), and
-// the size.
-struct Fit {
-    std::vector<double> spans;
-    double total = 0, k = 1;
+// The columns side by side at size `k`, left to right, with Steam's slot (`slot` wide, not scaled:
+// it's Steam's size) before column `slotAt` (-1 or a 0 `slot`: none). As little room between them
+// as can be (user, 2026-11-17: "very large gaps between the left and right sides of the displays
+// ... as minimal space between the monitors as possible"): each panel keeps its own span round
+// you, centred in its column, and each column comes as near the ones left of it as lets every
+// panel in it keep a gap from every panel there it shares some height with (a gap up or down
+// counts as sharing). So a wide or tall panel high in one column doesn't push a short neighbour's
+// panels away at the desk. The slot reaches all the way up.
+struct Packed {
+    std::vector<std::vector<Stacked>> stacks;   // each column's (Stack)
+    std::vector<double> mid;                    // each column's middle, from the strip's left end
+    double slotMid = -1;                        // the slot's (-1: none)
+    double width = 0;                           // the strip, round you
+    double top = 0;                             // the tallest column's top
 };
-inline Fit FitStrip(const std::vector<Column> &cols, const Params &p, double slot) {
-    // the strip at size k: the panels and the gaps scale with it; a gap between each two columns,
-    // one each side of a slot (not scaled: it's Steam's size), and one where the strip's ends would
-    // meet behind you
-    auto spansAt = [&](double k, double *total, double *top) {
-        std::vector<double> s(cols.size());
-        *total = p.gapDeg * k * double(cols.size()) + (slot > 0 ? slot + p.gapDeg * k : 0);
-        *top = p.deskDeg;
-        for (size_t c = 0; c < cols.size(); ++c) {
-            const std::vector<Stacked> st = Stack(cols[c], p, k, &s[c]);
-            if (!st.empty()) *top = std::max(*top, st.front().el1);
-            *total += s[c];
-        }
-        return s;
+inline Packed Pack(const std::vector<Column> &cols, const Params &p, double k, double slot, int slotAt) {
+    Packed out;
+    out.top = p.deskDeg;
+    const double gap = p.gapDeg * k;
+    struct Box {
+        double half, el0, el1;
     };
-    Fit f;
-    double top;
-    f.spans = spansAt(1, &f.total, &top);
-    const double room = p.maxSpanDeg;   // (the slot is at most half of it: the columns get the rest)
-    if ((f.total > room || top > kMaxTopDeg) && !cols.empty()) {
-        // too big: a k that fits, by halving (everything goes to nothing with k, so one fits)
-        double lo = 0, hi = 1;
-        for (int i = 0; i < 24; ++i) {   // (to within 1e-7 of the size)
-            const double mid = (lo + hi) / 2;
-            double t, tp;
-            spansAt(mid, &t, &tp);
-            (t <= room && tp <= kMaxTopDeg ? lo : hi) = mid;
-        }
-        f.k = std::max(lo, 1e-3);
-        f.spans = spansAt(f.k, &f.total, &top);
+    std::vector<std::vector<Box>> placed;   // (the columns and the slot so far, left to right)
+    std::vector<double> mids;
+    const auto place = [&](const std::vector<Box> &boxes) {
+        double m = mids.empty() ? 0 : mids.back();   // (never left of the one before)
+        for (const Box &b : boxes) m = std::max(m, b.half);   // (nothing past the strip's left end)
+        for (size_t a = 0; a < placed.size(); ++a)
+            for (const Box &x : placed[a])
+                for (const Box &y : boxes)
+                    if (x.el0 < y.el1 + gap - 1e-9 && y.el0 < x.el1 + gap - 1e-9) m = std::max(m, mids[a] + x.half + gap + y.half);
+        for (const Box &b : boxes) out.width = std::max(out.width, m + b.half);
+        placed.push_back(boxes), mids.push_back(m);
+        return m;
+    };
+    for (size_t c = 0; c <= cols.size(); ++c) {
+        if (slot > 0 && int(c) == slotAt) out.slotMid = place({{slot / 2, -1e9, 1e9}});
+        if (c == cols.size()) break;
+        out.stacks.push_back(Stack(cols[c], p, k));
+        std::vector<Box> boxes;
+        for (const Stacked &s : out.stacks.back()) boxes.push_back({s.spanDeg / 2, s.el0, s.el1}), out.top = std::max(out.top, s.el1);
+        out.mid.push_back(place(boxes));
     }
-    f.total = cols.empty() ? 0 : f.total - p.gapDeg * f.k;
-    return f;
+    return out;
 }
 
-// The split that puts the strip's middle nearest in front of you: with `left` columns left of a
-// slot at `az`, the strip runs from az - slot/2 - (their spans and gaps) to az + slot/2 + (the
-// rest's). Even columns round a slot in front: half each side (an odd one: the extra one right).
-inline int CentredSplit(const std::vector<double> &spans, double gap, double az) {
-    double rest = 0;
-    for (double s : spans) rest += gap + s;
-    double leftSpan = 0, best = 1e9;
-    int split = 0;
-    for (size_t j = 0; j <= spans.size(); ++j) {
-        const double off = std::fabs(az + (rest - leftSpan) / 2);
-        if (off < best - 1e-9) best = off, split = int(j);
-        if (j < spans.size()) leftSpan += spans[j] + gap, rest -= gap + spans[j];
+// The strip packed at a size that fits: in a turn, with a gap where its ends would meet behind
+// you, and under kMaxTopDeg. 1, or the largest smaller one that fits.
+struct Fit {
+    Packed packed;
+    double k = 1;
+};
+inline Fit FitStrip(const std::vector<Column> &cols, const Params &p, double slot, int slotAt) {
+    const auto fits = [&](const Packed &q, double k) { return q.width + p.gapDeg * k <= p.maxSpanDeg && q.top <= kMaxTopDeg; };
+    Fit f;
+    f.packed = Pack(cols, p, 1, slot, slotAt);
+    if (cols.empty() || fits(f.packed, 1)) return f;
+    double lo = 0, hi = 1;   // (everything goes to nothing with k but the slot, at most half a turn: one fits)
+    for (int i = 0; i < 24; ++i) {   // (to within 1e-7 of the size)
+        const double mid = (lo + hi) / 2;
+        (fits(Pack(cols, p, mid, slot, slotAt), mid) ? lo : hi) = mid;
     }
-    return split;
+    f.k = std::max(lo, 1e-3);
+    f.packed = Pack(cols, p, f.k, slot, slotAt);
+    return f;
 }
 
 // `split`: the columns left of Steam's slot (the grid's: -1 for one not chosen yet).
 inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int split = -1) {
     Layout out;
     // Steam's slot: with a split, always; without, when the strip centred in front of you would
-    // reach it (a gap's width short of it)
+    // reach it (a gap's width short of it), with the split that puts the strip's middle nearest in
+    // front of you (even columns round a slot in front: half each side; an odd one: the extra one right)
     const double slot = std::min(p.reserveDeg, p.maxSpanDeg / 2);
     const double slotAz = WrapNear(p.reserveAzDeg, 0);
-    const bool has = slot > 0 && !cols.empty();
-    Fit f = FitStrip(cols, p, has && split >= 0 ? slot : 0);
-    const bool reserve = has && (split >= 0 || std::fabs(slotAz) - slot / 2 < f.total / 2 + p.gapDeg * f.k);
-    if (reserve && split < 0) f = FitStrip(cols, p, slot);
-    const double k = f.k, total = f.total;
-    const std::vector<double> &spans = f.spans;
-    out.shrink = k;
-    const double gap = p.gapDeg * k;
+    Fit f = FitStrip(cols, p, 0, -1);
+    const bool reserve =
+        slot > 0 && !cols.empty() && (split >= 0 || std::fabs(slotAz) - slot / 2 < f.packed.width / 2 + p.gapDeg * f.k);
+    int left = -1;
+    if (reserve && split >= 0) {
+        left = std::min(split, int(cols.size()));
+        f = FitStrip(cols, p, slot, left);
+    } else if (reserve) {
+        double best = 1e9;
+        for (int j = 0; j <= int(cols.size()); ++j) {
+            Fit g = FitStrip(cols, p, slot, j);
+            const double off = std::fabs(slotAz - g.packed.slotMid + g.packed.width / 2);
+            if (off < best - 1e-9) best = off, left = j, f = std::move(g);
+        }
+    }
+    const Packed &pk = f.packed;
+    out.shrink = f.k;
+    out.az0 = reserve ? slotAz - pk.slotMid : -pk.width / 2;   // (the slot where Steam's menu is, or the strip centred)
+    out.az1 = out.az0 + pk.width;
+    if (reserve) out.split = left, out.slotAz = slotAz;
     out.el0 = out.el1 = p.deskDeg;
-    // the split's columns left of Steam's slot (each with its gap), the rest right of it
-    const size_t left = !reserve ? 0 : split >= 0 ? std::min(size_t(split), cols.size()) : size_t(CentredSplit(spans, gap, slotAz));
-    double leftSpan = 0;
-    for (size_t c = 0; c < left; ++c) leftSpan += spans[c] + gap;
-    double az = reserve ? slotAz - slot / 2 - leftSpan : -total / 2;
-    out.az0 = az, out.az1 = az + total;
-    if (reserve) out.split = int(left), out.slotAz = slotAz;
     for (size_t c = 0; c < cols.size(); ++c) {
-        if (reserve && c == left) az += slot + gap;
-        const double a0 = az, a1 = az + spans[c];
-        az = a1 + gap;
-        double span;
-        const std::vector<Stacked> st = Stack(cols[c], p, k, &span);
+        const double mid = out.az0 + pk.mid[c];
+        const std::vector<Stacked> &st = pk.stacks[c];
         for (size_t r = 0; r < st.size(); ++r) {
             Placed pl;
             pl.id = cols[c].tiles[r].id, pl.col = int(c), pl.row = int(r);
             pl.el0 = st[r].el0, pl.el1 = st[r].el1;
-            pl.az0 = a0, pl.az1 = a1;
-            pl.azDeg = (a0 + a1) / 2, pl.elDeg = (pl.el0 + pl.el1) / 2;
+            pl.az0 = mid - st[r].spanDeg / 2, pl.az1 = mid + st[r].spanDeg / 2;
+            pl.azDeg = mid, pl.elDeg = (pl.el0 + pl.el1) / 2;
             pl.widthM = st[r].widthM, pl.heightM = st[r].heightM;
             CornersOnSphere(p.radius, &pl);
             out.el1 = std::max(out.el1, pl.el1);
@@ -290,13 +301,15 @@ inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, 
     d.leftOfSlot = l.split >= 0 && az < l.slotAz;
     if (az < l.az0) return d.kind = Drop::NewColumn, d.col = 0, d;
     if (az > l.az1) return d.kind = Drop::NewColumn, d.col = int(cols.size()), d;
-    // the column it's over (a gap: the nearer side's)
+    // the column of the panel it's over (a gap: the nearest one's, round you and up; packed columns
+    // can share an azimuth at different heights)
     int c = 0;
     double best = 1e9;
     double a0 = 0, a1 = 0;
     for (const Placed &p : l.tiles) {
-        const double dist = az < p.az0 ? p.az0 - az : az > p.az1 ? az - p.az1 : 0;
-        if (dist < best) best = dist, c = p.col, a0 = p.az0, a1 = p.az1;
+        const double dAz = az < p.az0 ? p.az0 - az : az > p.az1 ? az - p.az1 : 0;
+        const double dEl = el < p.el0 ? p.el0 - el : el > p.el1 ? el - p.el1 : 0;
+        if (dAz + dEl < best) best = dAz + dEl, c = p.col, a0 = p.az0, a1 = p.az1;
     }
     const double u = (az - a0) / std::max(1e-6, a1 - a0);
     if (u < 0.25) return d.kind = Drop::NewColumn, d.col = c, d;

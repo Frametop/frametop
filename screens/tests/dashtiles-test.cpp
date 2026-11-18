@@ -221,6 +221,20 @@ int main() {
         b.Arrange(mixed);
         check("lean: the wide one moved from the left end: the narrow one alone now", first == 1 && b.PlacedOf(2)->col == 0);
         check("lean: ...the columns not touched stay put (not pulled by the narrow one's)", near(mid(3), a3, 1e-9));
+        // (between a stacked column and a single one: both make room, the stacked one doesn't
+        // outvote it; testbench, 2026-11-18: let go between them, it went 33 degrees off)
+        dashtiles::Board c;
+        for (const int i : {1, 3, 4}) c.Anchor(i, -1, false);
+        c.Anchor(2, -1, false);
+        c.Drop(2, {tiling::Drop::Into, 0, 1}, rel);
+        c.Arrange(mixed);
+        const auto cmid = [&](int id) { const tiling::Placed *p = c.PlacedOf(id); return p ? p->azDeg : NAN; };
+        const double c1 = cmid(1), c3 = cmid(3), at = (c.PlacedOf(1)->az1 + c.PlacedOf(3)->az0) / 2;
+        c.Drop(4, c.DropFor(4, at, 0, mixed), rel, at);
+        c.Arrange(mixed);
+        check("columns: let go between two, it's there", cmid(1) < cmid(4) && cmid(4) < cmid(3));
+        check("columns: ...both sides make room, it near where let go",
+              cmid(1) < c1 - 10 && cmid(3) > c3 + 10 && std::fabs(cmid(4) - at) < 10);
         (void)lean0, (void)a1, (void)off;
     }
     // --- the slot's side stays put (council, 2026-11-16: it was the column count's middle, so an

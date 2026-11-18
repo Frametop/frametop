@@ -409,11 +409,12 @@ private:
             for (const tiling::Placed &p : l.tiles)
                 if (p.id == centreOn_) pan = -p.azDeg;
         } else {
-            // (the median: most of them stay exactly where they were. A mean let one odd panel pull
-            // the rest: a column's narrower panels flip the way they lean, Lean, or a narrow one left
-            // alone by the wide one it leaned on lands somewhere new, and took the others 6 to 9
-            // degrees. Columns' middles instead moved a narrowed column's neighbours.)
-            std::vector<double> want;
+            // (a vote a column, its widest panel's, which leans against nothing; the median: most
+            // columns stay exactly where they were. A mean let one odd panel pull the rest: a narrower
+            // one flips the way it leans, Lean, or one left alone by the wide one it leaned on lands
+            // somewhere new, and took the others 6 to 9 degrees. A vote a panel let a stacked column
+            // outvote the one across from it: let go between them, it went 33 degrees off.)
+            std::map<int, std::pair<double, double>> vote;   // column -> (its widest's width, how far it wants turning)
             double alone = NAN;
             for (const tiling::Placed &p : l.tiles) {
                 if (p.id == moved_) {
@@ -421,8 +422,13 @@ private:
                     continue;
                 }
                 for (const tiling::Placed &q : last_.tiles)
-                    if (q.id == p.id) want.push_back(tiling::WrapNear(q.azDeg - p.azDeg, 0));
+                    if (q.id == p.id) {
+                        auto [it, added] = vote.try_emplace(p.col, -1.0, 0.0);
+                        if (p.az1 - p.az0 > it->second.first) it->second = {p.az1 - p.az0, tiling::WrapNear(q.azDeg - p.azDeg, 0)};
+                    }
             }
+            std::vector<double> want;
+            for (const auto &[col, v] : vote) want.push_back(v.second);
             if (const size_t n = want.size()) {   // (the median; of an even count, the middle two's mean: into
                 std::sort(want.begin(), want.end());   // the middle of two, both sides make room)
                 pan = (want[(n - 1) / 2] + want[n / 2]) / 2;

@@ -16,7 +16,7 @@
 // Full Keyboard, mounted below the dashboard tile; FrametopVr::steam_tile). Steam's own panels are
 // left shown: with a window ours they have no texture (gamescope forwards to one overlay), so they
 // draw nothing, and Steam paints only while its panel counts as visible (alpha 0 = a black tile).
-// Shown, they'd catch the laser in front of the tiles: vrsteamhit.cpp keeps them out of its way.
+// Shown, they'd catch the laser in front of the tiles: vrsteamhit.cpp shrinks them to nothing.
 
 #include "vrpanel.h"
 #include "gsdisplay.h"
@@ -407,7 +407,7 @@ void SteamDashShutdown() {
     LetGo();
     g_pages.reset();   // (the buttons up first)
     Do(g_fleet.Shutdown());
-    steamhit::Clear();   // (none of them ours now: Steam's take the laser again)
+    steamhit::Clear();   // (none of them ours now: Steam's get their widths back)
     g_link->Stop(500);
 }
 

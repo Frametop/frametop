@@ -126,7 +126,8 @@ int main() {
         check("desk: rows top down, the last on the desk", top.id == 1 && under.id == 2 && top.row == 0 && under.row == 1);
         check("desk: the one above rests on the one under it, a gap between", near(top.el0, under.el1 + p.gapDeg));
         check("desk: the tallest column's top is the layout's", near(l.el1, std::max(top.el1, l.tiles[2].el1)));
-        check("desk: a narrow panel centred in its column", near(top.azDeg, (top.az0 + top.az1) / 2) && near(top.azDeg, under.azDeg));
+        check("desk: a narrow panel against its column's edge toward the strip's middle (nothing to tuck under it)",
+              near(top.azDeg, (top.az0 + top.az1) / 2) && near(top.az1, under.az1) && top.az0 > under.az0);
         const auto ownSpan = [&](const tiling::Placed &t) {
             return near(t.az1 - t.az0, tiling::SpanFor(p.radius, t.widthM / t.distM * p.radius, t.heightM / t.distM * p.radius, t.elDeg), 1e-6);
         };
@@ -156,6 +157,7 @@ int main() {
         const std::vector<tiling::Column> cols = {col({px(1, 3440, 1440), px(2, 1280, 800)}), col({px(3, 1024, 600)})};
         const auto l = tiling::Arrange(cols, p);
         const auto &wide = l.tiles[0], &narrow = l.tiles[1], &shortOne = l.tiles[2];
+        check("packed: the wide one is the strip's middle: the narrow one stays centred", near(narrow.azDeg, wide.azDeg));
         check("packed: a short neighbour a gap from the panel beside it", near(shortOne.az0, narrow.az1 + p.gapDeg));
         check("packed: ...under the wide one's overhang (apart up and down)", shortOne.az0 < wide.az1 && shortOne.el1 + p.gapDeg <= wide.el0);
         check("packed: nothing nearer than a gap, the strip as narrow as that", apart(l, p.gapDeg) && tight(l, p.gapDeg) &&
@@ -165,6 +167,20 @@ int main() {
         const auto t = tiling::Arrange(tall, p);
         check("packed: a neighbour reaching the wide one's height keeps a gap from it", apart(t, p.gapDeg) && tight(t, p.gapDeg) &&
                                                                                             t.tiles[2].az0 >= t.tiles[0].az1 + p.gapDeg - 1e-9);
+        // ...and the narrow one under the wide one leans to it: no room between them, it's outside
+        check("packed: the narrow one leans to the tall neighbour, a gap between (its room outside)",
+              near(t.tiles[1].az1, t.tiles[0].az1) && near(t.tiles[2].az0, t.tiles[1].az1 + p.gapDeg));
+        // the same mirrored: the tall one left, the wide over narrow right of it
+        const std::vector<tiling::Column> mirror = {col({px(3, 1080, 1920), hd(4)}), col({px(1, 3440, 1440), px(2, 1280, 800)})};
+        const auto m = tiling::Arrange(mirror, p);
+        check("packed: mirrored, the narrow one leans left to it", near(m.tiles[3].az0, m.tiles[2].az0) &&
+                                                                     near(m.tiles[3].az0, m.tiles[0].az1 + p.gapDeg) &&
+                                                                     apart(m, p.gapDeg) && cornersInColumns(m));
+        // between two tall neighbours: either way leaves the room between monitors, so the strip's middle
+        const std::vector<tiling::Column> between = {col({px(5, 1080, 1920)}), col({px(1, 3440, 1440), px(2, 1280, 800)}),
+                                                     col({px(3, 1080, 1920)})};
+        const auto b = tiling::Arrange(between, p);
+        check("packed: alone in the middle, between tall ones: centred", near(b.tiles[1].azDeg, b.tiles[2].azDeg) && near(b.az0, -b.az1));
         // three columns: a far column can't run into an earlier one past a short middle one
         const std::vector<tiling::Column> three = {col({px(1, 3440, 1440), px(2, 800, 600)}), col({px(3, 640, 480)}),
                                                    col({px(4, 3440, 1440), px(5, 800, 600)})};

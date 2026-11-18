@@ -409,10 +409,10 @@ private:
             for (const tiling::Placed &p : l.tiles)
                 if (p.id == centreOn_) pan = -p.azDeg;
         } else {
-            // (by their columns' middles, as most of them want: a column's narrower panels lean one
-            // way or the other, Lean, and one flipping took the column next to it 6 degrees the other
-            // way; a narrow one left alone when the wide one it leaned on moves away is in a column
-            // of its own somewhere new, and pulled the rest 9 degrees when the turn was their mean)
+            // (the median: most of them stay exactly where they were. A mean let one odd panel pull
+            // the rest: a column's narrower panels flip the way they lean, Lean, or a narrow one left
+            // alone by the wide one it leaned on lands somewhere new, and took the others 6 to 9
+            // degrees. Columns' middles instead moved a narrowed column's neighbours.)
             std::vector<double> want;
             double alone = NAN;
             for (const tiling::Placed &p : l.tiles) {
@@ -421,7 +421,7 @@ private:
                     continue;
                 }
                 for (const tiling::Placed &q : last_.tiles)
-                    if (q.id == p.id) want.push_back(tiling::WrapNear(ColumnMid(last_, q.col) - ColumnMid(l, p.col), 0));
+                    if (q.id == p.id) want.push_back(tiling::WrapNear(q.azDeg - p.azDeg, 0));
             }
             if (const size_t n = want.size()) {   // (the median; of an even count, the middle two's mean: into
                 std::sort(want.begin(), want.end());   // the middle of two, both sides make room)
@@ -429,13 +429,6 @@ private:
             } else if (!std::isnan(alone)) pan = alone;
         }
         return std::clamp(pan, -l.az1, -l.az0);
-    }
-    // Column `col`'s middle round you: its widest panel's (the others lean against one of its edges).
-    static double ColumnMid(const tiling::Layout &l, int col) {
-        double a0 = 1e9, a1 = -1e9;
-        for (const tiling::Placed &p : l.tiles)
-            if (p.col == col) a0 = std::min(a0, p.az0), a1 = std::max(a1, p.az1);
-        return (a0 + a1) / 2;
     }
     double pan_ = 0;              // the strip turned this far from centred
     bool recentre_ = false;

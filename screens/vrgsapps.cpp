@@ -314,6 +314,9 @@ void GsToTheater(int index) {
     const uint32_t win = g_gsControl->Lend(index);
     if (!win) return;
     g_gsTheater.Lent(win, app, NowMs());
+    // SteamVR doesn't always put the game's new frame in its theater itself (it docked it in an
+    // open dashboard, testbench 2026-11-18): ft-dashpatch waits for the frame and puts it there.
+    SendDashpatch("gametheater " + std::to_string(app));
     std::printf("screen %d: View in Theater: window 0x%x (steam:%u) to SteamVR's theater\n", index + 1, win, app);
     std::fflush(stdout);
     UpdateVisibility();

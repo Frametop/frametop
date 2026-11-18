@@ -54,6 +54,7 @@ sys.path.insert(0, str(HERE.parent.parent / "conf"))
 import ft_vrsettings  # noqa: E402  (SteamVR's settings: vrcmd's output and the file)
 sys.path.insert(0, str(HERE))
 import steampage  # noqa: E402  (Steam's page: in SteamVR's theater? its controls hidden)
+import gametheater  # noqa: E402  (a game's panel's View in Theater)
 
 HOME = Path.home()
 SECTION = "VRWebHelper"
@@ -290,10 +291,22 @@ def watch_steamvr():
             last, sent = value, now
 
 
+def game_to_theater(app):
+    """ft-screens has taken game `app`'s window off its panel: into SteamVR's theater with it."""
+    def ask(expr):
+        url = dashboard()
+        return evaluate(url, expr) if url else "no dashboard"
+    try:
+        said = gametheater.put_in_theater(app, ask, time.sleep)
+    except (OSError, ValueError) as e:
+        said = f"can't reach the dashboard ({e})"
+    print(f"View in Theater: {said}", flush=True)
+
+
 def listen():
     """ft-screens on @ft_dashpatch, only from this user (SO_PASSCRED gives the sender's): the
     gamepad pill's "gamepad" (it moves SteamVR's input focus), "steamstrip 1|0" and "steamtheater"
-    (steampage.py)."""
+    (steampage.py), and "gametheater <app id>" (gametheater.py)."""
     creds = struct.Struct("3i")  # pid, uid, gid
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
@@ -307,12 +320,17 @@ def listen():
         uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
                     if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
         message = data.strip()
-        if message not in (b"gamepad", steampage.THEATER_ASK) and not message.startswith(b"steamstrip"):
+        game = gametheater.ask(message)
+        if (message not in (b"gamepad", steampage.THEATER_ASK) and not message.startswith(b"steamstrip")
+                and game is None):
             continue
         if uid != os.getuid():
             print(f"{message[:16]!r} from another user ({uid}): ignored", flush=True)
             continue
         if STRIP.take(message, time.monotonic()):
+            continue
+        if game is not None:  # waits for SteamVR's frame for it: not on this thread
+            threading.Thread(target=game_to_theater, args=(game,), daemon=True).start()
             continue
         who, expr = (("View in Theater", steampage.TO_THEATER) if message == steampage.THEATER_ASK
                      else ("gamepad pill", GAMEPAD_PUSH))

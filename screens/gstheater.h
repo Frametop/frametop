@@ -3,9 +3,10 @@
 // screens/tests/gstheater-test.cpp.
 //
 // Lending is untagging (gscontrol.h's Control::Lend): gamescope then gives the window an overlay
-// of its own, valve.steam.desktopgame.<app id>, and SteamVR shows that in its theater at once
-// (testbench, 2026-11-18: in its theater stack within a second), with its own controls and way
-// out. ft-dashpatch says which game SteamVR's theater shows (steamvrmode's fifth number). The
+// of its own, valve.steam.desktopgame.<app id>, and SteamVR makes a frame for it, which
+// ft-dashpatch puts in SteamVR's theater ("gametheater <app id>"; SteamVR did that itself only
+// sometimes, testbench 2026-11-18), with SteamVR's own controls and way out. ft-dashpatch says
+// which game SteamVR's theater shows (steamvrmode's fifth number). The
 // window comes back once SteamVR has shown it there and then doesn't (the user docked it, floated
 // it, or closed the game), or if SteamVR never shows it there within kTheaterWaitMs (an
 // ft-dashpatch too old to say, or none running): never left untagged with nothing to bring it back.

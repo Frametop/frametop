@@ -39,7 +39,7 @@ struct Link::Impl {
     xcb_window_t root = 0;
     uint32_t pid = 0;
     Role role = Role::Apps;
-    xcb_atom_t target = 0, steamGame = 0, netName = 0, utf8 = 0;
+    xcb_atom_t target = 0, steamGame = 0, netName = 0, utf8 = 0, netPid = 0;
     std::map<uint32_t, bool> top;   // root's children seen, and whether each is override-redirect
     std::vector<Event> pending;
     std::map<uint32_t, uint64_t> tags;   // the windows we've tagged, and the overlay each names (Focus puts it back)
@@ -177,6 +177,7 @@ bool Link::Open(const char *display, bool needForwarding, std::string *why, Role
     d.role = role;
     d.target = d.Atom("STEAM_GAMESCOPE_VROVERLAY_TARGET");
     d.steamGame = d.Atom("STEAM_GAME");
+    d.netPid = d.Atom("_NET_WM_PID");
     d.netName = d.Atom("_NET_WM_NAME");
     d.utf8 = d.Atom("UTF8_STRING");
     const uint32_t mask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
@@ -277,6 +278,39 @@ std::vector<Event> Link::Poll() {
     return out;
 }
 
+namespace {
+// The Steam app id a process runs under: its own command line's or one of its parents', as
+// gamescope looks for it (up to 16 up, before init).
+uint32_t SteamAppOfProcess(uint32_t pid) {
+    for (int hops = 0; pid > 1 && hops < 16; ++hops) {
+        const std::string dir = "/proc/" + std::to_string(pid);
+        std::string cmdline;
+        if (std::FILE *f = std::fopen((dir + "/cmdline").c_str(), "r")) {
+            char buf[4096];
+            const size_t n = std::fread(buf, 1, sizeof buf, f);
+            std::fclose(f);
+            cmdline.assign(buf, n);
+        }
+        if (const uint32_t app = SteamLaunchApp(cmdline)) return app;
+        uint32_t parent = 0;
+        if (std::FILE *f = std::fopen((dir + "/stat").c_str(), "r")) {
+            char buf[512];
+            const size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+            std::fclose(f);
+            buf[n] = 0;
+            // "pid (comm) state ppid ...": comm may hold spaces and parentheses, so after its last ')'
+            if (const char *close = std::strrchr(buf, ')')) {
+                char state = 0;
+                unsigned ppid = 0;
+                if (std::sscanf(close + 1, " %c %u", &state, &ppid) == 2) parent = ppid;
+            }
+        }
+        pid = parent;
+    }
+    return 0;
+}
+}  // namespace
+
 void Link::Describe(Window *w) {
     Impl &d = *d_;
     if (!d.c) return;
@@ -286,7 +320,9 @@ void Link::Describe(Window *w) {
         instance = cls.instance_name ? cls.instance_name : "", klass = cls.class_name ? cls.class_name : "";
         xcb_icccm_get_wm_class_reply_wipe(&cls);
     }
-    w->key = AppKey(d.Cardinal(w->id, d.steamGame), klass, instance);
+    const uint32_t steamGame = d.Cardinal(w->id, d.steamGame);
+    w->key = AppKey(steamGame, klass, instance);
+    w->steamApp = steamGame ? steamGame : SteamAppOfProcess(d.Cardinal(w->id, d.netPid));
     w->title = d.Text(w->id, d.netName, d.utf8);
     if (w->title.empty()) w->title = d.Text(w->id, XCB_ATOM_WM_NAME, XCB_ATOM_STRING);
     if (w->title.empty()) w->title = !klass.empty() ? klass : "App";

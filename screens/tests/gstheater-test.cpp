@@ -15,11 +15,6 @@ static int failures = 0;
     } while (0)
 
 int main() {
-    // the app id in an app's key
-    CHECK(SteamAppOf("steam:2868840") == 2868840);
-    CHECK(SteamAppOf("x11:XTerm") == 0 && SteamAppOf("steam:") == 0 && SteamAppOf("steam:12x") == 0);
-    CHECK(SteamAppOf("steam:0") == 0 && SteamAppOf("") == 0 && SteamAppOf("steam:99999999999") == 0);
-
     // lent; SteamVR not yet showing it: kept (the theater takes a moment)
     {
         Theater t;

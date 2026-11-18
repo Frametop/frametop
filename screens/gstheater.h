@@ -12,23 +12,12 @@
 #pragma once
 
 #include <cstdint>
-#include <cstdlib>
 #include <map>
-#include <string>
 #include <vector>
 
 namespace gsapps {
 
 constexpr int64_t kTheaterWaitMs = 5000;
-
-// The Steam app id in an app's key (gsforward::AppKey's "steam:<id>"), 0 for none: only a Steam
-// game gets an overlay of gamescope's that SteamVR takes into its theater.
-inline uint32_t SteamAppOf(const std::string &key) {
-    if (key.compare(0, 6, "steam:") != 0 || key.size() == 6) return 0;
-    char *end = nullptr;
-    const unsigned long id = std::strtoul(key.c_str() + 6, &end, 10);
-    return *end == '\0' && id > 0 && id <= 0xffffffffUL ? uint32_t(id) : 0;
-}
 
 class Theater {
 public:

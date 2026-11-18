@@ -45,6 +45,14 @@ static void Policy() {
     CHECK(AppKey(570, "dota", "x") == "steam:570");
     CHECK(AppKey(0, "konsole", "konsole") == "x11:konsole");
     CHECK(AppKey(0, "", "inst") == "x11:inst");
+    // Steam's reaper's command line (Slay the Spire 2's window has no STEAM_GAME)
+    using namespace std::string_literals;
+    CHECK(SteamLaunchApp("/x/reaper\0SteamLaunch\0AppId=2868840\0--\0/x/game\0"s) == 2868840);
+    CHECK(SteamLaunchApp("/x/reaper\0AppId=5\0--\0"s) == 0);                          // (no SteamLaunch)
+    CHECK(SteamLaunchApp("/x/reaper\0SteamLaunch\0--\0AppId=5\0"s) == 0);            // (the game's own arguments)
+    CHECK(SteamLaunchApp("r\0SteamLaunch\0AppId=\0"s) == 0 && SteamLaunchApp("r\0SteamLaunch\0AppId=12x\0"s) == 0);
+    CHECK(SteamLaunchApp("r\0SteamLaunch\0AppId=99999999999\0"s) == 0 && SteamLaunchApp("") == 0);
+    CHECK(SteamLaunchApp("r\0SteamLaunch\0AppId=7"s) == 7);                           // (no NUL at the end)
     CHECK(AppKey(0, "", "").empty());
 
     CHECK(XKeycode(30) == 38);   // KEY_A

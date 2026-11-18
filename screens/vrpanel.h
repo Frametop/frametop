@@ -172,6 +172,7 @@ struct Screen {
     bool gsapp = false;           // a gamescope app's window (the gamescope apps): gamescope draws it
     uint32_t gsWin = 0;           // ...which X window
     bool gsSeen = false;          // ...shown before (mapped again after an unmap: not anchored again)
+    bool theater = false;         // ...a Steam game's: a View in Theater button where a floating window has "back to the desktop"
     bool steamDash = false;       // ...Steam's own dashboard window (vrsteamwin.cpp; its input there, its size fixed)
     // Glued flush left of this panel (Steam's menu to its page, steamglue.h): moved, shown and tiled
     // with it, no controls of its own, cropX..cropH the part of its window it shows. -1: not glued.
@@ -253,7 +254,9 @@ struct Screen {
     // Whether its kind has control k (Controls()' order), whether or not it holds a set of them now
     // (chromepool.h): a floating window has dock and close, a desktop screen or remote display reset,
     // pin and layout, a gamescope app none of those; every kind the anchor. A glued one has none.
-    bool HasControl(int k) const { return glueTo < 0 && (k < 4 || k == 9 || (!gsapp && (floating ? k < 6 : k >= 6))); }
+    bool HasControl(int k) const {
+        return glueTo < 0 && (k < 4 || k == 9 || (gsapp ? k == 4 && theater : floating ? k < 6 : k >= 6));
+    }
     // One of KWin's outputs: a desktop screen (not a floating window's, a remote display or an app's).
     bool Desktop() const { return !floating && !remote && !gsapp; }
 };

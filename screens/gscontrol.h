@@ -5,7 +5,10 @@
 // so its test (screens/tests/gscontrol-test.cpp) runs with fakes of both.
 //
 // The laser on a panel or a popup over it moves the X pointer there, and raises that window
-// first: apps overlap on gamescope's one screen, and the X pointer goes to the top one. A press
+// first: apps overlap on gamescope's one screen, and the X pointer goes to the top one. gamescope
+// sends its pointer only while it has focused one of the apps' windows, and never focuses a tagged
+// one (gsforward.h): the laser coming onto an app with none focused by us yet (or the one we
+// focused gone or unmapped), and a press on another app's window, focus that app's window first. A press
 // gives that window the typing (a dialog's own, not its app's), until a click somewhere that isn't
 // an app (Blur). A dialog the window with the typing opens takes it, as a window manager gives it
 // one (not a menu or a tooltip: override-redirect, a window manager never focuses those), also
@@ -55,7 +58,7 @@ public:
         tagging_ = false;
         Do(book_.Clear());
         tagging_ = true;
-        buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, keys_ = Keys();
+        buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, keys_ = Keys();
         typedBefore_.clear();
     }
     // Off (GSAPP_PANELS, or ft-screens going): buttons and keys held let go of, each window back to
@@ -65,7 +68,7 @@ public:
         for (const auto &[code, win] : keys_.Down()) x_.Key(win, gsforward::XKeycode(code), 0, false);
         keys_ = Keys();
         Do(book_.Clear());
-        raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0;
+        raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0;
         typedBefore_.clear();
     }
     void On(const gsforward::Event &e, int64_t nowMs) {
@@ -82,6 +85,7 @@ public:
     void Point(int index, int sub, int x, int y) {
         const uint32_t w = WindowAt(index, sub);
         if (!w) return;
+        if (!focused_) FocusOn(book_.WindowOf(index));
         book_.Pointed(index);
         if (raised_ != w) x_.Raise(w), raised_ = w;
         x_.Pointer(x, y);
@@ -92,7 +96,7 @@ public:
         if (!w) return;
         if (down) {
             if (sub) TypeIn(w);
-            else keys_.Focus(w);
+            else keys_.Focus(w), FocusOn(w);
             pressedOn_ = w, blurredFrom_ = 0;
         }
         Point(index, sub, x, y);
@@ -136,11 +140,17 @@ private:
     uint32_t raised_ = 0;     // the window raised last
     uint32_t buttons_ = 0;    // X buttons held (bit b: button b)
     uint32_t pressedOn_ = 0;  // the window the last press went to
+    uint32_t focused_ = 0;    // the app window we had gamescope focus last (0: none, or it went or unmapped)
     // a popup that had the typing -> the app window that had it before (erased when the popup goes)
     std::map<uint32_t, uint32_t> typedBefore_;
     uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur (0 after a press)
     bool tagging_ = true;     // (false: the display's gone, nobody to untag at)
 
+    void FocusOn(uint32_t w) {
+        if (!w || w == focused_) return;
+        x_.Focus(w);
+        focused_ = w;
+    }
     uint32_t WindowAt(int index, int sub) const { return sub ? book_.PopupWindow(index, sub) : book_.WindowOf(index); }
     bool TargetShown() const {
         const int index = keys_.Target() ? book_.PanelOf(keys_.Target()) : -1;
@@ -189,6 +199,7 @@ private:
             keys_.Focus(known(first) ? first : known(then) ? then : owner);
         }
         if (raised_ == win) raised_ = 0;
+        if (focused_ == win) focused_ = 0;
         if (pressedOn_ == win) pressedOn_ = 0;
         if (blurredFrom_ == win) blurredFrom_ = 0;
     }
@@ -203,6 +214,7 @@ private:
                 case Action::Hide:
                     LetGoOf(a.win.id);
                     if (raised_ == a.win.id) raised_ = 0;   // (raised again when it's pointed at)
+                    if (focused_ == a.win.id) focused_ = 0;   // (gamescope may have let go of it: again when it's pointed at)
                     panels_.Hide(a.index);
                     break;
                 case Action::Drop: Gone(a.win.id, 0, 0, false), panels_.Drop(a.index); break;

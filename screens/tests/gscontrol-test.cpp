@@ -39,6 +39,21 @@ struct FakeX : gsforward::XSide {
     }
     void Raise(uint32_t w) override { log.push_back("raise " + std::to_string(w)); }
     void Resize(uint32_t w, int a, int b) override { log.push_back("resize " + std::to_string(w) + " " + std::to_string(a) + "x" + std::to_string(b)); }
+    void Focus(uint32_t w) override { log.push_back("focus " + std::to_string(w)); }
+    int Count(const std::string &s) const {
+        int n = 0;
+        for (const auto &l : log) n += l == s;
+        return n;
+    }
+    // where `a` was logged before `b` (both there)
+    bool Before(const std::string &a, const std::string &b) const {
+        int i = -1, j = -1;
+        for (int k = 0; k < int(log.size()); ++k) {
+            if (i < 0 && log[k] == a) i = k;
+            if (j < 0 && log[k] == b) j = k;
+        }
+        return i >= 0 && j >= 0 && i < j;
+    }
     bool Logged(const std::string &s) const {
         for (const auto &l : log)
             if (l == s) return true;
@@ -87,6 +102,51 @@ static Event Ev(Event::Type type, const Window &w) {
 }
 
 int main() {
+    // --- gamescope's focus: its pointer goes only to a window it focused, and it never focuses a
+    // tagged one (Slay the Spire 2's clicks went nowhere, 2026-11-18)
+    {
+        FakeX x;
+        FakePanels p;
+        Control c(x, p);
+        c.On(Ev(Event::Created, Win(1, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(1, Kind::Main)), 0);
+        c.On(Ev(Event::Created, Win(2, Kind::Main)), 0), c.On(Ev(Event::Mapped, Win(2, Kind::Main)), 0);
+        c.On(Ev(Event::Created, Menu(9, 100, 80, 1)), 0);   // app 1's menu
+        // the laser onto an app first: that app focused, before the pointer moves
+        c.Point(kFirst, 0, 10, 20);
+        CHECK(x.Before("focus 1", "at 10,20"));
+        // moving on it, and onto another app, focuses nothing more: gamescope's pointer stays on
+        // its display, and X finds the window under it
+        c.Point(kFirst, 0, 11, 20), c.Point(kFirst + 1, 0, 5, 5);
+        CHECK(x.Count("focus 1") == 1 && !x.Logged("focus 2"));
+        // a press on the other app focuses it (a window manager's click to focus), before the button
+        x.log.clear();
+        c.Press(kFirst + 1, 0, 1, true, 5, 5);
+        CHECK(x.Before("focus 2", "down 1"));
+        c.Press(kFirst + 1, 0, 1, false, 5, 5);
+        c.Press(kFirst + 1, 0, 1, true, 6, 5), c.Press(kFirst + 1, 0, 1, false, 6, 5);
+        CHECK(x.Count("focus 2") == 1);   // (once)
+        // a press on a menu doesn't take the focus from its app's window
+        x.log.clear();
+        c.Press(kFirst, 1, 1, true, 30, 30), c.Press(kFirst, 1, 1, false, 30, 30);
+        CHECK(!x.Logged("focus 1") && !x.Logged("focus 9") && x.Logged("down 1"));
+        // the window we focused unmaps: the laser coming back focuses again, once it maps
+        x.log.clear();
+        c.On(Ev(Event::Unmapped, Win(2, Kind::Main)), 1);
+        c.On(Ev(Event::Mapped, Win(2, Kind::Main)), 2);
+        c.Point(kFirst + 1, 0, 7, 7);
+        CHECK(x.Before("focus 2", "at 7,7"));
+        // ...and when it goes, the next app pointed at
+        x.log.clear();
+        c.On(Ev(Event::Gone, Win(2, Kind::Main)), 3);
+        c.Point(kFirst, 0, 8, 8);
+        CHECK(x.Before("focus 1", "at 8,8"));
+        // the display went and came back: none focused by us there yet
+        c.Closed();
+        x.log.clear();
+        c.On(Ev(Event::Created, Win(3, Kind::Main)), 4), c.On(Ev(Event::Mapped, Win(3, Kind::Main)), 4);
+        c.Point(kFirst, 0, 1, 1);
+        CHECK(x.Logged("focus 3"));
+    }
     // --- panels and tags
     {
         FakeX x;

@@ -304,6 +304,7 @@ void SteamDashStep() {
                 Do(g_fleet.Closed());
                 if (g_on && u.why != "off") std::printf("Steam's windows: %s\n", u.why.c_str());
                 break;
+            case gsforward::Update::Note: std::printf("Steam's windows: %s\n", u.why.c_str()); break;
             case gsforward::Update::Window: {
                 const steamwin::Tracker *t = g_fleet.Find(u.event.win.id);
                 if (u.event.type == gsforward::Event::Retarget && t && t->Panel() && u.event.win.target != t->Panel())

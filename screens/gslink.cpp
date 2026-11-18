@@ -16,7 +16,7 @@ namespace gsforward {
 
 namespace {
 struct Send {
-    enum Type { Tag, Untag, Pointer, Button, Scroll, Key, Raise, Resize, Close } type = Close;
+    enum Type { Tag, Untag, Pointer, Button, Scroll, Key, Raise, Resize, Focus, Close } type = Close;
     uint32_t win = 0;
     uint64_t overlay = 0;
     int a = 0, b = 0;
@@ -46,7 +46,7 @@ struct AsyncLink::Shared {
         if (wake >= 0) (void)!write(wake, &one, sizeof one);
     }
     // What may be dropped with the queue full (a hung gamescope): moves, presses, the wheel. Never
-    // a release, a tag or an untag: a button or key left down, or a window on a gone overlay, stays so.
+    // a release, a tag, an untag or a focus: a button or key left down, or a window on a gone overlay, stays so.
     // A raise or a resize isn't dropped but takes the place of the last one queued (a resize: the
     // same window's), so the window raised last is the one on top, and the size the last asked for.
     static bool Droppable(const Send &s) {
@@ -78,7 +78,7 @@ struct AsyncLink::Shared {
         updates.push_back(std::move(u));
     }
 
-    static void Do(Link &link, const Send &s) {
+    void Do(Link &link, const Send &s) {
         switch (s.type) {
             case Send::Tag: link.Tag(s.win, s.overlay); break;
             case Send::Untag: link.Untag(s.win); break;
@@ -88,6 +88,13 @@ struct AsyncLink::Shared {
             case Send::Key: link.Key(s.win, uint8_t(s.a), uint16_t(s.b), s.down); break;
             case Send::Raise: link.Raise(s.win); break;
             case Send::Resize: link.Resize(s.win, s.a, s.b); break;
+            case Send::Focus:
+                if (std::string said = link.FocusSaying(s.win); !said.empty()) {
+                    Update u;
+                    u.type = Update::Note, u.why = std::move(said);
+                    Say(std::move(u));
+                }
+                break;
             case Send::Close: break;
         }
     }
@@ -238,5 +245,6 @@ void AsyncLink::Key(uint32_t win, uint8_t keycode, uint16_t state, bool down) {
 }
 void AsyncLink::Raise(uint32_t win) { d_->Push({Send::Raise, win}); }
 void AsyncLink::Resize(uint32_t win, int w, int h) { d_->Push({Send::Resize, win, 0, w, h}); }
+void AsyncLink::Focus(uint32_t win) { d_->Push({Send::Focus, win}); }
 
 }  // namespace gsforward

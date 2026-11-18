@@ -12,10 +12,14 @@
 // for a moment), and its menus, tooltips and dialogs overlays over it where the app put them.
 //
 // Input: the pointer through XTest, which on a gamescope Xwayland goes through gamescope's own
-// input socket (LIBEI_SOCKET) to the window gamescope gives the pointer: that reaches a tagged
-// window. Keys don't go that way: gamescope drops a tagged window from its focus list, so its
-// keyboard focus (where XTest keys, and a libei client's such as Frametop's VR keyboard, land)
-// is never on it. Keys go as synthetic events straight to the window instead: most apps take
+// input socket (LIBEI_SOCKET) to the window gamescope gives the pointer. That's the window
+// gamescope focused last, and gamescope drops a tagged window from its focus list: one that had
+// its focus keeps the pointer once tagged, but one tagged before it ever had it (as each is, before
+// it maps) gets none, and the laser's clicks went nowhere (Slay the Spire 2, 2026-11-18). So the
+// laser coming onto an app first, and a press on another one, hand it gamescope's focus first
+// (XSide::Focus: its tag off until gamescope names it focused, about 10 ms, then on again).
+// Keys don't go that way: gamescope's keyboard focus (where XTest keys, and a libei client's such
+// as Frametop's VR keyboard, land) isn't moved by it the same way (the spike's open question). Keys go as synthetic events straight to the window instead: most apps take
 // them; ones that refuse synthetic events (xterm by default, games reading raw input) don't.
 //
 // Two halves: the policy here (pure, tested by screens/tests/gsforward-test.cpp), and Link, the
@@ -148,6 +152,8 @@ struct XSide {
     virtual void Key(uint32_t win, uint8_t keycode, uint16_t state, bool down) = 0;
     virtual void Raise(uint32_t win) = 0;
     virtual void Resize(uint32_t win, int w, int h) = 0;
+    // gamescope's focus to a tagged window (see the top), so its pointer goes there.
+    virtual void Focus(uint32_t win) = 0;
 };
 
 // The connection, on the caller's thread: its replies wait for the X server.
@@ -183,6 +189,13 @@ public:
     void Key(uint32_t win, uint8_t keycode, uint16_t state, bool down) override;
     void Raise(uint32_t win) override;
     void Resize(uint32_t win, int w, int h) override;
+    void Focus(uint32_t win) override { (void)FocusSaying(win); }
+    // Focus, and what came of it for the log: how long gamescope took, or why it didn't. It reads
+    // gamescope's focus where gamescope writes it, GAMESCOPE_FOCUSED_WINDOW on the root of its first
+    // Xwayland (Steam's `:0`), over a second connection opened the first time. The tag is put back
+    // after kFocusWaitMs even when gamescope never names the window (it might have unmapped).
+    static constexpr int kFocusWaitMs = 250;
+    std::string FocusSaying(uint32_t win);
 
 private:
     struct Impl;

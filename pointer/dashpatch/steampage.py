@@ -13,7 +13,12 @@ left over the tiles the same way (user, 2026-11-18: "the resize overlay ... is s
 - the strip hidden while ft-screens holds Steam's window ("steamstrip 1" on @ft_dashpatch, again
   every second; a lease, so with ft-screens gone the strip comes back by itself), and
 - View in Theater, now from the grab bar menu of Frametop's Steam tile ("steamtheater"):
-  TO_THEATER, the same call as SteamVR's button.
+  TO_THEATER, the same call as SteamVR's button, and
+- Steam's tab in front ("steamtab"; TO_STEAM), when the dashboard opens over a game in SteamVR's
+  theater. SteamVR opens it on the game's tab then, and Steam paints its window only while its own
+  tab shows: Frametop's Steam tile was a black slab in front (user, 2026-11-18: "an invisible game
+  scope window that is taking over the forward spot"). The game stays in the theater (testbench,
+  2026-11-18), and its tab is one click away on SteamVR's bar.
 
 The strip is hidden with a style rule, not by changing SteamVR's state: its panel stays where it
 is, drawing nothing, and the laser goes through it (testbench, 2026-11-18: clicks there reached
@@ -57,7 +62,24 @@ TO_THEATER = """(() => {
   return "no Steam page in SteamVR's dashboard";
 })()""" % STEAM_PAGE
 
+# Steam's tab in front, if the dashboard is open on a game's tab (only that: a tab the user picked
+# is theirs). SteamVR's own switch (0: shows the tab, doesn't open the dashboard).
+TO_STEAM = """(() => {
+  const d = window.DashboardStore, dash = window.Dashboard;
+  const page = d && d.activeFrame && d.activeFrame.activePage;
+  const key = (page && page.summonOverlayKey) || '';
+  if (!d || !d.isFullyVisible) return 'no dashboard open';
+  if (!key.startsWith('valve.steam.desktopgame.')) return 'left on ' + (key || 'no tab');
+  if (!dash || !dash.showOrHideDashboardOrFrameInternal) return 'no way to switch tabs in this SteamVR';
+  dash.showOrHideDashboardOrFrameInternal({dashboard_visibility_action: 0, target: {overlay_key: '%s'},
+    vrlink_request_split: 0, relatch_dashboard: {condition: 0, deadzone: 8}, reason: 'Frametop Steam tile'});
+  return 'from ' + key;
+})()""" % STEAM_PAGE
+
 THEATER_ASK = b"steamtheater"
+TAB_ASK = b"steamtab"
+# ft-screens' one-shot asks: what the log calls each, and its expression.
+ASKS = {THEATER_ASK: ("View in Theater", TO_THEATER), TAB_ASK: ("Steam's tab", TO_STEAM)}
 
 
 def expression(hide):

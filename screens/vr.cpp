@@ -944,8 +944,10 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
     return m;
 }
 
-// (the row's middle: under the screen by a gap and the taller of the bar's half and a button's, so grown
-// buttons (a hand near: ChromeSize) don't overlap the screen; user, 2026-10-11)
+// (the row's middle: in from the screen's edge by a gap and the taller of the bar's half and a button's,
+// so grown buttons (a hand near: ChromeSize) stay inside it. Until 2026-11-18 the row hung under the
+// screen so they didn't overlap it (user, 2026-10-11); now it's inside, as a bar between two stacked
+// tiles was hard to grab: barside.h)
 // A canvas centered at the screen corner. Only its padded corner-stroke mask is
 // interactive; the window and its safety margin are excluded from every primitive.
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
@@ -998,16 +1000,17 @@ void PaintResizeMask(Screen &s) {
     }
     s.resizePaintedVersion = g_resizeVersion, s.resizePaintedX = s.cornerX, s.resizePaintedY = s.cornerY;
 }
-// The bar row's line out from the panel's edge (barhit::Below), on the edge the panel's bar is on (barside.h).
-double BarOut(const Screen &s) { return barhit::Below(s.chrome, s.grip, g_barPaddingY); }
-barside::UV BarSpot(const Screen &s, double along) { return barside::Place(s.barSide, s.metres, s.heightMetres(), BarOut(s), along); }
+// The bar row's line in from the panel's edge (barhit::Below's distance, the row clear of the edge by
+// a gap), on the edge the panel's bar is on (barside.h).
+double BarIn(const Screen &s) { return barhit::Below(s.chrome, s.grip, g_barPaddingY); }
+barside::UV BarSpot(const Screen &s, double along) { return barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), along); }
 Mat BarOffset(const Screen &s) {
     const barside::UV c = BarSpot(s, 0);
     return OnSurface(s, c.u, c.v, 0.003);
 }
 
-// Put the bar, the curve button, and the corner tab under the screen (same parent: the
-// room or the controller), sized for the screen and its distance, and on its surface.
+// Put the bar, the curve button, and the corner tab on the screen, inside its bottom edge (same parent:
+// the room or the controller), sized for the screen and its distance, and on its surface.
 // Where each control sits, relative to the screen: bar, curve, roll, resize tab, a
 // floating window's dock and close buttons (left of the bar), and a desktop screen's reset,
 // pin and layout buttons (left of the bar, where a floating window has its dock and close buttons;
@@ -3254,12 +3257,11 @@ void UpdateAim() {
             continue;
         }
         const double m = s.grip * (g_tick < s.aimUntil ? 2.0 : 0.25), h = s.heightMetres();
-        // The panel and its controls: the bar row along its edge (under it unless moved: barside.h), the
-        // resize tab off its corner.
+        // The panel and its controls: the bar row inside its edge (barside.h), the resize tab off its corner.
         const double gap = std::max(s.chrome * 0.06, s.grip), reach = barhit::Width(s.chrome, g_barPaddingX) / 2 + gap * 2 + s.grip * 2;
         const double hw = s.metres / 2 + HandleSize(s), hh = h / 2 + HandleSize(s);
         const barside::Box box = barside::Union({-hw, hw, -hh, hh},
-            barside::Row(s.barSide, s.metres, h, BarOut(s), -reach, reach, std::max(s.grip, barhit::Height(s.chrome, g_barPaddingY) / 2)));
+            barside::Row(s.barSide, s.metres, h, BarIn(s), -reach, reach, std::max(s.grip, barhit::Height(s.chrome, g_barPaddingY) / 2)));
         for (const Mat &l : lasers) {
             double u, v;
             if (!RayOnSurface(s, p, l, &u, &v)) continue;
@@ -4687,7 +4689,7 @@ void HideResetAsk() {
     g_resetAsk.panel = -1, g_resetAsk.shownMs = -1;
 }
 
-// Under the reset button, a button's height lower, and at least a finger's size.
+// Beside the reset button, toward the panel's middle, and at least a finger's size.
 bool PlaceResetAsk(Screen &s) {
     Mat p, head;
     if (!ScreenPose(s, &p)) return false;
@@ -4696,10 +4698,8 @@ bool PlaceResetAsk(Screen &s) {
     g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
     double u[kControls], v[kControls];
     ControlUV(s, u, v);
-    // (under a bottom row, as it always was; beside the button over the panel on the other edges,
-    // where the next tile would hide it: barside::MenuAt)
-    const barside::UV at = barside::MenuAt(s.barSide, {u[6], v[6]}, s.grip / 2, std::max(s.grip, s.chrome * 0.06), g_resetAsk.w,
-                                           g_resetAsk.h, s.barSide != barside::Side::Bottom);
+    // (beside the button, toward the panel's middle: barside::MenuAt)
+    const barside::UV at = barside::MenuAt(s.barSide, {u[6], v[6]}, s.grip / 2, std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
     g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, 0.004));
     const vr::VROverlayHandle_t o = g_resetAsk.overlay;
     vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));

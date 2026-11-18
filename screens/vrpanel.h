@@ -330,7 +330,7 @@ bool CarryClick(const vr::VREvent_t &ev);
 void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *), void *data);
 void FillRound(std::vector<uint8_t> &px, int w, int h, int x0, int y0, int x1, int y1, int r, const uint8_t c[4]);
 double Apart(const Mat &a, const Mat &b);
-double BarOut(const Screen &s);   // the bar row's line, metres out from the panel's edge
+double BarIn(const Screen &s);    // the bar row's line, metres in from the panel's edge
 extern double g_barPaddingX, g_barPaddingY;   // the grab bar's hit padding (GRAB_BAR_PADDING_X/Y, cm)
 
 // ---------------------------------------------------------------- vrtiles.cpp's

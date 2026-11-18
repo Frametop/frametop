@@ -4729,6 +4729,47 @@ void TestRollButton() {
                 r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
 }
 
+// The bar row inside the panel's edge (2026-11-18, barside.h): a poke on a button or the bar over the
+// content presses the control, not the desktop under it; a poke clear of them is still the desktop's.
+// A bar down a side (standing on end) can be grabbed along its length.
+void TestControlsInside() {
+    Panel p = LivePanel();
+    const double chrome = 0.057, inY = -(p.height / 2 - (chrome * 0.06 + chrome * 12 / 256));
+    for (Spot &c : p.controls)
+        if (c.kind != Control::Tab) c.v = inY;
+    double x, y;
+    CHECK(ToBuffer(p, p.controls[1].u, inY, &x, &y));   // (the buttons are over the content now)
+    const Spot curve = p.controls[1], bar = p.controls[0];
+    for (const auto &[u, want] : {std::pair{curve.u + 0.002, Control::Curve}, std::pair{bar.u + 0.01, Control::Bar}}) {
+        Rig r;
+        r.panels = {p};
+        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(u, inY, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 0);
+        if (want != Control::Bar) CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == want);
+        std::printf("controls inside: a poke on %s over the content: %d control(s), %d desktop press(es)\n", ControlName(want),
+                    r.Count(Event::Control), r.Count(Event::Press));
+    }
+    {
+        Rig r;
+        r.panels = {p};
+        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(0.1, 0.05, mm / 1000.0)});
+        CHECK(r.Count(Event::Press) == 1 && r.Count(Event::Control) == 0);
+    }
+    // down the right side: the bar's long half up and down (InputPanel swaps them). A far panel's 30 cm
+    // bar, grabbed 12 cm off its middle (past barReach from the middle, on the bar itself)
+    Panel side = TestPanel();
+    const double u = side.width / 2 - 0.04, far = 0.3;
+    side.controls = {{Control::Bar, u, 0, far * 12 / 256, far / 2}};
+    Params k;
+    int sx, sy;
+    double e;
+    CHECK(GrabZone(side, {u, 0.12, 0.0}, k, &sx, &sy, &e) == Zone::Bar && e <= 0);
+    CHECK(GrabZone(side, {u, -0.12, 0.0}, k, &sx, &sy, &e) == Zone::Bar && e <= 0);
+    GrabZone(side, {u - 0.1, 0.0, 0.0}, k, &sx, &sy, &e);
+    CHECK(e > 0);   // (10 cm in from it: out of every zone)
+    std::printf("controls inside: a side bar grabbed 12 cm off its middle: %s\n", ZoneName(GrabZone(side, {u, 0.12, 0.0}, k, &sx, &sy, &e)));
+}
+
 // Buttons for hands: the nearest control wins, round ones have a bigger hit area, a pinch presses them.
 void TestButtons() {
     const Panel p = LivePanel();
@@ -5691,6 +5732,7 @@ int main(int argc, char **argv) {
     TestPinButton();
     TestAnchorLost();
     TestRollButton();
+    TestControlsInside();
     TestTouchDot();
     TestGuides();
     TestFistSettle();

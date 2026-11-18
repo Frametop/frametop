@@ -46,17 +46,19 @@ struct UV {
 };
 
 // A spot in the bar's row: `along` metres along the row from the bar's middle (positive: the side
-// the curve and roll buttons are on; negative: dock, close, reset, pin, layout and anchor), `out`
-// metres out from the panel's edge, on a panel `w` wide and `h` high.
-//   Bottom and Top: the row under or over the panel, as it always was under it.
+// the curve and roll buttons are on; negative: dock, close, reset, pin, layout and anchor), `in`
+// metres in from the panel's edge, on a panel `w` wide and `h` high. The row sits inside the panel
+// (user, 2026-11-18: "the overlay should be inside of the display": past the edge, a bar between two
+// stacked tiles was hard to grab), over its content while it shows.
+//   Bottom and Top: the row along the bottom or the top edge.
 //   Left and Right: the row turned down the side; what sat left of the bar goes above it, the curve
 // and roll buttons below.
-inline UV Place(Side s, double w, double h, double out, double along) {
+inline UV Place(Side s, double w, double h, double in, double along) {
     switch (s) {
-        case Side::Top: return {along, h / 2 + out};
-        case Side::Left: return {-(w / 2 + out), -along};
-        case Side::Right: return {w / 2 + out, -along};
-        default: return {along, -(h / 2 + out)};
+        case Side::Top: return {along, h / 2 - in};
+        case Side::Left: return {-(w / 2 - in), -along};
+        case Side::Right: return {w / 2 - in, -along};
+        default: return {along, -(h / 2 - in)};
     }
 }
 
@@ -80,8 +82,8 @@ struct Box {
 };
 
 // The row from `alongLo` to `alongHi`, `half` metres either side of its line: a box on the panel's surface.
-inline Box Row(Side s, double w, double h, double out, double alongLo, double alongHi, double half) {
-    const UV a = Place(s, w, h, out, alongLo), b = Place(s, w, h, out, alongHi);
+inline Box Row(Side s, double w, double h, double in, double alongLo, double alongHi, double half) {
+    const UV a = Place(s, w, h, in, alongLo), b = Place(s, w, h, in, alongHi);
     return {std::min(a.u, b.u) - half, std::max(a.u, b.u) + half, std::min(a.v, b.v) - half, std::max(a.v, b.v) + half};
 }
 inline Box Union(const Box &a, const Box &b) {
@@ -101,15 +103,15 @@ inline int RowAt(double x, double yUp) {
     return std::clamp(int(y / kRowH), 0, kSides - 1);
 }
 
-// Its centre on the panel's surface, beside the bar at the clicked spot, a gap clear of it: out past
-// the edge (`inward` false) or over the panel itself (`inward` true). Past a side or top edge is the
-// gap to the next tile, and the panel's plane runs on behind that tile (the tiles curve round the
-// head), so a popup there is hidden; over its own panel nothing covers it.
+// Its centre on the panel's surface: beside the bar at the clicked spot, a gap clear of it, toward
+// the panel's middle. Past the edge is the gap to the next tile, and the panel's plane runs on behind
+// that tile (the tiles curve round the head), so a popup there was hidden; over its own panel
+// nothing covers it.
 // `at`: the clicked spot on the bar; `barHalf`: the bar's half thickness; mw, mh: its size.
-inline UV MenuAt(Side s, UV at, double barHalf, double gap, double mw, double mh, bool inward) {
+inline UV MenuAt(Side s, UV at, double barHalf, double gap, double mw, double mh) {
     const UV o = Outward(s);
-    const double reach = (barHalf + gap + (Vertical(s) ? mw : mh) / 2) * (inward ? -1 : 1);
-    return {at.u + o.u * reach, at.v + o.v * reach};
+    const double reach = barHalf + gap + (Vertical(s) ? mw : mh) / 2;
+    return {at.u - o.u * reach, at.v - o.v * reach};
 }
 
 }  // namespace barside

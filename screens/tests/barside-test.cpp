@@ -21,12 +21,16 @@ int main() {
     check("only the sides stand the bar on end", !barside::Vertical(Side::Bottom) && !barside::Vertical(Side::Top) &&
           barside::Vertical(Side::Left) && barside::Vertical(Side::Right));
 
-    const double w = 1.2, h = 0.675, out = 0.05;
-    auto at = [&](Side s, double along) { return barside::Place(s, w, h, out, along); };
-    check("bottom: the row under the panel, as before", near(at(Side::Bottom, 0.1).u, 0.1) && near(at(Side::Bottom, 0.1).v, -(h / 2 + out)));
-    check("top: over it, the same order", near(at(Side::Top, 0.1).u, 0.1) && near(at(Side::Top, 0.1).v, h / 2 + out));
-    check("left: down its left side", near(at(Side::Left, 0).u, -(w / 2 + out)) && near(at(Side::Left, 0).v, 0));
-    check("right: down its right side", near(at(Side::Right, 0).u, w / 2 + out) && near(at(Side::Right, 0).v, 0));
+    const double w = 1.2, h = 0.675, in = 0.05;
+    auto at = [&](Side s, double along) { return barside::Place(s, w, h, in, along); };
+    check("bottom: the row inside the bottom edge", near(at(Side::Bottom, 0.1).u, 0.1) && near(at(Side::Bottom, 0.1).v, -(h / 2 - in)));
+    check("top: inside the top edge, the same order", near(at(Side::Top, 0.1).u, 0.1) && near(at(Side::Top, 0.1).v, h / 2 - in));
+    check("left: down inside its left edge", near(at(Side::Left, 0).u, -(w / 2 - in)) && near(at(Side::Left, 0).v, 0));
+    check("right: down inside its right edge", near(at(Side::Right, 0).u, w / 2 - in) && near(at(Side::Right, 0).v, 0));
+    for (Side s : barside::kAll) {
+        const auto c = at(s, 0);
+        check("every edge's row is on the panel", std::fabs(c.u) < w / 2 && std::fabs(c.v) < h / 2);
+    }
     check("a side: what sat left of the bar goes above it", at(Side::Left, -0.1).v > 0 && at(Side::Right, -0.1).v > 0);
     check("a side: curve and roll go below it", at(Side::Left, 0.1).v < 0 && at(Side::Right, 0.1).v < 0);
 
@@ -36,14 +40,16 @@ int main() {
         const auto a = at(s, 0), b = at(s, 1);
         check("the bar's mouse x runs along the row", near(std::cos(r), b.u - a.u) && near(std::sin(r), b.v - a.v));
         const auto o = barside::Outward(s);
-        check("outward points away from the panel", o.u * a.u + o.v * a.v > 0);
+        check("outward points from the middle to that edge", o.u * a.u + o.v * a.v > 0);
     }
 
-    const auto row = barside::Row(Side::Right, w, h, out, -0.3, 0.2, 0.02);
-    check("a side's row box stands on end", near(row.u0, w / 2 + out - 0.02) && near(row.u1, w / 2 + out + 0.02) &&
+    const auto row = barside::Row(Side::Right, w, h, in, -0.3, 0.2, 0.02);
+    check("a side's row box stands on end", near(row.u0, w / 2 - in - 0.02) && near(row.u1, w / 2 - in + 0.02) &&
           near(row.v0, -0.22) && near(row.v1, 0.32));
     const auto both = barside::Union(row, {-0.6, 0.6, -0.3, 0.3});
-    check("the union holds the panel and the row", both.Contains(0, 0) && both.Contains(w / 2 + out, 0.31) && !both.Contains(0.7, 0.4));
+    const auto tall = barside::Union(barside::Row(Side::Bottom, w, h, in, -0.1, 0.1, 0.02), {-0.6, 0.6, -0.3, 0.3});
+    check("the union holds the panel and the row", both.Contains(0, 0) && both.Contains(w / 2 - in, 0.31) && !both.Contains(0.7, 0.4) &&
+          tall.Contains(0, -0.3) && !tall.Contains(0, -0.34));
 
     check("the first row is at the top", barside::RowAt(10, barside::kMenuH - barside::kMenuPad - 1) == 0);
     check("the last row is at the bottom", barside::RowAt(10, barside::kMenuPad + 1) == barside::kSides - 1);
@@ -55,17 +61,18 @@ int main() {
     }
 
     const barside::UV click = at(Side::Bottom, 0.05);
-    const auto m = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1, false);
-    check("bottom, out: it hangs under the bar at the click", near(m.u, 0.05) && near(m.v, click.v - 0.02 - 0.01 - 0.05));
-    const auto mi = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1, true);
-    check("bottom, in: it sits over the panel above the bar", near(mi.u, 0.05) && near(mi.v, click.v + 0.02 + 0.01 + 0.05) && mi.v > -h / 2);
-    const auto r = barside::MenuAt(Side::Right, at(Side::Right, 0), 0.02, 0.01, 0.12, 0.1, false);
-    check("right, out: right of the bar, clear of it", near(r.u, w / 2 + out + 0.02 + 0.01 + 0.06) && near(r.v, 0));
-    const auto ri = barside::MenuAt(Side::Right, at(Side::Right, 0.1), 0.02, 0.01, 0.12, 0.1, true);
-    check("right, in: over the panel left of the bar, at the click's height",
-          near(ri.u, w / 2 + out - 0.02 - 0.01 - 0.06) && ri.u < w / 2 && near(ri.v, -0.1));
-    const auto li = barside::MenuAt(Side::Left, at(Side::Left, 0), 0.02, 0.01, 0.12, 0.1, true);
-    check("left, in: over the panel right of the bar", li.u > -w / 2 && li.u - 0.06 > -(w / 2 + out) + 0.02);
+    const auto m = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1);
+    check("bottom: the menu sits above the bar at the click", near(m.u, 0.05) && near(m.v, click.v + 0.02 + 0.01 + 0.05));
+    const auto t = barside::MenuAt(Side::Top, at(Side::Top, 0), 0.02, 0.01, 0.12, 0.1);
+    check("top: under the bar", near(t.v, h / 2 - in - 0.02 - 0.01 - 0.05));
+    const auto r = barside::MenuAt(Side::Right, at(Side::Right, 0.1), 0.02, 0.01, 0.12, 0.1);
+    check("right: left of the bar, at the click's height", near(r.u, w / 2 - in - 0.02 - 0.01 - 0.06) && near(r.v, -0.1));
+    const auto l = barside::MenuAt(Side::Left, at(Side::Left, 0), 0.02, 0.01, 0.12, 0.1);
+    check("left: right of the bar", near(l.u, -(w / 2 - in) + 0.02 + 0.01 + 0.06));
+    for (Side s : barside::kAll) {
+        const auto c = barside::MenuAt(s, at(s, 0), 0.02, 0.01, 0.12, 0.1);
+        check("every edge's menu is on its own panel", std::fabs(c.u) + 0.06 < w / 2 && std::fabs(c.v) + 0.05 < h / 2);
+    }
 
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed != 0;

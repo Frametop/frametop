@@ -32,7 +32,7 @@ Mat g_tileGroupRel = Identity();          // the dashboard's frame (DashFrame) -
 bool g_tileGroupSet = false;              // ...since the dashboard was first seen with a panel anchored
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
 bool g_dashWasUp = false;
-bool g_tileStayDefault = false;           // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
+bool g_tileStayTheater = false;           // DASH_TILE_STAY_THEATER: staying ones stay over a game in SteamVR's theater too
 // The wall: at Steam's bar (DASH_TILE_AT_BAR, dashtiles.h's AtBar), or where DASH_TILE_RADIUS and
 // DASH_TILE_DESK_DEG put it; which one the group has now (the last Regroup's: the bar may not be placed).
 struct Wall {
@@ -248,8 +248,12 @@ bool SetTileSetting(const char *name, double value) {
 
 bool TileAnchored(int i) { return g_tiles.Anchored(i); }
 bool TileTiled(int i) { return g_tiles.Tiled(i); }
-bool TileStayDefault() { return g_tileStayDefault; }
-void SetTileStayDefault(bool on) { g_tileStayDefault = on; }
+void SetTileStayDefault(bool on) {
+    if (on == g_tiles.stayDefault) return;
+    g_tiles.stayDefault = on;   // (each one that follows it: shown or hidden next tick, its anchor button lit for it)
+    for (auto &[i, s] : g_screens) LightAnchor(s);
+}
+void SetTileStayTheater(bool on) { g_tileStayTheater = on; }
 void SetTileAtBar(bool on) {
     if (on == g_tileAtBar) return;
     g_tileAtBar = on;
@@ -259,7 +263,7 @@ namespace {
 std::string TileLabel(int i) { return "screen " + std::to_string(i + 1); }
 }  // namespace
 
-void TileAnchor(int i, bool stay, const char *by, int leftOf) {
+void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     auto it = g_screens.find(i);
     if (it == g_screens.end() || g_tiles.Anchored(i)) return;
     EndDrag(it->second);
@@ -270,7 +274,7 @@ void TileAnchor(int i, bool stay, const char *by, int leftOf) {
     if (!g_tileGroupSet) g_tileRegroup = true;
     RetileDash();
     RememberTiles();
-    std::printf("%s: anchored to the dashboard%s (%s)%s\n", TileLabel(i).c_str(), stay ? ", staying shown" : "", by,
+    std::printf("%s: anchored to the dashboard%s (%s)%s\n", TileLabel(i).c_str(), TileStays(it->second, i) ? ", staying shown" : "", by,
                 g_tileGroupSet ? "" : "; it goes on when the dashboard opens");
 }
 void TileUnanchor(int i, const char *by) {
@@ -289,8 +293,12 @@ void TileUnanchor(int i, const char *by) {
 }
 namespace {
 void TileStay(int i, bool on, const char *by) {
+    if (g_screens[i].steamDash) {   // (Steam paints its window only with its tab showing: black with the dashboard closed)
+        std::printf("%s: Steam's window shows only with the dashboard (%s)\n", TileLabel(i).c_str(), by);
+        return;
+    }
     if (!g_tiles.Anchored(i)) {
-        if (on) TileAnchor(i, true, by);
+        if (on) TileAnchor(i, g_tiles.stayDefault ? dashtiles::Stay::Default : dashtiles::Stay::On, by);
         return;
     }
     if (g_tiles.Stay(i) == on) return;
@@ -335,19 +343,26 @@ void TileGone(int i) {
     if (g_tiles.Unanchor(i)) RetileDash(), RememberTiles();
 }
 
+// Stays shown with the dashboard closed: as set for it or as DASH_TILE_STAY says (on unless set:
+// user, 2026-11-18, a click in the room closes the dashboard and the panels went with it), never
+// Steam's own window (vrsteamwin.cpp: Steam paints it only while its tab shows).
+bool TileStays(const Screen &s, int i) { return !s.steamDash && g_tiles.Stay(i); }
+
 // Anchored panels (dashtiles.h): shown with the dashboard, or always when they stay; the hide key
 // (the manual switch in "always") and a panel's own conceal still hide them. The visibility mode
 // is the room's panels' (user, 2026-11-16).
 // While SteamVR's theater shows Steam's page the tiles step aside, as the rest of the dashboard
 // does then (user, 2026-11-18: "Hide while theater"); they're back when it docks again. A game lent
-// to the theater from its panel (View in Theater) hides only the staying ones: opening the dashboard
-// over the game shows the tiles with it, Steam's among them (user, 2026-11-18: "even if I open the
-// dashboard, our applications don't show up").
+// to the theater from its panel (View in Theater) hides only the staying ones, unless
+// DASH_TILE_STAY_THEATER (off unless set: user, 2026-11-18, "its own separate toggle"): opening the
+// dashboard over the game shows the tiles with it, Steam's among them (user, 2026-11-18: "even if I
+// open the dashboard, our applications don't show up").
 bool TileShown(const Screen &s, int i, bool dashUp) {
     const bool hiddenByKey = EffectiveMode() == Mode::Always && g_manual;
-    if ((SteamDashInTheater() || (GsInTheater() && !dashUp)) && s.drag == Drag::None) return false;
+    const bool gameTheater = GsInTheater() && !dashUp && !g_tileStayTheater;
+    if ((SteamDashInTheater() || gameTheater) && s.drag == Drag::None) return false;
     return !g_paused && s.shown && !s.alone && !hiddenByKey &&
-           (g_tiles.Stay(i) || dashUp || s.drag != Drag::None || i == PadPanel());
+           (TileStays(s, i) || dashUp || s.drag != Drag::None || i == PadPanel());
 }
 
 // Let go after a move: where on the grid it goes, or torn off as a satellite where it is.
@@ -546,13 +561,13 @@ void AnchorButtonUp(int i, const char *by) {
     it->second.anchorDownMs = -1;
     if (longPress) TileStay(i, !g_tiles.Stay(i), by);
     else if (g_tiles.Anchored(i)) TileUnanchor(i, by);
-    else TileAnchor(i, g_tileStayDefault, by);
+    else TileAnchor(i, dashtiles::Stay::Default, by);
 }
 
 // The anchor button blue while anchored, ringed while it stays shown too.
 void LightAnchor(Screen &s) {
     const int i = ScreenIndexOf(s);
-    const int lit = !g_tiles.Anchored(i) ? 0 : g_tiles.Stay(i) ? 2 : 1;
+    const int lit = !g_tiles.Anchored(i) ? 0 : TileStays(s, i) ? 2 : 1;
     if (s.anchorButton == vr::k_ulOverlayHandleInvalid || s.anchorLit == lit) return;
     s.anchorLit = lit;
     static const std::vector<uint8_t> tex[3] = {AnchorTexture(64, 0), AnchorTexture(64, 1), AnchorTexture(64, 2)};
@@ -580,7 +595,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         const int to = setting(parsed.hand, anchor ? g_tiles.Anchored(i) : g_tiles.Stay(i));
         if (to < 0) return (void)std::snprintf(reply, size, "error on, off or toggle");
         if (!anchor) TileStay(i, to, "command");
-        else if (to) TileAnchor(i, g_tileStayDefault, "command");
+        else if (to) TileAnchor(i, dashtiles::Stay::Default, "command");
         else TileUnanchor(i, "command");
         std::snprintf(reply, size, "ok %s %s", anchor ? "anchored" : "stay", to ? "on" : "off");
         return;

@@ -46,7 +46,8 @@ class DashTiles(unittest.TestCase):
             return f.read()
 
     def test_defaults(self):
-        self.assertFalse(self.t.stay)
+        self.assertTrue(self.t.stay)
+        self.assertFalse(self.t.stayTheater)
         self.assertEqual((self.t.deskDeg, self.t.radius, self.t.pxPerDeg, self.t.wallDeg), (-12, 2.7, 48, 120))
 
     def test_stay_written_and_sent(self):
@@ -56,6 +57,11 @@ class DashTiles(unittest.TestCase):
         self.assertEqual(self.asked[-1], "handsetting DASH_TILE_STAY 1")
         self.t.setStay(False)
         self.assertEqual(self.asked[-1], "handsetting DASH_TILE_STAY 0")
+        self.assertFalse(self.t.stay)
+        self.t.setStayTheater(True)
+        self.assertIn("DASH_TILE_STAY_THEATER=1", self.conf())
+        self.assertTrue(self.t.stayTheater)
+        self.assertEqual(self.asked[-1], "handsetting DASH_TILE_STAY_THEATER 1")
         self.assertIn("# mine", self.conf())
 
     def test_gamescope_apps_on_unless_off(self):

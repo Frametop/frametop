@@ -1519,9 +1519,16 @@ Item {
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Dashboard tiles" }
                     Controls.Switch {
                         Kirigami.FormData.label: "Stay visible:"
-                        text: "Panels anchored from now on stay with the dashboard closed"
+                        text: "Anchored panels stay with the dashboard closed (a long press on a panel's anchor sets it the other way)"
                         checked: backend.dashTiles.stay
                         onToggled: backend.dashTiles.setStay(checked)
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "In the theater:"
+                        text: "...and over a game in SteamVR's theater with the dashboard closed"
+                        enabled: backend.dashTiles.stay
+                        checked: backend.dashTiles.stayTheater
+                        onToggled: backend.dashTiles.setStayTheater(checked)
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "Dashboard apps:"

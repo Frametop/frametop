@@ -6,8 +6,9 @@
 // Anchored (user, 2026-11-16): a panel rides with the dashboard. Dragged on the grid, it moves to
 // where it's let go; pulled well off it, it tears off and stays anchored as a satellite at its own
 // pose in the group's frame (it comes along when the dashboard opens somewhere else) until its
-// anchor is turned off. Anchored panels show only with the dashboard unless they "stay" (the
-// anchor button's long press). Each app or display remembers what it was last: anchored or not,
+// anchor is turned off. Anchored panels stay shown with the dashboard closed as DASH_TILE_STAY says
+// (`stayDefault`; on unless set, user 2026-11-18: a click in the room closes the dashboard), unless
+// the anchor button's long press set one the other way. Each app or display remembers what it was last: anchored or not,
 // its place on the grid or as a satellite, and whether it stays, for the next time it opens.
 //
 // The group frame: at your head when the dashboard opened, level, -Z toward Steam's bar (AtBar) or the
@@ -33,7 +34,7 @@
 namespace dashtiles {
 
 struct Spot {
-    bool stay = false;        // shown with the dashboard closed too
+    Stay stay = Stay::Default;   // shown with the dashboard closed too (tilestate.h)
     bool satellite = false;   // off the grid, at `rel`
     double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // a satellite's: group frame -> panel
 };
@@ -126,12 +127,15 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
 class Board {
 public:
     tiling::Params params;
+    bool stayDefault = false;   // DASH_TILE_STAY: a panel whose stay is Default stays shown
 
     bool Anchored(int id) const { return spots_.count(id) != 0; }
     bool Tiled(int id) const { return grid_.Has(id); }
+    // Shown with the dashboard closed: as set for it, else as stayDefault says.
     bool Stay(int id) const {
         const auto it = spots_.find(id);
-        return it != spots_.end() && it->second.stay;
+        if (it == spots_.end()) return false;
+        return it->second.stay == dashtiles::Stay::Default ? stayDefault : it->second.stay == dashtiles::Stay::On;
     }
     bool Satellite(int id) const {
         const auto it = spots_.find(id);
@@ -152,7 +156,7 @@ public:
     // strip's end that brings its middle nearer in front of you, the left one when Steam's slot has
     // pushed it right). On a full desk (OnTopOf, with its `info`): on top of the lowest column.
     // With `leftOf` tiled: a column of its own just left of its.
-    void Anchor(int id, int focused, bool stay, int leftOf = -1, const Info *info = nullptr) {
+    void Anchor(int id, int focused, dashtiles::Stay stay, int leftOf = -1, const Info *info = nullptr) {
         if (Anchored(id)) return;
         spots_[id].stay = stay;
         if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
@@ -168,10 +172,13 @@ public:
         grid_.Remove(id);
         return spots_.erase(id) != 0;
     }
+    // Shown with the dashboard closed or not, set for it: as the default is, it goes back to
+    // following the default (so turning DASH_TILE_STAY over turns it over too).
     void SetStay(int id, bool on) {
         if (!Anchored(id)) return;
-        spots_[id].stay = on;
-        batch_.SetStay(id, on);
+        const dashtiles::Stay stay = on == stayDefault ? dashtiles::Stay::Default : on ? dashtiles::Stay::On : dashtiles::Stay::Off;
+        spots_[id].stay = stay;
+        batch_.SetStay(id, stay);
     }
     // Off the grid, a satellite at `rel` (the group frame's -> the panel's).
     void TearOff(int id, const double rel[3][4]) {

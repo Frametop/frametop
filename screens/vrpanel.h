@@ -354,11 +354,12 @@ void SaveTileMemoryDue();   // on the tick: written once it's 2 s after a change
 void FlushTileMemory();     // stopping: a change not written yet, written now
 bool TileAnchored(int i);
 bool TileTiled(int i);
-bool TileStayDefault();   // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
-void SetTileStayDefault(bool on);
+void SetTileStayDefault(bool on);   // DASH_TILE_STAY: anchored panels stay shown with the dashboard closed (unless set per panel)
+void SetTileStayTheater(bool on);   // DASH_TILE_STAY_THEATER: ...over a game in SteamVR's theater too
+bool TileStays(const Screen &s, int i);   // shown with the dashboard closed
 void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (dashtiles.h's AtBar), else as set
 void RetileDash();
-void TileAnchor(int i, bool stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
+void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
 void TileKnown(int i, const std::string &key);
 void TileGone(int i);

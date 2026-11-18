@@ -6,7 +6,7 @@
 //
 // So the menu's panel shows only the part Steam draws (its page tells us: steamcdp's AskDrawn),
 // flush left of the page's panel at the page's density, its middle level with the page's (the
-// crop sliding there: Slide; shut at once when the laser leaves, not when Steam shuts). It moves
+// crop sliding there: Slide; open and shut once Steam has: Goal). It moves
 // with the page, the tiles count it in the page's width (the width it has with nobody on it, so
 // its labels opening don't move the tiles), and it has no controls of its own.
 //
@@ -31,6 +31,19 @@ inline bool operator!=(const Rect &a, const Rect &b) { return !(a == b); }
 // retiled to its open width and it slid open again).
 inline bool NewRest(const Rect &drawn, const Rect &rest, const Rect &atLeave) {
     return drawn != rest && !(rest.w > 0 && atLeave.w > rest.w && drawn == atLeave);
+}
+
+// The crop to slide to: what Steam's menu draws while the laser's on it (open once Steam has
+// opened), and after the laser left until Steam has shut its labels too, so its icons are back in
+// the strip before the crop closes in on them (user, 2026-11-18: shut at once, the crop showed the
+// blank end of the labels until Steam drew the icons). At most kShutWaitMs after it left: then the
+// rest whatever Steam draws. `sinceLeftMs`: how long since the laser left it.
+constexpr int64_t kShutWaitMs = 2500;
+inline bool Shutting(const Rect &drawn, const Rect &rest, int64_t sinceLeftMs) {
+    return rest.w > 0 && drawn.w > rest.w && sinceLeftMs < kShutWaitMs;
+}
+inline Rect Goal(bool on, const Rect &drawn, const Rect &rest, int64_t sinceLeftMs) {
+    return on || rest.w <= 0 || Shutting(drawn, rest, sinceLeftMs) ? drawn : rest;
 }
 
 // The window pixels of a w x h window that CSS bounds l, t, r, b (at pixel ratio dpr) cover,

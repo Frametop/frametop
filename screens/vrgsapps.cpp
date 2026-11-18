@@ -89,7 +89,7 @@ public:
         const std::string key = w.key.empty() ? "" : dashtiles::Memory::Clean(w.key);
         const bool known = !key.empty() && !g_tileMemory.Get(key).empty();
         if (!key.empty()) TileKnown(index, w.key);
-        if (!known && !s.gsSeen) TileAnchor(index, true, "a gamescope app");
+        if (!known && !s.gsSeen) TileAnchor(index, dashtiles::Stay::On, "a gamescope app");
         std::printf("screen %d: %s (%s, window 0x%x), a gamescope app%s\n", index + 1, w.title.c_str(),
                     key.empty() ? "no app id" : key.c_str(), w.id, s.gsSeen ? ", mapped again" : "");
         s.gsSeen = true;

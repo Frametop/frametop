@@ -114,7 +114,7 @@ void ShowTile(const steamwin::Spec &spec, const gsforward::Window &w) {
     if (s.glueTo < 0) {   // (a glued one goes with what it's glued to)
         const bool known = !g_tileMemory.Get(spec.tileKey).empty();
         TileKnown(index, spec.tileKey);
-        if (!known && !s.gsSeen) TileAnchor(index, false, kLabels[spec.slot]);
+        if (!known && !s.gsSeen) TileAnchor(index, dashtiles::Stay::Default, kLabels[spec.slot]);
     }
     std::printf("screen %d: %s's window (0x%x, %dx%d)%s\n", index + 1, kLabels[spec.slot], w.id, w.w, w.h,
                 s.gsSeen ? ", mapped again" : "");
@@ -246,7 +246,8 @@ void GlueStep() {
     if (m.width <= 0 || m.height <= 0 || p.width <= 0 || m.overlay == vr::k_ulOverlayHandleInvalid) return;
     const int64_t now = NowMs();
     const steamwin::Tracker *t = m.gsWin ? g_fleet.Find(m.gsWin) : nullptr;
-    const bool settling = g_glue.on || now - g_glue.leftMs < kSettleMs;
+    const bool settling = g_glue.on || now - g_glue.leftMs < kSettleMs ||
+                          steamglue::Shutting(g_glue.crop, g_glue.rest, now - g_glue.leftMs);   // (asked often till Steam shuts)
     if (g_pages && t) {
         const std::string &page = t->Win().title;
         if (now >= g_glue.askAt) g_pages->AskDrawn(page), g_glue.askAt = now + (settling ? kAskOnMs : kAskOffMs);
@@ -267,8 +268,8 @@ void GlueStep() {
             }
         }
     }
-    // (the laser gone: shut now, not when Steam does; open when Steam has)
-    const steamglue::Rect &goal = g_glue.on || g_glue.rest.w <= 0 ? g_glue.crop : g_glue.rest;
+    // (open when Steam has; shut when Steam has too, its icons drawn first)
+    const steamglue::Rect goal = steamglue::Goal(g_glue.on, g_glue.crop, g_glue.rest, now - g_glue.leftMs);
     if (goal.w > 0) g_glue.slide.To(goal, now);
     const steamglue::Rect c = g_glue.slide.Set() ? g_glue.slide.At(now) : steamglue::Rect{0, 0, m.width, m.height};
     if (c.x != g_glue.shownCrop.x || c.y != g_glue.shownCrop.y || c.w != g_glue.shownCrop.w || c.h != g_glue.shownCrop.h ||

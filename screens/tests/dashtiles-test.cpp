@@ -200,6 +200,29 @@ int main() {
         b.Arrange(desk);
         check("pan: a key press: the strip still reaches straight ahead", b.Last().az0 <= 1e-9 && b.Last().az1 >= -1e-9);
     }
+    // --- a narrow panel flipping its lean doesn't move the other columns (testbench, 2026-11-18: one
+    // flip took the column next to it 6 degrees)
+    {
+        const auto mixed = [](int id) { return id == 2 ? dashtiles::Info{1.4, 0.8} : dashtiles::Info{3.5, 1.97}; };
+        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+        dashtiles::Board b;
+        for (const int i : {1, 3, 4}) b.Anchor(i, -1, false);
+        b.Anchor(2, -1, false);
+        b.Drop(2, {tiling::Drop::Into, 0, 1}, rel);   // (the narrow one under 1)
+        const tiling::Layout &l0 = b.Arrange(mixed);
+        const auto mid = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
+        const auto off = [&](int id) { const tiling::Placed *p = b.PlacedOf(id), *w = b.PlacedOf(1); return p && w ? p->azDeg - w->azDeg : NAN; };
+        const double lean0 = off(2), a3 = mid(3), a1 = mid(1);
+        const double right = l0.az1 + 2;
+        int first = -1;
+        for (const tiling::Placed &p : l0.tiles)
+            if (p.az0 <= l0.az0 + 1e-9) first = p.id;
+        b.Drop(first, b.DropFor(first, right - 5, 0, mixed), rel, right - 5);   // (the left end to the right end)
+        b.Arrange(mixed);
+        check("lean: the wide one moved from the left end: the narrow one alone now", first == 1 && b.PlacedOf(2)->col == 0);
+        check("lean: ...the columns not touched stay put (not pulled by the narrow one's)", near(mid(3), a3, 1e-9));
+        (void)lean0, (void)a1, (void)off;
+    }
     // --- the slot's side stays put (council, 2026-11-16: it was the column count's middle, so an
     // anchor or a drop moved panels across Steam's menu)
     {

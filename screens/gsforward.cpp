@@ -1,16 +1,38 @@
 // gsforward.h's X connection, on xcb (wlroots' Xwayland support brings it into both build
 // containers; Xlib's headers are in the dev one only).
 #include "gsforward.h"
+#include "gsdisplay.h"
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_icccm.h>
 #include <xcb/xtest.h>
 
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <thread>
 
 namespace gsforward {
+
+namespace {
+xcb_atom_t AtomOn(xcb_connection_t *c, const char *name) {
+    auto r = xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, uint16_t(std::strlen(name)), name), nullptr);
+    const xcb_atom_t a = r ? r->atom : xcb_atom_t(XCB_ATOM_NONE);
+    std::free(r);
+    return a;
+}
+uint32_t CardinalOn(xcb_connection_t *c, xcb_window_t w, xcb_atom_t a, bool *has = nullptr) {
+    auto r = xcb_get_property_reply(c, xcb_get_property(c, 0, w, a, XCB_ATOM_CARDINAL, 0, 1), nullptr);
+    uint32_t v = 0;
+    const bool there = r && xcb_get_property_value_length(r) >= 4;
+    if (there) std::memcpy(&v, xcb_get_property_value(r), 4);
+    if (has) *has = there;
+    std::free(r);
+    return v;
+}
+}  // namespace
 
 struct Link::Impl {
     xcb_connection_t *c = nullptr;
@@ -20,21 +42,47 @@ struct Link::Impl {
     xcb_atom_t target = 0, steamGame = 0, netName = 0, utf8 = 0;
     std::map<uint32_t, bool> top;   // root's children seen, and whether each is override-redirect
     std::vector<Event> pending;
+    std::map<uint32_t, uint64_t> tags;   // the windows we've tagged, and the overlay each names (Focus puts it back)
+    // gamescope's first Xwayland (Focus reads its focus there), opened the first time it's needed
+    xcb_connection_t *first = nullptr;
+    xcb_window_t firstRoot = 0;
+    xcb_atom_t focused = 0;
 
-    xcb_atom_t Atom(const char *name) {
-        auto r = xcb_intern_atom_reply(c, xcb_intern_atom(c, 0, uint16_t(std::strlen(name)), name), nullptr);
-        const xcb_atom_t a = r ? r->atom : xcb_atom_t(XCB_ATOM_NONE);
-        std::free(r);
-        return a;
+    xcb_atom_t Atom(const char *name) { return AtomOn(c, name); }
+    uint32_t Cardinal(xcb_window_t w, xcb_atom_t a, bool *has = nullptr) { return CardinalOn(c, w, a, has); }
+    // The first Xwayland of the same gamescope (GAMESCOPE_XWAYLAND_SERVER_ID 0, our GAMESCOPE_PID).
+    bool OpenFirst(std::string *why) {
+        for (const std::string &name : SteamDisplays()) {
+            int screen = 0;
+            xcb_connection_t *f = xcb_connect(name.c_str(), &screen);
+            if (!f || xcb_connection_has_error(f)) {
+                if (f) xcb_disconnect(f);
+                continue;
+            }
+            xcb_screen_iterator_t it = xcb_setup_roots_iterator(xcb_get_setup(f));
+            for (int i = 0; i < screen && it.rem; ++i) xcb_screen_next(&it);
+            const xcb_window_t r = it.data->root;
+            bool numbered = false;
+            const uint32_t server = CardinalOn(f, r, AtomOn(f, "GAMESCOPE_XWAYLAND_SERVER_ID"), &numbered);
+            if (numbered && server == 0 && pid && CardinalOn(f, r, AtomOn(f, "GAMESCOPE_PID")) == pid) {
+                first = f, firstRoot = r, focused = AtomOn(f, "GAMESCOPE_FOCUSED_WINDOW");
+                return true;
+            }
+            xcb_disconnect(f);
+        }
+        if (why) *why = "no first Xwayland of gamescope " + std::to_string(pid) + " to read its focus on";
+        return false;
     }
-    uint32_t Cardinal(xcb_window_t w, xcb_atom_t a, bool *has = nullptr) {
-        auto r = xcb_get_property_reply(c, xcb_get_property(c, 0, w, a, XCB_ATOM_CARDINAL, 0, 1), nullptr);
-        uint32_t v = 0;
-        const bool there = r && xcb_get_property_value_length(r) >= 4;
-        if (there) std::memcpy(&v, xcb_get_property_value(r), 4);
-        if (has) *has = there;
-        std::free(r);
-        return v;
+    void CloseFirst() {
+        if (first) xcb_disconnect(first);
+        first = nullptr;
+    }
+    // The window gamescope has focused (0: none, or the connection broke).
+    uint32_t Focused() {
+        if (!first) return 0;
+        const uint32_t w = CardinalOn(first, firstRoot, focused);
+        if (xcb_connection_has_error(first)) CloseFirst();
+        return w;
     }
     // The overlay a window's target names (its two halves), 0 for none.
     uint64_t Target(xcb_window_t w) {
@@ -160,6 +208,8 @@ void Link::Close() {
     d_->c = nullptr;
     d_->top.clear();
     d_->pending.clear();
+    d_->tags.clear();
+    d_->CloseFirst();
 }
 
 std::vector<Event> Link::Poll() {
@@ -248,11 +298,37 @@ void Link::Tag(uint32_t win, uint64_t overlay) {
     TargetHalves(overlay, halves);
     xcb_change_property(d_->c, XCB_PROP_MODE_REPLACE, win, d_->target, XCB_ATOM_CARDINAL, 32, 2, halves);
     xcb_flush(d_->c);
+    d_->tags[win] = overlay;
 }
 void Link::Untag(uint32_t win) {
     if (!d_->c) return;
     xcb_delete_property(d_->c, win, d_->target);
     xcb_flush(d_->c);
+    d_->tags.erase(win);
+}
+
+std::string Link::FocusSaying(uint32_t win) {
+    Impl &d = *d_;
+    const auto tag = d.tags.find(win);
+    if (!d.c || tag == d.tags.end()) return "";
+    std::string why;
+    if (!d.first && !d.OpenFirst(&why)) return why;   // (the tag stays: nothing would tell when to put it back)
+    uint32_t halves[2];
+    TargetHalves(tag->second, halves);
+    const auto start = std::chrono::steady_clock::now(), until = start + std::chrono::milliseconds(kFocusWaitMs);
+    xcb_delete_property(d.c, win, d.target);
+    xcb_flush(d.c);
+    bool got = false;
+    while (!(got = d.Focused() == win) && d.first && std::chrono::steady_clock::now() < until)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    xcb_change_property(d.c, XCB_PROP_MODE_REPLACE, win, d.target, XCB_ATOM_CARDINAL, 32, 2, halves);
+    xcb_flush(d.c);
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "0x%x", win);
+    const long ms = long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    if (got) return std::string("gamescope's focus to window ") + hex + " (its pointer with it) in " + std::to_string(ms) + " ms";
+    return std::string("gamescope didn't focus window ") + hex + " in " + std::to_string(ms) + " ms" +
+           (d.first ? "" : " (its first Xwayland went)") + ": tagged again; its clicks may go nowhere";
 }
 
 void Link::Pointer(int x, int y) {

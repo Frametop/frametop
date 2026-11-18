@@ -403,6 +403,7 @@ void SteamDashEvents(Screen &s, int index);
 void SteamDashSwitch(bool on);
 // Steam's page in SteamVR's theater or not (ft-dashpatch's "steamvrmode", its fourth number).
 void SteamDashTheater(bool on);
+void SteamDashToTheater();   // Steam's page into SteamVR's theater (its tile's grab bar menu)
 void SteamDashShutdown();
 
 }  // namespace ftvr

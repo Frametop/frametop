@@ -48,5 +48,14 @@ class ExpressionTests(unittest.TestCase):
         self.assertIn("m_rgTheaterFrameStack", e)
 
 
+class TheaterTests(unittest.TestCase):
+    def test_it_asks_steamvr_as_its_own_button_does(self):
+        self.assertIn("'valve.steam.gamepadui.main'", steampage.TO_THEATER)
+        self.assertIn("docking.SetInTheater(false)", steampage.TO_THEATER)
+
+    def test_the_ask_is_not_a_strip_message(self):
+        self.assertFalse(steampage.StripLease().take(steampage.THEATER_ASK, 10.0))
+
+
 if __name__ == "__main__":
     unittest.main()

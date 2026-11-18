@@ -280,7 +280,8 @@ def watch_steamvr():
 
 def listen():
     """ft-screens on @ft_dashpatch, only from this user (SO_PASSCRED gives the sender's): the
-    gamepad pill's "gamepad" (it moves SteamVR's input focus), and "steamstrip 1|0" (steampage.py)."""
+    gamepad pill's "gamepad" (it moves SteamVR's input focus), "steamstrip 1|0" and "steamtheater"
+    (steampage.py)."""
     creds = struct.Struct("3i")  # pid, uid, gid
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
@@ -294,18 +295,20 @@ def listen():
         uid = next((creds.unpack(d[:creds.size])[1] for level, kind, d in anc
                     if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
         message = data.strip()
-        if message != b"gamepad" and not message.startswith(b"steamstrip"):
+        if message not in (b"gamepad", steampage.THEATER_ASK) and not message.startswith(b"steamstrip"):
             continue
         if uid != os.getuid():
             print(f"{message[:16]!r} from another user ({uid}): ignored", flush=True)
             continue
         if STRIP.take(message, time.monotonic()):
             continue
+        who, expr = (("View in Theater", steampage.TO_THEATER) if message == steampage.THEATER_ASK
+                     else ("gamepad pill", GAMEPAD_PUSH))
         url = dashboard()
         try:
-            print(f"gamepad pill: {evaluate(url, GAMEPAD_PUSH) if url else 'the dashboard is not reachable'}", flush=True)
+            print(f"{who}: {evaluate(url, expr) if url else 'the dashboard is not reachable'}", flush=True)
         except (OSError, ValueError) as e:
-            print(f"gamepad pill: can't reach the dashboard ({e})", flush=True)
+            print(f"{who}: can't reach the dashboard ({e})", flush=True)
 
 
 def run():

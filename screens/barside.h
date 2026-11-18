@@ -92,15 +92,18 @@ inline Box Union(const Box &a, const Box &b) {
 
 // ---------------------------------------------------------------- the context menu
 
-// Its texture: a title-less column of the four edges, a row each.
+// Its texture: a title-less column of the four edges, a row each, and under them any rows the
+// panel adds (Steam's tile: View in Theater).
 constexpr int kMenuW = 300, kRowH = 64, kMenuPad = 8;
-constexpr int kMenuH = kSides * kRowH + 2 * kMenuPad;
+constexpr int MenuH(int rows) { return rows * kRowH + 2 * kMenuPad; }
+constexpr int kMenuH = MenuH(kSides);   // (the edges alone)
 
-// The row under a mouse point on its texture (OpenVR's mouse y is up from the bottom), -1 none.
-inline int RowAt(double x, double yUp) {
-    const double y = kMenuH - yUp - kMenuPad;   // down from the first row's top
-    if (x < 0 || x > kMenuW || y < 0 || y >= kSides * kRowH) return -1;
-    return std::clamp(int(y / kRowH), 0, kSides - 1);
+// The row under a mouse point on a texture of `rows` rows (OpenVR's mouse y is up from the
+// bottom), -1 none.
+inline int RowAt(double x, double yUp, int rows = kSides) {
+    const double y = MenuH(rows) - yUp - kMenuPad;   // down from the first row's top
+    if (rows < 1 || x < 0 || x > kMenuW || y < 0 || y >= rows * kRowH) return -1;
+    return std::clamp(int(y / kRowH), 0, rows - 1);
 }
 
 // Its centre on the panel's surface: beside the bar at the clicked spot, a gap clear of it, toward

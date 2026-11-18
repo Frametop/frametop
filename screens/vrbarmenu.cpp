@@ -9,6 +9,9 @@
 // the pointer. A click on a row moves the bar there and closes it; it closes on its own after
 // kMenuIdleMs with nothing on it, when its panel hides, or on another right click on the same bar.
 // Its panel's controls stay shown while it's open.
+//   Steam's tile adds a fifth row, View in Theater: its window shown in SteamVR's theater, SteamVR's
+// own way (vrsteamwin.cpp: SteamDashToTheater). Steam's page hides SteamVR's own button for that
+// while it is a tile (pointer/dashpatch/steampage.py), so this is where it went.
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
@@ -56,10 +59,12 @@ constexpr int kMenuText = 30;
 struct {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     int panel = -1;            // the panel it's for, -1 closed
+    int rows = barside::kSides;  // the edges, and View in Theater on Steam's tile
     double along = 0;          // where on its bar it was opened (metres from the bar's middle)
     int hover = -1;            // the row under a laser, -1 none
     int64_t usedMs = -1;       // opened, or a laser moved on it, then
     int drawnHover = -2;       // (what its texture shows: -2 nothing yet)
+    int drawnRows = 0;
     barside::Side drawnSide = barside::Side::Bottom;
     bool lasers = false;       // MakeOverlaysInteractiveIfVisible is set
 } g_menu;
@@ -72,24 +77,27 @@ void CloseMenu(const char *why) {
     g_menu.panel = -1, g_menu.hover = -1;
 }
 
-// The four edges, SteamVR's dark pill style: the row under a laser white, the panel's own edge marked.
+// The four edges (and Steam's View in Theater), SteamVR's dark pill style: the row under a laser
+// white, the panel's own edge marked.
 void DrawMenu(barside::Side current) {
-    const int W = barside::kMenuW, H = barside::kMenuH, R = barside::kRowH, pad = barside::kMenuPad;
+    const int W = barside::kMenuW, H = barside::MenuH(g_menu.rows), R = barside::kRowH, pad = barside::kMenuPad;
     std::vector<uint8_t> px(size_t(W) * H * 4, 0);
     const uint8_t bg[4] = {24, 24, 30, 225}, lit[4] = {240, 240, 244, 240};
     FillRound(px, W, H, 0, 0, W, H, R / 2, bg);
-    for (int r = 0; r < barside::kSides; ++r) {
+    const uint8_t rule[4] = {90, 90, 100, 255};
+    for (int r = 0; r < g_menu.rows; ++r) {
         const int y0 = pad + r * R;
-        const bool on = r == g_menu.hover;
+        const bool on = r == g_menu.hover, edge = r < barside::kSides;
+        if (!edge && r == barside::kSides) FillRound(px, W, H, pad * 3, y0 - 1, W - pad * 3, y0 + 1, 1, rule);
         if (on) FillRound(px, W, H, pad, y0 + 3, W - pad, y0 + R - 3, (R - 6) / 2, lit);
         const uint8_t ink[4] = {uint8_t(on ? 20 : 245), uint8_t(on ? 20 : 245), uint8_t(on ? 24 : 250), 255};
-        if (barside::kAll[r] == current) FillRound(px, W, H, 34 - 7, y0 + R / 2 - 7, 34 + 7, y0 + R / 2 + 7, 7, ink);
-        label::Draw(px.data(), W, H, barside::Label(barside::kAll[r]), kMenuText, W / 2, y0 + R / 2, 255, ink);
+        if (edge && barside::kAll[r] == current) FillRound(px, W, H, 34 - 7, y0 + R / 2 - 7, 34 + 7, y0 + R / 2 + 7, 7, ink);
+        label::Draw(px.data(), W, H, edge ? barside::Label(barside::kAll[r]) : "View in Theater", kMenuText, W / 2, y0 + R / 2, 255, ink);
     }
     overlaytex::Set(g_menu.overlay, px.data(), W, H);
     const vr::HmdVector2_t scale = {{float(W), float(H)}};
     vr::VROverlay()->SetOverlayMouseScale(g_menu.overlay, &scale);
-    g_menu.drawnHover = g_menu.hover, g_menu.drawnSide = current;
+    g_menu.drawnHover = g_menu.hover, g_menu.drawnSide = current, g_menu.drawnRows = g_menu.rows;
 }
 
 }  // namespace
@@ -158,6 +166,7 @@ void OpenBarMenu(int i, double along) {
     }
     if (g_menu.panel >= 0) CloseMenu("another bar's opened");
     g_menu.panel = i, g_menu.along = along, g_menu.hover = -1, g_menu.usedMs = NowMs(), g_menu.drawnHover = -2;
+    g_menu.rows = barside::kSides + (i == SteamDashIndex() ? 1 : 0);
     std::printf("screen %d: grab bar menu open (its bar on the %s)\n", i + 1, barside::Name(g_screens[i].barSide));
     std::fflush(stdout);
     UpdateBarMenu();
@@ -174,14 +183,14 @@ void UpdateBarMenu() {
     if (NowMs() - g_menu.usedMs >= kMenuIdleMs) return CloseMenu("not used");
     Mat p, head;
     if (!ScreenPose(s, &p)) return CloseMenu("its panel isn't placed");
-    if (g_menu.drawnHover != g_menu.hover || g_menu.drawnSide != s.barSide) DrawMenu(s.barSide);
+    if (g_menu.drawnHover != g_menu.hover || g_menu.drawnSide != s.barSide || g_menu.drawnRows != g_menu.rows) DrawMenu(s.barSide);
     if (g_menu.lasers != s.lasers) {
         g_menu.lasers = s.lasers;
         vr::VROverlay()->SetOverlayFlag(g_menu.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, s.lasers);
     }
     // 0.45 mm a pixel at 1 m (as the gamepad pill): its text about the pill's size
     const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
-    const double mpp = 0.00045 * d, w = barside::kMenuW * mpp, h = barside::kMenuH * mpp;
+    const double mpp = 0.00045 * d, w = barside::kMenuW * mpp, h = barside::MenuH(g_menu.rows) * mpp;
     const double half = barhit::Width(s.chrome, g_barPaddingX) / 2;
     const barside::UV at = barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), std::clamp(g_menu.along, -half, half));
     const barside::UV c = barside::MenuAt(s.barSide, at, barhit::Height(s.chrome, g_barPaddingY) / 2,
@@ -191,19 +200,25 @@ void UpdateBarMenu() {
     vr::VROverlay()->SetOverlayTransformAbsolute(g_menu.overlay, vr::TrackingUniverseStanding, &m);
 }
 
-// Its input: a laser over a row lights it, a click there moves the bar to that edge.
+// Its input: a laser over a row lights it, a click there moves the bar to that edge (or, on
+// Steam's tile, puts Steam's page in SteamVR's theater).
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
     while (g_menu.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_menu.overlay, &ev, sizeof ev)) {
         if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove) {
-            g_menu.hover = barside::RowAt(ev.data.mouse.x, ev.data.mouse.y);
+            g_menu.hover = barside::RowAt(ev.data.mouse.x, ev.data.mouse.y, g_menu.rows);
             g_menu.usedMs = NowMs();
         } else if (ev.eventType == vr::VREvent_FocusLeave) {
             g_menu.hover = -1;
         } else if (ev.eventType == vr::VREvent_MouseButtonDown &&
                    (ev.data.mouse.button == vr::VRMouseButton_Left || ev.data.mouse.button == vr::VRMouseButton_Right)) {
-            const int row = barside::RowAt(ev.data.mouse.x, ev.data.mouse.y), panel = g_menu.panel;
+            const int row = barside::RowAt(ev.data.mouse.x, ev.data.mouse.y, g_menu.rows), panel = g_menu.panel;
             if (row < 0 || panel < 0) continue;
+            if (row >= barside::kSides) {
+                CloseMenu("View in Theater");
+                SteamDashToTheater();
+                continue;
+            }
             SetBarSide(panel, barside::kAll[row], "its bar's menu");
             CloseMenu("picked");
         } else if (ev.eventType == vr::VREvent_MouseButtonUp) {

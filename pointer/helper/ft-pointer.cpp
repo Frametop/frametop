@@ -108,8 +108,9 @@
 // (SETTINGS_ORIGIN) and SteamVR's own hit test finds the page; our dot is drawn close in front
 // (SETTINGS_DOT), and the laser-catching dot sits far behind everything (SETTINGS_CATCHER),
 // invisible and with SteamVR's hit dot hidden, so it can't cover the page. The beam and
-// SteamVR's hit dot on the page then look like a controller's. Everywhere else nothing
-// changes.
+// SteamVR's hit dot on the page then look like a controller's. A hand's ray (see "Hand ray"
+// below) on the page starts within SETTINGS_ORIGIN of the hand, not most of the way to the panel
+// behind, and only SteamVR's hit dot shows. Everywhere else nothing changes.
 //
 // Panel edges: off a panel, the cursor stays on that panel's plane while it's within
 // POINTER_EDGE_REACH (0.3 m) of the last point it touched, instead of jumping to
@@ -2427,7 +2428,7 @@ struct Pointer {
     void AimAndPose(), FindTarget(bool dragging, const Vec3 &dir, Pass &t),
         PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
     Hit nearest(Vec3 from, Vec3 d);
-    bool OnVrSettingsPage(const Vec3 &sight);
+    bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
 };
 
 // Setup, once: the settings, SteamVR, the overlays and sockets.
@@ -4120,8 +4121,8 @@ void Pointer::AimAndPose() {
     const bool onScene = !dragging && ((t.scene && t.best < 1e8) || t.onEdge);
     const bool onPanel = dragging || (t.best < 1e8 && !onScene);
     const Vec3 sight = Normalize(t.point - fr.eye);
-    if (fr.rayMode) onVrSettings = false;  // the beam starts at the hand: SteamVR finds the page itself
-    if (!dragging && !reuse && !fr.rayMode) onVrSettings = OnVrSettingsPage(sight);
+    // the eye's line of sight to the cursor, or a hand's ray from the hand
+    if (!dragging && !reuse) onVrSettings = fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight);
     if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
                         t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {
@@ -4146,6 +4147,10 @@ void Pointer::AimAndPose() {
     if (fr.rayMode && !rayBeam && !leftHeld && fr.tnow >= dropHoldUntil) {
         const double d = Length(t.point - anchor);
         rayBeamOffset = std::max(0.0, std::min(d * originFraction, d - originMargin));
+        // On SteamVR's Settings page the point is a panel behind it, or free space: the beam started
+        // past the page and went through it (user, 2026-11-18, with the hand ray: "I still can't
+        // interact with it"). It starts near the hand, and SteamVR's hit test finds the page.
+        if (onVrSettings) rayBeamOffset = std::min(rayBeamOffset, SETTINGS_ORIGIN);
     } else if (fr.rayMode && rayBeam) {
         rayBeamOffset = 0;
     }
@@ -4304,7 +4309,7 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
     }
 }
 
-bool Pointer::OnVrSettingsPage(const Vec3 &sight) {
+bool Pointer::OnVrSettingsPage(const Vec3 &from, const Vec3 &d) {
     // SteamVR Settings (see the top): the dashboard's main panel is hidden and its
     // scene-graph panel shows the page. By SteamVR's word (`shown`), not `visible`: while
     // ft-screens shows Steam's window as a tile it shrinks both panels to nothing
@@ -4320,7 +4325,7 @@ bool Pointer::OnVrSettingsPage(const Vec3 &sight) {
             vr::ETrackingUniverseOrigin uo;
             vr::HmdMatrix34_t t{};
             if (overlay->GetOverlayTransformAbsolute(handle, &uo, &t) == vr::VROverlayError_None &&
-                OnSettingsPage(t, fr.eye, sight))
+                OnSettingsPage(t, from, d))
                 on = true;
         }
     }
@@ -4333,8 +4338,9 @@ void Pointer::PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, b
     if (fr.rayMode) {
         // A hand's ray (see "Hand ray" at the top): the beam shows, as a controller's does, and
         // our dot only where it meets a panel. No laser-catching dot in free space: the beam just
-        // ends. None while a controller has taken the laser (rayInactive).
-        if (rayInactive || (!onPanel && !onScene) || fr.tnow < calPanelUntil) {
+        // ends. None while a controller has taken the laser (rayInactive), nor on SteamVR's Settings
+        // page, where SteamVR's hit dot shows and ours would be on a panel behind it.
+        if (rayInactive || (!onPanel && !onScene) || fr.tnow < calPanelUntil || onVrSettings) {
             markerDot.Show(false);
         } else {
             const Vec3 at = onPanel ? point + Normalize(fr.eye - point) * 0.005 : point;

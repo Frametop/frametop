@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 static int failed = 0;
 static void check(const char *what, bool ok) {
@@ -26,6 +27,28 @@ int main() {
         check("no pixel ratio: none", !FromCss(0, 0, 10, 10, 0, 450, 1200, &r));
         check("NaN: none", !FromCss(std::nan(""), 0, 10, 10, 1, 450, 1200, &r));
         check("no window: none", !FromCss(0, 0, 10, 10, 1, 0, 1200, &r));
+    }
+    {   // the crop sliding: Steam's strip, then its labels open, then shut again mid-way
+        const Rect strip{369, 231, 81, 738}, open{86, 231, 364, 738};
+        Slide s;
+        check("nothing yet", !s.Set());
+        s.To(strip, 1000);
+        const Rect a = s.At(1000);
+        check("the first rect as it is", a.x == 369 && a.w == 81 && a.y == 231 && a.h == 738);
+        s.To(open, 2000);
+        check("opening starts where it was", s.At(2000).x == 369);
+        const Rect half = s.At(2000 + kSlideMs / 2);
+        check("half the time: most of the way (eased out)", half.x < (369 + 86) / 2 && half.x > 86);
+        check("its right edge stays put", half.x + half.w == 450);
+        check("there after kSlideMs", s.At(2000 + kSlideMs).x == 86 && s.At(2000 + kSlideMs).w == 364);
+        s.To(open, 2000 + kSlideMs / 2);   // (the same target again: not started over)
+        check("the same target: no restart", s.At(2000 + kSlideMs).x == 86);
+        const int mid = s.At(5000 + 50).x;   // (long since open)
+        s.To(strip, 5000);
+        const int turnAt = s.At(5000 + 40).x;
+        s.To(open, 5000 + 40);   // the laser back mid-way: turned round from where it is
+        check("turned round without a jump", std::abs(s.At(5000 + 40).x - turnAt) <= 1 && mid == 86);
+        check("then open again", s.At(5000 + 40 + kSlideMs).x == 86);
     }
     {   // flat: flush left, level, facing the same way
         double m[3][4];

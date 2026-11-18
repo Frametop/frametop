@@ -14,8 +14,9 @@
 // windows back itself (each time is logged, and after steamwin::kMaxRetakes in a row it's given
 // back). Keys aren't sent to them: a click in a text field opens Steam's keyboard (with Frametop,
 // Full Keyboard, mounted below the dashboard tile; FrametopVr::steam_tile). Steam's own panels are
-// left alone: with a window ours they have no texture (gamescope forwards to one overlay), so they
+// left shown: with a window ours they have no texture (gamescope forwards to one overlay), so they
 // draw nothing, and Steam paints only while its panel counts as visible (alpha 0 = a black tile).
+// Shown, they'd catch the laser in front of the tiles: vrsteamhit.cpp keeps them out of its way.
 
 #include "vrpanel.h"
 #include "gsdisplay.h"
@@ -24,6 +25,7 @@
 #include "steamglue.h"
 #include "steamwin.h"
 #include "vrsteamfollow.h"
+#include "vrsteamhit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,13 +49,14 @@ std::unique_ptr<steamcdp::Pages> g_pages;   // the laser on them, to their pages
 
 // The menu glued to the dashboard window's panel (steamglue.h, GlueStep).
 constexpr int kMenu = kIndex + 1;
-constexpr int64_t kAskOnMs = 50;      // what it draws asked this often while the laser's on it (its labels open and close)
+constexpr int64_t kAskOnMs = 20;      // what it draws asked this often while the laser's on it (its labels open and close)
 constexpr int64_t kAskOffMs = 1000;   // ...and with nobody on it
-constexpr int64_t kSettleMs = 450;    // its labels closed this long after the laser left (Steam's animation: 300 ms)
+constexpr int64_t kSettleMs = 1100;   // its labels closed this long after the laser left (Steam shuts them after ~800 ms)
 constexpr uint32_t kGlueSortOrder = 5;   // over the tiles (its open labels go over the next one), under the controls
 struct Glue {
     steamglue::Rect crop;          // what it draws now (w 0: not known yet, all of it shown)
-    int restW = 0;                 // ...its width with nobody on it: what the tiles count (GluedPx)
+    steamglue::Rect rest;          // ...with nobody on it (w 0: not known yet); its width is what the tiles count (GluedPx)
+    steamglue::Slide slide;        // the crop shown, sliding to `crop` while the laser's on it, else to `rest`
     bool on = false;               // the laser is on it
     int64_t leftMs = 0;            // ...left it then
     int64_t askAt = 0, seenMs = 0;   // the next ask; the last answer taken (when it was asked)
@@ -211,8 +214,8 @@ bool Differ(const Mat &a, const Mat &b) {
 }
 
 // The menu's panel glued to the dashboard window's (steamglue.h): what its page draws asked for
-// (often while the laser's on it), its overlay cropped to that at the dashboard window's density,
-// and put flush left of it: pinned as it's pinned (riding with it), or where it is in the room.
+// (often while the laser's on it), its overlay cropped to that (sliding there; shut as the laser
+// leaves) at the dashboard window's density, and put flush left of it: pinned as it's pinned (riding with it), or where it is in the room.
 void GlueStep() {
     const auto mit = g_screens.find(kMenu), pit = g_screens.find(kIndex);
     if (mit == g_screens.end() || pit == g_screens.end()) return;
@@ -231,16 +234,22 @@ void GlueStep() {
             g_glue.seenMs = d.askedMs;
             if (steamglue::FromCss(d.l, d.t, d.r, d.b, d.dpr, m.width, m.height, &r)) {
                 g_glue.crop = r;
-                if (!g_glue.on && d.askedMs >= g_glue.leftMs + kSettleMs && r.w != g_glue.restW) {
+                const steamglue::Rect &was = g_glue.rest;
+                if (!g_glue.on && d.askedMs >= g_glue.leftMs + kSettleMs &&
+                    (r.x != was.x || r.y != was.y || r.w != was.w || r.h != was.h)) {
                     std::printf("screen %d: Steam's menu draws %dx%d at %d,%d of its window (glued to screen %d)\n", kMenu + 1,
                                 r.w, r.h, r.x, r.y, kIndex + 1);
-                    g_glue.restW = r.w;
-                    if (TileAnchored(kIndex)) RetileDash();
+                    const bool resized = r.w != was.w;   // (the tiles count its width)
+                    g_glue.rest = r;
+                    if (resized && TileAnchored(kIndex)) RetileDash();
                 }
             }
         }
     }
-    const steamglue::Rect c = g_glue.crop.w > 0 ? g_glue.crop : steamglue::Rect{0, 0, m.width, m.height};
+    // (the laser gone: shut now, not when Steam does; open when Steam has)
+    const steamglue::Rect &goal = g_glue.on || g_glue.rest.w <= 0 ? g_glue.crop : g_glue.rest;
+    if (goal.w > 0) g_glue.slide.To(goal, now);
+    const steamglue::Rect c = g_glue.slide.Set() ? g_glue.slide.At(now) : steamglue::Rect{0, 0, m.width, m.height};
     if (c.x != g_glue.shownCrop.x || c.y != g_glue.shownCrop.y || c.w != g_glue.shownCrop.w || c.h != g_glue.shownCrop.h ||
         m.width != g_glue.shownW || m.height != g_glue.shownH) {
         // (fractions of the texture, v from the top; the mouse stays in the whole window's pixels)
@@ -273,7 +282,7 @@ void GlueStep() {
 }  // namespace
 
 int SteamDashIndex() { return g_on ? kIndex : -1; }
-int GluedPx(int index) { return index == kIndex && g_screens.count(kMenu) ? g_glue.restW : 0; }
+int GluedPx(int index) { return index == kIndex && g_screens.count(kMenu) ? g_glue.rest.w : 0; }
 
 // Each tick: Steam's display's news (its thread opens it, again every AsyncLink::kRetryMs).
 void SteamDashStep() {
@@ -300,11 +309,12 @@ void SteamDashStep() {
                 break;
             }
         }
-    if (!g_link->IsOpen()) return;
+    if (!g_link->IsOpen()) return steamhit::Clear();
     const bool all = now >= g_findAt;
     if (all) g_findAt = now + kFindMs;
     if (all || fresh) Find(all);
     Lost();
+    steamhit::Step(g_fleet, all);
     if (g_pages) steamfollow::Step(g_fleet, *g_pages);
     GlueStep();
 }
@@ -377,6 +387,8 @@ void SteamDashEvents(Screen &s, int index) {
 // STEAM_DASH_PANEL: on, Steam's windows become ours when they map (or now, if they are); off,
 // they're Steam's again.
 void SteamDashSwitch(bool on) {
+    static bool swept = false;   // (at start, switched on or not)
+    if (!swept) swept = true, steamhit::Sweep();
     if (on == g_on) return;
     g_on = on;
     if (!g_link) {
@@ -395,6 +407,7 @@ void SteamDashShutdown() {
     LetGo();
     g_pages.reset();   // (the buttons up first)
     Do(g_fleet.Shutdown());
+    steamhit::Clear();   // (none of them ours now: Steam's take the laser again)
     g_link->Stop(500);
 }
 

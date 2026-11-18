@@ -5,7 +5,8 @@
 // (the strip grows leftwards, to about 240 CSS pixels). The rest of the window is black.
 //
 // So the menu's panel shows only the part Steam draws (its page tells us: steamcdp's AskDrawn),
-// flush left of the page's panel at the page's density, its middle level with the page's. It moves
+// flush left of the page's panel at the page's density, its middle level with the page's (the
+// crop sliding there: Slide; shut at once when the laser leaves, not when Steam shuts). It moves
 // with the page, the tiles count it in the page's width (the width it has with nobody on it, so
 // its labels opening don't move the tiles), and it has no controls of its own.
 //
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace steamglue {
 
@@ -31,6 +33,46 @@ inline bool FromCss(double l, double t, double r, double b, double dpr, int w, i
     *out = {x0, y0, x1 - x0, y1 - y0};
     return true;
 }
+
+// The crop eased from one rect to the next (user, 2026-11-18: make the menu "expand and shrink
+// more responsively", not "on a single frame"): Steam snaps its labels open and shut, about 0.5 s
+// after the laser comes and 0.8 s after it goes; the crop slides there in kSlideMs instead, from
+// wherever it is (a new target mid-slide turns it round smoothly). The first rect is taken as is.
+constexpr int64_t kSlideMs = 180;
+class Slide {
+public:
+    void To(const Rect &target, int64_t nowMs) {
+        const double to[4] = {double(target.x), double(target.y), double(target.x + target.w), double(target.y + target.h)};
+        if (set_ && Same(to, to_)) return;
+        double from[4];
+        if (set_) Edges(nowMs, from);
+        for (int i = 0; i < 4; ++i) from_[i] = set_ ? from[i] : to[i], to_[i] = to[i];
+        at_ = set_ ? nowMs : nowMs - kSlideMs;
+        set_ = true;
+    }
+    bool Set() const { return set_; }
+    Rect At(int64_t nowMs) const {
+        double e[4];
+        Edges(nowMs, e);
+        const int l = int(std::lround(e[0])), t = int(std::lround(e[1]));
+        return {l, t, int(std::lround(e[2])) - l, int(std::lround(e[3])) - t};
+    }
+
+private:
+    double from_[4] = {}, to_[4] = {};   // left, top, right, bottom
+    int64_t at_ = 0;
+    bool set_ = false;
+
+    static bool Same(const double a[4], const double b[4]) {
+        for (int i = 0; i < 4; ++i)
+            if (a[i] != b[i]) return false;
+        return true;
+    }
+    void Edges(int64_t nowMs, double out[4]) const {
+        const double p = std::clamp(double(nowMs - at_) / kSlideMs, 0.0, 1.0), k = 1 - (1 - p) * (1 - p) * (1 - p);
+        for (int i = 0; i < 4; ++i) out[i] = from_[i] + (to_[i] - from_[i]) * k;   // (eased out: quick, then settling)
+    }
+};
 
 // Where the glued panel's middle goes in the page's panel's frame (x right, y up, z out of its
 // front; 3x4, row major): its right edge on the page's left edge, `up` metres above the page's

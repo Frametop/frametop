@@ -1,4 +1,4 @@
-// Steam's own overlays out of the way (vrsteamhit.h): shrunk (steamshrink.h).
+// Steam's own overlays out of the way (vrsteamhit.h): shrunk (steamshrink.h) and masked from the laser.
 #include "vrsteamhit.h"
 #include "steamshrink.h"
 #include "vrpanel.h"
@@ -25,14 +25,38 @@ float WidthOf(uint64_t steams) {
     float w = 0;
     return vr::VROverlay()->GetOverlayWidthInMeters(steams, &w) == vr::VROverlayError_None ? w : 0;
 }
-void Away(uint64_t steams) { Width(steams, steamshrink::Away(WidthOf(steams)), "shrunk"); }
-void Back(uint64_t steams) { Width(steams, steamshrink::Back(WidthOf(steams)), "given its width back"); }
+// The laser through it or not: an intersection mask that matches nothing (a circle too small to hit,
+// at a corner). The width isn't enough on its own: Steam's main page is a dashboard overlay, which
+// the dashboard sizes itself for the laser, so shrunk to a ten-thousandth it still took the laser
+// over 2.7 m in front of the tiles (2026-11-18: a click there never reached the tile behind it; with
+// the mask, it did).
+void Hittable(uint64_t steams, bool hittable) {
+    vr::VROverlayIntersectionMaskPrimitive_t none{};
+    none.m_nPrimitiveType = vr::OverlayIntersectionPrimitiveType_Circle;
+    none.m_Primitive.m_Circle = {0.f, 0.f, 1e-6f};
+    const vr::EVROverlayError e = hittable ? vr::VROverlay()->SetOverlayIntersectionMask(steams, nullptr, 0)
+                                           : vr::VROverlay()->SetOverlayIntersectionMask(steams, &none, 1);
+    if (e != vr::VROverlayError_None && e != vr::VROverlayError_UnknownOverlay)
+        std::printf("Steam's overlay 0x%llx: its laser mask not %s (%s)\n", (unsigned long long)steams,
+                    hittable ? "cleared" : "set", vr::VROverlay()->GetOverlayErrorNameFromEnum(e));
+}
+void Away(uint64_t steams) {
+    Width(steams, steamshrink::Away(WidthOf(steams)), "shrunk");
+    Hittable(steams, false);
+}
+// `ours`: one we took (its mask cleared whatever its width now: Steam may have set that back);
+// else only one left shrunk is ours, and a mask Steam set on its own is left alone.
+void Back(uint64_t steams, bool ours) {
+    const float w = steamshrink::Back(WidthOf(steams));
+    Width(steams, w, "given its width back");
+    if (ours || w > 0) Hittable(steams, true);
+}
 
 void Become(std::set<uint64_t> want, bool all) {
     for (const uint64_t h : want)
         if (all || !g_gone.count(h)) Away(h);
     for (const uint64_t h : g_gone)
-        if (!want.count(h)) Back(h);
+        if (!want.count(h)) Back(h, true);
     g_gone = std::move(want);
 }
 
@@ -43,7 +67,7 @@ void Step(const steamwin::Fleet &fleet, bool all) {
     for (const auto &[id, t] : fleet.Windows()) {
         if (!t.Steams()) continue;
         if (t.Panel()) want.insert(t.Steams());
-        else if (all) Back(t.Steams());
+        else if (all) Back(t.Steams(), false);
     }
     Become(std::move(want), all);
 }
@@ -63,7 +87,7 @@ void Sweep() {
         if (!end) continue;
         vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
         if (vr::VROverlay()->FindOverlay(std::string(line + 1, size_t(end - (line + 1))).c_str(), &h) != vr::VROverlayError_None) continue;
-        if (steamshrink::Shrunk(WidthOf(h))) Back(h), ++back;
+        if (steamshrink::Shrunk(WidthOf(h))) Back(h, false), ++back;
     }
     pclose(p);
     if (back) std::printf("Steam's overlays: %d left shrunk (an ft-screens that went?) given their widths back\n", back);

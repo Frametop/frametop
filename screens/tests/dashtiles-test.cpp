@@ -137,19 +137,19 @@ int main() {
     // --- Steam's menu tile anchored left of Steam's window's
     {
         dashtiles::Board b;
-        b.Anchor(1, -1, false), b.Anchor(2, 1, false), b.Anchor(3, 2, false);
-        b.Anchor(9, 1, false, 2);
+        b.Anchor(1, -1, dashtiles::Stay::Default), b.Anchor(2, 1, dashtiles::Stay::Default), b.Anchor(3, 2, dashtiles::Stay::Default);
+        b.Anchor(9, 1, dashtiles::Stay::Default, 2);
         const auto &cols = b.Grid().Cols();
         check("left of: a column of its own just left of it, with the focused one ignored",
               cols.size() == 4 && cols[0].cells[0].id == 1 && cols[1].cells[0].id == 9 && cols[2].cells[0].id == 2);
-        b.Anchor(8, 1, false, 77);
+        b.Anchor(8, 1, dashtiles::Stay::Default, 77);
         check("left of one not tiled: as without it", b.Grid().Find(8).col == 1);
     }
     // --- moved, the strip stays where it was (user, 2026-11-18: a monitor moved from the right to the
     // left was centred and every other one pushed right, 30 degrees and more)
     {
         dashtiles::Board b;
-        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
         b.Arrange(desk);
         const auto at = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
         const double w = at(2) - at(1), a1 = at(1), a2 = at(2);
@@ -169,7 +169,7 @@ int main() {
         (void)b3;
         {   // (alone on the board, it goes where it was let go)
             dashtiles::Board one;
-            one.Anchor(5, -1, false);
+            one.Anchor(5, -1, dashtiles::Stay::Default);
             one.Arrange(desk);
             one.Drop(5, one.DropFor(5, 20, 0, desk), rel, 20);
             one.Arrange(desk);
@@ -207,8 +207,8 @@ int main() {
         const auto mixed = [](int id) { return id == 2 ? dashtiles::Info{1.4, 0.8} : dashtiles::Info{3.5, 1.97}; };
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         dashtiles::Board b;
-        for (const int i : {1, 3, 4}) b.Anchor(i, -1, false);
-        b.Anchor(2, -1, false);
+        for (const int i : {1, 3, 4}) b.Anchor(i, -1, dashtiles::Stay::Default);
+        b.Anchor(2, -1, dashtiles::Stay::Default);
         b.Drop(2, {tiling::Drop::Into, 0, 1}, rel);   // (the narrow one under 1)
         const tiling::Layout &l0 = b.Arrange(mixed);
         const auto mid = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
@@ -225,8 +225,8 @@ int main() {
         // (between a stacked column and a single one: both make room, the stacked one doesn't
         // outvote it; testbench, 2026-11-18: let go between them, it went 33 degrees off)
         dashtiles::Board c;
-        for (const int i : {1, 3, 4}) c.Anchor(i, -1, false);
-        c.Anchor(2, -1, false);
+        for (const int i : {1, 3, 4}) c.Anchor(i, -1, dashtiles::Stay::Default);
+        c.Anchor(2, -1, dashtiles::Stay::Default);
         c.Drop(2, {tiling::Drop::Into, 0, 1}, rel);
         c.Arrange(mixed);
         const auto cmid = [&](int id) { const tiling::Placed *p = c.PlacedOf(id); return p ? p->azDeg : NAN; };
@@ -243,7 +243,7 @@ int main() {
     {
         dashtiles::Board b;
         b.params.reserveAzDeg = 0, b.params.reserveDeg = 66;
-        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
         const auto side = [&](int id) {   // -1 left of the slot, +1 right
             const tiling::Placed *p = b.PlacedOf(id);
             return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
@@ -256,7 +256,7 @@ int main() {
         b.Drop(3, d, rel);
         b.Arrange(desk);
         check("split: let go left of the menu, it goes left", side(1) == -1 && side(3) == -1 && side(2) == 1);
-        b.Anchor(4, 3, false);
+        b.Anchor(4, 3, dashtiles::Stay::Default);
         b.Arrange(desk);
         check("split: anchored next to a left one, it goes left; the others stay", side(4) == -1 && side(2) == 1 && side(1) == -1);
         b.Unanchor(4);
@@ -305,7 +305,7 @@ int main() {
         check("split: in front again: the front split, each panel on the side it was put", b.Split() == 1 && side(3) == -1 && side(2) == 1);
         b.Unanchor(2), b.Unanchor(3);
         check("split: all gone: no splits", b.Grid().Split(0) == -1 && b.Grid().Split(1) == -1);
-        b.Anchor(7, 7, false);
+        b.Anchor(7, 7, dashtiles::Stay::Default);
         b.Arrange(desk);
         const tiling::Placed *seven = b.PlacedOf(7);
         check("split: a new panel then: beside the menu in front, not past it", seven && std::fabs(seven->az0 + seven->az1) / 2 < 90 &&
@@ -315,7 +315,7 @@ int main() {
         // (council, 2026-11-16: the drop's Remove emptied the grid and cleared the split)
         dashtiles::Board one;
         one.params.reserveAzDeg = 0, one.params.reserveDeg = 66;
-        one.Anchor(1, -1, false);
+        one.Anchor(1, -1, dashtiles::Stay::Default);
         one.Arrange(desk);
         const auto sideIn = [](const dashtiles::Board &x, int id) {
             const tiling::Placed *p = x.PlacedOf(id);
@@ -333,9 +333,9 @@ int main() {
         // splits only chosen for you: chosen again when a fresh one is much nearer in front
         dashtiles::Board drift;
         drift.params.reserveAzDeg = 0, drift.params.reserveDeg = 66;
-        drift.Anchor(1, -1, false);
+        drift.Anchor(1, -1, dashtiles::Stay::Default);
         drift.Arrange(desk);
-        for (int i = 2; i <= 4; ++i) drift.Anchor(i, 1, false), drift.Arrange(desk);   // (all next to 1: right of the menu)
+        for (int i = 2; i <= 4; ++i) drift.Anchor(i, 1, dashtiles::Stay::Default), drift.Arrange(desk);   // (all next to 1: right of the menu)
         const bool lopsided = drift.Grid().Split(0) == 0 && slotsplit::Off(drift.Last()) > 90;
         drift.SlotMoved();
         drift.Arrange(desk);
@@ -344,9 +344,9 @@ int main() {
         // a reorder on one side doesn't make it yours (council, 2026-11-17)
         dashtiles::Board same;
         same.params.reserveAzDeg = 0, same.params.reserveDeg = 66;
-        same.Anchor(1, -1, false);
+        same.Anchor(1, -1, dashtiles::Stay::Default);
         same.Arrange(desk);
-        for (int i = 2; i <= 4; ++i) same.Anchor(i, 1, false), same.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
+        for (int i = 2; i <= 4; ++i) same.Anchor(i, 1, dashtiles::Stay::Default), same.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
         const bool swapped = same.Press(3, dashtiles::Key::Right);
         same.Arrange(desk);
         const tiling::Placed *p4 = same.PlacedOf(4);
@@ -360,8 +360,8 @@ int main() {
         // where the menu happens to open doesn't flip a default split (council, 2026-11-17)
         dashtiles::Board flip;
         flip.params.reserveAzDeg = 0, flip.params.reserveDeg = 66;
-        flip.Anchor(1, -1, false);
-        for (int i = 2; i <= 6; ++i) flip.Anchor(i, i - 1, false);
+        flip.Anchor(1, -1, dashtiles::Stay::Default);
+        for (int i = 2; i <= 6; ++i) flip.Anchor(i, i - 1, dashtiles::Stay::Default);
         flip.Arrange(floating);
         const int first = flip.Grid().Split(0);
         bool flat = true;
@@ -375,9 +375,9 @@ int main() {
         // torn off and docked again: a new panel, the split still only chosen for you
         dashtiles::Board dock;
         dock.params.reserveAzDeg = 0, dock.params.reserveDeg = 66;
-        dock.Anchor(1, -1, false);
+        dock.Anchor(1, -1, dashtiles::Stay::Default);
         dock.Arrange(desk);
-        for (int i = 2; i <= 4; ++i) dock.Anchor(i, 1, false), dock.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
+        for (int i = 2; i <= 4; ++i) dock.Anchor(i, 1, dashtiles::Stay::Default), dock.Arrange(desk);   // S [ 1 ][ 4 ][ 3 ][ 2 ]
         const tiling::Placed *p3 = dock.PlacedOf(3);
         const double at3 = p3 ? (p3->az0 + p3->az1) / 2 : 0;
         dock.TearOff(3, rel);
@@ -392,11 +392,11 @@ int main() {
         // a drop across the menu makes the split yours
         dashtiles::Board across;
         across.params.reserveAzDeg = 0, across.params.reserveDeg = 66;
-        for (int i = 1; i <= 2; ++i) across.Anchor(i, i - 1, false), across.Arrange(desk);   // S [ 1 ][ 2 ]
+        for (int i = 1; i <= 2; ++i) across.Anchor(i, i - 1, dashtiles::Stay::Default), across.Arrange(desk);   // S [ 1 ][ 2 ]
         across.Drop(2, across.DropFor(2, -40, 0, desk), rel, -40);   // (left of the menu)
         across.Arrange(desk);
         const bool crossed = across.Grid().Split(0) == 1;   // [ 2 ] S [ 1 ]
-        for (int i = 3; i <= 4; ++i) across.Anchor(i, 1, false), across.Arrange(desk);   // (next to 1: right)
+        for (int i = 3; i <= 4; ++i) across.Anchor(i, 1, dashtiles::Stay::Default), across.Arrange(desk);   // (next to 1: right)
         const bool leans = slotsplit::Off(across.Last()) > 60;
         across.SlotMoved();
         across.Arrange(desk);
@@ -405,7 +405,7 @@ int main() {
         dashtiles::Board aside;
         aside.params.reserveAzDeg = 35, aside.params.reserveDeg = 66;
         aside.SlotMoved();
-        for (int i = 1; i <= 4; ++i) aside.Anchor(i, i - 1, false);
+        for (int i = 1; i <= 4; ++i) aside.Anchor(i, i - 1, dashtiles::Stay::Default);
         aside.Arrange(floating);
         const int atSide = aside.Grid().Split(0);
         aside.params.reserveAzDeg = 0;
@@ -430,34 +430,59 @@ int main() {
         // at the end that brings the strip's middle nearer in front of you, not always the right
         dashtiles::Board e;
         e.params.reserveAzDeg = 0, e.params.reserveDeg = 66;
-        for (int i = 1; i <= 3; ++i) e.Anchor(i, i - 1, false);
+        for (int i = 1; i <= 3; ++i) e.Anchor(i, i - 1, dashtiles::Stay::Default);
         e.Arrange(desk);   // [ 1 ] S [ 2 ][ 3 ]: pushed right
-        e.Anchor(4, 4, false);
+        e.Anchor(4, 4, dashtiles::Stay::Default);
         e.Arrange(desk);
         check("split: a new panel, nothing in focus: the left end when the strip leans right",
               e.Grid().Cols()[0].cells[0].id == 4 && e.Grid().Split(0) == 2 && near(e.Last().az0, -e.Last().az1));
-        e.Anchor(5, 5, false);
+        e.Anchor(5, 5, dashtiles::Stay::Default);
         e.Arrange(desk);
         check("split: ...and the right end when it doesn't", e.Grid().Cols().back().cells[0].id == 5 && e.Grid().Split(0) == 2);
     }
     // --- anchoring
     {
         dashtiles::Board b;
-        b.Anchor(1, -1, false);
-        b.Anchor(2, 1, true);
-        b.Anchor(3, 1, false);
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Anchor(2, 1, dashtiles::Stay::On);
+        b.Anchor(3, 1, dashtiles::Stay::Default);
         check("anchor: a column right of the focused one", b.Grid().Cols().size() == 3 && b.Grid().Cols()[1].cells[0].id == 3);
         check("anchor: stay as asked", b.Stay(2) && !b.Stay(1));
-        b.Anchor(2, -1, false);
+        b.Anchor(2, -1, dashtiles::Stay::Default);
         check("anchor twice: once, stay kept", b.Grid().Cols().size() == 3 && b.Stay(2));
         check("unanchor", b.Unanchor(3) && !b.Anchored(3) && b.Grid().Cols().size() == 2 && !b.Unanchor(3));
         b.SetStay(9, true);
         check("stay on a panel not anchored: nothing", !b.Anchored(9));
     }
+    // --- stay: as DASH_TILE_STAY says unless set for the panel (user, 2026-11-18: on by default)
+    {
+        dashtiles::Board b;
+        b.stayDefault = true;
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Anchor(2, 1, dashtiles::Stay::Default);
+        check("stay default: an anchored panel stays", b.Stay(1) && b.Stay(2));
+        b.SetStay(2, false);
+        check("stay default: set off for one, kept as 2", !b.Stay(2) && b.Remember(2).rfind("tile 2 ", 0) == 0);
+        b.stayDefault = false;
+        check("stay default: turned off, the one following it follows", !b.Stay(1) && b.Remember(1).rfind("tile 0 ", 0) == 0);
+        b.stayDefault = true;
+        b.SetStay(2, true);
+        check("stay default: set back as the default is, it follows it again",
+              b.Stay(2) && b.Remember(2).rfind("tile 0 ", 0) == 0 && (b.stayDefault = false, !b.Stay(2)));
+        dashtiles::State st;
+        check("stay: 0 the default, 1 on, 2 off, any other on (the old yes)",
+              dashtiles::Parse("tile 0 0 0 1 1", &st) && st.stay == dashtiles::Stay::Default &&
+                  dashtiles::Parse("tile 1 0 0 1 1", &st) && st.stay == dashtiles::Stay::On &&
+                  dashtiles::Parse("tile 2 0 0 1 1", &st) && st.stay == dashtiles::Stay::Off &&
+                  dashtiles::Parse("tile 7 0 0 1 1", &st) && st.stay == dashtiles::Stay::On);
+        dashtiles::Board c;
+        c.stayDefault = true;
+        check("stay: restored off, it stays off with the default on", c.Restore(4, "tile 2 0 0 1 1", -1) && !c.Stay(4));
+    }
     // --- tear off and back
     {
         dashtiles::Board b;
-        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
         const auto &l = b.Arrange(desk);
         const double rel[3][4] = {{1, 0, 0, 0.5}, {0, 1, 0, 2}, {0, 0, 1, -1}};
         auto d = b.DropFor(2, l.az1 + 40, 20, desk);
@@ -483,7 +508,7 @@ int main() {
     // the dragged one, so a drop on the middle column's middle made a new column)
     {
         dashtiles::Board b;
-        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         b.Arrange(desk);
         const tiling::Placed p2 = *b.PlacedOf(2);
@@ -501,8 +526,8 @@ int main() {
     // --- the keys
     {
         dashtiles::Board b;
-        b.Anchor(1, -1, false);
-        b.Anchor(10, 1, false);
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Anchor(10, 1, dashtiles::Stay::Default);
         b.Arrange(info);
         const double before = b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM;   // (its size seen from you)
         check("bigger: Meta+Ctrl+Right", b.Press(10, dashtiles::Key::Wider) && near(b.Grid().CellOf(10)->scale, tilegrid::kStep));
@@ -524,8 +549,8 @@ int main() {
     // --- a resize by hand
     {
         dashtiles::Board b;
-        b.Anchor(10, -1, false);
-        b.Anchor(11, 10, false);
+        b.Anchor(10, -1, dashtiles::Stay::Default);
+        b.Anchor(11, 10, dashtiles::Stay::Default);
         b.Drop(11, {tiling::Drop::Into, 0, 1}, kI);
         b.Arrange(info);
         const double h = b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM;   // (its size seen from you)
@@ -542,11 +567,11 @@ int main() {
         const auto sized = [](int id) { return id == 2 ? dashtiles::Info{1.2, 1.6} : dashtiles::Info{1.6, 0.9}; };
         for (int i = 1; i <= 3; ++i) {
             const dashtiles::Info in = sized(i);
-            b.Anchor(i, i - 1, false, -1, &in), b.Arrange(sized);
+            b.Anchor(i, i - 1, dashtiles::Stay::Default, -1, &in), b.Arrange(sized);
         }
         check("desk: three side by side while there's room", b.Grid().Cols().size() == 3);
         const dashtiles::Info in = sized(4);
-        b.Anchor(4, 3, false, -1, &in);
+        b.Anchor(4, 3, dashtiles::Stay::Default, -1, &in);
         b.Arrange(sized);
         check("desk: full, the next one on top of the lowest column (not the tall middle one)",
               b.Grid().Cols().size() == 3 && b.Grid().Cols()[1].cells.size() == 1 &&
@@ -556,14 +581,14 @@ int main() {
         const tiling::Placed *under = four ? b.PlacedOf(b.Grid().Cols()[size_t(four->col)].cells[1].id) : nullptr;
         check("desk: ...resting on it", four && under && near(four->el0, under->el1 + b.params.gapDeg));
         dashtiles::Board fresh;
-        check("desk: a first panel: a column", (fresh.Anchor(1, -1, false, -1, &in), fresh.Grid().Cols().size() == 1));
+        check("desk: a first panel: a column", (fresh.Anchor(1, -1, dashtiles::Stay::Default, -1, &in), fresh.Grid().Cols().size() == 1));
     }
     // --- memory
     {
         dashtiles::Board b;
-        b.Anchor(1, -1, true);
-        b.Anchor(2, 1, false);
-        b.Anchor(3, 2, false);
+        b.Anchor(1, -1, dashtiles::Stay::On);
+        b.Anchor(2, 1, dashtiles::Stay::Default);
+        b.Anchor(3, 2, dashtiles::Stay::Default);
         b.Drop(3, {tiling::Drop::Into, 1, 1}, kI);
         const std::string one = b.Remember(1), three = b.Remember(3);
         check("remember: a tile", one.rfind("tile 1 0 0 1 ", 0) == 0);
@@ -574,7 +599,7 @@ int main() {
         const std::string sat = b.Remember(2);
         check("remember: a satellite", sat.rfind("sat 0 ", 0) == 0);
         dashtiles::Board c;
-        c.Anchor(5, -1, false);
+        c.Anchor(5, -1, dashtiles::Stay::Default);
         check("restore: a tile in a column of its own", c.Restore(1, one, 5) && c.Tiled(1) && c.Stay(1) &&
                                                             c.Grid().Cols().size() == 2 && c.Grid().Cols()[0].cells[0].id == 1);
         check("restore: under another", c.Restore(3, three, 5) && c.Grid().Cols()[1].cells.size() == 2 &&
@@ -604,7 +629,7 @@ int main() {
     // (council, 2026-11-16: they were inserted into the live grid, so they joined its columns)
     {
         dashtiles::Board b;
-        b.Anchor(199, -1, true);   // a gamescope app, the only tile
+        b.Anchor(199, -1, dashtiles::Stay::On);   // a gamescope app, the only tile
         const std::string top = "tile 0 0 0 0 1.000 1.000 0.00", under = "tile 0 0 1 0 1.000 1.000 0.00";
         check("restore all: both taken", b.RestoreAll({{0, top}, {1, under}, {5, "nonsense"}}) == 2);
         const auto &cols = b.Grid().Cols();
@@ -628,7 +653,7 @@ int main() {
     // --- a profile split over two commands (layout_tiles.py: "tiles set", then "tiles add")
     {
         dashtiles::Board b;
-        b.Anchor(199, -1, true);
+        b.Anchor(199, -1, dashtiles::Stay::On);
         auto line = [](int col, int row, int alone, double scale) {
             char t[96];
             std::snprintf(t, sizeof t, "tile 0 %d %d %d %.3f", col, row, alone, scale);
@@ -666,25 +691,25 @@ int main() {
         g.RestoreAll({{0, line(0, 0, 1)}, {1, line(2, 0, 0)}, {2, line(2, 1, 0)}});
         check("gaps: the stack kept, the columns closed up", order(g) == "[ 0 ][ 1 2 ]");
         dashtiles::Board r;
-        for (int id : {14, 13, 12, 11, 10}) r.Anchor(id, -1, false);
+        for (int id : {14, 13, 12, 11, 10}) r.Anchor(id, -1, dashtiles::Stay::Default);
         r.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
         r.Restore(60, line(1, 0, 1), -1);   // an app back from its memory between the two
         r.RestoreAll({{13, line(3, 0, 1)}, {14, line(4, 0, 1)}}, true);
         check("set, an app, add: the profile's order, then the app", order(r) == "[ 10 ][ 11 ][ 12 ][ 13 ][ 14 ][ 60 ]");
         dashtiles::Board q;
-        for (int id : {14, 13, 12, 11, 10, 70}) q.Anchor(id, -1, false);
+        for (int id : {14, 13, 12, 11, 10, 70}) q.Anchor(id, -1, dashtiles::Stay::Default);
         q.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
         q.Unanchor(11);   // gone between the two
         q.RestoreAll({{13, line(3, 0, 1)}, {14, line(4, 0, 1)}}, true);
         check("set, a panel goes, add: the rest in order", order(q) == "[ 10 ][ 12 ][ 13 ][ 14 ][ 70 ]");
         // council pass 4: columns by their saved number, whatever order the lines come in
         dashtiles::Board o;
-        for (int id : {2, 3}) o.Anchor(id, -1, false);
+        for (int id : {2, 3}) o.Anchor(id, -1, dashtiles::Stay::Default);
         o.RestoreAll({{3, line(1, 0, 1)}, {2, line(0, 0, 1)}});
         check("lines out of order: columns by number", order(o) == "[ 2 ][ 3 ]");
         // council pass 4: a tile moved after a set; an add then doesn't undo the move
         dashtiles::Board m;
-        for (int id : {10, 11, 12, 20}) m.Anchor(id, -1, false);
+        for (int id : {10, 11, 12, 20}) m.Anchor(id, -1, dashtiles::Stay::Default);
         m.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
         m.Press(12, dashtiles::Key::Left), m.Press(12, dashtiles::Key::Left);
         check("moved: [ 12 ][ 10 ][ 11 ]", order(m).rfind("[ 12 ][ 10 ][ 11 ]", 0) == 0);
@@ -692,33 +717,33 @@ int main() {
         check("an add after a move keeps the move, its tile after", order(m) == "[ 12 ][ 10 ][ 11 ][ 20 ]");
         // council pass 5: a stack listed before a lower column; per-panel forgetting; a key that changes nothing
         dashtiles::Board u;
-        for (int id : {1, 2, 3}) u.Anchor(id, -1, false);
+        for (int id : {1, 2, 3}) u.Anchor(id, -1, dashtiles::Stay::Default);
         u.RestoreAll({{2, line(1, 0, 0)}, {3, line(1, 1, 0)}, {1, line(0, 0, 1)}});
         check("a stack listed first: kept, columns by number", order(u) == "[ 1 ][ 2 3 ]");
         dashtiles::Board f;
-        for (int id : {10, 11, 12, 20}) f.Anchor(id, -1, false);
+        for (int id : {10, 11, 12, 20}) f.Anchor(id, -1, dashtiles::Stay::Default);
         f.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}, {12, line(2, 0, 1)}});
-        f.Unanchor(10), f.Anchor(10, 12, false);   // off and on again: now after 12
+        f.Unanchor(10), f.Anchor(10, 12, dashtiles::Stay::Default);   // off and on again: now after 12
         f.SetStay(11, true);
         f.RestoreAll({{20, line(3, 0, 1)}}, true);
         check("an add after an unanchor keeps it where it went", order(f) == "[ 11 ][ 12 ][ 20 ][ 10 ]");
         check("an add after a stay change keeps it", f.Stay(11));
         dashtiles::Board n;
-        for (int id : {10, 11, 12, 99}) n.Anchor(id, -1, false);
+        for (int id : {10, 11, 12, 99}) n.Anchor(id, -1, dashtiles::Stay::Default);
         n.RestoreAll({{10, line(0, 0, 1)}, {11, line(1, 0, 1)}});
         n.Press(10, dashtiles::Key::Left);   // (the first column: nothing moves)
         n.RestoreAll({{12, line(2, 0, 1)}}, true);
         check("a key that changes nothing keeps the set going", order(n).rfind("[ 10 ][ 11 ][ 12 ]", 0) == 0);
         dashtiles::Board e;
-        for (int id : {1, 2, 50}) e.Anchor(id, -1, false);
+        for (int id : {1, 2, 50}) e.Anchor(id, -1, dashtiles::Stay::Default);
         e.RestoreAll({{7, "nonsense"}});   // a set with no line it could take
         e.RestoreAll({{1, line(0, 0, 1)}, {2, line(1, 0, 1)}}, true);
         check("an add after an empty set: still the set's, first", order(e).rfind("[ 1 ][ 2 ]", 0) == 0);
         dashtiles::Board o2;
-        for (int id : {10, 11, 30}) o2.Anchor(id, -1, false);
+        for (int id : {10, 11, 30}) o2.Anchor(id, -1, dashtiles::Stay::Default);
         o2.RestoreAll({{10, line(0, 0, 1)}, {30, "off"}});
         check("an off line: unanchored", !o2.Anchored(30));
-        o2.Anchor(30, -1, false);
+        o2.Anchor(30, -1, dashtiles::Stay::Default);
         o2.RestoreAll({{11, line(1, 0, 1)}}, true);
         check("anchored again after it, an add keeps it", o2.Anchored(30));
     }
@@ -735,7 +760,7 @@ int main() {
         };
         dashtiles::State s;
         check("state: tabs and doubled spaces parse", dashtiles::Parse(" tile\t1  2 0 1   1.5 \n", &s) &&
-                                                          s.kind == dashtiles::State::Kind::Tile && s.stay && s.col == 2 &&
+                                                          s.kind == dashtiles::State::Kind::Tile && s.stay == dashtiles::Stay::On && s.col == 2 &&
                                                           s.row == 0 && s.alone && near(s.scale, 1.5));
         check("state: text round trip", dashtiles::Text(s) == "tile 1 2 0 1 1.500");
         check("state: the sphere's older form: its scale the size, its weight and width dropped",
@@ -760,21 +785,21 @@ int main() {
         const std::string bigText = dashtiles::Text(big);
         check("state: any state's text is whole", bigText.size() > 12 * 300 && bigText.rfind("sat 0 -1", 0) == 0);
         dashtiles::Board hb;
-        hb.Anchor(5, -1, false);
+        hb.Anchor(5, -1, dashtiles::Stay::Default);
         check("state: a huge satellite from a profile is refused", !hb.Restore(5, huge, -1));
         dashtiles::Board w;
-        for (int id : {10, 11, 20}) w.Anchor(id, -1, false);
+        for (int id : {10, 11, 20}) w.Anchor(id, -1, dashtiles::Stay::Default);
         w.RestoreAll({{10, "tile  0   0 0 1 1 1 0"}, {11, "tile\t0\t1\t0\t1\t1\t1\t0"}});
         w.SetStay(10, true);
         w.RestoreAll({{20, "tile 0 2 0 1 1 1 0"}}, true);
         check("odd whitespace: a stay change before an add keeps the tile on the grid",
               w.Stay(10) && order(w).rfind("[ 10 ][ 11 ][ 20 ]", 0) == 0);
         dashtiles::Board r;
-        for (int id : {10, 11, 12}) r.Anchor(id, -1, false);
+        for (int id : {10, 11, 12}) r.Anchor(id, -1, dashtiles::Stay::Default);
         r.RestoreAll({{10, "tile 0 0 0 1 1 1 0"}, {11, "tile 0 5 -1 1 1 1 0"}, {12, "tile 0 6 0 1 1 1 0"}});
         check("a tile with no row: no column kept for it, put where a new one goes", order(r) == "[ 10 ][ 12 ][ 11 ]");
         dashtiles::Board t;
-        for (int id : {10, 11, 50}) t.Anchor(id, -1, false);
+        for (int id : {10, 11, 50}) t.Anchor(id, -1, dashtiles::Stay::Default);
         t.RestoreAll({{10, "tile 0 0 0 1 1 1 0"}});
         t.EndRestore();   // (vrtiles.cpp: an add long after the set)
         t.RestoreAll({{11, "tile 0 1 0 1 1 1 0"}}, true);

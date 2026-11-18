@@ -82,6 +82,17 @@ int main() {
         check("upright", Near(m[1][1], 1) && Near(m[1][0], 0) && Near(m[0][1], 0));
         check("a rotation", Near(m[0][0] * m[0][0] + m[2][0] * m[2][0], 1, 1e-12));
     }
+    {   // the goal: open once Steam has, shut once Steam has (its icons first: user, 2026-11-18)
+        const Rect rest{369, 231, 81, 738}, open{86, 231, 364, 738};
+        check("goal: the laser on it, what Steam draws", Goal(true, open, rest, 0) == open && Goal(true, rest, rest, 0) == rest);
+        check("goal: rest not known yet, what Steam draws", Goal(false, open, Rect{}, 99999) == open);
+        check("goal: just left, Steam still open: stays open", Goal(false, open, rest, 0) == open && Shutting(open, rest, 0));
+        check("goal: ...800 ms on, Steam still open: still open", Goal(false, open, rest, 800) == open);
+        check("goal: Steam shut: the rest", Goal(false, rest, rest, 850) == rest && !Shutting(rest, rest, 850));
+        check("goal: Steam never shuts: the rest after kShutWaitMs",
+              Goal(false, open, rest, kShutWaitMs - 1) == open && Goal(false, open, rest, kShutWaitMs) == rest &&
+                  !Shutting(open, rest, kShutWaitMs));
+    }
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed != 0;
 }

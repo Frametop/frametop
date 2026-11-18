@@ -1,7 +1,8 @@
 // A dashboard panel's remembered state as a record (dashtiles.h's Board writes and reads it), and
 // the batch of them a profile put back last. The text form is what ft-screens' tile memory and the
 // `tiles` command carry: "off", "tile STAY COL ROW ALONE SCALE" or "sat STAY" and the satellite's 12
-// numbers. Parse takes any whitespace between the words and nothing else, and the sphere's older
+// numbers. STAY: 0 as DASH_TILE_STAY says, 1 shown with the dashboard closed, 2 hidden then (any
+// other number is 1, as it was when STAY was a yes or no: its 0 was "no", the default then). Parse takes any whitespace between the words and nothing else, and the sphere's older
 // "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" (its scale taken as the size, the rest dropped).
 // Header only, no OpenVR, so its test runs anywhere (screens/tests/dashtiles-test.cpp).
 #pragma once
@@ -17,10 +18,16 @@
 
 namespace dashtiles {
 
+// Whether a panel stays shown with the dashboard closed: as the default (DASH_TILE_STAY) says, or
+// set for it (the anchor button's long press).
+enum class Stay { Default = 0, On = 1, Off = 2 };
+inline int StayNumber(Stay s) { return int(s); }
+inline Stay StayOf(int n) { return n == 0 ? Stay::Default : n == 2 ? Stay::Off : Stay::On; }
+
 struct State {
     enum class Kind { Off, Tile, Sat };
     Kind kind = Kind::Off;
-    bool stay = false;
+    Stay stay = Stay::Default;
     int col = 0, row = 0;   // a tile's place on the grid when it was saved (negative: none)
     bool alone = true;      // a column of its own
     double scale = 1;       // its size, times its natural one
@@ -73,7 +80,7 @@ inline bool Parse(const std::string &text, State *out) {
         if (!ok || !detail::Int(w[1], &stay) || !detail::Int(w[2], &s.col) || !detail::Int(w[3], &s.row) ||
             !detail::Int(w[4], &alone))
             return false;
-        s.kind = State::Kind::Tile, s.stay = stay != 0, s.alone = alone != 0;
+        s.kind = State::Kind::Tile, s.stay = StayOf(stay), s.alone = alone != 0;
         return *out = s, true;
     }
     if (w[0] == "sat" && w.size() == 14) {
@@ -81,7 +88,7 @@ inline bool Parse(const std::string &text, State *out) {
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c)
                 if (!detail::Num(w[size_t(2 + r * 4 + c)], &s.rel[r][c])) return false;
-        s.kind = State::Kind::Sat, s.stay = stay != 0;
+        s.kind = State::Kind::Sat, s.stay = StayOf(stay);
         return *out = s, true;
     }
     return false;
@@ -97,10 +104,10 @@ inline std::string Text(const State &s) {
     switch (s.kind) {
         case State::Kind::Off: return "off";
         case State::Kind::Tile:
-            return "tile " + std::to_string(s.stay ? 1 : 0) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
+            return "tile " + std::to_string(StayNumber(s.stay)) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
                    std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.scale);
         case State::Kind::Sat: {
-            std::string t = std::string("sat ") + (s.stay ? "1" : "0");
+            std::string t = "sat " + std::to_string(StayNumber(s.stay));
             for (int r = 0; r < 3; ++r)
                 for (int c = 0; c < 4; ++c) t += num(" %.4f", s.rel[r][c]);
             return t;
@@ -123,9 +130,9 @@ public:
     void Forget(int id) {
         for (auto b = states_.begin(); b != states_.end();) b = b->first == id ? states_.erase(b) : std::next(b);
     }
-    void SetStay(int id, bool on) {
+    void SetStay(int id, Stay stay) {
         for (auto &[i, s] : states_)
-            if (i == id) s.stay = on;
+            if (i == id) s.stay = stay;
     }
 
 private:

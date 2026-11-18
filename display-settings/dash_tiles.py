@@ -1,5 +1,6 @@
-"""Display Settings' dashboard tiles (Visibility & pins): whether a panel anchored to the SteamVR
-dashboard stays shown with it closed, and the wall the tiles stand on round you (screens/tiling.h,
+"""Display Settings' dashboard tiles (Visibility & pins): whether the panels anchored to the SteamVR
+dashboard stay shown with it closed (each one not set the other way by its anchor button's long
+press), and over a game in SteamVR's theater too, and the wall the tiles stand on round you (screens/tiling.h,
 docs/design.md "Dashboard tiles"). Each is a frametop.conf value ft-screens reads at start and
 takes live as `handsetting KEY VALUE`, as the drag bars' are. And whether the apps started from the
 dashboard (Steam's gamescope session) come up as Frametop panels (GSAPP_PANELS; docs/design.md
@@ -18,7 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import ft_layout  # noqa: E402
 from ft_layout import ft_conf  # noqa: E402
 
-STAY = "DASH_TILE_STAY"
+STAY = "DASH_TILE_STAY"   # on unless "0", as ft-screens reads it
+STAY_THEATER = "DASH_TILE_STAY_THEATER"   # off unless "1"
 GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
 AT_BAR = "DASH_TILE_AT_BAR"   # on unless "0": the wall at Steam's bar, its desk line and distance (not the two below)
 # key: (default, lo, hi), as screens/vrtiles.cpp's TileSettings() and tiling::Params have them
@@ -54,11 +56,19 @@ class DashTiles(QObject):
 
     @Property(bool, notify=changed)
     def stay(self):
-        return ft_layout.read_conf().get(STAY, "0") == "1"
+        return ft_layout.read_conf().get(STAY, "1") != "0"
 
     @Slot(bool)
     def setStay(self, on):
         self._set_value(STAY, "1" if on else "0")
+
+    @Property(bool, notify=changed)
+    def stayTheater(self):
+        return ft_layout.read_conf().get(STAY_THEATER, "0") == "1"
+
+    @Slot(bool)
+    def setStayTheater(self, on):
+        self._set_value(STAY_THEATER, "1" if on else "0")
 
     @Property(bool, notify=changed)
     def gsApps(self):

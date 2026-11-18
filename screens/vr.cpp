@@ -5833,7 +5833,8 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_PALM_MENU") g_palm.params().on = on;
     else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
-    else if (n == "DASH_TILE_STAY") SetTileStayDefault(on);   // (panels anchored from now on)
+    else if (n == "DASH_TILE_STAY") SetTileStayDefault(on);   // (each anchored panel not set the other way)
+    else if (n == "DASH_TILE_STAY_THEATER") SetTileStayTheater(on);
     else if (n == "DASH_TILE_AT_BAR") SetTileAtBar(on);
     else if (n == "GSAPP_PANELS") GsSwitch(on);
     else if (n == "STEAM_DASH_PANEL") SteamDashSwitch(on);
@@ -6246,7 +6247,8 @@ bool ft_vr_init(void) {
     // the dashboard tiles (dashtiles.h, tiling.h): where their band and sphere are, and whether a panel
     // anchored stays shown with the dashboard closed
     for (const TileSetting &t : TileSettings()) num(t.name, *t.value, t.lo, t.hi);
-    SetTileStayDefault(handcut::Setting("DASH_TILE_STAY", "0") == "1");
+    SetTileStayDefault(handcut::Setting("DASH_TILE_STAY", "1") != "0");
+    SetTileStayTheater(handcut::Setting("DASH_TILE_STAY_THEATER", "0") == "1");
     SetTileAtBar(handcut::Setting("DASH_TILE_AT_BAR", "1") != "0");   // the wall at Steam's bar
     LoadTileMemory();
     LoadBarSides();
@@ -8010,7 +8012,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         if (dev == kDashboard) {
             // To the dashboard: anchored, and so tiled (a pose given with it, an older profile's, is
             // the tiles' to choose now). Not seen yet this run: in the room until it first opens.
-            const bool found = EachScreen(word, [&](Screen &s) { TileAnchor(ScreenIndexOf(s), TileStayDefault(), "pin dashboard"); });
+            const bool found = EachScreen(word, [&](Screen &s) { TileAnchor(ScreenIndexOf(s), dashtiles::Stay::Default, "pin dashboard"); });
             std::snprintf(reply, size, !found ? "error no such screen" : g_dash.a.ever ? "ok" : "ok waiting for the dashboard to open");
             return;
         }
@@ -8293,7 +8295,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     int &rr = parsed.rr;
     switch (verb) {
     case vrcmd::HandSetting: {
-        if (!std::strncmp(key, "DASH_TILE_", 10) && std::strcmp(key, "DASH_TILE_STAY") != 0 &&
+        if (!std::strncmp(key, "DASH_TILE_", 10) && std::strcmp(key, "DASH_TILE_STAY") != 0 && std::strcmp(key, "DASH_TILE_STAY_THEATER") != 0 &&
             std::strcmp(key, "DASH_TILE_AT_BAR") != 0) {
             double value;
             if (!ft_conf_number(word, &value) || !SetTileSetting(key, value))

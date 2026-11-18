@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 static int failed = 0;
 static void check(const char *what, bool ok) {
@@ -106,6 +107,26 @@ int main() {
         r = 7, desk = 7;
         check("at the bar: straight under the head, none", !dashtiles::AtBar(head, under, up, 0, 0.8, g, &r, &desk) && r == 7);
         check("at the bar: not finite, none", !dashtiles::AtBar(head, nan, up, 0, 0.8, g, &r, &desk) && desk == 7);
+    }
+    // --- turned so a tile round in the strip is straight ahead (Steam's page over its bar)
+    {
+        double g[3][4], t[3][4];
+        const double head[3] = {0.5, 1.6, -0.2}, f[3] = {std::sin(tiling::Rad(30)), 0, -std::cos(tiling::Rad(30))}, up[3] = {0, 1, 0};
+        dashtiles::GroupFrame(head, f, up, g);
+        std::memcpy(t, g, sizeof t);
+        dashtiles::TurnTo(t, 25);
+        double q[3][4], p[3][4], inT[3], ahead[3];
+        tiling::Pose(25, 10, 1.2, q);   // a tile 25 degrees round, 10 up, in the turned frame
+        tiling::Pose(0, 10, 1.2, p);    // ...and straight ahead in the first
+        for (int r = 0; r < 3; ++r) {
+            inT[r] = t[r][0] * q[0][3] + t[r][1] * q[1][3] + t[r][2] * q[2][3] + t[r][3];
+            ahead[r] = g[r][0] * p[0][3] + g[r][1] * p[1][3] + g[r][2] * p[2][3] + g[r][3];
+        }
+        check("turned: what was 25 degrees round is straight ahead",
+              near(inT[0], ahead[0], 1e-9) && near(inT[1], ahead[1], 1e-9) && near(inT[2], ahead[2], 1e-9));
+        check("turned: still level, at the head", near(t[1][1], 1) && near(t[1][0], 0) && near(t[0][3], 0.5));
+        dashtiles::TurnTo(t, -25);
+        check("turned back: as it was", near(t[0][0], g[0][0], 1e-12) && near(t[2][2], g[2][2], 1e-12) && near(t[0][2], g[0][2], 1e-12));
     }
     // --- Steam's slot: wherever the menu is round you (the strip keeps it only when it reaches it)
     {

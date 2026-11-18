@@ -41,6 +41,7 @@ struct Wall {
 Wall g_tileWallSet, g_tileWallBar;        // the settings', and the bar's at the last Regroup
 bool g_tileAtBar = true;
 bool g_tileWallAtBar = false;
+bool g_tileSteamOverBar = false;          // ...and Steam's tile turned over it (Regroup again once it's tiled)
 void ApplyWall() {
     const Wall &w = g_tileWallAtBar ? g_tileWallBar : g_tileWallSet;
     g_tiles.params.radius = w.radius, g_tiles.params.deskDeg = w.deskDeg;
@@ -203,6 +204,10 @@ bool Regroup() {
     if (steam >= 0) slot = 0;
     g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
     g_tiles.SlotMoved();
+    // at the bar, Steam's page (tiled) over it as Steam's own stands, not the strip's middle
+    g_tileSteamOverBar = g_tileWallAtBar && steam >= 0 && g_tiles.Tiled(steam);
+    if (g_tileSteamOverBar)
+        if (const tiling::Placed *p = (g_tiles.Arrange(TileInfo), g_tiles.PlacedOf(steam))) dashtiles::TurnTo(g, p->azDeg);
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
     RetileDash();
@@ -210,9 +215,10 @@ bool Regroup() {
     // (the facing in the room, 0 its -Z, right positive; the bar from there)
     std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees; Steam's bar %.0f degrees "
                 "round, %.2f m wide, its slot %.0f degrees (0: none), %d columns left of it (-1: the strip doesn't reach it); "
-                "the wall %.2f m away %s, the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
+                "the wall %.2f m away %s%s, the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
                 h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split,
-                g_tiles.params.radius, g_tileWallAtBar ? "(at Steam's bar)" : "(as set)", l.el0, l.el1, l.az0, l.az1);
+                g_tiles.params.radius, g_tileWallAtBar ? "(at Steam's bar)" : "(as set)",
+                g_tileSteamOverBar ? ", Steam's page over the bar" : "", l.el0, l.el1, l.az0, l.az1);
     return true;
 }
 }  // namespace
@@ -444,6 +450,9 @@ void UpdateDashTiles() {
     g_dashWasUp = up;
     // (a read that counts: this opening's, or before the group was ever set the last good one)
     const bool fresh = !Dash().why || (!g_tileGroupSet && !std::strcmp(Dash().why, "hidden"));
+    // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
+    const int steam = SteamDashIndex();
+    if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
     if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
     UpdateTileFocus();
 }

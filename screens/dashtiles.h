@@ -114,17 +114,6 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
     return true;
 }
 
-// The group frame g turned round its +Y so what was `azDeg` round in it is straight ahead (azimuth
-// 0) now: at the bar, Steam's page (its window a tile: STEAM_DASH_PANEL) over its bar, as Steam's
-// own page stands over it, rather than the strip's middle.
-inline void TurnTo(double g[3][4], double azDeg) {
-    const double c = std::cos(tiling::Rad(azDeg)), s = std::sin(tiling::Rad(azDeg));
-    for (int r = 0; r < 3; ++r) {   // (columns x and z of g times a turn about y)
-        const double x = g[r][0], z = g[r][2];
-        g[r][0] = x * c - z * s, g[r][2] = x * s + z * c;
-    }
-}
-
 class Board {
 public:
     tiling::Params params;
@@ -189,12 +178,17 @@ public:
     template <typename InfoOf>
     tiling::Drop DropFor(int id, double az, double el, InfoOf info) const {
         const auto cols = Columns(info);
-        return Without(grid_, id, tiling::DropAt(tiling::Arrange(cols, params, Split()), cols, az, el));
+        tiling::Layout l = tiling::Arrange(cols, params, Split());
+        if (l.split < 0) tiling::Turn(&l, pan_);   // (as you see it)
+        return Without(grid_, id, tiling::DropAt(l, cols, az, el));
     }
-    // Let go: where DropFor said (a column's indices are the grid's without it), or torn off at `rel`.
-    void Drop(int id, const tiling::Drop &d, const double rel[3][4]) {
+    // Let go at `az` round you: where DropFor said (a column's indices are the grid's without it), or
+    // torn off at `rel`. The strip then goes where it keeps it nearest `az` (Arrange; NAN: the others
+    // where they were, it as it falls).
+    void Drop(int id, const tiling::Drop &d, const double rel[3][4], double az = NAN) {
         if (!Anchored(id)) return;
         if (d.kind == tiling::Drop::TearOff) return TearOff(id, rel);
+        moved_ = id, movedAz_ = az;
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
         EndBatch();
@@ -219,6 +213,7 @@ public:
 private:
     // Meta+Ctrl+Right or Up: bigger; Left or Down: smaller (its natural shape kept).
     bool Pressed(int id, Key k) {
+        moved_ = id, movedAz_ = NAN;   // (moved by a key: the others keep their places, not it)
         switch (k) {
             case Key::Left:
             case Key::Right: {
@@ -274,11 +269,20 @@ public:
         }
         return cols;
     }
-    // Laid out, round Steam's slot as slotsplit.h says.
+    // Laid out, round Steam's slot as slotsplit.h says, and without one turned to keep the strip
+    // where it was (Pan).
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
-        return last_ = slot_.Arrange(grid_, Columns(info), params);
+        tiling::Layout l = slot_.Arrange(grid_, Columns(info), params);
+        pan_ = l.split >= 0 ? 0 : Pan(l);
+        if (pan_ != 0) tiling::Turn(&l, pan_);
+        moved_ = -1, recentre_ = false;
+        return last_ = std::move(l);
     }
+    // The dashboard opened: the strip centred again on the next Arrange (its middle straight ahead),
+    // or with panel `on`'s middle straight ahead (Steam's page over its bar), not where it was.
+    void Recentre(int on = -1) { recentre_ = true, centreOn_ = on; }
+    double PanDeg() const { return pan_; }
     // Steam's menu is where params.reserveAzDeg says now (the dashboard opened again).
     void SlotMoved() { slot_.Moved(params.reserveAzDeg); }
     // The split in use now (-1: no slot in the strip, or not chosen yet).
@@ -389,6 +393,42 @@ private:
     static std::pair<int, int> RestoreOrder(const State &s) {
         return s.Placed() ? std::pair<int, int>{s.col, s.row} : std::pair<int, int>{INT_MAX, 0};
     }
+
+    // The turn for `l` (laid out centred: Arrange): Recentre's; else, after a change (user,
+    // 2026-11-18: a panel moved from the right to the left "should put that monitor roughly where I
+    // put it, but not shift all monitors around"; Arrange centres the strip, so it shifted them by the
+    // moved one's width), the one that keeps the others nearest where they were on average: moved to
+    // an end, they stay; into the middle, its neighbours make room both ways. The one moved counts only
+    // when there are no others (it where it was let go; by a key, not at all: it pulled them a fifth
+    // of its width when it did). Always with the strip still reaching straight ahead (what it's
+    // centred round: Steam's bar, or where you faced).
+    double Pan(const tiling::Layout &l) const {
+        double pan = pan_;
+        if (recentre_) {
+            pan = 0;
+            for (const tiling::Placed &p : l.tiles)
+                if (p.id == centreOn_) pan = -p.azDeg;
+        } else {
+            double sum = 0, alone = NAN;
+            int n = 0;
+            for (const tiling::Placed &p : l.tiles) {
+                if (p.id == moved_) {
+                    if (!std::isnan(movedAz_)) alone = tiling::WrapNear(movedAz_ - p.azDeg, 0);
+                    continue;
+                }
+                for (const tiling::Placed &q : last_.tiles)
+                    if (q.id == p.id) sum += tiling::WrapNear(q.azDeg - p.azDeg, 0), ++n;
+            }
+            if (n) pan = sum / n;
+            else if (!std::isnan(alone)) pan = alone;
+        }
+        return std::clamp(pan, -l.az1, -l.az0);
+    }
+    double pan_ = 0;              // the strip turned this far from centred
+    bool recentre_ = false;
+    int centreOn_ = -1;
+    int moved_ = -1;              // the panel just moved (the next Arrange's), and where it was let go (NAN: by a key, or not said)
+    double movedAz_ = NAN;
 
     static void AppendColumn(tilegrid::Grid &g, const tilegrid::Col &c) {
         const int at = int(g.Cols().size());

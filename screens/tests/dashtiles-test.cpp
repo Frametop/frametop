@@ -108,26 +108,6 @@ int main() {
         check("at the bar: straight under the head, none", !dashtiles::AtBar(head, under, up, 0, 0.8, g, &r, &desk) && r == 7);
         check("at the bar: not finite, none", !dashtiles::AtBar(head, nan, up, 0, 0.8, g, &r, &desk) && desk == 7);
     }
-    // --- turned so a tile round in the strip is straight ahead (Steam's page over its bar)
-    {
-        double g[3][4], t[3][4];
-        const double head[3] = {0.5, 1.6, -0.2}, f[3] = {std::sin(tiling::Rad(30)), 0, -std::cos(tiling::Rad(30))}, up[3] = {0, 1, 0};
-        dashtiles::GroupFrame(head, f, up, g);
-        std::memcpy(t, g, sizeof t);
-        dashtiles::TurnTo(t, 25);
-        double q[3][4], p[3][4], inT[3], ahead[3];
-        tiling::Pose(25, 10, 1.2, q);   // a tile 25 degrees round, 10 up, in the turned frame
-        tiling::Pose(0, 10, 1.2, p);    // ...and straight ahead in the first
-        for (int r = 0; r < 3; ++r) {
-            inT[r] = t[r][0] * q[0][3] + t[r][1] * q[1][3] + t[r][2] * q[2][3] + t[r][3];
-            ahead[r] = g[r][0] * p[0][3] + g[r][1] * p[1][3] + g[r][2] * p[2][3] + g[r][3];
-        }
-        check("turned: what was 25 degrees round is straight ahead",
-              near(inT[0], ahead[0], 1e-9) && near(inT[1], ahead[1], 1e-9) && near(inT[2], ahead[2], 1e-9));
-        check("turned: still level, at the head", near(t[1][1], 1) && near(t[1][0], 0) && near(t[0][3], 0.5));
-        dashtiles::TurnTo(t, -25);
-        check("turned back: as it was", near(t[0][0], g[0][0], 1e-12) && near(t[2][2], g[2][2], 1e-12) && near(t[0][2], g[0][2], 1e-12));
-    }
     // --- Steam's slot: wherever the menu is round you (the strip keeps it only when it reaches it)
     {
         double g[3][4];
@@ -163,6 +143,62 @@ int main() {
               cols.size() == 4 && cols[0].cells[0].id == 1 && cols[1].cells[0].id == 9 && cols[2].cells[0].id == 2);
         b.Anchor(8, 1, false, 77);
         check("left of one not tiled: as without it", b.Grid().Find(8).col == 1);
+    }
+    // --- moved, the strip stays where it was (user, 2026-11-18: a monitor moved from the right to the
+    // left was centred and every other one pushed right, 30 degrees and more)
+    {
+        dashtiles::Board b;
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, false);
+        b.Arrange(desk);
+        const auto at = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
+        const double w = at(2) - at(1), a1 = at(1), a2 = at(2);
+        check("pan: three, centred at first", near(at(2), 0, 1e-9) && w > 20);
+        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+        const double left = a1 - w * 0.4;   // (on 1's left edge)
+        b.Drop(3, b.DropFor(3, left, 0, desk), rel, left);
+        b.Arrange(desk);
+        check("pan: right one to the left end: it's leftmost", at(3) < at(1) && at(1) < at(2));
+        check("pan: ...the others stay put", near(at(1), a1, 1e-9) && near(at(2), a2, 1e-9));
+        check("pan: ...it roughly where let go", std::fabs(at(3) - left) < w);
+        const double b1 = at(1), b2 = at(2), b3 = at(3), mid = (b1 + b2) / 2;
+        b.Drop(3, b.DropFor(3, mid, 0, desk), rel, mid);   // (back between them)
+        b.Arrange(desk);
+        check("pan: dragged into the middle: it's there", at(1) < at(3) && at(3) < at(2));
+        check("pan: ...its neighbours make room both ways", at(1) < b1 - w * 0.25 && at(2) > b2 + w * 0.25 && std::fabs(at(3) - mid) < w * 0.25);
+        (void)b3;
+        {   // (alone on the board, it goes where it was let go)
+            dashtiles::Board one;
+            one.Anchor(5, -1, false);
+            one.Arrange(desk);
+            one.Drop(5, one.DropFor(5, 20, 0, desk), rel, 20);
+            one.Arrange(desk);
+            const tiling::Placed *p5 = one.PlacedOf(5);
+            check("pan: alone, moved: where let go", p5 && near(p5->azDeg, 20, 1e-9));
+        }
+        bool reach = true;
+        for (int k = 0; k < 6; ++k) {   // (the left end dragged further left over and over)
+            const tiling::Layout &l = b.Last();
+            int end = -1;
+            for (const tiling::Placed &p : l.tiles)
+                if (p.az1 >= l.az1 - 1e-9) end = p.id;
+            b.Drop(end, b.DropFor(end, l.az0 + 5, 0, desk), rel, l.az0 + 5);
+            const tiling::Layout &m = b.Arrange(desk);
+            reach = reach && m.az0 <= 1e-9 && m.az1 >= -1e-9;
+        }
+        check("pan: moved and moved, the strip still reaches straight ahead", reach);
+        b.Arrange(desk);
+        const double steady = b.PanDeg();
+        b.Arrange(desk);
+        check("pan: arranged again unchanged: still", near(b.PanDeg(), steady, 1e-9));
+        b.Recentre();
+        const tiling::Layout &c = b.Arrange(desk);
+        check("pan: recentred: the strip's middle straight ahead", near(c.az0, -c.az1, 1e-9));
+        b.Recentre(1);
+        b.Arrange(desk);
+        check("pan: recentred on one: it straight ahead", near(at(1), 0, 1e-9));
+        b.Press(2, dashtiles::Key::Right);
+        b.Arrange(desk);
+        check("pan: a key press: the strip still reaches straight ahead", b.Last().az0 <= 1e-9 && b.Last().az1 >= -1e-9);
     }
     // --- the slot's side stays put (council, 2026-11-16: it was the column count's middle, so an
     // anchor or a drop moved panels across Steam's menu)
@@ -221,7 +257,7 @@ int main() {
         check("split: a panel gone, the strip short of the menu now: the slot stays (no one crosses it)",
               b.Last().split == 2 && clearOf(77, 143));
         b.params.reserveAzDeg = 160;   // (behind you)
-        b.SlotMoved();
+        b.SlotMoved(), b.Recentre();   // (as Regroup does)
         b.Arrange(desk);
         check("split: a menu the strip doesn't reach: no slot, centred", b.Last().split == -1 && near(b.Last().az0, -b.Last().az1));
         check("split: ...the splits kept for when it does (council, 2026-11-16)", b.Grid().Split(1) == 2 && b.Grid().Split(0) == 1);
@@ -248,11 +284,11 @@ int main() {
             return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
         };
         const bool rightFirst = sideIn(one, 1) == 1;
-        one.Drop(1, one.DropFor(1, -20, 0, desk), rel);
+        one.Drop(1, one.DropFor(1, -20, 0, desk), rel, -20);
         one.Arrange(desk);
         const bool wentLeft = sideIn(one, 1) == -1;
         const tiling::Placed *p1 = one.PlacedOf(1);
-        one.Drop(1, one.DropFor(1, p1 ? (p1->az0 + p1->az1) / 2 : 0, 0, desk), rel);
+        one.Drop(1, one.DropFor(1, p1 ? (p1->az0 + p1->az1) / 2 : 0, 0, desk), rel, p1 ? (p1->az0 + p1->az1) / 2 : 0);
         one.Arrange(desk);
         check("split: one panel let go left of the menu goes left, and stays on itself",
               rightFirst && wentLeft && sideIn(one, 1) == -1 && one.Grid().Split(0) == 1);
@@ -276,7 +312,7 @@ int main() {
         const bool swapped = same.Press(3, dashtiles::Key::Right);
         same.Arrange(desk);
         const tiling::Placed *p4 = same.PlacedOf(4);
-        same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), rel);   // (let go where it was)
+        same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), rel, p4 ? (p4->az0 + p4->az1) / 2 : 0);   // (let go where it was)
         same.Arrange(desk);
         const bool stillLopsided = same.Grid().Split(0) == 0;
         same.SlotMoved();
@@ -308,7 +344,7 @@ int main() {
         const double at3 = p3 ? (p3->az0 + p3->az1) / 2 : 0;
         dock.TearOff(3, rel);
         dock.Arrange(desk);
-        dock.Drop(3, dock.DropFor(3, at3 - 30, 0, desk), rel);   // (by its old left edge: a column of its own again)
+        dock.Drop(3, dock.DropFor(3, at3 - 30, 0, desk), rel, at3 - 30);   // (by its old left edge: a column of its own again)
         dock.Arrange(desk);
         const bool docked = dock.Grid().Has(3) && dock.Grid().Split(0) == 0;
         dock.SlotMoved();
@@ -319,7 +355,7 @@ int main() {
         dashtiles::Board across;
         across.params.reserveAzDeg = 0, across.params.reserveDeg = 66;
         for (int i = 1; i <= 2; ++i) across.Anchor(i, i - 1, false), across.Arrange(desk);   // S [ 1 ][ 2 ]
-        across.Drop(2, across.DropFor(2, -40, 0, desk), rel);   // (left of the menu)
+        across.Drop(2, across.DropFor(2, -40, 0, desk), rel, -40);   // (left of the menu)
         across.Arrange(desk);
         const bool crossed = across.Grid().Split(0) == 1;   // [ 2 ] S [ 1 ]
         for (int i = 3; i <= 4; ++i) across.Anchor(i, 1, false), across.Arrange(desk);   // (next to 1: right)

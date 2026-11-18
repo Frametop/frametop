@@ -1,7 +1,7 @@
 // The dashboard tiles' glue on OpenVR (user, 2026-11-16; docs/design.md, Dashboard tiles): panels
 // anchored to the SteamVR dashboard. The policy is dashtiles.h's (which are anchored, tiled or
 // satellites, the keys, the memory), the places tiling.h's, the panel vrpanel.h's. Here: the group
-// frame, in front of you when the dashboard opens (Regroup), held to the bar after that
+// frame, over Steam's bar (or in front of you) when the dashboard opens (Regroup), held to the bar after that
 // (a pin on kDashboard rides on its frame: vr.cpp's MoveFramePins), so a dashboard dragged carries its
 // tiles; the panels pinned to their places in it (RetileDash); which panel the tiling keys act on and
 // its border (UpdateTileFocus); each app's or display's last state in ~/.config/frametop-tiles.txt;
@@ -33,6 +33,18 @@ bool g_tileGroupSet = false;              // ...since the dashboard was first se
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
 bool g_dashWasUp = false;
 bool g_tileStayDefault = false;           // DASH_TILE_STAY: a panel anchored stays shown with the dashboard closed
+// The wall: at Steam's bar (DASH_TILE_AT_BAR, dashtiles.h's AtBar), or where DASH_TILE_RADIUS and
+// DASH_TILE_DESK_DEG put it; which one the group has now (the last Regroup's: the bar may not be placed).
+struct Wall {
+    double radius = tiling::Params().radius, deskDeg = tiling::Params().deskDeg;
+};
+Wall g_tileWallSet, g_tileWallBar;        // the settings', and the bar's at the last Regroup
+bool g_tileAtBar = true;
+bool g_tileWallAtBar = false;
+void ApplyWall() {
+    const Wall &w = g_tileWallAtBar ? g_tileWallBar : g_tileWallSet;
+    g_tiles.params.radius = w.radius, g_tiles.params.deskDeg = w.deskDeg;
+}
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
 constexpr std::chrono::seconds kTilesAddWindow{5};
@@ -134,6 +146,7 @@ Mat ToMat(const double m[3][4]) {
 // Each tiled panel pinned to its place at its size there, and each satellite at its own. Nothing
 // until the group has a frame (the dashboard seen).
 void RetileDash() {
+    ApplyWall();
     FlattenTiles();
     if (!g_tileGroupSet || !Dash().ever) return;
     const auto &l = g_tiles.Arrange(TileInfo);
@@ -173,11 +186,17 @@ bool Regroup() {
     const Mat bar = DashFrame();
     const double h[3] = {head.m[0][3], head.m[1][3], head.m[2][3]}, b[3] = {bar.m[0][3], bar.m[1][3], bar.m[2][3]},
                  fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, up[3] = {head.m[0][1], head.m[1][1], head.m[2][1]};
+    const double barUp[3] = {bar.m[0][1], bar.m[1][1], bar.m[2][1]};
     double g[3][4];
-    dashtiles::GroupFrame(h, fwd, up, g);
+    g_tileWallAtBar = g_tileAtBar && dashtiles::AtBar(h, b, barUp, DashHeight(), g_tiles.params.gapDeg, g,
+                                                      &g_tileWallBar.radius, &g_tileWallBar.deskDeg);
+    if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
+    ApplyWall();
     const double barW = DashWidth();
+    // (at the bar, Steam's page over it is as near as the tiles: the slot as wide as the page, or they'd cut into it)
+    const double slotW = g_tileWallAtBar ? std::max(barW, SteamPageWidth()) : barW;
     double barAz = 0, slot = 0;
-    if (!dashtiles::SteamSlot(g, b, barW, &barAz, &slot)) slot = 0;
+    if (!dashtiles::SteamSlot(g, b, slotW, &barAz, &slot)) slot = 0;
     const int steam = SteamDashIndex();
     // Steam's window a tile itself (STEAM_DASH_PANEL), its menu glued to it: no slot kept (it isn't
     // tiled yet when the dashboard opens, so not Tiled(steam): that kept a slot's gap in the strip)
@@ -191,17 +210,20 @@ bool Regroup() {
     // (the facing in the room, 0 its -Z, right positive; the bar from there)
     std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees; Steam's bar %.0f degrees "
                 "round, %.2f m wide, its slot %.0f degrees (0: none), %d columns left of it (-1: the strip doesn't reach it); "
-                "the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
-                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split, l.el0, l.el1,
-                l.az0, l.az1);
+                "the wall %.2f m away %s, the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
+                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split,
+                g_tiles.params.radius, g_tileWallAtBar ? "(at Steam's bar)" : "(as set)", l.el0, l.el1, l.az0, l.az1);
     return true;
 }
 }  // namespace
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
 std::array<TileSetting, 5> TileSettings() {
-    return {{{"DASH_TILE_DESK_DEG", &g_tiles.params.deskDeg, -40, 20},   // the desk line, up from your eyes
-             {"DASH_TILE_RADIUS", &g_tiles.params.radius, 0.8, 6},   // the wall: the tiles' corners from you, metres
+    // (the desk and the wall while they aren't at Steam's bar, DASH_TILE_AT_BAR, which keeps to their ranges)
+    static_assert(dashtiles::kDeskMinDeg == -40 && dashtiles::kDeskMaxDeg == 20 && dashtiles::kWallMinM == 0.8 &&
+                  dashtiles::kWallMaxM == 6, "AtBar's ranges are DASH_TILE_DESK_DEG's and DASH_TILE_RADIUS's");
+    return {{{"DASH_TILE_DESK_DEG", &g_tileWallSet.deskDeg, -40, 20},   // the desk line, up from your eyes
+             {"DASH_TILE_RADIUS", &g_tileWallSet.radius, 0.8, 6},   // the wall: the tiles' corners from you, metres
              {"DASH_TILE_PX_PER_DEG", &g_tiles.params.pxPerDeg, 15, 120},   // a panel's natural size
              {"DASH_TILE_GAP_DEG", &g_tiles.params.gapDeg, 0, 10},   // between tiles, round you and up
              {"DASH_TILE_WALL_DEG", &g_tiles.params.wallDeg, 30, 300}}};   // the desk's width before panels stack
@@ -222,6 +244,11 @@ bool TileAnchored(int i) { return g_tiles.Anchored(i); }
 bool TileTiled(int i) { return g_tiles.Tiled(i); }
 bool TileStayDefault() { return g_tileStayDefault; }
 void SetTileStayDefault(bool on) { g_tileStayDefault = on; }
+void SetTileAtBar(bool on) {
+    if (on == g_tileAtBar) return;
+    g_tileAtBar = on;
+    g_tileRegroup = true;   // (at once while the dashboard is open, else when it opens)
+}
 namespace {
 std::string TileLabel(int i) { return "screen " + std::to_string(i + 1); }
 }  // namespace

@@ -10,7 +10,8 @@
 // anchor button's long press). Each app or display remembers what it was last: anchored or not,
 // its place on the grid or as a satellite, and whether it stays, for the next time it opens.
 //
-// The group frame: at your head when the dashboard opened, level, -Z the way you faced (GroupFrame).
+// The group frame: at your head when the dashboard opened, level, -Z toward Steam's bar (AtBar) or the
+// way you faced (GroupFrame).
 // Header only, no OpenVR, so its test runs anywhere.
 #pragma once
 
@@ -85,6 +86,31 @@ inline bool SteamSlot(const double g[3][4], const double bar[3], double barWidth
     *azDeg = std::isfinite(az) ? az : 0;
     if (!(barWidthM > 0) || !std::isfinite(barWidthM) || !(flat >= 0.2) || !std::isfinite(az)) return false;
     *spanDeg = std::min(kMaxSlotDeg, 2 * tiling::Deg(std::atan2(barWidthM / 2, flat)));
+    return true;
+}
+
+// The wall at Steam's bar (user, 2026-11-18: "the same distance that the Steam menu is ... the
+// middle display should be positioned right above where the Steam menu bar is"; DASH_TILE_AT_BAR,
+// on unless "0"): the group frame at the head, level, facing the bar, so the strip is centred over
+// it; the wall (the tiles' corners) as far from the head as the bar is; and the desk line `gapDeg`
+// above the bar's top edge. `bar`: its middle, `barUp`: its +Y (a unit vector: Steam tilts it back,
+// so the top edge is a little further away too), `barHeightM` (0: not known, its middle counts).
+// Into the frame g, *radius (kWallMinM..kWallMaxM) and *deskDeg (kDeskMinDeg..kDeskMaxDeg), the
+// ranges DASH_TILE_RADIUS and DASH_TILE_DESK_DEG have. False, nothing set, with the bar under
+// kMinFlatM round from straight under or over the head, or anything not finite.
+constexpr double kWallMinM = 0.8, kWallMaxM = 6, kDeskMinDeg = -40, kDeskMaxDeg = 20, kMinFlatM = 0.2;
+inline bool AtBar(const double head[3], const double bar[3], const double barUp[3], double barHeightM, double gapDeg,
+                  double g[3][4], double *radius, double *deskDeg) {
+    const double d[3] = {bar[0] - head[0], bar[1] - head[1], bar[2] - head[2]};
+    const double flat = std::hypot(d[0], d[2]), dist = std::sqrt(flat * flat + d[1] * d[1]);
+    const double half = std::isfinite(barHeightM) && barHeightM > 0 ? barHeightM / 2 : 0;
+    const double top[3] = {d[0] + barUp[0] * half, d[1] + barUp[1] * half, d[2] + barUp[2] * half};
+    const double el = tiling::Deg(std::atan2(top[1], std::hypot(top[0], top[2]))) + gapDeg;
+    if (!(flat >= kMinFlatM) || !std::isfinite(dist + el)) return false;
+    const double fwd[3] = {d[0] / flat, 0, d[2] / flat}, up[3] = {0, 1, 0};
+    GroupFrame(head, fwd, up, g);
+    *radius = std::clamp(dist, kWallMinM, kWallMaxM);
+    *deskDeg = std::clamp(el, kDeskMinDeg, kDeskMaxDeg);
     return true;
 }
 

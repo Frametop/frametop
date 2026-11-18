@@ -142,6 +142,7 @@
 #include "chromepool.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
+#include "steamshrink.h"
 #include "gscontrol.h"
 #include "gsdisplay.h"
 #include "gslink.h"
@@ -801,6 +802,29 @@ double DashWidth() {
         vr::VROverlay()->GetOverlayWidthInMeters(g_dash.bar, &w) != vr::VROverlayError_None || !(w > 0))
         return 0;
     return w * g_dash.a.scale;
+}
+
+// The bar's height in the room, metres: its width at its pixels' shape (its mouse scale, 1800 x 120 on
+// SteamOS 0.5.9: it has no texture of its own to read), 0 when it isn't known.
+double DashHeight() {
+    vr::HmdVector2_t px{};
+    const double w = DashWidth();
+    if (!(w > 0) || vr::VROverlay()->GetOverlayMouseScale(g_dash.bar, &px) != vr::VROverlayError_None || !(px.v[0] > 0) ||
+        !(px.v[1] > 0))
+        return 0;
+    return w * px.v[1] / px.v[0];
+}
+
+// Steam's page over the bar (valve.steam.gamepadui.main), metres wide: its width at the bar's scale
+// (Steam draws the dashboard's panels at one scale), the width it had if it's shrunk now
+// (steamshrink.h). 0 when it isn't known.
+double SteamPageWidth() {
+    vr::VROverlayHandle_t main = vr::k_ulOverlayHandleInvalid;
+    float w = 0;
+    if (!g_dash.a.ever || vr::VROverlay()->FindOverlay("valve.steam.gamepadui.main", &main) != vr::VROverlayError_None ||
+        vr::VROverlay()->GetOverlayWidthInMeters(main, &w) != vr::VROverlayError_None || !(w > 0))
+        return 0;
+    return (steamshrink::Shrunk(w) ? steamshrink::Back(w) : w) * g_dash.a.scale;
 }
 
 Mat DashFrame() {
@@ -5722,6 +5746,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "SCREEN_SPIN_BRING") g_susanBring = on;
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
     else if (n == "DASH_TILE_STAY") SetTileStayDefault(on);   // (panels anchored from now on)
+    else if (n == "DASH_TILE_AT_BAR") SetTileAtBar(on);
     else if (n == "GSAPP_PANELS") GsSwitch(on);
     else if (n == "STEAM_DASH_PANEL") SteamDashSwitch(on);
     else if (n == "SCREEN_PIN_LEVEL") SetPinMode(on ? levelpin::Level : levelpin::Rigid);   // (2, Walk: the command's own case)
@@ -6131,6 +6156,7 @@ bool ft_vr_init(void) {
     // anchored stays shown with the dashboard closed
     for (const TileSetting &t : TileSettings()) num(t.name, *t.value, t.lo, t.hi);
     SetTileStayDefault(handcut::Setting("DASH_TILE_STAY", "0") == "1");
+    SetTileAtBar(handcut::Setting("DASH_TILE_AT_BAR", "1") != "0");   // the wall at Steam's bar
     LoadTileMemory();
     GsSwitch(handcut::Setting("GSAPP_PANELS", "1") != "0");   // the gamescope apps as panels of ours
     SteamDashSwitch(handcut::Setting("STEAM_DASH_PANEL", "0") == "1");   // Steam's dashboard window as one (a spike)
@@ -8150,7 +8176,8 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     int &rr = parsed.rr;
     switch (verb) {
     case vrcmd::HandSetting: {
-        if (!std::strncmp(key, "DASH_TILE_", 10) && std::strcmp(key, "DASH_TILE_STAY") != 0) {
+        if (!std::strncmp(key, "DASH_TILE_", 10) && std::strcmp(key, "DASH_TILE_STAY") != 0 &&
+            std::strcmp(key, "DASH_TILE_AT_BAR") != 0) {
             double value;
             if (!ft_conf_number(word, &value) || !SetTileSetting(key, value))
                 return (void)std::snprintf(reply, size, "error invalid dashboard tile setting");

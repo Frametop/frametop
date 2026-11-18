@@ -82,6 +82,7 @@ public:
         if (it == g_screens.end()) return;
         Screen &s = it->second;
         s.label = w.title;
+        s.theater = w.steamApp != 0;   // (its View in Theater button: LendChrome)
         vr::VROverlay()->SetOverlayName(s.overlay, w.title.c_str());
         GsGeometry(s, index, w);
         s.shown = this;   // (no buffer of ours: gamescope's frames)

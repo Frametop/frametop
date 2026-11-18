@@ -572,6 +572,20 @@ std::vector<uint8_t> DockTexture(int n) {
         DiscRim);
 }
 
+std::vector<uint8_t> TheaterTexture(int n) {
+    // A wide screen on a stand: "View in Theater" (a game's panel, in the dock button's place).
+    return ControlTexture(
+        n, InDisc,
+        [](double u, double v) {
+            const bool inScreen = std::fabs(u) < 0.56 && v > -0.12 && v < 0.42;
+            const bool inside = std::fabs(u) < 0.44 && v > 0.0 && v < 0.3;
+            if (inScreen && !inside) return true;                          // the screen's frame
+            if (std::fabs(u) < 0.06 && v > -0.34 && v <= -0.12) return true;  // the stand
+            return std::fabs(u) < 0.26 && v > -0.44 && v <= -0.34;            // its foot
+        },
+        DiscRim);
+}
+
 std::vector<uint8_t> ResetTexture(int n) {
     // A reticle: "put the screens back around you" (like a recenter).
     return ControlTexture(
@@ -1021,6 +1035,8 @@ Mat BarOffset(const Screen &s) {
 // button). It grows with them as a hand comes (ChromeSize).
 //   On another edge (s.barSide; barside.h's Place) the same row, turned to run along that edge.
 // Along the row (`along`: from the bar's middle, the curve and roll side positive); the tab's is its u.
+// Which button the anchor is from the bar, on the left: after the panel's other buttons there.
+int AnchorSlot(const Screen &s) { return s.floating ? 3 : s.gsapp ? (s.theater ? 2 : 1) : 4; }
 void ControlAlong(const Screen &s, double along[kControls]) {
     const double bar = barhit::Width(s.chrome, g_barPaddingX), button = s.grip;
     const double gap = std::max(s.chrome * 0.06, button);
@@ -1028,8 +1044,9 @@ void ControlAlong(const Screen &s, double along[kControls]) {
                            // Visual, preview and hit-mask canvases share the screen's actual corner.
                            s.cornerX * (s.metres / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
                           -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5), -(bar / 2 + gap * 3 + button * 2.5),
-                          // the anchor: outermost on the left (a floating window's after its dock and close)
-                          -(bar / 2 + gap * (s.floating ? 3 : 4) + button * (s.floating ? 2.5 : 3.5))};
+                          // the anchor: outermost on the left (a floating window's after its dock and close, a
+                          // game's after its View in Theater, an app's first)
+                          -(bar / 2 + gap * AnchorSlot(s) + button * (AnchorSlot(s) - 0.5))};
     std::copy(std::begin(uu), std::end(uu), along);
 }
 void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
@@ -1106,6 +1123,8 @@ void PlaceChrome(Screen &s) {
     if (s.floating) {
         vr::VROverlay()->SetOverlayWidthInMeters(s.dockButton, float(button));
         vr::VROverlay()->SetOverlayWidthInMeters(s.closeButton, float(button));
+    } else if (s.gsapp) {
+        if (s.dockButton != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->SetOverlayWidthInMeters(s.dockButton, float(button));
     } else {
         vr::VROverlay()->SetOverlayWidthInMeters(s.resetButton, float(button));
         vr::VROverlay()->SetOverlayWidthInMeters(s.pinButton, float(button));
@@ -5896,6 +5915,9 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                     AnchorHandDown(e.panel, e.side);   // (let go: a click or a long press, UpdateAnchorHold)
                 } else if (e.control == handinput::Control::Roll) {
                     LevelScreen(s, e.panel, e.side ? "the right hand" : "the left hand");
+                } else if (e.control == handinput::Control::Dock && s.gsapp) {
+                    std::printf("screen %d: View in Theater button (%s)\n", e.panel + 1, e.side ? "the right hand" : "the left hand");
+                    GsToTheater(e.panel);   // (a Steam game's panel: its View in Theater button is in the dock's place)
                 } else if (e.control == handinput::Control::Dock || e.control == handinput::Control::Close) {
                     SendFloat((e.control == handinput::Control::Dock ? "dock " : "close ") + std::to_string(e.panel + 1));
                 }
@@ -6928,8 +6950,12 @@ void LendChrome(Screen &s, int k) {
             continue;
         }
         *mine[c] = set.part[c];
-        vr::VROverlay()->SetOverlayName(set.part[c], (s.label + ": " + kControlWhat[c]).c_str());
+        vr::VROverlay()->SetOverlayName(set.part[c], (s.label + ": " + (c == 4 && s.gsapp ? "View in Theater" : kControlWhat[c])).c_str());
     }
+    // the dock button's slot: a game's View in Theater, else a floating window's way back to the desktop
+    static const auto dockTex = DockTexture(64), theaterTex = TheaterTexture(64);
+    if (s.dockButton != vr::k_ulOverlayHandleInvalid)
+        overlaytex::Set(s.dockButton, (s.gsapp ? theaterTex : dockTex).data(), 64, 64);
     // a floating window's tab scrolls its density (the event loop)
     vr::VROverlay()->SetOverlayFlag(s.handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, s.floating);
     static const auto pinNormal = PinTexture(64, false);
@@ -7696,13 +7722,17 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
         }
-        // A floating window's buttons: back to the desktop, and close (ft-floatd does both).
+        // A floating window's buttons: back to the desktop, and close (ft-floatd does both). A Steam
+        // game's panel has View in Theater in the first one's place.
         for (int k : {4, 5}) {
             const vr::VROverlayHandle_t o = s.Controls()[k];
             if (o == vr::k_ulOverlayHandleInvalid) continue;
             while (vr::VROverlay()->PollNextOverlayEvent(o, &ev, sizeof ev)) {
                 hover(k);
-                if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
+                if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left && s.gsapp) {
+                    std::printf("screen %d: View in Theater button (%s)\n", index + 1, DeviceLabel(ev.trackedDeviceIndex).c_str());
+                    GsToTheater(index);
+                } else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
                     SendFloat((k == 4 ? "dock " : "close ") + std::to_string(index + 1));
                 } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
                     EndDragsBy(ev.trackedDeviceIndex);

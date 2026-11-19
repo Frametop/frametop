@@ -166,4 +166,16 @@ inline bool IsTap(int64_t heldMs, double movedM, double turnedRad, const TapLimi
     return heldMs >= 0 && !CarryNow(heldMs, movedM, turnedRad, l);
 }
 
+// A press waiting on the bar, each tick (vr.cpp's BarHold): it waits on, its move starts, or it's dropped.
+// Dropped: the panel's already moving (`busy`), the laser has no pose, the panel isn't shown (hidden,
+// paused). A press that would carry while its controller holds nothing (`holds` 0; 1 held, -1 unknown,
+// SteamVR tells only in VR games) lost its release somewhere: no move with no button down.
+enum class Wait { Keep, Carry, Drop };
+inline Wait HoldStep(int64_t heldMs, double movedM, double turnedRad, bool busy, bool posed, bool shown, int holds,
+                     const TapLimits &l = {}) {
+    if (busy || !posed || !shown) return Wait::Drop;
+    if (!CarryNow(heldMs, movedM, turnedRad, l)) return Wait::Keep;
+    return holds == 0 ? Wait::Drop : Wait::Carry;
+}
+
 }  // namespace panelmenu

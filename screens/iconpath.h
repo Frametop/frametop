@@ -1,6 +1,6 @@
 // Small filled icons from SVG path data, on the 24-unit viewBox the Option C design draws them on
 // (user, 2026-11-19: "Use that as the design"), into an RGBA buffer with soft edges. Pure: no OpenVR
-// (screens/tests/iconpath-test.cpp).
+// (its tests are in screens/tests/menulayout-test.cpp).
 //   Path data: M L H V C S Q T A Z, absolute and relative; curves and arcs are cut into short lines.
 // Outlines fill by the nonzero rule, or even-odd for a shape that asks (a frame with a hole).
 #pragma once
@@ -59,6 +59,7 @@ inline void Quad(Outline &o, Pt a, Pt b, Pt c) {
 }
 // SVG's endpoint arc (its implementation notes, F.6.5): from a to b on an ellipse rx, ry turned phi degrees.
 inline void Arc(Outline &o, Pt a, double rx, double ry, double phiDeg, bool large, bool sweep, Pt b) {
+    if (a.x == b.x && a.y == b.y) return;   // (SVG: an arc to where it is draws nothing)
     if (rx == 0 || ry == 0) return o.push_back(b);
     rx = std::fabs(rx), ry = std::fabs(ry);
     const double phi = phiDeg * M_PI / 180, cp = std::cos(phi), sp = std::sin(phi);
@@ -170,6 +171,8 @@ inline std::vector<Outline> Parse(const char *d) {
             case 'Z':
                 close();
                 at = start;
+                cur.push_back(start);   // (what's drawn next without an M starts where this one did)
+                cmd = 0;                // (Z takes no numbers: one after it ends the data, as an error)
                 break;
             default: return close(), out;
         }
@@ -225,7 +228,8 @@ inline std::vector<float> Coverage(const std::vector<Shape> &shapes, int size) {
                     for (size_t i = 0; i < o.size(); ++i) {
                         const Pt a = o[i], b = o[(i + 1) % o.size()];
                         if ((a.y <= sy) == (b.y <= sy)) continue;
-                        xs.push_back({(a.x + (sy - a.y) / (b.y - a.y) * (b.x - a.x)) * k, b.y > a.y ? 1 : -1});
+                        const double x = (a.x + (sy - a.y) / (b.y - a.y) * (b.x - a.x)) * k;
+                        if (std::isfinite(x)) xs.push_back({x, b.y > a.y ? 1 : -1});   // (NaN or inf data: no crossing)
                     }
                 std::sort(xs.begin(), xs.end(), [](const Cross &p, const Cross &q) { return p.x < q.x; });
                 int wind = 0;

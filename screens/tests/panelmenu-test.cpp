@@ -99,6 +99,19 @@ int main() {
     check("held half a second: a move, not a tap", !panelmenu::IsTap(500, 0.0, 0.0) && panelmenu::CarryNow(500, 0.0, 0.0));
     check("held still under the hold: no move yet", !panelmenu::CarryNow(499, 0.01, 0.03));
     check("moved: the move starts at once", panelmenu::CarryNow(100, 0.02, 0.0) && !panelmenu::IsTap(100, 0.02, 0.0));
+    {
+        using panelmenu::HoldStep;
+        using panelmenu::Wait;
+        check("a waiting press waits", HoldStep(200, 0.0, 0.0, false, true, true, -1) == Wait::Keep);
+        check("held: it carries (controller unknown or held)", HoldStep(500, 0.0, 0.0, false, true, true, -1) == Wait::Carry &&
+                                                                  HoldStep(500, 0.0, 0.0, false, true, true, 1) == Wait::Carry);
+        check("held with nothing held: its release was lost, no carry", HoldStep(500, 0.0, 0.0, false, true, true, 0) == Wait::Drop);
+        check("nothing held while it still waits: it waits (the release may come)", HoldStep(200, 0.0, 0.0, false, true, true, 0) == Wait::Keep);
+        check("swung: it carries at once", HoldStep(50, 0.0, 0.1, false, true, true, -1) == Wait::Carry);
+        check("dropped when busy, unposed or hidden", HoldStep(600, 0.0, 0.0, true, true, true, 1) == Wait::Drop &&
+                                                         HoldStep(600, 0.0, 0.0, false, false, true, 1) == Wait::Drop &&
+                                                         HoldStep(100, 0.0, 0.0, false, true, false, 1) == Wait::Drop);
+    }
     check("turned: the move starts at once", panelmenu::CarryNow(100, 0.0, 0.07) && !panelmenu::IsTap(100, 0.0, 0.07));
     check("a 3 degree wobble is still a tap", panelmenu::IsTap(200, 0.0, 0.0524));
     check("no press: not a tap", !panelmenu::IsTap(-1, 0, 0));

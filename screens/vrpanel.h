@@ -321,6 +321,7 @@ int OurPointer(uint32_t d);
 bool ModCarry(Screen &s, int index, vr::TrackedDeviceIndex_t dev, uint32_t button, double x, double y);
 bool CarryScroll(const vr::VREvent_t &ev);
 bool CarryClick(const vr::VREvent_t &ev);
+bool BarClaims(const vr::VREvent_t &ev);   // a bar's press, its release seen elsewhere (vr.cpp)
 void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *), void *data);
 double Apart(const Mat &a, const Mat &b);
 double BarIn(const Screen &s);    // the bar row's line, metres in from the panel's edge

@@ -82,6 +82,7 @@ void Events(const steamwin::Tracker &t, steamcdp::Pages &pages) {
             case vr::VREvent_MouseMove: pages.Move(w.title, x, y); break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
+                if (BarClaims(ev)) break;   // (a bar's press, let go over a Steam popup: the bar's)
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
                 steamcdp::Button b;
                 if (!steamcdp::FromLinux(LinuxButton(ev.data.mouse.button), &b)) break;

@@ -1,12 +1,14 @@
 // The grab bar menu's layout (menulayout.h) on each page panelmenu.h gives, and its icons (iconpath.h,
 // barmenuicons.h): tiles side by side on top, rows under them, every point on one row at most, the
-// texture holding them all; each icon drawn inside its box.
+// texture holding them all; each icon drawn inside its box; the card's fills and corners (fillround.h).
 #include "../barmenuicons.h"
+#include "../fillround.h"
 #include "../menulayout.h"
 #include "../panelmenu.h"
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace {
 std::vector<menulayout::Spec> Specs(const std::vector<panelmenu::Row> &rows) {
@@ -99,6 +101,47 @@ int main() {
         const auto half = iconpath::Coverage({{{iconpath::Rect(0, 0, 24, 24)}, false, 0.5}}, 24);
         check("opacity halves it", std::fabs(Ink(half) - 288) < 1);
         check("bad path data stops, no crash", iconpath::Parse("M1 1 L x").empty() && iconpath::Parse("").empty());
+        const auto arc0 = iconpath::Parse("M0 0h2v2H0z");
+        const auto arcSame = iconpath::Parse("M0 0h2a5 5 0 0 1 0 0v2H0z");
+        check("an arc to where it is draws nothing (SVG)", arcSame.size() == 1 && arcSame[0].size() == arc0[0].size());
+        const auto two = iconpath::Parse("M0 0h4v4z h4v4z");
+        check("after z with no M, the next outline starts where it did", two.size() == 2 && two[1][0].x == 0 && two[1][0].y == 0);
+        check("a number after z ends the data (no loop)", iconpath::Parse("M0 0h4v4z 5").size() == 1 &&
+                                                              iconpath::Parse("M0 0h4v4Z-1").size() == 1 && iconpath::Parse("M0 0h4v4z.5").size() == 1);
+        const double nan = std::numeric_limits<double>::quiet_NaN(), inf = std::numeric_limits<double>::infinity();
+        const auto odd = iconpath::Coverage({{{{{0, 0}, {nan, 12}, {24, 24}}, {{inf, 0}, {-inf, 24}, {0, 12}}}}}, 24);
+        bool finite = true;
+        for (float v : odd) finite &= std::isfinite(v) && v >= 0 && v <= 1;
+        check("NaN and inf points: no crash, coverage stays 0..1", finite);
+    }
+
+    // The card's fills: an opaque colour is stored, a see-through one blended, a rounded box's inside is
+    // its colour and its corners soft; Round clears only outside the card's corners.
+    {
+        const uint8_t red[4] = {222, 54, 24, 255}, half[4] = {200, 100, 0, 128};
+        std::vector<uint8_t> px(16 * 16 * 4, 10);
+        ftvr::FillRect(px, 16, 16, 2, 2, 6, 6, red);
+        check("an opaque rect is its colour", px[(3 * 16 + 3) * 4] == 222 && px[(3 * 16 + 3) * 4 + 3] == 255 && px[(1 * 16 + 1) * 4] == 10);
+        ftvr::FillRect(px, 16, 16, 8, 8, 9, 9, half);
+        check("a see-through rect blends", px[(8 * 16 + 8) * 4] == 10 + std::lround((200 - 10) * 128 / 255.0));
+        std::vector<uint8_t> r(40 * 40 * 4, 0);
+        ftvr::FillRound(r, 40, 40, 0, 0, 40, 40, 10, red);
+        check("a rounded box: its inside its colour", r[(20 * 40 + 20) * 4 + 1] == 54 && r[(20 * 40 + 20) * 4 + 3] == 255);
+        check("...its corner clear, its corner's edge soft", r[3] == 0 && r[(2 * 40 + 4) * 4 + 3] > 0 && r[(2 * 40 + 4) * 4 + 3] < 255);
+        // Round against every pixel worked out (what it did before it kept to the corners)
+        const int W = 60, H = 44, rr = 20;
+        std::vector<uint8_t> a(size_t(W) * H * 4, 200), b = a;
+        ftvr::Round(a, W, H, rr);
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                const double cx = std::clamp(x + 0.5, double(rr), double(W - rr)), cy = std::clamp(y + 0.5, double(rr), double(H - rr));
+                const double k = std::clamp(rr - std::hypot(x + 0.5 - cx, y + 0.5 - cy) + 0.5, 0.0, 1.0);
+                if (k < 1) b[(size_t(y) * W + x) * 4 + 3] = uint8_t(std::lround(b[(size_t(y) * W + x) * 4 + 3] * k));
+            }
+        check("Round on the corners only: the same pixels as all of them", a == b);
+        std::vector<uint8_t> tiny(3 * 3 * 4, 255);
+        ftvr::Round(tiny, 3, 3, 20);
+        check("Round on a card smaller than its corners: no overrun", tiny.size() == 36);
     }
     std::printf(failed ? "%d FAILED\n" : "all passed\n", failed);
     return failed != 0;

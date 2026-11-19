@@ -387,7 +387,7 @@ void SteamDashEvents(Screen &s, int index) {
                 break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
-                if (CarryClick(ev)) break;
+                if (CarryClick(ev) || BarClaims(ev)) break;   // (a bar's press, let go over Steam's page: the bar's)
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
                 const uint32_t button = LinuxButton(ev.data.mouse.button);
                 if (!down) {

@@ -228,7 +228,7 @@ void GsPanelEvents(Screen &s, int index) {
                 break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
-                if (CarryClick(ev)) return;
+                if (CarryClick(ev) || BarClaims(ev)) return;   // (a bar's press, let go over the app: the bar's)
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
                 const uint32_t button = LinuxButton(ev.data.mouse.button);
                 if (!down) {

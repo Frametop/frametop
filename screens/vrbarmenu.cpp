@@ -58,6 +58,9 @@ struct {
     tiptap::Tap tip[2];        // each index tip's way through it
     tiptap::Tap beside[2];     // ...and through its panel beside it (a tap there closes it)
     std::string drawn;         // what its texture shows
+    std::string basePage;      // ...what its unlit pixels are of (the page, its rows' looks)
+    std::vector<barmenuart::RowLook> looks;   // ...their looks
+    std::vector<uint8_t> base; // ...and those pixels (barmenuart::Base)
     bool lasers = false;       // MakeOverlaysInteractiveIfVisible is set
 } g_menu;
 
@@ -108,9 +111,9 @@ panelmenu::Kind KindOf(const Screen &s, int i) {
 // Where the panel lives (Placement's value and its check).
 enum class Where { Room, View, Dashboard, Wrist };
 Where Placed(const Screen &s, int i) {
-    if (TileAnchored(i)) return Where::Dashboard;
+    if (TileAnchored(i) || s.pinned == kDashboard) return Where::Dashboard;   // (a tile, or `ft-layout pin N dashboard`)
     if (s.pinned == vr::k_unTrackedDeviceIndex_Hmd) return Where::View;
-    if (s.pinned != kNone && s.pinned != kDashboard) return Where::Wrist;
+    if (s.pinned != kNone) return Where::Wrist;
     return Where::Room;
 }
 
@@ -170,17 +173,23 @@ std::vector<menulayout::Spec> Specs(const std::vector<panelmenu::Row> &rows) {
     return specs;
 }
 
+// Its texture, drawn again only when what it shows changes: the page and its rows' looks (Base, kept),
+// then the lit row over that (a laser sweeping down the list redraws one row a step, not the card).
 void DrawMenu(const Screen &s, int i) {
     const menulayout::Layout &L = g_menu.layout;
     const int n = int(g_menu.rows.size()), lit = g_menu.hover >= 0 ? g_menu.hover : g_menu.handHover;
     const bool pressed = g_menu.holding != kNone;
-    std::string what = std::to_string(lit) + "/" + (pressed ? "p" : "") + std::to_string(int(s.barSide)) + "/" +
-                       std::to_string(int(Placed(s, i))) + "/";
-    for (const auto &r : g_menu.rows) what += char('a' + int(r.item)), what += On(r, s, i) ? '1' : '0';
+    std::string page = std::to_string(int(s.barSide)) + "/" + std::to_string(int(Placed(s, i))) + "/";
+    for (const auto &r : g_menu.rows) page += char('a' + int(r.item)), page += On(r, s, i) ? '1' : '0';
+    const std::string what = std::to_string(lit) + "/" + (pressed ? "p" : "") + page;
     if (what == g_menu.drawn) return;
-    std::vector<barmenuart::RowLook> looks;
-    for (int r = 0; r < n; ++r) looks.push_back(Look(g_menu.rows[size_t(r)], s, i, panelmenu::Caption(g_menu.rows, size_t(r))));
-    const std::vector<uint8_t> px = barmenuart::Menu(looks, L, lit, pressed);
+    if (page != g_menu.basePage) {
+        g_menu.looks.clear();
+        for (int r = 0; r < n; ++r) g_menu.looks.push_back(Look(g_menu.rows[size_t(r)], s, i, panelmenu::Caption(g_menu.rows, size_t(r))));
+        g_menu.base = barmenuart::Base(g_menu.looks, L);
+        g_menu.basePage = page;
+    }
+    const std::vector<uint8_t> px = barmenuart::Lit(g_menu.base, g_menu.looks, L, lit, pressed);
     overlaytex::Set(g_menu.overlay, px.data(), L.w, L.h);
     const vr::HmdVector2_t scale = {{float(L.w), float(L.h)}};
     vr::VROverlay()->SetOverlayMouseScale(g_menu.overlay, &scale);
@@ -232,7 +241,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             if (s.pinned != vr::k_unTrackedDeviceIndex_Hmd) TogglePinView(s, i, by);   // (off the dashboard or a wrist too)
             break;
         case Item::OnDashboard:
-            if (!TileAnchored(i)) TileAnchor(i, dashtiles::Stay::Default, by);
+            if (Placed(s, i) != Where::Dashboard) TileAnchor(i, dashtiles::Stay::Default, by);   // (the choice it is: nothing)
             break;
         case Item::StayShown: TileStay(i, !TileStays(s, i), by); break;
         case Item::Dock: SendFloat("dock " + std::to_string(i + 1)); break;
@@ -310,7 +319,7 @@ void OpenBarMenu(int i, double along, bool edges) {
     if (g_menu.panel >= 0) CloseMenu("another bar's opened");
     g_menu.panel = i, g_menu.along = along, g_menu.page = page, g_menu.back = false;
     g_menu.hover = g_menu.handHover = -1, g_menu.holding = kNone;
-    g_menu.openedMs = g_menu.usedMs = NowMs(), g_menu.drawn.clear();
+    g_menu.openedMs = g_menu.usedMs = NowMs(), g_menu.drawn.clear(), g_menu.basePage.clear();
     for (tiptap::Tap &t : g_menu.tip) t.Reset();
     for (tiptap::Tap &t : g_menu.beside) t.Reset();
     Rows(it->second, i);

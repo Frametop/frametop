@@ -55,56 +55,81 @@ inline int Text(std::vector<uint8_t> &px, int W, int H, const std::string &s, in
 inline void IconAt(std::vector<uint8_t> &px, int W, int H, Icon i, int x, int cy, int size, const uint8_t rgb[3]) {
     if (i != Icon::None) iconpath::Paint(px, W, H, barmenuicons::Shapes(i), x, cy - size / 2, size, rgb);
 }
-// Everything outside a rounded card of radius r goes clear (the design's overflow: hidden).
-inline void Round(std::vector<uint8_t> &px, int W, int H, int r) {
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x) {
-            const double cx = std::clamp(x + 0.5, double(r), double(W - r)), cy = std::clamp(y + 0.5, double(r), double(H - r));
-            const double a = std::clamp(r - std::hypot(x + 0.5 - cx, y + 0.5 - cy) + 0.5, 0.0, 1.0);
-            if (a < 1) px[(size_t(y) * W + x) * 4 + 3] = uint8_t(std::lround(px[(size_t(y) * W + x) * 4 + 3] * a));
-        }
-}
 inline std::string Upper(std::string s) {
     for (char &c : s) c = char(std::toupper((unsigned char)c));
     return s;
 }
 
-// The menu on its layout (menulayout::Lay of the same rows); `lit` the row under a laser or a fingertip
-// (-1 none), `pressed` while it's held (Rotate, Move All Screens).
-inline std::vector<uint8_t> Menu(const std::vector<RowLook> &rows, const menulayout::Layout &l, int lit, bool pressed) {
-    using ftvr::FillRound;
+// One tile or row, lit (`hot`) or not, `held` while it's pressed, on its box of the card.
+inline void Item(std::vector<uint8_t> &px, int W, int H, const RowLook &r, const menulayout::Layout &l, size_t i, bool hot, bool held) {
+    const menulayout::Box &b = l.rows[i];
+    const int cy = (b.y0 + b.y1) / 2;
+    if (l.tiles[i]) {
+        const uint8_t *bg = held ? kPressed : hot ? (r.red ? kRedHot : r.on ? kBlueHot : kWhiteBg) : r.on ? kBlueOn : kTile;
+        const uint8_t *ink = hot && !held && !r.red && !r.on ? kDark : r.on || hot ? kWhite : kText;
+        ftvr::FillRound(px, W, H, b.x0, b.y0, b.x1, b.y1, 12, bg);
+        const int mid = (b.x0 + b.x1) / 2;
+        IconAt(px, W, H, r.icon, mid - 22, b.y0 + 44, 44, ink);
+        const int tw = label::Width(r.text.c_str(), 24);
+        Text(px, W, H, r.text, 24, mid - tw / 2, b.y0 + 92, ink, true);
+        return;
+    }
+    if (hot) ftvr::FillRect(px, W, H, b.x0, b.y0, b.x1, b.y1, held ? kPressed : r.red ? kRedHot : kHot);
+    const uint8_t *ink = hot ? kWhite : kText;
+    IconAt(px, W, H, r.icon, 40, cy, 40, ink);
+    Text(px, W, H, r.text, 32, r.icon == Icon::None ? 40 : 112, cy, ink);   // (an edge has no icon: the design's text at the padding)
+    int right = W - 40;
+    if (r.chevron) IconAt(px, W, H, Icon::Chevron, right - 32, cy, 32, kGrey), right -= 32 + 8;
+    if (r.chosen) IconAt(px, W, H, Icon::Check, right - 40, cy, 40, kBlue), right -= 40 + 12;
+    if (!r.value.empty())
+        Text(px, W, H, r.value, 28, right - label::Width(r.value.c_str(), 28), cy, r.valueBlue ? kValueBlue : kGrey);
+}
+
+// The card's own pixel (kCard on nothing), for filling it and for wiping a tile back to it.
+inline void CardPixel(uint8_t out[4]) {
+    std::vector<uint8_t> one(4, 0);
+    ftvr::FillRect(one, 1, 1, 0, 0, 1, 1, kCard);
+    std::copy(one.begin(), one.end(), out);
+}
+inline void FillCard(std::vector<uint8_t> &px, int W, int x0, int y0, int x1, int y1) {
+    uint8_t c[4];
+    CardPixel(c);
+    for (int y = y0; y < y1; ++y)
+        for (int x = x0; x < x1; ++x) std::copy(c, c + 4, &px[(size_t(y) * W + x) * 4]);
+}
+
+// The menu with nothing lit, its corners not yet rounded: what Lit draws a lit row over. Its pixels change
+// only with the page and what its rows show, so it's drawn once for each (vrbarmenu.cpp keeps it).
+inline std::vector<uint8_t> Base(const std::vector<RowLook> &rows, const menulayout::Layout &l) {
     const int W = l.w, H = l.h;
     std::vector<uint8_t> px(size_t(W) * H * 4, 0);
-    ftvr::FillRect(px, W, H, 0, 0, W, H, kCard);
+    FillCard(px, W, 0, 0, W, H);
     for (int y : l.rules) ftvr::FillRect(px, W, H, 0, y - 1, W, y + 1, kRule);
     for (size_t i = 0; i < rows.size() && i < l.rows.size(); ++i) {
-        const RowLook &r = rows[i];
-        const menulayout::Box &b = l.rows[i];
-        const bool hot = int(i) == lit, held = hot && pressed;
-        const int cy = (b.y0 + b.y1) / 2;
-        if (l.tiles[i]) {
-            const uint8_t *bg = held ? kPressed : hot ? (r.red ? kRedHot : r.on ? kBlueHot : kWhiteBg) : r.on ? kBlueOn : kTile;
-            const uint8_t *ink = hot && !held && !r.red && !r.on ? kDark : r.on || hot ? kWhite : kText;
-            FillRound(px, W, H, b.x0, b.y0, b.x1, b.y1, 12, bg);
-            const int mid = (b.x0 + b.x1) / 2;
-            IconAt(px, W, H, r.icon, mid - 22, b.y0 + 44, 44, ink);
-            const int tw = label::Width(r.text.c_str(), 24);
-            Text(px, W, H, r.text, 24, mid - tw / 2, b.y0 + 92, ink, true);
-            continue;
-        }
-        if (l.captions[i] >= 0) Text(px, W, H, Upper(r.caption), 22, 40, l.captions[i] + 36, kGrey, true);
-        if (hot) ftvr::FillRect(px, W, H, b.x0, b.y0, b.x1, b.y1, held ? kPressed : r.red ? kRedHot : kHot);
-        const uint8_t *ink = hot ? kWhite : kText;
-        IconAt(px, W, H, r.icon, 40, cy, 40, ink);
-        Text(px, W, H, r.text, 32, r.icon == Icon::None ? 40 : 112, cy, ink);   // (an edge has no icon: the design's text at the padding)
-        int right = W - 40;
-        if (r.chevron) IconAt(px, W, H, Icon::Chevron, right - 32, cy, 32, kGrey), right -= 32 + 8;
-        if (r.chosen) IconAt(px, W, H, Icon::Check, right - 40, cy, 40, kBlue), right -= 40 + 12;
-        if (!r.value.empty())
-            Text(px, W, H, r.value, 28, right - label::Width(r.value.c_str(), 28), cy, r.valueBlue ? kValueBlue : kGrey);
+        if (!l.tiles[i] && l.captions[i] >= 0) Text(px, W, H, Upper(rows[i].caption), 22, 40, l.captions[i] + 36, kGrey, true);
+        Item(px, W, H, rows[i], l, i, false, false);
     }
-    Round(px, W, H, 20);
     return px;
+}
+
+// `base` (Base of the same rows) with row `lit` lit under a laser or a fingertip (-1 none), `pressed`
+// while it's held (Rotate, Move All Screens), its corners rounded: only that row is drawn again.
+inline std::vector<uint8_t> Lit(const std::vector<uint8_t> &base, const std::vector<RowLook> &rows, const menulayout::Layout &l,
+                                int lit, bool pressed) {
+    const int W = l.w, H = l.h;
+    std::vector<uint8_t> px = base;
+    if (lit >= 0 && size_t(lit) < rows.size() && size_t(lit) < l.rows.size()) {
+        const menulayout::Box &b = l.rows[size_t(lit)];
+        if (l.tiles[size_t(lit)]) FillCard(px, W, std::max(0, b.x0), std::max(0, b.y0), std::min(W, b.x1), std::min(H, b.y1));
+        Item(px, W, H, rows[size_t(lit)], l, size_t(lit), true, pressed);
+    }
+    ftvr::Round(px, W, H, 20);
+    return px;
+}
+
+// The menu on its layout (menulayout::Lay of the same rows), as Lit(Base(...)) draws it.
+inline std::vector<uint8_t> Menu(const std::vector<RowLook> &rows, const menulayout::Layout &l, int lit, bool pressed) {
+    return Lit(Base(rows, l), rows, l, lit, pressed);
 }
 
 // The reset question: its pixels, size and its two buttons (pixels, y down).

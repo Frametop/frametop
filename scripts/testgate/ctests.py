@@ -75,17 +75,23 @@ class Run:
         self.ninja_file = f"{cbuild.OUT}/build.ninja"
         with open(os.path.join(self.root, self.ninja_file), "w") as f:
             f.write(self.plan.ninja)
-        # what each object read when it last built, before this build adds the ones it builds now
-        self.deps = cbuild.deps(self.root, self.ninja_file) if self.changed is not None else {}
+        # What each object read when it last built (an object with no record has never built), and
+        # after this build what it reads now: a header it reads either way counts.
+        before = cbuild.deps(self.root, self.ninja_file) if self.changed is not None else {}
         targets = sorted(self.plan.objects)
         start = time.monotonic()
-        p = subprocess.run(["ninja", "-f", self.ninja_file, "-k", "0", "-j", str(self.njobs), "--quiet", *targets],
-                           cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        log = os.path.join(self.root, cbuild.OUT, "ninja.log")
+        with open(log, "w") as f:   # a session of its own: stopped, its compilers go with it
+            code = procs.run_session(["ninja", "-f", self.ninja_file, "-k", "0", "-j", str(self.njobs), "--quiet",
+                                      *targets], self.live, None, cwd=self.root, stdout=f, stderr=subprocess.STDOUT)
         self.times["(build)"] = round(time.monotonic() - start, 2)
-        self.unbuilt = cbuild.stale(self.root, self.ninja_file, targets) if p.returncode else set()
-        if p.returncode:
-            self.say(p.stdout.rstrip())
+        self.unbuilt = cbuild.stale(self.root, self.ninja_file, targets) if code else set()
+        if code:
+            with open(log, errors="replace") as f:
+                self.say(f.read().rstrip())
             self.status = 1
+        after = cbuild.deps(self.root, self.ninja_file) if self.changed is not None else {}
+        self.deps = {o: read | after.get(o, set()) for o, read in before.items()}
 
     def broken(self, path):
         """Why the program at path isn't there to run, or None."""
@@ -117,9 +123,9 @@ class Run:
         if self.changed is None:
             return True
         roots = (*_repo_paths(c.argv, self.root), *c.watch)
-        if any(under(x, roots) for x in self.changed):
+        if any(under(x, roots) for x in self.changed) or self.missing(c.needs):
             return True
-        return any(self.program_hit(self.programs[n]) for n in c.needs if n in self.programs)
+        return any(self.program_hit(self.programs[n]) for n in c.needs)
 
     # the run
 

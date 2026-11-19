@@ -6,10 +6,12 @@ Made-up C programs in a temp folder, built with gcc and ninja.
 
   python3 scripts/testgate/tests/test_ctests.py
 """
+import contextlib
 import io
 import os
 import unittest.mock
 import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -171,6 +173,25 @@ class CTests(unittest.TestCase):
         self.assertIn("bad.c: FAILED (didn't build", out)
         self.assertIn("b.c: ok", out)
 
+    def test_a_header_a_rebuild_starts_reading_counts(self):
+        self.file("h1.h", "#define ONE 1\n")
+        self.file("h2.h", "#define TWO 2\n")
+        self.file("a.c", '#include "h1.h"\nint main(void) { return ONE - 1; }\n')
+        p = [Program("a", ("a.c",), C, cc="gcc", test="a.c")]
+        self.run_items(p)
+        # h1.h now includes h2.h (an edit the changed set doesn't name), and h2.h breaks a.c
+        self.file("h1.h", '#include "h2.h"\n#define ONE (TWO - 1)\n')
+        self.file("h2.h", "#define TWO 3\n")
+        r, out = self.run_items(p, changed=["h2.h"])
+        self.assertEqual((r.status, out.splitlines()[:1]), (1, ["a.c: FAILED"]))
+
+    def test_a_check_that_names_a_missing_program_fails_on_a_change_too(self):
+        items = self.programs() + [Check("uses-x", ("sh", "-c", "exit 0"), needs=("no-such-program",))]
+        self.run_items(items)
+        r, out = self.run_items(items, changed=["elsewhere.txt"])
+        self.assertEqual(r.status, 1)
+        self.assertIn("uses-x: FAILED (needs no-such-program, which didn't build)", out)
+
     def test_generate_keeps_an_unchanged_file(self):
         self.file("gen.sh", 'echo "int g(void) { return 1; }" > "$1"\n')
         g = Generate("build/tests/g.c", ("sh", "gen.sh", "{out}"))
@@ -220,6 +241,31 @@ class TestChanged(unittest.TestCase):
         with unittest.mock.patch.object(changed, "python_files", return_value=[]):
             runs = changed.plan([".claude/skills/verify-frametop/scripts/verify-frametop"], self.root)
         self.assertIn("test-testbench", [w for w, _, _ in runs])
+
+    def git_repo(self):
+        def g(*a):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], cwd=self.root,
+                           check=True, capture_output=True)
+        with open(os.path.join(self.root, ".gitignore"), "w") as f:
+            f.write("build/\n")
+        g("init", "-q")
+        g("add", ".")
+        g("commit", "-qm", "one")
+        return g
+
+    def test_a_rename_is_both_paths_and_the_stamp_is_the_tree_a_run_started_on(self):
+        g = self.git_repo()
+        with unittest.mock.patch.object(changed, "TREE", self.root), \
+                contextlib.redirect_stdout(io.StringIO()):
+            start = changed.git("rev-parse", "HEAD").strip()
+            changed.mark_start()
+            # during the run: menu_model.py moves, and that's committed
+            g("mv", "menu/test/test_menu.py", "menu/test/test_menus.py")
+            g("commit", "-qm", "two")
+            changed.mark_green()
+            base, edited = changed.read_green()
+            self.assertEqual((base, edited), (start, []))
+            self.assertEqual(changed.changed_since(base), ["menu/test/test_menu.py", "menu/test/test_menus.py"])
 
     def test_paths_come_whole(self):
         self.assertEqual(changed._paths("my file.py\0a/b c.md\0"), {"my file.py", "a/b c.md"})

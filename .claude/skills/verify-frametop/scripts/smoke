@@ -58,6 +58,15 @@ def t(*args):
     return call([T, *args])
 
 
+def tidy(step):
+    """A cleanup step on the way out of a failed or stopped step: its own failure doesn't replace
+    why the run is leaving (a Stop it raises does: the guard ended the run)."""
+    try:
+        step()
+    except RuntimeError as e:
+        print(f"smoke: a cleanup step failed: {e}", flush=True)
+
+
 def press(*button, hold=0.2):
     t(*button, "on")
     time.sleep(hold)
@@ -102,8 +111,12 @@ class Smoke:
         try:
             time.sleep(1)
             off = (self.snap("power-off").get("power") or {}).get("displays")
-        finally:
-            t("power", "on")
+        except Stop:
+            raise   # the guard's cleanup turned the displays back on
+        except BaseException:
+            tidy(lambda: t("power", "on"))
+            raise
+        t("power", "on")
         time.sleep(1)
         on = (self.snap("power-on").get("power") or {}).get("displays")
         self.expect("display-power off", off == "off", off)
@@ -154,7 +167,7 @@ class Smoke:
         except Stop:
             raise   # the guard cleaned up; whoever wears the headset closes the dashboard
         except BaseException:
-            self.close_dashboard(dash, opened)
+            tidy(lambda: self.close_dashboard(dash, opened))
             raise
         closed = self.close_dashboard(dash, opened)
         self.expect("dashboard opens on system", opened, f"no {dash}")
@@ -225,6 +238,8 @@ def main(argv):
         stopped = str(e)
     finally:
         if stopped is None:
+            for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):   # nothing cuts the cleanup short
+                signal.signal(sig, signal.SIG_IGN)
             p = call([V, "cleanup", run], check=False)
             if p.returncode != 0:
                 s.expect("cleanup", False, p.stdout.strip()[-400:] or p.stderr.strip())

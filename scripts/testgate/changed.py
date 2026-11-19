@@ -2,8 +2,8 @@
 """`just test-changed [BASE]`: the tests a change since the last green `just test` reaches, for the
 loop while working; `just test` is still the gate before a push.
 
-`just test` writes the commit it passed on to build/tests/last-green (`--mark-green`), with the
-paths that were edited and not committed then: they count as changed every time, since what
+A passing `just test` writes the commit it started on to build/tests/last-green
+(`--mark-start`, then `--mark-green`), with the paths that were edited and not committed then: they count as changed every time, since what
 was tested isn't in git. This compares the tree as it is now (commits, edits, new files) with
 that commit, or with BASE, and runs:
 
@@ -31,6 +31,7 @@ from cbuild import under  # noqa: E402
 
 TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STAMP = "build/tests/last-green"
+PENDING = STAMP + ".pending"   # the tree a `just test` that is still running started on
 SUITES = "scripts/testgate/python-suites.txt"
 # a change here can change what any test does or which run: everything runs
 FULL = ("justfile", "pyproject.toml", "uv.lock", "setup/packages.txt", "pack/", "scripts/testgate/",
@@ -58,14 +59,15 @@ def _paths(out):
 
 
 def dirty():
-    """Repo paths that differ from HEAD: edited, deleted or new (untracked)."""
-    return _paths(git("diff", "-z", "--name-only", "HEAD", "--")) | \
+    """Repo paths that differ from HEAD: edited, deleted or new (untracked). A rename is both of its
+    paths (--no-renames), since tests can name either."""
+    return _paths(git("diff", "-z", "--no-renames", "--name-only", "HEAD", "--")) | \
         _paths(git("ls-files", "-z", "--others", "--exclude-standard"))
 
 
 def changed_since(base, also=()):
     """Repo paths that differ from base (committed since, edited, deleted or new), and also."""
-    return sorted(_paths(git("diff", "-z", "--name-only", base, "--"))
+    return sorted(_paths(git("diff", "-z", "--no-renames", "--name-only", base, "--"))
                   | _paths(git("ls-files", "-z", "--others", "--exclude-standard")) | set(also))
 
 
@@ -125,18 +127,40 @@ def plan(changed, root=TREE):
     return runs
 
 
-def mark_green():
-    """Record HEAD and the paths edited since (what was tested that git doesn't have)."""
+def _tree_now():
+    """HEAD and the paths edited since (what is tested that git doesn't have), as stamp lines."""
+    return [git("rev-parse", "HEAD").strip(), *sorted(dirty())]
+
+
+def mark_start():
+    """`just test` starts: what it tests is the tree now (an edit or commit during the run isn't)."""
     try:
-        head = git("rev-parse", "HEAD").strip()
-        edited = sorted(dirty())
+        lines = _tree_now()
     except (RuntimeError, OSError):
-        print("last green: not recorded (no git here); `just test-changed` will run everything")
         return 0
     os.makedirs(os.path.join(TREE, os.path.dirname(STAMP)), exist_ok=True)
-    with open(os.path.join(TREE, STAMP), "w") as f:
-        f.write("".join(f"{line}\n" for line in (head, *edited)))
-    print(f"last green: {head[:12]}" + (f" and {len(edited)} edited paths" if edited else "")
+    with open(os.path.join(TREE, PENDING), "w") as f:
+        f.write("".join(f"{line}\n" for line in lines))
+    return 0
+
+
+def mark_green():
+    """`just test` passed: the tree it started on (mark_start) is the last green one."""
+    try:
+        with open(os.path.join(TREE, PENDING)) as f:
+            lines = [line.strip() for line in f if line.strip()]
+        os.replace(os.path.join(TREE, PENDING), os.path.join(TREE, STAMP))
+    except OSError:     # not started by `just test`: the tree now
+        try:
+            lines = _tree_now()
+        except (RuntimeError, OSError):
+            print("last green: not recorded (no git here); `just test-changed` will run everything")
+            return 0
+        os.makedirs(os.path.join(TREE, os.path.dirname(STAMP)), exist_ok=True)
+        with open(os.path.join(TREE, STAMP), "w") as f:
+            f.write("".join(f"{line}\n" for line in lines))
+    edited = len(lines) - 1
+    print(f"last green: {lines[0][:12]}" + (f" and {edited} edited paths" if edited else "")
           + " (build/tests/last-green; `just test-changed` starts from it)")
     return 0
 
@@ -157,6 +181,8 @@ def full(why):
 
 
 def main(argv):
+    if argv[:1] == ["--mark-start"]:
+        return mark_start()
     if argv[:1] == ["--mark-green"]:
         return mark_green()
     base, also = (argv[0], ()) if argv else (read_green() or (None, ()))

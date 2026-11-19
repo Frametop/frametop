@@ -381,10 +381,9 @@ struct QuickAccessIn {
 void UpdateQuickAccess(const QuickAccessIn &in);
 bool QuickAccessEngaged(int side);   // that palm's card has the other hand's fingertip or a laser on it
 bool QuickAccessHasHand(int side);   // that hand's fingertip is at the other palm's card: the card's, not near input's
-// That palm's pinch, let go: the tile its drag lit (quickaccess::Tile; Steam Menu with no card or no drag),
-// or -1, none. QuickAccessPress does a tile other than Steam Menu (`by`: whose).
-int QuickAccessPinchPick(int side);
-void QuickAccessPress(int tile, const char *by);
+// The palm menu's Steam menu (vr.cpp: ft-steam's menu, which closes the dashboard if it's open), for
+// that hand's pinch: UpdateQuickAccess does a released pinch, the tile its drag lit.
+void PalmSteamMenu(int side);
 void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data);
 void DestroyQuickAccess();
 
@@ -472,7 +471,7 @@ void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev);
 void SendFloat(const std::string &msg);   // to ft-floatd
 bool HandsFrame();   // hand input had a new hands frame this tick
 bool IndexTipIn(int side, const Mat &frame, double out[3]);   // that hand's index fingertip in `frame`'s coordinates, if it's seen
-bool PinchPointIn(int side, const Mat &frame, double out[3]);   // ...the point between its thumb and index tips
+bool PinchPointIn(int side, const Mat &frame, double out[3]);   // ...its pinch's contact, between thumb and index tips
 std::string DeviceLabel(vr::TrackedDeviceIndex_t dev);
 
 // ---------------------------------------------------------------- vr.cpp's gamepad pill

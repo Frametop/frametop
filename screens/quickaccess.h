@@ -47,12 +47,11 @@ constexpr int64_t kShownMs = 300;
 
 // A fingertip presses a tile from this near its face (user, 2026-11-19: "increase the sensitivity on the
 // detection of a tap so it's easier to trigger"; 3 mm, tiptap's own, before), and is out again past
-// kPokeOut. Only 2 mm of tiptap's hysteresis: Poke's own spent tile already holds off a second press
-// until the tip is kOut out, and a wider band lets a quick slanted jab land its one in-front frame in
-// it, unarmed (a 2 m/s 30 degree jab at 15 Hz; quickaccess-test). That jab's frame in front can also be
-// beside the card: kPokeSide past its edges (and tiptap's margin) still arms. The bar menu and the reset
-// question keep tiptap's.
-constexpr double kPokeAt = 0.010, kPokeOut = 0.012, kPokeSide = 0.02;
+// kPokeOut: 6 mm between them, as tiptap's 3 and 8 had 5 (council, 2026-11-19: 2 mm let a tip's depth
+// jitter press the next tile it slid over). A quick slanted jab's one frame in front of the card can be
+// beside it (a 2 m/s 30 degree jab at 15 Hz; quickaccess-test): kPokeSide past its edges (and tiptap's
+// margin) still arms. The bar menu and the reset question keep tiptap's.
+constexpr double kPokeAt = 0.010, kPokeOut = 0.016, kPokeSide = 0.02;
 
 // The card in pixels: kCols x kRows tiles of kTile, kGap apart and kPad in from its edge.
 constexpr int kTile = 150, kGap = 12, kPad = 16;
@@ -201,12 +200,14 @@ private:
 // The palm hand's pinch, dragged across the card, which holds still meanwhile (vrquick.cpp). It starts
 // on Steam Menu, where the pinch alone always went; the pinch moving on the card's face (x right, y up,
 // metres) moves the lit point kGain times as far, from that tile's middle, so the far column is about
-// 7 cm over and the second row 4 cm down. Held at a tile's edge it keeps that tile (StickyTileAt), and
-// off the card nothing is lit: let go there, nothing happens. The palm turned away lights nothing too,
-// as its release does nothing then (palmmenu.h).
+// 7 cm over and the second row 4 cm down. Held at a tile's edge it keeps that tile (StickyTileAt); up to
+// kCancel past the card's edge, the edge tile (council, 2026-11-19: a still pinch drifting 2 cm up or left
+// off Steam Menu did nothing); farther off, nothing is lit: let go there, nothing happens. The palm
+// turned away lights nothing too, as its release does nothing then (palmmenu.h).
 class Drag {
 public:
     static constexpr double kGain = 1.0;
+    static constexpr double kCancel = 0.015;   // m past the card's edge
 
     void Start() { on_ = true, haveFrom_ = false, place_ = tile_ = int(Tile::SteamMenu); }
     void End() { on_ = false, tile_ = -1; }
@@ -214,14 +215,16 @@ public:
     // w x h metres; `up`: the palm still up. The tile lit, -1 none.
     int Step(const double *at, double w, double h, bool up) {
         if (!on_) return -1;
-        if (at) {
+        if (at && w > 0 && h > 0) {
             if (!haveFrom_) from_[0] = at[0], from_[1] = at[1], haveFrom_ = true;
             int x0, y0, x1, y1;
             Box(int(Tile::SteamMenu), &x0, &y0, &x1, &y1);
             const double u0 = ((x0 + x1) / 2.0 / kW - 0.5) * w, v0 = (0.5 - (y0 + y1) / 2.0 / kH) * h;
             double x, y;
             FaceToPx(u0 + kGain * (at[0] - from_[0]), v0 + kGain * (at[1] - from_[1]), w, h, &x, &y);
-            place_ = StickyTileAt(place_, x, y);
+            const double mx = kCancel / w * kW, my = kCancel / h * kH;
+            if (x < -mx || x > kW + mx || y < -my || y > kH + my) place_ = -1;
+            else place_ = StickyTileAt(place_, std::fmin(std::fmax(x, kPad), kW - kPad), std::fmin(std::fmax(y, kPad), kH - kPad));
         }
         tile_ = up ? place_ : -1;
         return tile_;

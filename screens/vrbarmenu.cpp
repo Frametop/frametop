@@ -51,6 +51,7 @@ struct {
     double along = 0;          // where on its bar it was opened (metres from the bar's middle)
     double w = 0, h = 0;       // its size now (m)
     Mat pose{};                // ...and where it is
+    double lift = 0;           // ...out in front of its panel's surface (posemath::CardLift)
     int hover = -1;            // the row under a laser, -1 none
     int handHover = -1;        // ...under a fingertip near it
     int64_t openedMs = -1, usedMs = -1;   // opened; opened, or a laser moved on it, then
@@ -281,7 +282,7 @@ void HandsOnMenu(const Screen &s, const Mat &panel) {
         const char *by = k ? "the right hand" : "the left hand";
         if (through) {
             g_menu.usedMs = NowMs();
-            g_handsOff.Start(i, k, s.curve, NowMs());
+            g_handsOff.Start(i, k, s.curve, NowMs(), g_menu.lift);
             return PressRow(RowAtFace(l[0], l[1]), kNone, by);
         }
         if (beside) {
@@ -362,7 +363,8 @@ void UpdateBarMenu() {
     const barside::UV at = barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), std::clamp(g_menu.along, -half, half));
     const barside::UV c = barside::MenuAt(s.barSide, at, barhit::Height(s.chrome, g_barPaddingY) / 2,
                                           std::max(s.grip, s.chrome * 0.06), g_menu.w, g_menu.h);
-    g_menu.pose = Mul(p, OnSurface(s, c.u, c.v, posemath::CardLift(s.curve, g_menu.w / 2, 0.004)));   // (clear of a curve)
+    g_menu.lift = posemath::CardLift(s.curve, g_menu.w / 2, 0.004);   // (clear of a curve)
+    g_menu.pose = Mul(p, OnSurface(s, c.u, c.v, g_menu.lift));
     vr::VROverlay()->SetOverlayWidthInMeters(g_menu.overlay, float(g_menu.w));
     vr::VROverlay()->SetOverlayTransformAbsolute(g_menu.overlay, vr::TrackingUniverseStanding, &g_menu.pose);
     if (g_menu.holding == kNone) HandsOnMenu(s, p);

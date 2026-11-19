@@ -15,9 +15,11 @@ namespace handsoff {
 
 class Hold {
 public:
-    // `curve`: the panel's then (posemath::OnPanel's; 0 flat).
-    void Start(int panel, int side, double curve, int64_t nowMs) {
-        panel_ = panel, side_ = side, curve_ = curve, sinceMs_ = nowMs;
+    // `curve`: the panel's then (posemath::OnPanel's; 0 flat). `lift`: how far in front of the panel's
+    // surface the tip pressed (the menu's posemath::CardLift; 0 beside it): out is kOut past that
+    // (council, 2026-11-19: a tight curve lifts the menu past kOut, and the press itself counted as out).
+    void Start(int panel, int side, double curve, int64_t nowMs, double lift = 0) {
+        panel_ = panel, side_ = side, curve_ = curve, sinceMs_ = nowMs, lift_ = lift;
     }
     void Clear() { panel_ = -1; }
     // One tick. `q`: the tip in the panel's frame (x right, y up, z out of its front, metres), or null
@@ -32,7 +34,7 @@ public:
             double then[3], now[3];
             posemath::OnPanel(curve_, q, then);
             posemath::OnPanel(curve, q, now);
-            out = std::fmin(then[2], now[2]) > kOut || std::fabs(now[0]) > halfW + kAside || std::fabs(now[1]) > halfH + kAside;
+            out = std::fmin(then[2], now[2]) > kOut + lift_ || std::fabs(now[0]) > halfW + kAside || std::fabs(now[1]) > halfH + kAside;
         }
         if (out || !there || nowMs - sinceMs_ >= kMostMs) panel_ = -1;
     }
@@ -46,7 +48,7 @@ public:
 
 private:
     int panel_ = -1, side_ = 0;
-    double curve_ = 0;
+    double curve_ = 0, lift_ = 0;
     int64_t sinceMs_ = 0;
 };
 

@@ -297,8 +297,8 @@ int main() {
         const double edge = w / 2 - 0.0025, side = w / 2 + 0.0005;
         check("pressed by the card's edge, a sideways tremble off it: one press",
               run({{edge, 0, 40}, {edge, 0, 10}, {edge, 0, 1}, {side, 0, 2}, {edge, 0, 10}, {edge, 0, 2}, {side, 0, 12}, {edge, 0, 1}}, 30) == 1);
-        // (15 mm over it: out past kPokeOut)
-        check("...well off it (2 cm) and back: a second press", run({{edge, 0, 40}, {edge, 0, 1}, {w / 2 + 0.02, 0, 15}, {edge, 0, 15}, {edge, 0, 1}}, 30) == 2);
+        // (20 mm over it: out past kPokeOut)
+        check("...well off it (2 cm) and back: a second press", run({{edge, 0, 40}, {edge, 0, 1}, {w / 2 + 0.02, 0, 20}, {edge, 0, 20}, {edge, 0, 1}}, 30) == 2);
         // hover: near lights the tile it's over; held at the edge
         {
             Poke p;
@@ -391,6 +391,20 @@ int main() {
         check("past the gap's middle by 2 px from Steam Menu: still Steam Menu",
               d.Step(at(pitch / 2 + 2 * w / kW, 0), w, h, true) == 0);
         check("...past kStick: Hide Screens", d.Step(at(pitch / 2 + (kGap / 2.0 + kStick + 1) * w / kW, 0), w, h, true) == 1);
+        // a still pinch drifting off Steam Menu's top or left edge keeps it to kCancel past the card
+        const double toTop = (kPad + kTile / 2.0) * w / kW;   // Steam Menu's middle to the card's top edge
+        for (const int k : {0, 1}) {
+            Drag e;
+            e.Start();
+            e.Step(at(0, 0), w, h, true);
+            const double sx = k ? -1 : 0, sy = k ? 0 : 1;   // up, then left
+            const bool near = e.Step(at(sx * (toTop + 0.01), sy * (toTop + 0.01)), w, h, true) == 0;
+            const bool far = e.Step(at(sx * (toTop + 0.02), sy * (toTop + 0.02)), w, h, true) == -1;
+            check(k ? "1 cm past the card's left edge: Steam Menu; 2 cm: nothing" : "1 cm past its top edge: Steam Menu; 2 cm: nothing", near && far);
+        }
+        Drag z;
+        z.Start();
+        check("a card of no size: what's lit stays", z.Step(at(0, 0), 0, 0, true) == 0);
     }
 
     check("paused for a game, only Steam Menu works", WorksPaused(Tile::SteamMenu) && !WorksPaused(Tile::Screens) &&

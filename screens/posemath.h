@@ -215,7 +215,7 @@ inline void OnPanel(double curve, const double q[3], double out[3]) {
 inline double CardLift(double curve, double halfWidth, double dz) {
     if (curve <= 0) return dz;
     const double r = curve, in = r - dz, x = std::fabs(halfWidth);
-    return x >= in ? r : std::fmax(dz, r - std::sqrt(in * in - x * x));
+    return x >= in ? std::fmax(r, dz) : std::fmax(dz, r - std::sqrt(in * in - x * x));
 }
 
 }  // namespace posemath

@@ -225,6 +225,14 @@ int main() {
         h.Start(2, 1, 0, 0);
         h.Step(through, 0, 0.4, 0.25, 100, false);
         check("its panel gone: let go", !h.Holds(2));
+        // a menu lifted 21.7 mm off a tight curve's surface (posemath::CardLift): a press at its face is
+        // 23.7 mm in front of the panel, still held; kOut past the lift, out
+        h.Start(2, 1, 0, 0, 0.0217);
+        const double atMenu[3] = {0.0, -0.2, 0.0237}, pastIt[3] = {0.0, -0.2, 0.0217 + handsoff::Hold::kOut + 0.002};
+        h.Step(atMenu, 0, 0.4, 0.25, 50, true);
+        check("a lifted menu's press, 23.7 mm out: still held", h.Holds(2));
+        h.Step(pastIt, 0, 0.4, 0.25, 100, true);
+        check("...kOut past its lift: let go", !h.Holds(2));
     }
     // A curved panel (r 0.6 m) with its bar on the left: the menu's rows 28 cm off its centre, where the
     // surface is 6.5 cm in front of the flat centre plane (council, 2026-11-18: measured on that plane,

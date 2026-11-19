@@ -182,6 +182,29 @@ bool Make() {
     return true;
 }
 
+// The palm hand's pinch, let go (palmmenu's toggled): `tile` its drag lit, Steam Menu for the pinch alone
+// (as before the drag), -1 nothing (let go off the card, or the palm turned away).
+void PinchRelease(int side, int tile) {
+    const char *by = side ? "the right hand's pinch" : "the left hand's pinch";
+    if (tile == int(Tile::SteamMenu)) {
+        g_resetAsk.Clear();   // (as any other tile does)
+        PalmSteamMenu(side);
+    } else if (tile >= 0) {
+        PressTile(tile, by);
+    } else {
+        std::printf("palm Quick Access: %s let go off the card: nothing\n", by);
+    }
+}
+
+// The drag, on to this tick's pinch point and palm: the tile it lights.
+int StepDrag(const palmmenu::PalmMenu &palm, int side) {
+    double at[3];
+    const int was = g_card.drag.tile();
+    const int now = g_card.drag.Step(PinchPointIn(side, g_card.dragPose, at) ? at : nullptr, g_card.w, g_card.h, palm.up(side));
+    if (now != was) std::printf("palm Quick Access: the pinch on %s\n", now >= 0 ? quickaccess::kSpecs[now].label : "nothing");
+    return now;
+}
+
 }  // namespace
 
 void UpdateQuickAccess(const QuickAccessIn &in) {
@@ -189,22 +212,40 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     // the palm it's over while that shows; else whichever shows (both up: the right). (Paused for a VR
     // game, it shows with the dashboard open, as the palm menu does: Steam Menu works, the rest dim.)
     const int side = g_card.side >= 0 && palm.shown(g_card.side) ? g_card.side : palm.shown(1) ? 1 : palm.shown(0) ? 0 : -1;
+    const int released = palm.toggled();   // (a pinch let go this Update, on that side)
     if (g_paused) g_resetAsk.Clear();   // (Reset does nothing then: its ask ends, not waits out the pause)
+    // dragged across, the card holds still where it was, the palm or the head seen this frame or not
+    // (council, 2026-11-19: one lost hands frame hid it and the drag began again on Steam Menu; palmmenu's
+    // lostMs ends a pinch whose hand is gone)
+    const bool held = side >= 0 && side == g_card.side && g_card.drag.on();
     double c[3];
-    if (side < 0 || !in.haveHead || !palm.Card(side, *in.shown, c) || !Make()) return Hide();
+    const bool card = side >= 0 && in.haveHead && palm.Card(side, *in.shown, c);
+    if ((!held && !card) || !Make()) {
+        Hide();
+        if (released >= 0) PinchRelease(released, int(Tile::SteamMenu));   // (no card: the pinch alone)
+        return;
+    }
     const bool fresh = side != g_card.side;
     if (fresh) {
         // (no Invalidate: hidden, the overlay kept its image, which g_card.looks still says)
         g_card.side = side, g_card.shownMs = NowMs(), g_card.hover = -1, g_card.laserMs = -1;
-        g_card.poke.Reset(NowMs()), g_resetAsk.Clear();
+        g_card.poke.Reset(NowMs()), g_card.drag.End(), g_resetAsk.Clear();   // (the other palm's drag ends)
         std::printf("palm Quick Access: over the %s palm\n", side ? "right" : "left");
     }
     g_card.w = palm.params().size, g_card.h = g_card.w * quickaccess::kH / quickaccess::kW;
+    // this Update's release: where its drag is now, with this read's pinch point and palm (council,
+    // 2026-11-19: not the last read's); its drag ends, so a pinch begun in the same read starts afresh
+    if (released >= 0) {
+        const bool mine = released == side && g_card.drag.on();
+        const int tile = mine ? StepDrag(palm, side) : int(Tile::SteamMenu);
+        if (mine) g_card.drag.End();
+        PinchRelease(released, tile);
+    }
     // (the palm hand's pinch: the card holds still where it was while it's dragged across it)
-    const bool pinched = palm.pinched(side);
-    if (!pinched) g_card.drag.End();
-    else if (!g_card.drag.on()) g_card.drag.Start(), g_card.dragPose = fresh ? FacingPose(c, in.head) : g_card.pose;
-    g_card.pose = g_card.drag.on() ? g_card.dragPose : FacingPose(c, in.head);
+    if (!palm.pinched(side)) g_card.drag.End();
+    else if (!g_card.drag.on()) g_card.drag.Start(), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
+    if (g_card.drag.on()) StepDrag(palm, side);   // (each tick: HandsFrame() is the last tick's news)
+    g_card.pose = g_card.drag.on() ? g_card.dragPose : card ? FacingPose(c, in.head) : g_card.pose;
     if (float(g_card.w) != g_card.widthSet) {
         g_card.widthSet = float(g_card.w);
         vr::VROverlay()->SetOverlayWidthInMeters(g_card.overlay, g_card.widthSet);
@@ -218,27 +259,15 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
         const int other = 1 - side;
         // the tip against the card where the hands were seen (the card shows where they're predicted to
         // be, ahead of them), by a hand that isn't holding or pressing something
-        double cs[3], l[3], at[3];
+        double cs[3], l[3];
         const bool seen = !in.busy[other] && (g_card.drag.on() || palm.Card(side, *in.seen, cs)) &&
                           IndexTipIn(other, g_card.drag.on() ? g_card.dragPose : FacingPose(cs, in.head), l);
         const int pressed = g_card.poke.Step(seen ? l : nullptr, g_card.w, g_card.h, NowMs());
         if (pressed >= 0) PressTile(pressed, other ? "the right hand" : "the left hand");
-        if (g_card.drag.on()) {
-            const int was = g_card.drag.tile();
-            const int now = g_card.drag.Step(PinchPointIn(side, g_card.dragPose, at) ? at : nullptr, g_card.w, g_card.h, palm.up(side));
-            if (now != was) std::printf("palm Quick Access: the pinch on %s\n", now >= 0 ? quickaccess::kSpecs[now].label : "nothing");
-        }
     }
     Draw();
     if (fresh) PinShow(g_card.overlay);
 }
-
-int QuickAccessPinchPick(int side) {
-    if (g_card.side != side || !g_card.drag.on()) return int(Tile::SteamMenu);   // (no card, or a pinch tap between two reads)
-    return g_card.drag.tile();
-}
-
-void QuickAccessPress(int tile, const char *by) { PressTile(tile, by); }
 
 bool QuickAccessEngaged(int side) {
     return g_card.side >= 0 && g_card.side == side && (g_card.poke.near() || (g_card.laserMs >= 0 && NowMs() - g_card.laserMs < kLaserKeepMs));

@@ -134,7 +134,6 @@
 #include "../conf/ft_pinlock.h"
 #include "overlaytex.h"
 #include "palmmenu.h"
-#include "quickaccess.h"
 #include "label.h"
 #include "roomview.h"
 #include "levelpin.h"
@@ -3777,22 +3776,16 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
         pin.engaged[k] = QuickAccessEngaged(k);
     }
     g_palm.Update(pin);
-    if (const int side = g_palm.toggled(); side >= 0) {
-        const int tile = QuickAccessPinchPick(side);   // (what its drag lit; the pinch alone, Steam Menu)
-        if (tile == int(quickaccess::Tile::SteamMenu)) {
-            std::printf("palm menu (%s hand): the Steam menu\n", side ? "right" : "left");
-            fh_event("screens", "palm-menu", "done", side, 0, "palm menu: the Steam menu");
-            RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
-        } else if (tile >= 0) {
-            QuickAccessPress(tile, side ? "the right hand's pinch" : "the left hand's pinch");
-        } else {
-            std::printf("palm menu (%s hand): its pinch let go off the card: nothing\n", side ? "right" : "left");
-        }
-    }
-    QuickAccessIn qa;
+    QuickAccessIn qa;   // (its card does this Update's pinch release, g_palm.toggled(): what its drag lit)
     qa.palm = &g_palm, qa.shown = &g_hands.shown(), qa.seen = &g_hands.seen(), qa.head = in.head, qa.haveHead = in.haveHead;
     for (int k = 0; k < 2; ++k) qa.busy[k] = pin.busy[k];
     UpdateQuickAccess(qa);
+}
+
+void PalmSteamMenu(int side) {
+    std::printf("palm menu (%s hand): the Steam menu\n", side ? "right" : "left");
+    fh_event("screens", "palm-menu", "done", side, 0, "palm menu: the Steam menu");
+    RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
 }
 
 // "Grab that" (grabthat.h): the detector reads each hands frame after near input (which leaves it
@@ -4172,21 +4165,20 @@ const handcut::Hand *SideHand(int k) {
         if (c.right == (k == 1) && (!h || c.confidence > h->confidence)) h = &c;
     return h;
 }
+// A point of a hand's, in `frame`'s coordinates.
+static void HandPointIn(const float *p, const Mat &frame, double out[3]) {
+    const Mat in = Inverse(frame);
+    for (int r = 0; r < 3; ++r) out[r] = in.m[r][0] * p[0] + in.m[r][1] * p[1] + in.m[r][2] * p[2] + in.m[r][3];
+}
 bool IndexTipIn(int side, const Mat &frame, double out[3]) {
     const handcut::Hand *h = SideHand(side);
-    if (!h) return false;
-    const Mat in = Inverse(frame);
-    for (int r = 0; r < 3; ++r) out[r] = in.m[r][0] * h->p[8][0] + in.m[r][1] * h->p[8][1] + in.m[r][2] * h->p[8][2] + in.m[r][3];
-    return true;
+    if (h) HandPointIn(h->p[8], frame, out);
+    return h != nullptr;
 }
 bool PinchPointIn(int side, const Mat &frame, double out[3]) {
     const handcut::Hand *h = SideHand(side);
-    if (!h) return false;
-    const Mat in = Inverse(frame);
-    double p[3];
-    for (int k = 0; k < 3; ++k) p[k] = (h->p[4][k] + h->p[8][k]) / 2;
-    for (int r = 0; r < 3; ++r) out[r] = in.m[r][0] * p[0] + in.m[r][1] * p[1] + in.m[r][2] * p[2] + in.m[r][3];
-    return true;
+    if (h) HandPointIn(h->contact, frame, out);   // (ft-hands' fitted contact, or the tips' midpoint)
+    return h != nullptr;
 }
 bool HandsFrame() { return g_handInput.newFrame(); }
 

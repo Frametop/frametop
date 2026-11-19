@@ -211,6 +211,7 @@ int main() {
         check("CardLift: the menu's 29 cm at 1 m sits ~14 mm out (it was 4: its outer 5.5 cm behind the curve)",
               std::fabs(CardLift(1.0, 0.145, 0.004) - 0.0146) < 0.0005);
         check("CardLift: too wide to clear it, the axis's depth", near(CardLift(0.5, 0.9, 0.004), 0.5));
+        check("CardLift: a curve tighter than dz, never less than dz", near(CardLift(0.003, 0.1, 0.004), 0.004) && near(CardLift(0.004, 0.0, 0.004), 0.004));
     }
     return failed ? 1 : 0;
 }

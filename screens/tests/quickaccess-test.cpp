@@ -204,6 +204,35 @@ int main() {
             }
             check("a slanted jab from over Spin Right's edge onto Dock Windows presses Dock Windows", presses == 2 && got == 5);
         }
+        // ...but a jab that goes in within Spin Right's reach is a re-poke of it, however far past it the next
+        // frame is (behind the card): pressed at its centre, pulled back to 16 or 20 mm over it, then a 45
+        // degree jab at 1 m/s toward Dock Windows: no second press (council, 2026-11-19: the crossing, not
+        // the frame after it, decides)
+        {
+            bool once = true;
+            for (const double z0mm : {16.0, 20.0}) {
+                Poke p;
+                p.Reset(0);
+                int64_t t = 1000;
+                int presses = 0;
+                auto step = [&](double u, double z) {
+                    const double l[3] = {u, v4, z};
+                    presses += p.Step(l, w, h, t += 33) >= 0;
+                };
+                step(u4, 0.04), step(u4, 0.01), step(u4, -0.002);   // the press
+                const double z0 = z0mm / 1000;
+                for (double z = 0.004; z < z0; z += 0.004) step(u4, z);
+                step(u4, z0);
+                const double dz = 1.0 / 30 * std::cos(3.14159265358979 / 4);
+                for (double z = z0 - dz / 2;; z -= dz) {
+                    const double zz = z < -0.04 ? -0.04 : z;
+                    step(u4 + (z0 - zz), zz);
+                    if (z < -0.04) break;
+                }
+                once = once && presses == 1;
+            }
+            check("a 45 degree jab going in within Spin Right's reach, past it behind: no second press", once);
+        }
         // the last two frames 3.1 then 2.9 mm out, 2 mm apart sideways (the lerp once took that a tile over)
         check("a slow poke's last frames 3.1 -> 2.9 mm, 2 mm jitter: Spin Right",
               run({{u4, v4, 40}, {u4, v4, 20}, {u4, v4, 10}, {u4, v4, 5}, {u4, v4, 3.1}, {u4 + 0.002, v4, 2.9}}, 30, tiles) == 1 && tiles[0] == 4);

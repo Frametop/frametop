@@ -7405,8 +7405,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     // A release on the catcher, or the pointer helper's word that left came up (see "up").
     vr::VREvent_t ev;
     // (a carry's wheel and a bar press's release, its laser off every panel: PollOverlay's)
-    while (PollOverlay(g_catcher, &ev))
-        if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev)) ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+    while (PollOverlay(g_catcher, &ev)) {
+        // (a carry_toggle carry's drop click off every panel: the catcher is up for a bar carry by the same laser)
+        if (ev.eventType == vr::VREvent_MouseButtonDown) CarryClick(ev);
+        else if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev)) ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+    }
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
     UpdateLayoutGrab();   // (after the carried screen's own move, above)
     PollPill(handle, data);

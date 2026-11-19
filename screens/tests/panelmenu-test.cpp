@@ -1,9 +1,13 @@
-// The grab bar's menu (panelmenu.h): the rows each kind of panel gets, the tap, and the fingertip tap
-// on a target of ours (tiptap.h), at every poke speed.
+// The grab bar's menu (panelmenu.h): the rows each kind of panel gets, the tap, the fingertip tap on a
+// target of ours (tiptap.h) at every poke speed, and the panel kept from hand input after one
+// (handsoff.h), on flat and curved panels.
+#include "../handsoff.h"
 #include "../panelmenu.h"
+#include "../posemath.h"
 #include "../tiptap.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 int main() {
@@ -128,6 +132,85 @@ int main() {
         t.Step(in, 0.05, 0.02);
         t.Step(side, 0.05, 0.02);
         check("in front, then off to the side: disarmed", !t.Step(face, 0.05, 0.02));
+    }
+    {
+        tiptap::Tap t;
+        const double in[3] = {0.0, 0.0, 0.09}, jump[3] = {0.0, 0.0, -0.4};
+        t.Step(in, 0.05, 0.02);
+        check("a one-frame jump far behind it: no tap (council, 2026-11-18)", !t.Step(jump, 0.05, 0.02));
+        const double face[3] = {0.0, 0.0, 0.0};
+        check("...nor when it comes back to its face", !t.Step(face, 0.05, 0.02));
+    }
+
+    // A point on a curved panel's surface, out of it along its normal by `d` (OnSurface's), in its frame.
+    auto curvedAt = [](double r, double u, double v, double d, double q[3]) {
+        const double a = u / r;
+        q[0] = (r - d) * std::sin(a), q[1] = v, q[2] = r - (r - d) * std::cos(a);
+    };
+    {
+        double q[3], s[3];
+        curvedAt(0.6, 0.28, 0.1, 0.03, q);
+        posemath::OnPanel(0.6, q, s);
+        check("on a curved panel: u along the arc, v, d out of its surface",
+              std::fabs(s[0] - 0.28) < 1e-9 && std::fabs(s[1] - 0.1) < 1e-9 && std::fabs(s[2] - 0.03) < 1e-9);
+        const double flat[3] = {0.1, -0.2, 0.05};
+        posemath::OnPanel(0, flat, s);
+        check("flat: as it is", s[0] == 0.1 && s[1] == -0.2 && s[2] == 0.05);
+    }
+
+    // The panel out of hand input after a row's pressed: until the tip's back out in front of its surface.
+    {
+        handsoff::Hold h;
+        h.Start(2, 1, 1000);
+        check("held from the press", h.Holds(2) && !h.Holds(1) && h.side() == 1);
+        const double through[3] = {0.0, -0.2, -0.02}, front[3] = {0.0, -0.2, 0.01}, out[3] = {0.0, -0.2, 0.03};
+        h.Step(through, 0.4, 0.25, 1100, true);
+        h.Step(front, 0.4, 0.25, 1200, true);
+        check("through it, then just in front: still held", h.Holds(2));
+        h.Step(nullptr, 0.4, 0.25, 2000, true);
+        check("the hand lost in the poke: still held (it may be through it yet)", h.Holds(2));
+        h.Step(out, 0.4, 0.25, 2100, true);
+        check("out 3 cm in front: let go", !h.Holds(2));
+        h.Start(2, 1, 0);
+        h.Step(nullptr, 0.4, 0.25, 3000, true);
+        check("3 s on: let go, whatever the tip", !h.Holds(2));
+        h.Start(2, 1, 0);
+        const double aside[3] = {0.47, 0.0, -0.01};
+        h.Step(aside, 0.4, 0.25, 100, true);
+        check("5 cm off its edges: let go", !h.Holds(2));
+        h.Start(2, 1, 0);
+        h.Step(through, 0.4, 0.25, 100, false);
+        check("its panel gone: let go", !h.Holds(2));
+    }
+    // A curved panel (r 0.6 m) with its bar on the left: the menu's rows 28 cm off its centre, where the
+    // surface is 6.5 cm in front of the flat centre plane (council, 2026-11-18: measured on that plane,
+    // the poke counted as out the tick after it pressed the row, and went on into the content).
+    for (double u : {-0.28, 0.28}) {
+        handsoff::Hold h;
+        h.Start(0, 0, 0);
+        double q[3], s[3];
+        curvedAt(0.6, u, 0.0, -0.02, q);   // 2 cm through, at the row
+        check(u < 0 ? "left bar: that tip is in front of the flat plane (the old measure's let go)"
+                    : "right bar: that tip is in front of the flat plane (the old measure's let go)", q[2] > handsoff::Hold::kOut);
+        posemath::OnPanel(0.6, q, s);
+        h.Step(s, 0.4, 0.25, 50, true);
+        check(u < 0 ? "left bar: 2 cm through its surface, still held" : "right bar: 2 cm through its surface, still held", h.Holds(0));
+        curvedAt(0.6, u, 0.0, 0.03, q);
+        posemath::OnPanel(0.6, q, s);
+        h.Step(s, 0.4, 0.25, 100, true);
+        check(u < 0 ? "left bar: back out 3 cm in front of it, let go" : "right bar: back out 3 cm in front of it, let go", !h.Holds(0));
+    }
+    // ...and a tap beside the menu there, measured on its surface: one poke 2 cm through closes it.
+    {
+        tiptap::Tap t;
+        int taps = 0;
+        for (double d = 0.10; d > -0.02; d -= 0.01) {
+            double q[3], s[3];
+            curvedAt(0.6, 0.2, 0.05, d, q);
+            posemath::OnPanel(0.6, q, s);
+            taps += t.Step(s, 0.4, 0.25);
+        }
+        check("a curved panel's side, tapped 2 cm through: one tap", taps == 1);
     }
     std::printf(failed ? "%d FAILED\n" : "all passed\n", failed);
     return failed != 0;

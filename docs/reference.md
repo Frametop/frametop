@@ -59,7 +59,7 @@ Every screen is an overlay named `frametop.screen.N` with these controls:
 The bar's menu has what the screen's round buttons used to:
 
 - **Curved** bends the screen into a cylinder around you, using your current distance as the radius, or makes it flat again.
-- **Rotate**, held, rolls the screen as you move the laser sideways, like a knob at its bar. It snaps level within 2.5°. A click (or a finger's tap) levels it.
+- **Rotate**, held, rolls the screen as you move the laser sideways, like a knob held at its bottom edge, whichever edge its bar is on. It snaps level within 2.5°. A click (or a finger's tap) levels it.
 - **Keep in View** pins it to your head (see below). **On Dashboard** anchors it to the SteamVR dashboard, and **Stay Shown** (while anchored) keeps it shown with the dashboard closed.
 - **Back to Desktop** and **Close Window**, on a floating window. **View in Theater**, on Steam's tile and a Steam game's panel.
 - **Bar Position** puts the bar on the bottom, top, left or right edge.

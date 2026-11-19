@@ -22,7 +22,9 @@
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
+#include "handsoff.h"
 #include "panelmenu.h"
+#include "posemath.h"
 #include "tiptap.h"
 
 #include <algorithm>
@@ -85,32 +87,27 @@ struct {
     bool lasers = false;       // MakeOverlaysInteractiveIfVisible is set
 } g_menu;
 
-// After a fingertip pressed a row or closed the menu: its panel stays out of hand input until that tip
-// has come back out in front of it (council, 2026-11-18: the same poke went on into the panel's content
-// and clicked what was under the row).
-struct {
-    int panel = -1, side = 0;
-    Mat frame{};               // the panel then
-    int64_t sinceMs = -1, seenMs = -1;
-} g_handsOff;
-constexpr double kHandsOffOut = 0.02;     // the tip this far in front of the panel: it's out
-constexpr int64_t kHandsOffLostMs = 300;  // ...or not seen this long
-constexpr int64_t kHandsOffMostMs = 3000;
+handsoff::Hold g_handsOff;   // the panel a fingertip pressed a row of, or tapped beside it (handsoff.h)
 
-void HandsOff(int panel, int side, const Mat &frame) {
-    g_handsOff.panel = panel, g_handsOff.side = side, g_handsOff.frame = frame;
-    g_handsOff.sinceMs = g_handsOff.seenMs = NowMs();
+// That side's index tip on a panel posed at `p`: {u, v, d} along its surface (curved or flat), up, out.
+bool TipOnPanel(int side, const Screen &s, const Mat &p, double out[3]) {
+    double q[3];
+    if (!IndexTipIn(side, p, q)) return false;
+    posemath::OnPanel(s.curve, q, out);
+    return true;
 }
 
+// Each tick, before hand input: the panel's back to it once the tip that pressed it is out in front.
 void UpdateHandsOff() {
-    if (g_handsOff.panel < 0) return;
-    double l[3];
-    const int64_t now = NowMs();
-    if (IndexTipIn(g_handsOff.side, g_handsOff.frame, l)) g_handsOff.seenMs = now;
-    else l[2] = -1;
-    if ((now == g_handsOff.seenMs && l[2] > kHandsOffOut) || now - g_handsOff.seenMs >= kHandsOffLostMs ||
-        now - g_handsOff.sinceMs >= kHandsOffMostMs || !g_screens.count(g_handsOff.panel))
-        g_handsOff.panel = -1;
+    const int i = g_handsOff.panel();
+    if (i < 0) return;
+    const auto it = g_screens.find(i);
+    Mat p;
+    double uvd[3];
+    const bool there = it != g_screens.end() && ScreenPose(it->second, &p);
+    const bool seen = there && TipOnPanel(g_handsOff.side(), it->second, p, uvd);
+    g_handsOff.Step(seen ? uvd : nullptr, there ? it->second.metres / 2 : 0, there ? it->second.heightMetres() / 2 : 0,
+                    NowMs(), there);
 }
 
 void CloseMenu(const char *why) {
@@ -253,7 +250,7 @@ void HandsOnMenu(const Screen &s, const Mat &panel) {
     const int i = g_menu.panel;
     for (int k = 0; k < 2; ++k) {
         double l[3], q[3];
-        const bool seen = IndexTipIn(k, g_menu.pose, l), onPanel = IndexTipIn(k, panel, q);
+        const bool seen = IndexTipIn(k, g_menu.pose, l), onPanel = TipOnPanel(k, s, panel, q);
         const bool through = g_menu.tip[k].Step(seen ? l : nullptr, g_menu.w / 2, g_menu.h / 2);
         const bool overMenu = seen && std::fabs(l[0]) <= g_menu.w / 2 + tiptap::Tap::kMargin &&
                               std::fabs(l[1]) <= g_menu.h / 2 + tiptap::Tap::kMargin;
@@ -263,11 +260,11 @@ void HandsOnMenu(const Screen &s, const Mat &panel) {
         const char *by = k ? "the right hand" : "the left hand";
         if (through) {
             g_menu.usedMs = NowMs();
-            HandsOff(i, k, panel);
+            g_handsOff.Start(i, k, NowMs());
             return PressRow(RowAtFace(l[0], l[1]), kNone, by);
         }
         if (beside) {
-            HandsOff(i, k, panel);
+            g_handsOff.Start(i, k, NowMs());
             return CloseMenu("tapped beside it");
         }
     }
@@ -323,7 +320,7 @@ bool SetBarSide(int i, barside::Side side, const char *by) {
 }
 
 bool BarMenuOn(int i) { return g_menu.panel >= 0 && g_menu.panel == i; }
-bool BarMenuHasHands(int i) { return BarMenuOn(i) || (g_handsOff.panel >= 0 && g_handsOff.panel == i); }
+bool BarMenuHasHands(int i) { return BarMenuOn(i) || g_handsOff.Holds(i); }
 
 void OpenBarMenu(int i, double along, bool edges) {
     if (g_menu.panel == i && g_menu.edges == edges) return CloseMenu("its bar tapped again");

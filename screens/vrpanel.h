@@ -121,7 +121,7 @@ struct Screen {
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
     double rollRadius = 0;                    // roll: the lever's length then (m)
-    double rollLeverX = 0, rollLeverY = 0;    // roll: added to the laser's spot, so it turns the panel as a knob at its bar
+    double rollLeverX = 0, rollLeverY = 0;    // roll: added to the laser's spot, so it turns the panel as a knob held at its bottom
                                               // would, wherever on the menu it's held (RollLever)
     double rollTurned = 0;                    // roll: the most the laser has gone round since (rad; RollClick)
     bool hover[kControls] = {};               // a laser is on the bar, the resize corner

@@ -7,7 +7,7 @@
 //     while dragging pushes it away or pulls it closer (along the line from the head).
 //   - a tap on the bar (BarTap) opens its menu (vrbarmenu.cpp, panelmenu.h). Curved bends the screen
 //     into a cylinder around you (its radius: your distance to it), or flat again. Rotate, held, rolls it
-//     about its centre like a knob at its bar (RollLever; it snaps level within kRollSnap); clicked (let
+//     about its centre like a knob held at its bottom (RollLever; it snaps level within kRollSnap); clicked (let
 //     go without turning it past kRollTap or kRollTapM) the screen goes level where it is, its tilt back
 //     to 0 (DEE-337, LevelScreen); a fingertip's tap on it does the same.
 //   - a resize handle on a corner: drag it to resize from that corner, the opposite one staying
@@ -1612,13 +1612,16 @@ bool RollLaserAngle(const Screen &s, const Mat &d, double *rad, double *radius =
 
 // Rotate is a row of the bar's menu, which sits near the panel's middle: turned from there, a 2 mm wobble
 // of the laser would be 5 degrees, and a 25 degree turn would still count as a click. So it turns the
-// panel as a knob held at its bar would (where the roll button was): the laser's spot moved out to the
-// bar's middle, and moving with the laser after. Held farther out than that, it's held where it is.
+// panel as a knob held at its bottom middle would: the laser's spot moved out there, and moving with the
+// laser after; held farther out than that, it's held where it is. The bottom whatever edge its bar is
+// on (council, 2026-11-18: held at a side bar's middle, the laser's sideways sweep went straight out
+// from the centre, didn't turn it, and its release levelled it), so a sweep right turns every panel
+// the same way.
 bool RollLever(Screen &s, const Mat &l) {
     s.rollLeverX = s.rollLeverY = 0;
     double hx, hy;
     if (!RollSpot(s, l, &hx, &hy)) return false;
-    const barside::UV bar = barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), 0);
+    const barside::UV bar = barside::Place(barside::Side::Bottom, s.metres, s.heightMetres(), BarIn(s), 0);
     if (std::hypot(hx, hy) < std::hypot(bar.u, bar.v)) s.rollLeverX = bar.u - hx, s.rollLeverY = bar.v - hy;
     return true;
 }

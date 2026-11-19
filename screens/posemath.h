@@ -159,4 +159,19 @@ bool FaceAbout(const M &p, double kx, double ky, const M &turn, const M &head, M
     return false;
 }
 
+// A point `q` in a panel's own frame (x right, y up, z out of its front, metres) on its surface:
+// out = {u along it (along the arc when curved), v up, d out of its front (negative behind)}. OpenVR
+// curves a panel into a cylinder toward its front, its axis at (0, *, curve) with the viewer inside
+// (vr.cpp's OnSurface); `curve` <= 0 is flat. Hand input's Locate and the grab bar's menu use it.
+inline void OnPanel(double curve, const double q[3], double out[3]) {
+    if (curve <= 0) {
+        out[0] = q[0], out[1] = q[1], out[2] = q[2];
+        return;
+    }
+    const double r = curve;
+    out[0] = r * std::atan2(q[0], r - q[2]);
+    out[1] = q[1];
+    out[2] = r - std::hypot(q[0], q[2] - r);
+}
+
 }  // namespace posemath

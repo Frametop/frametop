@@ -8,13 +8,14 @@
 //   The tiles are actions that touch every screen, the input relay's own (its "action NAME", the ones
 // frunner's OS menu runs: conf/ft_input_actions.py's MENU_ACTIONS), so they keep its rules (this user
 // only; while Frametop is paused for a VR game only Steam Menu works, and the rest dim: WorksPaused);
-// Reset Layout asks first: its first tap turns it red for kConfirmMs, and a second does it.
+// Reset Layout counts down first: its tap turns it red, "Reset in 3" to 1, then it resets; a second tap stops it.
 // Pure: the tiles, their layout, a fingertip's pokes and Reset's ask (screens/tests/quickaccess-test.cpp);
 // vrquick.cpp draws the card, places it over the palm and gives it the tip and the clicks.
 #pragma once
 
 #include "tiptap.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -50,8 +51,9 @@ constexpr int64_t kShownMs = 300;
 // kPokeOut: 6 mm between them, as tiptap's 3 and 8 had 5 (council, 2026-11-19: 2 mm let a tip's depth
 // jitter press the next tile it slid over). A quick slanted jab's one frame in front of the card can be
 // beside it (a 2 m/s 30 degree jab at 15 Hz; quickaccess-test): kPokeSide past its edges (and tiptap's
-// margin) still arms. The bar menu and the reset question keep tiptap's.
-constexpr double kPokeAt = 0.010, kPokeOut = 0.016, kPokeSide = 0.02;
+// margin) still arms. The bar menu and the reset question keep tiptap's. 14/19 mm and 3 cm since the user's
+// second ask (2026-11-19: "increase the sensitivity ... the taps while you're facing your palm"; 10/16/2 before).
+constexpr double kPokeAt = 0.014, kPokeOut = 0.019, kPokeSide = 0.03;
 
 // The card in pixels: kCols x kRows tiles of kTile, kGap apart and kPad in from its edge.
 constexpr int kTile = 150, kGap = 12, kPad = 16;
@@ -112,7 +114,7 @@ inline int StickyTileAt(int prev, double x, double y) {
 // the card on an outer side, or as far into another tile (StickyTileAt's hold alone is a tremble's
 // width: council, 2026-11-19, a pull-back drifting sideways pressed the neighbour; and only in front, or
 // where a poke went in: a slanted poke goes on sideways behind the card, and off it), or out of
-// sight for kLostMs (one lost frame isn't the hand gone: holds last through 10, palmmenu waits 250 ms).
+// sight for kLostMs (one lost frame isn't the hand gone: holds last through 10, palmmenu waits 400 ms).
 // While it's spent the tile it pressed stays lit (from the frame it's pressed), not the one beside it.
 // A press is the tile under the tip, or, when the tip is behind the face by then, where it crossed it,
 // between this frame and the last: a quick or slanted poke is centimetres on, and to the side.
@@ -124,13 +126,19 @@ public:
     // Shown afresh at `nowMs`: a tip already through it doesn't count, and none presses for kShownMs.
     void Reset(int64_t nowMs) {
         tap_.Reset();
-        hover_ = spent_ = -1, near_ = false, haveLast_ = false, lostMs_ = -1, shownMs_ = nowMs;
+        hover_ = spent_ = -1, near_ = false, haveLast_ = false, lostMs_ = tipLostMs_ = -1, shownMs_ = nowMs;
     }
     // `l`: the tip on the card's face (metres from its centre: x right, y up, z out), or null; the card
     // w x h metres. The tile it pressed, or -1.
     int Step(const double *l, double w, double h, int64_t nowMs) {
         const double hw = w / 2, hh = h / 2, m = tiptap::Tap::kMargin;
-        const bool through = tap_.Step(l, hw, hh);
+        // (the tip out of sight, the palm in front of it as it reaches the card (user, 2026-11-19: the model
+        // "doesn't handle occlusion well enough"): its way in holds for kLostMs, so it presses where it
+        // shows again behind the face; longer, it's gone)
+        if (l) tipLostMs_ = -1;
+        else if (tipLostMs_ < 0) tipLostMs_ = nowMs;
+        const bool gone = !l && nowMs - tipLostMs_ >= kLostMs;
+        const bool through = l || gone ? tap_.Step(l, hw, hh) : false;
         const int held = hover_;
         near_ = l && tap_.Near();
         if (near_) {
@@ -158,8 +166,8 @@ public:
             if (l[2] > kOut || (l[2] > 0 && Past(spent_, l, w, h, m)) || (through && Past(spent_, at, w, h, m))) spent_ = -1;
         }
         if (spent_ >= 0 && hover_ >= 0) hover_ = spent_;
-        haveLast_ = l != nullptr;
-        if (l) last_[0] = l[0], last_[1] = l[1], last_[2] = l[2];
+        if (l) haveLast_ = true, last_[0] = l[0], last_[1] = l[1], last_[2] = l[2];
+        else if (gone) haveLast_ = false;
         if (!through || spent_ >= 0) return -1;
         double x, y;
         FaceToPx(at[0], at[1], w, h, &x, &y);
@@ -195,6 +203,7 @@ private:
     bool near_ = false, haveLast_ = false;
     double last_[3] = {0, 0, 0};    // the tip last frame
     int64_t lostMs_ = -1, shownMs_ = 0;
+    int64_t tipLostMs_ = -1;   // the tip out of sight since (-1: seen)
 };
 
 // The palm hand's pinch, dragged across the card, which holds still meanwhile (vrquick.cpp). It starts
@@ -243,27 +252,35 @@ private:
     int place_ = -1, tile_ = -1;   // place_: the tile under it, the palm up or not
 };
 
-// Reset's ask: armed by its first tap, it resets on a second from kLeastMs to kConfirmMs after it (one
-// poke's tremble, or a double click, sooner: not a second tap).
-class Confirm {
+// Reset's countdown (user, 2026-11-19: "it should count down to 3 and then do the reset without having
+// to tap"; the hand model loses the tip too often for a second tap): a tap starts it, and kMs later it's
+// due. A tap from kLeastMs on stops it (one poke's tremble, or a double click, sooner: not a second tap).
+class Countdown {
 public:
-    static constexpr int64_t kConfirmMs = 3000;
+    static constexpr int64_t kMs = 3000;
     static constexpr int64_t kLeastMs = 400;
-    // A tap on Reset at `nowMs`: true, do it (the second); false, it asks now (or still: too soon).
+    // A tap on Reset at `nowMs`: true, it started; false, it stopped (or was tapped too soon to).
     bool Tap(int64_t nowMs) {
-        if (Armed(nowMs)) {
-            if (nowMs - armedMs_ < kLeastMs) return false;
-            armedMs_ = -1;
-            return true;
+        if (On()) {
+            if (nowMs - startMs_ >= kLeastMs) startMs_ = -1;
+            return false;
         }
-        armedMs_ = nowMs;
-        return false;
+        startMs_ = nowMs;
+        return true;
     }
-    bool Armed(int64_t nowMs) const { return armedMs_ >= 0 && nowMs - armedMs_ < kConfirmMs; }
-    void Clear() { armedMs_ = -1; }
+    bool On() const { return startMs_ >= 0; }
+    // The whole seconds left, shown (3, 2, 1), 0 when it isn't counting.
+    int Left(int64_t nowMs) const { return On() ? int(std::max<int64_t>(1, (kMs - (nowMs - startMs_) + 999) / 1000)) : 0; }
+    // True once, when it's run out: reset now.
+    bool Due(int64_t nowMs) {
+        if (!On() || nowMs - startMs_ < kMs) return false;
+        startMs_ = -1;
+        return true;
+    }
+    void Clear() { startMs_ = -1; }
 
 private:
-    int64_t armedMs_ = -1;
+    int64_t startMs_ = -1;
 };
 
 }  // namespace quickaccess

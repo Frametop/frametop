@@ -34,16 +34,18 @@ struct Params {
     // the two never meet.
     // 45 since the third live test (2026-10-10: the menu opened as the user took a panel's bottom
     // edge from below, palm up, fingers bunched; 60 and 75 before).
-    double facing = 45, facingLeave = 60;     // degrees
+    // 55/70 since the user's 2026-11-19 ask ("increase the sensitivity and detection of the palm menu to make
+    // it more reliable to access"), with look, open, showMs, still, hideMs and lostMs below.
+    double facing = 55, facingLeave = 70;     // degrees
     // ...and you look at it: the palm within this of the head's forward direction
-    double look = 45, lookLeave = 55;         // degrees
+    double look = 55, lookLeave = 65;         // degrees
     // ...with the hand open: the middle, ring and little fingers' extension (tip-to-wrist over
     // knuckle-to-wrist, as handinput's), averaged. Straight is about 2, a fist under 1. The index
     // and thumb don't count: they pinch.
-    double open = 1.5, openLeave = 1.3;
+    double open = 1.35, openLeave = 1.15;
     double nearest = 0.15, farthest = 0.70;   // the palm this far from the head (m)
-    double showMs = 300;            // held this long (and still: the palm under `still` m/s) before it shows
-    double still = 0.25;
+    double showMs = 200;            // held this long (and still: the palm under `still` m/s) before it shows
+    double still = 0.35;
     // Not by a panel, nor busy (user, 2026-10-10: "make the palm menu much stricter"): not shown while
     // the hand is at a panel (Input::atPanel: in or near its touch zone, or within 12 cm in front
     // of one and 8 cm round it) or near input or "grab that" has it (Input::busy), nor for quietMs
@@ -54,8 +56,8 @@ struct Params {
     // the bunched fingertips), the palm still (under pinchStill m/s) as it begins. Another pinch
     // while it shows does nothing.
     double plainMiddle = 0.045, plainExtended = 1.35, pinchStill = 0.35;
-    double hideMs = 150;            // ...and away this long before it hides
-    double lostMs = 250;            // a hand unseen this long: it goes, a pinch is cancelled
+    double hideMs = 250;            // ...and away this long before it hides
+    double lostMs = 400;            // a hand unseen this long: it goes, a pinch is cancelled
     double againMs = 500;           // no second menu toggle this soon (a pinch read twice)
     // The card: its centre this far out of the palm's centre, toward the eyes, clear of the fingers
     // (m), and this wide: its six tiles about 3.5 cm, a fingertip's poke (quickaccess.h).

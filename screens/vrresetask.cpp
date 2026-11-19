@@ -2,8 +2,10 @@
 // tap to reset the displays"; then for a hand's tap only, now for a laser's click too: the reset button became
 // a menu row, 2026-11-18, and one click there is as easy to make by mistake as a stray poke was): Steam's
 // dialog as the Option C design draws it (user, 2026-11-19: "Use that as the design"; barmenuart::ResetAsk),
-// "Reset the layout?" with Cancel and Reset, shows over the panel beside its bar for kResetAskMs. Focus starts
-// on Cancel; a click or a fingertip's tap on Reset resets, on Cancel it goes.
+// "Reset the layout?" with Cancel and Reset, shows over the panel beside its bar and counts down 3, 2, 1, then
+// resets (user, 2026-11-19: "it should count down to 3 and then do the reset without having to tap"; the hand
+// model loses the tip too often to tap). Focus starts on Cancel; a click or a fingertip's tap on Cancel stops
+// it, on Reset resets at once.
 // The question's geometry is barside.h's (MenuAt, as the bar's menu); its tap, tiptap.h's.
 #include "vrpanel.h"
 #include "barmenuart.h"
@@ -28,12 +30,15 @@ struct ResetAsk {
     tiptap::Tap tip[2];                   // each index tip's way through it
     barmenuart::Ask art;                  // its pixels and buttons
     int drawnLit = -2;                    // the button lit in them
+    int drawnLeft = -1;                   // ...and the seconds left they say
     int hover = -1, handHover = -1;       // 0 Cancel, 1 Reset under a laser, a fingertip near; -1 neither
     bool lasers = false;                  // MakeOverlaysInteractiveIfVisible is set
 } g_resetAsk;
-constexpr int64_t kResetAskMs = 5000, kResetAskLeastMs = 300;   // (the least: the press that opened it isn't the answer)
+constexpr int64_t kResetAskMs = 3000, kResetAskLeastMs = 300;   // (the least: the press that opened it isn't the answer)
 constexpr const char *kResetAskKey = "frametop.resetask";
-constexpr const char *kResetAskBody = "Your screens go back to their layout around where you are now. Windows and sizes stay as they are.";
+// (the seconds left first: "Resetting in 3.")
+constexpr const char *kResetAskBody = "Your screens go back to their layout around where you are now. Cancel keeps them.";
+int SecondsLeft() { return int(std::max<int64_t>(1, (kResetAskMs - (NowMs() - g_resetAsk.shownMs) + 999) / 1000)); }
 
 // The button under a texture point (y down), -1 none.
 int ButtonAt(double x, double y) {
@@ -46,14 +51,14 @@ int ButtonAtFace(double x, double y) {
 }
 
 void Draw() {
-    const int lit = g_resetAsk.hover >= 0 ? g_resetAsk.hover : g_resetAsk.handHover;
-    if (lit == g_resetAsk.drawnLit) return;
-    g_resetAsk.art = barmenuart::ResetAsk(kResetAskBody, lit);
+    const int lit = g_resetAsk.hover >= 0 ? g_resetAsk.hover : g_resetAsk.handHover, left = SecondsLeft();
+    if (lit == g_resetAsk.drawnLit && left == g_resetAsk.drawnLeft) return;
+    g_resetAsk.art = barmenuart::ResetAsk("Resetting in " + std::to_string(left) + ". " + kResetAskBody, lit);
     const barmenuart::Ask &a = g_resetAsk.art;
     overlaytex::Set(g_resetAsk.overlay, a.px.data(), a.w, a.h);
     const vr::HmdVector2_t scale = {{float(a.w), float(a.h)}};
     vr::VROverlay()->SetOverlayMouseScale(g_resetAsk.overlay, &scale);
-    g_resetAsk.drawnLit = lit;
+    g_resetAsk.drawnLit = lit, g_resetAsk.drawnLeft = left;
 }
 
 // Beside the bar's middle, toward the panel's middle (where its menu was); its buttons at least a finger's size.
@@ -108,23 +113,24 @@ void ShowResetAsk(int panel) {
         AnnounceOverlay(kResetAskKey);   // (the 3D mouse's ray finds it)
     }
     g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs();
-    g_resetAsk.hover = g_resetAsk.handHover = -1, g_resetAsk.drawnLit = -2;
+    g_resetAsk.hover = g_resetAsk.handHover = -1, g_resetAsk.drawnLit = -2, g_resetAsk.drawnLeft = -1;
     for (tiptap::Tap &t : g_resetAsk.tip) t.Reset();
     Draw();
     if (!PlaceResetAsk(it->second)) return HideResetAsk();
     PinShow(g_resetAsk.overlay);
-    std::printf("screen %d: reset the layout? (asks, %.0f s)\n", panel + 1, kResetAskMs / 1000.0);
+    std::printf("screen %d: reset the layout? (counts down, %.0f s)\n", panel + 1, kResetAskMs / 1000.0);
 }
 
-// Each tick: it follows its panel, and goes after kResetAskMs; each hands frame, a fingertip near a button
+// Each tick: it follows its panel, and resets after kResetAskMs (its panel gone or hidden: no reset); each hands frame, a fingertip near a button
 // lights it, and one coming through it from the front presses it.
 void UpdateResetAsk() {
     if (g_resetAsk.panel < 0) return;
     const auto it = g_screens.find(g_resetAsk.panel);
-    if (it == g_screens.end() || !it->second.visible || NowMs() - g_resetAsk.shownMs >= kResetAskMs) {
-        if (it != g_screens.end()) std::printf("screen %d: reset the layout? not confirmed: no reset\n", g_resetAsk.panel + 1);
+    if (it == g_screens.end() || !it->second.visible) {
+        if (it != g_screens.end()) std::printf("screen %d: reset the layout? its panel hid: no reset\n", g_resetAsk.panel + 1);
         return HideResetAsk();
     }
+    if (NowMs() - g_resetAsk.shownMs >= kResetAskMs) return DoReset(g_resetAsk.panel, "after its countdown");
     if (!PlaceResetAsk(it->second)) return HideResetAsk();
     if (HandsFrame()) {
         g_resetAsk.handHover = -1;

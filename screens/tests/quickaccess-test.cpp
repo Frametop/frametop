@@ -198,8 +198,8 @@ int main() {
                 presses += p.Step(l, w, h, t += 33) >= 0;
             }
             const double s = std::tan(30 * 3.14159265358979 / 180);
-            for (const double zmm : {25.0, 10.6, -18.3}) {   // at the edge, then the jab (1 m/s, 30 Hz)
-                const double z = zmm / 1000, l[3] = {zmm > 20 ? e : e + 0.0083 + s * (0.0106 - z), v4, z};
+            for (const double zmm : {25.0, 15.6, -13.3}) {   // at the edge, then the jab (1 m/s, 30 Hz)
+                const double z = zmm / 1000, l[3] = {zmm > 20 ? e : e + 0.0083 + s * (0.0156 - z), v4, z};
                 const int k = p.Step(l, w, h, t += 33);
                 if (k >= 0) got = k, ++presses;
             }
@@ -334,15 +334,21 @@ int main() {
             }
             check("...and stays lit while spent with the tip over Spin Left", held);
         }
-        // the easier press (kPokeAt, user 2026-11-19): a tip easing in that stops 9 mm out presses; 13 mm, not
-        check("a tip easing in that stops 9 mm out: a press", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 15}, {u4, v4, 9}, {u4, v4, 20}}, 30, tiles) == 1 && tiles[0] == 4);
-        check("...one that stops 13 mm out: nothing", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 15}, {u4, v4, 13}, {u4, v4, 20}}, 30) == 0);
+        // the easier press (kPokeAt, user 2026-11-19): a tip easing in that stops 13 mm out presses; 17 mm, not
+        check("a tip easing in that stops 13 mm out: a press", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 20}, {u4, v4, 13}, {u4, v4, 25}}, 30, tiles) == 1 && tiles[0] == 4);
+        check("...one that stops 17 mm out: nothing", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 20}, {u4, v4, 17}, {u4, v4, 25}}, 30) == 0);
+        // the tip hidden by the palm as it reaches the card (user, 2026-11-19): 3 frames lost then behind it
+        // presses; lost longer than kLostMs (9 frames, 297 ms), it's a fresh tip, no press
+        check("a tip lost 3 frames on its way in, seen again behind: a press",
+              run({{u4, v4, 40}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {u4, v4, -8}}, 30, tiles) == 1 && tiles[0] == 4);
+        check("...lost 9 frames: nothing", run({{u4, v4, 40}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost},
+                                               {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {u4, v4, -8}}, 30) == 0);
         // a frame in front beside the card (kPokeSide) arms it; farther, not
         {   // (crossing ~7 mm in from the card's edge)
             const double in = w / 2 - 0.012;
             check("in front 1.5 cm beside the card, then through Dock Windows: a press",
                   run({{w / 2 + 0.015, v5, 20}, {in, v5, -5}}, 30, tiles) == 1 && tiles[0] == 5);
-            check("...3.5 cm beside it: nothing", run({{w / 2 + 0.035, v5, 20}, {in, v5, -5}}, 30) == 0);
+            check("...4.5 cm beside it: nothing", run({{w / 2 + 0.045, v5, 20}, {in, v5, -5}}, 30) == 0);
         }
         // too soon after it showed: no press, and the tip comes out before it can
         {
@@ -412,20 +418,18 @@ int main() {
                                                           !WorksPaused(Tile::Reset) && !WorksPaused(Tile::SpinLeft) &&
                                                           !WorksPaused(Tile::SpinRight) && !WorksPaused(Tile::DockAll));
 
-    // Reset asks: the first tap arms, a second from kLeastMs to kConfirmMs does it, one after doesn't.
-    Confirm c;
-    check("not armed at first", !c.Armed(0));
-    check("the first tap asks", !c.Tap(1000) && c.Armed(1000));
-    check("a second tap 100 ms after: too soon, still asking", !c.Tap(1100) && c.Armed(1100));
-    check("...at kLeastMs: resets", c.Tap(1000 + Confirm::kLeastMs));
-    check("the first tap asks again", !c.Tap(5000) && c.Armed(5000));
-    check("a second tap inside the window resets", c.Tap(5000 + Confirm::kConfirmMs - 1));
-    check("...and it's disarmed after", !c.Armed(1000 + Confirm::kConfirmMs - 1));
-    check("a tap arms again", !c.Tap(10000) && c.Armed(10000));
-    check("it lapses at kConfirmMs", !c.Armed(10000 + Confirm::kConfirmMs));
-    check("a tap after it lapsed asks again, not resets", !c.Tap(10000 + Confirm::kConfirmMs) && c.Armed(10000 + Confirm::kConfirmMs));
-    c.Clear();
-    check("Clear disarms it", !c.Armed(10000 + Confirm::kConfirmMs) && !c.Tap(20000));
+    // Reset counts down: a tap starts it, it's due kMs on (once), a tap from kLeastMs stops it.
+    Countdown c;
+    check("not counting at first", !c.On() && c.Left(0) == 0 && !c.Due(100000));
+    check("a tap starts it", c.Tap(1000) && c.On() && c.Left(1000) == 3);
+    check("...2 then 1 left", c.Left(2000) == 2 && c.Left(3500) == 1 && c.Left(3999) == 1);
+    check("not due before kMs", !c.Due(1000 + Countdown::kMs - 1) && c.On());
+    check("due at kMs, once", c.Due(1000 + Countdown::kMs) && !c.On() && !c.Due(1000 + Countdown::kMs + 1));
+    check("a tap starts it again", c.Tap(10000));
+    check("a tap 100 ms after: too soon to stop it", !c.Tap(10100) && c.On());
+    check("...from kLeastMs it stops", !c.Tap(10000 + Countdown::kLeastMs) && !c.On() && !c.Due(20000));
+    c.Tap(30000), c.Clear();
+    check("Clear stops it", !c.On() && !c.Due(40000));
 
     std::printf(failed ? "%d failed\n" : "all passed\n", failed);
     return failed ? 1 : 0;

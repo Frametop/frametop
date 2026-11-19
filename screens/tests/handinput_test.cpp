@@ -2878,15 +2878,26 @@ void TestPalmUp() {
         // a fist: not; half curled: only once up (hysteresis)
         sh.rollDeg = 0, sh.curl = 2;
         CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true));
-        sh.curl = 1;
-        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose) && palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        // (curled until it's between the thresholds, so the check follows their tuning)
+        sh.curl = 0;
+        for (double c = 0; c <= 2; c += 0.02) {
+            sh.curlT = c;
+            palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose);
+            if (pose.open > k.openLeave && pose.open < k.open) break;
+        }
         CHECK(pose.open > k.openLeave && pose.open < k.open);
-        // turned a little away from the face (about 50 deg off it): only once up
-        sh.curl = 0, sh.tiltDeg = 5;
         CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose) && palmmenu::PalmUp(Seen(sh), Identity(), k, true));
+        // turned a little away from the face (between facing and facingLeave off it): only once up
+        sh.curlT = -1;
+        for (double t = 20; t >= -60; t -= 0.5) {
+            sh.tiltDeg = t;
+            palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose);
+            if (pose.facingDeg > k.facing + 1 && pose.facingDeg < k.facingLeave - 1) break;
+        }
         CHECK(pose.facingDeg > k.facing && pose.facingDeg < k.facingLeave);
+        CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, false, &pose) && palmmenu::PalmUp(Seen(sh), Identity(), k, true));
         // not looked at (out to the side and low), or out of reach: not
-        sh.tiltDeg = 20, sh.palmAt[0] = right ? 0.4 : -0.4, sh.palmAt[1] = -0.15, sh.palmAt[2] = -0.2;
+        sh.tiltDeg = 20, sh.palmAt[0] = right ? 0.55 : -0.55, sh.palmAt[1] = -0.2, sh.palmAt[2] = -0.15;
         CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true, &pose) && pose.lookDeg > k.lookLeave);
         sh.palmAt[0] = 0, sh.palmAt[1] = -0.3, sh.palmAt[2] = -0.8;
         CHECK(!palmmenu::PalmUp(Seen(sh), Identity(), k, true));
@@ -2945,11 +2956,11 @@ void TestPalmMenuShows() {
     h.Palm(palm);
     NEAR(at[1] - palm[1], r.menu.params().lift * std::cos(20 * M_PI / 180), 0.003);   // above the palm, toward the face
     CHECK(!r.menu.Card(0, r.hands.shown(), at));
-    // turned away for one frame: stays; for 150 ms: goes
+    // turned away for one frame: stays; for hideMs (250 ms): goes
     r.Frame({down});
     CHECK(r.menu.shown(1));
     r.Frame({up});
-    r.Frames(6, {down});
+    r.Frames(9, {down});
     CHECK(!r.menu.shown(1));
     // a palm up for less than showMs, twice: never shows
     r.Frames(5, {up});
@@ -2959,7 +2970,7 @@ void TestPalmMenuShows() {
     // the hand gone: it goes after lostMs
     r.Frames(6, {up});
     CHECK(r.menu.shown(1));
-    r.Frames(10, {});
+    r.Frames(14, {});
     CHECK(!r.menu.shown(1));
     // Quick Access: the other hand (or a laser) on the card keeps it while the palm turns away, or
     // the palm hand comes by a panel; let go, it goes after hideMs
@@ -2969,12 +2980,12 @@ void TestPalmMenuShows() {
     r.Frames(10, {down});
     CHECK(r.menu.shown(1));
     r.engaged[1] = false, r.atPanel[1] = false;
-    r.Frames(6, {down});
+    r.Frames(9, {down});
     CHECK(!r.menu.shown(1));
     // ...but not once the palm hand is lost
     r.Frames(11, {up});
     r.engaged[1] = true;
-    r.Frames(10, {});
+    r.Frames(14, {});
     CHECK(!r.menu.shown(1));
     r.engaged[1] = false;
     // the left hand alone
@@ -3076,7 +3087,7 @@ void TestPalmMenuPinch() {
         r.Pinch(1, false);
         r.Frame({down});
         CHECK(r.toggles.empty() && r.menu.stats.cancels == 1);
-        r.Frames(6, {down});
+        r.Frames(9, {down});
         CHECK(!r.menu.shown(1));
     }
     {   // a fist pinch (curled fingers) once the ring shows: still the ring's (the leave thresholds)

@@ -53,7 +53,7 @@ struct {
     std::vector<uint8_t> styles[kStyles];   // a tile's box in each style, without its label
     Look looks[quickaccess::kTiles];
 } g_card;
-quickaccess::Confirm g_resetAsk;
+quickaccess::Countdown g_resetAsk;
 
 void Invalidate() {
     for (Look &l : g_card.looks) l.valid = false;
@@ -61,7 +61,7 @@ void Invalidate() {
 
 std::string Label(const quickaccess::Spec &s) {
     if (s.tile == Tile::Screens) return ModeVisible() ? "Hide Screens" : "Show Screens";
-    if (s.tile == Tile::Reset && g_resetAsk.Armed(NowMs())) return "Tap to Reset";
+    if (s.tile == Tile::Reset && g_resetAsk.On()) return "Reset in " + std::to_string(g_resetAsk.Left(NowMs()));
     return s.label;
 }
 
@@ -110,13 +110,13 @@ void DrawTile(int i, const Look &look) {
 bool Idle(Tile t) { return g_paused && !quickaccess::WorksPaused(t); }
 
 // SteamVR's dark tiles: the one under the fingertip (else the palm pinch's drag, else a laser's) white,
-// Reset red while it asks, and the idle ones dim. Only the tiles that changed are
+// Reset red while it counts down, and the idle ones dim. Only the tiles that changed are
 // repainted (council, 2026-11-19: the whole card took ~25 ms on a little core).
 void Draw() {
     using namespace quickaccess;
     if (g_card.px.empty()) MakeImages(), Invalidate();
     const int lit = g_card.poke.hover() >= 0 ? g_card.poke.hover() : g_card.drag.on() ? g_card.drag.tile() : g_card.hover;
-    const bool armed = g_resetAsk.Armed(NowMs());
+    const bool armed = g_resetAsk.On();
     bool changed = false;
     Look now[kTiles];
     for (int i = 0; i < kTiles; ++i) {
@@ -145,8 +145,7 @@ void Hide() {
     std::printf("palm Quick Access: hidden\n");
     PinHide(g_card.overlay);
     g_card.side = -1, g_card.hover = -1, g_card.laserMs = -1;
-    g_card.poke.Reset(NowMs()), g_card.drag.End();
-    g_resetAsk.Clear();
+    g_card.poke.Reset(NowMs()), g_card.drag.End();   // (Reset's countdown goes on: the palm put down after its tap)
 }
 
 // A tile pressed (`by`: whose).
@@ -158,7 +157,7 @@ void PressTile(int i, const char *by) {
     std::fflush(stdout);
     if (Idle(s.tile)) return (void)std::printf("palm Quick Access: not while paused for a game\n");
     if (s.tile == Tile::Reset) {
-        if (g_resetAsk.Tap(NowMs())) DoReset(-1, (std::string("palm Quick Access, ") + by + ", confirmed").c_str());
+        std::printf("palm Quick Access: Reset %s\n", g_resetAsk.Tap(NowMs()) ? "counts down" : g_resetAsk.On() ? "tapped too soon" : "stopped");
         return;
     }
     g_resetAsk.Clear();
@@ -214,7 +213,9 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     // game, it shows with the dashboard open, as the palm menu does: Steam Menu works, the rest dim.)
     const int side = g_card.side >= 0 && palm.shown(g_card.side) ? g_card.side : palm.shown(1) ? 1 : palm.shown(0) ? 0 : -1;
     const int released = palm.toggled();   // (a pinch let go this Update, on that side)
-    if (g_paused) g_resetAsk.Clear();   // (Reset does nothing then: its ask ends, not waits out the pause)
+    if (g_paused) g_resetAsk.Clear();   // (Reset does nothing then: its countdown ends, not waits out the pause)
+    // (the card shown or not: the palm put down after a tap on Reset still resets)
+    if (g_resetAsk.Due(NowMs())) DoReset(-1, "palm Quick Access, after its countdown");
     // dragged across, the card holds still where it was, the palm seen this frame or not (council,
     // 2026-11-19: one lost hands frame hid it and the drag began again on Steam Menu; palmmenu's lostMs
     // ends a pinch whose hand is gone, and no head ends it at once)
@@ -230,7 +231,7 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     if (fresh) {
         // (no Invalidate: hidden, the overlay kept its image, which g_card.looks still says)
         g_card.side = side, g_card.shownMs = NowMs(), g_card.hover = -1, g_card.laserMs = -1;
-        g_card.poke.Reset(NowMs()), g_card.drag.End(), g_resetAsk.Clear();   // (the other palm's drag ends)
+        g_card.poke.Reset(NowMs()), g_card.drag.End();   // (the other palm's drag ends; Reset's countdown goes on)
         std::printf("palm Quick Access: over the %s palm\n", side ? "right" : "left");
     }
     g_card.w = palm.params().size, g_card.h = g_card.w * quickaccess::kH / quickaccess::kW;

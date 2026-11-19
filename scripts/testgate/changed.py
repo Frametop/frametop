@@ -28,7 +28,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cbuild import under  # noqa: E402
+from cbuild import SEEN, under  # noqa: E402
 
 TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STAMP = "build/tests/last-green"
@@ -151,7 +151,7 @@ def mark_start(run):
     except OSError:
         names = []
     for name in names:
-        if not name.startswith(os.path.basename(PENDING)):
+        if not name.startswith(os.path.basename(STAMP) + ".pending"):   # last-green.pending too (no run ids)
             continue
         old = os.path.join(folder, name)
         try:
@@ -181,6 +181,9 @@ def mark_green(run):
               "`just test-changed` starts from the one before")
         return 0
     os.replace(pending, os.path.join(TREE, STAMP))
+    if os.path.exists(os.path.join(TREE, SEEN)):     # what objects read before green is behind it now
+        with open(os.path.join(TREE, SEEN), "w") as f:
+            f.write("{}")
     edited = len(lines) - 1
     print(f"last green: {lines[0][:12]}" + (f" and {edited} edited paths" if edited else "")
           + " (build/tests/last-green; `just test-changed` starts from it)")

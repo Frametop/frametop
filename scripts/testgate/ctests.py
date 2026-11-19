@@ -74,9 +74,11 @@ class Run:
         self.ninja_file = f"{cbuild.OUT}/build.ninja"
         with open(os.path.join(self.root, self.ninja_file), "w") as f:
             f.write(self.plan.ninja)
-        # What each object read when it last built (an object with no record has never built), and
-        # after this build what it reads now: a header it reads either way counts.
-        before = cbuild.deps(self.root, self.ninja_file) if self.changed is not None else {}
+        # What each object read when it last built (an object with no record has never built),
+        # after this build what it reads now, and what it read in any build since the last green
+        # `just test` (a header it stopped reading before, while still changed since green): a
+        # header it read in any of them counts.
+        before = cbuild.deps(self.root, self.ninja_file)
         targets = sorted(self.plan.objects)
         start = time.monotonic()
         log = os.path.join(self.root, cbuild.OUT, "ninja.log")
@@ -89,8 +91,10 @@ class Run:
             with open(log, errors="replace") as f:
                 self.say(f.read().rstrip())
             self.status = 1
-        after = cbuild.deps(self.root, self.ninja_file) if self.changed is not None else {}
-        self.deps = {o: read | after.get(o, set()) for o, read in before.items()}
+        after = cbuild.deps(self.root, self.ninja_file)
+        seen = cbuild.remembered(self.root)
+        self.deps = {o: before.get(o, set()) | after.get(o, set()) | seen.get(o, set()) for o in before.keys() | seen.keys()}
+        cbuild.remember(self.root, {o: self.deps.get(o, set()) | after.get(o, set()) for o in self.deps.keys() | after.keys()})
 
     def broken(self, path):
         """Why the program at path isn't there to run, or None."""

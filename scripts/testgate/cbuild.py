@@ -16,12 +16,15 @@ The items, in the order the run reports them:
 - Skip, Fail: a line the run prints as is; a Fail fails the run.
 """
 import hashlib
+import json
 import os
 import shlex
 import subprocess
 from dataclasses import dataclass, field
 
 OUT = "build/tests"
+# what objects have read since the last green `just test` (changed.py --mark-green empties it)
+SEEN = OUT + "/deps-since-green.json"
 
 
 @dataclass(frozen=True)
@@ -221,3 +224,20 @@ def deps(root, ninja_file):
             if not os.path.isabs(path) and not path.startswith(".."):
                 out[current].add(path)
     return out
+
+
+def remembered(root):
+    """What each object has read in any build since the last green `just test` (SEEN)."""
+    try:
+        with open(os.path.join(root, SEEN)) as f:
+            return {o: set(paths) for o, paths in json.load(f).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def remember(root, reads):
+    """Keep reads (object -> paths) as SEEN, written whole."""
+    path = os.path.join(root, SEEN)
+    with open(path + ".tmp", "w") as f:
+        json.dump({o: sorted(p) for o, p in reads.items()}, f)
+    os.replace(path + ".tmp", path)

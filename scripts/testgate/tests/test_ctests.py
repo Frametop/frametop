@@ -185,6 +185,19 @@ class CTests(unittest.TestCase):
         r, out = self.run_items(p, changed=["h2.h"])
         self.assertEqual((r.status, out.splitlines()[:1]), (1, ["a.c: FAILED"]))
 
+    def test_a_header_dropped_since_green_counts_on_every_run(self):
+        """dir1/h.h goes and a.c falls back on dir2/h.h, which makes the test fail: the run after
+        it catches that, and so does the next one, though the last build didn't read dir1/h.h."""
+        self.file("dir1/h.h", "#define V 0\n")
+        self.file("dir2/h.h", "#define V 1\n")
+        self.file("a.c", '#include "h.h"\nint main(void) { return V; }\n')
+        p = [Program("a", ("a.c",), C + " -Idir1 -Idir2", cc="gcc", test="a.c")]
+        self.assertEqual(self.run_items(p)[0].status, 0)    # green
+        os.unlink(os.path.join(self.root, "dir1/h.h"))
+        self.assertEqual(self.run_items(p, changed=["dir1/h.h"])[0].status, 1)
+        r, out = self.run_items(p, changed=["dir1/h.h", "notes.txt"])
+        self.assertEqual((r.status, out.splitlines()[:1]), (1, ["a.c: FAILED"]))
+
     def test_a_check_that_names_a_missing_program_fails_on_a_change_too(self):
         items = self.programs() + [Check("uses-x", ("sh", "-c", "exit 0"), needs=("no-such-program",))]
         self.run_items(items)
@@ -259,12 +272,16 @@ class TestChanged(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             start = changed.git("rev-parse", "HEAD").strip()
             changed.mark_start("r1")
+            seen = os.path.join(self.root, cbuild.SEEN)
+            with open(seen, "w") as f:
+                f.write('{"o": ["gone.h"]}')
             # during the run: test_menu.py moves, and that's committed
             g("mv", "menu/test/test_menu.py", "menu/test/test_menus.py")
             g("commit", "-qm", "two")
             changed.mark_green("r1")
             base, edited = changed.read_green()
             self.assertEqual((base, edited), (start, []))
+            self.assertEqual(cbuild.remembered(self.root), {})    # what was read before green is behind it
             self.assertEqual(changed.changed_since(base), ["menu/test/test_menu.py", "menu/test/test_menus.py"])
 
     def test_each_run_records_its_own_start_and_a_run_with_none_records_nothing(self):
@@ -292,10 +309,12 @@ class TestChanged(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(self.root, changed.PENDING + "b")))
             # a failed run's record goes after a day; a newer one (b's) stays
             old = os.path.join(self.root, changed.PENDING + "old")
-            open(old, "w").close()
-            os.utime(old, (0, 0))
+            older = os.path.join(self.root, changed.STAMP + ".pending")     # the one-file format before run ids
+            for f in (old, older):
+                open(f, "w").close()
+                os.utime(f, (0, 0))
             changed.mark_start("e")
-            self.assertFalse(os.path.exists(old))
+            self.assertFalse(os.path.exists(old) or os.path.exists(older))
             self.assertTrue(os.path.exists(os.path.join(self.root, changed.PENDING + "b")))
 
     def test_paths_come_whole(self):

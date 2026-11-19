@@ -15,15 +15,11 @@ from pathlib import Path
 from frame_testbench import peersim
 
 TESTBENCH = Path(__file__).resolve().parents[1]
+sys.path.append(str(TESTBENCH.parent / 'together' / 'tests'))   # after testbench's own
+from roomkit import free_port  # noqa: E402  (ports no other test running beside this one gets)
 POSE_HEAD = '<BH3f'   # together/proto/posewire.h: kind, count, the eyes' place
 BUILT = all(path.is_file() for path in peersim.PROGRAMS.values())
 NOT_BUILT = 'Frametop Together is not built (together/build.sh, screens/build.sh)'
-
-
-def free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
 
 
 class Asker:

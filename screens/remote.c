@@ -312,12 +312,19 @@ void ft_remote_init(struct wl_event_loop *loop, bool vr) {
     for (int i = 0; i < FT_REMOTE_MAX; ++i) g_remotes[i].fd = -1, g_remotes[i].shown = -1;
 }
 
+static void drop(struct remote *r);
+
+// Every stream ends and none starts again: a remote stays unused, so a restart that was waiting
+// (a display given new settings, its old stream not reaped yet) doesn't start one after this.
 void ft_remote_shutdown(void) {
     for (int i = 0; i < FT_REMOTE_MAX; ++i) {
         struct remote *r = &g_remotes[i];
-        stop_stream(r);
-        if (r->used) ft_vr_screen_destroy(r->index);  // the panel goes before its textures
-        forget_ring(r);
+        if (r->used) {
+            drop(r);  // the panel goes before its textures
+        } else {
+            stop_stream(r);
+            forget_ring(r);
+        }
     }
 }
 

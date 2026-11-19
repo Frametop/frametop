@@ -6,6 +6,7 @@ the Together loopback tests run. A test that can't build here (no msquic, no ncn
 header) is a Skip that says why. Add a new test here."""
 import glob
 import os
+import shlex
 import subprocess
 
 from cbuild import Check, Fail, Generate, Program, Skip
@@ -243,7 +244,7 @@ def items(root, env=os.environ):
         out.append(P("mmap-layout-test", "gaze/test/mmap-layout-test.cpp",
                      flags="-std=c++17 -O2 -Wall -Wno-unused-parameter -Wno-missing-field-initializers",
                      cflags="-Igaze/build/include -Ipointer/common",
-                     libs=f"-L{openvr} -lopenvr_api -Wl,-rpath,{openvr} -lpthread"))
+                     libs=f"-L{shlex.quote(openvr)} -lopenvr_api -Wl,-rpath,{shlex.quote(openvr)} -lpthread"))
     return out
 
 
@@ -255,7 +256,7 @@ def _quic(root, openvr, has):
                      "roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: "
                      "SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)")]
     quic = dict(cflags="-Itogether/build/msquic/src/inc",
-                libs=f"together/build/libmsquic.so.2 -Wl,-rpath,{root}/together/build -lpthread", pkglibs="openssl")
+                libs=f"together/build/libmsquic.so.2 -Wl,-rpath,{shlex.quote(root + '/together/build')} -lpthread", pkglibs="openssl")
     out = [
         P("together-links-test", "together/tests/links-test.cpp", *NET, flags=ASAN, **quic),
         P("ft-together", "together/ft-together.cpp", *NET, *SESSION, "together/flow/video.cpp",
@@ -296,7 +297,7 @@ def _quic(root, openvr, has):
         out += [
             P("ft-roompoints", "together/ft-roompoints.cpp", "together/points/asker.cpp", "together/points/dots.cpp",
               flags=ASAN, test=False, cflags="-isystem together/build/include",
-              libs=f"-L{openvr} -lopenvr_api -Wl,-rpath,/opt/steamvr/bin/linuxarm64:{openvr}"),
+              libs=f"-L{shlex.quote(openvr)} -lopenvr_api -Wl,-rpath,{shlex.quote('/opt/steamvr/bin/linuxarm64:' + openvr)}"),
             py("together/tests/roompoints-test.py", "ft-together", "ft-roompoints"),
         ]
     else:

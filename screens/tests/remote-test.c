@@ -174,15 +174,35 @@ static void read_log(void) {
 
 // One scenario in a process of its own, so g_remotes starts empty: 0 when it held.
 typedef bool (*scenario)(void);
+// Whether an ft-stream started after "down" in the log (ft_remote_shutdown).
+static bool started_after_shutdown(void) {
+    FILE *f = fopen(g_log, "r");
+    char what[16], host[64], app[64];
+    int pid;
+    long t;
+    bool down = false, started = false;
+    while (f && fscanf(f, "%15s %d %63s %63s %ld", what, &pid, host, app, &t) == 5) {
+        if (!strcmp(what, "down")) down = true;
+        else if (down && !strcmp(what, "start")) started = true;
+    }
+    if (f) fclose(f);
+    return started;
+}
+
 static bool check(const char *name, scenario s) {
     fflush(stdout);
     const pid_t pid = fork();
     if (pid == 0) {
         g_loop = wl_event_loop_create();
         ft_remote_init(g_loop, true);
-        const bool ok = s();
+        bool ok = s();
         ft_remote_shutdown();
+        note("down", 0, "-", "-");
         run(1500);
+        if (started_after_shutdown()) {  // it would outlive ft-screens
+            fprintf(stderr, "  an ft-stream started after ft_remote_shutdown\n");
+            ok = false;
+        }
         _exit(ok ? 0 : 1);
     }
     int status;

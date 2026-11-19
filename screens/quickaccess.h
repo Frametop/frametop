@@ -59,19 +59,59 @@ inline int TileAt(double x, double y) {
 // ...under a laser's mouse point (OpenVR's mouse y is up from the bottom; its scale, kW x kH).
 inline int TileAtMouse(double x, double yUp) { return TileAt(x, kH - yUp); }
 
-// ...under a point on its face (metres from its centre, y up) for a card w x h metres.
-inline int TileAtFace(double u, double v, double w, double h) {
-    if (w <= 0 || h <= 0) return -1;
-    return TileAt((u / w + 0.5) * kW, (0.5 - v / h) * kH);
+// A point on its face (metres from its centre, y up) for a card w x h metres, in pixels (y down).
+inline void FaceToPx(double u, double v, double w, double h, double *x, double *y) {
+    *x = (u / w + 0.5) * kW, *y = (0.5 - v / h) * kH;
 }
 
-// Reset's ask: armed by its first tap, it resets on a second within kConfirmMs.
+// ...the tile under it.
+inline int TileAtFace(double u, double v, double w, double h) {
+    if (w <= 0 || h <= 0) return -1;
+    double x, y;
+    FaceToPx(u, v, w, h, &x, &y);
+    return TileAt(x, y);
+}
+
+// The tile a fingertip is over, kept while it's within kStick of that one's box (council, 2026-11-19:
+// a tip trembling by a tile's edge lit one and then the other, ~15 redraws a second).
+constexpr int kStick = 12;   // px, ~3 mm on a 12 cm card
+inline int StickyTileAt(int prev, double x, double y) {
+    if (prev >= 0 && prev < kTiles) {
+        int x0, y0, x1, y1;
+        Box(prev, &x0, &y0, &x1, &y1);
+        if (x >= x0 - kStick && x <= x1 + kStick && y >= y0 - kStick && y <= y1 + kStick) return prev;
+    }
+    return TileAt(x, y);
+}
+
+// After a fingertip pressed a tile: the card stays (the bar menu closes), so the same tip resting or
+// trembling by its face mustn't press again (council, 2026-11-19: tiptap arms again 8 mm out, and one
+// poke pressed twice). It's spent until it has come kOut in front of the card, gone off it, or out of sight.
+class Spent {
+public:
+    static constexpr double kOut = 0.03;
+    void Pressed() { on_ = true; }
+    void Clear() { on_ = false; }
+    // One hands frame: `l`, the tip on the card's face (x right, y up, z out, metres), or null.
+    void Step(const double *l, double halfW, double halfH) {
+        if (on_ && (!l || l[2] > kOut || l[0] < -halfW || l[0] > halfW || l[1] < -halfH || l[1] > halfH)) on_ = false;
+    }
+    bool on() const { return on_; }
+
+private:
+    bool on_ = false;
+};
+
+// Reset's ask: armed by its first tap, it resets on a second from kLeastMs to kConfirmMs after it (one
+// poke's tremble, or a double click, sooner: not a second tap).
 class Confirm {
 public:
     static constexpr int64_t kConfirmMs = 3000;
-    // A tap on Reset at `nowMs`: true, do it (the second); false, it asks now.
+    static constexpr int64_t kLeastMs = 400;
+    // A tap on Reset at `nowMs`: true, do it (the second); false, it asks now (or still: too soon).
     bool Tap(int64_t nowMs) {
         if (Armed(nowMs)) {
+            if (nowMs - armedMs_ < kLeastMs) return false;
             armedMs_ = -1;
             return true;
         }

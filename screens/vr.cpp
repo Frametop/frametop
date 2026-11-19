@@ -3798,7 +3798,10 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
         fh_event("screens", "palm-menu", "done", g_palm.toggled(), 0, "palm menu: the Steam menu");
         RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
     }
-    UpdateQuickAccess(g_palm, g_hands.shown(), in.head, in.haveHead);
+    QuickAccessIn qa;
+    qa.palm = &g_palm, qa.shown = &g_hands.shown(), qa.seen = &g_hands.seen(), qa.head = in.head, qa.haveHead = in.haveHead;
+    for (int k = 0; k < 2; ++k) qa.busy[k] = pin.busy[k];
+    UpdateQuickAccess(qa);
 }
 
 // "Grab that" (grabthat.h): the detector reads each hands frame after near input (which leaves it

@@ -12,7 +12,6 @@
 #include "handinput.h"
 #include "hoverhaptics.h"
 #include "levelpin.h"
-#include "palmmenu.h"
 #include "posemath.h"
 #include "resizecorner.h"
 #include "vrcmd.h"
@@ -27,6 +26,10 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace palmmenu {
+class PalmMenu;
+}
 
 namespace ftvr {
 
@@ -366,7 +369,14 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
 // ---------------------------------------------------------------- vrquick.cpp's
 
 // Quick Access over the palm (quickaccess.h): each tick, after the palm menu's Update.
-void UpdateQuickAccess(const palmmenu::PalmMenu &palm, const std::vector<handcut::Hand> &hands, const Mat &head, bool haveHead);
+struct QuickAccessIn {
+    const palmmenu::PalmMenu *palm = nullptr;
+    const std::vector<handcut::Hand> *shown = nullptr, *seen = nullptr;   // the hands drawn (predicted), and as seen
+    Mat head{};
+    bool haveHead = false;
+    bool busy[2] = {false, false};   // that hand holds or presses something (near input, "grab that")
+};
+void UpdateQuickAccess(const QuickAccessIn &in);
 bool QuickAccessEngaged(int side);   // that palm's card has the other hand's fingertip or a laser on it
 bool QuickAccessHasHand(int side);   // that hand's fingertip is at the other palm's card: the card's, not near input's
 void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data);

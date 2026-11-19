@@ -404,6 +404,7 @@ void BarPressed(Screen &s, vr::TrackedDeviceIndex_t dev, double along);   // its
 void BarCarry(Screen &s, const char *why);   // its waiting press becomes a move now
 void BarHold(Screen &s);   // each tick: a waiting press held or moved enough starts the move
 vr::TrackedDeviceIndex_t BarHolder();   // the device of a bar's press, waiting or carrying (kNone: none)
+bool BarHeldBy(vr::TrackedDeviceIndex_t dev);   // ...by this device
 // The next event on one of our overlays (false: none), a bar's press seen first: a carry's wheel pushes
 // the carried panel (CarryScroll), a bar press's release is the bar's (a tap, or its move's end), and
 // neither comes back; a press by a laser whose bar press is still on means its release was lost.

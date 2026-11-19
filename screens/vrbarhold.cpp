@@ -59,9 +59,6 @@ void BarLetGo(vr::TrackedDeviceIndex_t dev) {
 bool PressBy(const Screen &s, vr::TrackedDeviceIndex_t dev) {
     return (s.barPressMs >= 0 && s.barPressDevice == dev) || (s.barCarry && s.drag == Drag::Move && s.dragDevice == dev);
 }
-bool BarHeldBy(vr::TrackedDeviceIndex_t dev) {
-    return std::any_of(g_screens.begin(), g_screens.end(), [dev](const auto &e) { return PressBy(e.second, dev); });
-}
 
 // A left press by a device whose bar press waits or carries: its release was lost where we don't see
 // (another app's overlay, outside VR games), so the wait is dropped and the carry let go where it is.
@@ -88,6 +85,10 @@ bool BarClaims(const vr::VREvent_t &ev) {
 }
 
 }  // namespace
+
+bool BarHeldBy(vr::TrackedDeviceIndex_t dev) {
+    return std::any_of(g_screens.begin(), g_screens.end(), [dev](const auto &e) { return PressBy(e.second, dev); });
+}
 
 // The waiting press becomes a move, from where the panel is now (StartDrag takes the device's pose now:
 // no catching up, so nothing jumps). A pulse says it's held.

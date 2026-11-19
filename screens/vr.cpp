@@ -6523,7 +6523,7 @@ int ft_vr_mouse_screen(void) {
     // A press held, a torn-off window, or KWin moving one by its title bar: the wheel goes through SteamVR
     // (VREvent_ScrollDiscrete), where it pushes, pulls or tears off (DEE-246), not straight to the window.
     if (g_press.buttons || g_press.torn || !g_kwinMove.window.empty()) return -1;
-    if (BarHolder() != kNone) return -1;   // (a bar's press or carry: the wheel pushes it, PollOverlay)
+    if (g_mouseDevice != kNone && BarHeldBy(g_mouseDevice)) return -1;   // (its own bar press or carry: the wheel pushes it, PollOverlay)
     return g_mouseScreen;
 }
 
@@ -7334,7 +7334,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 continue;
             const double along = ev.data.mouse.x / 1000.0 - barhit::Width(s.chrome, g_barPaddingX) / 2;   // (mm: its mouse scale)
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                if (s.drag == Drag::None) BarPressed(s, ev.trackedDeviceIndex, along);   // (BarHold starts the move)
+                // (a window's press by this laser still held: its release was lost, as BarLost's; a claimed
+                // release never reaches ReleaseAwayBy, so KWin would keep the button)
+                if (g_press.device == ev.trackedDeviceIndex) ReleaseAway(BTN_LEFT, handle, data);
+                // (BarHold starts the move; another laser's press already waiting on it keeps it)
+                if (s.drag == Drag::None && s.barPressMs < 0) BarPressed(s, ev.trackedDeviceIndex, along);
             }
             // A right click: the menu of edges the bar can go on (vrbarmenu.cpp), at the spot clicked along it.
             else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Right && s.drag == Drag::None &&
@@ -7365,6 +7369,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             }
             hover(kResizePart);
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
+                if (g_press.device == ev.trackedDeviceIndex) ReleaseAway(BTN_LEFT, handle, data);   // (as the bar's)
                 StartDrag(s, Drag::Resize, ev.trackedDeviceIndex);
             } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
                 EndDragsBy(ev.trackedDeviceIndex);

@@ -327,7 +327,9 @@ def build(comp, box, cpus):
     cmd = f'cd {STAGE} && exec taskset -c {cpus} env FRAME_IN_BOX=1 OPENVR_LIB=/opt/frametop/lib ./{script}'
     log = STAGE.parent / f'build-{comp.replace("/", "-")}.log'
     with open(log, 'w') as out:
-        done = subprocess.run(['frame-job', '--local', '--', str(DISTROBOX), 'enter', box, '--',
+        # frame-job is the maintainer's job runner (AGENTS.md): without it, the command runs as is.
+        runner = ['frame-job', '--local', '--'] if shutil.which('frame-job') else []
+        done = subprocess.run([*runner, str(DISTROBOX), 'enter', box, '--',
                                'bash', '-c', cmd], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT)
     if done.returncode:
         tail = log.read_text(errors='replace').splitlines()[-15:]

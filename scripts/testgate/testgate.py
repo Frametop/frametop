@@ -31,7 +31,6 @@ import glob
 import json
 import os
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -64,22 +63,7 @@ def run(path, python=sys.executable, limit=None, threads=None):
         # files, not pipes: a server a test starts and leaves running can hold a pipe open
         with open(os.path.join(tmp, "out"), "w+", errors="replace") as out, \
                 open(os.path.join(tmp, "err"), "w+", errors="replace") as err:
-            p = subprocess.Popen([python, path], stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env,
-                                 start_new_session=True)
-            LIVE.add(p.pid)
-            try:
-                timed_out = not procs.exited(p.pid, limit)
-                if timed_out:
-                    os.killpg(p.pid, signal.SIGKILL)
-                procs.end_group(p.pid)   # what it started and left running goes too
-            except BaseException:   # testgate stopped (Ctrl-C, SIGTERM): the file goes with it
-                procs.end_group(p.pid)
-                p.kill()
-                p.wait()
-                raise
-            finally:
-                LIVE.discard(p.pid)
-            code = None if timed_out else p.wait()
+            code = procs.run_session([python, path], LIVE, limit, stdout=out, stderr=err, env=env)
             out.seek(0)
             err.seek(0)
             stdout, stderr = out.read(), err.read()
@@ -199,8 +183,7 @@ def main(patterns, njobs=1, times=None):
             report(item[0], item[1], item[2].result() if item[2] else None)
     except BaseException:   # testgate stopped (Ctrl-C, SIGTERM): what runs goes, what waits doesn't start
         pool.shutdown(wait=False, cancel_futures=True)
-        for pgid in list(LIVE):
-            procs.end_group(pgid)
+        procs.stop(LIVE)
         raise
     pool.shutdown()
     print(f"python files: {files['ok']} ok, {files['skipped']} skipped, {files['failed']} failed; "

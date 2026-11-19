@@ -4,6 +4,7 @@ process group, unless that went to a session of its own too (setsid).
 """
 import os
 import signal
+import subprocess
 import time
 
 TIMEOUT = 900   # seconds a test gets: room for a slow one, an end for a hung one
@@ -60,3 +61,32 @@ def end_group(pgid):
             time.sleep(0.05)
         if not members(pgid):
             return
+
+
+def run_session(argv, live, limit, **popen):
+    """Run argv in a session of its own and wait for it: its exit code, or None when it was still
+    running after limit seconds (None: no limit) and was killed. What it leaves running is ended.
+    live (a set) holds its process group id while it runs; if the wait is stopped (Ctrl-C,
+    SIGTERM), the group is ended and the exception goes on."""
+    p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, start_new_session=True, **popen)
+    live.add(p.pid)
+    try:
+        timed_out = not exited(p.pid, limit)
+        if timed_out:
+            os.killpg(p.pid, signal.SIGKILL)
+        end_group(p.pid)
+    except BaseException:
+        end_group(p.pid)
+        p.kill()
+        p.wait()
+        raise
+    finally:
+        live.discard(p.pid)
+    code = p.wait()
+    return None if timed_out else code
+
+
+def stop(live):
+    """End every group run_session has running (a runner that was stopped)."""
+    for pgid in list(live):
+        end_group(pgid)

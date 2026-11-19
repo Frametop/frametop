@@ -107,6 +107,11 @@ def _var(text):
     return text.replace("$", "$$").replace("\n", " ")
 
 
+def _vars(**values):
+    """A build line's variables."""
+    return [f"  {k} = {_var(v)}" for k, v in values.items()]
+
+
 def plan(items, root):
     """The build.ninja for the Programs in items, from the repo at root."""
     lines = [
@@ -141,7 +146,7 @@ def plan(items, root):
             continue
         if p.syntax:
             lines += [f"build {_esc(p.path)}: syntax {' '.join(map(_esc, p.sources))}",
-                      f"  cc = {p.cc}", f"  flags = {_var(p.flags)}", f"  cflags = {_var(cflags)}"]
+                      *_vars(cc=p.cc, flags=p.flags, cflags=cflags)]
             result.objects[p.path] = []
             continue
         objs = []
@@ -150,10 +155,8 @@ def plan(items, root):
             objs.append(o)
             if o not in compiled:
                 compiled.add(o)
-                lines += [f"build {_esc(o)}: cc {_esc(s)}",
-                          f"  cc = {p.cc}", f"  flags = {_var(p.flags)}", f"  cflags = {_var(cflags)}"]
-        lines += [f"build {_esc(p.path)}: link {' '.join(map(_esc, objs))}",
-                  f"  cc = {p.cc}", f"  flags = {_var(p.flags)}", f"  libs = {_var(libs)}"]
+                lines += [f"build {_esc(o)}: cc {_esc(s)}", *_vars(cc=p.cc, flags=p.flags, cflags=cflags)]
+        lines += [f"build {_esc(p.path)}: link {' '.join(map(_esc, objs))}", *_vars(cc=p.cc, flags=p.flags, libs=libs)]
         result.objects[p.path] = objs
     result.ninja = "\n".join(lines) + "\n"
     return result

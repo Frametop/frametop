@@ -22,7 +22,6 @@ import argparse
 import concurrent.futures
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -56,6 +55,7 @@ class Run:
         self.preps = {}
         self.not_run = 0
         self.live = set()   # the tests running now (their process group ids)
+        self.generated = {g.out: g for g in items if isinstance(g, Generate)}
 
     def say(self, text):
         print(text, file=self.out, flush=True)
@@ -65,7 +65,7 @@ class Run:
     def build(self):
         bdir = os.path.join(self.root, cbuild.OUT)
         os.makedirs(bdir, exist_ok=True)
-        for g in (i for i in self.items if isinstance(i, Generate)):
+        for g in self.generated.values():
             err = cbuild.generate(g, self.root)
             if err:
                 self.say(f"{g.out}: FAILED to make it\n{err}")
@@ -104,8 +104,8 @@ class Run:
                 return True     # never built: no record of what it reads
             if self.deps[o] & self.changed:
                 return True
-        gens = {g.out: g for g in self.items if isinstance(g, Generate)}
-        return any(s in gens and any(_under(c, gens[s].watch) for c in self.changed) for s in p.sources)
+        return any(s in self.generated and any(_under(c, self.generated[s].watch) for c in self.changed)
+                   for s in p.sources)
 
     def check_hit(self, c, programs):
         if self.changed is None:
@@ -126,28 +126,13 @@ class Run:
         limit = procs.timeout()
         start = time.monotonic()
         with open(log, "w") as f:
-            p = subprocess.Popen(argv, cwd=self.root, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT,
-                                 start_new_session=True)
-            self.live.add(p.pid)
-            try:
-                timed_out = not procs.exited(p.pid, limit)
-                if timed_out:
-                    os.killpg(p.pid, signal.SIGKILL)
-                procs.end_group(p.pid)
-            except BaseException:
-                procs.end_group(p.pid)
-                p.kill()
-                p.wait()
-                raise
-            finally:
-                self.live.discard(p.pid)
-            code = p.wait()
+            code = procs.run_session(argv, self.live, limit, cwd=self.root, stdout=f, stderr=subprocess.STDOUT)
         self.times[name] = round(time.monotonic() - start, 2)
         with open(log, errors="replace") as f:
             printed = f.read().rstrip()
-        if timed_out:
+        if code is None:
             printed += f"\nctests: still running after {limit:g} s, killed"
-        return code == 0 and not timed_out, printed
+        return code == 0, printed
 
     def prep(self, argv):
         """Run a Check's prep once: None when it worked, else its output."""
@@ -205,8 +190,7 @@ class Run:
                 show(kind, what)
         except BaseException:   # stopped (Ctrl-C, SIGTERM): what runs goes, what waits doesn't start
             pool.shutdown(wait=False, cancel_futures=True)
-            for pgid in list(self.live):
-                procs.end_group(pgid)
+            procs.stop(self.live)
             raise
         pool.shutdown()
 

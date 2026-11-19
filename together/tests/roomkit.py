@@ -2,13 +2,16 @@
 loopback and the questions to it, a program on its media socket, a program that hands it poses,
 voices and pointers and gets the others', a program whose printed lines are read as they come,
 and the checks' tally."""
+import fcntl
 import json
 import os
+import random
 import signal
 import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -31,11 +34,36 @@ def finish():
     sys.exit(1 if failed else 0)
 
 
+_held = []     # the ports this process holds (free_port): their lock files' descriptors
+
+
+def _ephemeral_low():
+    try:
+        with open("/proc/sys/net/ipv4/ip_local_port_range") as f:
+            return int(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 32768
+
+
 def free_port():
-    """A UDP port nothing listens on right now."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """A loopback UDP port nothing listens on, which no other test running beside this one gets
+    either: one below the kernel's ephemeral ports (a bind to port 0, as ft-together's own
+    outgoing sockets do, never gets it), held with a lock file until this process ends."""
+    low = _ephemeral_low()
+    folder = os.path.join(tempfile.gettempdir(), "ft-test-ports-%d" % os.getuid())
+    os.makedirs(folder, exist_ok=True)
+    for port in random.sample(range(max(1024, low - 12000), low), 200):
+        fd = os.open(os.path.join(folder, str(port)), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.bind(("127.0.0.1", port))
+        except OSError:     # another test holds it, or something listens there
+            os.close(fd)
+            continue
+        _held.append(fd)
+        return port
+    raise RuntimeError("no free loopback port below %d" % low)
 
 
 class End:

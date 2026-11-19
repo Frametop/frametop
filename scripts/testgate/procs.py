@@ -97,10 +97,11 @@ def run_session(argv, live, limit, **popen):
 
 def on_stop(handler):
     """handler for SIGTERM and SIGHUP (a closed terminal): either way, the cleanup runs. One the
-    run was started ignoring (nohup) stays ignored."""
+    run was started ignoring (nohup) still doesn't end it, but through a handler that does
+    nothing rather than SIG_IGN, which every test it starts would inherit (a handler isn't
+    inherited: they start with the default)."""
     for sig in (signal.SIGTERM, signal.SIGHUP):
-        if signal.getsignal(sig) is not signal.SIG_IGN:
-            signal.signal(sig, handler)
+        signal.signal(sig, handler if signal.getsignal(sig) is not signal.SIG_IGN else (lambda *_: None))
 
 
 def stop(live):

@@ -231,20 +231,37 @@ class Gate(unittest.TestCase):
             self.assertEqual(procs.members(p.pid), [])
         finally:
             for pid in procs.members(p.pid):
-                os.kill(pid, signal.SIGKILL)
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
             p.stdout.close()
             p.wait()
 
     def test_a_run_started_ignoring_sighup_keeps_ignoring_it(self):
-        """nohup: a closed terminal doesn't end the run; without it, it does (and cleans up)."""
-        path = self.file("w.py", "import time; time.sleep(1.5); print('all passed')\n")
+        """nohup: a closed terminal doesn't end the run, and the files it runs still start with
+        SIGHUP's default (not nohup's ignore); without nohup, a hangup ends it (and cleans up)."""
+        started = os.path.join(self.dir, "started")
+        path = self.file("w.py", f"""\
+            import signal, time
+            open({started!r}, "w").write(str(signal.getsignal(signal.SIGHUP) == signal.SIG_DFL))
+            time.sleep(1.5)
+            print("all passed")
+            """)
         gate = os.path.join(os.path.dirname(os.path.abspath(testgate.__file__)), "testgate.py")
         for ignore, want in ((True, 0), (False, 128 + signal.SIGHUP)):
+            if os.path.exists(started):
+                os.unlink(started)
+            disposition = signal.SIG_IGN if ignore else signal.SIG_DFL
             p = subprocess.Popen([sys.executable, gate, "--jobs", "1", path], stdout=subprocess.DEVNULL,
-                                 preexec_fn=(lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN)) if ignore else None)
-            time.sleep(0.5)
+                                 preexec_fn=lambda d=disposition: signal.signal(signal.SIGHUP, d))
+            deadline = time.monotonic() + 20
+            while not os.path.exists(started) and time.monotonic() < deadline:   # its handler is in
+                time.sleep(0.02)
             p.send_signal(signal.SIGHUP)
             self.assertEqual(p.wait(timeout=20), want)
+            with open(started) as f:
+                self.assertEqual(f.read(), "True")
 
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")

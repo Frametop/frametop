@@ -3775,10 +3775,9 @@ void UpdateSteamTouches(const std::vector<handinput::Carry> &carries) {
     }
 }
 
-// The palm menu (palmmenu.h): before near input, which leaves it the hand it has. Its ring is
-// a guide ("frametop.guide.palm.*"), so the pointer helper's cursor and rays pass through it.
+// The palm menu (palmmenu.h): before near input, which leaves it the hand it has. Its card, Quick
+// Access, is vrquick.cpp's: the other hand's fingertip at the card is the card's too.
 palmmenu::PalmMenu g_palm;
-GuidePart g_palmRing[2];
 
 void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Panel> &panels) {
     palmmenu::Input pin;
@@ -3791,6 +3790,7 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
         pin.busy[k] = g_handInput.pressing(k) || g_handInput.grabbing(k) || g_grabThat.armed(k) ||
                       g_grabThat.claims(k, g_handInput.frameNs());
         pin.atPanel[k] = g_handInput.near(k) || handinput::HandAtPanel(g_hands, k, panels, g_handInput.params());
+        pin.engaged[k] = QuickAccessEngaged(k);
     }
     g_palm.Update(pin);
     if (g_palm.toggled() >= 0) {
@@ -3798,24 +3798,7 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
         fh_event("screens", "palm-menu", "done", g_palm.toggled(), 0, "palm menu: the Steam menu");
         RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
     }
-    for (int k = 0; k < 2; ++k) {
-        GuidePart &r = g_palmRing[k];
-        double pt[3];
-        if (!in.haveHead || !g_palm.Ring(k, g_hands.shown(), pt)) {
-            r.Show(false);
-            continue;
-        }
-        if (r.overlay == vr::k_ulOverlayHandleInvalid) {
-            const char *key = k ? "frametop.guide.palm.right" : "frametop.guide.palm.left";
-            if (vr::VROverlay()->CreateOverlay(key, "Frametop: palm menu", &r.overlay) != vr::VROverlayError_None) continue;
-            vr::VROverlay()->SetOverlayWidthInMeters(r.overlay, float(g_palm.params().size));
-            vr::VROverlay()->SetOverlaySortOrder(r.overlay, 22);
-        }
-        const Mat m = FacingPose(pt, in.head);
-        vr::VROverlay()->SetOverlayTransformAbsolute(r.overlay, vr::TrackingUniverseStanding, &m);
-        r.Light(g_palm.pinched(k), RingTexture(g_palm.pinched(k)), 128);
-        r.Show(true);
-    }
+    UpdateQuickAccess(g_palm, g_hands.shown(), in.head, in.haveHead);
 }
 
 // "Grab that" (grabthat.h): the detector reads each hands frame after near input (which leaves it
@@ -5581,7 +5564,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     for (int k = 0; k < 2; ++k)
         if (g_handInput.pressingKwin(k) && !(g_press.buttons && g_press.device == kHandHolder[k])) g_handInput.ForgetPress(k);
     UpdatePalmMenu(in, panels);
-    for (int k = 0; k < 2; ++k) in.allowed[k] = in.allowed[k] && !g_palm.shown(k);   // the palm menu has that hand
+    for (int k = 0; k < 2; ++k) in.allowed[k] = in.allowed[k] && !g_palm.shown(k) && !QuickAccessHasHand(k);   // the palm menu has that hand
     // a fist or pinch waits on "grab that" only while it aims at a panel it would take (one at arm's
     // reach it doesn't: the fourth live test's fist at the near panel waited, then clicked)
     UpdateGrabThatAims();
@@ -5750,7 +5733,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     static const char *claimedBy[2] = {"", ""};
     auto near = [](int k) {
         const int64_t t = g_handInput.frameNs();
-        const char *by = g_handInput.claims(k) ? "" : g_palm.shown(k) ? "the palm menu" : FarClaims(k, t) ? "the far stretch"
+        const char *by = g_handInput.claims(k) ? "" : g_palm.shown(k) || QuickAccessHasHand(k) ? "the palm menu" : FarClaims(k, t) ? "the far stretch"
                          : g_grabThat.claims(k, t) && (!g_grabThat.armed(k) || g_grabThatAim[k] >= 0) ? "grab that" : nullptr;
         const char *other = by && *by ? by : "";
         if (std::strcmp(other, claimedBy[k]) != 0) {
@@ -5945,7 +5928,7 @@ bool ft_vr_init(void) {
                     why.c_str());
     }
     g_palm.params().on = handcut::Setting("HANDS_PALM_MENU", "1") != "0";
-    std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up, pinch: the Steam menu)" : "off");
+    std::printf("hands: palm menu %s\n", g_palm.params().on ? "on (palm up: Quick Access; pinch: the Steam menu)" : "off");
     grabthat::Params &gt = g_grabThat.params();
     gt.on = handcut::Setting("HANDS_GRAB_THAT", "1") != "0";
     num("HANDS_GRAB_THAT_DISTANCE", gt.distance, 0.2, 1.5);
@@ -6140,8 +6123,7 @@ void ft_vr_shutdown(void) {
             if (set.made) vr::VROverlay()->DestroyOverlay(o);
     for (auto &[dev, g] : g_guides)
         for (auto o : {g.ring.overlay, g.dot.overlay}) vr::VROverlay()->DestroyOverlay(o);
-    for (GuidePart &r : g_palmRing)
-        if (r.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(r.overlay), r = GuidePart{};
+    DestroyQuickAccess();
     if (g_target.overlay != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->DestroyOverlay(g_target.overlay), g_target = TargetGlow{};
     for (CarryGlow &g : g_carryGlow) DestroyCarryGlow(g);
     g_carryGlow.clear();
@@ -7447,6 +7429,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     PollPill(handle, data);
     PollBarMenu(handle, data);
     PollResetAsk(handle, data);
+    PollQuickAccess(handle, data);
     UpdateHandInput(handle, data);
     DockPushed(handle, data);   // (after UpdateHandInput's dock aims)
     PlacePulled();

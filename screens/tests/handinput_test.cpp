@@ -2907,7 +2907,7 @@ struct PalmRig {
     palmmenu::PalmMenu menu;
     Synth synth;
     int64_t t = 1'000'000'000;
-    bool allowed[2] = {true, true}, busy[2] = {false, false}, atPanel[2] = {false, false};
+    bool allowed[2] = {true, true}, busy[2] = {false, false}, atPanel[2] = {false, false}, engaged[2] = {false, false};
     std::vector<int> toggles;   // the side of each toggle
     void Frame(const std::vector<SynthHand> &h, int ticks = 3) {
         synth.Write(h, t);
@@ -2917,7 +2917,7 @@ struct PalmRig {
             else hands.Feed(nullptr, 0, nullptr, Identity(), now);
             palmmenu::Input i;
             i.nowNs = now, i.hands = &hands, i.head = Identity(), i.haveHead = true;
-            for (int s = 0; s < 2; ++s) i.allowed[s] = allowed[s], i.busy[s] = busy[s], i.atPanel[s] = atPanel[s];
+            for (int s = 0; s < 2; ++s) i.allowed[s] = allowed[s], i.busy[s] = busy[s], i.atPanel[s] = atPanel[s], i.engaged[s] = engaged[s];
             menu.Update(i);
             if (menu.toggled() >= 0) toggles.push_back(menu.toggled());
         }
@@ -2942,12 +2942,12 @@ void TestPalmMenuShows() {
     r.Frames(6, {up});   // 367 ms
     CHECK(r.menu.shown(1) && !r.menu.shown(0) && !r.menu.pinched(1));
     double at[3];
-    CHECK(r.menu.Ring(1, r.hands.shown(), at));
+    CHECK(r.menu.Card(1, r.hands.shown(), at));
     const handcut::Hand h = Seen(up);
     double palm[3];
     h.Palm(palm);
     NEAR(at[1] - palm[1], r.menu.params().lift * std::cos(20 * M_PI / 180), 0.003);   // above the palm, toward the face
-    CHECK(!r.menu.Ring(0, r.hands.shown(), at));
+    CHECK(!r.menu.Card(0, r.hands.shown(), at));
     // turned away for one frame: stays; for 150 ms: goes
     r.Frame({down});
     CHECK(r.menu.shown(1));
@@ -2959,11 +2959,27 @@ void TestPalmMenuShows() {
     r.Frame({down});
     r.Frames(5, {up});
     CHECK(!r.menu.shown(1));
-    // the hand gone: the ring goes after lostMs
+    // the hand gone: it goes after lostMs
     r.Frames(6, {up});
     CHECK(r.menu.shown(1));
     r.Frames(10, {});
     CHECK(!r.menu.shown(1));
+    // Quick Access: the other hand (or a laser) on the card keeps it while the palm turns away, or
+    // the palm hand comes by a panel; let go, it goes after hideMs
+    r.Frames(11, {up});
+    CHECK(r.menu.shown(1));
+    r.engaged[1] = true, r.atPanel[1] = true;
+    r.Frames(10, {down});
+    CHECK(r.menu.shown(1));
+    r.engaged[1] = false, r.atPanel[1] = false;
+    r.Frames(6, {down});
+    CHECK(!r.menu.shown(1));
+    // ...but not once the palm hand is lost
+    r.Frames(11, {up});
+    r.engaged[1] = true;
+    r.Frames(10, {});
+    CHECK(!r.menu.shown(1));
+    r.engaged[1] = false;
     // the left hand alone
     r.Frames(11, {PalmUpHand(false, 2)});
     CHECK(r.menu.shown(0) && !r.menu.shown(1));

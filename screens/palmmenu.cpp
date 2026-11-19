@@ -89,8 +89,8 @@ void PalmMenu::Update(const Input &in) {
             if (in.busy[s]) sd.quietUntil = in.nowNs + int64_t(p_.quietMs * 1e6);
             continue;
         }
-        // at a panel: no ring now, nor for quietMs (a pinch on the ring held goes on)
-        if (in.atPanel[s]) {
+        // at a panel: not shown now, nor for quietMs (a pinch held while it showed goes on)
+        if (in.atPanel[s] && !in.engaged[s]) {
             sd.quietUntil = in.nowNs + int64_t(p_.quietMs * 1e6);
             if (sd.state == State::Shown) sd.state = State::Idle;
             sd.upSince = -1;
@@ -98,7 +98,7 @@ void PalmMenu::Update(const Input &in) {
         if (sd.state == State::Off) sd.state = State::Idle;
         const Hand *h = HandFor(s, H.seen());
         if (h) sd.lastSeen = in.nowNs, sd.handId = h->id;
-        if (!h && in.nowNs - sd.lastSeen > int64_t(p_.lostMs * 1e6)) {
+        if (!h && in.nowNs - sd.lastSeen > int64_t(p_.lostMs * 1e6)) {   // (engaged or not: it follows the palm)
             if (sd.state == State::Pinched) ++stats.cancels;
             sd.state = State::Idle, sd.up = false, sd.upSince = -1;
         }
@@ -111,7 +111,7 @@ void PalmMenu::Update(const Input &in) {
             case State::Off:
                 break;
             case State::Idle:
-                // a pinch now is the helper's (gaze); the ring shows after showMs of palm up
+                // a pinch now is the helper's (gaze); it shows after showMs of palm up
                 if (!newFrame) break;
                 if (!sd.up || in.nowNs < sd.quietUntil || (h && h->speed() >= p_.still)) {
                     sd.upSince = -1;
@@ -128,7 +128,7 @@ void PalmMenu::Update(const Input &in) {
                 }
                 break;
             case State::Shown:
-                // A pinch that began while the ring showed (the helper saw this hand near then).
+                // A pinch that began while it showed (the helper saw this hand near then).
                 if (began && g.beginNs >= sd.shownNs) {
                     if (!Plain(h)) {   // the middle finger in it, the fingers bunched, or the hand moving: not ours to toggle
                         ++stats.notPlain;
@@ -142,7 +142,8 @@ void PalmMenu::Update(const Input &in) {
                     }
                 }
                 if (!newFrame) break;
-                if (sd.up) {
+                // (the other hand poking it, or a laser on it: the palm sags or turns as you reach)
+                if (sd.up || in.engaged[s]) {
                     sd.awaySince = -1;
                 } else {
                     if (sd.awaySince < 0) sd.awaySince = in.nowNs;
@@ -150,7 +151,7 @@ void PalmMenu::Update(const Input &in) {
                 }
                 break;
             case State::Pinched:
-                // held: the ring stays whatever the palm does; the release decides
+                // held: it stays whatever the palm does; the release decides
                 if (began || !g.down) {
                     Release(s, g.lost, in.nowNs);
                     if (began && g.down && Plain(h)) sd.state = State::Pinched, ++stats.pinches;   // and another began
@@ -160,7 +161,7 @@ void PalmMenu::Update(const Input &in) {
     }
 }
 
-bool PalmMenu::Ring(int side, const std::vector<Hand> &hands, double out[3]) const {
+bool PalmMenu::Card(int side, const std::vector<Hand> &hands, double out[3]) const {
     if (!shown(side)) return false;
     const Hand *h = HandFor(side, hands);
     if (!h) return false;

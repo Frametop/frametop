@@ -308,6 +308,10 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/panelmenu-test.cpp \
       -o build/tests/panelmenu-test
     run screens/tests/panelmenu-test.cpp build/tests/panelmenu-test
+    # palm Quick Access (quickaccess.h): its tiles, where a tip or laser lands, Reset's ask
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/quickaccess-test.cpp \
+      -o build/tests/quickaccess-test
+    run screens/tests/quickaccess-test.cpp build/tests/quickaccess-test
     # gamescope apps (gsforward.h): the policy, and the X side against an Xvfb when there is one
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gsforward-test.cpp screens/gsforward.cpp \
       $(pkg-config --cflags --libs xcb xcb-xtest xcb-icccm) -o build/tests/gsforward-test

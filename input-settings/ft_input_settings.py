@@ -170,7 +170,7 @@ HAND_INTERACTIONS = [
      "The next screen comes 1 m in front of you, big enough to read, and takes the typing; the next stroke sends "
      "it home. Grab that pulls it to arm's reach; a push steps it back. Off: the screens turn around you instead."),
     ("HANDS_PALM_MENU", True, "1", "Gestures", "Palm menu",
-     "Palm toward your face, away from screens, and a plain pinch: the Steam menu."),
+     "Palm toward your face, away from screens: Quick Access, tiles your other hand pokes. A plain pinch: the Steam menu."),
     ("HANDS_TARGET_GLOW", True, "1", "Feedback", "Grab that's glow",
      "A faint white glow round the screen \"grab that\" would take."),
     ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",

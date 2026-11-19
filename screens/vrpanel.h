@@ -12,6 +12,7 @@
 #include "handinput.h"
 #include "hoverhaptics.h"
 #include "levelpin.h"
+#include "palmmenu.h"
 #include "posemath.h"
 #include "resizecorner.h"
 #include "vrcmd.h"
@@ -361,6 +362,15 @@ void UpdateDashTiles();
 void PlaceTileBorder();
 void TileStay(int i, bool on, const char *by);   // anchored: shown with the dashboard closed too, or not
 void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size);
+
+// ---------------------------------------------------------------- vrquick.cpp's
+
+// Quick Access over the palm (quickaccess.h): each tick, after the palm menu's Update.
+void UpdateQuickAccess(const palmmenu::PalmMenu &palm, const std::vector<handcut::Hand> &hands, const Mat &head, bool haveHead);
+bool QuickAccessEngaged(int side);   // that palm's card has the other hand's fingertip or a laser on it
+bool QuickAccessHasHand(int side);   // that hand's fingertip is at the other palm's card: the card's, not near input's
+void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data);
+void DestroyQuickAccess();
 
 // ---------------------------------------------------------------- vrresetask.cpp's
 

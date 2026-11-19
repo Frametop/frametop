@@ -222,7 +222,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS,
                     and from its key list the tiling keys: KEY_LIST_RUNNABLE; from this user only),
-                    as a button would ({"t": "action"}, or an error)
+                    as a button would ({"t": "action"}, or an error); from ft-screens' palm Quick
+                    Access too, unbound, so no answer
   tilefocus 1|0     from ft-screens: an anchored dashboard tile has the focus (renewed every 2 s,
                     lapses TILE_FOCUS_LAPSE after the last), so the tiling keys (TILE_FOCUS_ACTIONS)
                     are ft-screens'; without it they go to the desktop. Ignored from another user
@@ -2076,6 +2077,8 @@ class Relay:
             (node.down.add if value else node.down.discard)(code)
 
     def reply(self, addr, obj):
+        if not addr:  # an unbound sender (ft-screens' Quick Access runs actions so): nowhere to answer
+            return
         try:
             self.control.sendto(json.dumps(obj).encode(), addr)
         except OSError:
@@ -2202,8 +2205,8 @@ class Relay:
                 self.reply(addr, self.pause.status())
             return
         if cmd == "action" and len(words) == 2:
-            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu.
-            # Only those (KEY_LIST_RUNNABLE), and only from this user: never run:, command: or keys:.
+            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu; or
+            # from ft-screens (unbound, no reply): a tile of the palm's Quick Access. Only those (KEY_LIST_RUNNABLE), and only from this user: never run:, command: or keys:.
             name = words[1]
             if uid != os.getuid():
                 self.reply(addr, {"t": "error", "error": "another user's"})

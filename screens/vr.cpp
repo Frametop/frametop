@@ -761,7 +761,7 @@ bool ScreenPose(const Screen &s, Mat *out) {
 // The controls' size from both the screen's width and its distance from the head (the
 // geometric mean of 12% of the width and 10% of the distance), so a small screen near you
 // gets small controls and a big or far one gets big ones, never under about 1.7 degrees.
-double g_handButton = 0.024;   // HANDS_BUTTON_SIZE: a hand at a panel makes its round buttons at least this wide (m)
+double g_handButton = 0.024;   // HANDS_BUTTON_SIZE: a hand at a panel makes its grip (the resize handle, the bar's row) at least this (m)
 
 void ChromeSize(Screen &s) {
     Mat head, p;
@@ -5502,7 +5502,6 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "HANDS_FIST_GRAB") k.fistGrab = on;
     else if (n == "HANDS_FIST_PAIR") k.fistPair = on;
     else if (n == "HANDS_FIST_RESIZE_ONLY") k.fistResizeOnly = on;
-    else if (n == "HANDS_PINCH_BUTTONS") k.pinchButtons = on;
     else if (n == "HANDS_EDGE_GLOW") k.edgeGlow = on;
     else if (n == "HANDS_RELEASE_FREEZE") k.openFreeze = on ? d.openFreeze : 0;
     else if (n == "HANDS_FLICK") k.flick = on;
@@ -5902,15 +5901,13 @@ bool ft_vr_init(void) {
     k.gate = handcut::Setting("HANDS_TRACK_GATE", "1") != "0";
     g_targetGlowOn = handcut::Setting("HANDS_TARGET_GLOW", "1") != "0";
     g_pushGlowOn = handcut::Setting("HANDS_PUSH_GLOW", "0") != "0";
-    // the fourth live test (2026-10-10): two anchors, fists, buttons for hands, the soft glow at corners,
-    // edges and buttons (handinput.h Params::joinFront, fistFront, buttonReach, pinchButtons, edgeGlow)
+    // the fourth live test (2026-10-10): two anchors, fists, the soft glow at corners and edges
+    // (handinput.h Params::joinFront, fistFront, edgeGlow)
     num("HANDS_JOIN_REACH", k.joinFront, 0, 0.5);   // 0: off
     num("HANDS_FIST_REACH", k.fistFront, 0, 0.3);   // 0: the touch zone's (as before)
     if (k.fistFront <= 0) k.fistBack = 0, k.fistClaimCurl = 0;
-    num("HANDS_BUTTON_REACH", k.buttonReach, 0, 0.05);
     num("HANDS_BAR_PINCH", k.barPinch, 0, 0.04);   // a bar grab with the tips this close (0: only ft-hands' pinch)
     num("HANDS_BUTTON_SIZE", g_handButton, 0, 0.08);
-    k.pinchButtons = handcut::Setting("HANDS_PINCH_BUTTONS", "1") != "0";
     k.edgeGlow = handcut::Setting("HANDS_EDGE_GLOW", "1") != "0";
     const std::string near = handcut::Setting("HANDS_NEAR", "1");
     g_nearMode = near == "0" ? NearMode::Off : near == "force" ? NearMode::Force : NearMode::Helper;
@@ -6063,12 +6060,10 @@ bool ft_vr_init(void) {
                 k.stretchTurn ? "on every axis" : "about the vertical (HANDS_STRETCH_TURN=0)",
                 k.gate ? "dropped (HANDS_TRACK_GATE)" : "taken (HANDS_TRACK_GATE=0)",
                 g_targetGlowOn ? "softly white round its edges (HANDS_TARGET_GLOW)" : "not (HANDS_TARGET_GLOW=0)");
-    std::printf("hands: a second hand %s; fists reach %.0f cm in front and %.0f behind; buttons %.1f cm each way for a fingertip%s; "
-                "corners, edges and buttons glow %s\n",
+    std::printf("hands: a second hand %s; fists reach %.0f cm in front and %.0f behind; corners and edges glow %s\n",
                 k.joinFront > 0 ? ("within " + std::to_string(int(std::lround(k.joinFront * 100))) +
                                    " cm of a panel the other holds joins it (two anchors)").c_str() : "has to find a grab zone (HANDS_JOIN_REACH=0)",
-                std::max(k.nearFront, k.fistFront) * 100, -std::min(k.nearBack, k.fistBack) * 100, k.buttonReach * 100,
-                k.pinchButtons ? " or a pinch" : " (a pinch takes the bar: HANDS_PINCH_BUTTONS=0)",
+                std::max(k.nearFront, k.fistFront) * 100, -std::min(k.nearBack, k.fistBack) * 100,
                 k.edgeGlow ? "softly as a hand comes to them (HANDS_EDGE_GLOW)" : "not; the resize handle follows the hand (HANDS_EDGE_GLOW=0)");
     std::printf("hands: grabs smoothed from %.2f Hz (+%.1f Hz per m/s), a %.1f cm dead zone, held through %.2f s of "
                 "tracking loss; the wrist turns them %s\n",
@@ -7994,7 +7989,7 @@ static void HandFeatureCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char 
                       "%d not nearest, %d pinching, %d busy, %d resting, %d typing, %d askew, %d slow, %d flicks, %d open; %d flicks, "
                       "%d throws, %d pushes; holds: %d coasts, %d back, %d glitches, %d held through, %d ended unseen; gates: %d frames "
                       "and %d turns dropped, %d moved, %d near the edge, %d one camera; %d fists ft-hands called pinches; %d second "
-                      "hands joined, %d pinches waited to be fists (%d were), %d buttons pinched, %d pokes on a panel the other hand held",
+                      "hands joined, %d pinches waited to be fists (%d were), %d pokes on a panel the other hand held",
                       g_nearMode == NearMode::Off ? "off" : g_nearMode == NearMode::Force ? "force" : "on",
                       NowMs() - g_handsWord.atMs < 3000 ? "heard" : "silent", g_handsWord.hand[0] ? "hand" : "-",
                       g_handsWord.hand[1] ? "hand" : "-", g_handsWord.allowed ? "allowed" : "not allowed",
@@ -8004,7 +7999,7 @@ static void HandFeatureCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char 
                       st.heldPinching, st.heldBusy, st.heldResting, st.heldTyping, st.heldAskew, st.heldSlow, st.heldFlick, st.heldOpen,
                       st.flicks, st.throws, st.pushes, st.coasts, st.reacquired, st.glitches, st.heldThrough, st.lostEnds, st.gated,
                       st.turnsGated, st.moved, st.edgeFrames, st.monoFrames, st.fistPinches, st.joins, st.settles, st.settledFists,
-                      st.buttonPinches, st.heldByOther);
+                      st.heldByOther);
         return;
     }
     case vrcmd::PalmMenu: {

@@ -276,20 +276,14 @@ bool ToBuffer(const Panel &p, double u, double v, double *x, double *y) {
     return true;
 }
 
-Control ControlAt(const Panel &p, double u, double v, double margin, double buttonMin) {
+Control ControlAt(const Panel &p, double u, double v, double margin) {
     Control best = Control::None;
     double key = 1e9;
-    bool bestRound = false;
     for (const Spot &s : p.controls) {
-        // the round ones (not the bar or the corner tab) grown for a fingertip or a pinch
-        const bool round = s.kind != Control::Bar && s.kind != Control::Tab;
-        const double hw = round ? std::max(s.hw, buttonMin) : s.hw, hh = round ? std::max(s.hh, buttonMin) : s.hh;
         const double du = std::fabs(u - s.u), dv = std::fabs(v - s.v);
-        if (du > hw + margin || dv > hh + margin) continue;
-        // the nearest by its own rectangle: a tap 3 mm past the bar's end and 1 mm short of the curve
-        // button is the button's
-        const double d = std::hypot(std::max(0.0, du - s.hw), std::max(0.0, dv - s.hh));
-        if (d < key - 1e-9 || (d < key + 1e-9 && round && !bestRound)) key = d, best = s.kind, bestRound = round;
+        if (du > s.hw + margin || dv > s.hh + margin) continue;
+        const double d = std::hypot(std::max(0.0, du - s.hw), std::max(0.0, dv - s.hh));   // (by its own rectangle)
+        if (d < key - 1e-9) key = d, best = s.kind;
     }
     return best;
 }
@@ -297,14 +291,7 @@ Control ControlAt(const Panel &p, double u, double v, double margin, double butt
 const char *ControlName(Control c) {
     switch (c) {
         case Control::Bar: return "the bar";
-        case Control::Curve: return "the curve button";
-        case Control::Roll: return "the roll button";
         case Control::Tab: return "the resize tab";
-        case Control::Dock: return "the dock button";
-        case Control::Close: return "the close button";
-        case Control::Reset: return "the reset button";
-        case Control::Pin: return "the pin button";
-        case Control::Anchor: return "the anchor button";
         default: return "nothing";
     }
 }
@@ -614,7 +601,6 @@ void HandInput::Emit(Event::Type t, int s, int panel, double x, double y, bool l
 void HandInput::EndPress(int s, bool lost, const char *why) {
     Side &sd = side_[s];
     if (sd.state != State::Press) return;
-    if (sd.control != Control::None) sd.controlLost = lost;
     if (sd.control == Control::None) {
         Emit(Event::Release, s, sd.panel, sd.lastX, sd.lastY, lost);
         ++stats.releases, stats.lostReleases += lost;
@@ -998,7 +984,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     const bool nearest = t.d + p_.nearest <= others || ext - straightest >= p_.pointing;
     double x = 0, y = 0;
     // a control before the content under it: the bar row sits inside the panel's edge (vr.cpp's barside.h)
-    const Control ctl = ControlAt(*P, t.u, t.v, 0.01, p_.buttonReach);
+    const Control ctl = ControlAt(*P, t.u, t.v, 0.01);
     bool over = ctl == Control::None && ToBuffer(*P, t.u, t.v, &x, &y);
     // just past the content's edge (not on a control): at the edge
     const bool edge = !over && ctl == Control::None && FromBorder(*P, t.u, t.v) <= p_.edgeSlack &&
@@ -1388,9 +1374,6 @@ void HandInput::BarPinch(int s, const Input &in, const std::vector<Panel> &panel
         if (GrabZone(P, b, kz, &x, &y, &e) == Zone::Bar && e <= 0 && std::fabs(b.d) < key) key = std::fabs(b.d), bestP = &P, sx = x, sy = y;
     }
     if (!bestP) return;
-    // at a round button on the bar (the curve, roll...): left to ft-hands' pinch, which presses it
-    const Hit b = Locate(*bestP, h->contact);
-    if (p_.pinchButtons && PressableButton(ControlAt(*bestP, b.u, b.v, 0.005, p_.buttonReach))) return;
     sd.barArmed = false;
     StartGrab(s, in, *bestP, Zone::Bar, sx, sy, h, h->pinchPoint, false);
     if (sd.state != State::Grab) return;
@@ -1661,8 +1644,6 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
     const Hand *h = HandFor(s, in.hands->seen(), g.handId ? g.handId : sd.handId);
     // where the fingers meet (the gestures file's point is the knuckles, 5-8 cm behind)
     const float *c = h ? h->contact : g.beginPoint;
-    // a round button there (the curve, reset, dock, close): pressed
-    if (h && PinchButton(s, in, panels, *h)) return;
     // the card pinch: the thumb and index tips were either side of a panel's plane at its border, and
     // the middle finger is with the index (or all four bunched): a plain pinch there is a border move,
     // a card if the middle joins it soon (cardCandidate)
@@ -1726,33 +1707,6 @@ void HandInput::PinchBegin(int s, const Input &in, const std::vector<Panel> &pan
         return;
     }
     PinchClick(s, in, panels, c);
-}
-
-bool HandInput::PinchButton(int s, const Input &in, const std::vector<Panel> &panels, const Hand &h) {
-    Side &sd = side_[s];
-    if (!p_.pinchButtons) return false;
-    const Panel *best = nullptr;
-    Control ctl = Control::None;
-    double key = 1e9;
-    for (const Panel &P : panels) {
-        if (P.held) continue;
-        const Hit b = Locate(P, h.contact);
-        if (std::fabs(b.d) > p_.bandDepth + p_.pinchSlack) continue;   // (over the content too: the buttons sit inside its edge)
-        const Control c = ControlAt(P, b.u, b.v, 0.005, p_.buttonReach);
-        if (PressableButton(c) && std::fabs(b.d) < key) key = std::fabs(b.d), best = &P, ctl = c;
-    }
-    if (!best) return false;
-    EndAttempt(s);
-    sd.state = State::Press, sd.byPinch = true, sd.control = ctl, sd.panel = best->index, sd.dragging = false, sd.upFrames = 0;
-    sd.pressedNs = in.nowNs;
-    Event e;
-    e.type = Event::Control, e.side = s, e.panel = best->index, e.control = ctl;
-    events_.push_back(e);
-    ++stats.controls, ++stats.buttonPinches;
-    const Hit b = Locate(*best, h.contact);
-    Did("pinch", "done", s, best->index + 1, "%s pinch pressed %s of screen %d (%+.1f, %+.1f cm from its centre, %+.1f cm)", SideName(s), ControlName(ctl),
-        best->index + 1, b.u * 100, b.v * 100, b.d * 100);
-    return true;
 }
 
 void HandInput::PinchClick(int s, const Input &in, const std::vector<Panel> &panels, const float c[3]) {
@@ -2707,22 +2661,6 @@ void HandInput::Guides(const Input &in, const std::vector<Panel> &panels) {
         }
         const Hand *h = HandFor(s, in.hands->shown(), sd.handId);
         if (!h || in.typing[s] || sd.resting) continue;
-        // a round button under the pointing fingertip, or where the fingers meet
-        Control bc = Control::None;
-        double bs = 0;
-        auto atButton = [&](const float pt[3], double front, double back) {
-            const Hit t = Locate(*P, pt);
-            if (t.d > front || t.d < back) return;   // (over the content too: the buttons sit inside its edge)
-            const Control c = ControlAt(*P, t.u, t.v, 0.005, p_.buttonReach);
-            const double k = std::clamp(1 - std::max(0.0, t.d) / std::max(1e-3, front), 0.0, 1.0);
-            if (PressableButton(c) && 0.4 + 0.6 * k > bs) bc = c, bs = 0.4 + 0.6 * k;
-        };
-        if (Extension(*h) >= p_.extended - 0.1) atButton(h->p[8], p_.nearFront, p_.nearBack);
-        atButton(h->contact, p_.bandDepth, -p_.bandDepth);
-        if (bc != Control::None) {
-            button(bc, bs, false);
-            continue;
-        }
         // a corner a pinch here would resize from, the fingers in its zone: that first (a hand by a corner
         // is reaching for it, even pointing)
         {

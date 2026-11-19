@@ -65,13 +65,10 @@ Mat RotY(double rad, double x, double y, double z) {
 Panel TestPanel(double z = -0.5) {
     Panel p;
     p.index = 0, p.pose = At(0, 0, z), p.width = 1.0, p.height = 0.5625, p.pxW = 1920, p.pxH = 1080, p.glows = true;
-    // vr.cpp's controls for chrome 0.3, grip 0.04: bar, curve, roll, tab, reset
-    const double barY = -(p.height / 2 + 0.3 * 0.06 + 0.3 * 12 / 256), gap = 0.3 * 0.06;
+    // vr.cpp's controls for chrome 0.3, grip 0.04: the bar and the resize tab (Option C)
+    const double barY = -(p.height / 2 + 0.3 * 0.06 + 0.3 * 12 / 256);
     p.controls = {{Control::Bar, 0, barY, 0.15, 0.3 * 12 / 256},
-                  {Control::Curve, 0.15 + gap + 0.02, barY, 0.02, 0.02},
-                  {Control::Roll, 0.15 + gap * 2 + 0.06, barY, 0.02, 0.02},
-                  {Control::Tab, 0.5 + 0.02, -(p.height / 2 + 0.02), 0.02, 0.02},
-                  {Control::Reset, -(0.15 + gap + 0.02), barY, 0.02, 0.02}};
+                  {Control::Tab, 0.5 + 0.02, -(p.height / 2 + 0.02), 0.02, 0.02}};
     return p;
 }
 
@@ -390,7 +387,11 @@ void TestGeometry() {
     f.popups.push_back({0.55, 0, 0.2, 0.1, 2000, 600, 320, 160});   // past the window's right edge
     CHECK(ToBuffer(f, 0.55, 0, &x, &y)), NEAR(x, 2160, 1e-6), NEAR(y, 680, 1e-6);
     // controls
-    CHECK(ControlAt(p, 0.15 + 0.018 + 0.02, -(0.28125 + 0.018 + 0.3 * 12 / 256), 0) == Control::Curve);
+    const double barV = -(0.28125 + 0.018 + 0.3 * 12 / 256);
+    CHECK(ControlAt(p, 0.1, barV, 0) == Control::Bar);
+    CHECK(ControlAt(p, 0.52, -(0.28125 + 0.02), 0) == Control::Tab);
+    CHECK(ControlAt(p, 0.15 + 0.018 + 0.02, barV, 0) == Control::None);   // (where the curve button was)
+    CHECK(ControlAt(p, 0.15 + 0.005, barV, 0.01) == Control::Bar);        // (just past its end, in the margin)
 }
 
 void TestZones() {
@@ -853,18 +854,14 @@ void TestLost() {
     CHECK(q.Count(Event::Release) == 1 && q.Last(Event::Release)->lost);
 }
 
+// A poke on the bar presses it (Option C: it opens the bar's menu), and not the desktop; held there, once.
 void TestControlPoke() {
-    Rig r;
-    const Spot &c = r.panels[0].controls[1];   // the curve button
-    for (int mm = 50; mm >= -15; mm -= 10) { const double d = mm / 1000.0; r.Frame({TipAt(c.u, c.v, d)}); }
-    CHECK(r.Count(Event::Control) == 1 && r.Count(Event::Press) == 0);
-    for (int k = 0; k < 20; ++k) r.Frame({TipAt(c.u, c.v, -0.015)});   // held there: once
-    CHECK(r.Count(Event::Control) == 1);
-    // a poke on the bar presses it too (Option C: it opens the bar's menu), and not the desktop
     Rig b;
     const Spot &bar = b.panels[0].controls[0];
     for (int mm = 50; mm >= -15; mm -= 10) { const double d = mm / 1000.0; b.Frame({TipAt(bar.u, bar.v, d)}); }
     CHECK(b.Count(Event::Control) == 1 && b.Last(Event::Control)->control == Control::Bar && b.Count(Event::Press) == 0);
+    for (int k = 0; k < 20; ++k) b.Frame({TipAt(bar.u, bar.v, -0.015)});
+    CHECK(b.Count(Event::Control) == 1);
 }
 
 void TestNearClaim() {
@@ -4670,87 +4667,22 @@ void TestGrabThatFlag() {
 // ------------------------------------------------------------------- the fourth live test (2026-10-10)
 
 // A panel as the live test had it after "grab that": 0.6 m wide, 3440x1440, half a metre ahead (as
-// TestPanel), with vr.cpp's controls for its distance (0.45 m: chrome 5.7 cm, buttons 8 mm).
+// TestPanel), with vr.cpp's controls for its distance (0.45 m: chrome 5.7 cm, grip 8 mm).
 Panel LivePanel() {
     Panel p = TestPanel();
     p.width = 0.6, p.height = 0.6 * 1440 / 3440, p.pxW = 3440, p.pxH = 1440;
     const double chrome = 0.057, grip = 0.0081, gap = chrome * 0.06, barY = -(p.height / 2 + gap + chrome * 12 / 256);
     p.controls = {{Control::Bar, 0, barY, chrome / 2, chrome * 12 / 256},
-                  {Control::Curve, chrome / 2 + gap + grip / 2, barY, grip / 2, grip / 2},
-                  {Control::Roll, chrome / 2 + gap * 2 + grip * 1.5, barY, grip / 2, grip / 2},
-                  {Control::Tab, p.width / 2 + grip / 2, -(p.height / 2 + grip / 2), grip / 2, grip / 2},
-                  {Control::Reset, -(chrome / 2 + gap + grip / 2), barY, grip / 2, grip / 2}};
+                  {Control::Tab, p.width / 2 + grip / 2, -(p.height / 2 + grip / 2), grip / 2, grip / 2}};
     return p;
 }
 
-// The pin button (2026-10-23), left of the reset button as vr.cpp's ControlUV puts it (gap: a button's width
-// or more): a poke on it presses it, not the reset button next to it, and a poke on the reset button is still that.
-void TestPinButton() {
-    Panel p = LivePanel();
-    const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
-    p.controls[4].u = -(chrome / 2 + gap + grip / 2);
-    p.controls.push_back({Control::Pin, -(chrome / 2 + gap * 2 + grip * 1.5), v, grip / 2, grip / 2});
-    p.controls.push_back({Control::Anchor, chrome / 2 + gap * 3 + grip * 2.5, v, grip / 2, grip / 2});
-    const Spot reset = p.controls[4], pin = p.controls[5], anchor = p.controls[6];
-    CHECK(PressableButton(Control::Pin));
-    CHECK(PressableButton(Control::Anchor));   // (a hand presses the anchor button too: follow-up)
-    CHECK(ControlAt(p, pin.u + 0.002, v, 0.005, 0.015) == Control::Pin);
-    CHECK(ControlAt(p, reset.u - 0.002, v, 0.005, 0.015) == Control::Reset);
-    for (const Spot *at : {&pin, &reset, &anchor}) {
-        Rig r;
-        r.panels = {p};
-        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(at->u + 0.002, v, mm / 1000.0)});
-        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == at->kind && r.Count(Event::Press) == 0);
-        std::printf("buttons: a poke 2 mm right of %s: %s\n", ControlName(at->kind),
-                    r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
-    }
-}
-
-// The anchor button held by a hand (vr.cpp's UpdateAnchorHold): pulled back off it is a let-go,
-// the hand lost on it is not (controlPressLost), so a loss doesn't anchor or let go of a panel.
-void TestAnchorLost() {
-    Panel p = LivePanel();
-    const double chrome = 0.057, grip = 0.0081, gap = std::max(chrome * 0.06, grip), v = p.controls[0].v;
-    p.controls.push_back({Control::Anchor, chrome / 2 + gap * 3 + grip * 2.5, v, grip / 2, grip / 2});
-    const Spot anchor = p.controls.back();
-    for (const bool lose : {false, true}) {
-        Rig r;
-        r.panels = {p};
-        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(anchor.u + 0.002, v, mm / 1000.0)});
-        CHECK(r.in.pressControl(1) == Control::Anchor);
-        if (lose) {
-            SynthHand gone;
-            gone.present = false;
-            for (int k = 0; k < 15; ++k) r.Frame({gone});
-        } else {
-            for (int mm = -15; mm <= 80; mm += 10) r.Frame({TipAt(anchor.u + 0.002, v, mm / 1000.0)});
-        }
-        CHECK(r.in.pressControl(1) == Control::None);
-        CHECK(r.in.controlPressLost(1) == lose);
-        std::printf("anchor held: %s: lost %d\n", lose ? "the hand lost" : "pulled back", int(r.in.controlPressLost(1)));
-    }
-}
-
-// The roll button (DEE-337): a poke on it presses it (vr.cpp levels the screen), not the curve button or
-// the bar beside it, and gives the desktop no press.
-void TestRollButton() {
-    const Panel p = LivePanel();
-    const Spot &roll = p.controls[2];
-    CHECK(PressableButton(Control::Roll));
-    Rig r;
-    r.panels = {p};
-    for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(roll.u + 0.002, roll.v, mm / 1000.0)});
-    CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Roll && r.Count(Event::Press) == 0);
-    std::printf("buttons: a poke 2 mm right of the roll button: %s\n",
-                r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
-}
-
 // Option C (2026-11-18): a poke on the grab bar presses it (vr.cpp opens its menu), as a poke on a round
-// button did, and gives the desktop no press.
+// button did, and gives the desktop no press; a pinch on it still grabs it (TestButtons).
 void TestBarPoke() {
     const Panel p = LivePanel();
     const Spot &bar = p.controls[0];
-    CHECK(PokeButton(Control::Bar) && !PressableButton(Control::Bar));   // (a pinch on it still grabs it)
+    CHECK(PokeButton(Control::Bar) && !PokeButton(Control::Tab));
     Rig r;
     r.panels = {p};
     for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(bar.u + 0.005, bar.v, mm / 1000.0)});
@@ -4758,8 +4690,8 @@ void TestBarPoke() {
     std::printf("buttons: a poke on the grab bar: %s\n", r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
 }
 
-// The bar row inside the panel's edge (2026-11-18, barside.h): a poke on a button or the bar over the
-// content presses the control, not the desktop under it; a poke clear of them is still the desktop's.
+// The bar row inside the panel's edge (2026-11-18, barside.h): a poke on the bar over the content
+// presses it, not the desktop under it; a poke clear of it is still the desktop's.
 // A bar down a side (standing on end) can be grabbed along its length.
 void TestControlsInside() {
     Panel p = LivePanel();
@@ -4767,9 +4699,9 @@ void TestControlsInside() {
     for (Spot &c : p.controls)
         if (c.kind != Control::Tab) c.v = inY;
     double x, y;
-    CHECK(ToBuffer(p, p.controls[1].u, inY, &x, &y));   // (the buttons are over the content now)
-    const Spot curve = p.controls[1], bar = p.controls[0];
-    for (const auto &[u, want] : {std::pair{curve.u + 0.002, Control::Curve}, std::pair{bar.u + 0.01, Control::Bar}}) {
+    const Spot bar = p.controls[0];
+    CHECK(ToBuffer(p, bar.u, inY, &x, &y));   // (the bar is over the content now)
+    for (const auto &[u, want] : {std::pair{bar.u + 0.01, Control::Bar}}) {
         Rig r;
         r.panels = {p};
         for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(u, inY, mm / 1000.0)});
@@ -4799,57 +4731,15 @@ void TestControlsInside() {
     std::printf("controls inside: a side bar grabbed 12 cm off its middle: %s\n", ZoneName(GrabZone(side, {u, 0.12, 0.0}, k, &sx, &sy, &e)));
 }
 
-// Buttons for hands: the nearest control wins, round ones have a bigger hit area, a pinch presses them.
+// The bar for hands: a poke near it is the bar's (the nearest control, by its own rectangle), and a
+// pinch on it grabs it.
 void TestButtons() {
     const Panel p = LivePanel();
-    const Spot &bar = p.controls[0], &curve = p.controls[1];
-    const double v = curve.v;
-    // the live log's pokes at the curve button: 3-5 mm left of its centre, which the bar took
-    CHECK(ControlAt(p, curve.u - 0.005, v, 0.01, 0.015) == Control::Curve);
-    CHECK(ControlAt(p, curve.u - 0.004, v + 0.002, 0.01) == Control::Curve);   // (nearest: even without the bigger area)
-    CHECK(ControlAt(p, bar.u + 0.02, v, 0.01, 0.015) == Control::Bar);        // on the bar: the bar
-    CHECK(ControlAt(p, curve.u, v - 0.016, 0.005, 0.015) == Control::Curve);  // 1.6 cm under it: the bigger area
-    CHECK(ControlAt(p, curve.u, v - 0.016, 0.005) == Control::None);
-    CHECK(ControlAt(p, p.controls[2].u + 0.002, v, 0.005, 0.015) == Control::Roll);   // the roll button next to it
-    // a poke 4 mm left of the curve button's centre presses it
-    {
-        Rig r;
-        r.panels = {LivePanel()};
-        for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(curve.u - 0.004, v, mm / 1000.0)});
-        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Curve && r.Count(Event::Press) == 0);
-        std::printf("buttons: a poke 4 mm left of the 8 mm curve button: %s\n", r.Count(Event::Control) ? "pressed it" : "nothing");
-    }
-    // a pinch on it: lit before (hovered, its guide), pressed once, held with the pinch, no grab
-    {
-        Rig r;
-        r.panels = {LivePanel()};
-        SynthHand h = PinchAt(curve.u - 0.003, v, 0.01);
-        h.open = 0.6;
-        for (int k = 0; k < 5; ++k) r.Frame({h});
-        CHECK(r.in.hovered().count(0) && (r.in.hovered().at(0) >> int(Control::Curve) & 1));
-        CHECK(r.in.guide(1).kind == Guide::Button && r.in.guide(1).control == Control::Curve && !r.in.guide(1).selected);
-        const double at[3] = {curve.u, v, -0.49};
-        h.open = 0;
-        r.synth.Pinch(1, true, r.t, at, 1);
-        for (int k = 0; k < 5; ++k) r.Frame({h});
-        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Curve);
-        CHECK(r.Count(Event::GrabStart) == 0 && r.Count(Event::Press) == 0 && r.in.pressing(1) && r.in.stats.buttonPinches == 1);
-        CHECK(r.in.guide(1).kind == Guide::Button && r.in.guide(1).selected);
-        r.synth.Pinch(1, false, r.t, at, 1);
-        h.open = 1;
-        for (int k = 0; k < 4; ++k) r.Frame({h});
-        CHECK(!r.in.pressing(1) && r.Count(Event::Release) == 0 && r.Count(Event::Control) == 1);
-        // HANDS_PINCH_BUTTONS=0: the bar's grab zone takes it (before the fourth live test)
-        Rig o;
-        o.panels = {LivePanel()};
-        o.in.params().pinchButtons = false;
-        h.open = 0.6;
-        for (int k = 0; k < 5; ++k) o.Frame({h});
-        o.synth.Pinch(1, true, o.t, at, 1);
-        h.open = 0;
-        o.Frame({h});
-        CHECK(o.Count(Event::Control) == 0 && o.Count(Event::GrabStart) == 1 && o.Last(Event::GrabStart)->zone == Zone::Bar);
-    }
+    const Spot &bar = p.controls[0];
+    const double v = bar.v;
+    CHECK(ControlAt(p, bar.u + 0.02, v, 0.01) == Control::Bar);        // on the bar: the bar
+    CHECK(ControlAt(p, bar.u + bar.hw + 0.005, v, 0.01) == Control::Bar);   // 5 mm past its end: still it
+    CHECK(ControlAt(p, bar.u + bar.hw + 0.02, v, 0.01) == Control::None);   // 2 cm past: nothing
     // a pinch on the bar still takes the bar
     {
         Rig r;
@@ -4890,7 +4780,6 @@ void TestButtons() {
         CHECK(held == 1);                                     // ...held at 3.3 cm, let go at 5.9
         CHECK(!run(bar.u - 0.01, 0.3, true));                 // resting at 2.3 cm, never opened: nothing
         CHECK(!run(bar.u - 0.01, 0.6, false));                // HANDS_BAR_PINCH=0: ft-hands' pinch only
-        CHECK(!run(curve.u - 0.003, 0.6, true));              // at the curve button: left to the pinch
         Rig c;                                                // on the content, not the bar: nothing
         c.panels = {LivePanel()};
         SynthHand h = PinchAt(0, 0, 0.01);
@@ -5758,9 +5647,6 @@ int main(int argc, char **argv) {
     TestGrabThatAtNearPanel();
     TestGrabThatAfterThrow();
     TestButtons();
-    TestPinButton();
-    TestAnchorLost();
-    TestRollButton();
     TestBarPoke();
     TestControlsInside();
     TestTouchDot();

@@ -135,8 +135,6 @@ HAND_INTERACTIONS = [
      "Up close, a pinch on a screen's content clicks there, and drags while held."),
     ("HANDS_TWO_FINGER_SCROLL", True, "1", "Tapping", "Two-finger scroll",
      "Index and middle finger together on a screen: swipe to scroll, lift without moving to click."),
-    ("HANDS_PINCH_BUTTONS", True, "1", "Tapping", "Pinch the bar's buttons",
-     "A pinch at a round button under a screen (curve, reset, pin, dock, close) presses it."),
     ("HANDS_GRAB_ROTATE", True, "1", "Moving screens", "Turn with the wrist",
      "A screen held by its bar or edge turns as the wrist turns."),
     ("HANDS_CARD_PINCH", True, "1", "Moving screens", "Card grab",

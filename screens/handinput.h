@@ -21,7 +21,7 @@
 //     (or a closed hand ft-hands calls a pinch)          not a click (Params::fistIndex)
 //   two grabs (pinches or fists) on one panel          stretch, and turn on every axis with them; the
 //     (the second: anywhere on a panel the other holds)  second hand's pinch or fist joins (joinFront)
-//   pinch or poke on a round button (curve, reset...)   presses it (buttonReach: a bigger hit area)
+//   poke on the grab bar                                presses it (vr.cpp opens its menu); a pinch grabs it
 //   a carry by one hand let go moving out fast         thrown 3 m out along that line (cardThrow)
 //   an open-ing hand at a panel flicked out fast       flicked 3 m out from the eyes (flick); not
 //                                                       a poke, a wave, or "grab that"'s pull back
@@ -58,17 +58,13 @@ namespace handinput {
 using Mat = handcut::Mat;
 
 // A panel's controls (vr.cpp's ControlOffsets), in the order of Screen::Controls().
-enum class Control { Bar, Curve, Roll, Tab, Dock, Close, Reset, Pin, Anchor, None };
+// Option C (2026-11-18) left the bar and the resize tab: the round buttons (curve, roll, dock, close,
+// reset, pin, anchor) are rows of the bar's menu now.
+enum class Control { Bar, Tab, None };
 
-// The round buttons a poke or a pinch presses (not the bar or the resize tab). The roll button is one
-// since DEE-337: a hand can't turn it like a knob, and pressing it levels the screen.
-inline bool PressableButton(Control c) {
-    return c == Control::Curve || c == Control::Roll || c == Control::Reset || c == Control::Pin || c == Control::Dock ||
-           c == Control::Close || c == Control::Anchor;
-}
-// ...and what a poke presses: those, and the grab bar (Option C: a tap on it opens its menu; a pinch
-// or a grab on it still moves the panel).
-inline bool PokeButton(Control c) { return PressableButton(c) || c == Control::Bar; }
+// What a poke presses: the grab bar (a tap on it opens its menu; a pinch or a grab on it still moves
+// the panel).
+inline bool PokeButton(Control c) { return c == Control::Bar; }
 const char *ControlName(Control c);
 
 // A control on (or by) the panel's surface: its centre u (right) and v (up), metres from
@@ -353,15 +349,6 @@ struct Params {
     // wait on "grab that". Nor does a push or a flick throw a panel a hand holds. 0: off (the second hand
     // had to find a grab zone like the first). HANDS_JOIN_REACH (joinFront).
     double joinFront = 0.15, joinBack = -0.12, joinMargin = 0.10;
-    // Buttons for hands (the fourth live test: "it's extremely difficult to interact with the button to
-    // make the curve curve and not"). At arm's reach the curve button is 8 mm across, 3.5 mm past the
-    // bar's end; the log's six pokes at it landed 3-5 mm left of its centre and the bar, listed first
-    // with a 1 cm margin, took them ("on the bar: not a poke"); a pinch there took the bar's grab zone.
-    // Now the nearest control wins, round buttons have a hit area at least buttonReach each way for a
-    // fingertip or a pinch, and a pinch on one presses it (pinchButtons, HANDS_PINCH_BUTTONS); a hand at
-    // one lights it (hovered) and shows a soft ring round it (guide). HANDS_BUTTON_REACH.
-    double buttonReach = 0.025;   // (1.5 cm until 2026-10-11: buttons on the bar were hard to hit right after a move)
-    bool pinchButtons = true;
     // A bar pinch ft-hands doesn't call (2026-10-14 testing session: the user's pinches on a panel's bar
     // closed the thumb and index tips to 2.0-2.5 cm, and ft-hands' pinch begins under 2.0): a hand whose
     // tips close under barPinch with the point between them in a panel's bar zone takes the bar. Only a
@@ -628,10 +615,8 @@ void FromSurface(const Panel &p, double u, double v, double d, double out[3]);
 // Buffer pixels at u, v on the panel's content (a floating window's crop, or a popup over
 // it). False off the content.
 bool ToBuffer(const Panel &p, double u, double v, double *x, double *y);
-// The control under u, v: the nearest one (by its own rectangle; a round button before the bar on a
-// tie) whose rectangle, round buttons' grown to at least buttonMin each way, is within `margin`; or
-// Control::None. (Before the fourth live test: the first in the list within `margin`.)
-Control ControlAt(const Panel &p, double u, double v, double margin, double buttonMin = 0);
+// The control under u, v: the nearest one (by its own rectangle) within `margin`; or Control::None.
+Control ControlAt(const Panel &p, double u, double v, double margin);
 // The grab zone a pinch's contact at h is in (3.6, Params::band*), and for corners which one (sx,
 // sy: +1 right, top). excess: how far it is outside that zone (<= 0 inside), for the glow; the
 // zone is the nearest one then.
@@ -723,10 +708,6 @@ public:
     // The caller ended this side's press in KWin itself (vr.cpp's ReleaseStuck): forget it.
     void ForgetPress(int side);
     bool pressing(int side) const { return side_[side].state == State::Press; }
-    // the control a side is pressing (None: not pressing one): a hold on the reset button
-    Control pressControl(int side) const { return pressing(side) ? side_[side].control : Control::None; }
-    // ...and whether the last one ended with the hand lost (or input taken away), not let go
-    bool controlPressLost(int side) const { return side_[side].controlLost; }
     // ...holding KWin's button (not a poked control)
     bool pressingKwin(int side) const { return pressing(side) && side_[side].control == Control::None; }
     bool grabbing(int side) const { return side_[side].state == State::Grab; }
@@ -765,7 +746,7 @@ public:
         int barPinches = 0;                          // bar grabs ft-hands didn't call a pinch (Params::barPinch)
         int settles = 0, settledFists = 0;           // pinches that waited to become fists (Params::fistSettleMs), and did
         int joins = 0;                               // second hands joining a held panel (Params::joinFront)
-        int buttonPinches = 0, heldByOther = 0;      // buttons pressed by a pinch; pokes refused on a panel the other hand holds
+        int heldByOther = 0;                         // pokes refused on a panel the other hand holds
         int gated = 0, turnsGated = 0, moved = 0;    // frames the gates dropped; places they took after gateFrames
         int edgeFrames = 0, monoFrames = 0;          // held frames smoothed harder: near the edge of view, one camera
     } stats;
@@ -795,7 +776,6 @@ private:
         bool rearmed = true;                 // out past Params::rearm since the last release
         int64_t grabbedNs = 0;
         Control control = Control::None;     // pressed a control (no KWin press)
-        bool controlLost = false;            // the last control press ended with the hand lost
         double hoverX = -1, hoverY = -1, hoverU = 0, hoverV = 0;
         // the aim (Params::lockOut): where a tap will land, frozen as the tip comes within lockOut
         double aimU = 0, aimV = 0, tipD = 1;
@@ -928,8 +908,6 @@ private:
     // A pinch or a grip that began at a panel the other hand holds: the second anchor (Params::joinFront).
     void Join(int s, const Input &in, const std::vector<Panel> &panels, bool byGrip);
     void BarPinch(int s, const Input &in, const std::vector<Panel> &panels);
-    // A pinch on a round button (Params::pinchButtons): pressed, held with the pinch. False: none there.
-    bool PinchButton(int s, const Input &in, const std::vector<Panel> &panels, const handcut::Hand &h);
     // The hand is a fist (Params::fistIndex, fistCurl).
     bool IsFist(const handcut::Hand &h) const;
     // The other hand holds this side's panel (the join's zone applies).

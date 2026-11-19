@@ -5,7 +5,8 @@
 // a laser with their other hand to do quick actions"; until then a small ring, like the Vision
 // Pro's home indicator). A thumb-index pinch tap by that hand while it shows still opens the Steam
 // menu (`ft-steam menu`, the input relay's steam_menu), or closes the SteamVR dashboard if it's
-// open; its Steam Menu tile lights while the pinch is held, and the release does it. Turning the
+// open; its Steam Menu tile lights while the pinch is held, and the release does it, or, dragged
+// to another tile while it's held, that one (quickaccess.h's Drag). Turning the
 // hand away hides it, unless the other hand or a laser is on the card (Input::engaged).
 //
 // While it shows, that hand is ours: vr.cpp reports it near ("near ... <L> <R>" to the
@@ -97,9 +98,12 @@ public:
     // It shows on that side (the hand is ours: its pinches aren't the helper's).
     bool shown(int side) const { return side_[side].state == State::Shown || side_[side].state == State::Pinched; }
     bool anyShown() const { return shown(0) || shown(1); }
-    // ...and that hand's pinch is held (its Steam Menu tile lights).
+    // ...and that hand's pinch is held (Quick Access's Drag: what it lights, its release does).
     bool pinched(int side) const { return side_[side].state == State::Pinched; }
-    // This Update's pinch released while it showed: toggle the Steam menu (the side that did it, or -1).
+    // That palm passed the palm-up test on the last frame (a pinch let go otherwise does nothing).
+    bool up(int side) const { return side_[side].up; }
+    // This Update's pinch released while it showed: do what it lit on the card (UpdatePalmMenu: Steam Menu
+    // unless it was dragged; the side that did it, or -1).
     int toggled() const { return toggled_; }
     // Where the card's centre goes for this side's hand in `hands` (Hands::shown(), moved ahead to now).
     bool Card(int side, const std::vector<handcut::Hand> &hands, double out[3]) const;

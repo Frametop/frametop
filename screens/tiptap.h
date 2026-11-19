@@ -11,6 +11,11 @@ namespace tiptap {
 
 class Tap {
 public:
+    // `face`: within this of its face, or through, it's a tap; `front`: out at least this far, it's on
+    // its way in again (more than `face`, so a tip resting between them neither presses nor arms);
+    // `side`: in front past `front`, up to this much farther past its edges than kMargin still arms (a
+    // quick slanted poke's one frame in front of it can be beside it).
+    explicit Tap(double face = kFace, double front = kFront, double side = 0) : face_(face), front_(front), side_(side) {}
     // One hands frame. `l`: the tip in the target's frame (x right, y up, z out of its face, metres), or
     // null with no hand. `halfW`, `halfH`: the target's half size. True as the tip comes through: it was
     // seen in front of it (within kArm, past kFront) since it last came through, and it's at its face or
@@ -18,7 +23,9 @@ public:
     // (a quick one).
     bool Step(const double *l, double halfW, double halfH) {
         if (!l || std::fabs(l[0]) > halfW + kMargin || std::fabs(l[1]) > halfH + kMargin || l[2] > kArm) {
-            armed_ = false, z_ = 1;   // (off it, or far in front)
+            const double m = kMargin + side_;   // (off it, or far in front; beside it in front, with `side`)
+            armed_ = l && side_ > 0 && std::fabs(l[0]) <= halfW + m && std::fabs(l[1]) <= halfH + m && l[2] > front_ && l[2] <= kArm;
+            z_ = 1;
             return false;
         }
         const double z = l[2];
@@ -27,12 +34,12 @@ public:
             armed_ = false;
             return false;
         }
-        if (z <= kFace) {
+        if (z <= face_) {
             const bool through = armed_;
             armed_ = false;
             return through;
         }
-        if (z > kFront) armed_ = true;
+        if (z > front_) armed_ = true;
         return false;
     }
     // Shown afresh: a tip already through it doesn't count until it's been out in front.
@@ -49,6 +56,7 @@ public:
     static constexpr double kDeep = 0.18;     // ...and farther than this in one frame: no tap (2 m/s at 15 Hz is 13 cm)
 
 private:
+    double face_, front_, side_;
     bool armed_ = false;
     double z_ = 1;
 };

@@ -134,6 +134,7 @@
 #include "../conf/ft_pinlock.h"
 #include "overlaytex.h"
 #include "palmmenu.h"
+#include "quickaccess.h"
 #include "label.h"
 #include "roomview.h"
 #include "levelpin.h"
@@ -3776,10 +3777,17 @@ void UpdatePalmMenu(const handinput::Input &in, const std::vector<handinput::Pan
         pin.engaged[k] = QuickAccessEngaged(k);
     }
     g_palm.Update(pin);
-    if (g_palm.toggled() >= 0) {
-        std::printf("palm menu (%s hand): the Steam menu\n", g_palm.toggled() ? "right" : "left");
-        fh_event("screens", "palm-menu", "done", g_palm.toggled(), 0, "palm menu: the Steam menu");
-        RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
+    if (const int side = g_palm.toggled(); side >= 0) {
+        const int tile = QuickAccessPinchPick(side);   // (what its drag lit; the pinch alone, Steam Menu)
+        if (tile == int(quickaccess::Tile::SteamMenu)) {
+            std::printf("palm menu (%s hand): the Steam menu\n", side ? "right" : "left");
+            fh_event("screens", "palm-menu", "done", side, 0, "palm menu: the Steam menu");
+            RunTool("steam/ft-steam", "menu", nullptr);   // opens it, or closes the dashboard
+        } else if (tile >= 0) {
+            QuickAccessPress(tile, side ? "the right hand's pinch" : "the left hand's pinch");
+        } else {
+            std::printf("palm menu (%s hand): its pinch let go off the card: nothing\n", side ? "right" : "left");
+        }
     }
     QuickAccessIn qa;
     qa.palm = &g_palm, qa.shown = &g_hands.shown(), qa.seen = &g_hands.seen(), qa.head = in.head, qa.haveHead = in.haveHead;
@@ -4169,6 +4177,15 @@ bool IndexTipIn(int side, const Mat &frame, double out[3]) {
     if (!h) return false;
     const Mat in = Inverse(frame);
     for (int r = 0; r < 3; ++r) out[r] = in.m[r][0] * h->p[8][0] + in.m[r][1] * h->p[8][1] + in.m[r][2] * h->p[8][2] + in.m[r][3];
+    return true;
+}
+bool PinchPointIn(int side, const Mat &frame, double out[3]) {
+    const handcut::Hand *h = SideHand(side);
+    if (!h) return false;
+    const Mat in = Inverse(frame);
+    double p[3];
+    for (int k = 0; k < 3; ++k) p[k] = (h->p[4][k] + h->p[8][k]) / 2;
+    for (int r = 0; r < 3; ++r) out[r] = in.m[r][0] * p[0] + in.m[r][1] * p[1] + in.m[r][2] * p[2] + in.m[r][3];
     return true;
 }
 bool HandsFrame() { return g_handInput.newFrame(); }

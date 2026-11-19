@@ -1,7 +1,8 @@
 // Palm Quick Access (quickaccess.h): the tiles and their relay actions, which tile a fingertip or a
 // laser lands on (gaps to the nearer tile, nothing past the padding, the mouse's y up, the face's metres),
-// Reset's ask, what works while paused, and a fingertip's pokes: hover held at a tile's edge, quick pokes
-// that end well behind the card, and the tip spent after a press through tremble and lost frames.
+// Reset's ask, what works while paused, a fingertip's pokes (hover held at a tile's edge, quick pokes
+// that end well behind the card, the tip spent after a press through tremble and lost frames, the easier
+// 1 cm press) and the palm hand's pinch drag.
 #include "../quickaccess.h"
 
 #include <cmath>
@@ -296,7 +297,8 @@ int main() {
         const double edge = w / 2 - 0.0025, side = w / 2 + 0.0005;
         check("pressed by the card's edge, a sideways tremble off it: one press",
               run({{edge, 0, 40}, {edge, 0, 10}, {edge, 0, 1}, {side, 0, 2}, {edge, 0, 10}, {edge, 0, 2}, {side, 0, 12}, {edge, 0, 1}}, 30) == 1);
-        check("...well off it (2 cm) and back: a second press", run({{edge, 0, 40}, {edge, 0, 1}, {w / 2 + 0.02, 0, 10}, {edge, 0, 10}, {edge, 0, 1}}, 30) == 2);
+        // (15 mm over it: out past kPokeOut)
+        check("...well off it (2 cm) and back: a second press", run({{edge, 0, 40}, {edge, 0, 1}, {w / 2 + 0.02, 0, 15}, {edge, 0, 15}, {edge, 0, 1}}, 30) == 2);
         // hover: near lights the tile it's over; held at the edge
         {
             Poke p;
@@ -332,6 +334,16 @@ int main() {
             }
             check("...and stays lit while spent with the tip over Spin Left", held);
         }
+        // the easier press (kPokeAt, user 2026-11-19): a tip easing in that stops 9 mm out presses; 13 mm, not
+        check("a tip easing in that stops 9 mm out: a press", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 15}, {u4, v4, 9}, {u4, v4, 20}}, 30, tiles) == 1 && tiles[0] == 4);
+        check("...one that stops 13 mm out: nothing", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 15}, {u4, v4, 13}, {u4, v4, 20}}, 30) == 0);
+        // a frame in front beside the card (kPokeSide) arms it; farther, not
+        {   // (crossing ~7 mm in from the card's edge)
+            const double in = w / 2 - 0.012;
+            check("in front 1.5 cm beside the card, then through Dock Windows: a press",
+                  run({{w / 2 + 0.015, v5, 20}, {in, v5, -5}}, 30, tiles) == 1 && tiles[0] == 5);
+            check("...3.5 cm beside it: nothing", run({{w / 2 + 0.035, v5, 20}, {in, v5, -5}}, 30) == 0);
+        }
         // too soon after it showed: no press, and the tip comes out before it can
         {
             Poke p;
@@ -349,6 +361,36 @@ int main() {
             }
             check("...and its tremble after: nothing", presses == 0);
         }
+    }
+
+    // The palm hand's pinch drag (Drag): from Steam Menu, the pinch's moves on the card's face, 1:1.
+    {
+        const double w = 0.12, h = w * kH / kW, pitch = (kTile + kGap) * w / kW;
+        auto at = [](double x, double y) { static double p[3]; p[0] = x, p[1] = y, p[2] = 0.01; return p; };
+        Drag d;
+        check("not dragging: nothing", !d.on() && d.Step(at(0, 0), w, h, true) == -1);
+        d.Start();
+        check("a pinch starts on Steam Menu", d.on() && d.tile() == int(Tile::SteamMenu));
+        check("...unseen: still Steam Menu", d.Step(nullptr, w, h, true) == 0);
+        const double x0 = 0.31, y0 = -0.2;   // (anywhere: it's the moves that count)
+        check("...its first point: Steam Menu", d.Step(at(x0, y0), w, h, true) == 0);
+        check("a tile right: Hide Screens", d.Step(at(x0 + pitch, y0), w, h, true) == 1);
+        check("two right: Reset", d.Step(at(x0 + 2 * pitch, y0), w, h, true) == 2);
+        check("down one, left two: Spin Left", d.Step(at(x0, y0 - pitch), w, h, true) == 3);
+        check("down one, right one: Spin Right", d.Step(at(x0 + pitch, y0 - pitch), w, h, true) == 4);
+        check("down one, right two: Dock Windows", d.Step(at(x0 + 2 * pitch, y0 - pitch), w, h, true) == 5);
+        check("...unseen: still Dock Windows", d.Step(nullptr, w, h, true) == 5);
+        check("the palm turned away: nothing", d.Step(nullptr, w, h, false) == -1 && d.tile() == -1);
+        check("...back up: Dock Windows again", d.Step(nullptr, w, h, true) == 5);
+        check("off the card: nothing", d.Step(at(x0 + 0.2, y0), w, h, true) == -1);
+        d.End();
+        check("let go: done, nothing", !d.on() && d.tile() == -1 && d.Step(at(x0, y0), w, h, true) == -1);
+        d.Start();
+        d.Step(at(0, 0), w, h, true);
+        check("a fresh pinch starts again from Steam Menu, at its own first point", d.Step(at(0.002, 0), w, h, true) == 0);
+        check("past the gap's middle by 2 px from Steam Menu: still Steam Menu",
+              d.Step(at(pitch / 2 + 2 * w / kW, 0), w, h, true) == 0);
+        check("...past kStick: Hide Screens", d.Step(at(pitch / 2 + (kGap / 2.0 + kStick + 1) * w / kW, 0), w, h, true) == 1);
     }
 
     check("paused for a game, only Steam Menu works", WorksPaused(Tile::SteamMenu) && !WorksPaused(Tile::Screens) &&

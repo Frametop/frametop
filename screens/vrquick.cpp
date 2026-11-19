@@ -4,6 +4,8 @@
 // While that tip is near the card, the hand is the card's (vr.cpp leaves it out of near input and tells
 // the pointer helper it's ours), and the card stays though the palm turns as you reach (Input::engaged),
 // as it does for a laser on it (not the mouse's or gaze's cursor, which sits on whatever you look at).
+//   The palm hand's own pinch holds the card still where it was, lights Steam Menu, and moves what's lit
+// as the pinch moves across it (quickaccess::Drag); its release does that tile (UpdatePalmMenu).
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
@@ -42,7 +44,8 @@ struct {
     int hover = -1;             // the tile under a laser or the cursor, -1 none
     int64_t laserMs = -1;       // a laser last moved on it
     int64_t shownMs = -1;
-    bool pinched = false;       // the palm hand's pinch held (its Steam Menu tile lights)
+    quickaccess::Drag drag;     // the palm hand's pinch held: what it lights
+    Mat dragPose{};             // ...and where the card held still for it
     bool lasers = false;        // MakeOverlaysInteractiveIfVisible is set
     float widthSet = -1;        // the width SetOverlayWidthInMeters has
     std::vector<uint8_t> px;                // the card as shown
@@ -105,13 +108,13 @@ void DrawTile(int i, const Look &look) {
 // A tile that does nothing now: one that doesn't work while Frametop is paused for a VR game.
 bool Idle(Tile t) { return g_paused && !quickaccess::WorksPaused(t); }
 
-// SteamVR's dark tiles: the one under the fingertip (else a laser's) white, Steam Menu white while the
-// palm's pinch is held, Reset red while it asks, and the idle ones dim. Only the tiles that changed are
+// SteamVR's dark tiles: the one under the fingertip (else the palm pinch's drag, else a laser's) white,
+// Reset red while it asks, and the idle ones dim. Only the tiles that changed are
 // repainted (council, 2026-11-19: the whole card took ~25 ms on a little core).
 void Draw() {
     using namespace quickaccess;
     if (g_card.px.empty()) MakeImages(), Invalidate();
-    const int lit = g_card.poke.hover() >= 0 ? g_card.poke.hover() : g_card.hover;
+    const int lit = g_card.poke.hover() >= 0 ? g_card.poke.hover() : g_card.drag.on() ? g_card.drag.tile() : g_card.hover;
     const bool armed = g_resetAsk.Armed(NowMs());
     bool changed = false;
     Look now[kTiles];
@@ -121,7 +124,7 @@ void Draw() {
         look.valid = true;
         look.style = Idle(s.tile)                                       ? kDim
                      : s.tile == Tile::Reset && armed                   ? kAsk
-                     : i == lit || (s.tile == Tile::SteamMenu && g_card.pinched) ? kHot
+                     : i == lit                                         ? kHot
                                                                         : kPlain;
         look.text = Label(s);
         if (look == g_card.looks[i]) continue;
@@ -141,7 +144,7 @@ void Hide() {
     std::printf("palm Quick Access: hidden\n");
     PinHide(g_card.overlay);
     g_card.side = -1, g_card.hover = -1, g_card.laserMs = -1;
-    g_card.poke.Reset(NowMs());
+    g_card.poke.Reset(NowMs()), g_card.drag.End();
     g_resetAsk.Clear();
 }
 
@@ -197,7 +200,11 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
         std::printf("palm Quick Access: over the %s palm\n", side ? "right" : "left");
     }
     g_card.w = palm.params().size, g_card.h = g_card.w * quickaccess::kH / quickaccess::kW;
-    g_card.pose = FacingPose(c, in.head);
+    // (the palm hand's pinch: the card holds still where it was while it's dragged across it)
+    const bool pinched = palm.pinched(side);
+    if (!pinched) g_card.drag.End();
+    else if (!g_card.drag.on()) g_card.drag.Start(), g_card.dragPose = fresh ? FacingPose(c, in.head) : g_card.pose;
+    g_card.pose = g_card.drag.on() ? g_card.dragPose : FacingPose(c, in.head);
     if (float(g_card.w) != g_card.widthSet) {
         g_card.widthSet = float(g_card.w);
         vr::VROverlay()->SetOverlayWidthInMeters(g_card.overlay, g_card.widthSet);
@@ -211,15 +218,27 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
         const int other = 1 - side;
         // the tip against the card where the hands were seen (the card shows where they're predicted to
         // be, ahead of them), by a hand that isn't holding or pressing something
-        double cs[3], l[3];
-        const bool seen = !in.busy[other] && palm.Card(side, *in.seen, cs) && IndexTipIn(other, FacingPose(cs, in.head), l);
+        double cs[3], l[3], at[3];
+        const bool seen = !in.busy[other] && (g_card.drag.on() || palm.Card(side, *in.seen, cs)) &&
+                          IndexTipIn(other, g_card.drag.on() ? g_card.dragPose : FacingPose(cs, in.head), l);
         const int pressed = g_card.poke.Step(seen ? l : nullptr, g_card.w, g_card.h, NowMs());
         if (pressed >= 0) PressTile(pressed, other ? "the right hand" : "the left hand");
+        if (g_card.drag.on()) {
+            const int was = g_card.drag.tile();
+            const int now = g_card.drag.Step(PinchPointIn(side, g_card.dragPose, at) ? at : nullptr, g_card.w, g_card.h, palm.up(side));
+            if (now != was) std::printf("palm Quick Access: the pinch on %s\n", now >= 0 ? quickaccess::kSpecs[now].label : "nothing");
+        }
     }
-    g_card.pinched = palm.pinched(side);
     Draw();
     if (fresh) PinShow(g_card.overlay);
 }
+
+int QuickAccessPinchPick(int side) {
+    if (g_card.side != side || !g_card.drag.on()) return int(Tile::SteamMenu);   // (no card, or a pinch tap between two reads)
+    return g_card.drag.tile();
+}
+
+void QuickAccessPress(int tile, const char *by) { PressTile(tile, by); }
 
 bool QuickAccessEngaged(int side) {
     return g_card.side >= 0 && g_card.side == side && (g_card.poke.near() || (g_card.laserMs >= 0 && NowMs() - g_card.laserMs < kLaserKeepMs));

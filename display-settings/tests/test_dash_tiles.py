@@ -74,6 +74,16 @@ class DashTiles(unittest.TestCase):
         self.assertTrue(self.t.gsApps)
         self.assertEqual(self.asked[-1], "handsetting GSAPP_PANELS 1")
 
+    def test_steams_window_off_unless_on(self):
+        self.assertFalse(self.t.steamWindows)
+        self.t.setSteamWindows(True)
+        self.assertIn("STEAM_DASH_PANEL=1", self.conf())
+        self.assertTrue(self.t.steamWindows)
+        self.assertEqual(self.asked[-1], "handsetting STEAM_DASH_PANEL 1")
+        self.t.setSteamWindows(False)
+        self.assertFalse(self.t.steamWindows)
+        self.assertEqual(self.asked[-1], "handsetting STEAM_DASH_PANEL 0")
+
     def test_at_steams_bar_on_unless_off(self):
         self.assertTrue(self.t.atBar)
         self.t.setAtBar(False)

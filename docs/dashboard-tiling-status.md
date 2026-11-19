@@ -64,4 +64,4 @@ Return to Dashboard strip, and the dimmed gamepad path with real controllers awa
 
 - User headset results for the list above, then fixes.
 - Council review of the branch once the user stops iterating.
-- `STEAM_DASH_PANEL` is still a spike switch; decide whether it becomes the default.
+- `STEAM_DASH_PANEL` is a Display Settings switch now (Steam's window, off by default, 2026-11-19); decide whether it becomes the default.

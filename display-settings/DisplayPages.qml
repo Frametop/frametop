@@ -1537,6 +1537,12 @@ Item {
                         onToggled: backend.dashTiles.setGsApps(checked)
                     }
                     Controls.Switch {
+                        Kirigami.FormData.label: "Steam's window:"
+                        text: "Steam's dashboard page and its menu are Frametop panels, tiled with the rest"
+                        checked: backend.dashTiles.steamWindows
+                        onToggled: backend.dashTiles.setSteamWindows(checked)
+                    }
+                    Controls.Switch {
                         Kirigami.FormData.label: "At Steam's bar:"
                         text: "The middle panel just above Steam's bar, as far away as it is"
                         checked: backend.dashTiles.atBar

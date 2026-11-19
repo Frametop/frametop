@@ -1,5 +1,5 @@
-// Steam's own windows as panels of ours (steamwin.h has why and how; a spike, STEAM_DASH_PANEL, off
-// by default). This file is its X link (Steam's own display, gsforward::Role::Steam, on a thread of
+// Steam's own windows as panels of ours (steamwin.h has why and how; STEAM_DASH_PANEL, Display
+// Settings' "Steam's window" switch, off by default). This file is its X link (Steam's own display, gsforward::Role::Steam, on a thread of
 // its own: gslink.h), the tiles on OpenVR, and the laser on them as their pages' mouse (steamcdp.h:
 // X's pointer doesn't reach Steam's windows). Steam's popups, the followers, are vrsteamfollow.cpp's.
 //
@@ -10,9 +10,8 @@
 // it, only the part Steam draws, moved, shown and tiled with it; GlueStep). With the dashboard
 // window tiled, the dashboard tiles keep no slot for Steam's menu (vrtiles.cpp's Regroup).
 //
-// What the spike is there to find out (docs/design.md, HEADSET-TESTS.md): whether Steam tags its
-// windows back itself (each time is logged, and after steamwin::kMaxRetakes in a row it's given
-// back). Keys aren't sent to them: a click in a text field opens Steam's keyboard (with Frametop,
+// Steam may tag its windows back itself: each time is logged, and after steamwin::kMaxRetakes in a
+// row it's given back (docs/design.md). Keys aren't sent to them: a click in a text field opens Steam's keyboard (with Frametop,
 // Full Keyboard, mounted below the dashboard tile; FrametopVr::steam_tile). Steam's own panels are
 // left shown: with a window ours they have no texture (gamescope forwards to one overlay), so they
 // draw nothing, and Steam paints only while its panel counts as visible (alpha 0 = a black tile).

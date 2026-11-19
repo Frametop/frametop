@@ -1,7 +1,7 @@
 // Steam's own windows as panels of ours (user, 2026-11-17: "We need the dashboard Steam window to
 // use frame-top displays, not GameScope anymore", then "a prototype of the whole steamos with the
-// exception of the horizontal dashboard/launcher using Frametop windows instead of gamescope"; a
-// spike, STEAM_DASH_PANEL, off by default).
+// exception of the horizontal dashboard/launcher using Frametop windows instead of gamescope";
+// STEAM_DASH_PANEL, Display Settings' "Steam's window" switch, off by default).
 //
 // Steam's dashboard windows aren't gamescope's apps: they're Steam's own CEF windows on gamescope's
 // first Xwayland (`:0`), each tagged with STEAM_GAMESCOPE_VROVERLAY_TARGET naming Steam's overlay for

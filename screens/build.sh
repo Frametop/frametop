@@ -14,7 +14,7 @@
 # gsforward.cpp is the X side of the gamescope apps (gsforward.h), on xcb (wlroots-devel brings it);
 # gslink.cpp runs it on a thread of its own.
 # vrgsapps.cpp is the gamescope apps' panels, on OpenVR (vrpanel.h: what it shares with vr.cpp).
-# vrsteamwin.cpp is Steam's own windows as panels (steamwin.h; STEAM_DASH_PANEL, a spike), and
+# vrsteamwin.cpp is Steam's own windows as panels (steamwin.h; STEAM_DASH_PANEL, a Display Settings switch), and
 # vrsteamfollow.cpp its popups, placed with them (steamplace.h), its menu glued to its page (steamglue.h), vrsteamhit.cpp
 # Steam's own (empty) overlays shrunk to nothing (steamshrink.h); steamcdp.cpp sends the laser on
 # them to their pages in Steam's CEF, on a thread of its own (X's pointer doesn't reach them).

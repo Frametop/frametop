@@ -362,7 +362,7 @@ void UpdateBarMenu() {
     const barside::UV at = barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), std::clamp(g_menu.along, -half, half));
     const barside::UV c = barside::MenuAt(s.barSide, at, barhit::Height(s.chrome, g_barPaddingY) / 2,
                                           std::max(s.grip, s.chrome * 0.06), g_menu.w, g_menu.h);
-    g_menu.pose = Mul(p, OnSurface(s, c.u, c.v, 0.004));
+    g_menu.pose = Mul(p, OnSurface(s, c.u, c.v, posemath::CardLift(s.curve, g_menu.w / 2, 0.004)));   // (clear of a curve)
     vr::VROverlay()->SetOverlayWidthInMeters(g_menu.overlay, float(g_menu.w));
     vr::VROverlay()->SetOverlayTransformAbsolute(g_menu.overlay, vr::TrackingUniverseStanding, &g_menu.pose);
     if (g_menu.holding == kNone) HandsOnMenu(s, p);

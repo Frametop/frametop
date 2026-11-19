@@ -8,6 +8,7 @@
 #include "vrpanel.h"
 #include "barmenuart.h"
 #include "overlaytex.h"
+#include "posemath.h"
 #include "tiptap.h"
 
 #include <algorithm>
@@ -65,7 +66,7 @@ bool PlaceResetAsk(Screen &s) {
     g_resetAsk.w = a.w * mpp, g_resetAsk.h = a.h * mpp;
     const barside::UV at = barside::MenuAt(s.barSide, BarSpot(s, 0), barhit::Height(s.chrome, g_barPaddingY) / 2,
                                            std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
-    g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, 0.004));
+    g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, posemath::CardLift(s.curve, g_resetAsk.w / 2, 0.004)));   // (clear of a curve)
     const vr::VROverlayHandle_t o = g_resetAsk.overlay;
     vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));
     vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &g_resetAsk.pose);

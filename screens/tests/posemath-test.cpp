@@ -187,5 +187,30 @@ int main() {
         std::printf("Rotate's lever: %d of %d drifting sweeps turned one way, smoothly\n", steady, drifts);
         check("OnLever: a laser drifting up or down through the centre doesn't turn it back", steady == drifts);
     }
+    {
+        // The grab bar menu on a curved panel (user, 2026-11-19: its sides cut off): a flat card, its
+        // middle on the surface, sits far enough out that every point across it is in front of the
+        // surface by at least dz (OnPanel's own out-distance), and its edges by about dz.
+        check("CardLift: flat, just dz", near(CardLift(0, 0.15, 0.004), 0.004));
+        bool clear = true;
+        double worst = 1;
+        for (double r : {0.5, 0.8, 1.0, 1.5, 3.0})
+            for (double hw : {0.05, 0.145, 0.29, 0.45}) {
+                if (hw >= r - 0.004) continue;   // (too wide to clear: checked below)
+                const double D = CardLift(r, hw, 0.004);
+                for (int k = 0; k <= 20; ++k) {
+                    const double q[3] = {hw * (k / 10.0 - 1), 0.1, D};
+                    double out[3];
+                    OnPanel(r, q, out);
+                    worst = std::fmin(worst, out[2]);
+                    clear &= out[2] >= 0.004 - 1e-9;
+                }
+            }
+        std::printf("CardLift: the nearest a card came to its curved panel: %.2f mm\n", worst * 1000);
+        check("CardLift: a flat card is in front of its curved panel all the way across", clear);
+        check("CardLift: the menu's 29 cm at 1 m sits ~14 mm out (it was 4: its outer 5.5 cm behind the curve)",
+              std::fabs(CardLift(1.0, 0.145, 0.004) - 0.0146) < 0.0005);
+        check("CardLift: too wide to clear it, the axis's depth", near(CardLift(0.5, 0.9, 0.004), 0.5));
+    }
     return failed ? 1 : 0;
 }

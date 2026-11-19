@@ -207,4 +207,15 @@ inline void OnPanel(double curve, const double q[3], double out[3]) {
     out[2] = r - std::hypot(q[0], q[2] - r);
 }
 
+// How far out of a panel's surface a flat card `halfWidth` m either side of where it touches sits, so
+// that its sides still clear the surface by `dz` (user, 2026-11-19: the grab bar menu's sides cut off on
+// some displays: a curved panel's sides come out toward its front, past a card 4 mm out at its middle).
+// Its edges are then dz in from the cylinder (OnPanel's out-distance), its middle farther. Flat: `dz`. A
+// card too wide to clear it sits on the axis's depth (r): as far out as one can.
+inline double CardLift(double curve, double halfWidth, double dz) {
+    if (curve <= 0) return dz;
+    const double r = curve, in = r - dz, x = std::fabs(halfWidth);
+    return x >= in ? r : std::fmax(dz, r - std::sqrt(in * in - x * x));
+}
+
 }  // namespace posemath

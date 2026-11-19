@@ -1,6 +1,7 @@
-"""Running one test process (testgate.py's files, ctests.py's programs): the time it gets, and
-ending what it leaves running. Each runs in a session of its own, so what it starts is in its
-process group, unless that went to a session of its own too (setsid).
+"""Running one test process (testgate.py's files, ctests.py's programs, ninja): the time it gets,
+and ending what it leaves running. Each runs in a session of its own, and what it starts stays
+in that session even in a process group of its own (ninja gives each command one), unless it
+starts a session of its own too (setsid).
 """
 import os
 import signal
@@ -21,7 +22,7 @@ def timeout():
 
 def exited(pid, limit):
     """Wait up to limit seconds (None: no limit) for pid to exit, without reaping it, so its
-    process group id stays its own while the group is ended. True when it exited."""
+    session id stays its own while the session is ended. True when it exited."""
     deadline = None if limit is None else time.monotonic() + limit
     while True:
         r = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
@@ -32,8 +33,8 @@ def exited(pid, limit):
         time.sleep(0.05)
 
 
-def members(pgid):
-    """The live processes in process group pgid (the zombie leader not counted)."""
+def members(sid):
+    """The live processes in session sid (the zombie leader not counted)."""
     out = []
     for name in os.listdir("/proc"):
         if name.isdigit():
@@ -42,41 +43,45 @@ def members(pgid):
                     fields = f.read().rsplit(")", 1)[1].split()
             except (OSError, IndexError):
                 continue
-            if fields[0] != "Z" and int(fields[2]) == pgid:
+            if fields[0] != "Z" and int(fields[3]) == sid:
                 out.append(int(name))
     return out
 
 
-def end_group(pgid):
-    """SIGTERM what's left in the group, and SIGKILL what's still there a second later."""
-    if not members(pgid):
-        return
-    for sig, grace in ((signal.SIGTERM, 1.0), (signal.SIGKILL, 0)):
+def _signal(pids, sig):
+    for pid in pids:
         try:
-            os.killpg(pgid, sig)
+            os.kill(pid, sig)
         except OSError:
+            pass
+
+
+def end_session(sid):
+    """SIGTERM what's left in the session, and SIGKILL what's still there a second later."""
+    for sig, grace in ((signal.SIGTERM, 1.0), (signal.SIGKILL, 0)):
+        left = members(sid)
+        if not left:
             return
+        _signal(left, sig)
         deadline = time.monotonic() + grace
-        while members(pgid) and time.monotonic() < deadline:
+        while members(sid) and time.monotonic() < deadline:
             time.sleep(0.05)
-        if not members(pgid):
-            return
 
 
 def run_session(argv, live, limit, **popen):
     """Run argv in a session of its own and wait for it: its exit code, or None when it was still
     running after limit seconds (None: no limit) and was killed. What it leaves running is ended.
-    live (a set) holds its process group id while it runs; if the wait is stopped (Ctrl-C,
-    SIGTERM), the group is ended and the exception goes on."""
+    live (a set) holds its session id while it runs; if the wait is stopped (Ctrl-C, SIGTERM),
+    the session is ended and the exception goes on."""
     p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, start_new_session=True, **popen)
     live.add(p.pid)
     try:
         timed_out = not exited(p.pid, limit)
         if timed_out:
-            os.killpg(p.pid, signal.SIGKILL)
-        end_group(p.pid)
+            _signal(members(p.pid), signal.SIGKILL)
+        end_session(p.pid)
     except BaseException:
-        end_group(p.pid)
+        end_session(p.pid)
         p.kill()
         p.wait()
         raise
@@ -86,7 +91,13 @@ def run_session(argv, live, limit, **popen):
     return None if timed_out else code
 
 
+def on_stop(handler):
+    """handler for SIGTERM and SIGHUP (a closed terminal): either way, the cleanup runs."""
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, handler)
+
+
 def stop(live):
-    """End every group run_session has running (a runner that was stopped)."""
-    for pgid in list(live):
-        end_group(pgid)
+    """End every session run_session has running (a runner that was stopped)."""
+    for sid in list(live):
+        end_session(sid)

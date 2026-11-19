@@ -63,7 +63,9 @@ def tidy(step):
     why the run is leaving (a Stop it raises does: the guard ended the run)."""
     try:
         step()
-    except RuntimeError as e:
+    except Stop:
+        raise
+    except Exception as e:
         print(f"smoke: a cleanup step failed: {e}", flush=True)
 
 
@@ -216,7 +218,8 @@ def main(argv):
     unknown = [f for f in picked if f not in FEATURES]
     if unknown:
         sys.exit(f"smoke: no feature {', '.join(unknown)} (--list)")
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))   # so the cleanup runs
+    for sig in (signal.SIGTERM, signal.SIGHUP):   # so the cleanup runs (a closed terminal too)
+        signal.signal(sig, lambda n, _: sys.exit(128 + n))
     launch = call([V, "launch", "smoke"], check=False)
     if launch.returncode != 0:
         print(launch.stdout.strip(), launch.stderr.strip(), sep="\n", file=sys.stderr)

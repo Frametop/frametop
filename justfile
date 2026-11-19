@@ -7,14 +7,17 @@
 default:
     @just --list
 
+# one `just test`'s id: two at once in one tree each record their own start
+test_run := uuid()
+
 # everything, strict (the recipes are the source of truth); when it passes, the commit it passed
 # on is where `just test-changed` starts
 test: _mark-start lint test-python test-c test-keyboard test-bash test-testbench test-fast-install
-    @python3 scripts/testgate/changed.py --mark-green
+    @python3 scripts/testgate/changed.py --mark-green {{test_run}}
 
 # what `just test` tests: the tree as it starts (scripts/testgate/changed.py)
 _mark-start:
-    @python3 scripts/testgate/changed.py --mark-start
+    @python3 scripts/testgate/changed.py --mark-start {{test_run}}
 
 # while working: only the tests a change since the last green `just test` (or since BASE)
 # reaches, with lint and the shell scripts' check (scripts/testgate/changed.py). `just test`

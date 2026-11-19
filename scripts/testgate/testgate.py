@@ -30,7 +30,6 @@ import concurrent.futures
 import glob
 import json
 import os
-import signal
 import sys
 import tempfile
 import time
@@ -46,7 +45,7 @@ TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SKIP = 77
 TIMEOUT = procs.TIMEOUT    # seconds a file gets (procs.py)
 timeout = procs.timeout
-LIVE = set()    # the test files running now (their process group ids)
+LIVE = set()    # the test files running now (their session ids)
 
 
 def run(path, python=sys.executable, limit=None, threads=None):
@@ -200,7 +199,7 @@ def main(patterns, njobs=1, times=None):
 
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))   # so the file running ends too
+    procs.on_stop(lambda sig, _: sys.exit(128 + sig))   # SIGTERM, SIGHUP: so the files running end too
     import argparse
     a = argparse.ArgumentParser(usage=__doc__.rstrip().rsplit("\n", 1)[-1].strip())
     a.add_argument("--jobs", "-j", type=int, default=0)

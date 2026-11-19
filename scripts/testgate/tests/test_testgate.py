@@ -187,6 +187,30 @@ class Gate(unittest.TestCase):
         self.assertTrue(os.path.exists(marker))
         self.assertLess(time.monotonic() - start, 20)
 
+    def test_a_leftover_in_a_process_group_of_its_own_is_ended_too(self):
+        """ninja gives each command a process group of its own, in its session: a leftover there
+        that is slow to go on SIGTERM still goes (SIGKILL), with the session."""
+        pidfile = os.path.join(self.dir, "pid")
+        child = ("import os, signal, time\n"
+                 "signal.signal(signal.SIGTERM, lambda *a: time.sleep(5))\n"
+                 f"open({pidfile!r}, 'w').write(str(os.getpid()))\n"
+                 "time.sleep(60)")
+        path = self.file("o.py", f"""\
+            import os, subprocess, sys, time
+            subprocess.Popen([sys.executable, "-c", {child!r}], process_group=0)
+            while not os.path.exists({pidfile!r}): time.sleep(0.05)
+            print("all passed")
+            """)
+        self.assertEqual(testgate.run(path)[0], "ok")
+        with open(pidfile) as f:
+            pid = int(f.read())
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                state = f.read().rsplit(")", 1)[1].split()[0]
+        except OSError:
+            state = "gone"
+        self.assertIn(state, ("gone", "Z"))
+
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")
         status, out = self.gate("a.py", "gone/*.py")

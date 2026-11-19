@@ -23,7 +23,6 @@ import argparse
 import concurrent.futures
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -52,7 +51,7 @@ class Run:
         self.times = {}
         self.preps = {}
         self.not_run = 0
-        self.live = set()   # the tests running now (their process group ids)
+        self.live = set()   # ninja or the tests running now (their session ids)
         self.generated = {g.out: g for g in items if isinstance(g, Generate)}
         self.programs = {i.out: i for i in items if isinstance(i, Program)}
         if self.changed is not None:    # a generated file changes with what it's made from
@@ -233,7 +232,7 @@ def main(argv=None):
     if args.changed:
         f = sys.stdin if args.changed == "-" else open(args.changed)
         changed = [line.strip() for line in f if line.strip()]
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))   # so the tests running end too
+    procs.on_stop(lambda sig, _: sys.exit(128 + sig))   # SIGTERM, SIGHUP: so ninja and the tests running end too
     cprograms.prepare(TREE)
     r = Run(cprograms.items(TREE), TREE, args.jobs or jobs(), changed)
     r.build()

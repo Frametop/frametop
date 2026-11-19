@@ -258,14 +258,38 @@ class TestChanged(unittest.TestCase):
         with unittest.mock.patch.object(changed, "TREE", self.root), \
                 contextlib.redirect_stdout(io.StringIO()):
             start = changed.git("rev-parse", "HEAD").strip()
-            changed.mark_start()
-            # during the run: menu_model.py moves, and that's committed
+            changed.mark_start("r1")
+            # during the run: test_menu.py moves, and that's committed
             g("mv", "menu/test/test_menu.py", "menu/test/test_menus.py")
             g("commit", "-qm", "two")
-            changed.mark_green()
+            changed.mark_green("r1")
             base, edited = changed.read_green()
             self.assertEqual((base, edited), (start, []))
             self.assertEqual(changed.changed_since(base), ["menu/test/test_menu.py", "menu/test/test_menus.py"])
+
+    def test_each_run_records_its_own_start_and_a_run_with_none_records_nothing(self):
+        g = self.git_repo()
+        with unittest.mock.patch.object(changed, "TREE", self.root), \
+                contextlib.redirect_stdout(io.StringIO()):
+            one = changed.git("rev-parse", "HEAD").strip()
+            changed.mark_start("a")     # run a starts on one
+            with open(os.path.join(self.root, "x.py"), "w") as f:
+                f.write("broken\n")
+            g("add", ".")
+            g("commit", "-qm", "two")
+            changed.mark_start("b")     # run b starts on two (and will fail)
+            changed.mark_green("a")
+            self.assertEqual(changed.read_green(), (one, []))     # a's tree, not b's
+            # no git (./ft dev test's image): nothing recorded, and b's file isn't taken
+            with unittest.mock.patch.object(changed, "git", side_effect=OSError("no git")):
+                changed.mark_start("c")
+                changed.mark_green("c")
+            self.assertEqual(changed.read_green(), (one, []))
+            # an empty start record (a stopped write) records nothing either
+            open(os.path.join(self.root, changed.PENDING + "d"), "w").close()
+            self.assertEqual(changed.mark_green("d"), 0)
+            self.assertEqual(changed.read_green(), (one, []))
+            self.assertTrue(os.path.exists(os.path.join(self.root, changed.PENDING + "b")))
 
     def test_paths_come_whole(self):
         self.assertEqual(changed._paths("my file.py\0a/b c.md\0"), {"my file.py", "a/b c.md"})

@@ -3,8 +3,8 @@
 loop while working; `just test` is still the gate before a push.
 
 A passing `just test` writes the commit it started on to build/tests/last-green
-(`--mark-start`, then `--mark-green`), with the paths that were edited and not committed then: they count as changed every time, since what
-was tested isn't in git. This compares the tree as it is now (commits, edits, new files) with
+(`--mark-start RUN`, then `--mark-green RUN`), with the paths that were edited and not committed
+then: they count as changed every time, since what was tested isn't in git. This compares the tree as it is now (commits, edits, new files) with
 that commit, or with BASE, and runs:
 
 - lint, the shell scripts' syntax check and the tests that read the whole repo (ALWAYS: docs'
@@ -25,13 +25,15 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cbuild import under  # noqa: E402
 
 TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STAMP = "build/tests/last-green"
-PENDING = STAMP + ".pending"   # the tree a `just test` that is still running started on
+PENDING = STAMP + ".pending-"  # + a run's id: the tree a `just test` still running started on
+PENDING_DAYS = 1   # a failed run's pending file goes after this
 SUITES = "scripts/testgate/python-suites.txt"
 # a change here can change what any test does or which run: everything runs
 FULL = ("justfile", "pyproject.toml", "uv.lock", "setup/packages.txt", "pack/", "scripts/testgate/",
@@ -132,33 +134,46 @@ def _tree_now():
     return [git("rev-parse", "HEAD").strip(), *sorted(dirty())]
 
 
-def mark_start():
-    """`just test` starts: what it tests is the tree now (an edit or commit during the run isn't)."""
+def _write(path, lines):
+    """Write the stamp lines whole or not at all (a stopped write leaves no half file)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        f.write("".join(f"{line}\n" for line in lines))
+    os.replace(path + ".tmp", path)
+
+
+def mark_start(run):
+    """`just test` (its run id) starts: what it tests is the tree now, not an edit or commit made
+    while it runs. Another run's file is never this one's, and a failed run's goes in a day."""
+    folder = os.path.join(TREE, os.path.dirname(STAMP))
+    try:
+        for name in os.listdir(folder):
+            old = os.path.join(folder, name)
+            if name.startswith(os.path.basename(PENDING)) and time.time() - os.path.getmtime(old) > PENDING_DAYS * 86400:
+                os.unlink(old)
+    except OSError:
+        pass
     try:
         lines = _tree_now()
     except (RuntimeError, OSError):
-        return 0
-    os.makedirs(os.path.join(TREE, os.path.dirname(STAMP)), exist_ok=True)
-    with open(os.path.join(TREE, PENDING), "w") as f:
-        f.write("".join(f"{line}\n" for line in lines))
+        return 0    # no git here: the run ends with nothing to record
+    _write(os.path.join(TREE, PENDING + run), lines)
     return 0
 
 
-def mark_green():
-    """`just test` passed: the tree it started on (mark_start) is the last green one."""
+def mark_green(run):
+    """`just test` (its run id) passed: the tree it started on is the last green one. With no
+    record of its start (no git), the last green stays as it was: test-changed then runs more."""
+    pending = os.path.join(TREE, PENDING + run)
     try:
-        with open(os.path.join(TREE, PENDING)) as f:
+        with open(pending) as f:
             lines = [line.strip() for line in f if line.strip()]
-        os.replace(os.path.join(TREE, PENDING), os.path.join(TREE, STAMP))
-    except OSError:     # not started by `just test`: the tree now
-        try:
-            lines = _tree_now()
-        except (RuntimeError, OSError):
-            print("last green: not recorded (no git here); `just test-changed` will run everything")
-            return 0
-        os.makedirs(os.path.join(TREE, os.path.dirname(STAMP)), exist_ok=True)
-        with open(os.path.join(TREE, STAMP), "w") as f:
-            f.write("".join(f"{line}\n" for line in lines))
+    except OSError:
+        lines = []
+    if not lines:
+        print("last green: not recorded (no git here); `just test-changed` starts from the one before")
+        return 0
+    os.replace(pending, os.path.join(TREE, STAMP))
     edited = len(lines) - 1
     print(f"last green: {lines[0][:12]}" + (f" and {edited} edited paths" if edited else "")
           + " (build/tests/last-green; `just test-changed` starts from it)")
@@ -181,10 +196,10 @@ def full(why):
 
 
 def main(argv):
-    if argv[:1] == ["--mark-start"]:
-        return mark_start()
-    if argv[:1] == ["--mark-green"]:
-        return mark_green()
+    if argv[:1] in (["--mark-start"], ["--mark-green"]):
+        if len(argv) != 2 or not argv[1]:
+            sys.exit(f"changed.py {argv[0]} RUN: the run's id (the justfile's test_run)")
+        return (mark_start if argv[0] == "--mark-start" else mark_green)(argv[1])
     base, also = (argv[0], ()) if argv else (read_green() or (None, ()))
     if base is None:
         return full("no green `just test` recorded yet")

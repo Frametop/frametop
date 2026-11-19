@@ -103,6 +103,7 @@ void ShowResetAsk(int panel) {
         }
         vr::VROverlay()->SetOverlayInputMethod(g_resetAsk.overlay, vr::VROverlayInputMethod_Mouse);
         vr::VROverlay()->SetOverlaySortOrder(g_resetAsk.overlay, 10);
+        vr::VROverlay()->SetOverlayFlag(g_resetAsk.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (a carry's wheel over it: PollOverlay)
         AnnounceOverlay(kResetAskKey);   // (the 3D mouse's ray finds it)
     }
     g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs();

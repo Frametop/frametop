@@ -172,6 +172,7 @@ bool Make() {
     const vr::HmdVector2_t scale = {{float(quickaccess::kW), float(quickaccess::kH)}};
     vr::VROverlay()->SetOverlayMouseScale(g_card.overlay, &scale);
     vr::VROverlay()->SetOverlaySortOrder(g_card.overlay, 22);
+    vr::VROverlay()->SetOverlayFlag(g_card.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (a carry's wheel over it: PollOverlay)
     g_card.widthSet = -1, g_card.lasers = false;
     Invalidate();
     AnnounceOverlay(kKey);   // (the 3D mouse's ray finds it)

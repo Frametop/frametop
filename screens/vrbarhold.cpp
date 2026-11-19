@@ -62,13 +62,17 @@ bool PressBy(const Screen &s, vr::TrackedDeviceIndex_t dev) {
 
 // A left press by a device whose bar press waits or carries: its release was lost where we don't see
 // (another app's overlay, outside VR games), so the wait is dropped and the carry let go where it is.
-// The press itself is its own.
+// Only the bar's: a carry_toggle carry by the same laser is CarryClick's to end. The press itself is its own.
 void BarLost(vr::TrackedDeviceIndex_t dev) {
-    bool any = false;
-    for (auto &[i, s] : g_screens)
-        if (PressBy(s, dev))
-            any = true, std::printf("screen %d: its bar's release was lost (a new press): %s\n", i + 1, s.barPressMs >= 0 ? "no tap, no move" : "let go here");
-    if (any) EndDragsBy(dev);
+    bool carried = false;
+    for (auto &[i, s] : g_screens) {
+        if (!PressBy(s, dev)) continue;
+        const bool waiting = s.barPressMs >= 0;
+        std::printf("screen %d: its bar's release was lost (a new press): %s\n", i + 1, waiting ? "no tap, no move" : "let go here");
+        if (waiting) s.barPressMs = -1;
+        else carried = true;
+    }
+    if (carried) EndDragsBy(dev);
 }
 
 // A laser's button, seen first for a bar's press: a left release by a device whose bar press waits or

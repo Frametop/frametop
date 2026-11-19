@@ -314,6 +314,7 @@ void OpenBarMenu(int i, double along, bool edges) {
         }
         vr::VROverlay()->SetOverlayInputMethod(g_menu.overlay, vr::VROverlayInputMethod_Mouse);
         vr::VROverlay()->SetOverlaySortOrder(g_menu.overlay, 10);
+        vr::VROverlay()->SetOverlayFlag(g_menu.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (a carry's wheel over it: PollOverlay)
         AnnounceOverlay(kMenuKey);   // (the 3D mouse's ray finds it)
     }
     if (g_menu.panel >= 0) CloseMenu("another bar's opened");

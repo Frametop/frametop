@@ -1484,7 +1484,7 @@ void UpdateControls() {
     }
     StepChromePool();
     for (auto &[i, s] : g_screens) {
-        const bool inUse = s.drag != Drag::None || std::any_of(std::begin(s.hover), std::end(s.hover), [](bool h) { return h; });
+        const bool inUse = s.drag != Drag::None || s.barPressMs >= 0 || std::any_of(std::begin(s.hover), std::end(s.hover), [](bool h) { return h; });
         const bool want = s.visible && (inUse || g_tick < s.nearUntil);
         // A panel's set of controls stays shown while it has one, just fully transparent when
         // not wanted: SteamVR's laser still hits them, and the hover event keeps them in.
@@ -4569,6 +4569,7 @@ void UpdatePill() {
             return;
         vr::VROverlay()->SetOverlayInputMethod(g_pill.overlay, vr::VROverlayInputMethod_Mouse);
         vr::VROverlay()->SetOverlaySortOrder(g_pill.overlay, 10);
+        vr::VROverlay()->SetOverlayFlag(g_pill.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (a carry's wheel over it: PollOverlay)
         AnnounceOverlay(kPillKey);   // (the 3D mouse's ray finds it)
     }
     const bool lit = g_pill.hover;
@@ -6476,12 +6477,17 @@ static void CarryUndoAll() {
 // did.
 // A bar's carry the same (the laser may be off its bar: the carry starts where the hand is when it's held),
 // and a bar's press still waiting: the wheel makes it a move at once.
+// (a sideways-only notch is taken but starts nothing: a waiting press stays a tap)
 static bool CarryWheel(vr::TrackedDeviceIndex_t dev, double notches) {
+    bool waits = false;
     for (auto &[i, s] : g_screens)
-        if (s.barPressMs >= 0 && s.barPressDevice == dev) BarCarry(s, "the wheel");
+        if (s.barPressMs >= 0 && s.barPressDevice == dev) {
+            waits = true;
+            if (notches != 0) BarCarry(s, "the wheel");
+        }
     for (auto &[i, s] : g_screens)
         if ((s.toggleCarry || (s.barCarry && s.drag == Drag::Move)) && s.dragDevice == dev) return Push(s, notches), true;
-    return false;
+    return waits;
 }
 extern "C++" bool ftvr::CarryScroll(const vr::VREvent_t &ev) {
     return ev.eventType == vr::VREvent_ScrollDiscrete && CarryWheel(ev.trackedDeviceIndex, ev.data.scroll.ydelta);
@@ -7329,9 +7335,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     s.barBuzz.Enter(int(ev.trackedDeviceIndex), IsHandController(ev.trackedDeviceIndex), g_barPreview.haptics) && s.drag == Drag::None)
                     vr::VRSystem()->TriggerHapticPulse(ev.trackedDeviceIndex, 0, 1500);
             }
-            hover(kBarPart);
-            if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
-                continue;
+            hover(kBarPart);   // (a click that ends a carry is gone after it: VREvent_None)
             const double along = ev.data.mouse.x / 1000.0 - barhit::Width(s.chrome, g_barPaddingX) / 2;   // (mm: its mouse scale)
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
                 // (a window's press by this laser still held: its release was lost, as BarLost's; a claimed

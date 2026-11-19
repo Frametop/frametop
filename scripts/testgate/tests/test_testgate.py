@@ -246,8 +246,10 @@ class Gate(unittest.TestCase):
         SIGHUP's default (not nohup's ignore); without nohup, a hangup ends it (and cleans up)."""
         started = os.path.join(self.dir, "started")
         path = self.file("w.py", f"""\
-            import signal, time
-            open({started!r}, "w").write(str(signal.getsignal(signal.SIGHUP) == signal.SIG_DFL))
+            import os, signal, time
+            with open({started!r} + ".tmp", "w") as f:   # whole: the test reads it once it's there
+                f.write(str(signal.getsignal(signal.SIGHUP) == signal.SIG_DFL))
+            os.replace({started!r} + ".tmp", {started!r})
             time.sleep(1.5)
             print("all passed")
             """)
@@ -258,11 +260,15 @@ class Gate(unittest.TestCase):
             disposition = signal.SIG_IGN if ignore else signal.SIG_DFL
             p = subprocess.Popen([sys.executable, gate, "--jobs", "1", path], stdout=subprocess.DEVNULL,
                                  preexec_fn=lambda d=disposition: signal.signal(signal.SIGHUP, d))
-            deadline = time.monotonic() + 20
-            while not os.path.exists(started) and time.monotonic() < deadline:   # its handler is in
-                time.sleep(0.02)
-            p.send_signal(signal.SIGHUP)
-            self.assertEqual(p.wait(timeout=20), want)
+            try:
+                deadline = time.monotonic() + 20
+                while not os.path.exists(started) and time.monotonic() < deadline:   # its handler is in
+                    time.sleep(0.02)
+                p.send_signal(signal.SIGHUP)
+                self.assertEqual(p.wait(timeout=20), want)
+            finally:
+                p.kill()
+                p.wait()
             with open(started) as f:
                 self.assertEqual(f.read(), "True")
 

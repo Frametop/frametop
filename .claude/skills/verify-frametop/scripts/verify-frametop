@@ -533,8 +533,12 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
     out = next(f for n in range(1, 100) if not (f := run / f'stream-{client}-{stamp}{"" if n == 1 else f"-{n}"}').exists())
     LOCK.touch()   # the lease runs on
     modules, players, viewer, ended = [], [], None, False
-    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-        signal.signal(sig, stopped)
+    # stopped (Ctrl-C, SIGTERM, a closed terminal), the stream ends; one ignored (nohup) stays so;
+    # what was there before is back after the stream
+    before = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
+    for sig, was in before.items():
+        if was is not signal.SIG_IGN:
+            signal.signal(sig, stopped)
     try:
         out.mkdir(mode=0o700)
         env = []
@@ -584,8 +588,8 @@ def stream(host, client=None, seconds=20.0, allow_host_input=False, mic_bursts=F
             player.wait()
         for module in modules:
             subprocess.run(['pactl', 'unload-module', module], capture_output=True)
-        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-            signal.signal(sig, signal.SIG_DFL)
+        for sig, was in before.items():
+            signal.signal(sig, signal.SIG_DFL if was is None else was)   # None: not set from Python
     try:
         result = json.loads((out / 'result.json').read_text())
     except (OSError, ValueError):

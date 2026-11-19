@@ -18,7 +18,9 @@ Features, in the order they run (`--only` picks some):
 It runs inside one `verify-frametop launch smoke` run and always ends with its cleanup, after a
 failure too. It stops at once, cleaning up, when someone puts the headset on (`V guard`), as the
 verify skill's hard rules say. What only a person can judge stays in HEADSET-TESTS.md.
-Exit 0 when every step passed, 1 when one failed, 2 when the run couldn't start or was stopped.
+Exit 0 when every step passed, 1 when one failed, 2 when the run couldn't start or the guard
+stopped it; stopped from outside, it cleans up and exits 130 (Ctrl-C) or 128 + the signal
+(SIGTERM, SIGHUP).
 """
 import argparse
 import json

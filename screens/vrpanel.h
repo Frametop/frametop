@@ -299,6 +299,7 @@ void ApplyAlpha(const Screen &s);   // its overlays' alpha now (the bar lit whil
 void PlaceSubs(const Screen &s);
 void EndDrag(Screen &s);
 void EndDragsBy(vr::TrackedDeviceIndex_t dev);
+void EndBarCarriesBy(vr::TrackedDeviceIndex_t dev);   // only bar carries: a carry_toggle carry stays
 void UpdateVisibility();
 Mode EffectiveMode();
 int ScreenIndexOf(const Screen &s);

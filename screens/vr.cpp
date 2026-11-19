@@ -1973,6 +1973,13 @@ void EndDragsBy(vr::TrackedDeviceIndex_t dev) {
         if (s.drag != Drag::None && s.dragDevice == dev) FinishDrag(s, index), ForgetIfPlacedFar(index, s);
 }
 
+// Only the bar's carries by `dev` let go where they are: a carry_toggle carry by the same laser stays
+// (its click ends it, CarryClick).
+void EndBarCarriesBy(vr::TrackedDeviceIndex_t dev) {
+    for (auto &[index, s] : g_screens)
+        if (s.barCarry && s.drag == Drag::Move && s.dragDevice == dev) FinishDrag(s, index), ForgetIfPlacedFar(index, s);
+}
+
 // While moving: the laser entering a controller's ring flips whether the screen pins to
 // it when let go (so sweeping across arms it, sweeping back disarms it).
 void CheckWristAim(Screen &s, const Mat &d, const Mat &p) {

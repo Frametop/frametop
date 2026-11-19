@@ -72,7 +72,7 @@ void BarLost(vr::TrackedDeviceIndex_t dev) {
         if (waiting) s.barPressMs = -1;
         else carried = true;
     }
-    if (carried) EndDragsBy(dev);
+    if (carried) EndBarCarriesBy(dev);
 }
 
 // A laser's button, seen first for a bar's press: a left release by a device whose bar press waits or

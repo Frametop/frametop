@@ -55,7 +55,9 @@ enum class Page { Main, Placement, Edges };
 inline bool Tile(Item i) { return i == Item::Curve || i == Item::Rotate || i == Item::Dock || i == Item::Close; }
 
 inline std::vector<Row> Main(const Kind &k) {
-    std::vector<Row> r = {{Item::Curve}, {Item::Rotate}};
+    std::vector<Row> r;  // (reserved, then pushed: GCC 16's -O2 -Warray-bounds misreads growing an initializer list)
+    r.reserve(10);
+    r.push_back({Item::Curve}), r.push_back({Item::Rotate});
     if (k.floating) r.push_back({Item::Dock}), r.push_back({Item::Close});
     r.push_back({Item::Placement});
     if (k.theater) r.push_back({Item::Theater});
@@ -68,7 +70,9 @@ inline std::vector<Row> Main(const Kind &k) {
 // Where the panel lives: in the room, in view (the layout's panels), on the dashboard, and Stay Shown
 // while it's on the dashboard.
 inline std::vector<Row> Placement(const Kind &k) {
-    std::vector<Row> r = {{Item::Back}, {Item::InRoom}};
+    std::vector<Row> r;
+    r.reserve(5);
+    r.push_back({Item::Back}), r.push_back({Item::InRoom});
     if (LayoutRows(k)) r.push_back({Item::KeepInView});
     r.push_back({Item::OnDashboard});
     if (k.anchored) r.push_back({Item::StayShown});

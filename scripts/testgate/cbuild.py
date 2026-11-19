@@ -262,12 +262,14 @@ def remembered(root):
 
 
 def remember(root, reads):
-    """Add reads (object -> paths) to SEEN, as recorded now."""
-    now = time.time()
+    """Add reads (object -> paths) to SEEN, as recorded now (a later time already there stays)."""
     with _seen_lock(root):
+        now = time.time()   # in the lock: one that waited for it doesn't record an earlier time
         seen = _seen(root)
         for o, paths in reads.items():
-            seen.setdefault(o, {}).update(dict.fromkeys(paths, now))
+            kept = seen.setdefault(o, {})
+            for path in paths:
+                kept[path] = max(kept.get(path, 0.0), now)
         _write_seen(root, seen)
 
 

@@ -53,7 +53,7 @@ def free_port():
     folder = "/tmp/ft-test-ports-%d" % os.getuid()
     os.makedirs(folder, exist_ok=True)
     pool = range(max(1024, low - 12000), max(1024, low))
-    if len(pool) < 100:     # the ephemeral ports start low (1024): any port then, as before
+    if len(pool) < 200:     # the ephemeral ports start low (1024): any port then, as before
         pool = range(1024, 65536)
     for port in random.sample(pool, 200):
         fd = os.open(os.path.join(folder, str(port)), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)

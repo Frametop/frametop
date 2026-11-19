@@ -317,6 +317,8 @@ class Gate(unittest.TestCase):
                     if f.read().rsplit(")", 1)[1].split()[0] == "Z":
                         break
                 time.sleep(0.02)
+            else:
+                self.fail("the leader didn't become a zombie: nothing here to test")
             self.assertEqual(procs.members(p.pid), [p.pid])
             procs.end_session(p.pid)
             self.assertEqual(procs.members(p.pid), [])

@@ -7,6 +7,7 @@ hangs. Made-up test files in a temp folder.
 """
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -192,6 +193,46 @@ class Gate(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("gone/*.py: FAILED, matches no file", out)
         self.assertIn("python files: 1 ok, 0 skipped, 0 failed", out)
+
+    def test_files_run_side_by_side_and_report_in_order(self):
+        for name, wait in (("p1.py", 1.5), ("p2.py", 0), ("p3.py", 0)):
+            self.file(name, f"import time; time.sleep({wait}); print('all passed')\n")
+        out = io.StringIO()
+        start = time.monotonic()
+        times = os.path.join(self.dir, "times.json")
+        with contextlib.redirect_stdout(out):
+            status = testgate.main([os.path.join(self.dir, "p*.py")], njobs=3, times=times)
+        self.assertLess(time.monotonic() - start, 2.5)
+        self.assertEqual(status, 0)
+        lines = [line.rsplit("/", 1)[-1] for line in out.getvalue().splitlines()[:3]]
+        self.assertEqual(lines, ["p1.py: ok", "p2.py: ok", "p3.py: ok"])
+        with open(times) as f:
+            self.assertEqual(len(json.load(f)), 3)
+
+    def test_a_file_that_runs_alone_runs_alone(self):
+        """q2 says it runs alone: q1 has ended before it starts, and q3 starts after it ends."""
+        log = os.path.join(self.dir, "log")
+        for name, first in (("q1.py", "# runs with others"), ("q2.py", testgate.ALONE), ("q3.py", "# runs with others")):
+            self.file(name, f"""\
+                {first}
+                import os, time
+                with open({log!r}, "a") as f: f.write("start {name}\\n")
+                time.sleep(0.3)
+                with open({log!r}, "a") as f: f.write("end {name}\\n")
+                """)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(testgate.main([os.path.join(self.dir, "q*.py")], njobs=3), 0)
+        with open(log) as f:
+            events = f.read().split("\n")
+        q2 = events.index("start q2.py")
+        self.assertEqual(events[q2 - 1], "end q1.py")
+        self.assertEqual(events[q2 + 1], "end q2.py")
+
+    def test_each_file_has_its_own_tmpdir_and_patterns_come_from_a_file(self):
+        self.file("r.py", "import os, tempfile; assert tempfile.gettempdir() == os.environ['TMPDIR'] != '/tmp'\n")
+        listing = self.file("suites.txt", f"# a comment\n{os.path.join(self.dir, 'r.py')}\n")
+        self.assertEqual(testgate.expand([f"@{listing}", "x.py"]), [os.path.join(self.dir, "r.py"), "x.py"])
+        self.assertEqual(testgate.run(os.path.join(self.dir, "r.py"))[0], "ok")
 
 
 if __name__ == "__main__":

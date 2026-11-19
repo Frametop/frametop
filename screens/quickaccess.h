@@ -211,11 +211,13 @@ public:
 
     void Start() { on_ = true, haveFrom_ = false, place_ = tile_ = int(Tile::SteamMenu); }
     void End() { on_ = false, tile_ = -1; }
-    // `at`: the pinch on the card's face this hands frame (null: not seen, what's lit stays); the card
-    // w x h metres; `up`: the palm still up. The tile lit, -1 none.
+    // `at`: the pinch on the card's face this hands frame (null: not seen, what's lit stays, whatever
+    // `up` says then: council, 2026-11-19, a lost frame blinked it off); the card w x h metres; `up`: the
+    // palm still up. The tile lit, -1 none.
     int Step(const double *at, double w, double h, bool up) {
         if (!on_) return -1;
-        if (at && w > 0 && h > 0) {
+        if (!at || w <= 0 || h <= 0) return tile_;
+        {
             if (!haveFrom_) from_[0] = at[0], from_[1] = at[1], haveFrom_ = true;
             int x0, y0, x1, y1;
             Box(int(Tile::SteamMenu), &x0, &y0, &x1, &y1);
@@ -231,6 +233,9 @@ public:
     }
     bool on() const { return on_; }
     int tile() const { return tile_; }   // -1 none
+    // The tile under it at its last point, the palm up or not (-1 off the card): what a release does
+    // (palmmenu lets go only with the palm up), from the last frame it was held, not the release's.
+    int place() const { return on_ ? place_ : -1; }
 
 private:
     bool on_ = false, haveFrom_ = false;

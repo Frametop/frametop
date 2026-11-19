@@ -3020,6 +3020,22 @@ void TestPalmMenuPinch() {
         r.Frame({up});
         CHECK(r.toggles.size() == 2);
     }
+    {   // let go and pinched again in one read: a new pinch (pinchCount), toggled or not (Quick Access's
+        // drag starts afresh on it: council, 2026-11-19)
+        PalmRig r;
+        r.Frames(11, {up});
+        r.Pinch(1, true);
+        r.Frame({up});
+        CHECK(r.menu.pinchCount(1) == 1 && r.menu.pinchCount(0) == 0);
+        r.Pinch(1, false);
+        r.Pinch(1, true);
+        r.Frame({up});
+        CHECK(r.menu.pinched(1) && r.menu.pinchCount(1) == 2 && r.toggles.size() == 1);
+        r.Pinch(1, false);
+        r.Pinch(1, true);
+        r.Frame({up});   // (inside againMs: no toggle)
+        CHECK(r.menu.pinched(1) && r.menu.pinchCount(1) == 3 && r.toggles.size() == 1);
+    }
     {   // a pinch that began and ended between two reads (a quick tap): toggles too
         PalmRig r;
         r.Frames(11, {up});

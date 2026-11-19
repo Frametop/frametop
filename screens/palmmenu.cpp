@@ -123,7 +123,7 @@ void PalmMenu::Update(const Input &in) {
                 ++stats.shows;
                 // a pinch beginning on this very frame: the near report for it says ours
                 if (began && g.down && g.beginNs >= sd.shownNs) {
-                    if (Plain(h)) sd.state = State::Pinched, ++stats.pinches;
+                    if (Plain(h)) sd.state = State::Pinched, ++stats.pinches, ++sd.pinches;
                     else ++stats.notPlain;
                 }
                 break;
@@ -135,7 +135,7 @@ void PalmMenu::Update(const Input &in) {
                     } else {
                         ++stats.pinches;
                         if (g.down) {
-                            sd.state = State::Pinched;
+                            sd.state = State::Pinched, ++sd.pinches;
                             break;
                         }
                         Release(s, g.lost, in.nowNs);   // began and ended between two reads: a tap
@@ -154,7 +154,7 @@ void PalmMenu::Update(const Input &in) {
                 // held: it stays whatever the palm does; the release decides
                 if (began || !g.down) {
                     Release(s, g.lost, in.nowNs);
-                    if (began && g.down && Plain(h)) sd.state = State::Pinched, ++stats.pinches;   // and another began
+                    if (began && g.down && Plain(h)) sd.state = State::Pinched, ++stats.pinches, ++sd.pinches;   // and another began
                 }
                 break;
         }

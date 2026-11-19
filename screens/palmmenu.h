@@ -102,8 +102,11 @@ public:
     bool pinched(int side) const { return side_[side].state == State::Pinched; }
     // That palm passed the palm-up test on the last frame (a pinch let go otherwise does nothing).
     bool up(int side) const { return side_[side].up; }
-    // This Update's pinch released while it showed: do what it lit on the card (UpdatePalmMenu: Steam Menu
-    // unless it was dragged; the side that did it, or -1).
+    // ...and how many pinches have been held on that side: a new one since (council, 2026-11-19: let go
+    // and pinched again in one read, toggled or not) starts its drag afresh.
+    uint32_t pinchCount(int side) const { return side_[side].pinches; }
+    // This Update's pinch released while it showed: do what it lit on the card (vrquick.cpp's
+    // UpdateQuickAccess: Steam Menu unless it was dragged; the side that did it, or -1).
     int toggled() const { return toggled_; }
     // Where the card's centre goes for this side's hand in `hands` (Hands::shown(), moved ahead to now).
     bool Card(int side, const std::vector<handcut::Hand> &hands, double out[3]) const;
@@ -126,6 +129,7 @@ private:
         int64_t quietUntil = 0;              // not shown before this (Params::quietMs)
         uint32_t begins = 0;                 // the pinch slot's begins counter last seen
         bool knowBegins = false;
+        uint32_t pinches = 0;                // pinches held on it (Pinched entered), ever
     };
     const handcut::Hand *HandFor(int side, const std::vector<handcut::Hand> &hands) const;
     // A plain thumb-index pinch by a still hand (Params::plainMiddle).

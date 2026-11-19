@@ -379,10 +379,11 @@ int main() {
         check("down one, left two: Spin Left", d.Step(at(x0, y0 - pitch), w, h, true) == 3);
         check("down one, right one: Spin Right", d.Step(at(x0 + pitch, y0 - pitch), w, h, true) == 4);
         check("down one, right two: Dock Windows", d.Step(at(x0 + 2 * pitch, y0 - pitch), w, h, true) == 5);
-        check("...unseen: still Dock Windows", d.Step(nullptr, w, h, true) == 5);
-        check("the palm turned away: nothing", d.Step(nullptr, w, h, false) == -1 && d.tile() == -1);
-        check("...back up: Dock Windows again", d.Step(nullptr, w, h, true) == 5);
-        check("off the card: nothing", d.Step(at(x0 + 0.2, y0), w, h, true) == -1);
+        check("...unseen (a lost frame's palm isn't up): still Dock Windows", d.Step(nullptr, w, h, false) == 5);
+        check("the palm turned away: nothing lit, Dock Windows under it",
+              d.Step(at(x0 + 2 * pitch, y0 - pitch), w, h, false) == -1 && d.tile() == -1 && d.place() == 5);
+        check("...back up: Dock Windows again", d.Step(at(x0 + 2 * pitch, y0 - pitch), w, h, true) == 5);
+        check("off the card: nothing", d.Step(at(x0 + 0.2, y0), w, h, true) == -1 && d.place() == -1);
         d.End();
         check("let go: done, nothing", !d.on() && d.tile() == -1 && d.Step(at(x0, y0), w, h, true) == -1);
         d.Start();

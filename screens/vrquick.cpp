@@ -5,7 +5,7 @@
 // the pointer helper it's ours), and the card stays though the palm turns as you reach (Input::engaged),
 // as it does for a laser on it (not the mouse's or gaze's cursor, which sits on whatever you look at).
 //   The palm hand's own pinch holds the card still where it was, lights Steam Menu, and moves what's lit
-// as the pinch moves across it (quickaccess::Drag); its release does that tile (UpdatePalmMenu).
+// as the pinch moves across it (quickaccess::Drag); its release does that tile (PinchRelease).
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
@@ -46,6 +46,7 @@ struct {
     int64_t shownMs = -1;
     quickaccess::Drag drag;     // the palm hand's pinch held: what it lights
     Mat dragPose{};             // ...and where the card held still for it
+    uint32_t dragPinch = 0;     // ...and which pinch it is (palmmenu's pinchCount)
     bool lasers = false;        // MakeOverlaysInteractiveIfVisible is set
     float widthSet = -1;        // the width SetOverlayWidthInMeters has
     std::vector<uint8_t> px;                // the card as shown
@@ -214,9 +215,9 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     const int side = g_card.side >= 0 && palm.shown(g_card.side) ? g_card.side : palm.shown(1) ? 1 : palm.shown(0) ? 0 : -1;
     const int released = palm.toggled();   // (a pinch let go this Update, on that side)
     if (g_paused) g_resetAsk.Clear();   // (Reset does nothing then: its ask ends, not waits out the pause)
-    // dragged across, the card holds still where it was, the palm or the head seen this frame or not
-    // (council, 2026-11-19: one lost hands frame hid it and the drag began again on Steam Menu; palmmenu's
-    // lostMs ends a pinch whose hand is gone)
+    // dragged across, the card holds still where it was, the palm seen this frame or not (council,
+    // 2026-11-19: one lost hands frame hid it and the drag began again on Steam Menu; palmmenu's lostMs
+    // ends a pinch whose hand is gone, and no head ends it at once)
     const bool held = side >= 0 && side == g_card.side && g_card.drag.on();
     double c[3];
     const bool card = side >= 0 && in.haveHead && palm.Card(side, *in.shown, c);
@@ -233,17 +234,19 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
         std::printf("palm Quick Access: over the %s palm\n", side ? "right" : "left");
     }
     g_card.w = palm.params().size, g_card.h = g_card.w * quickaccess::kH / quickaccess::kW;
-    // this Update's release: where its drag is now, with this read's pinch point and palm (council,
-    // 2026-11-19: not the last read's); its drag ends, so a pinch begun in the same read starts afresh
+    // this Update's release: the tile under its last held frame, as drawn (council, 2026-11-19: not the
+    // release frame's, whose contact moves as the fingers open; palmmenu let go only with the palm up)
     if (released >= 0) {
         const bool mine = released == side && g_card.drag.on();
-        const int tile = mine ? StepDrag(palm, side) : int(Tile::SteamMenu);
+        const int tile = mine ? g_card.drag.place() : int(Tile::SteamMenu);
         if (mine) g_card.drag.End();
         PinchRelease(released, tile);
     }
-    // (the palm hand's pinch: the card holds still where it was while it's dragged across it)
+    // (the palm hand's pinch: the card holds still where it was while it's dragged across it; a new
+    // pinch, let go and pinched again in one read whether it did anything or not, starts afresh)
     if (!palm.pinched(side)) g_card.drag.End();
-    else if (!g_card.drag.on()) g_card.drag.Start(), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
+    else if (!g_card.drag.on() || palm.pinchCount(side) != g_card.dragPinch)
+        g_card.drag.Start(), g_card.dragPinch = palm.pinchCount(side), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
     if (g_card.drag.on()) StepDrag(palm, side);   // (each tick: HandsFrame() is the last tick's news)
     g_card.pose = g_card.drag.on() ? g_card.dragPose : card ? FacingPose(c, in.head) : g_card.pose;
     if (float(g_card.w) != g_card.widthSet) {

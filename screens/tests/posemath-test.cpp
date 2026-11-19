@@ -1,4 +1,4 @@
-// ft-screens' pose math (screens/posemath.h): rigid poses, PanelPose, RollZ, LevelRoll, RollLever and FacingPose.
+// ft-screens' pose math (screens/posemath.h): rigid poses, PanelPose, RollZ, LevelRoll, RollLever/OnLever and FacingPose.
 #include "../posemath.h"
 
 #include <cmath>
@@ -130,30 +130,62 @@ int main() {
     check("Inverse: q * q^-1 is the identity", same(Mul(q, Inverse(q)), I) && same(Mul(Inverse(q), q), I));
     const M b = Mul(Translation<M>(0, 0, -1), Translation<M>(0, 2, 0));
     check("Mul: translations add", near(b.m[1][3], 2) && near(b.m[2][3], -1));
-    // Rotate's lever: a 5 cm sweep right turns the panel the same way wherever the row was pressed (the
-    // bar's menu on any edge, any width), far enough not to count as a click (3 degrees, 1.5 cm round:
-    // vr.cpp's RollClick), clockwise held at the top, counterclockwise at the bottom (council, 2026-11-18).
+    // Rotate's lever: a 5 cm sweep right turns the panel the same way wherever on the panel the row was
+    // pressed (the bar's menu on any edge, any width, a tiny panel's too), far enough not to count as a
+    // click (3 degrees, 1.5 cm round: vr.cpp's RollClick), clockwise held at the top, counterclockwise at
+    // the bottom (council, 2026-11-18).
+    auto angle = [](const Lever &l, double hx, double hy) {
+        double x, y;
+        OnLever(l, hx, hy, &x, &y);
+        return std::atan2(y, x);
+    };
     {
         int sweeps = 0, ok = 0;
         for (bool top : {false, true})
-            for (double edge : {0.15, 0.2, 0.41})
+            for (double edge : {0.02, 0.06, 0.15, 0.2, 0.41})
                 for (double hx = -0.8; hx <= 0.801; hx += 0.1)
                     for (double hy = -0.3; hy <= 0.301; hy += 0.1) {
-                        double lx, ly;
-                        RollLever(hx, hy, top ? edge : -edge, top, &lx, &ly);
-                        const double a0 = std::atan2(hy + ly, hx + lx), a1 = std::atan2(hy + ly, hx + 0.05 + lx);
-                        const double turn = std::remainder(a1 - a0, 2 * M_PI), r = std::hypot(hx + lx, hy + ly);
+                        const Lever l = RollLever(hx, hy, top ? edge : -edge, top);
+                        const double turn = std::remainder(angle(l, hx + 0.05, hy) - angle(l, hx, hy), 2 * M_PI);
+                        const double r = std::fabs(l.knob);
                         ++sweeps;
                         ok += (top ? turn < 0 : turn > 0) && std::fabs(turn) >= 3 * M_PI / 180 && std::fabs(turn) * r >= 0.015;
                     }
         std::printf("Rotate's lever: %d of %d sweeps right turned the way the edge held goes\n", ok, sweeps);
-        check("RollLever: every press spot turns the panel the same way, not a click", ok == sweeps);
-        double lx, ly;
-        RollLever(0.3, 0.1, -0.2, false, &lx, &ly);
+        check("RollLever: pressed anywhere within 0.8 m of the centre, a sweep turns it the edge's way, not a click", ok == sweeps);
+        Lever l = RollLever(0.3, 0.1, -0.2, false);
+        double x, y;
+        OnLever(l, 0.3, 0.1, &x, &y);
         check("RollLever: the spot goes straight below the centre, as far out as it was",
-              near(0.3 + lx, 0) && near(0.1 + ly, -std::hypot(0.3, 0.1)));
-        RollLever(0.05, 0.0, 0.41, true, &lx, &ly);
-        check("RollLever: near the middle, out to the bar's edge", near(0.05 + lx, 0) && near(ly, 0.41));
+              near(x, 0) && near(y, -std::hypot(0.3, 0.1)) && near(l.knob, y));
+        l = RollLever(0.05, 0.0, 0.41, true);
+        OnLever(l, 0.05, 0.0, &x, &y);
+        check("RollLever: near the middle, out to the bar's edge", near(x, 0) && near(y, 0.41));
+        l = RollLever(0.01, 0.0, -0.03, false);
+        check("RollLever: a tiny panel's lever is kLeastLever long", near(l.knob, -kLeastLever));
+        // The laser drifting up or down past the lever's length as it starts a sweep (5 cm right, `drift`
+        // up), then swept on 30 cm right: the turn only ever goes the knob's way, and never jumps (no
+        // step over 20 degrees for a 1 cm step of the laser). Without the clamp the knob went through the
+        // centre: the drift spun it round and the sweep after turned it back.
+        int drifts = 0, steady = 0;
+        for (bool top : {false, true})
+            for (double edge : {0.06, 0.2, 0.41})
+                for (double drift : {-1.0, -0.5, -0.3, 0.3, 0.5, 1.0}) {
+                    const Lever d = RollLever(0.1, 0.05, top ? edge : -edge, top);
+                    double last = angle(d, 0.1, 0.05);
+                    bool fine = true;
+                    auto to = [&](double hx, double hy) {
+                        const double a = angle(d, hx, hy), step = std::remainder(a - last, 2 * M_PI);
+                        fine = fine && (top ? step <= 1e-9 : step >= -1e-9) && std::fabs(step) < 20 * M_PI / 180;
+                        last = a;
+                    };
+                    const int n = int(std::fabs(drift) * 100);
+                    for (int k = 1; k <= n; ++k) to(0.1 + 0.05 * k / n, 0.05 + drift * k / n);
+                    for (int k = 1; k <= 30; ++k) to(0.15 + 0.01 * k, 0.05 + drift);
+                    ++drifts, steady += fine;
+                }
+        std::printf("Rotate's lever: %d of %d drifting sweeps turned one way, smoothly\n", steady, drifts);
+        check("OnLever: a laser drifting up or down through the centre doesn't turn it back", steady == drifts);
     }
     return failed ? 1 : 0;
 }

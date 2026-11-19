@@ -140,7 +140,6 @@
 #include "barhit.h"
 #include "chromepool.h"
 #include "panelmenu.h"
-#include "tiptap.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
 #include "steamshrink.h"
@@ -1604,9 +1603,10 @@ bool RollSpot(const Screen &s, const Mat &d, double *hx, double *hy) {
 bool RollLaserAngle(const Screen &s, const Mat &d, double *rad, double *radius = nullptr) {
     double hx, hy;
     if (!RollSpot(s, d, &hx, &hy)) return false;
-    hx += s.rollLeverX, hy += s.rollLeverY;
-    *rad = std::atan2(hy, hx);
-    if (radius) *radius = std::hypot(hx, hy);
+    double x, y;
+    posemath::OnLever(s.rollLever, hx, hy, &x, &y);
+    *rad = std::atan2(y, x);
+    if (radius) *radius = std::hypot(x, y);
     return true;
 }
 
@@ -1616,12 +1616,11 @@ bool RollLaserAngle(const Screen &s, const Mat &d, double *rad, double *radius =
 // knob held at its top middle would with a top bar, at its bottom middle with any other
 // (posemath::RollLever): the laser's spot moved there, and moving with the laser after.
 bool RollLever(Screen &s, const Mat &l) {
-    s.rollLeverX = s.rollLeverY = 0;
+    s.rollLever = {};
     double hx, hy;
     if (!RollSpot(s, l, &hx, &hy)) return false;
-    const bool top = s.barSide == barside::Side::Top;
-    const barside::UV bar = barside::Place(top ? barside::Side::Top : barside::Side::Bottom, s.metres, s.heightMetres(), BarIn(s), 0);
-    posemath::RollLever(hx, hy, bar.v, top, &s.rollLeverX, &s.rollLeverY);
+    // (the bar's line, a top or bottom bar's: half the height, less how far in it sits)
+    s.rollLever = posemath::RollLever(hx, hy, s.heightMetres() / 2 - BarIn(s), s.barSide == barside::Side::Top);
     return true;
 }
 
@@ -1894,6 +1893,8 @@ void FinishDrag(Screen &s, int index) {
     const bool moved = s.drag == Drag::Move, resized = s.drag == Drag::Resize;
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
     const int dockOn = s.dockOn;
+    const bool tapped = s.barTapped;   // (BarTap put it back where it was: nothing to re-arrange)
+    s.barTapped = false;
     EndDrag(s);
     if (resized && TileTiled(index)) return TileResized(s, index);
     if (resized) FaceAfterResize(s, index);
@@ -1917,7 +1918,7 @@ void FinishDrag(Screen &s, int index) {
                   std::to_string(s.dockY) + " " + std::to_string(s.dockGX) + " " + std::to_string(s.dockGY));
         return;
     }
-    if (s.Desktop()) ArrangeDesktopSoon();
+    if (s.Desktop() && !tapped) ArrangeDesktopSoon();
     if (target != kNone && ScreenPose(s, &p) && PinAt(s, target, p)) {
         if (target == vr::k_unTrackedDeviceIndex_Hmd) std::printf("screen %d: pinned to the head\n", index + 1);
         else if (target == kDashboard)
@@ -1979,7 +1980,7 @@ bool BarTap(Screen &s, vr::TrackedDeviceIndex_t dev) {
     const double turned = std::acos(std::clamp(dot, -1.0, 1.0));
     if (!panelmenu::IsTap(NowMs() - at, moved, turned)) return false;
     SetAbsolute(s, s.barPressPose, s.barPressUniverse);
-    s.dockOn = -1, s.pinTarget = s.barPressPinned, s.onWrist = kNone;
+    s.dockOn = -1, s.pinTarget = s.barPressPinned, s.onWrist = kNone, s.barTapped = true;
     return true;
 }
 
@@ -4150,9 +4151,9 @@ void GrabThatReset() {
     for (auto &[i, s] : g_screens) s.hasBefore = false;
 }
 
-void HideResetAsk();
 void DoReset(int panel, const char *how) {
-    std::printf("screen %d: reset the layout (%s)\n", panel + 1, how);
+    if (panel >= 0) std::printf("screen %d: reset the layout (%s)\n", panel + 1, how);
+    else std::printf("reset the layout (%s)\n", how);
     HideResetAsk();
     GrabThatReset();
     RunLayout("reset");
@@ -4498,113 +4499,6 @@ void UpdateCarousel() {
         g_carousel.shownMs = -1;
     } else if (age > kCarouselMs - kCarouselFadeMs) {
         vr::VROverlay()->SetOverlayAlpha(g_carousel.overlay, float(double(kCarouselMs - age) / kCarouselFadeMs));
-    }
-}
-
-// ---------------------------------------------------------------- the reset confirmation
-// Reset Layout... in a panel's bar menu asks first (user, 2026-10-13: "add a confirmation dialogue you have to
-// tap to reset the displays"; then for a hand's tap only, now for a laser's click too: the reset button became
-// a menu row, 2026-11-18, and one click there is as easy to make by mistake as a stray poke was): "Reset the
-// layout?" shows over the panel beside its bar for kResetAskMs, and a click or a fingertip's tap on it resets.
-struct ResetAsk {
-    int panel = -1;
-    int64_t shownMs = -1;
-    vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
-    double w = 0, h = 0;                  // its size now (m)
-    Mat pose{};                           // ...and where it is
-    tiptap::Tap tip[2];                   // each index tip's way through it
-    int px = 0;                           // its width in pixels
-    bool lasers = false;                  // MakeOverlaysInteractiveIfVisible is set
-} g_resetAsk;
-constexpr int64_t kResetAskMs = 5000, kResetAskLeastMs = 300;   // (the least: the press that opened it isn't the answer)
-constexpr int kResetAskH = 84;
-constexpr const char *kResetAskKey = "frametop.resetask", *kResetAskText = "Reset the layout? Tap to confirm";
-
-void HideResetAsk() {
-    if (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid) PinHide(g_resetAsk.overlay);
-    g_resetAsk.panel = -1, g_resetAsk.shownMs = -1;
-}
-
-// Beside the bar's middle, toward the panel's middle (where its menu was), and at least a finger's size.
-bool PlaceResetAsk(Screen &s) {
-    Mat p, head;
-    if (!ScreenPose(s, &p)) return false;
-    const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
-    g_resetAsk.h = std::max(0.00045 * d * kResetAskH, 1.4 * s.grip);
-    g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
-    const barside::UV at = barside::MenuAt(s.barSide, BarSpot(s, 0), barhit::Height(s.chrome, g_barPaddingY) / 2,
-                                           std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
-    g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, 0.004));
-    const vr::VROverlayHandle_t o = g_resetAsk.overlay;
-    vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));
-    vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &g_resetAsk.pose);
-    if (g_resetAsk.lasers != s.lasers) {
-        g_resetAsk.lasers = s.lasers;
-        vr::VROverlay()->SetOverlayFlag(o, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, s.lasers);
-    }
-    return true;
-}
-
-void ShowResetAsk(int panel) {
-    const auto it = g_screens.find(panel);
-    if (it == g_screens.end()) return;
-    const int H = kResetAskH, W = label::Width(kResetAskText, 32) + 2 * 40;
-    std::vector<uint8_t> px(size_t(W) * H * 4, 0);
-    const uint8_t bg[4] = {196, 52, 48, 240}, fg[3] = {255, 255, 255};
-    FillRound(px, W, H, 2, 2, W - 2, H - 2, (H - 4) / 2, bg);
-    label::Draw(px.data(), W, H, kResetAskText, 32, W / 2, H / 2, 255, fg);
-    if (g_resetAsk.overlay == vr::k_ulOverlayHandleInvalid) {
-        if (vr::VROverlay()->CreateOverlay(kResetAskKey, "Frametop: reset the layout?", &g_resetAsk.overlay) != vr::VROverlayError_None) {
-            g_resetAsk.overlay = vr::k_ulOverlayHandleInvalid;
-            return;
-        }
-        vr::VROverlay()->SetOverlayInputMethod(g_resetAsk.overlay, vr::VROverlayInputMethod_Mouse);
-        vr::VROverlay()->SetOverlaySortOrder(g_resetAsk.overlay, 10);
-        AnnounceOverlay(kResetAskKey);   // (the 3D mouse's ray finds it)
-    }
-    overlaytex::Set(g_resetAsk.overlay, px.data(), W, H);
-    const vr::HmdVector2_t scale = {{float(W), float(H)}};
-    vr::VROverlay()->SetOverlayMouseScale(g_resetAsk.overlay, &scale);
-    g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs(), g_resetAsk.px = W;
-    for (tiptap::Tap &t : g_resetAsk.tip) t.Reset();
-    if (!PlaceResetAsk(it->second)) return HideResetAsk();
-    PinShow(g_resetAsk.overlay);
-    std::printf("screen %d: reset the layout? (asks, %.0f s)\n", panel + 1, kResetAskMs / 1000.0);
-}
-
-// Each tick: it follows its panel, and goes after kResetAskMs; each hands frame, an index tip coming through
-// it from the front is the tap.
-void UpdateResetAsk() {
-    if (g_resetAsk.panel < 0) return;
-    const auto it = g_screens.find(g_resetAsk.panel);
-    if (it == g_screens.end() || !it->second.visible || NowMs() - g_resetAsk.shownMs >= kResetAskMs) {
-        if (it != g_screens.end()) std::printf("screen %d: reset the layout? not confirmed: no reset\n", g_resetAsk.panel + 1);
-        return HideResetAsk();
-    }
-    if (!PlaceResetAsk(it->second)) return HideResetAsk();
-    if (!g_handInput.newFrame()) return;
-    for (int k = 0; k < 2; ++k) {
-        double l[3];
-        const bool seen = IndexTipIn(k, g_resetAsk.pose, l);
-        if (g_resetAsk.tip[k].Step(seen ? l : nullptr, g_resetAsk.w / 2, g_resetAsk.h / 2) &&
-            NowMs() - g_resetAsk.shownMs >= kResetAskLeastMs) {
-            const int panel = g_resetAsk.panel;
-            return DoReset(panel, k ? "the right hand, confirmed" : "the left hand, confirmed");
-        }
-    }
-}
-
-// Its input: a click on it resets (not the press that asked, if it lands here: kResetAskLeastMs).
-void PollResetAsk(void (*handle)(const struct ft_event *, void *), void *data) {
-    vr::VREvent_t ev;
-    while (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_resetAsk.overlay, &ev, sizeof ev)) {
-        if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left && g_resetAsk.panel >= 0 &&
-            NowMs() - g_resetAsk.shownMs >= kResetAskLeastMs) {
-            DoReset(g_resetAsk.panel, ("confirmed by the " + DeviceLabel(ev.trackedDeviceIndex)).c_str());
-        } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-            EndDragsBy(ev.trackedDeviceIndex);
-            ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-        }
     }
 }
 

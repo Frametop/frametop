@@ -159,18 +159,37 @@ bool FaceAbout(const M &p, double kx, double ky, const M &turn, const M &head, M
     return false;
 }
 
-// Rotate's lever (the bar menu's held row, vr.cpp's RollLever): what to add to the laser's spot (hx, hy:
-// on the panel's plane, from its centre, metres) so the panel turns as a knob held at its top or bottom
-// middle would, wherever on the panel the row was pressed. The spot goes straight above the centre
-// (`top`) or below it, `edge` out (the bar's distance from the centre there) or as far out as it already
-// was if that's farther (no twitchier than the laser held where it is). Then a sideways sweep goes
-// round the centre, not out from it: right turns the panel clockwise held at the top, counterclockwise
-// at the bottom, the edge held following the laser. Held at a side bar's middle a sweep ran straight
-// out and didn't turn it (council, 2026-11-18).
-inline void RollLever(double hx, double hy, double edge, bool top, double *lx, double *ly) {
-    const double r = std::fmax(std::fabs(edge), std::hypot(hx, hy));
-    *lx = -hx;
-    *ly = (top ? r : -r) - hy;
+// Rotate's lever (the bar menu's held row, vr.cpp's RollLever): the panel turns as a knob held at its
+// top or bottom middle would, wherever on the panel the row was pressed. At the press, the laser's spot
+// (hx, hy: on the panel's plane, from its centre, metres) goes straight above the centre (`top`) or
+// below it: `edge` out (the bar's distance from the centre there), as far out as it already was if
+// that's farther (no twitchier than the laser held where it is), and kLeastLever at least (a small
+// panel's bar is near its centre, where a 2 mm wobble is degrees). A sideways sweep then goes round the
+// centre, not out from it: right turns the panel clockwise held at the top, counterclockwise at the
+// bottom, the edge held following the laser. Held at a side bar's middle a sweep ran straight out and
+// didn't turn it (council, 2026-11-18).
+struct Lever {
+    double x = 0, y = 0;   // added to the laser's spot
+    double knob = 0;       // where the knob was held: its y then (+ above the centre, - below)
+};
+constexpr double kLeastLever = 0.12;
+inline Lever RollLever(double hx, double hy, double edge, bool top) {
+    const double r = std::fmax(kLeastLever, std::fmax(std::fabs(edge), std::hypot(hx, hy)));
+    Lever l;
+    l.knob = top ? r : -r;
+    l.x = -hx, l.y = l.knob - hy;
+    return l;
+}
+// The knob now, for the laser's spot (hx, hy): moved by the lever, and kept on its side of the centre,
+// at least half the lever out. A laser drifting up or down as it sweeps (more than the lever's length)
+// took the knob through the centre, where the turn spun round and swept the other way after (council,
+// 2026-11-18). A sweep still turns it: up to about 90 degrees each way, as a knob turned without
+// letting go.
+inline void OnLever(const Lever &l, double hx, double hy, double *x, double *y) {
+    *x = hx + l.x;
+    *y = hy + l.y;
+    if (l.knob < 0) *y = std::fmin(*y, l.knob / 2);
+    else if (l.knob > 0) *y = std::fmax(*y, l.knob / 2);
 }
 
 // A point `q` in a panel's own frame (x right, y up, z out of its front, metres) on its surface:

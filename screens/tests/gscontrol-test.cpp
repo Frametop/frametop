@@ -2,7 +2,7 @@
 // window it's on (a dialog's own); a press giving that window the typing, a click elsewhere taking
 // it; keys only to a shown panel (PIN lock too); everything held let go of when it goes off.
 //
-//   g++ -std=c++17 -Iscreens screens/tests/gscontrol-test.cpp
+//   g++ -std=c++17 -Iscreens screens/tests/gscontrol-test.cpp screens/gsforward.cpp $(pkg-config --cflags --libs xcb xcb-xtest xcb-icccm)
 #include "gscontrol.h"
 
 #include <cstdio>

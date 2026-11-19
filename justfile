@@ -324,7 +324,8 @@ test-c:
     run screens/tests/steamshrink-test.cpp build/tests/steamshrink-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/cdpwire-test.cpp -o build/tests/cdpwire-test
     run screens/tests/cdpwire-test.cpp build/tests/cdpwire-test
-    g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gscontrol-test.cpp -o build/tests/gscontrol-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gscontrol-test.cpp screens/gsforward.cpp \
+      $(pkg-config --cflags --libs xcb xcb-xtest xcb-icccm) -o build/tests/gscontrol-test
     run screens/tests/gscontrol-test.cpp build/tests/gscontrol-test
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gstheater-test.cpp -o build/tests/gstheater-test
     run screens/tests/gstheater-test.cpp build/tests/gstheater-test

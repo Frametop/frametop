@@ -40,16 +40,17 @@ def P(out, *sources, flags, test=True, **kw):
     return Program(out, tuple(sources), flags, test=sources[0] if test is True else (test or None), **kw)
 
 
-def single(path, flags, cflags="", out=None):
+def single(path, flags, cflags="", out=None, **kw):
     """A one-file test named after its file, compiled by gcc (a .c) or g++."""
     return P(out or os.path.splitext(os.path.basename(path))[0], path, flags=flags, cflags=cflags,
-             cc="gcc" if path.endswith(".c") else "g++")
+             cc="gcc" if path.endswith(".c") else "g++", **kw)
 
 
 def py(path, *programs):
-    """A Together loopback test: a Python script run with the programs it drives."""
+    """A Together loopback test: a Python script run with the programs it drives, and the room's
+    Python tools (together/ft-room*, ...), which read conf/'s modules."""
     return Check(path, ("python3", path, *(f"build/tests/{p}" for p in programs)), needs=programs,
-                 watch=("together/tests",))
+                 watch=("together", "conf"))
 
 
 def prepare(root):
@@ -62,8 +63,8 @@ def items(root, env=os.environ):
     openvr = env.get("OPENVR_LIB") or "/opt/steamvr/bin/linuxarm64"
     has = lambda p: os.path.exists(os.path.join(root, p))   # noqa: E731
     out = [
-        Check("screens/tests/screen-scale-test.c", ("scripts/test-screen-scale.sh",),
-              watch=("screens/tests/screen-scale-test.c",)),
+        Check("screens/tests/screen-scale-test.c", ("scripts/test-screen-scale.sh",),   # it compiles the test
+              watch=("screens/tests/screen-scale-test.c", "screens/screen-scale.h")),
         single("screens/tests/barhit-test.cpp", CXX),
         single("screens/tests/resizecorner-test.cpp", CXX),
         single("pointer/tests/overlayregion-test.cpp", CXX),
@@ -175,7 +176,7 @@ def items(root, env=os.environ):
         P("ft-clip", "stream/ft-clip.c", "build/tests/wlr-data-control-protocol.c", cc="gcc", flags=GNU11, test=False,
           cflags="-DFT_CLIP_MAX=262144 -DFT_CLIP_MAX_IMAGE=262144 -Ibuild/tests", pkgs="wayland-client"),
         P("ft-clip-test", "stream/test/ft-clip-test.c", cc="gcc", flags=GNU11, pkgs="wlroots-0.20 wayland-server",
-          args=("build/tests/ft-clip",)),
+          args=("build/tests/ft-clip",), needs=("ft-clip",)),
         P("eyegrab-files-test", "gaze/tracker/tests/eyegrab-files-test.c", cc="gcc",
           flags="-std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread"),
     ]
@@ -198,8 +199,9 @@ def items(root, env=os.environ):
         P("gslink-test", "screens/tests/gslink-test.cpp", "screens/gslink.cpp", "screens/gsforward.cpp",
           flags=f"{CXX2} -pthread", cflags="-Iscreens", pkgs=XCB),
     ]
-    for name in ("universefix", "posemath", "roomshift", "layoutgrab", "chromepool", "vrcmd", "windowdrag", "wallimage"):
+    for name in ("universefix", "posemath", "roomshift", "layoutgrab", "chromepool", "vrcmd", "windowdrag"):
         out.append(single(f"screens/tests/{name}-test.cpp", CXX2))
+    out.append(single("screens/tests/wallimage-test.cpp", CXX2, watch=("screens/handrender.cpp",)))   # reads it
     # stb_truetype.h, pinned, fetched once (prepare()); without it (no network) only this
     # test fails
     if has("build/include/stb_truetype.h"):

@@ -2,14 +2,17 @@
 """`just test-changed [BASE]`: the tests a change since the last green `just test` reaches, for the
 loop while working; `just test` is still the gate before a push.
 
-`just test` writes the commit it passed on to build/tests/last-green (`--mark-green`). This
-compares the tree as it is now (commits, edits, new files) with that commit, or with BASE, and
-runs:
+`just test` writes the commit it passed on to build/tests/last-green (`--mark-green`), with the
+paths that were edited and not committed then: they count as changed every time, since what
+was tested isn't in git. This compares the tree as it is now (commits, edits, new files) with
+that commit, or with BASE, and runs:
 
-- lint and the shell scripts' syntax check, always (seconds);
+- lint, the shell scripts' syntax check and the tests that read the whole repo (ALWAYS: docs'
+  links), always (seconds);
 - the Python test files (scripts/testgate/python-suites.txt) in a folder that changed, or whose
-  text names a changed file (its name without the extension, as a word); all of them when a
-  file everything reads changed (FULL_PYTHON);
+  text names a changed file (its name, with or without the extension, as a word); the apps'
+  import check when a Python file changed; all of them when a file everything reads changed
+  (FULL_PYTHON);
 - the C/C++ tests the change reaches (scripts/testgate/ctests.py --changed);
 - Full Keyboard's ctest, the testbench's tests, fast-install's test and session/tests when
   their folders changed.
@@ -23,6 +26,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cbuild import under  # noqa: E402
+
 TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STAMP = "build/tests/last-green"
 SUITES = "scripts/testgate/python-suites.txt"
@@ -31,11 +37,11 @@ FULL = ("justfile", "pyproject.toml", "uv.lock", "setup/packages.txt", "pack/", 
         "scripts/_env.sh")
 # read by nearly every Python program: every Python test file runs
 FULL_PYTHON = ("conf/",)
-STEM_MIN = 4    # shorter names ("run", "app") are in every file
-
-
-def _under(path, roots):
-    return any(path == r.rstrip("/") or path.startswith(r.rstrip("/") + "/") for r in roots)
+STEM_MIN = 4    # shorter names ("run", "app") are in every file: "run.sh" is looked for instead
+# read every doc or every file in the repo: a rename anywhere can break them
+ALWAYS = ("docs/tests/test_doc_links.py",)
+# imports every app: a change to any Python module can break it
+ON_PYTHON = ("scripts/tests/test_app_imports.py",)
 
 
 def git(*args):
@@ -47,11 +53,20 @@ def git(*args):
     return p.stdout
 
 
-def changed_since(base):
-    """Repo paths that differ from base: committed since, edited, deleted or new (untracked)."""
-    paths = set(git("diff", "--name-only", base, "--").split())
-    paths |= set(git("ls-files", "--others", "--exclude-standard").split())
-    return sorted(paths)
+def _paths(out):
+    return {p for p in out.split("\0") if p}
+
+
+def dirty():
+    """Repo paths that differ from HEAD: edited, deleted or new (untracked)."""
+    return _paths(git("diff", "-z", "--name-only", "HEAD", "--")) | \
+        _paths(git("ls-files", "-z", "--others", "--exclude-standard"))
+
+
+def changed_since(base, also=()):
+    """Repo paths that differ from base (committed since, edited, deleted or new), and also."""
+    return sorted(_paths(git("diff", "-z", "--name-only", base, "--"))
+                  | _paths(git("ls-files", "-z", "--others", "--exclude-standard")) | set(also))
 
 
 def python_files(root=TREE):
@@ -67,15 +82,16 @@ def python_files(root=TREE):
 
 def pick_python(files, changed, root=TREE):
     """The test files of files a change reaches: same top folder, or a changed file's name in it."""
-    if any(_under(c, FULL_PYTHON) for c in changed):
+    if any(under(c, FULL_PYTHON) for c in changed):
         return list(files)
     tops = {c.split("/", 1)[0] for c in changed if "/" in c}
-    stems = {os.path.splitext(os.path.basename(c))[0] for c in changed}
-    words = re.compile(r"\b(" + "|".join(sorted(map(re.escape, (s for s in stems if len(s) >= STEM_MIN)))) + r")\b") \
-        if any(len(s) >= STEM_MIN for s in stems) else None
+    names = {n for c in changed for n in (os.path.basename(c), os.path.splitext(os.path.basename(c))[0])
+             if len(n) >= STEM_MIN}
+    words = re.compile(r"(?<![\w-])(" + "|".join(sorted(map(re.escape, names))) + r")(?![\w-])") if names else None
+    always = set(ALWAYS) | (set(ON_PYTHON) if any(c.endswith(".py") for c in changed) else set())
     picked = []
     for f in files:
-        if f.split("/", 1)[0] in tops or f in changed:
+        if f.split("/", 1)[0] in tops or f in changed or f in always:
             picked.append(f)
             continue
         if words:
@@ -90,7 +106,7 @@ def pick_python(files, changed, root=TREE):
 
 def plan(changed, root=TREE):
     """[(what, argv, stdin)]: the runs the change calls for, or None for `just test`."""
-    if any(_under(c, FULL) for c in changed):
+    if any(under(c, FULL) for c in changed):
         return None
     py = pick_python(python_files(root), changed, root)
     runs = [("lint", ["just", "lint"], None), ("shell scripts", ["just", "test-bash"], None)]
@@ -98,27 +114,41 @@ def plan(changed, root=TREE):
         runs += [("countdown headers", ["layout/countdown/deps.sh"], None),
                  (f"{len(py)} Python test files", ["python3", "scripts/testgate/testgate.py", "--times",
                                                    "build/tests/times-python.json", *py], None)]
-    if any(_under(c, ("session",)) for c in changed):
+    if any(under(c, ("session",)) for c in changed):
         runs.append(("session/tests", ["pytest", "-q", "session/tests"], None))
     runs.append(("C/C++ tests", ["python3", "scripts/testgate/ctests.py", "--changed", "-"], "\n".join(changed)))
-    for roots, recipe in ((("keyboard", "scripts/openvr.sh"), "test-keyboard"), (("testbench",), "test-testbench"),
+    for roots, recipe in ((("keyboard", "scripts/openvr.sh"), "test-keyboard"),
+                          (("testbench", ".claude/skills/verify-frametop"), "test-testbench"),
                           (("scripts/fast-install", "scripts/tests/test_fast_install.py"), "test-fast-install")):
-        if any(_under(c, roots) for c in changed):
+        if any(under(c, roots) for c in changed):
             runs.append((recipe, ["just", recipe], None))
     return runs
 
 
 def mark_green():
+    """Record HEAD and the paths edited since (what was tested that git doesn't have)."""
     try:
         head = git("rev-parse", "HEAD").strip()
+        edited = sorted(dirty())
     except (RuntimeError, OSError):
         print("last green: not recorded (no git here); `just test-changed` will run everything")
         return 0
     os.makedirs(os.path.join(TREE, os.path.dirname(STAMP)), exist_ok=True)
     with open(os.path.join(TREE, STAMP), "w") as f:
-        f.write(head + "\n")
-    print(f"last green: {head[:12]} (build/tests/last-green; `just test-changed` starts from it)")
+        f.write("".join(f"{line}\n" for line in (head, *edited)))
+    print(f"last green: {head[:12]}" + (f" and {len(edited)} edited paths" if edited else "")
+          + " (build/tests/last-green; `just test-changed` starts from it)")
     return 0
+
+
+def read_green():
+    """(commit, edited paths) from the last green run, or None."""
+    try:
+        with open(os.path.join(TREE, STAMP)) as f:
+            lines = [line.strip() for line in f if line.strip()]
+    except OSError:
+        return None
+    return (lines[0], lines[1:]) if lines else None
 
 
 def full(why):
@@ -129,15 +159,11 @@ def full(why):
 def main(argv):
     if argv[:1] == ["--mark-green"]:
         return mark_green()
-    base = argv[0] if argv else None
+    base, also = (argv[0], ()) if argv else (read_green() or (None, ()))
     if base is None:
-        try:
-            with open(os.path.join(TREE, STAMP)) as f:
-                base = f.read().strip()
-        except OSError:
-            return full("no green `just test` recorded yet")
+        return full("no green `just test` recorded yet")
     try:
-        changed = changed_since(base)
+        changed = changed_since(base, also)
     except (RuntimeError, OSError) as e:
         return full(str(e))
     if not changed:
@@ -145,7 +171,7 @@ def main(argv):
         return 0
     runs = plan(changed)
     if runs is None:
-        return full("a change to what decides the tests (" + ", ".join(c for c in changed if _under(c, FULL)) + ")")
+        return full("a change to what decides the tests (" + ", ".join(c for c in changed if under(c, FULL)) + ")")
     print(f"test-changed: {len(changed)} paths changed since {base[:12]}: " + ", ".join(w for w, _, _ in runs),
           flush=True)
     failed = []

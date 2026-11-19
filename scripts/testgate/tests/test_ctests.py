@@ -8,6 +8,7 @@ Made-up C programs in a temp folder, built with gcc and ninja.
 """
 import io
 import os
+import unittest.mock
 import shutil
 import sys
 import tempfile
@@ -19,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import cbuild  # noqa: E402
 import changed  # noqa: E402
 import ctests  # noqa: E402
+import jobs  # noqa: E402
 from cbuild import Check, Fail, Generate, Program, Skip  # noqa: E402
 
 C = "-std=c11 -Wall -Werror"
@@ -126,6 +128,49 @@ class CTests(unittest.TestCase):
         self.assertEqual(r.status, 1)
         self.assertEqual(r.out.getvalue().splitlines(), ["wait-1: ok", "wait-0.1: FAILED", "said-0.1", "wait-0: ok"])
 
+    def test_a_helper_a_test_runs_counts_as_its_input(self):
+        self.file("helper.c", "int main(void) { return 0; }\n")
+        self.file("runner.c", '#include <stdlib.h>\n#include <stdio.h>\nint main(int c, char **v) '
+                  '{ char cmd[256]; snprintf(cmd, sizeof cmd, "%s", v[1]); return system(cmd) ? 1 : 0; }\n')
+        helper = Program("helper", ("helper.c",), C, cc="gcc")
+        runner = Program("runner", ("runner.c",), C, cc="gcc", test="runner.c", args=("build/tests/helper",),
+                         needs=("helper",))
+        self.run_items([helper, runner])
+        self.assertEqual(self.run_items([helper, runner], changed=["helper.c"])[1].splitlines(), ["runner.c: ok"])
+        # a helper that can't build fails what runs it, even with an old binary left
+        gone = Program("helper", ("helper.c",), C, cc="gcc", pkgs="no-such-package-ft")
+        r, out = self.run_items([gone, runner])
+        self.assertEqual(r.status, 1)
+        self.assertIn("runner.c: FAILED (needs helper, which didn't build)", out)
+
+    def test_a_file_a_test_reads_counts_and_a_first_build_runs(self):
+        p = [Program("a", ("a.c", "lib.c"), C, cc="gcc", test="a.c", watch=("data/table.txt",))]
+        # no build before this one: no record of what it reads, so it runs
+        self.assertEqual(self.run_items(p, changed=["elsewhere.txt"])[1].splitlines(), ["a.c: ok"])
+        self.assertEqual(self.run_items(p, changed=["elsewhere.txt"])[1].splitlines(), [])
+        self.assertEqual(self.run_items(p, changed=["data/table.txt"])[1].splitlines(), ["a.c: ok"])
+
+    def test_a_generated_header_counts_through_what_its_made_from(self):
+        self.file("gen.sh", 'cat proto.txt > "$1"\n')
+        self.file("proto.txt", "#define ANSWER 42\n")
+        self.file("g.c", '#include "build/tests/gen.h"\nint main(void) { return ANSWER == 42 ? 0 : 1; }\n')
+        items = [Generate("build/tests/gen.h", ("sh", "gen.sh", "{out}"), watch=("proto.txt", "gen.sh")),
+                 Program("g", ("g.c",), C + " -I.", cc="gcc", test="g.c")]
+        self.run_items(items)
+        self.file("proto.txt", "#define ANSWER 41\n")
+        r, out = self.run_items(items, changed=["proto.txt"])
+        self.assertEqual((r.status, out.splitlines()), (1, ["g.c: FAILED"]))
+
+    def test_a_test_that_cant_start_fails_alone_and_ninja_status_doesnt_matter(self):
+        items = [Check("gone", ("./no-such-program-ft",)), Program("bad", ("bad.c",), C, cc="gcc", test="bad.c")] \
+            + self.programs()
+        with unittest.mock.patch.dict(os.environ, NINJA_STATUS="%p "):
+            r, out = self.run_items(items)
+        self.assertEqual(r.status, 1)
+        self.assertIn("gone: FAILED\nctests: can't run ./no-such-program-ft", out)
+        self.assertIn("bad.c: FAILED (didn't build", out)
+        self.assertIn("b.c: ok", out)
+
     def test_generate_keeps_an_unchanged_file(self):
         self.file("gen.sh", 'echo "int g(void) { return 1; }" > "$1"\n')
         g = Generate("build/tests/g.c", ("sh", "gen.sh", "{out}"))
@@ -160,9 +205,41 @@ class TestChanged(unittest.TestCase):
         self.assertEqual(pick(["docs/readme.md"]), [])
         self.assertEqual(pick(["conf/ft_conf.py"]), self.files)
 
+    def test_name_with_its_extension_and_the_tests_that_read_everything(self):
+        os.makedirs(os.path.join(self.root, "scripts/tests"))
+        with open(os.path.join(self.root, "scripts/tests/test_install.py"), "w") as f:
+            f.write('RUNNERS = ["power/run.sh", "gaze/run.sh"]\n')
+        files = self.files + ["scripts/tests/test_install.py", "docs/tests/test_doc_links.py",
+                              "scripts/tests/test_app_imports.py"]
+        pick = lambda c: changed.pick_python(files, c, self.root)  # noqa: E731
+        self.assertEqual(pick(["power/run.sh"]), ["scripts/tests/test_install.py", "docs/tests/test_doc_links.py"])
+        self.assertIn("scripts/tests/test_app_imports.py", pick(["settings/sections.py"]))
+        self.assertIn("docs/tests/test_doc_links.py", pick(["README.md"]))
+
+    def test_the_verify_skill_runs_the_testbench_tests(self):
+        with unittest.mock.patch.object(changed, "python_files", return_value=[]):
+            runs = changed.plan([".claude/skills/verify-frametop/scripts/verify-frametop"], self.root)
+        self.assertIn("test-testbench", [w for w, _, _ in runs])
+
+    def test_paths_come_whole(self):
+        self.assertEqual(changed._paths("my file.py\0a/b c.md\0"), {"my file.py", "a/b c.md"})
+
     def test_what_decides_the_tests_runs_everything(self):
         self.assertIsNone(changed.plan(["justfile"], self.root))
         self.assertIsNone(changed.plan(["scripts/testgate/cprograms.py"], self.root))
+
+
+class Jobs(unittest.TestCase):
+    def test_the_tightest_quota_above_holds(self):
+        with tempfile.TemporaryDirectory() as fs:
+            for path, quota in (("", "max 100000"), ("user", "200000 100000"), ("user/app", "max 100000")):
+                os.makedirs(os.path.join(fs, path), exist_ok=True)
+                with open(os.path.join(fs, path, "cpu.max"), "w") as f:
+                    f.write(quota + "\n")
+            with unittest.mock.patch.object(jobs, "_cgroup", return_value="user/app"), \
+                    unittest.mock.patch.object(jobs.os, "sched_getaffinity", return_value=set(range(8))):
+                self.assertEqual(jobs._cpus(fs), 2)
+        self.assertEqual(jobs.jobs({"FT_TEST_JOBS": "1"}), 1)
 
 
 if __name__ == "__main__":

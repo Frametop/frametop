@@ -7,7 +7,8 @@ The items, in the order the run reports them:
 
 - Program: a C or C++ program from its sources. With a `test` name it is a test (run as
   `build/tests/OUT ARGS...`, ok when it exits 0); without one it is a helper other items run.
-  `syntax` only compiles it (-fsyntax-only).
+  `syntax` only compiles it (-fsyntax-only). `needs`: the helpers it runs; `watch`: files it
+  reads when it runs (not through #include).
 - Check: a command, ok when it exits 0, run after the programs it `needs` are built, with
   an optional `prep` command first (run once for every Check that names it).
 - Generate: a file a command writes (`{out}` in its argv) before the build; it is replaced only
@@ -36,6 +37,8 @@ class Program:
     test: str = None         # the name the run reports; None: a helper, built and not run
     args: tuple = ()
     syntax: bool = False
+    needs: tuple = ()        # Program outs it runs (in args)
+    watch: tuple = ()        # repo paths it reads at run time, for `--changed`
 
     @property
     def path(self):
@@ -75,6 +78,11 @@ class Plan:
     ninja: str
     objects: dict = field(default_factory=dict)     # Program.path -> [object paths]
     unbuildable: dict = field(default_factory=dict)  # Program.path -> reason
+
+
+def under(path, roots):
+    """path is one of roots or inside one (a root may end in /)."""
+    return any(path == r.rstrip("/") or path.startswith(r.rstrip("/") + "/") for r in roots)
 
 
 def _pkg(what, pkgs, cache):
@@ -191,7 +199,7 @@ def stale(root, ninja_file, targets):
     if not targets:
         return set()
     p = subprocess.run(["ninja", "-f", ninja_file, "-n", "-k", "0", *targets], cwd=root,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=dict(os.environ, NINJA_STATUS="[%f/%t] "))
     left = set()
     for line in p.stdout.splitlines():
         if line.startswith("["):    # "[3/9] build/tests/x": the description is the output

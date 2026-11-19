@@ -193,6 +193,7 @@ def main(patterns, njobs=1, times=None):
         print(f"python files took (at {max(1, njobs)} at once); slowest: "
               + ", ".join(f"{p} {t:g} s" for p, t in slow), flush=True)
     if times:
+        os.makedirs(os.path.dirname(os.path.abspath(times)), exist_ok=True)
         with open(times, "w") as f:
             json.dump(took, f, indent=1, sort_keys=True)
     return status

@@ -59,8 +59,9 @@ run_in_image() {
   # ft clean finds the leftovers of crashed runs by the prefix.
   local name
   name=frametop-$(printf '%s' "${1##*/}" | tr -c 'a-zA-Z0-9._-' '-')-$$
+  # FT_TEST_JOBS and FT_TEST_TIMEOUT reach the tests (scripts/testgate/jobs.py) when they are set
   exec "$engine" run --rm --name "$name" ${mounts[@]+"${mounts[@]}"} \
-    --workdir /src/frametop "$image" "$@"
+    -e FT_TEST_JOBS -e FT_TEST_TIMEOUT --workdir /src/frametop "$image" "$@"
 }
 
 clean() {

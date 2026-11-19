@@ -114,7 +114,8 @@ def _esc(path):
 
 
 def _var(text):
-    """A value in a ninja variable line."""
+    """A value in a ninja variable line. It goes into the shell as it is (ninja quotes only $in
+    and $out): a path in flags or libs is shell-quoted where it's made (cprograms.py)."""
     return text.replace("$", "$$").replace("\n", " ")
 
 

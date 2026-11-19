@@ -6,6 +6,7 @@ the Together loopback tests run. A test that can't build here (no msquic, no ncn
 header) is a Skip that says why. Add a new test here."""
 import glob
 import os
+import shlex
 import subprocess
 
 from cbuild import Check, Fail, Generate, Program, Skip
@@ -255,7 +256,7 @@ def _quic(root, openvr, has):
                      "roomgaze-test.py,roominput-test.py,roommove-test.py,roompoints-test.py,panelhand-test.py}: "
                      "SKIPPED: no together/build/libmsquic.so.2 (together/build.sh builds it)")]
     quic = dict(cflags="-Itogether/build/msquic/src/inc",
-                libs=f"together/build/libmsquic.so.2 -Wl,-rpath,{root}/together/build -lpthread", pkglibs="openssl")
+                libs=f"together/build/libmsquic.so.2 -Wl,-rpath,{shlex.quote(root + '/together/build')} -lpthread", pkglibs="openssl")
     out = [
         P("together-links-test", "together/tests/links-test.cpp", *NET, flags=ASAN, **quic),
         P("ft-together", "together/ft-together.cpp", *NET, *SESSION, "together/flow/video.cpp",

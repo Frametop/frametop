@@ -161,25 +161,25 @@ int main() {
     // The panel out of hand input after a row's pressed: until the tip's back out in front of its surface.
     {
         handsoff::Hold h;
-        h.Start(2, 1, 1000);
+        h.Start(2, 1, 0, 1000);
         check("held from the press", h.Holds(2) && !h.Holds(1) && h.side() == 1);
         const double through[3] = {0.0, -0.2, -0.02}, front[3] = {0.0, -0.2, 0.01}, out[3] = {0.0, -0.2, 0.03};
-        h.Step(through, 0.4, 0.25, 1100, true);
-        h.Step(front, 0.4, 0.25, 1200, true);
+        h.Step(through, 0, 0.4, 0.25, 1100, true);
+        h.Step(front, 0, 0.4, 0.25, 1200, true);
         check("through it, then just in front: still held", h.Holds(2));
-        h.Step(nullptr, 0.4, 0.25, 2000, true);
+        h.Step(nullptr, 0, 0.4, 0.25, 2000, true);
         check("the hand lost in the poke: still held (it may be through it yet)", h.Holds(2));
-        h.Step(out, 0.4, 0.25, 2100, true);
+        h.Step(out, 0, 0.4, 0.25, 2100, true);
         check("out 3 cm in front: let go", !h.Holds(2));
-        h.Start(2, 1, 0);
-        h.Step(nullptr, 0.4, 0.25, 3000, true);
+        h.Start(2, 1, 0, 0);
+        h.Step(nullptr, 0, 0.4, 0.25, 3000, true);
         check("3 s on: let go, whatever the tip", !h.Holds(2));
-        h.Start(2, 1, 0);
+        h.Start(2, 1, 0, 0);
         const double aside[3] = {0.47, 0.0, -0.01};
-        h.Step(aside, 0.4, 0.25, 100, true);
+        h.Step(aside, 0, 0.4, 0.25, 100, true);
         check("5 cm off its edges: let go", !h.Holds(2));
-        h.Start(2, 1, 0);
-        h.Step(through, 0.4, 0.25, 100, false);
+        h.Start(2, 1, 0, 0);
+        h.Step(through, 0, 0.4, 0.25, 100, false);
         check("its panel gone: let go", !h.Holds(2));
     }
     // A curved panel (r 0.6 m) with its bar on the left: the menu's rows 28 cm off its centre, where the
@@ -187,18 +187,34 @@ int main() {
     // the poke counted as out the tick after it pressed the row, and went on into the content).
     for (double u : {-0.28, 0.28}) {
         handsoff::Hold h;
-        h.Start(0, 0, 0);
-        double q[3], s[3];
+        h.Start(0, 0, 0.6, 0);
+        double q[3];
         curvedAt(0.6, u, 0.0, -0.02, q);   // 2 cm through, at the row
         check(u < 0 ? "left bar: that tip is in front of the flat plane (the old measure's let go)"
                     : "right bar: that tip is in front of the flat plane (the old measure's let go)", q[2] > handsoff::Hold::kOut);
-        posemath::OnPanel(0.6, q, s);
-        h.Step(s, 0.4, 0.25, 50, true);
+        h.Step(q, 0.6, 0.4, 0.25, 50, true);
         check(u < 0 ? "left bar: 2 cm through its surface, still held" : "right bar: 2 cm through its surface, still held", h.Holds(0));
         curvedAt(0.6, u, 0.0, 0.03, q);
-        posemath::OnPanel(0.6, q, s);
-        h.Step(s, 0.4, 0.25, 100, true);
+        h.Step(q, 0.6, 0.4, 0.25, 100, true);
         check(u < 0 ? "left bar: back out 3 cm in front of it, let go" : "right bar: back out 3 cm in front of it, let go", !h.Holds(0));
+    }
+    // The row pressed was Curved, on a curved panel with a side bar: flattened, its side drops 6.5 cm back
+    // behind the tip, which is still through where the surface was (council, 2026-11-18: that let go,
+    // and a poke going on 7 cm pressed the flat content).
+    {
+        handsoff::Hold h;
+        h.Start(0, 0, 0.6, 0);
+        double q[3];
+        curvedAt(0.6, -0.28, 0.0, -0.03, q);
+        h.Step(q, 0, 0.4, 0.25, 50, true);
+        check("Curved pressed (now flat), the tip still through where its surface was: held", h.Holds(0));
+        curvedAt(0.6, -0.28, 0.0, 0.03, q);
+        h.Step(q, 0, 0.4, 0.25, 100, true);
+        check("...out in front of both: let go", !h.Holds(0));
+        h.Start(0, 0, 0, 0);
+        curvedAt(0.6, -0.28, 0.0, -0.01, q);
+        h.Step(q, 0.6, 0.4, 0.25, 50, true);
+        check("flat, then curved: the tip through the new surface, held", h.Holds(0));
     }
     // ...and a tap beside the menu there, measured on its surface: one poke 2 cm through closes it.
     {

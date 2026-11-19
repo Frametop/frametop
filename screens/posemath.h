@@ -159,6 +159,20 @@ bool FaceAbout(const M &p, double kx, double ky, const M &turn, const M &head, M
     return false;
 }
 
+// Rotate's lever (the bar menu's held row, vr.cpp's RollLever): what to add to the laser's spot (hx, hy:
+// on the panel's plane, from its centre, metres) so the panel turns as a knob held at its top or bottom
+// middle would, wherever on the panel the row was pressed. The spot goes straight above the centre
+// (`top`) or below it, `edge` out (the bar's distance from the centre there) or as far out as it already
+// was if that's farther (no twitchier than the laser held where it is). Then a sideways sweep goes
+// round the centre, not out from it: right turns the panel clockwise held at the top, counterclockwise
+// at the bottom, the edge held following the laser. Held at a side bar's middle a sweep ran straight
+// out and didn't turn it (council, 2026-11-18).
+inline void RollLever(double hx, double hy, double edge, bool top, double *lx, double *ly) {
+    const double r = std::fmax(std::fabs(edge), std::hypot(hx, hy));
+    *lx = -hx;
+    *ly = (top ? r : -r) - hy;
+}
+
 // A point `q` in a panel's own frame (x right, y up, z out of its front, metres) on its surface:
 // out = {u along it (along the arc when curved), v up, d out of its front (negative behind)}. OpenVR
 // curves a panel into a cylinder toward its front, its axis at (0, *, curve) with the viewer inside

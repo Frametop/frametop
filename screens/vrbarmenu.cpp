@@ -97,17 +97,17 @@ bool TipOnPanel(int side, const Screen &s, const Mat &p, double out[3]) {
     return true;
 }
 
-// Each tick, before hand input: the panel's back to it once the tip that pressed it is out in front.
+// Each tick: the panel's back to hand input once the tip that pressed it is out in front.
 void UpdateHandsOff() {
     const int i = g_handsOff.panel();
     if (i < 0) return;
     const auto it = g_screens.find(i);
+    const bool there = it != g_screens.end();
     Mat p;
-    double uvd[3];
-    const bool there = it != g_screens.end() && ScreenPose(it->second, &p);
-    const bool seen = there && TipOnPanel(g_handsOff.side(), it->second, p, uvd);
-    g_handsOff.Step(seen ? uvd : nullptr, there ? it->second.metres / 2 : 0, there ? it->second.heightMetres() / 2 : 0,
-                    NowMs(), there);
+    double q[3];
+    const bool seen = there && ScreenPose(it->second, &p) && IndexTipIn(g_handsOff.side(), p, q);
+    g_handsOff.Step(seen ? q : nullptr, there ? it->second.curve : 0, there ? it->second.metres / 2 : 0,
+                    there ? it->second.heightMetres() / 2 : 0, NowMs(), there);
 }
 
 void CloseMenu(const char *why) {
@@ -260,11 +260,11 @@ void HandsOnMenu(const Screen &s, const Mat &panel) {
         const char *by = k ? "the right hand" : "the left hand";
         if (through) {
             g_menu.usedMs = NowMs();
-            g_handsOff.Start(i, k, NowMs());
+            g_handsOff.Start(i, k, s.curve, NowMs());
             return PressRow(RowAtFace(l[0], l[1]), kNone, by);
         }
         if (beside) {
-            g_handsOff.Start(i, k, NowMs());
+            g_handsOff.Start(i, k, s.curve, NowMs());
             return CloseMenu("tapped beside it");
         }
     }

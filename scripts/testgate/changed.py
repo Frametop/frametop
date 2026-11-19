@@ -39,7 +39,9 @@ def _under(path, roots):
 
 
 def git(*args):
-    p = subprocess.run(["git", *args], cwd=TREE, capture_output=True, text=True)
+    # `podman exec dev` runs as the box's root, and git won't read a tree root doesn't own
+    # ("dubious ownership") unless told this one is safe
+    p = subprocess.run(["git", "-c", f"safe.directory={TREE}", *args], cwd=TREE, capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)}: {p.stderr.strip()}")
     return p.stdout

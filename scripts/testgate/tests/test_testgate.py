@@ -171,7 +171,10 @@ class Gate(unittest.TestCase):
             self.assertEqual(testgate.timeout(), testgate.TIMEOUT)
         with unittest.mock.patch.dict(os.environ, FT_TEST_TIMEOUT="0"):
             self.assertIsNone(testgate.timeout())   # no limit
-        self.assertEqual(testgate.run(self.file("m.py", "print('all passed')\n"), limit=None)[0], "ok")
+        slow = self.file("m.py", "import time; time.sleep(1.5); print('all passed')\n")
+        with unittest.mock.patch.dict(os.environ, FT_TEST_TIMEOUT="1"):
+            self.assertEqual(testgate.run(slow, limit=None)[0], "ok")     # None is no limit, not the default
+            self.assertEqual(testgate.run(slow)[0], "failed")
 
     def test_a_server_left_running_gets_sigterm(self):
         """A passing file's leftover is ended, and asked first: it gets SIGTERM and can clean up."""
@@ -262,6 +265,73 @@ class Gate(unittest.TestCase):
             self.assertEqual(p.wait(timeout=20), want)
             with open(started) as f:
                 self.assertEqual(f.read(), "True")
+
+    def test_a_stopped_runner_starts_nothing(self):
+        """A worker that gets to its test after the runner was stopped doesn't start it."""
+        marker = os.path.join(self.dir, "started")
+        live = procs.Live()
+        procs.stop(live)
+        with self.assertRaises(procs.Stopped):
+            procs.run_session([sys.executable, "-c", f"open({marker!r}, 'w')"], live, None)
+        time.sleep(0.3)
+        self.assertFalse(os.path.exists(marker))
+
+    def test_stuck_sessions_end_together(self):
+        """Four tests that ignore SIGTERM, stopped at once: about a second in all, not one each."""
+        live = procs.Live()
+        stuck = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('up', flush=True); time.sleep(60)"
+        ps = [subprocess.Popen([sys.executable, "-c", stuck], stdout=subprocess.PIPE, start_new_session=True)
+              for _ in range(4)]
+        try:
+            for p in ps:
+                p.stdout.readline()
+                live.sids.add(p.pid)
+            start = time.monotonic()
+            procs.stop(live)
+            self.assertLess(time.monotonic() - start, 2.5)
+            self.assertEqual([procs.members(p.pid) for p in ps], [[]] * 4)
+        finally:
+            for p in ps:
+                p.kill()
+                p.stdout.close()
+                p.wait()
+
+    def test_a_leader_whose_first_thread_ended_still_counts(self):
+        """Its first thread is gone (a zombie in /proc), the rest still run: it's ended too."""
+        code = ("import ctypes, threading, time\n"
+                "threading.Thread(target=time.sleep, args=(60,)).start()\n"
+                "print('up', flush=True)\n"
+                "ctypes.CDLL(None).pthread_exit(None)\n")
+        p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, start_new_session=True)
+        try:
+            self.assertEqual(p.stdout.readline().strip(), b"up")
+            deadline = time.monotonic() + 5
+            while procs._threads(p.pid) != 1 and time.monotonic() < deadline:   # wait for the zombie
+                with open(f"/proc/{p.pid}/stat") as f:
+                    if f.read().rsplit(")", 1)[1].split()[0] == "Z":
+                        break
+                time.sleep(0.02)
+            self.assertEqual(procs.members(p.pid), [p.pid])
+            procs.end_session(p.pid)
+            self.assertEqual(procs.members(p.pid), [])
+        finally:
+            p.kill()
+            p.stdout.close()
+            p.wait()
+
+    def test_on_stop_twice_under_nohup_and_its_way_out(self):
+        """Called twice, an ignored SIGHUP is still ignored; and it's SIG_IGN again at the exit."""
+        code = ("import atexit, os, signal, sys\n"
+                f"sys.path.insert(0, {os.path.dirname(os.path.abspath(procs.__file__))!r})\n"
+                "import procs\n"
+                "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+                "atexit.register(lambda: print('at exit', signal.getsignal(signal.SIGHUP) is signal.SIG_IGN))\n"
+                "procs.on_stop(lambda s, _: sys.exit(128 + s))\n"
+                "procs.on_stop(lambda s, _: sys.exit(128 + s))\n"
+                "os.kill(os.getpid(), signal.SIGHUP)\n"
+                "print('survived')\n")
+        p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=20)
+        self.assertEqual((p.returncode, p.stdout.split("\n")[:2]), (0, ["survived", "at exit True"]))
 
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")

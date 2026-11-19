@@ -45,13 +45,14 @@ TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SKIP = 77
 TIMEOUT = procs.TIMEOUT    # seconds a file gets (procs.py)
 timeout = procs.timeout
-LIVE = set()    # the test files running now (their session ids)
+LIVE = procs.Live()     # the test files running now
 
 
-def run(path, python=sys.executable, limit=None, threads=None):
+def run(path, python=sys.executable, limit=procs.FROM_ENV, threads=None):
     """Run one test file: (status, how many tests ran, the skip reasons, its stdout, its stderr).
-    status is "ok", "skipped" or "failed". threads: the math libraries' threads, when set."""
-    limit = limit if limit is not None else procs.timeout()
+    status is "ok", "skipped" or "failed". limit: seconds it gets (None: no limit; FT_TEST_TIMEOUT's
+    by default). threads: the math libraries' threads, when set."""
+    limit = procs.timeout() if limit is procs.FROM_ENV else limit
     with tempfile.TemporaryDirectory(prefix="ft-testgate-") as tmp:
         report = os.path.join(tmp, "report.json")
         env = dict(os.environ, FT_TEST_REPORT=report, TMPDIR=tmp,

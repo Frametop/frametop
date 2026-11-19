@@ -51,7 +51,7 @@ class Run:
         self.times = {}
         self.preps = {}
         self.not_run = 0
-        self.live = set()   # ninja or the tests running now (their session ids)
+        self.live = procs.Live()    # ninja or the tests running now
         self.generated = {g.out: g for g in items if isinstance(g, Generate)}
         self.programs = {i.out: i for i in items if isinstance(i, Program)}
         if self.changed is not None:    # a generated file changes with what it's made from

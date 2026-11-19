@@ -474,12 +474,14 @@ const barhit::Image &BarImage(const barhit::Raster &raster, bool lit) {
     return images.emplace(key, barhit::Render(raster, g_barPreview, BarTexture(lit))).first->second;
 }
 
+// Blue while it's armed to dock, and while its menu is open (the Option C design's bar, clicked).
 void PaintBar(Screen &s) {
     const auto raster = barhit::Pixels(s.chrome, g_barPaddingX, g_barPaddingY);
-    if (s.barPaintedVersion == g_barVersion && s.barPaintedLit == s.barLit && s.barPaintedRaster == raster) return;
-    const auto &im = BarImage(raster, s.barLit);
+    const bool lit = s.barLit || BarMenuOn(ScreenIndexOf(s));
+    if (s.barPaintedVersion == g_barVersion && s.barPaintedLit == lit && s.barPaintedRaster == raster) return;
+    const auto &im = BarImage(raster, lit);
     if (overlaytex::Set(s.bar, im.pixels.data(), im.width, im.height) == vr::VROverlayError_None)
-        s.barPaintedVersion = g_barVersion, s.barPaintedLit = s.barLit, s.barPaintedRaster = raster;
+        s.barPaintedVersion = g_barVersion, s.barPaintedLit = lit, s.barPaintedRaster = raster;
 }
 
 // The resize handle draws nothing (user, 2026-10-13: "remove the radio icon thing on corners for resizing
@@ -1184,7 +1186,7 @@ bool ModeVisible() {
 void ApplyAlpha(const Screen &s) {
     vr::VROverlay()->SetOverlayAlpha(s.overlay, s.alpha);
     for (const auto &[k, sub] : s.subs) vr::VROverlay()->SetOverlayAlpha(sub.overlay, s.alpha);
-    bool active[kControls] = {s.hover[kBarPart] || s.drag == Drag::Move || s.drag == Drag::Roll || BarMenuOn(ScreenIndexOf(s)),
+    bool active[kControls] = {s.hover[kBarPart] || s.barPressMs >= 0 || s.drag == Drag::Move || s.drag == Drag::Roll || BarMenuOn(ScreenIndexOf(s)),
                               s.hover[kResizePart] || s.drag == Drag::Resize};
     for (const auto &[k, kind] : kHandControls) active[k] = active[k] || (s.handHover >> int(kind) & 1);
     const auto controls = s.Controls();
@@ -1802,7 +1804,7 @@ void EndDrag(Screen &s) {
     s.drag = Drag::None;
     s.dragDevice = kNone;
     s.pushedMs = -1;
-    s.dragFacing = s.toggleCarry = s.layoutHeld = false;
+    s.dragFacing = s.toggleCarry = s.layoutHeld = s.barCarry = false;
     s.carryMode = 0;
     s.dockOn = -1;
     s.pinTarget = s.onWrist = kNone;
@@ -1893,8 +1895,6 @@ void FinishDrag(Screen &s, int index) {
     const bool moved = s.drag == Drag::Move, resized = s.drag == Drag::Resize;
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
     const int dockOn = s.dockOn;
-    const bool tapped = s.barTapped;   // (BarTap put it back where it was: nothing to re-arrange)
-    s.barTapped = false;
     EndDrag(s);
     if (resized && TileTiled(index)) return TileResized(s, index);
     if (resized) FaceAfterResize(s, index);
@@ -1918,7 +1918,7 @@ void FinishDrag(Screen &s, int index) {
                   std::to_string(s.dockY) + " " + std::to_string(s.dockGX) + " " + std::to_string(s.dockGY));
         return;
     }
-    if (s.Desktop() && !tapped) ArrangeDesktopSoon();
+    if (s.Desktop()) ArrangeDesktopSoon();
     if (target != kNone && ScreenPose(s, &p) && PinAt(s, target, p)) {
         if (target == vr::k_unTrackedDeviceIndex_Hmd) std::printf("screen %d: pinned to the head\n", index + 1);
         else if (target == kDashboard)
@@ -1948,46 +1948,71 @@ void TogglePinView(Screen &s, int index, const char *by) {
     if (s.Desktop()) ArrangeDesktopSoon();   // KWin's outputs: pinned screens go last
 }
 
-// The bar pressed (before the move starts): where the device's laser and the panel were, for BarTap.
-void BarPressed(Screen &s, vr::TrackedDeviceIndex_t dev) {
+// Placement's In the Room: off the dashboard, the head or a wrist, left in the room where it is.
+void PlaceInRoom(Screen &s, int index, const char *by) {
+    if (TileAnchored(index)) TileUnanchor(index, by);
+    Mat p;
+    if (s.pinned == kNone || s.pinned == kDashboard || !ScreenPose(s, &p)) return;
+    EndDrag(s);
+    SetAbsolute(s, p);
+    std::printf("screen %d: left in the room where it is (its bar's menu, %s)\n", index + 1, by);
+    if (s.Desktop()) ArrangeDesktopSoon();
+}
+
+// The bar pressed by `dev`, `along` m from its middle: nothing moves yet (BarHold decides).
+void BarPressed(Screen &s, vr::TrackedDeviceIndex_t dev, double along) {
     s.barPressMs = -1;
-    if (!LaserPose(dev, &s.barPressFrom) || !ScreenPose(s, &s.barPressPose)) return;
-    s.barPressMs = NowMs(), s.barPressDevice = dev, s.barPressUniverse = s.universe;
-    s.barPressPinned = s.pinned, s.barPressPinRel = s.pinRel;
+    if (!LaserPose(dev, &s.barPressFrom)) return;
+    s.barPressMs = NowMs(), s.barPressDevice = dev, s.barPressAlong = along;
 }
 
-// A press on the bar that may still turn out a tap: its move does nothing for good yet (the front slot
-// keeps it).
-bool BarMaybeTap(const Screen &s) {
-    return s.barPressMs >= 0 && s.drag == Drag::Move && s.dragDevice == s.barPressDevice && NowMs() - s.barPressMs < panelmenu::TapLimits{}.ms;
-}
-
-// The bar let go by `dev`: was it a tap (panelmenu::IsTap)? Then the move it started never happened: the
-// panel is back where it was, a screen it was over doesn't take it (dockOn), a wrist ring it crossed
-// doesn't pin it, and a pinned one goes back on the same pin (BarTapEnded, once the move has ended).
+// How far the pressing device's laser has moved and turned since the press (false: no pose now).
 // The laser's own turn decides, not the controller's -Z: the Frame's laser points 40 degrees below it.
-bool BarTap(Screen &s, vr::TrackedDeviceIndex_t dev) {
-    const int64_t at = s.barPressMs;
-    s.barPressMs = -1;
+bool BarPressDrift(const Screen &s, double *moved, double *turned) {
     Mat now;
-    if (at < 0 || s.barPressDevice != dev || s.drag != Drag::Move || s.dragDevice != dev || s.layoutHeld || !LaserPose(dev, &now))
-        return false;
+    if (!LaserPose(s.barPressDevice, &now)) return false;
     const Mat &was = s.barPressFrom;
-    const double moved = std::sqrt(std::pow(now.m[0][3] - was.m[0][3], 2) + std::pow(now.m[1][3] - was.m[1][3], 2) +
-                                   std::pow(now.m[2][3] - was.m[2][3], 2));
+    *moved = std::sqrt(std::pow(now.m[0][3] - was.m[0][3], 2) + std::pow(now.m[1][3] - was.m[1][3], 2) +
+                       std::pow(now.m[2][3] - was.m[2][3], 2));
     // (the angle between its pointing directions, -z)
     const double dot = -now.m[0][2] * -was.m[0][2] + -now.m[1][2] * -was.m[1][2] + -now.m[2][2] * -was.m[2][2];
-    const double turned = std::acos(std::clamp(dot, -1.0, 1.0));
-    if (!panelmenu::IsTap(NowMs() - at, moved, turned)) return false;
-    SetAbsolute(s, s.barPressPose, s.barPressUniverse);
-    s.dockOn = -1, s.pinTarget = s.barPressPinned, s.onWrist = kNone, s.barTapped = true;
+    *turned = std::acos(std::clamp(dot, -1.0, 1.0));
     return true;
 }
 
-// After a tap's move ended: a pinned panel back on its pin just as it was (FinishDrag pinned it again
-// where it is now, which a head or a wrist moving meanwhile would have shifted a little).
-void BarTapEnded(Screen &s) {
-    if (s.barPressPinned != kNone && s.pinned == s.barPressPinned) s.pinRel = s.barPressPinRel;
+// The waiting press becomes a move, from where the panel is now (StartDrag takes the device's pose now:
+// no catching up, so nothing jumps). A pulse says it's held.
+void BarCarry(Screen &s, const char *why) {
+    const vr::TrackedDeviceIndex_t dev = s.barPressDevice;
+    s.barPressMs = -1;
+    if (s.drag != Drag::None) return;
+    StartDrag(s, Drag::Move, dev);
+    if (s.drag != Drag::Move) return;
+    s.barCarry = true;
+    std::printf("screen %d: the bar held (%s)\n", ScreenIndexOf(s) + 1, why);
+    if (IsHandController(dev)) vr::VRSystem()->TriggerHapticPulse(dev, 0, 2500);
+}
+
+// Every tick, a press waiting on the bar: held long enough, or moved past a tap, the move starts. (Its
+// release can't be lost off the bar: the catcher follows its laser, UpdateCatcher.)
+void BarHold(Screen &s) {
+    if (s.barPressMs < 0) return;
+    double moved, turned;
+    if (s.drag != Drag::None || !BarPressDrift(s, &moved, &turned)) {
+        s.barPressMs = -1;
+        return;
+    }
+    const int64_t held = NowMs() - s.barPressMs;
+    if (panelmenu::CarryNow(held, moved, turned)) BarCarry(s, held >= panelmenu::TapLimits{}.ms ? "held" : "moved off a tap");
+}
+
+// The bar let go by `dev`: was it a tap (panelmenu::IsTap)? The press ends either way.
+bool BarTap(Screen &s, vr::TrackedDeviceIndex_t dev) {
+    if (s.barPressMs < 0 || s.barPressDevice != dev) return false;
+    const int64_t at = s.barPressMs;
+    s.barPressMs = -1;
+    double moved, turned;
+    return s.drag == Drag::None && !s.layoutHeld && BarPressDrift(s, &moved, &turned) && panelmenu::IsTap(NowMs() - at, moved, turned);
 }
 
 void RememberPlace(int i, Screen &s);       // (how far out a sent-away panel goes: by SendBack)
@@ -1997,7 +2022,20 @@ void ForgetIfPlacedFar(int i, Screen &s);
 // screen by then).
 void EndDragsBy(vr::TrackedDeviceIndex_t dev) {
     for (auto &[index, s] : g_screens)
+        if (s.barPressMs >= 0 && s.barPressDevice == dev) s.barPressMs = -1;   // (let go before the hold: no move)
+    for (auto &[index, s] : g_screens)
         if (s.drag != Drag::None && s.dragDevice == dev) FinishDrag(s, index), ForgetIfPlacedFar(index, s);
+}
+
+// The bar's press let go by `dev` (on the bar, or the catcher after the laser drifted off it): a tap opens
+// the menu where it was pressed; a move under way ends (EndDragsBy).
+void BarLetGo(int index, Screen &s, vr::TrackedDeviceIndex_t dev) {
+    if (BarTap(s, dev)) OpenBarMenu(index, s.barPressAlong, false);
+}
+void BarLetGoAnywhere(vr::TrackedDeviceIndex_t dev) {
+    for (auto &[i, s] : g_screens)
+        if (s.barPressMs >= 0 && s.barPressDevice == dev) BarLetGo(i, s, dev);
+    EndDragsBy(dev);
 }
 
 // While moving: the laser entering a controller's ring flips whether the screen pins to
@@ -2638,11 +2676,31 @@ void ShowCatcher(bool on) {
     else PinHide(g_catcher);
 }
 
-// Every tick: while a button is held, find what the pressing laser is on. On one of our
-// panels or controls, note how far away; on none, put the catcher across it there.
+// A bar's press, waiting or carrying, by a laser: its device (kNone: none). Its release comes on
+// whatever the laser is on, and the laser may be off the bar: drifted while the press waited (the
+// panel didn't follow), and kept off by the carry that starts from there.
+vr::TrackedDeviceIndex_t BarHolder() {
+    for (auto &[i, s] : g_screens) {
+        if (s.barPressMs >= 0) return s.barPressDevice;
+        if (s.barCarry && s.drag == Drag::Move) return s.dragDevice;
+    }
+    return kNone;
+}
+
+bool BarHeldBy(vr::TrackedDeviceIndex_t dev) {
+    for (auto &[i, s] : g_screens)
+        if ((s.barPressMs >= 0 && s.barPressDevice == dev) || (s.barCarry && s.drag == Drag::Move && s.dragDevice == dev)) return true;
+    return false;
+}
+
+// Every tick: while a button is held (a screen's press, else a bar's), find what the pressing laser is
+// on. On one of our panels or controls, note how far away; on none, put the catcher across it there.
 void UpdateCatcher() {
     Mat l;
-    if (!g_press.buttons || g_catcher == vr::k_ulOverlayHandleInvalid || !LaserPose(g_press.device, &l)) {
+    static double barDistance = 1;   // (a bar press's own: g_press's is the screen press's)
+    const vr::TrackedDeviceIndex_t dev = g_press.buttons ? g_press.device : BarHolder();
+    double &distance = g_press.buttons ? g_press.distance : barDistance;
+    if (dev == kNone || g_catcher == vr::k_ulOverlayHandleInvalid || !LaserPose(dev, &l)) {
         ShowCatcher(false);
         return;
     }
@@ -2658,13 +2716,13 @@ void UpdateCatcher() {
             vr::VROverlayIntersectionResults_t hit;
             if (o != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->ComputeOverlayIntersection(o, &params, &hit)) {
                 if (o == s.handle && !overlayregion::Contains(s.resizeRegion, hit.vUVs.v[0], hit.vUVs.v[1])) continue;
-                g_press.distance = std::max(0.05, double(hit.fDistance));
+                distance = std::max(0.05, double(hit.fDistance));
                 ShowCatcher(false);
                 return;
             }
         }
     }
-    const double d = g_press.distance;
+    const double d = distance;
     const double pt[3] = {l.m[0][3] - l.m[0][2] * d, l.m[1][3] - l.m[1][2] * d, l.m[2][3] - l.m[2][2] * d};
     const Mat m = FacingPose(pt, l);  // across the laser, facing its start
     vr::VROverlay()->SetOverlayTransformAbsolute(g_catcher, vr::TrackingUniverseStanding, &m);
@@ -4401,20 +4459,6 @@ struct Carousel {
 } g_carousel;
 constexpr int64_t kCarouselMs = 2500, kCarouselFadeMs = 500;
 
-void FillRound(std::vector<uint8_t> &px, int w, int h, int x0, int y0, int x1, int y1, int r, const uint8_t c[4]) {
-    for (int y = std::max(0, y0); y < std::min(h, y1); ++y)
-        for (int x = std::max(0, x0); x < std::min(w, x1); ++x) {
-            const int dx = x < x0 + r ? x0 + r - x : x >= x1 - r ? x - (x1 - r - 1) : 0;
-            const int dy = y < y0 + r ? y0 + r - y : y >= y1 - r ? y - (y1 - r - 1) : 0;
-            const double out = std::sqrt(double(dx * dx + dy * dy)) - r;
-            const double a = std::clamp(0.5 - out, 0.0, 1.0) * c[3] / 255.0;
-            if (a <= 0) continue;
-            uint8_t *p = &px[(size_t(y) * w + x) * 4];
-            for (int k = 0; k < 3; ++k) p[k] = uint8_t(std::lround(p[k] + (c[k] - p[k]) * a));
-            p[3] = uint8_t(std::max<double>(p[3], 255 * a));
-        }
-}
-
 std::string ShortLabel(const Screen &s, int i) {
     std::string l = s.label.empty() ? "Screen " + std::to_string(i + 1) : s.label;
     for (const char *pre : {"frametop-", "Frametop "})
@@ -4694,7 +4738,6 @@ void UpdateFront() {
     const bool held = s.drag != Drag::None || g_handInput.heldByHand(i);
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
     const bool onLine = haveHead && grabthat::OffLineDeg(head, g_front.to, p) <= kFrontLineDeg;   // (nearer or farther only)
-    if (BarMaybeTap(s)) return;   // (a tap on its bar puts it back)
     if (held && Apart(p, g_front.to) > 0.03 && !onLine) return FrontRelease(i, "carried by hand or laser");
     if (!held && std::fabs(s.metres - g_front.width) > 0.01 * g_front.width && haveHead) {
         // resized there (two fists, a corner): that's its size in the slot, here and next time
@@ -5961,7 +6004,7 @@ bool ft_vr_init(void) {
     LoadTileMemory();
     LoadBarSides();
     GsSwitch(handcut::Setting("GSAPP_PANELS", "1") != "0");   // the gamescope apps as panels of ours
-    SteamDashSwitch(handcut::Setting("STEAM_DASH_PANEL", "0") == "1");   // Steam's dashboard window as one (a spike)
+    SteamDashSwitch(handcut::Setting("STEAM_DASH_PANEL", "0") == "1");   // Steam's dashboard window as one (Display Settings)
     if (!windowdrag::ParseCommand(handcut::Setting("WINDOW_DRAG_MOD", "meta").c_str(), handcut::Setting("WINDOW_DRAG_LEFT", "move").c_str(),
                                   handcut::Setting("WINDOW_DRAG_RIGHT", "resize").c_str(),
                                   handcut::Setting("WINDOW_DRAG_MIDDLE", "none").c_str(), &g_windowDrag))
@@ -7257,6 +7300,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 case vr::VREvent_MouseButtonDown:
                 case vr::VREvent_MouseButtonUp:
                     if (CarryClick(ev)) return;
+                    // the bar's press let go over the content (the bar sits inside its edge): it was never
+                    // pressed there, so it's the bar's (a tap, or the end of its move), not the window's
+                    if (ev.eventType == vr::VREvent_MouseButtonUp && ev.data.mouse.button == vr::VRMouseButton_Left &&
+                        BarHeldBy(ev.trackedDeviceIndex))
+                        return BarLetGoAnywhere(ev.trackedDeviceIndex);
                     if (ev.eventType == vr::VREvent_MouseButtonUp) EndDragsBy(ev.trackedDeviceIndex);
                     if (ev.eventType == vr::VREvent_MouseButtonUp && g_press.torn && ev.trackedDeviceIndex == g_press.device) {
                         // a torn-off window let go: KWin had its release at the tear
@@ -7364,20 +7412,22 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 continue;
             const double along = ev.data.mouse.x / 1000.0 - barhit::Width(s.chrome, g_barPaddingX) / 2;   // (mm: its mouse scale)
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                BarPressed(s, ev.trackedDeviceIndex);
-                StartDrag(s, Drag::Move, ev.trackedDeviceIndex);
+                if (s.drag == Drag::None) BarPressed(s, ev.trackedDeviceIndex, along);   // (BarHold starts the move)
             }
             // A right click: the menu of edges the bar can go on (vrbarmenu.cpp), at the spot clicked along it.
-            else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Right && s.drag == Drag::None)
+            else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Right && s.drag == Drag::None &&
+                     s.barPressMs < 0)
                 OpenBarMenu(index, along, true);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                const bool tap = ev.data.mouse.button == vr::VRMouseButton_Left && BarTap(s, ev.trackedDeviceIndex);
+                if (ev.data.mouse.button == vr::VRMouseButton_Left) BarLetGo(index, s, ev.trackedDeviceIndex);
                 EndDragsBy(ev.trackedDeviceIndex);
-                if (tap) BarTapEnded(s), OpenBarMenu(index, along, false);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
-            else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
-                Push(s, ev.data.scroll.ydelta);
+            else if (ev.eventType == vr::VREvent_ScrollDiscrete) {
+                // the wheel while the press waits: it's a move (push and pull), at once
+                if (s.barPressMs >= 0 && s.barPressDevice == ev.trackedDeviceIndex) BarCarry(s, "the wheel");
+                if (s.drag == Drag::Move) Push(s, ev.data.scroll.ydelta);
+            }
         }
         // The corner: resize. A floating window's: scroll for its density too (user, 2026-10-30): up,
         // its panel bigger at the same pixels, down, smaller (ft-floatd, 5% a notch); not while it's resized.
@@ -7409,6 +7459,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                 SendFloat("density " + std::to_string(index + 1) + (ev.data.scroll.ydelta > 0 ? " 1" : " -1"));
             }
         }
+        BarHold(s);
         if (s.drag != Drag::None) UpdateDrag(s, index);
         else if (s.stretchW > 0 && g_far.panel != index && g_tick > s.stretchUntil) {
             s.keepUntil = std::max(s.keepUntil, g_tick + 1);   // no answer to its resize: its own size again, the same corner kept
@@ -7420,8 +7471,11 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
     while (g_catcher != vr::k_ulOverlayHandleInvalid &&
            vr::VROverlay()->PollNextOverlayEvent(g_catcher, &ev, sizeof ev))
-        if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev))
+        if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev)) {
+            if (ev.data.mouse.button == vr::VRMouseButton_Left && BarHeldBy(ev.trackedDeviceIndex))
+                BarLetGoAnywhere(ev.trackedDeviceIndex);   // (a bar's press, its laser drifted off the bar)
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+        }
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
     UpdateLayoutGrab();   // (after the carried screen's own move, above)
     PollPill(handle, data);

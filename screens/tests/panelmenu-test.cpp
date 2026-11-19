@@ -21,31 +21,55 @@ int main() {
         return std::any_of(rows.begin(), rows.end(), [&](const panelmenu::Row &r) { return r.item == i; });
     };
 
-    // Every button the controls had is a row for the kinds that had it.
+    // Every button the controls had is a tile or a row, on a page, for the kinds that had it.
     panelmenu::Kind desktop, floating, game, steam;
     floating.floating = true;
     game.gsapp = true, game.theater = true;
     steam.theater = true;
     const auto d = panelmenu::Main(desktop), f = panelmenu::Main(floating), g = panelmenu::Main(game), st = panelmenu::Main(steam);
-    check("a desktop screen: curve, rotate, in view, dashboard, move all, bar position, reset",
-          has(d, Item::Curve) && has(d, Item::Rotate) && has(d, Item::KeepInView) && has(d, Item::OnDashboard) &&
-              has(d, Item::MoveAll) && has(d, Item::BarPosition) && has(d, Item::Reset));
+    const auto dp = panelmenu::Placement(desktop), fp = panelmenu::Placement(floating), gp = panelmenu::Placement(game);
+    check("a desktop screen: curve, rotate, placement, move all, bar position, reset",
+          has(d, Item::Curve) && has(d, Item::Rotate) && has(d, Item::Placement) && has(d, Item::MoveAll) &&
+              has(d, Item::BarPosition) && has(d, Item::Reset));
+    check("a desktop screen's placement: back, in the room, in view, dashboard",
+          dp.size() == 4 && dp[0].item == Item::Back && dp[1].item == Item::InRoom && dp[2].item == Item::KeepInView &&
+              dp[3].item == Item::OnDashboard);
     check("a desktop screen: no window or theater rows", !has(d, Item::Dock) && !has(d, Item::Close) && !has(d, Item::Theater));
-    check("a floating window: back to desktop and close, not the layout's rows",
-          has(f, Item::Dock) && has(f, Item::Close) && !has(f, Item::KeepInView) && !has(f, Item::MoveAll) && !has(f, Item::Reset));
+    check("a floating window: to desktop and close tiles, not the layout's rows",
+          has(f, Item::Dock) && has(f, Item::Close) && !has(fp, Item::KeepInView) && !has(f, Item::MoveAll) && !has(f, Item::Reset));
     check("a Steam game: View in Theater, no layout or window rows",
-          has(g, Item::Theater) && !has(g, Item::Dock) && !has(g, Item::Reset) && !has(g, Item::KeepInView));
+          has(g, Item::Theater) && !has(g, Item::Dock) && !has(g, Item::Reset) && !has(gp, Item::KeepInView));
     check("Steam's tile: View in Theater and the layout's rows", has(st, Item::Theater) && has(st, Item::Reset));
-    check("not anchored: no Stay Shown", !has(d, Item::StayShown));
+    check("not anchored: no Stay Shown", !has(dp, Item::StayShown));
     panelmenu::Kind anchored;
     anchored.anchored = true;
-    check("anchored: Stay Shown, right after On Dashboard", [&] {
-        const auto a = panelmenu::Main(anchored);
+    check("anchored: Stay Shown, right after On Dashboard, a rule above it", [&] {
+        const auto a = panelmenu::Placement(anchored);
         const auto on = std::find(a.begin(), a.end(), panelmenu::Row{Item::OnDashboard});
-        return on != a.end() && on + 1 != a.end() && (on + 1)->item == Item::StayShown;
+        return on != a.end() && on + 1 != a.end() && (on + 1)->item == Item::StayShown && panelmenu::RuleAbove(a, size_t(on + 1 - a.begin()));
     }());
+    for (const auto &rows : {d, f, g, st}) {
+        bool listed = false, tilesFirst = true;
+        for (const auto &r : rows) tilesFirst &= !(listed && panelmenu::Tile(r.item)), listed |= !panelmenu::Tile(r.item);
+        check("the quick tiles come first", tilesFirst && panelmenu::Tile(rows[0].item));
+    }
+    check("a floating window's four tiles: curved, rotate, to desktop, close",
+          f.size() > 4 && panelmenu::Tile(f[3].item) && f[3].item == Item::Close && !panelmenu::Tile(f[4].item));
     check("reset is the last row, after a rule", d.back().item == Item::Reset && panelmenu::RuleAbove(d, d.size() - 1));
-    check("no rule above the first row", !panelmenu::RuleAbove(d, 0));
+    check("no rule above the first row", !panelmenu::RuleAbove(d, 0) && !panelmenu::RuleAbove(dp, 0));
+    check("no rule inside the main list but Reset's", [&] {
+        for (size_t i = 0; i + 1 < d.size(); ++i)
+            if (panelmenu::RuleAbove(d, i)) return false;
+        return true;
+    }());
+    check("placement's caption is over its first choice", panelmenu::Caption(dp, 1) && !panelmenu::Caption(dp, 0) && !panelmenu::Caption(dp, 2));
+    check("the main page has no caption", [&] {
+        for (size_t i = 0; i < d.size(); ++i)
+            if (panelmenu::Caption(d, i)) return false;
+        return true;
+    }());
+    check("Rows picks the page", panelmenu::Rows(panelmenu::Page::Placement, desktop, true) == dp &&
+          panelmenu::Rows(panelmenu::Page::Main, desktop, false) == d);
 
     // The edges page: four edges, Back from the main page; from a right click as before (Theater under them).
     const auto fromMain = panelmenu::Edges(game, true), fromRight = panelmenu::Edges(game, false);
@@ -53,23 +77,30 @@ int main() {
           fromMain[1] == panelmenu::Row{Item::Edge, barside::Side::Bottom} && fromMain[4] == panelmenu::Row{Item::Edge, barside::Side::Right});
     check("edges from a right click: the four, then View in Theater", fromRight.size() == 5 && fromRight[0].item == Item::Edge &&
           fromRight[4].item == Item::Theater && panelmenu::RuleAbove(fromRight, 4));
+    check("the edges' caption is over the first edge only", panelmenu::Caption(fromMain, 1) && !panelmenu::Caption(fromMain, 2) &&
+          panelmenu::Caption(fromRight, 0) && !panelmenu::Caption(fromRight, 4));
     check("a desktop screen's right click: just the edges", panelmenu::Edges(desktop, false).size() == 4);
     check("edge rows differ by their side", !(panelmenu::Row{Item::Edge, barside::Side::Top} == panelmenu::Row{Item::Edge, barside::Side::Left}));
-    for (const auto &rows : {d, f, g, st, fromMain, fromRight})
+    for (const auto &rows : {d, f, g, st, dp, fp, gp, fromMain, fromRight})
         for (const auto &r : rows) check("every row has a label", *panelmenu::Label(r) != 0);
-    check("the texture fits every page", barside::RowAt(1, barside::kMenuPad + 1, int(d.size())) == int(d.size()) - 1);
 
     check("rotate and move all are held, the rest clicked", panelmenu::Held(Item::Rotate) && panelmenu::Held(Item::MoveAll) &&
           !panelmenu::Held(Item::Curve) && !panelmenu::Held(Item::Reset) && !panelmenu::Held(Item::BarPosition));
-    check("the toggles", panelmenu::Toggle(Item::Curve) && panelmenu::Toggle(Item::KeepInView) &&
-          panelmenu::Toggle(Item::OnDashboard) && !panelmenu::Toggle(Item::MoveAll) && !panelmenu::Toggle(Item::Reset));
+    check("the toggles", panelmenu::Toggle(Item::Curve) && panelmenu::Toggle(Item::StayShown) && !panelmenu::Toggle(Item::MoveAll) &&
+          !panelmenu::Toggle(Item::Reset));
+    check("the choices", panelmenu::Choice(Item::InRoom) && panelmenu::Choice(Item::KeepInView) && panelmenu::Choice(Item::OnDashboard) &&
+          panelmenu::Choice(Item::Edge) && !panelmenu::Choice(Item::Curve) && !panelmenu::Choice(Item::StayShown));
+    check("placement and bar position open pages", panelmenu::Opens(Item::Placement) && panelmenu::Opens(Item::BarPosition) &&
+          !panelmenu::Opens(Item::Reset));
 
-    // The tap: quick, the device still.
+    // The tap: let go before the hold, the device still. The hold: the move starts.
     check("a quick still press is a tap", panelmenu::IsTap(120, 0.004, 0.01));
-    check("held too long: a move", !panelmenu::IsTap(350, 0.0, 0.0));
-    check("a soft 300 ms pull is still a tap", panelmenu::IsTap(300, 0.002, 0.0));
-    check("moved: a move", !panelmenu::IsTap(100, 0.02, 0.0));
-    check("turned: a move", !panelmenu::IsTap(100, 0.0, 0.07));
+    check("a soft 400 ms pull is still a tap", panelmenu::IsTap(400, 0.002, 0.0));
+    check("held half a second: a move, not a tap", !panelmenu::IsTap(500, 0.0, 0.0) && panelmenu::CarryNow(500, 0.0, 0.0));
+    check("held still under the hold: no move yet", !panelmenu::CarryNow(499, 0.01, 0.03));
+    check("moved: the move starts at once", panelmenu::CarryNow(100, 0.02, 0.0) && !panelmenu::IsTap(100, 0.02, 0.0));
+    check("turned: the move starts at once", panelmenu::CarryNow(100, 0.0, 0.07) && !panelmenu::IsTap(100, 0.0, 0.07));
+    check("a 3 degree wobble is still a tap", panelmenu::IsTap(200, 0.0, 0.0524));
     check("no press: not a tap", !panelmenu::IsTap(-1, 0, 0));
 
     // The fingertip: from in front, through its face, within its edges; once.

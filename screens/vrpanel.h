@@ -8,6 +8,7 @@
 #include "barside.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
+#include "fillround.h"
 #include "gsforward.h"
 #include "handinput.h"
 #include "hoverhaptics.h"
@@ -128,14 +129,12 @@ struct Screen {
     posemath::Lever rollLever;                // roll: the knob held at its top or bottom middle, wherever on the menu it's held (RollLever)
     double rollTurned = 0;                    // roll: the most the laser has gone round since (rad; RollClick)
     bool hover[kControls] = {};               // a laser is on the bar, the resize corner
-    // The bar's press, to tell a tap (the menu) from a move when it comes up (panelmenu::IsTap).
+    // A press on the bar waiting to become a move or a tap (panelmenu::CarryNow, IsTap; BarHold).
     int64_t barPressMs = -1;
     vr::TrackedDeviceIndex_t barPressDevice = kNone;
-    Mat barPressFrom{}, barPressPose{};       // the device's laser then, and the panel's pose in the room
-    uint64_t barPressUniverse = 0;            // ...and its universe (universefix.h)
-    vr::TrackedDeviceIndex_t barPressPinned = kNone;   // ...what it was pinned to, and how
-    Mat barPressPinRel{};
-    bool barTapped = false;                   // the move ending now was a tap, put back (FinishDrag: nothing moved)
+    Mat barPressFrom{};                       // the device's laser then
+    double barPressAlong = 0;                 // where along the bar (m from its middle): a tap's menu opens there
+    bool barCarry = false;                    // the move under way began on the bar (the catcher takes its release)
     unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
@@ -323,7 +322,6 @@ bool ModCarry(Screen &s, int index, vr::TrackedDeviceIndex_t dev, uint32_t butto
 bool CarryScroll(const vr::VREvent_t &ev);
 bool CarryClick(const vr::VREvent_t &ev);
 void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *), void *data);
-void FillRound(std::vector<uint8_t> &px, int w, int h, int x0, int y0, int x1, int y1, int r, const uint8_t c[4]);
 double Apart(const Mat &a, const Mat &b);
 double BarIn(const Screen &s);    // the bar row's line, metres in from the panel's edge
 barside::UV BarSpot(const Screen &s, double along);   // a spot on the bar's line, `along` from its middle
@@ -448,6 +446,8 @@ void LevelScreen(Screen &s, int index, const char *by);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev);
 bool RollClick(const Screen &s);   // a roll pressed and let go, not turned: a click (levels it)
 void TogglePinView(Screen &s, int index, const char *by);
+void PlaceInRoom(Screen &s, int index, const char *by);   // off the dashboard, the head or a wrist
+void PaintBar(Screen &s);   // its bar's texture: blue while armed to dock or its menu is open
 void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev);
 void SendFloat(const std::string &msg);   // to ft-floatd
 bool HandsFrame();   // hand input had a new hands frame this tick

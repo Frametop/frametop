@@ -1,4 +1,4 @@
-// The grab bar's edge (barside.h): where the row goes on each edge, its turn, the menu's rows.
+// The grab bar's edge (barside.h): where the row goes on each edge, its turn, where its menu sits.
 #include "../barside.h"
 
 #include <cstdio>
@@ -51,15 +51,6 @@ int main() {
     check("the union holds the panel and the row", both.Contains(0, 0) && both.Contains(w / 2 - in, 0.31) && !both.Contains(0.7, 0.4) &&
           tall.Contains(0, -0.3) && !tall.Contains(0, -0.34));
 
-    check("the first row is at the top", barside::RowAt(10, barside::kMenuH - barside::kMenuPad - 1) == 0);
-    check("the last row is at the bottom", barside::RowAt(10, barside::kMenuPad + 1) == barside::kSides - 1);
-    check("the padding is no row", barside::RowAt(10, barside::kMenuH - 2) == -1 && barside::RowAt(10, 2) == -1);
-    check("off its sides is no row", barside::RowAt(-1, 100) == -1 && barside::RowAt(barside::kMenuW + 1, 100) == -1);
-    for (int r = 0; r < barside::kSides; ++r) {
-        const double yUp = barside::kMenuH - barside::kMenuPad - (r + 0.5) * barside::kRowH;
-        check("each row's middle is that row", barside::RowAt(barside::kMenuW / 2, yUp) == r);
-    }
-
     const barside::UV click = at(Side::Bottom, 0.05);
     const auto m = barside::MenuAt(Side::Bottom, click, 0.02, 0.01, 0.12, 0.1);
     check("bottom: the menu sits above the bar at the click", near(m.u, 0.05) && near(m.v, click.v + 0.02 + 0.01 + 0.05));
@@ -73,14 +64,6 @@ int main() {
         const auto c = barside::MenuAt(s, at(s, 0), 0.02, 0.01, 0.12, 0.1);
         check("every edge's menu is on its own panel", std::fabs(c.u) + 0.06 < w / 2 && std::fabs(c.v) + 0.05 < h / 2);
     }
-
-    const int five = barside::kSides + 1, h5 = barside::MenuH(five);
-    check("an added row is under the edges", barside::RowAt(10, barside::kMenuPad + 1, five) == barside::kSides);
-    for (int r = 0; r < five; ++r) {
-        const double yUp = h5 - barside::kMenuPad - (r + 0.5) * barside::kRowH;
-        check("with a row added, each row's middle is still that row", barside::RowAt(barside::kMenuW / 2, yUp, five) == r);
-    }
-    check("the edges alone have no fifth row", barside::RowAt(10, barside::kMenuPad + 1) == barside::kSides - 1);
 
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed != 0;

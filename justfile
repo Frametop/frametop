@@ -308,6 +308,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/panelmenu-test.cpp \
       -o build/tests/panelmenu-test
     run screens/tests/panelmenu-test.cpp build/tests/panelmenu-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/menulayout-test.cpp \
+      -o build/tests/menulayout-test
+    run screens/tests/menulayout-test.cpp build/tests/menulayout-test
     # palm Quick Access (quickaccess.h): its tiles, where a tip or laser lands, Reset's ask
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/quickaccess-test.cpp \
       -o build/tests/quickaccess-test

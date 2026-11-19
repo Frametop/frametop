@@ -1,12 +1,14 @@
 // The grab bar's menu (Option C, user 2026-11-18: "a quick tap opens up the menu on the drag bar, and
-// a hold and press acts as the current behavior"), and the edge each panel's bar is on.
-//   A tap on the bar (vr.cpp's BarTap), a poke on it, or `barside N menu` opens the main page: what the
-// panel's round buttons did, as rows (panelmenu.h: Curved, Rotate, Keep in View, On Dashboard, Stay
-// Shown, Back to Desktop, Close Window, View in Theater, Move All Screens, Bar Position, Reset Layout).
+// a hold and press acts as the current behavior"), and the edge each panel's bar is on. It looks as the
+// Option C design draws it (user, 2026-11-19: "Use that as the design"; barmenuart.h, menulayout.h).
+//   A tap on the bar (vr.cpp's BarTap), a poke on it, or `barside N menu` opens the main page: quick tiles
+// on top (Curved, Rotate; a floating window's To Desktop and Close), then Placement, View in Theater,
+// Move All Screens, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
+// Keep in View, On Dashboard (the one it is checked) and Stay Shown while it's on the dashboard.
 // A right click on the bar, as before, or `barside N edges` opens the edges page: Bottom, Top, Left,
-// Right (the panel's own marked), and View in Theater where the panel has it. Bar Position goes there
+// Right (the panel's own checked), and View in Theater where the panel has it. Bar Position goes there
 // with Back first. It opens over the panel beside the bar at the spot clicked, toward its middle
-// (barside::MenuAt), a row lit under a laser, the 3D mouse or a fingertip near it.
+// (barside::MenuAt), a row lit under a laser, the 3D mouse or a fingertip near it; its bar goes blue.
 //   A click on a row does it and closes the menu; Rotate and Move All Screens are held (a press starts
 // the roll or the layout's carry, the release ends it; Rotate let go without turning levels the panel,
 // as the roll button's click did). A fingertip coming through a row presses it (tiptap.h): Rotate levels.
@@ -18,9 +20,10 @@
 // (pointer/dashpatch/steampage.py), so this is where it went. A Steam game's panel has it too: the
 // game's window lent to SteamVR's theater (vrgsapps.cpp: GsToTheater).
 #include "vrpanel.h"
-#include "label.h"
+#include "barmenuart.h"
 #include "overlaytex.h"
 #include "handsoff.h"
+#include "menulayout.h"
 #include "panelmenu.h"
 #include "posemath.h"
 #include "tiptap.h"
@@ -37,14 +40,14 @@ namespace {
 constexpr const char *kMenuKey = "frametop.barmenu";
 constexpr int64_t kMenuIdleMs = 6000;   // nothing on it this long: it goes
 constexpr int64_t kMenuLeastMs = 300;   // a fingertip's tap no sooner (the poke that opened it, still on its way)
-constexpr int kMenuText = 30, kMenuHint = 24;
 
 struct {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     int panel = -1;            // the panel it's for, -1 closed
-    bool edges = false;        // on its edges page (a right click opens it there; Bar Position goes there)
+    panelmenu::Page page = panelmenu::Page::Main;   // a right click opens the edges; Placement, Bar Position go on
     bool back = false;         // ...with Back to the main page first
     std::vector<panelmenu::Row> rows;
+    menulayout::Layout layout; // where they sit on its texture
     double along = 0;          // where on its bar it was opened (metres from the bar's middle)
     double w = 0, h = 0;       // its size now (m)
     Mat pose{};                // ...and where it is
@@ -91,7 +94,7 @@ void CloseMenu(const char *why) {
     g_menu.rows.clear();
     // its bar back from lit to idle now, not on the next thing that touches its alpha
     const auto it = g_screens.find(i);
-    if (it != g_screens.end()) ApplyAlpha(it->second);
+    if (it != g_screens.end()) ApplyAlpha(it->second), PaintBar(it->second);
 }
 
 panelmenu::Kind KindOf(const Screen &s, int i) {
@@ -102,64 +105,96 @@ panelmenu::Kind KindOf(const Screen &s, int i) {
     return k;
 }
 
-// A toggle on (its dot shows), or the panel's own edge.
-bool Checked(const panelmenu::Row &r, const Screen &s, int i) {
+// Where the panel lives (Placement's value and its check).
+enum class Where { Room, View, Dashboard, Wrist };
+Where Placed(const Screen &s, int i) {
+    if (TileAnchored(i)) return Where::Dashboard;
+    if (s.pinned == vr::k_unTrackedDeviceIndex_Hmd) return Where::View;
+    if (s.pinned != kNone && s.pinned != kDashboard) return Where::Wrist;
+    return Where::Room;
+}
+
+// A toggle on, or the choice picked: the panel's placement, its bar's edge.
+bool On(const panelmenu::Row &r, const Screen &s, int i) {
     switch (r.item) {
         case panelmenu::Item::Curve: return s.curve > 0;
-        case panelmenu::Item::KeepInView: return s.pinned == vr::k_unTrackedDeviceIndex_Hmd;
-        case panelmenu::Item::OnDashboard: return TileAnchored(i);
+        case panelmenu::Item::InRoom: return Placed(s, i) == Where::Room;
+        case panelmenu::Item::KeepInView: return Placed(s, i) == Where::View;
+        case panelmenu::Item::OnDashboard: return Placed(s, i) == Where::Dashboard;
         case panelmenu::Item::StayShown: return TileStays(s, i);
         case panelmenu::Item::Edge: return s.barSide == r.side;
         default: return false;
     }
 }
 
-// The grey words at a row's right: what a hold does, the edge it's on.
-std::string Hint(const panelmenu::Row &r, const Screen &s) {
+// What a row shows (barmenuart.h draws it): the design's icon, its value at the right, its check.
+barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const char *caption) {
+    using barmenuicons::Icon;
+    using panelmenu::Item;
+    barmenuart::RowLook l;
+    l.text = panelmenu::Label(r);
+    const Where w = Placed(s, i);
     switch (r.item) {
-        case panelmenu::Item::Rotate: return "hold to turn";
-        case panelmenu::Item::MoveAll: return "hold";
-        case panelmenu::Item::BarPosition: return std::string(barside::Label(s.barSide)) + " \xe2\x80\xba";
-        default: return "";
+        case Item::Curve: l.icon = Icon::Curved; break;
+        case Item::Rotate: l.icon = Icon::Rotate; break;
+        case Item::Dock: l.icon = Icon::Desktop; break;
+        case Item::Close: l.icon = Icon::Close, l.red = true; break;
+        case Item::Placement:
+            l.icon = w == Where::View ? Icon::InView : w == Where::Dashboard ? Icon::Dashboard : w == Where::Wrist ? Icon::Controller : Icon::InRoom;
+            l.value = w == Where::View ? "Keep in View" : w == Where::Dashboard ? "On Dashboard" : w == Where::Wrist ? "On a Wrist" : "In the Room";
+            l.valueBlue = w != Where::Room;
+            break;
+        case Item::InRoom: l.icon = Icon::InRoom; break;
+        case Item::KeepInView: l.icon = Icon::InView; break;
+        case Item::OnDashboard: l.icon = Icon::Dashboard; break;
+        case Item::StayShown: l.icon = Icon::StayShown; break;
+        case Item::MoveAll: l.icon = Icon::MoveAll, l.value = "Hold"; break;   // (a click alone carries nothing)
+        case Item::Theater: l.icon = Icon::Theater; break;
+        case Item::BarPosition: l.icon = Icon::BarPosition, l.value = barside::Label(s.barSide); break;
+        case Item::Reset: l.icon = Icon::Reset, l.red = true; break;
+        case Item::Back: l.icon = Icon::Back; break;
+        case Item::Edge: break;
     }
+    l.chevron = panelmenu::Opens(r.item);
+    const bool on = On(r, s, i);
+    l.on = r.item == Item::Curve && on;
+    l.chosen = on && r.item != Item::Curve;
+    if (caption) l.caption = caption;
+    return l;
 }
 
-// SteamVR's dark menu: a row each, the one under a laser or a fingertip white, a dot on each toggle
-// that's on, grey hints at the right, a rule between groups, reset in red.
+std::vector<menulayout::Spec> Specs(const std::vector<panelmenu::Row> &rows) {
+    std::vector<menulayout::Spec> specs;
+    for (size_t r = 0; r < rows.size(); ++r)
+        specs.push_back({panelmenu::Tile(rows[r].item), panelmenu::RuleAbove(rows, r), panelmenu::Caption(rows, r) != nullptr});
+    return specs;
+}
+
 void DrawMenu(const Screen &s, int i) {
-    const int W = barside::kMenuW, n = int(g_menu.rows.size()), H = barside::MenuH(n), R = barside::kRowH, pad = barside::kMenuPad;
-    const int lit = g_menu.hover >= 0 ? g_menu.hover : g_menu.handHover;
-    std::string what = std::to_string(lit) + "/" + std::to_string(int(s.barSide)) + "/";
-    for (const auto &r : g_menu.rows) what += char('a' + int(r.item)), what += Checked(r, s, i) ? '1' : '0';
+    const menulayout::Layout &L = g_menu.layout;
+    const int n = int(g_menu.rows.size()), lit = g_menu.hover >= 0 ? g_menu.hover : g_menu.handHover;
+    const bool pressed = g_menu.holding != kNone;
+    std::string what = std::to_string(lit) + "/" + (pressed ? "p" : "") + std::to_string(int(s.barSide)) + "/" +
+                       std::to_string(int(Placed(s, i))) + "/";
+    for (const auto &r : g_menu.rows) what += char('a' + int(r.item)), what += On(r, s, i) ? '1' : '0';
     if (what == g_menu.drawn) return;
-    std::vector<uint8_t> px(size_t(W) * H * 4, 0);
-    const uint8_t bg[4] = {24, 24, 30, 230}, on[4] = {240, 240, 244, 240}, rule[4] = {90, 90, 100, 255};
-    FillRound(px, W, H, 0, 0, W, H, R / 2, bg);
-    for (int r = 0; r < n; ++r) {
-        const panelmenu::Row &row = g_menu.rows[size_t(r)];
-        const int y0 = pad + r * R, cy = y0 + R / 2;
-        if (panelmenu::RuleAbove(g_menu.rows, size_t(r))) FillRound(px, W, H, pad * 3, y0 - 1, W - pad * 3, y0 + 1, 1, rule);
-        const bool hot = r == lit;
-        if (hot) FillRound(px, W, H, pad, y0 + 3, W - pad, y0 + R - 3, (R - 6) / 2, on);
-        const bool red = row.item == panelmenu::Item::Reset;
-        const uint8_t ink[4] = {uint8_t(hot ? 20 : red ? 255 : 245), uint8_t(hot ? 20 : red ? 120 : 245), uint8_t(hot ? 24 : red ? 110 : 250), 255};
-        const uint8_t dim[3] = {uint8_t(hot ? 70 : 150), uint8_t(hot ? 70 : 155), uint8_t(hot ? 80 : 165)};
-        if (panelmenu::Toggle(row.item) && Checked(row, s, i)) FillRound(px, W, H, 34 - 7, cy - 7, 34 + 7, cy + 7, 7, ink);
-        const char *text = panelmenu::Label(row);
-        label::Draw(px.data(), W, H, text, kMenuText, 60 + label::Width(text, kMenuText) / 2, cy, 255, ink);
-        const std::string hint = Hint(row, s);
-        if (!hint.empty())
-            label::Draw(px.data(), W, H, hint.c_str(), kMenuHint, W - 28 - label::Width(hint.c_str(), kMenuHint) / 2, cy, 255, dim);
-    }
-    overlaytex::Set(g_menu.overlay, px.data(), W, H);
-    const vr::HmdVector2_t scale = {{float(W), float(H)}};
+    std::vector<barmenuart::RowLook> looks;
+    for (int r = 0; r < n; ++r) looks.push_back(Look(g_menu.rows[size_t(r)], s, i, panelmenu::Caption(g_menu.rows, size_t(r))));
+    const std::vector<uint8_t> px = barmenuart::Menu(looks, L, lit, pressed);
+    overlaytex::Set(g_menu.overlay, px.data(), L.w, L.h);
+    const vr::HmdVector2_t scale = {{float(L.w), float(L.h)}};
     vr::VROverlay()->SetOverlayMouseScale(g_menu.overlay, &scale);
     g_menu.drawn = what;
 }
 
 void Rows(const Screen &s, int i) {
-    const panelmenu::Kind k = KindOf(s, i);
-    g_menu.rows = g_menu.edges ? panelmenu::Edges(k, g_menu.back) : panelmenu::Main(k);
+    g_menu.rows = panelmenu::Rows(g_menu.page, KindOf(s, i), g_menu.back);
+    g_menu.layout = menulayout::Lay(Specs(g_menu.rows));
+}
+
+// A page of the menu (Back: the main one).
+void ToPage(const Screen &s, int i, panelmenu::Page p) {
+    g_menu.page = p, g_menu.back = p != panelmenu::Page::Main, Rows(s, i), g_menu.hover = -1;
 }
 
 // A row pressed (`dev` a laser's or the 3D mouse's; kNone: a fingertip, `by` says whose). Held rows start
@@ -173,8 +208,9 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
     std::printf("screen %d: grab bar menu: %s (%s)\n", i + 1, panelmenu::Label(r), by);
     using panelmenu::Item;
     switch (r.item) {
-        case Item::BarPosition: g_menu.edges = g_menu.back = true, Rows(s, i), g_menu.hover = -1; return;
-        case Item::Back: g_menu.edges = g_menu.back = false, Rows(s, i), g_menu.hover = -1; return;
+        case Item::Placement: return ToPage(s, i, panelmenu::Page::Placement);
+        case Item::BarPosition: return ToPage(s, i, panelmenu::Page::Edges);
+        case Item::Back: return ToPage(s, i, panelmenu::Page::Main);
         case Item::Rotate:
             if (dev == kNone) break;   // (a fingertip's tap levels it)
             StartDrag(s, Drag::Roll, dev);
@@ -191,10 +227,12 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
     switch (r.item) {
         case Item::Curve: ToggleCurve(s); break;
         case Item::Rotate: LevelScreen(s, i, by); break;
-        case Item::KeepInView: TogglePinView(s, i, by); break;
+        case Item::InRoom: PlaceInRoom(s, i, by); break;
+        case Item::KeepInView:
+            if (s.pinned != vr::k_unTrackedDeviceIndex_Hmd) TogglePinView(s, i, by);   // (off the dashboard or a wrist too)
+            break;
         case Item::OnDashboard:
-            if (TileAnchored(i)) TileUnanchor(i, by);
-            else TileAnchor(i, dashtiles::Stay::Default, by);
+            if (!TileAnchored(i)) TileAnchor(i, dashtiles::Stay::Default, by);
             break;
         case Item::StayShown: TileStay(i, !TileStays(s, i), by); break;
         case Item::Dock: SendFloat("dock " + std::to_string(i + 1)); break;
@@ -212,8 +250,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
 // The row under a point on its face (metres from its centre, y up), -1 none.
 int RowAtFace(double x, double y) {
     if (g_menu.w <= 0 || g_menu.h <= 0) return -1;
-    return barside::RowAt((x / g_menu.w + 0.5) * barside::kMenuW, (y / g_menu.h + 0.5) * barside::MenuH(int(g_menu.rows.size())),
-                          int(g_menu.rows.size()));
+    return menulayout::At(g_menu.layout, (x / g_menu.w + 0.5) * g_menu.layout.w, (y / g_menu.h + 0.5) * g_menu.layout.h);
 }
 
 // Each hands frame: a fingertip near it lights the row under it (and keeps it open), one coming through
@@ -251,9 +288,10 @@ bool BarMenuOn(int i) { return g_menu.panel >= 0 && g_menu.panel == i; }
 bool BarMenuHasHands(int i) { return BarMenuOn(i) || g_handsOff.Holds(i); }
 
 void OpenBarMenu(int i, double along, bool edges) {
-    if (g_menu.panel == i && g_menu.edges == edges) return CloseMenu("its bar tapped again");
-    if (g_menu.panel == i) {   // (a right click on its bar with the main page open, or a tap with the edges open)
-        g_menu.edges = edges, g_menu.back = false, g_menu.hover = -1, g_menu.usedMs = NowMs();
+    const panelmenu::Page page = edges ? panelmenu::Page::Edges : panelmenu::Page::Main;
+    if (g_menu.panel == i && (g_menu.page == page || !edges)) return CloseMenu("its bar tapped again");
+    if (g_menu.panel == i) {   // (a right click on its bar with another page open)
+        g_menu.page = page, g_menu.back = false, g_menu.hover = -1, g_menu.usedMs = NowMs();
         const auto it = g_screens.find(i);
         if (it != g_screens.end()) Rows(it->second, i);
         return;
@@ -270,7 +308,7 @@ void OpenBarMenu(int i, double along, bool edges) {
         AnnounceOverlay(kMenuKey);   // (the 3D mouse's ray finds it)
     }
     if (g_menu.panel >= 0) CloseMenu("another bar's opened");
-    g_menu.panel = i, g_menu.along = along, g_menu.edges = edges, g_menu.back = false;
+    g_menu.panel = i, g_menu.along = along, g_menu.page = page, g_menu.back = false;
     g_menu.hover = g_menu.handHover = -1, g_menu.holding = kNone;
     g_menu.openedMs = g_menu.usedMs = NowMs(), g_menu.drawn.clear();
     for (tiptap::Tap &t : g_menu.tip) t.Reset();
@@ -280,7 +318,7 @@ void OpenBarMenu(int i, double along, bool edges) {
                 barside::Name(it->second.barSide));
     std::fflush(stdout);
     UpdateBarMenu();
-    if (g_menu.panel >= 0) PinShow(g_menu.overlay), ApplyAlpha(it->second);   // (its bar lit while it's open)
+    if (g_menu.panel >= 0) PinShow(g_menu.overlay), ApplyAlpha(it->second), PaintBar(it->second);   // (its bar lit, and blue, while it's open)
 }
 
 // Each tick: it follows its panel's bar (moved, rolled, or turned to another edge), its rows follow the
@@ -306,10 +344,10 @@ void UpdateBarMenu() {
         g_menu.lasers = s.lasers;
         vr::VROverlay()->SetOverlayFlag(g_menu.overlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, s.lasers);
     }
-    // 0.45 mm a pixel at 1 m (as the gamepad pill): its text about the pill's size
+    // 0.4 mm a pixel at 1 m: its 32 px text 13 mm, about the gamepad pill's; the card 29 cm wide
     const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
-    const double mpp = 0.00045 * d;
-    g_menu.w = barside::kMenuW * mpp, g_menu.h = barside::MenuH(int(g_menu.rows.size())) * mpp;
+    const double mpp = 0.0004 * d;
+    g_menu.w = g_menu.layout.w * mpp, g_menu.h = g_menu.layout.h * mpp;
     const double half = barhit::Width(s.chrome, g_barPaddingX) / 2;
     const barside::UV at = barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), std::clamp(g_menu.along, -half, half));
     const barside::UV c = barside::MenuAt(s.barSide, at, barhit::Height(s.chrome, g_barPaddingY) / 2,
@@ -325,9 +363,8 @@ void UpdateBarMenu() {
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
     while (g_menu.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_menu.overlay, &ev, sizeof ev)) {
-        const int n = int(g_menu.rows.size());
         if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove) {
-            g_menu.hover = g_menu.holding != kNone ? g_menu.hover : barside::RowAt(ev.data.mouse.x, ev.data.mouse.y, n);
+            g_menu.hover = g_menu.holding != kNone ? g_menu.hover : menulayout::At(g_menu.layout, ev.data.mouse.x, ev.data.mouse.y);
             g_menu.usedMs = NowMs();
         } else if (ev.eventType == vr::VREvent_FocusLeave) {
             if (g_menu.holding == kNone) g_menu.hover = -1;
@@ -335,7 +372,7 @@ void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
                    (ev.data.mouse.button == vr::VRMouseButton_Left || ev.data.mouse.button == vr::VRMouseButton_Right)) {
             if (g_menu.panel < 0) continue;
             g_menu.usedMs = NowMs();
-            PressRow(barside::RowAt(ev.data.mouse.x, ev.data.mouse.y, n), ev.trackedDeviceIndex, DeviceLabel(ev.trackedDeviceIndex).c_str());
+            PressRow(menulayout::At(g_menu.layout, ev.data.mouse.x, ev.data.mouse.y), ev.trackedDeviceIndex, DeviceLabel(ev.trackedDeviceIndex).c_str());
         } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
             const vr::TrackedDeviceIndex_t dev = ev.trackedDeviceIndex;
             const int panel = g_menu.panel;

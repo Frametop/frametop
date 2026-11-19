@@ -1,0 +1,221 @@
+#!/usr/bin/python3
+"""smoke: the feature map's recipes (features/*.md) that a readback can prove, as one scripted
+run against the live Frametop, after `scripts/fast-install`. Each step drives the user's inputs
+through the testbench and checks Frametop's own readbacks; nothing here reads a capture (with
+--capture the snapshots take them, for a person or an agent to look at).
+
+  smoke [--only FEATURE,...] [--capture] [--list]
+
+Features, in the order they run (`--only` picks some):
+
+  display-power  T power off, then on: power.displays follows
+  gaze           T gaze look twice, then one eye lost: the gaze service's sample follows
+  keys           meta+space opens frunner (frametop.frunner visible), esc closes it
+  dashboard      a controller's system button opens SteamVR's dashboard, a second press closes it
+  hands          a posed hand: the testbench publishes it (ft-hands parks); only when hand
+                 tracking runs, else SKIPPED
+
+It runs inside one `verify-frametop launch smoke` run and always ends with its cleanup, after a
+failure too. It stops at once, cleaning up, when someone puts the headset on (`V guard`), as the
+verify skill's hard rules say. What only a person can judge stays in HEADSET-TESTS.md.
+Exit 0 when every step passed, 1 when one failed, 2 when the run couldn't start or was stopped.
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+V = os.path.join(HERE, "verify-frametop")
+T = os.path.join(ROOT, "testbench", "frame-testbench")
+POSE = ("--position", "0", "1.1", "0", "--rotation", "0", "0", "0")
+
+
+class Stop(Exception):
+    """The guard stopped the run (worn, sensor unread, a host lending its input): it cleaned up."""
+
+
+def call(argv, check=True):
+    p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
+    if check and p.returncode != 0:
+        raise RuntimeError(f"{' '.join(argv)}: exit {p.returncode}: {(p.stderr or p.stdout).strip()[-400:]}")
+    return p
+
+
+def guard():
+    p = call([V, "guard"], check=False)
+    if p.returncode != 0:
+        raise Stop(p.stderr.strip() or f"guard exit {p.returncode}")
+
+
+def t(*args):
+    """One testbench command, after the guard."""
+    guard()
+    return call([T, *args])
+
+
+def press(*button, hold=0.2):
+    t(*button, "on")
+    time.sleep(hold)
+    t(*button, "off")
+
+
+class Smoke:
+    def __init__(self, capture):
+        self.capture = capture
+        self.n = 0
+        self.failed = []
+
+    def snap(self, label):
+        self.n += 1
+        argv = [V, "snapshot", f"{self.n}-{label}"] + (["--capture"] if self.capture else [])
+        p = call(argv, check=False)
+        if p.returncode in (1, 2, 3) and "stopping the run" in p.stderr:
+            raise Stop(p.stderr.strip())
+        if p.returncode != 0:
+            raise RuntimeError(f"snapshot {label}: {p.stderr.strip() or p.stdout.strip()}")
+        folder = json.loads(p.stdout)["snapshot"]
+        with open(os.path.join(folder, "readbacks.json")) as f:
+            return json.load(f)
+
+    def expect(self, name, ok, saw):
+        print(f"{name}: {'ok' if ok else 'FAILED'}" + ("" if ok else f" (saw {saw})"), flush=True)
+        if not ok:
+            self.failed.append(name)
+
+    def visible(self, rb):
+        return set((rb.get("overlays") or {}).get("visible") or [])
+
+    # the features
+
+    def display_power(self):
+        before = (self.snap("power-before").get("power") or {}).get("displays")
+        t("power", "off")
+        time.sleep(1)
+        off = (self.snap("power-off").get("power") or {}).get("displays")
+        t("power", "on")
+        time.sleep(1)
+        on = (self.snap("power-on").get("power") or {}).get("displays")
+        self.expect("display-power off", off == "off", off)
+        self.expect("display-power on", on == before, f"{on}, was {before}")
+
+    def gaze(self):
+        call([V, "ask", "ft_gazed", "wake 90"], check=False)
+        start = (self.snap("gaze-before").get("gaze") or {}).get("samples") or 0
+        try:
+            for yaw, pitch in ((10, -5), (-8, 4)):
+                t("gaze", "look", str(yaw), str(pitch))
+                time.sleep(1)
+                g = self.snap(f"gaze-look-{yaw}_{pitch}").get("gaze") or {}
+                last = g.get("last") or [None, None]
+                near = all(isinstance(v, (int, float)) for v in last[:2]) and \
+                    abs(last[0] - yaw) < 3 and abs(last[1] - pitch) < 3
+                fresh = (g.get("sample_age_s") if g.get("sample_age_s") is not None else 99) < 1
+                self.expect(f"gaze look {yaw} {pitch}", near and fresh and (g.get("samples") or 0) > start,
+                            f"last {last}, age {g.get('sample_age_s')}, samples {g.get('samples')}")
+            t("gaze", "eyes", "open", "lost")
+            time.sleep(1)
+            g = self.snap("gaze-eye-lost").get("gaze") or {}
+            self.expect("gaze eye lost", g.get("eyes_lost") == [False, True], g.get("eyes_lost"))
+        finally:
+            call([T, "gaze", "release"], check=False)
+
+    def keys(self):
+        t("keyboard", "keys", "meta+space")
+        time.sleep(1.5)
+        opened = "frametop.frunner" in self.visible(self.snap("frunner-open"))
+        t("keyboard", "keys", "esc")
+        time.sleep(1)
+        closed = "frametop.frunner" not in self.visible(self.snap("frunner-closed"))
+        self.expect("keys meta+space opens frunner", opened, "no frametop.frunner")
+        self.expect("keys esc closes frunner", closed, "frametop.frunner still visible")
+
+    def dashboard(self):
+        dash = "valve.steam.gamepadui.main"
+        if dash in self.visible(self.snap("dash-before")):
+            self.expect("dashboard closed to start", False, f"{dash} already visible")
+            return
+        t("controller", "right", "set", "--position", "0.2", "0.9", "-0.4")
+        opened = closed = False
+        try:
+            press("controller", "right", "button", "system")
+            time.sleep(2)
+            opened = dash in self.visible(self.snap("dash-open"))
+        finally:
+            if opened or dash in self.visible(self.snap("dash-check")):
+                press("controller", "right", "button", "system")   # never leave it open: it holds the controllers
+                time.sleep(2)
+            closed = dash not in self.visible(self.snap("dash-closed"))
+            call([T, "controller", "right", "reset"], check=False)
+        self.expect("dashboard opens on system", opened, f"no {dash}")
+        self.expect("dashboard closes on a second press", closed, f"{dash} still visible")
+
+    def hands(self):
+        doctor = json.loads(call([V, "doctor"], check=False).stdout or "{}")
+        running = any("hand tracking" in str(c.get("name", "")) and c.get("ok") for c in doctor.get("checks", []))
+        if not running:
+            print("hands: SKIPPED: hand tracking doesn't run (V doctor)", flush=True)
+            return
+        try:
+            t("hand", "right", "set", "--position", ".1", "-.1", "-.4", "--shape", "open")
+            time.sleep(1.5)
+            fakes = (self.snap("hand-posed").get("testbench") or {}).get("fakes") or {}
+            self.expect("hands posed hand published", fakes.get("hands_publishing") is True and not fakes.get("hands_waiting"),
+                        fakes)
+        finally:
+            call([T, "hand", "all", "release"], check=False)
+
+
+FEATURES = {"display-power": Smoke.display_power, "gaze": Smoke.gaze, "keys": Smoke.keys,
+            "dashboard": Smoke.dashboard, "hands": Smoke.hands}
+
+
+def main(argv):
+    a = argparse.ArgumentParser(usage=__doc__.split("\n\n")[1].strip())
+    a.add_argument("--only", default=",".join(FEATURES))
+    a.add_argument("--capture", action="store_true")
+    a.add_argument("--list", action="store_true")
+    args = a.parse_args(argv)
+    if args.list:
+        print("\n".join(FEATURES))
+        return 0
+    picked = [f.strip() for f in args.only.split(",") if f.strip()]
+    unknown = [f for f in picked if f not in FEATURES]
+    if unknown:
+        sys.exit(f"smoke: no feature {', '.join(unknown)} (--list)")
+    launch = call([V, "launch", "smoke"], check=False)
+    if launch.returncode != 0:
+        print(launch.stdout.strip(), launch.stderr.strip(), sep="\n", file=sys.stderr)
+        return 2
+    run = json.loads(launch.stdout)["run"]
+    print(f"smoke: run {run}", flush=True)
+    s = Smoke(args.capture)
+    stopped = None
+    try:
+        t("worn", "on")
+        t("compositor", "awake")
+        t("pose", "set", *POSE)
+        for name in picked:
+            try:
+                FEATURES[name](s)
+            except RuntimeError as e:
+                s.expect(name, False, e)
+    except Stop as e:
+        stopped = str(e)
+    finally:
+        if stopped is None:
+            p = call([V, "cleanup", run], check=False)
+            if p.returncode != 0:
+                s.expect("cleanup", False, p.stdout.strip()[-400:] or p.stderr.strip())
+    if stopped:
+        print(f"smoke: STOPPED: {stopped}", flush=True)
+        return 2
+    print(f"smoke: {'FAILED: ' + ', '.join(s.failed) if s.failed else 'ok'} (evidence in {run})", flush=True)
+    return 1 if s.failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

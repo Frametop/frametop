@@ -147,6 +147,19 @@ inputs:
 Details: `testbench/README.md`, `testbench/docs/controller-inputs.md`,
 `testbench/docs/fake-trackers.md`, `testbench/docs/desktop.md`.
 
+## Smoke
+
+`scripts/smoke` runs the recipes a readback can prove as one scripted run, in a few minutes:
+display power off and on, two gaze looks and a lost eye, meta+space opening frunner and esc
+closing it, the dashboard opening and closing from a controller's system button, and a posed
+hand (when hand tracking runs). Run it after every `scripts/fast-install`, before driving the
+changed feature by hand: it catches a change that broke something next to it. It launches its
+own run (`smoke`), guards every step, and always cleans up; exit 0 all passed, 1 a step
+failed, 2 the run couldn't start or the guard stopped it. `--only gaze,keys` runs some,
+`--capture` adds a capture to each snapshot (read them before calling one proof). It proves
+readbacks, not looks: a visual change still needs its own capture, and what only a person can
+judge still goes in HEADSET-TESTS.md. A recipe that gains a readback check belongs in it too.
+
 ## Evidence
 
 `V snapshot LABEL [--capture]` writes `RUN/LABEL/readbacks.json`: `T status` (overrides and the

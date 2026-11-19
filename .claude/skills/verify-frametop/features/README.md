@@ -36,6 +36,12 @@ in `../SKILL.md`.
 - What only a person can judge (comfort, tracking quality, how a look or pinch feels) goes in
   `~/Desktop/Projects/HEADSET-TESTS.md`.
 
+## Scripted checks
+
+`../scripts/smoke` runs the readback checks of display power, the gaze pointer, the 3D mouse's
+keys, the dashboard and hand tracking in one run (`../SKILL.md`, Smoke). When a recipe here
+changes what a readback should show, change the smoke step with it.
+
 ## Feature entry contract
 
 Each feature file starts with an H1 title and a paragraph on the user-visible behaviour, then

@@ -129,9 +129,11 @@ void Draw() {
         changed = true;
     }
     if (!changed) return;
-    // (kept only once it's on the overlay: if that failed, the next tick tries again)
-    if (overlaytex::Set(g_card.overlay, g_card.px.data(), kW, kH) == vr::VROverlayError_None)
-        for (int i = 0; i < kTiles; ++i) g_card.looks[i] = now[i];
+    // (kept only once it's on the overlay; if that failed, what it drew isn't what any look says, so
+    // those tiles are drawn again whatever they look like next)
+    const bool ok = overlaytex::Set(g_card.overlay, g_card.px.data(), kW, kH) == vr::VROverlayError_None;
+    for (int i = 0; i < kTiles; ++i)
+        if (!(now[i] == g_card.looks[i])) g_card.looks[i] = ok ? now[i] : Look{};
 }
 
 void Hide() {
@@ -183,6 +185,7 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     // the palm it's over while that shows; else whichever shows (both up: the right). (Paused for a VR
     // game, it shows with the dashboard open, as the palm menu does: Steam Menu works, the rest dim.)
     const int side = g_card.side >= 0 && palm.shown(g_card.side) ? g_card.side : palm.shown(1) ? 1 : palm.shown(0) ? 0 : -1;
+    if (g_paused) g_resetAsk.Clear();   // (Reset does nothing then: its ask ends, not waits out the pause)
     double c[3];
     if (side < 0 || !in.haveHead || !palm.Card(side, *in.shown, c) || !Make()) return Hide();
     const bool fresh = side != g_card.side;

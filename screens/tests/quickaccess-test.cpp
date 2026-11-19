@@ -129,6 +129,32 @@ int main() {
                     quick = quick && presses == 1;
                 }
         check("quick pokes up to 2 m/s at 15 and 30 Hz, ending 5 cm behind: each presses once", quick);
+        // slanted ones (council, 2026-11-19: by the through frame the tip is cm to the side): the tile it
+        // crossed, Spin Right, every time
+        bool slanted = true;
+        for (const double hz : {15.0, 30.0})
+            for (const double ms : {1.0, 1.5, 2.0})
+                for (const double deg : {20.0, 30.0, 45.0})
+                    for (const double dir : {-1.0, 1.0})
+                        for (int k = 0; k < 20; ++k) {
+                            Poke p;
+                            p.Reset(0);
+                            const double step = ms / hz, s = std::tan(deg * 3.14159265358979 / 180) * dir;
+                            const double z0 = 0.08 + k * step / 20;
+                            int right = 0, wrong = 0;
+                            int64_t t = 1000;
+                            for (double z = z0; z > -0.05 - step; z -= step * std::cos(deg * 3.14159265358979 / 180), t += int64_t(1000 / hz)) {
+                                const double zz = z < -0.05 ? -0.05 : z;
+                                const double l[3] = {u4 + s * zz, v4, zz};
+                                const int got = p.Step(l, w, h, t);
+                                right += got == 4, wrong += got >= 0 && got != 4;
+                            }
+                            // (45 degrees at 15 Hz and 1.5 m/s or more, the tip goes ~9 cm sideways a frame and
+                            // is never seen in front over the card: tiptap never arms, so nothing; never another tile)
+                            const bool reach = deg < 40 || hz > 20 || ms < 1.25;
+                            slanted = slanted && wrong == 0 && (right == 1 || (!reach && right == 0));
+                        }
+        check("slanted quick pokes (20-45 degrees, either way): Spin Right once, never another tile", slanted);
 
         check("resting 6 mm in front after it: spent", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 6}, {u4, v4, 10}, {u4, v4, 1}}, 30) == 1);
         check("...3 cm out and in again: a second press", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 31}, {u4, v4, 10}, {u4, v4, 1}}, 30) == 2);
@@ -141,6 +167,23 @@ int main() {
                    {u4, v4, 28}, {u4, v4, 9}, {u4, v4, 2}, {u4, v4, 14}, {u4, v4, 1}}, 30) == 1);
         check("...with the hand lost a frame after the press: one press",
               run({{u4, v4, 40}, {u4, v4, 20}, {u4, v4, 8}, {u4, v4, -4}, {0, 0, lost}, {u4, v4, 10}, {u4, v4, 2}, {0, 0, lost}, {u4, v4, 12}, {u4, v4, 1}}, 30) == 1);
+        // pressed 4 mm inside Steam Menu's right edge, then a noisy pull-back drifting 10 mm toward Hide Screens
+        {
+            int b0, by0, b1, by1;
+            Box(0, &b0, &by0, &b1, &by1);
+            const double px = w / kW, at = (b1 - 4 / 1000.0 / px - kW / 2.0) * px, v0 = (kH / 2.0 - (by0 + by1) / 2.0) * h / kH;
+            const double drift = 0.010, zs[] = {40, 20, 8, 1, -4, 10, 2, 12, 28, 9, 2, 14, 1};
+            Poke p;
+            p.Reset(0);
+            int presses = 0, other = 0;
+            int64_t t = 1000;
+            for (int k = 0; k < 13; ++k) {
+                const double u = at + (k > 4 ? drift * (k - 4) / 8 : 0), l[3] = {u, v0, zs[k] / 1000.0};
+                const int got = p.Step(l, w, h, t += 33);
+                presses += got >= 0, other += got > 0;
+            }
+            check("a pull-back drifting 10 mm sideways across a tile edge: one press, Steam Menu", presses == 1 && other == 0);
+        }
         // pressed 2.5 mm in from the card's right edge, trembling 3 mm sideways off it and back
         const double edge = w / 2 - 0.0025, side = w / 2 + 0.0005;
         check("pressed by the card's edge, a sideways tremble off it: one press",

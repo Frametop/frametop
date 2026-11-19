@@ -98,8 +98,11 @@ inline int StickyTileAt(int prev, double x, double y) {
 // edge: StickyTileAt) and the one it presses as it comes through (tiptap.h). After a press the card stays
 // (the bar menu closes), so the tip is spent: resting or trembling by the face it mustn't press again
 // (council, 2026-11-19: tiptap arms again 8 mm out, and one poke pressed twice). It's spent until it's
-// seen kOut in front of the card, off tiptap's reach of it, or over another tile, or out of sight for
-// kLostMs (one lost frame isn't the hand gone: holds last through 10, palmmenu waits 250 ms).
+// seen kOut in front of the card, off tiptap's reach of it, or as far into another tile (StickyTileAt's
+// hold alone is a tremble's width: council, 2026-11-19, a pull-back drifting sideways pressed the
+// neighbour), or out of sight for kLostMs (one lost frame isn't the hand gone: holds last through 10,
+// palmmenu waits 250 ms). A press is the tile where the tip crossed the face, between this frame and
+// the last: a quick or slanted poke is centimetres on, and to the side, by the frame it's through.
 class Poke {
 public:
     static constexpr double kOut = 0.03;
@@ -108,13 +111,14 @@ public:
     // Shown afresh at `nowMs`: a tip already through it doesn't count, and none presses for kShownMs.
     void Reset(int64_t nowMs) {
         tap_.Reset();
-        hover_ = spent_ = -1, near_ = false, lostMs_ = -1, shownMs_ = nowMs;
+        hover_ = spent_ = -1, near_ = false, haveLast_ = false, lostMs_ = -1, shownMs_ = nowMs;
     }
     // `l`: the tip on the card's face (metres from its centre: x right, y up, z out), or null; the card
     // w x h metres. The tile it pressed, or -1.
     int Step(const double *l, double w, double h, int64_t nowMs) {
         const double hw = w / 2, hh = h / 2, m = tiptap::Tap::kMargin;
         const bool through = tap_.Step(l, hw, hh);
+        const int held = hover_;
         near_ = l && tap_.Near();
         if (near_) {
             double x, y;
@@ -128,11 +132,20 @@ public:
             if (nowMs - lostMs_ >= kLostMs) spent_ = -1;
         } else if (spent_ >= 0) {
             lostMs_ = -1;
-            if (l[2] > kOut || std::fabs(l[0]) > hw + m || std::fabs(l[1]) > hh + m || (hover_ >= 0 && hover_ != spent_)) spent_ = -1;
+            if (l[2] > kOut || std::fabs(l[0]) > hw + m || std::fabs(l[1]) > hh + m || Past(spent_, l, w, h, m)) spent_ = -1;
         }
+        // where it crossed the face (tiptap's through follows a frame in front, past kFront)
+        double at[2] = {l ? l[0] : 0, l ? l[1] : 0};
+        if (through && haveLast_ && last_[2] > l[2]) {
+            const double f = last_[2] / (last_[2] - l[2]);
+            at[0] = last_[0] + f * (l[0] - last_[0]), at[1] = last_[1] + f * (l[1] - last_[1]);
+        }
+        haveLast_ = l != nullptr;
+        if (l) last_[0] = l[0], last_[1] = l[1], last_[2] = l[2];
         if (!through || spent_ >= 0) return -1;
-        // (a quick poke can be well behind the face on the frame it's through, past Near: where it went in)
-        const int t = hover_ >= 0 ? hover_ : TileAtFace(l[0], l[1], w, h);
+        double x, y;
+        FaceToPx(at[0], at[1], w, h, &x, &y);
+        const int t = StickyTileAt(held, x, y);
         if (t < 0) return -1;
         spent_ = t, lostMs_ = -1;   // (too soon after it showed: spent, so it comes out before it presses)
         return nowMs - shownMs_ >= kShownMs ? t : -1;
@@ -142,9 +155,20 @@ public:
     bool spent() const { return spent_ >= 0; }
 
 private:
+    // The tip `l` more than `m` metres past tile i's box, on a card w x h.
+    static bool Past(int i, const double *l, double w, double h, double m) {
+        int x0, y0, x1, y1;
+        Box(i, &x0, &y0, &x1, &y1);
+        double x, y;
+        FaceToPx(l[0], l[1], w, h, &x, &y);
+        const double mx = m / w * kW, my = m / h * kH;
+        return x < x0 - mx || x > x1 + mx || y < y0 - my || y > y1 + my;
+    }
+
     tiptap::Tap tap_;
     int hover_ = -1, spent_ = -1;   // spent_: the tile it pressed
-    bool near_ = false;
+    bool near_ = false, haveLast_ = false;
+    double last_[3] = {0, 0, 0};    // the tip last frame
     int64_t lostMs_ = -1, shownMs_ = 0;
 };
 

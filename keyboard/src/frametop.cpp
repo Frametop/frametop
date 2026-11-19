@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <stdexcept>
 #include <sys/socket.h>
@@ -157,9 +158,16 @@ void FrametopLink::poll() {
             if (auto poke = parse_hand_poke(text); poke && pokes_.size() < 64) {
                 pokes_.push_back(*poke);
             }
-        } else if (std::sscanf(text.c_str(), "kb %d %d", &desktop, &surface) == 2) {
+        } else if (char layout[64]{}; std::sscanf(text.c_str(), "kb %d %d %63s", &desktop, &surface, layout) >= 2) {
             desktop_ = desktop != 0;
             surface_ = surface != 0;
+            layout_ = desktop_ ? layout : "";
+            const bool name = std::all_of(layout_.begin(), layout_.end(), [](unsigned char c) {
+                return std::isalnum(c) || c == '_' || c == '-' || c == '(' || c == ')';
+            });
+            if (!name) {
+                layout_.clear();
+            }
             heard_ = clock_();
         }
     }
@@ -222,6 +230,43 @@ bool FrametopSink::pump() {
     const bool steam = steam_.pump();
     return link_.desktop() || steam;
 }
+LayoutCodes::~LayoutCodes() {
+    xkb_keymap_unref(keymap_);
+    xkb_context_unref(context_);
+}
+int LayoutCodes::code(const std::string& layout, xkb_keysym_t symbol, int fallback) {
+    if (layout.empty()) {
+        return fallback;
+    }
+    if (layout != name_) {
+        name_ = layout;
+        xkb_keymap_unref(std::exchange(keymap_, nullptr));
+        if (!context_) {
+            context_ = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+        }
+        // "fr" or "fr(azerty)": the relay's name for the first layout of the desktop's kxkbrc.
+        const auto open = layout.find('(');
+        const std::string base = layout.substr(0, open);
+        const std::string variant =
+            open == std::string::npos || layout.back() != ')' ? "" : layout.substr(open + 1, layout.size() - open - 2);
+        const xkb_rule_names names{"evdev", "pc105", base.c_str(), variant.c_str(), nullptr};
+        keymap_ = context_ ? xkb_keymap_new_from_names(context_, &names, XKB_KEYMAP_COMPILE_NO_FLAGS) : nullptr;
+    }
+    if (!keymap_) {
+        return fallback;
+    }
+    for (auto code = xkb_keymap_min_keycode(keymap_); code <= xkb_keymap_max_keycode(keymap_); ++code) {
+        const xkb_keysym_t* symbols = nullptr;
+        const int count = xkb_keymap_key_get_syms_by_level(keymap_, code, 0, 0, &symbols);
+        for (int i = 0; i < count; ++i) {
+            if (code >= 8 && xkb_keysym_to_lower(symbols[i]) == symbol) {
+                return static_cast<int>(code - 8);
+            }
+        }
+    }
+    return fallback;
+}
+
 bool FrametopSink::commit_text(const std::string& text) {
     if (link_.desktop()) {
         return link_.send("kbtext " + text);

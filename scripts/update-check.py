@@ -73,7 +73,9 @@ PACKAGES = {
     "at-spi2-core": "an AT-SPI-aware app appears on the nested desktop's accessibility bus; "
                     "the registry stops and comes back after a desktop restart",
     "gamescope": "the headset's volume buttons with nothing focused; typing goes where you last clicked; "
-                 "Full Keyboard types into a Steam field and a game (libei)",
+                 "Full Keyboard types into a Steam field and a game (libei); in Native Desktop with a "
+                 "French layout, Full Keyboard types \u00e9, \u00ea and Ctrl+A, and a Steam field over it still "
+                 "types \"a\" (the relay's GamescopeFocus)",
     "libei": "Full Keyboard types into a Steam field and a game (its own libei client, built in, "
              "talks to gamescope's EIS server from this package)",
     "deckard-steamvr-session": "Full Keyboard starts with SteamVR and its panel draws (frametop-keyboard.service "
@@ -768,6 +770,32 @@ def check_launch_list():
         report("ok", label, f"{len(hidden)} of Frametop's entries are in the Frametop menu, not in the list")
 
 
+def check_native_focus():
+    """The relay's GamescopeFocus reads gamescope's GAMESCOPE_FOCUSED_WINDOW and
+    GAMESCOPE_FOCUSABLE_WINDOWS (window, app id, pid) on its first Xwayland, an undocumented
+    layout, to type in Native Desktop (a kwin_wayland window there) with its own layout."""
+    label = "Native Desktop's focus"
+    code, out = run("xprop", "-display", ":0", "-root", "GAMESCOPE_FOCUSED_WINDOW", "GAMESCOPE_FOCUSABLE_WINDOWS")
+    if code != 0:
+        report("skip", label, "gamescope's Xwayland (:0) didn't answer")
+        return
+    if "not found" in out or "GAMESCOPE_FOCUSABLE_WINDOWS" not in out:
+        report("warn", label, "gamescope no longer sets GAMESCOPE_FOCUSED_WINDOW or GAMESCOPE_FOCUSABLE_WINDOWS: "
+               "Frametop's keyboard types in Native Desktop with a US layout's keys again")
+        return
+    if run("pgrep", "-f", "steamos-nested-desktop")[0] != 0:
+        report("skip", label, "Native Desktop isn't running")
+        return
+    kwin = [int(p) for p in run("pgrep", "-x", "kwin_wayland")[1].split()]
+    focusable = [int(n) for n in re.findall(r"\d+", out.split("GAMESCOPE_FOCUSABLE_WINDOWS", 1)[1])]
+    if not any(p in focusable[2::3] for p in kwin):
+        report("warn", label, "Native Desktop's KWin isn't among gamescope's focusable windows' pids (every "
+               "third number), so the relay won't see it focused: Frametop's keyboard types there with a US "
+               "layout's keys again")
+        return
+    report("ok", label)
+
+
 def check_vr_socket():
     """vrserver's web socket, which the pause gesture reads the controllers from (input/vrws.py,
     input/game_pause.py). It's undocumented: SteamVR's controller binding page uses it."""
@@ -1015,6 +1043,7 @@ def main():
         check_dashboard_apps()
         check_launch_list()
         check_vr_socket()
+        check_native_focus()
         check_eye_tracker()
         check_eye_rate()
         check_dashpatch()

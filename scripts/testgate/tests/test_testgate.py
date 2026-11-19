@@ -7,7 +7,10 @@ hangs. Made-up test files in a temp folder.
 """
 import contextlib
 import io
+import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -16,6 +19,7 @@ import unittest
 import unittest.mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import procs  # noqa: E402
 import testgate  # noqa: E402
 
 UNITTEST = """\
@@ -186,12 +190,125 @@ class Gate(unittest.TestCase):
         self.assertTrue(os.path.exists(marker))
         self.assertLess(time.monotonic() - start, 20)
 
+    def test_a_leftover_in_a_process_group_of_its_own_is_ended_too(self):
+        """ninja gives each command a process group of its own, in its session: a leftover there
+        that is slow to go on SIGTERM still goes (SIGKILL), with the session."""
+        pidfile = os.path.join(self.dir, "pid")
+        child = ("import os, signal, time\n"
+                 "signal.signal(signal.SIGTERM, lambda *a: time.sleep(5))\n"
+                 f"open({pidfile!r}, 'w').write(str(os.getpid()))\n"
+                 "time.sleep(60)")
+        path = self.file("o.py", f"""\
+            import os, subprocess, sys, time
+            subprocess.Popen([sys.executable, "-c", {child!r}], process_group=0)
+            while not os.path.exists({pidfile!r}): time.sleep(0.05)
+            print("all passed")
+            """)
+        self.assertEqual(testgate.run(path)[0], "ok")
+        with open(pidfile) as f:
+            pid = int(f.read())
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                state = f.read().rsplit(")", 1)[1].split()[0]
+        except OSError:
+            state = "gone"
+        self.assertIn(state, ("gone", "Z"))
+
+    def test_a_leftover_that_keeps_forking_is_ended_with_all_it_forked(self):
+        """It ignores SIGTERM and forks every millisecond: one forked while /proc is read still goes."""
+        loop = ("import os, signal, time\n"
+                "signal.signal(signal.SIGTERM, lambda *a: None)\n"
+                "print('ready', flush=True)\n"
+                "while True:\n"
+                "    if os.fork() == 0:\n"
+                "        time.sleep(60); os._exit(0)\n"
+                "    time.sleep(0.001)\n")
+        p = subprocess.Popen([sys.executable, "-c", loop], stdout=subprocess.PIPE, start_new_session=True)
+        try:
+            self.assertEqual(p.stdout.readline().strip(), b"ready")
+            procs.end_session(p.pid)
+            time.sleep(0.1)
+            self.assertEqual(procs.members(p.pid), [])
+        finally:
+            for pid in procs.members(p.pid):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            p.stdout.close()
+            p.wait()
+
+    def test_a_run_started_ignoring_sighup_keeps_ignoring_it(self):
+        """nohup: a closed terminal doesn't end the run, and the files it runs still start with
+        SIGHUP's default (not nohup's ignore); without nohup, a hangup ends it (and cleans up)."""
+        started = os.path.join(self.dir, "started")
+        path = self.file("w.py", f"""\
+            import signal, time
+            open({started!r}, "w").write(str(signal.getsignal(signal.SIGHUP) == signal.SIG_DFL))
+            time.sleep(1.5)
+            print("all passed")
+            """)
+        gate = os.path.join(os.path.dirname(os.path.abspath(testgate.__file__)), "testgate.py")
+        for ignore, want in ((True, 0), (False, 128 + signal.SIGHUP)):
+            if os.path.exists(started):
+                os.unlink(started)
+            disposition = signal.SIG_IGN if ignore else signal.SIG_DFL
+            p = subprocess.Popen([sys.executable, gate, "--jobs", "1", path], stdout=subprocess.DEVNULL,
+                                 preexec_fn=lambda d=disposition: signal.signal(signal.SIGHUP, d))
+            deadline = time.monotonic() + 20
+            while not os.path.exists(started) and time.monotonic() < deadline:   # its handler is in
+                time.sleep(0.02)
+            p.send_signal(signal.SIGHUP)
+            self.assertEqual(p.wait(timeout=20), want)
+            with open(started) as f:
+                self.assertEqual(f.read(), "True")
+
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")
         status, out = self.gate("a.py", "gone/*.py")
         self.assertEqual(status, 1)
         self.assertIn("gone/*.py: FAILED, matches no file", out)
         self.assertIn("python files: 1 ok, 0 skipped, 0 failed", out)
+
+    def test_files_run_side_by_side_and_report_in_order(self):
+        for name, wait in (("p1.py", 1.5), ("p2.py", 0), ("p3.py", 0)):
+            self.file(name, f"import time; time.sleep({wait}); print('all passed')\n")
+        out = io.StringIO()
+        start = time.monotonic()
+        times = os.path.join(self.dir, "times.json")
+        with contextlib.redirect_stdout(out):
+            status = testgate.main([os.path.join(self.dir, "p*.py")], njobs=3, times=times)
+        self.assertLess(time.monotonic() - start, 2.5)
+        self.assertEqual(status, 0)
+        lines = [line.rsplit("/", 1)[-1] for line in out.getvalue().splitlines()[:3]]
+        self.assertEqual(lines, ["p1.py: ok", "p2.py: ok", "p3.py: ok"])
+        with open(times) as f:
+            self.assertEqual(len(json.load(f)), 3)
+
+    def test_a_file_that_runs_alone_runs_alone(self):
+        """q2 says it runs alone: q1 has ended before it starts, and q3 starts after it ends."""
+        log = os.path.join(self.dir, "log")
+        for name, first in (("q1.py", "# runs with others"), ("q2.py", testgate.ALONE), ("q3.py", "# runs with others")):
+            self.file(name, f"""\
+                {first}
+                import os, time
+                with open({log!r}, "a") as f: f.write("start {name}\\n")
+                time.sleep(0.3)
+                with open({log!r}, "a") as f: f.write("end {name}\\n")
+                """)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(testgate.main([os.path.join(self.dir, "q*.py")], njobs=3), 0)
+        with open(log) as f:
+            events = f.read().split("\n")
+        q2 = events.index("start q2.py")
+        self.assertEqual(events[q2 - 1], "end q1.py")
+        self.assertEqual(events[q2 + 1], "end q2.py")
+
+    def test_each_file_has_its_own_tmpdir_and_patterns_come_from_a_file(self):
+        self.file("r.py", "import os, tempfile; assert tempfile.gettempdir() == os.environ['TMPDIR'] != '/tmp'\n")
+        listing = self.file("suites.txt", f"# a comment\n{os.path.join(self.dir, 'r.py')}\n")
+        self.assertEqual(testgate.expand([f"@{listing}", "x.py"]), [os.path.join(self.dir, "r.py"), "x.py"])
+        self.assertEqual(testgate.run(os.path.join(self.dir, "r.py"))[0], "ok")
 
 
 if __name__ == "__main__":

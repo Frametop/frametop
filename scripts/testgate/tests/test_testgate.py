@@ -9,6 +9,8 @@ import contextlib
 import io
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -17,6 +19,7 @@ import unittest
 import unittest.mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import procs  # noqa: E402
 import testgate  # noqa: E402
 
 UNITTEST = """\
@@ -210,6 +213,38 @@ class Gate(unittest.TestCase):
         except OSError:
             state = "gone"
         self.assertIn(state, ("gone", "Z"))
+
+    def test_a_leftover_that_keeps_forking_is_ended_with_all_it_forked(self):
+        """It ignores SIGTERM and forks every millisecond: one forked while /proc is read still goes."""
+        loop = ("import os, signal, time\n"
+                "signal.signal(signal.SIGTERM, lambda *a: None)\n"
+                "print('ready', flush=True)\n"
+                "while True:\n"
+                "    if os.fork() == 0:\n"
+                "        time.sleep(60); os._exit(0)\n"
+                "    time.sleep(0.001)\n")
+        p = subprocess.Popen([sys.executable, "-c", loop], stdout=subprocess.PIPE, start_new_session=True)
+        try:
+            self.assertEqual(p.stdout.readline().strip(), b"ready")
+            procs.end_session(p.pid)
+            time.sleep(0.1)
+            self.assertEqual(procs.members(p.pid), [])
+        finally:
+            for pid in procs.members(p.pid):
+                os.kill(pid, signal.SIGKILL)
+            p.stdout.close()
+            p.wait()
+
+    def test_a_run_started_ignoring_sighup_keeps_ignoring_it(self):
+        """nohup: a closed terminal doesn't end the run; without it, it does (and cleans up)."""
+        path = self.file("w.py", "import time; time.sleep(1.5); print('all passed')\n")
+        gate = os.path.join(os.path.dirname(os.path.abspath(testgate.__file__)), "testgate.py")
+        for ignore, want in ((True, 0), (False, 128 + signal.SIGHUP)):
+            p = subprocess.Popen([sys.executable, gate, "--jobs", "1", path], stdout=subprocess.DEVNULL,
+                                 preexec_fn=(lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN)) if ignore else None)
+            time.sleep(0.5)
+            p.send_signal(signal.SIGHUP)
+            self.assertEqual(p.wait(timeout=20), want)
 
     def test_a_pattern_that_matches_nothing_fails(self):
         self.case("a.py", "def test_a(self): pass")

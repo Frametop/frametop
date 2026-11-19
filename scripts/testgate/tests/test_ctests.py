@@ -290,6 +290,13 @@ class TestChanged(unittest.TestCase):
             self.assertEqual(changed.mark_green("d"), 0)
             self.assertEqual(changed.read_green(), (one, []))
             self.assertTrue(os.path.exists(os.path.join(self.root, changed.PENDING + "b")))
+            # a failed run's record goes after a day; a newer one (b's) stays
+            old = os.path.join(self.root, changed.PENDING + "old")
+            open(old, "w").close()
+            os.utime(old, (0, 0))
+            changed.mark_start("e")
+            self.assertFalse(os.path.exists(old))
+            self.assertTrue(os.path.exists(os.path.join(self.root, changed.PENDING + "b")))
 
     def test_paths_come_whole(self):
         self.assertEqual(changed._paths("my file.py\0a/b c.md\0"), {"my file.py", "a/b c.md"})

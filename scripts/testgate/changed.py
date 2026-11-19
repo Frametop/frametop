@@ -4,8 +4,8 @@ loop while working; `just test` is still the gate before a push.
 
 A passing `just test` writes the commit it started on to build/tests/last-green
 (`--mark-start RUN`, then `--mark-green RUN`), with the paths that were edited and not committed
-then: they count as changed every time, since what was tested isn't in git. This compares the tree as it is now (commits, edits, new files) with
-that commit, or with BASE, and runs:
+then: they count as changed every time, since what was tested isn't in git. This compares the
+tree as it is now (commits, edits, new files) with that commit, or with BASE, and runs:
 
 - lint, the shell scripts' syntax check and the tests that read the whole repo (ALWAYS: docs'
   links), always (seconds);
@@ -147,12 +147,18 @@ def mark_start(run):
     while it runs. Another run's file is never this one's, and a failed run's goes in a day."""
     folder = os.path.join(TREE, os.path.dirname(STAMP))
     try:
-        for name in os.listdir(folder):
-            old = os.path.join(folder, name)
-            if name.startswith(os.path.basename(PENDING)) and time.time() - os.path.getmtime(old) > PENDING_DAYS * 86400:
-                os.unlink(old)
+        names = os.listdir(folder)
     except OSError:
-        pass
+        names = []
+    for name in names:
+        if not name.startswith(os.path.basename(PENDING)):
+            continue
+        old = os.path.join(folder, name)
+        try:
+            if time.time() - os.path.getmtime(old) > PENDING_DAYS * 86400:
+                os.unlink(old)
+        except OSError:
+            pass    # gone already (another run's sweep)
     try:
         lines = _tree_now()
     except (RuntimeError, OSError):
@@ -171,7 +177,8 @@ def mark_green(run):
     except OSError:
         lines = []
     if not lines:
-        print("last green: not recorded (no git here); `just test-changed` starts from the one before")
+        print("last green: not recorded (no record of where this run started, as with no git); "
+              "`just test-changed` starts from the one before")
         return 0
     os.replace(pending, os.path.join(TREE, STAMP))
     edited = len(lines) - 1

@@ -57,15 +57,19 @@ def _signal(pids, sig):
 
 
 def end_session(sid):
-    """SIGTERM what's left in the session, and SIGKILL what's still there a second later."""
-    for sig, grace in ((signal.SIGTERM, 1.0), (signal.SIGKILL, 0)):
-        left = members(sid)
-        if not left:
-            return
-        _signal(left, sig)
-        deadline = time.monotonic() + grace
-        while members(sid) and time.monotonic() < deadline:
-            time.sleep(0.05)
+    """SIGTERM what's left in the session, and SIGKILL what's still there a second later, again
+    and again for up to a second (one forked while /proc was read isn't in that read)."""
+    left = members(sid)
+    if not left:
+        return
+    _signal(left, signal.SIGTERM)
+    deadline = time.monotonic() + 1.0
+    while members(sid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    deadline = time.monotonic() + 1.0
+    while (left := members(sid)) and time.monotonic() < deadline:
+        _signal(left, signal.SIGKILL)
+        time.sleep(0.01)
 
 
 def run_session(argv, live, limit, **popen):
@@ -92,9 +96,11 @@ def run_session(argv, live, limit, **popen):
 
 
 def on_stop(handler):
-    """handler for SIGTERM and SIGHUP (a closed terminal): either way, the cleanup runs."""
+    """handler for SIGTERM and SIGHUP (a closed terminal): either way, the cleanup runs. One the
+    run was started ignoring (nohup) stays ignored."""
     for sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, handler)
+        if signal.getsignal(sig) is not signal.SIG_IGN:
+            signal.signal(sig, handler)
 
 
 def stop(live):

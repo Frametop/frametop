@@ -75,6 +75,7 @@ inline void Arc(Outline &o, Pt a, double rx, double ry, double phiDeg, bool larg
     double dt = std::atan2((-y1 - cyp) / ry, (-x1 - cxp) / rx) - t1;
     if (sweep && dt < 0) dt += 2 * M_PI;
     if (!sweep && dt > 0) dt -= 2 * M_PI;
+    if (!std::isfinite(dt) || !std::isfinite(t1)) return o.push_back(b);   // (a NaN or infinity in the data: a line)
     const int n = std::max(2, int(std::ceil(std::fabs(dt) / (M_PI / 16))));
     for (int i = 1; i <= n; ++i) {
         const double t = t1 + dt * i / n, ex = rx * std::cos(t), ey = ry * std::sin(t);

@@ -228,7 +228,7 @@ void GsPanelEvents(Screen &s, int index) {
                 break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
-                if (CarryClick(ev) || BarClaims(ev)) return;   // (a bar's press, let go over the app: the bar's)
+                if (CarryClick(ev)) return;
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
                 const uint32_t button = LinuxButton(ev.data.mouse.button);
                 if (!down) {
@@ -248,7 +248,6 @@ void GsPanelEvents(Screen &s, int index) {
                 break;
             }
             case vr::VREvent_ScrollDiscrete:
-                if (CarryScroll(ev)) return;
                 s.useMs = now;
                 gs.Scroll(int(std::lround(ev.data.scroll.ydelta)));
                 break;
@@ -261,9 +260,9 @@ void GsPanelEvents(Screen &s, int index) {
         }
     };
     vr::VREvent_t ev;
-    while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) one(ev, 0, s.gsX, s.gsY, s.height);
+    while (PollOverlay(s.overlay, &ev)) one(ev, 0, s.gsX, s.gsY, s.height);
     for (const auto &[k, sub] : s.subs)
-        while (vr::VROverlay()->PollNextOverlayEvent(sub.overlay, &ev, sizeof ev)) one(ev, k, sub.x, sub.y, sub.h);
+        while (PollOverlay(sub.overlay, &ev)) one(ev, k, sub.x, sub.y, sub.h);
 }
 
 void GsResize(int index, int w, int h) {

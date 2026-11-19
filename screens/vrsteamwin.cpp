@@ -356,7 +356,7 @@ void SteamDashStep() {
 // The laser on a tile: its page's mouse (steamcdp.h), at the window's pixels it points at.
 void SteamDashEvents(Screen &s, int index) {
     vr::VREvent_t ev;
-    while (vr::VROverlay()->PollNextOverlayEvent(s.overlay, &ev, sizeof ev)) {
+    while (PollOverlay(s.overlay, &ev)) {
         const steamwin::Tracker *t = s.gsWin ? g_fleet.Find(s.gsWin) : nullptr;
         if (!g_pages || !t) continue;
         const std::string &page = t->Win().title;
@@ -387,7 +387,7 @@ void SteamDashEvents(Screen &s, int index) {
                 break;
             case vr::VREvent_MouseButtonDown:
             case vr::VREvent_MouseButtonUp: {
-                if (CarryClick(ev) || BarClaims(ev)) break;   // (a bar's press, let go over Steam's page: the bar's)
+                if (CarryClick(ev)) break;
                 const bool down = ev.eventType == vr::VREvent_MouseButtonDown;
                 const uint32_t button = LinuxButton(ev.data.mouse.button);
                 if (!down) {
@@ -405,7 +405,6 @@ void SteamDashEvents(Screen &s, int index) {
                 break;
             }
             case vr::VREvent_ScrollDiscrete:
-                if (CarryScroll(ev)) break;
                 s.useMs = now;
                 g_pages->Wheel(page, int(std::lround(ev.data.scroll.ydelta)));
                 break;

@@ -228,7 +228,7 @@ bool QuickAccessHasHand(int side) { return g_card.side >= 0 && side == 1 - g_car
 
 void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
-    while (g_card.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_card.overlay, &ev, sizeof ev)) {
+    while (PollOverlay(g_card.overlay, &ev)) {
         // (only a laser keeps the card: the mouse's or gaze's cursor would hold it wherever you look)
         const bool laser = FromLaser(ev);
         if (ev.eventType == vr::VREvent_MouseMove) {

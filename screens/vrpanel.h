@@ -282,6 +282,9 @@ extern bool g_manual;   // the hide key's switch
 extern bool g_paused;   // Frametop paused for a VR game: everything hidden
 int64_t NowMs();
 bool DevicePose(vr::TrackedDeviceIndex_t dev, Mat *out);
+bool LaserPose(vr::TrackedDeviceIndex_t dev, Mat *out);   // where its laser starts, pointing down its -z
+bool IsHandController(vr::TrackedDeviceIndex_t i);   // a hand's controller (not the 3D mouse's, not a hand)
+int ControllerHolds(vr::TrackedDeviceIndex_t dev);   // a button down on it: 1, 0, or -1 (SteamVR won't say)
 vr::EVROverlayError PinShow(vr::VROverlayHandle_t overlay);
 void SendRelay(const std::string &msg);
 void AnnounceOverlay(const char *key);
@@ -321,7 +324,6 @@ int OurPointer(uint32_t d);
 bool ModCarry(Screen &s, int index, vr::TrackedDeviceIndex_t dev, uint32_t button, double x, double y);
 bool CarryScroll(const vr::VREvent_t &ev);
 bool CarryClick(const vr::VREvent_t &ev);
-bool BarClaims(const vr::VREvent_t &ev);   // a bar's press, its release seen elsewhere (vr.cpp)
 void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *), void *data);
 double Apart(const Mat &a, const Mat &b);
 double BarIn(const Screen &s);    // the bar row's line, metres in from the panel's edge
@@ -395,6 +397,17 @@ void LoadBarSides();
 void BarSideKnown(int i, const std::string &key);   // its key now: its remembered edge, if any
 void BarSideGone(int i);
 bool SetBarSide(int i, barside::Side side, const char *by);   // false: no such panel
+
+// ---------------------------------------------------------------- vrbarhold.cpp's
+
+void BarPressed(Screen &s, vr::TrackedDeviceIndex_t dev, double along);   // its bar pressed: it waits (BarHold)
+void BarCarry(Screen &s, const char *why);   // its waiting press becomes a move now
+void BarHold(Screen &s);   // each tick: a waiting press held or moved enough starts the move
+vr::TrackedDeviceIndex_t BarHolder();   // the device of a bar's press, waiting or carrying (kNone: none)
+// The next event on one of our overlays (false: none), a bar's press seen first: a carry's wheel pushes
+// the carried panel (CarryScroll), a bar press's release is the bar's (a tap, or its move's end), and
+// neither comes back; a press by a laser whose bar press is still on means its release was lost.
+bool PollOverlay(vr::VROverlayHandle_t overlay, vr::VREvent_t *ev);
 
 // ---------------------------------------------------------------- vrbarmenu.cpp's
 

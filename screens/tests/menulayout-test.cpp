@@ -113,6 +113,9 @@ int main() {
         bool finite = true;
         for (float v : odd) finite &= std::isfinite(v) && v >= 0 && v <= 1;
         check("NaN and inf points: no crash, coverage stays 0..1", finite);
+        const auto huge = iconpath::Parse("M0 0a1e400 1e400 0 0 1 4 0v4H0z");
+        check("an arc on an infinite radius is a line to its end (no undefined step count)",
+              huge.size() == 1 && huge[0].size() >= 2 && huge[0][1].x == 4 && huge[0][1].y == 0);
     }
 
     // The card's fills: an opaque colour is stored, a see-through one blended, a rounded box's inside is

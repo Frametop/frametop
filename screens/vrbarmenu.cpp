@@ -223,12 +223,12 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
         case Item::Rotate:
             if (dev == kNone) break;   // (a fingertip's tap levels it)
             StartDrag(s, Drag::Roll, dev);
-            if (s.drag == Drag::Roll) g_menu.holding = dev;
+            if (s.drag == Drag::Roll) g_menu.holding = dev, g_menu.hover = row;   // (lit while held, the laser anywhere)
             return;
         case Item::MoveAll:
             if (dev == kNone) return (void)std::printf("screen %d: Move All Screens is a laser's hold\n", i + 1);
             LayoutGrabStart(s, i, dev);
-            if (s.drag == Drag::Move) g_menu.holding = dev;
+            if (s.drag == Drag::Move) g_menu.holding = dev, g_menu.hover = row;   // (lit while held, the laser anywhere)
             return;
         default: break;
     }
@@ -371,9 +371,11 @@ void UpdateBarMenu() {
 // Its input: a laser over a row lights it, a press there does it (a held row until it's let go).
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
-    while (g_menu.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_menu.overlay, &ev, sizeof ev)) {
+    while (PollOverlay(g_menu.overlay, &ev)) {
+        // (FocusEnter's data isn't a point: the row lights on the move that follows it)
         if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove) {
-            g_menu.hover = g_menu.holding != kNone ? g_menu.hover : menulayout::At(g_menu.layout, ev.data.mouse.x, ev.data.mouse.y);
+            if (ev.eventType == vr::VREvent_MouseMove && g_menu.holding == kNone)
+                g_menu.hover = menulayout::At(g_menu.layout, ev.data.mouse.x, ev.data.mouse.y);
             g_menu.usedMs = NowMs();
         } else if (ev.eventType == vr::VREvent_FocusLeave) {
             if (g_menu.holding == kNone) g_menu.hover = -1;

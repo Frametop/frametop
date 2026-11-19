@@ -145,10 +145,10 @@ void UpdateResetAsk() {
 // asked, if it lands here: kResetAskLeastMs).
 void PollResetAsk(void (*handle)(const struct ft_event *, void *), void *data) {
     vr::VREvent_t ev;
-    while (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_resetAsk.overlay, &ev, sizeof ev)) {
-        // (OpenVR's mouse y is up from the bottom)
+    while (PollOverlay(g_resetAsk.overlay, &ev)) {
+        // (OpenVR's mouse y is up from the bottom; FocusEnter's data isn't a point, the move after it lights)
         const double x = ev.data.mouse.x, y = g_resetAsk.art.h - ev.data.mouse.y;
-        if (ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_FocusEnter) {
+        if (ev.eventType == vr::VREvent_MouseMove) {
             g_resetAsk.hover = ButtonAt(x, y);
         } else if (ev.eventType == vr::VREvent_FocusLeave) {
             g_resetAsk.hover = -1;

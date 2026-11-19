@@ -1,9 +1,10 @@
 // Palm Quick Access (quickaccess.h): the tiles and their relay actions, which tile a fingertip or a
 // laser lands on (gaps to the nearer tile, nothing past the padding, the mouse's y up, the face's metres),
-// Reset's ask, the fingertip's hover held at a tile's edge and the tip spent after a press.
+// Reset's ask, what works while paused, and a fingertip's pokes: hover held at a tile's edge, quick pokes
+// that end well behind the card, and the tip spent after a press through tremble and lost frames.
 #include "../quickaccess.h"
-#include "../tiptap.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
@@ -77,32 +78,107 @@ int main() {
         check("a 2 px tremble at the gap: no flips", flips == 0);
     }
 
-    // After a press the tip is spent until it comes 3 cm out, goes off the card or out of sight.
+    // A fingertip's pokes (Poke). The card as palmmenu makes it: 12 cm wide.
     {
-        Spent s;
-        const double hw = 0.06, hh = 0.04;
-        s.Pressed();
-        const double resting[3] = {0.0, 0.0, 0.006}, out[3] = {0.0, 0.0, Spent::kOut + 0.001}, off[3] = {0.07, 0.0, 0.005};
-        s.Step(resting, hw, hh);
-        check("spent: resting 6 mm in front, still spent", s.on());
-        s.Step(out, hw, hh);
-        check("...3 cm out: not", !s.on());
-        s.Pressed(), s.Step(off, hw, hh);
-        check("...off the card's side: not", !s.on());
-        s.Pressed(), s.Step(nullptr, hw, hh);
-        check("...out of sight: not", !s.on());
+        const double w = 0.12, h = w * kH / kW;
+        int x0, y0, x1, y1;
+        auto faceOf = [&](int i, double *u, double *v) {   // tile i's centre on the face
+            Box(i, &x0, &y0, &x1, &y1);
+            *u = ((x0 + x1) / 2.0 / kW - 0.5) * w, *v = (0.5 - (y0 + y1) / 2.0 / kH) * h;
+        };
+        // a run of frames, `hz` a second, from 1 s after it showed; `mm` the tip's z (mm), a NaN: unseen
+        struct Frame { double u, v, mm; };
+        auto run = [&](std::initializer_list<Frame> frames, double hz, int *tiles = nullptr) {
+            Poke p;
+            p.Reset(0);
+            int presses = 0;
+            int64_t t = 1000;
+            for (const Frame &f : frames) {
+                const double l[3] = {f.u, f.v, f.mm / 1000.0};
+                const int got = p.Step(std::isnan(f.mm) ? nullptr : l, w, h, t);
+                if (got >= 0) {
+                    if (tiles) tiles[presses] = got;
+                    ++presses;
+                }
+                t += int64_t(1000 / hz);
+            }
+            return presses;
+        };
+        const double lost = std::nan("");
+        double u4, v4, u5, v5;
+        faceOf(4, &u4, &v4), faceOf(5, &u5, &v5);
+        int tiles[16];
+
+        check("a poke on Spin Right presses it", run({{u4, v4, 60}, {u4, v4, 30}, {u4, v4, 10}, {u4, v4, -5}}, 30, tiles) == 1 && tiles[0] == 4);
+        // quick pokes, the tip ending 4-6 cm behind the card (nothing stops it), at every phase
+        bool quick = true;
+        for (const double hz : {15.0, 30.0})
+            for (const double ms : {1.0, 1.5, 2.0})
+                for (int k = 0; k < 20; ++k) {
+                    Poke p;
+                    p.Reset(0);
+                    const double step = ms * 1000 / hz, start = 80 + k * step / 20;
+                    int presses = 0;
+                    int64_t t = 1000;
+                    for (double z = start; z > -60; z -= step, t += int64_t(1000 / hz)) {
+                        const double l[3] = {u4, v4, z / 1000.0};
+                        presses += p.Step(l, w, h, t) == 4;
+                    }
+                    const double l[3] = {u4, v4, -0.05};
+                    presses += p.Step(l, w, h, t) == 4;
+                    quick = quick && presses == 1;
+                }
+        check("quick pokes up to 2 m/s at 15 and 30 Hz, ending 5 cm behind: each presses once", quick);
+
+        check("resting 6 mm in front after it: spent", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 6}, {u4, v4, 10}, {u4, v4, 1}}, 30) == 1);
+        check("...3 cm out and in again: a second press", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 31}, {u4, v4, 10}, {u4, v4, 1}}, 30) == 2);
+        check("...over to Dock Windows (lifted 2 cm): it presses", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 20}, {u5, v5, 20}, {u5, v5, 10}, {u5, v5, 1}}, 30, tiles) == 2 && tiles[1] == 5);
+        check("...out of sight 8 frames (231 ms): spent", run({{u4, v4, 40}, {u4, v4, -2}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {u4, v4, 20}, {u4, v4, 1}}, 30) == 1);
+        check("...10 frames (297 ms): a second press", run({{u4, v4, 40}, {u4, v4, -2}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {0, 0, lost}, {u4, v4, 20}, {u4, v4, 1}}, 30) == 2);
         // the noisy pull-back the council found (mm): one press, however tiptap arms again
-        tiptap::Tap tap;
-        Spent sp;
-        int presses = 0;
-        for (const double mm : {60, 40, 20, 8, 1, -4, 10, 2, 12, 30, 9, 2, 14, 1}) {
-            const double l[3] = {0.0, 0.0, mm / 1000.0};
-            const bool through = tap.Step(l, hw, hh);
-            sp.Step(l, hw, hh);
-            if (through && !sp.on()) ++presses, sp.Pressed();
+        check("a noisy pull-back that never leaves 3 cm: one press",
+              run({{u4, v4, 60}, {u4, v4, 40}, {u4, v4, 20}, {u4, v4, 8}, {u4, v4, 1}, {u4, v4, -4}, {u4, v4, 10}, {u4, v4, 2}, {u4, v4, 12},
+                   {u4, v4, 28}, {u4, v4, 9}, {u4, v4, 2}, {u4, v4, 14}, {u4, v4, 1}}, 30) == 1);
+        check("...with the hand lost a frame after the press: one press",
+              run({{u4, v4, 40}, {u4, v4, 20}, {u4, v4, 8}, {u4, v4, -4}, {0, 0, lost}, {u4, v4, 10}, {u4, v4, 2}, {0, 0, lost}, {u4, v4, 12}, {u4, v4, 1}}, 30) == 1);
+        // pressed 2.5 mm in from the card's right edge, trembling 3 mm sideways off it and back
+        const double edge = w / 2 - 0.0025, side = w / 2 + 0.0005;
+        check("pressed by the card's edge, a sideways tremble off it: one press",
+              run({{edge, 0, 40}, {edge, 0, 10}, {edge, 0, 1}, {side, 0, 2}, {edge, 0, 10}, {edge, 0, 2}, {side, 0, 12}, {edge, 0, 1}}, 30) == 1);
+        check("...well off it (2 cm) and back: a second press", run({{edge, 0, 40}, {edge, 0, 1}, {w / 2 + 0.02, 0, 10}, {edge, 0, 10}, {edge, 0, 1}}, 30) == 2);
+        // hover: near lights the tile it's over; held at the edge
+        {
+            Poke p;
+            p.Reset(0);
+            const double l[3] = {u4, v4, 0.05};
+            p.Step(l, w, h, 1000);
+            check("a tip 5 cm in front: near, Spin Right lit", p.near() && p.hover() == 4);
+            const double far[3] = {u4, v4, 0.12};
+            p.Step(far, w, h, 1033);
+            check("...12 cm: not near, nothing lit", !p.near() && p.hover() == -1);
         }
-        check("a noisy pull-back that never leaves 3 cm: one press", presses == 1);
+        // too soon after it showed: no press, and the tip comes out before it can
+        {
+            Poke p;
+            p.Reset(1000);
+            int64_t t = 1000;
+            int presses = 0;
+            for (const double mm : {40.0, 10.0, -3.0}) {
+                const double l[3] = {u4, v4, mm / 1000.0};
+                presses += p.Step(l, w, h, t += 33) >= 0;
+            }
+            check("a poke within kShownMs of showing: nothing", presses == 0);
+            for (const double mm : {10.0, 1.0}) {
+                const double l[3] = {u4, v4, mm / 1000.0};
+                presses += p.Step(l, w, h, t += 400) >= 0;
+            }
+            check("...and its tremble after: nothing", presses == 0);
+        }
     }
+
+    check("paused for a game, only Steam Menu works", WorksPaused(Tile::SteamMenu) && !WorksPaused(Tile::Screens) &&
+                                                          !WorksPaused(Tile::Reset) && !WorksPaused(Tile::SpinLeft) &&
+                                                          !WorksPaused(Tile::SpinRight) && !WorksPaused(Tile::DockAll));
 
     // Reset asks: the first tap arms, a second from kLeastMs to kConfirmMs does it, one after doesn't.
     Confirm c;

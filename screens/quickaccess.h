@@ -5,12 +5,15 @@
 // the ring's did.
 //   The tiles are actions that touch every screen, the input relay's own (its "action NAME", the ones
 // frunner's OS menu runs: conf/ft_input_actions.py's MENU_ACTIONS), so they keep its rules (this user
-// only, not while paused); Reset Layout asks first: its first tap turns it red for kConfirmMs, and a
-// second does it.
-// Pure: the tiles, their layout and Reset's ask (screens/tests/quickaccess-test.cpp); vrquick.cpp draws
-// the card, places it over the palm and takes its pokes and clicks.
+// only; while Frametop is paused for a VR game only Steam Menu works, and the rest dim: WorksPaused);
+// Reset Layout asks first: its first tap turns it red for kConfirmMs, and a second does it.
+// Pure: the tiles, their layout, a fingertip's pokes and Reset's ask (screens/tests/quickaccess-test.cpp);
+// vrquick.cpp draws the card, places it over the palm and gives it the tip and the clicks.
 #pragma once
 
+#include "tiptap.h"
+
+#include <cmath>
 #include <cstdint>
 
 namespace quickaccess {
@@ -32,6 +35,13 @@ constexpr Spec kSpecs[kTiles] = {
     {Tile::SpinRight, "Spin Right", "spin_next"},
     {Tile::DockAll, "Dock Windows", "dock_all"},
 };
+
+// What still works while Frametop is paused for a VR game: the relay's PAUSED_ACTIONS
+// (input/game_pause.py) has steam_menu and none of the others; Reset is ours, and the screens are hidden.
+inline bool WorksPaused(Tile t) { return t == Tile::SteamMenu; }
+
+// No press this soon after the card shows (the hand reaching over as it came), by tip or click.
+constexpr int64_t kShownMs = 300;
 
 // The card in pixels: kCols x kRows tiles of kTile, kGap apart and kPad in from its edge.
 constexpr int kTile = 150, kGap = 12, kPad = 16;
@@ -84,22 +94,58 @@ inline int StickyTileAt(int prev, double x, double y) {
     return TileAt(x, y);
 }
 
-// After a fingertip pressed a tile: the card stays (the bar menu closes), so the same tip resting or
-// trembling by its face mustn't press again (council, 2026-11-19: tiptap arms again 8 mm out, and one
-// poke pressed twice). It's spent until it has come kOut in front of the card, gone off it, or out of sight.
-class Spent {
+// The other hand's index tip at the card, one hands frame at a time: the tile it's over (held at an
+// edge: StickyTileAt) and the one it presses as it comes through (tiptap.h). After a press the card stays
+// (the bar menu closes), so the tip is spent: resting or trembling by the face it mustn't press again
+// (council, 2026-11-19: tiptap arms again 8 mm out, and one poke pressed twice). It's spent until it's
+// seen kOut in front of the card, off tiptap's reach of it, or over another tile, or out of sight for
+// kLostMs (one lost frame isn't the hand gone: holds last through 10, palmmenu waits 250 ms).
+class Poke {
 public:
     static constexpr double kOut = 0.03;
-    void Pressed() { on_ = true; }
-    void Clear() { on_ = false; }
-    // One hands frame: `l`, the tip on the card's face (x right, y up, z out, metres), or null.
-    void Step(const double *l, double halfW, double halfH) {
-        if (on_ && (!l || l[2] > kOut || l[0] < -halfW || l[0] > halfW || l[1] < -halfH || l[1] > halfH)) on_ = false;
+    static constexpr int64_t kLostMs = 250;
+
+    // Shown afresh at `nowMs`: a tip already through it doesn't count, and none presses for kShownMs.
+    void Reset(int64_t nowMs) {
+        tap_.Reset();
+        hover_ = spent_ = -1, near_ = false, lostMs_ = -1, shownMs_ = nowMs;
     }
-    bool on() const { return on_; }
+    // `l`: the tip on the card's face (metres from its centre: x right, y up, z out), or null; the card
+    // w x h metres. The tile it pressed, or -1.
+    int Step(const double *l, double w, double h, int64_t nowMs) {
+        const double hw = w / 2, hh = h / 2, m = tiptap::Tap::kMargin;
+        const bool through = tap_.Step(l, hw, hh);
+        near_ = l && tap_.Near();
+        if (near_) {
+            double x, y;
+            FaceToPx(l[0], l[1], w, h, &x, &y);
+            hover_ = StickyTileAt(hover_, x, y);
+        } else {
+            hover_ = -1;
+        }
+        if (spent_ >= 0 && !l) {
+            if (lostMs_ < 0) lostMs_ = nowMs;
+            if (nowMs - lostMs_ >= kLostMs) spent_ = -1;
+        } else if (spent_ >= 0) {
+            lostMs_ = -1;
+            if (l[2] > kOut || std::fabs(l[0]) > hw + m || std::fabs(l[1]) > hh + m || (hover_ >= 0 && hover_ != spent_)) spent_ = -1;
+        }
+        if (!through || spent_ >= 0) return -1;
+        // (a quick poke can be well behind the face on the frame it's through, past Near: where it went in)
+        const int t = hover_ >= 0 ? hover_ : TileAtFace(l[0], l[1], w, h);
+        if (t < 0) return -1;
+        spent_ = t, lostMs_ = -1;   // (too soon after it showed: spent, so it comes out before it presses)
+        return nowMs - shownMs_ >= kShownMs ? t : -1;
+    }
+    int hover() const { return hover_; }   // -1 none
+    bool near() const { return near_; }     // the tip near its face (tiptap's kNear), this frame
+    bool spent() const { return spent_ >= 0; }
 
 private:
-    bool on_ = false;
+    tiptap::Tap tap_;
+    int hover_ = -1, spent_ = -1;   // spent_: the tile it pressed
+    bool near_ = false;
+    int64_t lostMs_ = -1, shownMs_ = 0;
 };
 
 // Reset's ask: armed by its first tap, it resets on a second from kLeastMs to kConfirmMs after it (one

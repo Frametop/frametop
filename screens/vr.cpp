@@ -3326,8 +3326,8 @@ TypingWord g_rayWord;
 enum class NearMode { Off, Helper, Force } g_nearMode = NearMode::Helper;
 
 // Hand input on this side now: the helper's word (or force). The palm menu goes by this alone:
-// paused for a VR game, the helper allows hands while the dashboard is open, and the ring isn't a
-// panel that hides.
+// paused for a VR game, the helper allows hands while the dashboard is open, and Quick Access isn't a
+// panel that hides (its Steam Menu tile and the pinch work then; vrquick.cpp dims the rest).
 bool HandsAllowed(int side) {
     if (g_nearMode == NearMode::Force) return true;
     return NowMs() - g_handsWord.atMs < 3000 && g_handsWord.allowed && g_handsWord.hand[side];

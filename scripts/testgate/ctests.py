@@ -79,6 +79,8 @@ class Run:
         # `just test` (a header it stopped reading before, while still changed since green): a
         # header it read in any of them counts.
         before = cbuild.deps(self.root, self.ninja_file)
+        seen = cbuild.remembered(self.root)
+        cbuild.remember(self.root, before)  # before ninja: a build stopped part-way still leaves them
         targets = sorted(self.plan.objects)
         start = time.monotonic()
         log = os.path.join(self.root, cbuild.OUT, "ninja.log")
@@ -92,9 +94,8 @@ class Run:
                 self.say(f.read().rstrip())
             self.status = 1
         after = cbuild.deps(self.root, self.ninja_file)
-        seen = cbuild.remembered(self.root)
+        cbuild.remember(self.root, after)
         self.deps = {o: before.get(o, set()) | after.get(o, set()) | seen.get(o, set()) for o in before.keys() | seen.keys()}
-        cbuild.remember(self.root, {o: self.deps.get(o, set()) | after.get(o, set()) for o in self.deps.keys() | after.keys()})
 
     def broken(self, path):
         """Why the program at path isn't there to run, or None."""

@@ -11,7 +11,6 @@ import socket
 import struct
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 
@@ -48,11 +47,15 @@ def _ephemeral_low():
 def free_port():
     """A loopback UDP port nothing listens on, which no other test running beside this one gets
     either: one below the kernel's ephemeral ports (a bind to port 0, as ft-together's own
-    outgoing sockets do, never gets it), held with a lock file until this process ends."""
+    outgoing sockets do, never gets it), held with a lock file until this process ends. The locks
+    are in /tmp itself, not TMPDIR, which testgate.py gives each test file its own of."""
     low = _ephemeral_low()
-    folder = os.path.join(tempfile.gettempdir(), "ft-test-ports-%d" % os.getuid())
+    folder = "/tmp/ft-test-ports-%d" % os.getuid()
     os.makedirs(folder, exist_ok=True)
-    for port in random.sample(range(max(1024, low - 12000), low), 200):
+    pool = range(max(1024, low - 12000), max(1024, low))
+    if len(pool) < 100:     # the ephemeral ports start low (1024): any port then, as before
+        pool = range(1024, 65536)
+    for port in random.sample(pool, 200):
         fd = os.open(os.path.join(folder, str(port)), os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -63,7 +66,7 @@ def free_port():
             continue
         _held.append(fd)
         return port
-    raise RuntimeError("no free loopback port below %d" % low)
+    raise RuntimeError("no free loopback port in %d-%d" % (pool.start, pool.stop - 1))
 
 
 class End:

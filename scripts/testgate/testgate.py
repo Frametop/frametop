@@ -45,14 +45,15 @@ TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SKIP = 77
 TIMEOUT = procs.TIMEOUT    # seconds a file gets (procs.py)
 timeout = procs.timeout
-LIVE = procs.Live()     # the test files running now
 
 
-def run(path, python=sys.executable, limit=procs.FROM_ENV, threads=None):
+def run(path, python=sys.executable, limit=procs.FROM_ENV, threads=None, live=None):
     """Run one test file: (status, how many tests ran, the skip reasons, its stdout, its stderr).
     status is "ok", "skipped" or "failed". limit: seconds it gets (None: no limit; FT_TEST_TIMEOUT's
-    by default). threads: the math libraries' threads, when set."""
+    by default). threads: the math libraries' threads, when set. live: the runner's procs.Live
+    (main's, so stopping it ends this file too; a Live of its own otherwise)."""
     limit = procs.timeout() if limit is procs.FROM_ENV else limit
+    live = procs.Live() if live is None else live
     with tempfile.TemporaryDirectory(prefix="ft-testgate-") as tmp:
         report = os.path.join(tmp, "report.json")
         env = dict(os.environ, FT_TEST_REPORT=report, TMPDIR=tmp,
@@ -63,7 +64,7 @@ def run(path, python=sys.executable, limit=procs.FROM_ENV, threads=None):
         # files, not pipes: a server a test starts and leaves running can hold a pipe open
         with open(os.path.join(tmp, "out"), "w+", errors="replace") as out, \
                 open(os.path.join(tmp, "err"), "w+", errors="replace") as err:
-            code = procs.run_session([python, path], LIVE, limit, stdout=out, stderr=err, env=env)
+            code = procs.run_session([python, path], live, limit, stdout=out, stderr=err, env=env)
             out.seek(0)
             err.seek(0)
             stdout, stderr = out.read(), err.read()
@@ -137,9 +138,11 @@ def main(patterns, njobs=1, times=None):
             paths.append((pattern, None))
         paths += [(pattern, p) for p in matched]
 
+    live = procs.Live()     # the test files running now
+
     def timed(path):
         start = time.monotonic()
-        result = run(path, threads=1 if njobs > 1 else None)
+        result = run(path, threads=1 if njobs > 1 else None, live=live)
         took[path] = round(time.monotonic() - start, 2)
         return result
 
@@ -183,7 +186,7 @@ def main(patterns, njobs=1, times=None):
             report(item[0], item[1], item[2].result() if item[2] else None)
     except BaseException:   # testgate stopped (Ctrl-C, SIGTERM): what runs goes, what waits doesn't start
         pool.shutdown(wait=False, cancel_futures=True)
-        procs.stop(LIVE)
+        procs.stop(live)
         raise
     pool.shutdown()
     print(f"python files: {files['ok']} ok, {files['skipped']} skipped, {files['failed']} failed; "

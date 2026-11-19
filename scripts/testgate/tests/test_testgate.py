@@ -312,7 +312,7 @@ class Gate(unittest.TestCase):
         try:
             self.assertEqual(p.stdout.readline().strip(), b"up")
             deadline = time.monotonic() + 5
-            while procs._threads(p.pid) != 1 and time.monotonic() < deadline:   # wait for the zombie
+            while time.monotonic() < deadline:   # wait for the zombie
                 with open(f"/proc/{p.pid}/stat") as f:
                     if f.read().rsplit(")", 1)[1].split()[0] == "Z":
                         break

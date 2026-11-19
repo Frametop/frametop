@@ -244,7 +244,7 @@ def items(root, env=os.environ):
         out.append(P("mmap-layout-test", "gaze/test/mmap-layout-test.cpp",
                      flags="-std=c++17 -O2 -Wall -Wno-unused-parameter -Wno-missing-field-initializers",
                      cflags="-Igaze/build/include -Ipointer/common",
-                     libs=f"-L{openvr} -lopenvr_api -Wl,-rpath,{openvr} -lpthread"))
+                     libs=f"-L{shlex.quote(openvr)} -lopenvr_api -Wl,-rpath,{shlex.quote(openvr)} -lpthread"))
     return out
 
 
@@ -297,7 +297,7 @@ def _quic(root, openvr, has):
         out += [
             P("ft-roompoints", "together/ft-roompoints.cpp", "together/points/asker.cpp", "together/points/dots.cpp",
               flags=ASAN, test=False, cflags="-isystem together/build/include",
-              libs=f"-L{openvr} -lopenvr_api -Wl,-rpath,/opt/steamvr/bin/linuxarm64:{openvr}"),
+              libs=f"-L{shlex.quote(openvr)} -lopenvr_api -Wl,-rpath,{shlex.quote('/opt/steamvr/bin/linuxarm64:' + openvr)}"),
             py("together/tests/roompoints-test.py", "ft-together", "ft-roompoints"),
         ]
     else:

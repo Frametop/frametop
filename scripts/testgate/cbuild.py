@@ -15,11 +15,14 @@ The items, in the order the run reports them:
   when its text changed, so what includes it isn't rebuilt for nothing.
 - Skip, Fail: a line the run prints as is; a Fail fails the run.
 """
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass, field
 
 OUT = "build/tests"
@@ -227,18 +230,53 @@ def deps(root, ninja_file):
     return out
 
 
-def remembered(root):
-    """What each object has read in any build since the last green `just test` (SEEN)."""
+def _seen(root):
+    """SEEN as it is: object -> {path: when a build last recorded it (time.time())}."""
     try:
         with open(os.path.join(root, SEEN)) as f:
-            return {o: set(paths) for o, paths in json.load(f).items()}
-    except (OSError, ValueError, AttributeError):
+            data = json.load(f)
+        return {o: dict(paths) if isinstance(paths, dict) else dict.fromkeys(paths, 0.0) for o, paths in data.items()}
+    except (OSError, ValueError, TypeError, AttributeError):
         return {}
 
 
-def remember(root, reads):
-    """Keep reads (object -> paths) as SEEN, written whole."""
+@contextlib.contextmanager
+def _seen_lock(root):
+    """SEEN's read-change-write, one at a time (a `just test` and a `just test-changed` at once)."""
+    os.makedirs(os.path.join(root, OUT), exist_ok=True)
+    with open(os.path.join(root, SEEN + ".lock"), "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def _write_seen(root, seen):
     path = os.path.join(root, SEEN)
-    with open(path + ".tmp", "w") as f:
-        json.dump({o: sorted(p) for o, p in reads.items()}, f)
+    with open(path + ".tmp", "w") as f:     # whole or not at all
+        json.dump(seen, f, sort_keys=True)
     os.replace(path + ".tmp", path)
+
+
+def remembered(root):
+    """What each object has read in any build since the last green `just test` (SEEN)."""
+    return {o: set(paths) for o, paths in _seen(root).items()}
+
+
+def remember(root, reads):
+    """Add reads (object -> paths) to SEEN, as recorded now."""
+    now = time.time()
+    with _seen_lock(root):
+        seen = _seen(root)
+        for o, paths in reads.items():
+            seen.setdefault(o, {}).update(dict.fromkeys(paths, now))
+        _write_seen(root, seen)
+
+
+def forget(root, before):
+    """A `just test` that started at before (time.time()) passed: SEEN keeps only what builds
+    recorded after that (a `just test-changed` beside it saw a tree the green run didn't)."""
+    if not os.path.exists(os.path.join(root, SEEN)):
+        return
+    with _seen_lock(root):
+        seen = {o: kept for o, paths in _seen(root).items()
+                if (kept := {p: t for p, t in paths.items() if t >= before})}
+        _write_seen(root, seen)

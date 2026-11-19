@@ -15,7 +15,7 @@ from pathlib import Path
 from frame_testbench import peersim
 
 TESTBENCH = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(TESTBENCH.parent / 'together' / 'tests'))
+sys.path.append(str(TESTBENCH.parent / 'together' / 'tests'))   # after testbench's own
 from roomkit import free_port  # noqa: E402  (ports no other test running beside this one gets)
 POSE_HEAD = '<BH3f'   # together/proto/posewire.h: kind, count, the eyes' place
 BUILT = all(path.is_file() for path in peersim.PROGRAMS.values())

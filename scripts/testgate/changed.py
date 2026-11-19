@@ -28,7 +28,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cbuild import SEEN, under  # noqa: E402
+import cbuild  # noqa: E402
+from cbuild import under  # noqa: E402
 
 TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STAMP = "build/tests/last-green"
@@ -180,10 +181,9 @@ def mark_green(run):
         print("last green: not recorded (no record of where this run started, as with no git); "
               "`just test-changed` starts from the one before")
         return 0
+    started = os.path.getmtime(pending)     # mark_start wrote it as the run started
     os.replace(pending, os.path.join(TREE, STAMP))
-    if os.path.exists(os.path.join(TREE, SEEN)):     # what objects read before green is behind it now
-        with open(os.path.join(TREE, SEEN), "w") as f:
-            f.write("{}")
+    cbuild.forget(TREE, started)    # what objects read before the green run is behind it now
     edited = len(lines) - 1
     print(f"last green: {lines[0][:12]}" + (f" and {edited} edited paths" if edited else "")
           + " (build/tests/last-green; `just test-changed` starts from it)")

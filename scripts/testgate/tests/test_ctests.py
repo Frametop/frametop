@@ -198,6 +198,34 @@ class CTests(unittest.TestCase):
         r, out = self.run_items(p, changed=["dir1/h.h", "notes.txt"])
         self.assertEqual((r.status, out.splitlines()[:1]), (1, ["a.c: FAILED"]))
 
+    def test_a_build_stopped_part_way_keeps_what_was_read_before_it(self):
+        """Stopped while ninja runs (Ctrl-C), a.o has rebuilt against dir2/h.h already: dir1/h.h,
+        which it read before, still counts on the next run."""
+        self.file("dir1/h.h", "#define V 0\n")
+        self.file("dir2/h.h", "#define V 1\n")
+        self.file("a.c", '#include "h.h"\nint main(void) { return V; }\n')
+        p = [Program("a", ("a.c",), C + " -Idir1 -Idir2", cc="gcc", test="a.c")]
+        self.run_items(p)
+        cbuild.forget(self.root, time.time() + 1)     # a green run: nothing remembered
+        os.unlink(os.path.join(self.root, "dir1/h.h"))
+        real = ctests.procs.run_session
+
+        def stopped(*a, **k):   # ninja runs to its end, then Ctrl-C
+            real(*a, **k)
+            raise KeyboardInterrupt
+        with unittest.mock.patch.object(ctests.procs, "run_session", stopped), self.assertRaises(KeyboardInterrupt):
+            ctests.Run(p, self.root, 2, ["dir1/h.h"], out=io.StringIO()).build()
+        self.assertEqual(self.run_items(p, changed=["dir1/h.h"])[0].status, 1)
+
+    def test_a_green_run_forgets_only_what_was_read_before_it_started(self):
+        cbuild.remember(self.root, {"o": {"old.h"}})
+        time.sleep(0.01)
+        started = time.time()
+        time.sleep(0.01)
+        cbuild.remember(self.root, {"o": {"new.h"}, "p": {"p.h"}})     # a test-changed beside it
+        cbuild.forget(self.root, started)
+        self.assertEqual(cbuild.remembered(self.root), {"o": {"new.h"}, "p": {"p.h"}})
+
     def test_a_check_that_names_a_missing_program_fails_on_a_change_too(self):
         items = self.programs() + [Check("uses-x", ("sh", "-c", "exit 0"), needs=("no-such-program",))]
         self.run_items(items)

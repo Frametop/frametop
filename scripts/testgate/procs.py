@@ -77,7 +77,7 @@ def _scan(sids):
 
 
 def members(sid):
-    """The live processes in session sid (the zombie leader not counted)."""
+    """The live processes in session sid (a zombie counted only while it has threads running)."""
     return _scan({sid}).get(sid, [])
 
 
@@ -116,24 +116,27 @@ def run_session(argv, live, limit, **popen):
     running after limit seconds (None: no limit) and was killed. What it leaves running is ended.
     live (a Live) holds its session id while it runs; if the wait is stopped (Ctrl-C, SIGTERM),
     the session is ended and the exception goes on. Stopped when live was stopped first."""
-    with live.lock:
-        if live.stopped:
-            raise Stopped(argv[0])
-        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, start_new_session=True, **popen)
-        live.sids.add(p.pid)
-    try:
+    p = None
+    try:    # from before Popen: a Ctrl-C as it returns still ends the session it started
+        with live.lock:
+            if live.stopped:
+                raise Stopped(argv[0])
+            p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, start_new_session=True, **popen)
+            live.sids.add(p.pid)
         timed_out = not exited(p.pid, limit)
         if timed_out:
             _signal(members(p.pid), signal.SIGKILL)
         end_session(p.pid)
     except BaseException:
-        end_session(p.pid)
-        p.kill()
-        p.wait()
+        if p is not None:
+            end_session(p.pid)
+            p.kill()
+            p.wait()
         raise
     finally:
-        with live.lock:
-            live.sids.discard(p.pid)
+        if p is not None:
+            with live.lock:
+                live.sids.discard(p.pid)
     code = p.wait()
     return None if timed_out else code
 

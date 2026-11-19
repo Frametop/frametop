@@ -305,6 +305,9 @@ test-c:
     g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/barside-test.cpp \
       -o build/tests/barside-test
     run screens/tests/barside-test.cpp build/tests/barside-test
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror screens/tests/panelmenu-test.cpp \
+      -o build/tests/panelmenu-test
+    run screens/tests/panelmenu-test.cpp build/tests/panelmenu-test
     # gamescope apps (gsforward.h): the policy, and the X side against an Xvfb when there is one
     g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iscreens screens/tests/gsforward-test.cpp screens/gsforward.cpp \
       $(pkg-config --cflags --libs xcb xcb-xtest xcb-icccm) -o build/tests/gsforward-test

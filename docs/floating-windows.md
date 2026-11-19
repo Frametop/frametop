@@ -116,7 +116,7 @@ ft-screens creates a `screen` for each toplevel in the order they appear, and in
 - **ft-pointer.** The drag lock crosses onto other Frametop panels (see "Drag and drop between panels"), and a left release also goes to ft-screens as a backstop for the catcher.
 - **Input relay.** Owns the float key: `float_toggle` and `dock_all` send `float pointer` and `dock all` to ft-floatd.
 
-Program names stay within 15 characters (`ft-floatd`). Overlay keys are `frametop.float.N`; a floating window's popups and dialogs are `frametop.float.N.sub.K`. Its bar and buttons are one of the shared sets every panel borrows from while something is at it (`frametop.controls.K.bar`, and so on; `screens/chromepool.h`).
+Program names stay within 15 characters (`ft-floatd`). Overlay keys are `frametop.float.N`; a floating window's popups and dialogs are `frametop.float.N.sub.K`. Its bar and resize corner are one of the shared sets every panel borrows from while something is at it (`frametop.controls.K.bar`, and so on; `screens/chromepool.h`).
 
 ## A floating window
 

@@ -94,7 +94,7 @@ inline Box Union(const Box &a, const Box &b) {
 
 // Its texture: a title-less column of the four edges, a row each, and under them any rows the
 // panel adds (Steam's tile: View in Theater).
-constexpr int kMenuW = 300, kRowH = 64, kMenuPad = 8;
+constexpr int kMenuW = 400, kRowH = 64, kMenuPad = 8;
 constexpr int MenuH(int rows) { return rows * kRowH + 2 * kMenuPad; }
 constexpr int kMenuH = MenuH(kSides);   // (the edges alone)
 

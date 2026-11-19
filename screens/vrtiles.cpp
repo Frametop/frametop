@@ -52,7 +52,6 @@ constexpr std::chrono::seconds kTilesAddWindow{5};
 int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus, 0 not
 int64_t g_tileFocusSaidMs = 0;
 constexpr int64_t kTileFocusRenewMs = 2000;   // said again this often (the relay lapses it after 5 s)
-constexpr int64_t kAnchorStayMs = 600;        // an anchor button press this long: stay, not anchor
 constexpr double kTileBorder = 0.012;         // the focused tile's border, metres each side
 struct TileBorder {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
@@ -250,8 +249,7 @@ bool TileAnchored(int i) { return g_tiles.Anchored(i); }
 bool TileTiled(int i) { return g_tiles.Tiled(i); }
 void SetTileStayDefault(bool on) {
     if (on == g_tiles.stayDefault) return;
-    g_tiles.stayDefault = on;   // (each one that follows it: shown or hidden next tick, its anchor button lit for it)
-    for (auto &[i, s] : g_screens) LightAnchor(s);
+    g_tiles.stayDefault = on;   // (each one that follows it: shown or hidden next tick)
 }
 void SetTileStayTheater(bool on) { g_tileStayTheater = on; }
 void SetTileAtBar(bool on) {
@@ -270,7 +268,6 @@ void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
     const dashtiles::Info info = TileInfo(i);
     g_tiles.Anchor(i, after, stay, leftOf, &info);
-    LightAnchor(it->second);
     if (!g_tileGroupSet) g_tileRegroup = true;
     RetileDash();
     RememberTiles();
@@ -285,13 +282,11 @@ void TileUnanchor(int i, const char *by) {
     const bool placed = ScreenPose(s, &p);
     EndDrag(s);
     g_tiles.Unanchor(i);
-    LightAnchor(s);
     if (placed && s.pinned == kDashboard) SetAbsolute(s, p);   // left in the room where it is
     RetileDash();
     RememberTiles();
     std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
 }
-namespace {
 void TileStay(int i, bool on, const char *by) {
     if (g_screens[i].steamDash) {   // (Steam paints its window only with its tab showing: black with the dashboard closed)
         std::printf("%s: Steam's window shows only with the dashboard (%s)\n", TileLabel(i).c_str(), by);
@@ -303,11 +298,9 @@ void TileStay(int i, bool on, const char *by) {
     }
     if (g_tiles.Stay(i) == on) return;
     g_tiles.SetStay(i, on);
-    LightAnchor(g_screens[i]);
     RememberTiles();
     std::printf("%s: %s with the dashboard closed (%s)\n", TileLabel(i).c_str(), on ? "stays shown" : "hidden", by);
 }
-}  // namespace
 
 // A panel's key is known (made, or ft-floatd said whose window it is): back to its last state.
 void TileKnown(int i, const std::string &key) {
@@ -326,7 +319,6 @@ void TileKnown(int i, const std::string &key) {
     if (line.empty()) return;
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
     if (!g_tiles.Restore(i, line, after)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
-    LightAnchor(g_screens[i]);
     if (g_tiles.Anchored(i)) {
         if (!g_tileGroupSet) g_tileRegroup = true;
         RetileDash();
@@ -552,28 +544,6 @@ void TileGaps(char *reply, int size) {
 }
 }  // namespace
 
-// The anchor button: a click anchors or lets go, a long press (kAnchorStayMs) makes it stay shown
-// with the dashboard closed, or not (anchoring it if it wasn't).
-void AnchorButtonUp(int i, const char *by) {
-    auto it = g_screens.find(i);
-    if (it == g_screens.end() || it->second.anchorDownMs < 0) return;
-    const bool longPress = NowMs() - it->second.anchorDownMs >= kAnchorStayMs;
-    it->second.anchorDownMs = -1;
-    if (longPress) TileStay(i, !g_tiles.Stay(i), by);
-    else if (g_tiles.Anchored(i)) TileUnanchor(i, by);
-    else TileAnchor(i, dashtiles::Stay::Default, by);
-}
-
-// The anchor button blue while anchored, ringed while it stays shown too.
-void LightAnchor(Screen &s) {
-    const int i = ScreenIndexOf(s);
-    const int lit = !g_tiles.Anchored(i) ? 0 : TileStays(s, i) ? 2 : 1;
-    if (s.anchorButton == vr::k_ulOverlayHandleInvalid || s.anchorLit == lit) return;
-    s.anchorLit = lit;
-    static const std::vector<uint8_t> tex[3] = {AnchorTexture(64, 0), AnchorTexture(64, 1), AnchorTexture(64, 2)};
-    overlaytex::Set(s.anchorButton, tex[lit].data(), 64, 64);
-}
-
 // The dashboard tiles (dashtiles.h): anchor and stay, the tiling keys, the grid for a profile, and
 // whose window a floating panel is (ft-floatd), so it comes back as that app was.
 void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size) {
@@ -665,7 +635,6 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         }
         const int taken = g_tiles.RestoreAll(saved, more);
         done += taken, bad += int(saved.size()) - taken;
-        for (const auto &[i, state] : saved) LightAnchor(g_screens[i]);
         if (taken && !g_tileGroupSet) g_tileRegroup = true;
         RetileDash();
         RememberTiles();
@@ -676,7 +645,6 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         Screen *s = Find(parsed.n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no such floating window");
         TileKnown(parsed.n - 1, std::string("app:") + parsed.appId);
-        LightAnchor(*s);
         std::snprintf(reply, size, "ok");
         return;
     }

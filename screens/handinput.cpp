@@ -1135,7 +1135,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     // off the content and its buttons (a hand reaching for the bar or a corner): counted, logged
     // once, no poke
     Side::Attempt &a = sd.attempt;
-    const bool button = PressableButton(ctl);
+    const bool button = PokeButton(ctl);
     if (crossed && !a.on && !over && !button) {
         if (sd.below == 1) {
             ++stats.offContent;

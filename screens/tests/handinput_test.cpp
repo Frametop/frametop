@@ -860,11 +860,11 @@ void TestControlPoke() {
     CHECK(r.Count(Event::Control) == 1 && r.Count(Event::Press) == 0);
     for (int k = 0; k < 20; ++k) r.Frame({TipAt(c.u, c.v, -0.015)});   // held there: once
     CHECK(r.Count(Event::Control) == 1);
-    // the bar takes no poke
+    // a poke on the bar presses it too (Option C: it opens the bar's menu), and not the desktop
     Rig b;
     const Spot &bar = b.panels[0].controls[0];
     for (int mm = 50; mm >= -15; mm -= 10) { const double d = mm / 1000.0; b.Frame({TipAt(bar.u, bar.v, d)}); }
-    CHECK(b.Count(Event::Control) == 0 && b.Count(Event::Press) == 0);
+    CHECK(b.Count(Event::Control) == 1 && b.Last(Event::Control)->control == Control::Bar && b.Count(Event::Press) == 0);
 }
 
 void TestNearClaim() {
@@ -4729,6 +4729,19 @@ void TestRollButton() {
                 r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
 }
 
+// Option C (2026-11-18): a poke on the grab bar presses it (vr.cpp opens its menu), as a poke on a round
+// button did, and gives the desktop no press.
+void TestBarPoke() {
+    const Panel p = LivePanel();
+    const Spot &bar = p.controls[0];
+    CHECK(PokeButton(Control::Bar) && !PressableButton(Control::Bar));   // (a pinch on it still grabs it)
+    Rig r;
+    r.panels = {p};
+    for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(bar.u + 0.005, bar.v, mm / 1000.0)});
+    CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Bar && r.Count(Event::Press) == 0);
+    std::printf("buttons: a poke on the grab bar: %s\n", r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
+}
+
 // The bar row inside the panel's edge (2026-11-18, barside.h): a poke on a button or the bar over the
 // content presses the control, not the desktop under it; a poke clear of them is still the desktop's.
 // A bar down a side (standing on end) can be grabbed along its length.
@@ -4745,7 +4758,7 @@ void TestControlsInside() {
         r.panels = {p};
         for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(u, inY, mm / 1000.0)});
         CHECK(r.Count(Event::Press) == 0);
-        if (want != Control::Bar) CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == want);
+        CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == want);   // (the bar: its menu, Option C)
         std::printf("controls inside: a poke on %s over the content: %d control(s), %d desktop press(es)\n", ControlName(want),
                     r.Count(Event::Control), r.Count(Event::Press));
     }
@@ -5732,6 +5745,7 @@ int main(int argc, char **argv) {
     TestPinButton();
     TestAnchorLost();
     TestRollButton();
+    TestBarPoke();
     TestControlsInside();
     TestTouchDot();
     TestGuides();

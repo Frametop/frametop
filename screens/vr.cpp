@@ -140,6 +140,8 @@
 #include "levelpin.h"
 #include "barhit.h"
 #include "chromepool.h"
+#include "panelmenu.h"
+#include "tiptap.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
 #include "steamshrink.h"
@@ -482,38 +484,6 @@ void PaintBar(Screen &s) {
         s.barPaintedVersion = g_barVersion, s.barPaintedLit = s.barLit, s.barPaintedRaster = raster;
 }
 
-// Paint a control: dark translucent inside `inside(u, v)`, white where `glyph(u, v)`, a
-// faint light rim where `rim(u, v)`. u, v: -1..1 across the texture, v up.
-template <typename In, typename Glyph, typename Rim>
-std::vector<uint8_t> ControlTexture(int n, In inside, Glyph glyph, Rim rim) {
-    std::vector<uint8_t> px(size_t(n) * n * 4, 0);
-    const int ss = 3;  // supersampling, for smooth edges
-    for (int y = 0; y < n; ++y)
-        for (int x = 0; x < n; ++x) {
-            double in = 0, g = 0, e = 0;
-            for (int j = 0; j < ss; ++j)
-                for (int i = 0; i < ss; ++i) {
-                    const double u = (x + (i + 0.5) / ss) / n * 2 - 1, v = 1 - (y + (j + 0.5) / ss) / n * 2;
-                    if (!inside(u, v)) continue;
-                    in += 1;
-                    if (glyph(u, v)) g += 1;
-                    else if (rim(u, v)) e += 1;
-                }
-            const double k = ss * ss;
-            in /= k, g /= k, e /= k;
-            uint8_t *p = &px[(size_t(y) * n + x) * 4];
-            const double bg = in - g - e;  // dark part
-            const double a = bg * 0.72 + e * 0.6 + g * 1.0;
-            if (a <= 0) continue;
-            const double shade = (bg * 0.72 * 38 + e * 0.6 * 200 + g * 255) / a;
-            p[0] = p[1] = p[2] = uint8_t(std::clamp(shade, 0.0, 255.0));
-            p[3] = uint8_t(std::clamp(a * 255, 0.0, 255.0));
-        }
-    return px;
-}
-bool InDisc(double u, double v) { return u * u + v * v <= 1; }
-bool DiscRim(double u, double v) { return u * u + v * v > 0.86 * 0.86; }
-
 // The resize handle draws nothing (user, 2026-10-13: "remove the radio icon thing on corners for resizing
 // and replace them with the glow that is used for grabbing with hand tracking"): it stays as the laser's
 // hit area just outside the corner (its mouse scale, not its texture, sizes that), and the corner's soft
@@ -523,131 +493,6 @@ const std::vector<uint8_t> &HandleTexture(bool) {
     static const std::vector<uint8_t> legacy(64 * 64 * 4, 0);
     static const std::vector<uint8_t> clear(256 * 256 * 4, 0);
     return g_resizeCorner.sharp ? clear : legacy;
-}
-
-std::vector<uint8_t> CurveTexture(int n) {
-    // An arc: "curve this screen".
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) { return std::fabs(std::hypot(u, -v - 1.9) - 1.7) < 0.11 && std::fabs(u) < 0.6; },
-        DiscRim);
-}
-
-std::vector<uint8_t> RollTexture(int n) {
-    // A circular arrow, counterclockwise: "roll this screen".
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            const double r = std::hypot(u, v);
-            double ang = std::atan2(v, u) * 180 / M_PI;
-            if (ang < 0) ang += 360;
-            if (std::fabs(r - 0.48) < 0.085 && ang >= 100) return true;  // the arc, 100..360 degrees
-            // The head at 0 degrees, pointing up (the way the arc turns there).
-            const double hx = u - 0.48, hy = v + 0.02;
-            return hy >= 0 && hy <= 0.3 && std::fabs(hx) <= 0.24 * (1 - hy / 0.3);
-        },
-        DiscRim);
-}
-
-std::vector<uint8_t> CloseTexture(int n) {
-    // A cross: "close this window".
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            return std::max(std::fabs(u), std::fabs(v)) < 0.42 &&
-                   (std::fabs(u - v) < 0.12 || std::fabs(u + v) < 0.12);
-        },
-        DiscRim);
-}
-
-std::vector<uint8_t> DockTexture(int n) {
-    // An arrow down onto a line: "back to the desktop".
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            if (std::fabs(u) < 0.5 && v > -0.52 && v < -0.38) return true;  // the line
-            if (std::fabs(u) < 0.08 && v > -0.1 && v < 0.5) return true;    // the shaft
-            return v >= -0.3 && v <= -0.05 && std::fabs(u) <= (v + 0.3) * 1.2;  // the head, point down
-        },
-        DiscRim);
-}
-
-std::vector<uint8_t> TheaterTexture(int n) {
-    // A wide screen on a stand: "View in Theater" (a game's panel, in the dock button's place).
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            const bool inScreen = std::fabs(u) < 0.56 && v > -0.12 && v < 0.42;
-            const bool inside = std::fabs(u) < 0.44 && v > 0.0 && v < 0.3;
-            if (inScreen && !inside) return true;                          // the screen's frame
-            if (std::fabs(u) < 0.06 && v > -0.34 && v <= -0.12) return true;  // the stand
-            return std::fabs(u) < 0.26 && v > -0.44 && v <= -0.34;            // its foot
-        },
-        DiscRim);
-}
-
-std::vector<uint8_t> ResetTexture(int n) {
-    // A reticle: "put the screens back around you" (like a recenter).
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            const double r = std::hypot(u, v);
-            if (std::fabs(r - 0.4) < 0.07 || r < 0.13) return true;  // the ring and the centre
-            return (std::fabs(u) < 0.06 && std::fabs(v) > 0.47 && std::fabs(v) < 0.72) ||
-                   (std::fabs(v) < 0.06 && std::fabs(u) > 0.47 && std::fabs(u) < 0.72);  // the ticks
-        },
-        DiscRim);
-}
-
-std::vector<uint8_t> PinTexture(int n, bool lit) {
-    // A pushpin, leaning: "keep this screen in view". Lit (pinned to the head), the disc is blue, as the
-    // bar is while a carried screen is armed for a pin.
-    auto px = ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            const double b = (u + v) * M_SQRT1_2, a = (u - v) * M_SQRT1_2;  // b: along the pin, up and right
-            if (std::fabs(a) < 0.24 && b > 0.40 && b < 0.56) return true;   // the cap
-            if (std::fabs(a) < 0.12 && b > 0.12 && b <= 0.40) return true;  // the body
-            if (std::fabs(a) < 0.36 && b > 0 && b <= 0.12) return true;     // the flange
-            return b > -0.62 && b <= 0 && std::fabs(a) < 0.05 * (1 + b / 0.62 * 0.6);  // the needle, tapering
-        },
-        DiscRim);
-    if (lit)
-        for (size_t k = 0; k < px.size(); k += 4)
-            if (px[k] < 128) px[k] = 40, px[k + 1] = 110, px[k + 2] = 225;   // the dark part only
-    return px;
-}
-
-// An anchor: "this one rides with the dashboard". lit 1 (anchored): the disc blue; 2 (anchored and
-// staying shown with the dashboard closed): a ring round it too.
-std::vector<uint8_t> AnchorTexture(int n, int lit) {
-    auto px = ControlTexture(
-        n, InDisc,
-        [lit](double u, double v) {
-            if (lit == 2 && u * u + v * v > 0.74 * 0.74 && u * u + v * v < 0.82 * 0.82) return true;   // the ring
-            const double ring = std::hypot(u, v - 0.42);
-            if (ring > 0.07 && ring < 0.15) return true;                         // the eye at the top
-            if (std::fabs(u) < 0.055 && v > -0.5 && v < 0.28) return true;       // the shank
-            if (std::fabs(v - 0.16) < 0.045 && std::fabs(u) < 0.26) return true; // the stock
-            const double arm = std::hypot(u, v + 0.08);                          // the arms, a curve up to the flukes
-            return v < -0.2 && arm > 0.4 && arm < 0.5 && std::fabs(u) < 0.42;
-        },
-        DiscRim);
-    if (lit)
-        for (size_t k = 0; k < px.size(); k += 4)
-            if (px[k] < 128) px[k] = 40, px[k + 1] = 110, px[k + 2] = 225;
-    return px;
-}
-
-std::vector<uint8_t> LayoutTexture(int n) {
-    // Three screens side by side, the middle one bigger: "all of them, as they stand".
-    return ControlTexture(
-        n, InDisc,
-        [](double u, double v) {
-            if (std::fabs(u) <= 0.2 && std::fabs(v) <= 0.3) return true;                         // the middle one
-            return std::fabs(u) >= 0.32 && std::fabs(u) <= 0.62 && std::fabs(v) <= 0.2;          // one each side
-        },
-        DiscRim);
 }
 
 vr::VROverlayHandle_t MakeChrome(const char *key, const char *name, const std::vector<uint8_t> &px, int w, int h) {
@@ -671,16 +516,6 @@ void LightBar(Screen &s, bool lit) {
     if (s.barLit == lit) return;
     s.barLit = lit;
     PaintBar(s);
-}
-
-// The pin button blue while the screen rides on the head (or is carried, to be pinned there again).
-void LightPin(Screen &s) {
-    const bool lit = s.pinned == vr::k_unTrackedDeviceIndex_Hmd ||
-                     (s.drag == Drag::Move && s.pinTarget == vr::k_unTrackedDeviceIndex_Hmd);
-    if (s.pinButton == vr::k_ulOverlayHandleInvalid || s.pinLit == lit) return;
-    s.pinLit = lit;
-    static const auto normal = PinTexture(64, false), blue = PinTexture(64, true);
-    overlaytex::Set(s.pinButton, (lit ? blue : normal).data(), 64, 64);
 }
 
 // ---------------------------------------------------------------- wrist guides
@@ -1023,40 +858,17 @@ Mat BarOffset(const Screen &s) {
     return OnSurface(s, c.u, c.v, 0.003);
 }
 
-// Put the bar, the curve button, and the corner tab on the screen, inside its bottom edge (same parent:
-// the room or the controller), sized for the screen and its distance, and on its surface.
-// Where each control sits, relative to the screen: bar, curve, roll, resize tab, a
-// floating window's dock and close buttons (left of the bar), and a desktop screen's reset,
-// pin and layout buttons (left of the bar, where a floating window has its dock and close buttons;
-// the layout button is the outermost).
-// Their centres on the surface: u along it, v up, metres from the screen's centre.
-//   Between the bar and a button, and button and button, a button's width or more (user, 2026-10-13:
-// "farther apart so it's harder to accidentally click"; was 6% of the bar's width, about a third of a
-// button). It grows with them as a hand comes (ChromeSize).
-//   On another edge (s.barSide; barside.h's Place) the same row, turned to run along that edge.
-// Along the row (`along`: from the bar's middle, the curve and roll side positive); the tab's is its u.
-// Which button the anchor is from the bar, on the left: after the panel's other buttons there.
-int AnchorSlot(const Screen &s) { return s.floating ? 3 : s.gsapp ? (s.theater ? 2 : 1) : 4; }
-void ControlAlong(const Screen &s, double along[kControls]) {
-    const double bar = barhit::Width(s.chrome, g_barPaddingX), button = s.grip;
-    const double gap = std::max(s.chrome * 0.06, button);
-    const double uu[kControls] = {0, bar / 2 + gap + button / 2, bar / 2 + gap * 2 + button * 1.5,
-                           // Visual, preview and hit-mask canvases share the screen's actual corner.
-                           s.cornerX * (s.metres / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)), -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5),
-                          -(bar / 2 + gap + button / 2), -(bar / 2 + gap * 2 + button * 1.5), -(bar / 2 + gap * 3 + button * 2.5),
-                          // the anchor: outermost on the left (a floating window's after its dock and close, a
-                          // game's after its View in Theater, an app's first)
-                          -(bar / 2 + gap * AnchorSlot(s) + button * (AnchorSlot(s) - 0.5))};
-    std::copy(std::begin(uu), std::end(uu), along);
-}
+// Put the bar and the corner tab on the screen, the bar inside its edge (same parent: the room or the
+// controller), sized for the screen and its distance, and on its surface. Their centres on the surface:
+// u along it, v up, metres from the screen's centre. The bar on another edge (s.barSide; barside.h's
+// Place) runs along that edge; the tab is at the corner an aim is at (UpdateCorner).
 void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
-    double along[kControls];
-    ControlAlong(s, along);
-    for (int k = 0; k < kControls; ++k) {
-        const barside::UV c = BarSpot(s, along[k]);
-        u[k] = k == 3 ? along[k] : c.u;
-        v[k] = k == 3 ? s.cornerY * (s.heightMetres() / 2 + (g_resizeCorner.sharp ? 0 : HandleSize(s) / 2)) : c.v;
-    }
+    const barside::UV c = BarSpot(s, 0);
+    u[kBarPart] = c.u, v[kBarPart] = c.v;
+    // Visual, preview and hit-mask canvases share the screen's actual corner.
+    const double out = g_resizeCorner.sharp ? 0 : HandleSize(s) / 2;
+    u[kResizePart] = s.cornerX * (s.metres / 2 + out);
+    v[kResizePart] = s.cornerY * (s.heightMetres() / 2 + out);
 }
 Mat RollZ(double rad);
 std::array<Mat, kControls> ControlOffsets(const Screen &s) {
@@ -1064,8 +876,8 @@ std::array<Mat, kControls> ControlOffsets(const Screen &s) {
     ControlUV(s, u, v);
     std::array<Mat, kControls> m;
     for (int k = 0; k < kControls; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
-    // Down a side the bar stands on end (its texture and mouse x turn with it); the round buttons need no turn.
-    if (barside::Vertical(s.barSide)) m[0] = Mul(m[0], RollZ(barside::Roll(s.barSide)));
+    // Down a side the bar stands on end (its texture and mouse x turn with it).
+    if (barside::Vertical(s.barSide)) m[kBarPart] = Mul(m[kBarPart], RollZ(barside::Roll(s.barSide)));
     // The handle's texture is clear; orientation lives in its mask, not the transform.
     // The shaped mask already encodes the selected corner; do not rotate its canvas.
     return m;
@@ -1106,7 +918,7 @@ void PlaceParts(Screen &s, const std::array<ChromePart, kControls> &parts);
 
 void PlaceChrome(Screen &s) {
     ChromeSize(s);
-    const double bar = s.chrome, button = s.grip;
+    const double bar = s.chrome;
     const auto offsets = ControlOffsets(s);
     const double targetWidth = barhit::Width(bar, g_barPaddingX);
     vr::VROverlay()->SetOverlayWidthInMeters(s.bar, float(targetWidth));
@@ -1115,24 +927,9 @@ void PlaceChrome(Screen &s) {
     const vr::HmdVector2_t barScale = {{float(targetWidth * 1000), float(barhit::Height(bar, g_barPaddingY) * 1000)}};
     vr::VROverlay()->SetOverlayMouseScale(s.bar, &barScale);
     PaintBar(s);
-    vr::VROverlay()->SetOverlayWidthInMeters(s.curveButton, float(button));
-    vr::VROverlay()->SetOverlayWidthInMeters(s.rollButton, float(button));
     vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(HandleSize(s)));
     vr::VROverlay()->SetOverlayCurvature(s.handle, g_resizeCorner.sharp && s.curve > 0 ? float(std::clamp(HandleSize(s) / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
     PaintResizeMask(s);
-    if (s.floating) {
-        vr::VROverlay()->SetOverlayWidthInMeters(s.dockButton, float(button));
-        vr::VROverlay()->SetOverlayWidthInMeters(s.closeButton, float(button));
-    } else if (s.gsapp) {
-        if (s.dockButton != vr::k_ulOverlayHandleInvalid) vr::VROverlay()->SetOverlayWidthInMeters(s.dockButton, float(button));
-    } else {
-        vr::VROverlay()->SetOverlayWidthInMeters(s.resetButton, float(button));
-        vr::VROverlay()->SetOverlayWidthInMeters(s.pinButton, float(button));
-        vr::VROverlay()->SetOverlayWidthInMeters(s.layoutButton, float(button));
-        LightPin(s);
-    }
-    vr::VROverlay()->SetOverlayWidthInMeters(s.anchorButton, float(button));
-    LightAnchor(s);
     // Curved, the bar bends with the screen's bottom (or top) edge; standing down a side, it stays flat (an
     // overlay bends along its own width, which runs up and down there).
     const bool bends = s.curve > 0 && !barside::Vertical(s.barSide);
@@ -1389,16 +1186,15 @@ bool ModeVisible() {
 void ApplyAlpha(const Screen &s) {
     vr::VROverlay()->SetOverlayAlpha(s.overlay, s.alpha);
     for (const auto &[k, sub] : s.subs) vr::VROverlay()->SetOverlayAlpha(sub.overlay, s.alpha);
-    bool active[kControls] = {s.hover[0] || s.drag == Drag::Move, s.hover[1], s.hover[2] || s.drag == Drag::Roll,
-                              s.hover[3] || s.drag == Drag::Resize, s.hover[4], s.hover[5], s.hover[6], s.hover[7],
-                              s.hover[8] || s.layoutHeld, s.hover[9]};
+    bool active[kControls] = {s.hover[kBarPart] || s.drag == Drag::Move || s.drag == Drag::Roll || BarMenuOn(ScreenIndexOf(s)),
+                              s.hover[kResizePart] || s.drag == Drag::Resize};
     for (const auto &[k, kind] : kHandControls) active[k] = active[k] || (s.handHover >> int(kind) & 1);
     const auto controls = s.Controls();
     for (int k = 0; k < kControls; ++k) {
         if (controls[k] == vr::k_ulOverlayHandleInvalid) continue;
         // the resize handle brightens as an aim comes to its corner (UpdateCorner)
-        const float idle = k == 3 ? kChromeIdle + (1 - kChromeIdle) * std::clamp(s.cornerGlow, 0.f, 1.f) : kChromeIdle;
-        const float fade = k == 0 && g_barPreview.enabled && g_barPreview.always ? 1.f : s.controls;
+        const float idle = k == kResizePart ? kChromeIdle + (1 - kChromeIdle) * std::clamp(s.cornerGlow, 0.f, 1.f) : kChromeIdle;
+        const float fade = k == kBarPart && g_barPreview.enabled && g_barPreview.always ? 1.f : s.controls;
         vr::VROverlay()->SetOverlayAlpha(controls[k], s.alpha * fade * (active[k] ? 1.f : idle));
     }
 }
@@ -1608,23 +1404,23 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
             best = it->second.closeness, cx = it->second.sx, cy = it->second.sy, held = it->second.held;
     }
     // A true hover/held target must stay obvious even outside the proximity fade.
-    if (g_resizeCorner.sharp && s.hover[3]) best = 1, cx = s.cornerX, cy = s.cornerY;
+    if (g_resizeCorner.sharp && s.hover[kResizePart]) best = 1, cx = s.cornerX, cy = s.cornerY;
     if (best > 0) {
         s.cornerUntil = g_tick + kControlsLinger;
         s.nearUntil = std::max(s.nearUntil, g_tick + kControlsLinger);   // the controls show
-    } else if (g_tick >= s.cornerUntil && !s.hover[3]) {
+    } else if (g_tick >= s.cornerUntil && !s.hover[kResizePart]) {
         cx = 1, cy = -1;   // back to the bottom right
     } else {
         cx = s.cornerX, cy = s.cornerY;   // lingering where it was
     }
     // (not away from under a laser that's on it)
-    if ((cx != s.cornerX || cy != s.cornerY) && !s.hover[3]) {
+    if ((cx != s.cornerX || cy != s.cornerY) && !s.hover[kResizePart]) {
         s.cornerX = cx, s.cornerY = cy;
         PlaceChrome(s);
     }
     const float glow = float(best);
     const bool lit = held || s.drag == Drag::Resize;
-    if (best > 0 && ((g_resizeCorner.sharp && s.hover[3]) || best > g_laserCornerNext.strength)) {
+    if (best > 0 && ((g_resizeCorner.sharp && s.hover[kResizePart]) || best > g_laserCornerNext.strength)) {
         g_laserCornerNext.kind = handinput::Guide::Corner, g_laserCornerNext.panel = ScreenIndexOf(s);
         g_laserCornerNext.sx = s.cornerX, g_laserCornerNext.sy = s.cornerY, g_laserCornerNext.strength = best, g_laserCornerNext.selected = lit;
     }
@@ -1663,16 +1459,13 @@ void UpdateControls() {
                 SendPointer(s.resizeRegionMessage);  // helper restart/lost datagram recovery
                 s.resizeAnnouncedMs = NowMs();
             }
-            // Points along the bar and at each button and the tab; a laser passing within
-            // `reach` of one of them is close.
+            // Points along the bar; a laser passing within `reach` of one of them is close (the
+            // corner tab's own closeness: UpdateCorner).
             std::vector<Mat> spots;
-            const auto offsets = ControlOffsets(s);
             for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5}) {
                 const barside::UV c = BarSpot(s, f * barhit::Width(s.chrome, g_barPaddingX));
                 spots.push_back(Mul(p, OnSurface(s, c.u, c.v, 0.003)));
             }
-            for (int k = 1; k < kControls; ++k)
-                if (s.HasControl(k)) spots.push_back(Mul(p, offsets[k]));
             UpdateCorner(s, p, lasers);
             const double reach = std::max(s.grip * 1.5, s.chrome * 0.12);
             for (const Mat &d : lasers) {
@@ -2133,6 +1926,32 @@ void TogglePinView(Screen &s, int index, const char *by) {
     if (s.Desktop()) ArrangeDesktopSoon();   // KWin's outputs: pinned screens go last
 }
 
+// The bar pressed: where the device and the panel were, for BarTap.
+void BarPressed(Screen &s, vr::TrackedDeviceIndex_t dev) {
+    s.barPressMs = -1;
+    if (!DevicePose(dev, &s.barPressFrom) || !ScreenPose(s, &s.barPressPose)) return;
+    s.barPressMs = NowMs(), s.barPressDevice = dev, s.barPressUniverse = s.universe;
+}
+
+// The bar let go by `dev`: was it a tap (panelmenu::IsTap)? Then the move it started never happened: the
+// panel is back where it was (in the room; a pinned one goes back on its pin as the move ends).
+bool BarTap(Screen &s, vr::TrackedDeviceIndex_t dev) {
+    const int64_t at = s.barPressMs;
+    s.barPressMs = -1;
+    Mat now;
+    if (at < 0 || s.barPressDevice != dev || s.drag != Drag::Move || s.dragDevice != dev || s.layoutHeld || !DevicePose(dev, &now))
+        return false;
+    const Mat &was = s.barPressFrom;
+    const double moved = std::sqrt(std::pow(now.m[0][3] - was.m[0][3], 2) + std::pow(now.m[1][3] - was.m[1][3], 2) +
+                                   std::pow(now.m[2][3] - was.m[2][3], 2));
+    // (the angle between its pointing directions, -z)
+    const double dot = -now.m[0][2] * -was.m[0][2] + -now.m[1][2] * -was.m[1][2] + -now.m[2][2] * -was.m[2][2];
+    const double turned = std::acos(std::clamp(dot, -1.0, 1.0));
+    if (!panelmenu::IsTap(NowMs() - at, moved, turned)) return false;
+    SetAbsolute(s, s.barPressPose, s.barPressUniverse);
+    return true;
+}
+
 void RememberPlace(int i, Screen &s);       // (how far out a sent-away panel goes: by SendBack)
 void ForgetIfPlacedFar(int i, Screen &s);
 
@@ -2588,10 +2407,8 @@ void DropFloatPanel(Screen &s) {
     ReturnChrome(s);
     for (auto o : s.All())
         if (o != vr::k_ulOverlayHandleInvalid) overlaytex::Forget(o), vr::VROverlay()->DestroyOverlay(o);
-    s.overlay = s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton =
-        s.pinButton = s.layoutButton = s.anchorButton = vr::k_ulOverlayHandleInvalid;
-    s.visible = s.controlsUp = s.barLit = s.cornerLit = s.pinLit = false;
-    s.anchorLit = 0;
+    s.overlay = s.bar = s.handle = vr::k_ulOverlayHandleInvalid;
+    s.visible = s.controlsUp = s.barLit = s.cornerLit = false;
     s.controls = 0;
     std::fill(std::begin(s.hover), std::end(s.hover), false);
 }
@@ -3506,11 +3323,11 @@ handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
     double u[kControls], v[kControls];
     ControlUV(s, u, v);
     for (const auto &[k, kind] : kHandControls) {
-        if (!s.HasControl(k)) continue;   // (by its kind: a set comes once a hand is near, StepChromePool)
-        if (k == 3 && g_resizeCorner.sharp) continue;  // legacy retains its original near-hand tab
-        const double c = k == 3 ? HandleSize(s) : s.grip;
-        const bool upright = k == 0 && barside::Vertical(s.barSide);   // (the bar standing down a side)
-        const double along = k == 0 ? s.chrome / 2 : c / 2, across = k == 0 ? s.chrome * 12 / 256 : c / 2;
+        if (s.glueTo >= 0) break;   // (a glued one has no controls; any other gets a set once a hand is near, StepChromePool)
+        if (k == kResizePart && g_resizeCorner.sharp) continue;  // legacy retains its original near-hand tab
+        const double c = k == kResizePart ? HandleSize(s) : s.grip;
+        const bool upright = k == kBarPart && barside::Vertical(s.barSide);   // (the bar standing down a side)
+        const double along = k == kBarPart ? s.chrome / 2 : c / 2, across = k == kBarPart ? s.chrome * 12 / 256 : c / 2;
         const double hw = upright ? across : along, hh = upright ? along : across;
         P.controls.push_back({kind, u[k], v[k], hw, hh});
     }
@@ -4296,72 +4113,12 @@ void GrabThatReset() {
     for (auto &[i, s] : g_screens) s.hasBefore = false;
 }
 
-// The reset button may take a hold: pressed for g_resetHoldMs (HANDS_RESET_HOLD_MS) by the same laser
-// or hand, the layout resets; let go sooner, nothing. (500 ms from 2026-10-11, after a stray poke reset
-// the whole layout; a press again since 2026-10-13: "clicking the reset ... button that's underneath
-// doesn't actually do anything", taps of 0.09-0.16 s, and the buttons sit farther apart: ControlUV.)
-double g_resetHoldMs = 0;
-struct ResetHold {
-    int panel = -1;
-    vr::TrackedDeviceIndex_t device = kNone;   // a laser's
-    int side = -1;                             // ...or a hand's
-    int64_t startMs = 0;
-} g_resetHold;
-
 void HideResetAsk();
 void DoReset(int panel, const char *how) {
     std::printf("screen %d: reset the layout (%s)\n", panel + 1, how);
     HideResetAsk();
     GrabThatReset();
     RunLayout("reset");
-}
-void ResetHoldStart(int panel, vr::TrackedDeviceIndex_t device, int side) {
-    if (g_resetHoldMs <= 0) return DoReset(panel, side >= 0 ? "poked" : "clicked");
-    g_resetHold = {panel, device, side, NowMs()};
-    std::printf("screen %d: the reset button held (%s): resets in %.1f s\n", panel + 1, side >= 0 ? "a hand" : "a laser", g_resetHoldMs / 1000);
-}
-void ResetHoldEnd(vr::TrackedDeviceIndex_t device) {
-    if (g_resetHold.panel < 0 || g_resetHold.device != device) return;
-    std::printf("screen %d: the reset button let go after %.2f s: no reset (hold it)\n", g_resetHold.panel + 1,
-                (NowMs() - g_resetHold.startMs) / 1000.0);
-    g_resetHold = {};
-}
-// The anchor button pressed by a hand: let go (the hand off it), a click or a long press as a
-// laser's (AnchorButtonUp); the hand lost meanwhile, nothing.
-struct AnchorHold {
-    int panel = -1, side = -1;
-} g_anchorHold[2];   // each hand's
-void AnchorHandDown(int panel, int side) {
-    const auto it = g_screens.find(panel);
-    if (it == g_screens.end() || side < 0 || side > 1) return;
-    it->second.anchorDownMs = NowMs();
-    g_anchorHold[side] = {panel, side};
-}
-void UpdateAnchorHold() {
-    for (AnchorHold &hold : g_anchorHold) {
-        if (hold.panel < 0 || g_handInput.pressControl(hold.side) == handinput::Control::Anchor) continue;
-        const AnchorHold h = hold;
-        hold = {};
-        if (g_handInput.controlPressLost(h.side)) {
-            if (const auto it = g_screens.find(h.panel); it != g_screens.end()) it->second.anchorDownMs = -1;
-            std::printf("screen %d: the anchor button: the hand was lost, nothing done\n", h.panel + 1);
-            continue;
-        }
-        AnchorButtonUp(h.panel, h.side ? "the right hand" : "the left hand");
-    }
-}
-void UpdateResetHold() {
-    if (g_resetHold.panel < 0) return;
-    if (g_resetHold.side >= 0 && g_handInput.pressControl(g_resetHold.side) != handinput::Control::Reset) {
-        std::printf("screen %d: the reset button let go after %.2f s: no reset (hold it)\n", g_resetHold.panel + 1,
-                    (NowMs() - g_resetHold.startMs) / 1000.0);
-        return void(g_resetHold = {});
-    }
-    if (NowMs() - g_resetHold.startMs >= g_resetHoldMs) {
-        const ResetHold h = g_resetHold;
-        g_resetHold = {};
-        DoReset(h.panel, h.side >= 0 ? "held by a hand" : "held by a laser");
-    }
 }
 
 // ---------------------------------------------------------------- the far stretch
@@ -4400,6 +4157,13 @@ const handcut::Hand *SideHand(int k) {
         if (c.right == (k == 1) && (!h || c.confidence > h->confidence)) h = &c;
     return h;
 }
+bool IndexTip(int side, double out[3]) {
+    const handcut::Hand *h = SideHand(side);
+    if (!h) return false;
+    for (int r = 0; r < 3; ++r) out[r] = h->p[8][r];
+    return true;
+}
+bool HandsFrame() { return g_handInput.newFrame(); }
 
 double FistsApart() {
     const handcut::Hand *a = SideHand(0), *b = SideHand(1);
@@ -4700,43 +4464,46 @@ void UpdateCarousel() {
 }
 
 // ---------------------------------------------------------------- the reset confirmation
-// A hand's tap on the reset button asks first (user, 2026-10-13: "add a confirmation dialogue you have to
-// tap to reset the displays as well ONLY for while you're doing hand tracking"): "Reset the layout?" shows
-// under the button for kResetAskMs, and a tap on it (or on the button again) resets. A laser's click
-// resets straight away.
+// Reset Layout... in a panel's bar menu asks first (user, 2026-10-13: "add a confirmation dialogue you have to
+// tap to reset the displays"; then for a hand's tap only, now for a laser's click too: the reset button became
+// a menu row, 2026-11-18, and one click there is as easy to make by mistake as a stray poke was): "Reset the
+// layout?" shows over the panel beside its bar for kResetAskMs, and a click or a fingertip's tap on it resets.
 struct ResetAsk {
     int panel = -1;
     int64_t shownMs = -1;
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     double w = 0, h = 0;                  // its size now (m)
     Mat pose{};                           // ...and where it is
-    double tipZ[2] = {1, 1};              // each index tip's way in front of it last frame (m; 1: away)
+    tiptap::Tap tip[2];                   // each index tip's way through it
     int px = 0;                           // its width in pixels
+    bool lasers = false;                  // MakeOverlaysInteractiveIfVisible is set
 } g_resetAsk;
-constexpr int64_t kResetAskMs = 5000, kResetAskLeastMs = 300;
+constexpr int64_t kResetAskMs = 5000, kResetAskLeastMs = 300;   // (the least: the press that opened it isn't the answer)
 constexpr int kResetAskH = 84;
-constexpr const char *kResetAskText = "Reset the layout? Tap";
+constexpr const char *kResetAskKey = "frametop.resetask", *kResetAskText = "Reset the layout? Tap to confirm";
 
 void HideResetAsk() {
     if (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid) PinHide(g_resetAsk.overlay);
     g_resetAsk.panel = -1, g_resetAsk.shownMs = -1;
 }
 
-// Beside the reset button, toward the panel's middle, and at least a finger's size.
+// Beside the bar's middle, toward the panel's middle (where its menu was), and at least a finger's size.
 bool PlaceResetAsk(Screen &s) {
     Mat p, head;
     if (!ScreenPose(s, &p)) return false;
     const double d = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? std::max(0.3, Apart(head, p)) : 1.0;
     g_resetAsk.h = std::max(0.00045 * d * kResetAskH, 1.4 * s.grip);
     g_resetAsk.w = g_resetAsk.h * g_resetAsk.px / kResetAskH;
-    double u[kControls], v[kControls];
-    ControlUV(s, u, v);
-    // (beside the button, toward the panel's middle: barside::MenuAt)
-    const barside::UV at = barside::MenuAt(s.barSide, {u[6], v[6]}, s.grip / 2, std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
+    const barside::UV at = barside::MenuAt(s.barSide, BarSpot(s, 0), barhit::Height(s.chrome, g_barPaddingY) / 2,
+                                           std::max(s.grip, s.chrome * 0.06), g_resetAsk.w, g_resetAsk.h);
     g_resetAsk.pose = Mul(p, OnSurface(s, at.u, at.v, 0.004));
     const vr::VROverlayHandle_t o = g_resetAsk.overlay;
     vr::VROverlay()->SetOverlayWidthInMeters(o, float(g_resetAsk.w));
     vr::VROverlay()->SetOverlayTransformAbsolute(o, vr::TrackingUniverseStanding, &g_resetAsk.pose);
+    if (g_resetAsk.lasers != s.lasers) {
+        g_resetAsk.lasers = s.lasers;
+        vr::VROverlay()->SetOverlayFlag(o, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, s.lasers);
+    }
     return true;
 }
 
@@ -4748,26 +4515,23 @@ void ShowResetAsk(int panel) {
     const uint8_t bg[4] = {196, 52, 48, 240}, fg[3] = {255, 255, 255};
     FillRound(px, W, H, 2, 2, W - 2, H - 2, (H - 4) / 2, bg);
     label::Draw(px.data(), W, H, kResetAskText, 32, W / 2, H / 2, 255, fg);
-    if (g_resetAsk.overlay == vr::k_ulOverlayHandleInvalid &&
-        vr::VROverlay()->CreateOverlay("frametop.resetask", "Frametop: reset the layout?", &g_resetAsk.overlay) != vr::VROverlayError_None)
-        return;
+    if (g_resetAsk.overlay == vr::k_ulOverlayHandleInvalid) {
+        if (vr::VROverlay()->CreateOverlay(kResetAskKey, "Frametop: reset the layout?", &g_resetAsk.overlay) != vr::VROverlayError_None) {
+            g_resetAsk.overlay = vr::k_ulOverlayHandleInvalid;
+            return;
+        }
+        vr::VROverlay()->SetOverlayInputMethod(g_resetAsk.overlay, vr::VROverlayInputMethod_Mouse);
+        vr::VROverlay()->SetOverlaySortOrder(g_resetAsk.overlay, 10);
+        AnnounceOverlay(kResetAskKey);   // (the 3D mouse's ray finds it)
+    }
     overlaytex::Set(g_resetAsk.overlay, px.data(), W, H);
-    vr::VROverlay()->SetOverlaySortOrder(g_resetAsk.overlay, 10);
+    const vr::HmdVector2_t scale = {{float(W), float(H)}};
+    vr::VROverlay()->SetOverlayMouseScale(g_resetAsk.overlay, &scale);
     g_resetAsk.panel = panel, g_resetAsk.shownMs = NowMs(), g_resetAsk.px = W;
-    g_resetAsk.tipZ[0] = g_resetAsk.tipZ[1] = 1;
+    for (tiptap::Tap &t : g_resetAsk.tip) t.Reset();
     if (!PlaceResetAsk(it->second)) return HideResetAsk();
     PinShow(g_resetAsk.overlay);
-}
-
-void ResetTapped(int panel, int side) {
-    const int64_t age = NowMs() - g_resetAsk.shownMs;
-    if (g_resetAsk.panel == panel && age < kResetAskLeastMs) return;   // (the same tap)
-    if (g_resetAsk.panel == panel) {
-        HideResetAsk();
-        return DoReset(panel, side ? "the right hand, the button twice" : "the left hand, the button twice");
-    }
-    ShowResetAsk(panel);
-    std::printf("screen %d: reset the layout? (a hand's tap: asks, %.0f s)\n", panel + 1, kResetAskMs / 1000.0);
+    std::printf("screen %d: reset the layout? (asks, %.0f s)\n", panel + 1, kResetAskMs / 1000.0);
 }
 
 // Each tick: it follows its panel, and goes after kResetAskMs; each hands frame, an index tip coming through
@@ -4776,28 +4540,35 @@ void UpdateResetAsk() {
     if (g_resetAsk.panel < 0) return;
     const auto it = g_screens.find(g_resetAsk.panel);
     if (it == g_screens.end() || !it->second.visible || NowMs() - g_resetAsk.shownMs >= kResetAskMs) {
-        if (it != g_screens.end()) std::printf("screen %d: reset the layout? not tapped: no reset\n", g_resetAsk.panel + 1);
+        if (it != g_screens.end()) std::printf("screen %d: reset the layout? not confirmed: no reset\n", g_resetAsk.panel + 1);
         return HideResetAsk();
     }
     if (!PlaceResetAsk(it->second)) return HideResetAsk();
     if (!g_handInput.newFrame()) return;
     const Mat in = Inverse(g_resetAsk.pose);
     for (int k = 0; k < 2; ++k) {
-        const handcut::Hand *h = SideHand(k);
-        double z = 1;
-        if (h) {
-            const float *q = h->p[8];
-            double l[3];
-            for (int r = 0; r < 3; ++r) l[r] = in.m[r][0] * q[0] + in.m[r][1] * q[1] + in.m[r][2] * q[2] + in.m[r][3];
-            const double margin = 0.01;
-            if (std::fabs(l[0]) <= g_resetAsk.w / 2 + margin && std::fabs(l[1]) <= g_resetAsk.h / 2 + margin && l[2] > -0.03) z = l[2];
-        }
-        const bool through = g_resetAsk.tipZ[k] > 0.008 && g_resetAsk.tipZ[k] < 0.08 && z <= 0.003;
-        g_resetAsk.tipZ[k] = z;
-        if (through && NowMs() - g_resetAsk.shownMs >= kResetAskLeastMs) {
+        double tip[3], l[3];
+        const bool seen = IndexTip(k, tip);
+        if (seen)
+            for (int r = 0; r < 3; ++r) l[r] = in.m[r][0] * tip[0] + in.m[r][1] * tip[1] + in.m[r][2] * tip[2] + in.m[r][3];
+        if (g_resetAsk.tip[k].Step(seen ? l : nullptr, g_resetAsk.w / 2, g_resetAsk.h / 2) &&
+            NowMs() - g_resetAsk.shownMs >= kResetAskLeastMs) {
             const int panel = g_resetAsk.panel;
-            HideResetAsk();
             return DoReset(panel, k ? "the right hand, confirmed" : "the left hand, confirmed");
+        }
+    }
+}
+
+// Its input: a click on it resets (not the press that asked, if it lands here: kResetAskLeastMs).
+void PollResetAsk(void (*handle)(const struct ft_event *, void *), void *data) {
+    vr::VREvent_t ev;
+    while (g_resetAsk.overlay != vr::k_ulOverlayHandleInvalid && vr::VROverlay()->PollNextOverlayEvent(g_resetAsk.overlay, &ev, sizeof ev)) {
+        if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left && g_resetAsk.panel >= 0 &&
+            NowMs() - g_resetAsk.shownMs >= kResetAskLeastMs) {
+            DoReset(g_resetAsk.panel, ("confirmed by the " + DeviceLabel(ev.trackedDeviceIndex)).c_str());
+        } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
+            EndDragsBy(ev.trackedDeviceIndex);
+            ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
         }
     }
 }
@@ -5613,7 +5384,7 @@ void UpdateResizeVisuals() {
     for (auto &[panel, s] : g_screens) for (int corner = 0; corner < 4; ++corner) {
         const int sx = corner % 2 ? 1 : -1, sy = corner < 2 ? 1 : -1;
         const bool active = sx == s.cornerX && sy == s.cornerY;
-        bool ready = active && (s.hover[3] || s.drag == Drag::Resize);
+        bool ready = active && (s.hover[kResizePart] || s.drag == Drag::Resize);
         double strength = 0;
         auto guide = [&](const handinput::Guide &g, bool hand) {
             if (g.kind != handinput::Guide::Corner || g.panel != panel || g.sx != sx || g.sy != sy) return;
@@ -5847,7 +5618,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
     std::vector<handinput::Panel> panels;
     for (auto &[i, s] : g_screens) {
         Mat p;
-        if (s.visible && s.width > 0 && s.height > 0 && (!s.floating || s.cropW > 0) && ScreenPose(s, &p))
+        // (not one with its bar's menu open: a fingertip through a row would go on into the panel)
+        if (s.visible && s.width > 0 && s.height > 0 && (!s.floating || s.cropW > 0) && !BarMenuOn(i) && ScreenPose(s, &p))
             panels.push_back(InputPanel(s, i, p));
     }
     handinput::Input in;
@@ -5947,22 +5719,9 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
             case handinput::Event::Control:
                 s.inputMs = NowMs();
                 std::printf("screen %d: %s (%s hand)\n", e.panel + 1, handinput::ControlName(e.control), e.side ? "right" : "left");
-                if (e.control == handinput::Control::Curve) {
-                    ToggleCurve(s);
-                } else if (e.control == handinput::Control::Reset) {
-                    ResetTapped(e.panel, e.side);   // (a hand: it asks first)
-                } else if (e.control == handinput::Control::Pin) {
-                    TogglePinView(s, e.panel, e.side ? "the right hand" : "the left hand");
-                } else if (e.control == handinput::Control::Anchor) {
-                    AnchorHandDown(e.panel, e.side);   // (let go: a click or a long press, UpdateAnchorHold)
-                } else if (e.control == handinput::Control::Roll) {
-                    LevelScreen(s, e.panel, e.side ? "the right hand" : "the left hand");
-                } else if (e.control == handinput::Control::Dock && s.gsapp) {
-                    std::printf("screen %d: View in Theater button (%s)\n", e.panel + 1, e.side ? "the right hand" : "the left hand");
-                    GsToTheater(e.panel);   // (a Steam game's panel: its View in Theater button is in the dock's place)
-                } else if (e.control == handinput::Control::Dock || e.control == handinput::Control::Close) {
-                    SendFloat((e.control == handinput::Control::Dock ? "dock " : "close ") + std::to_string(e.panel + 1));
-                }
+                // a poke on the bar (a pinch or a grab there moves it): its menu, whose rows a fingertip
+                // presses (vrbarmenu.cpp)
+                if (e.control == handinput::Control::Bar) OpenBarMenu(e.panel, 0, false);
                 break;
             case handinput::Event::GrabStart:
                 // the handle goes to that corner (not while the other hand holds it: a stretch)
@@ -6096,6 +5855,41 @@ void UpdateSteamInFront() {
     if (front == g_steamInFront) return;
     g_steamInFront = front;
     std::printf("Steam %s\n", front ? "in front (the Steam menu or Steam's keyboard)" : "out of the way");
+}
+
+// ---------------------------------------------------------------- the layout's carry (Move All Screens)
+// The layout button, the outermost left of a screen's bar (user, 2026-11-14: "when you grab it, it
+// grabs your entire Frametop layout and moves it ... interactable with the laser pinch underneath a
+// display, and not just with a key binding": carry_toggle's carry-all, the 3D mouse's, was the only way
+// to move the room's panels together). Held by a laser, its screen is carried as by its bar, and every
+// other panel in the room (not pinned; shown or not) keeps its place in a level frame at that screen
+// (layoutgrab.h): the layout turns about you, rises and comes nearer with it in one piece, and nothing
+// in it tilts. The front slot's home and a stopped remote display's place are in the layout too. The
+// panels it moves wear carry-all's fuchsia border (UpdateCarryGlow). One held otherwise meanwhile stays
+// where that has it; the carried screen arms no wrist pin. It ends when the button is let go.
+bool LayoutFrame(const Screen &s, Mat *out) {
+    Mat p, head;
+    return ScreenPose(s, &p) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) && layoutgrab::Frame(p, head, out);
+}
+
+void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
+    if (g_layoutGrab.on()) return;
+    for (const auto &[i, o] : g_screens)
+        if (o.toggleCarry) return;   // (the 3D mouse's carry has the room)
+    StartDrag(s, Drag::Move, dev);
+    Mat f;
+    if (s.drag != Drag::Move) return;
+    if (!LayoutFrame(s, &f)) return (void)std::printf("screen %d: its layout button: carried alone (it's above or below you)\n", index + 1);
+    g_layoutGrab.Begin(index, f);
+    for (auto &[i, o] : g_screens) {
+        Mat p;
+        if (i == index || o.pinned != kNone || !ScreenPose(o, &p)) continue;
+        g_layoutGrab.Take(i, p);
+        g_spin.base.erase(i);   // (turning: it goes on from where the layout leaves it)
+    }
+    s.layoutHeld = true;
+    ApplyAlpha(s);
+    std::printf("screen %d: its layout button: %zu other panel(s) go with it\n", index + 1, g_layoutGrab.rel.size());
 }
 
 }  // namespace ftvr
@@ -6304,7 +6098,6 @@ bool ft_vr_init(void) {
     g_wideCurveMaxArc = g_frontRead.maxWideW * M_PI / 180;
     num("SCREEN_FRONT_KEEP_MS", g_frontKeepMs, 0, 600000);   // this much use keeps it in the slot when you look away
     g_frontAway = handcut::Setting("SCREEN_FRONT_AWAY", "0") != "0";   // turned away from, it goes home
-    num("HANDS_RESET_HOLD_MS", g_resetHoldMs, 0, 5000);       // the reset button needs this long a hold (0: a press)
     {   // SCREEN_UI_SCALE="104=2 103=1.5": a remote display's own UI scale (its OS's), for its readable size
         std::istringstream in(handcut::Setting("SCREEN_UI_SCALE", ""));
         std::string kv;
@@ -6923,29 +6716,24 @@ bool MakePanel(Screen &s, const char *prefix, const char *label) {
 
 // ---------------------------------------------------------------- shared controls
 
-// chromepool.h's sets: every control once each (Screen::Controls()' order), lent to the panels
-// something is at. Their keys are frametop.controls.K.PART, PART as a panel's own were.
-constexpr const char *kControlPart[kControls] = {"bar", "curve", "roll", "resize", "dock", "close", "reset", "pin", "layout", "anchor"};
-constexpr const char *kControlWhat[kControls] = {"move", "curve", "roll", "resize", "back to the desktop", "close",
-                                                 "reset the layout", "pin in view", "move the layout",
-                                                 "anchor to the dashboard"};
+// chromepool.h's sets: a bar and a resize corner each (Screen::Controls()' order), lent to the panels
+// something is at. Their keys are frametop.controls.K.PART, PART as a panel's own were (the pointer
+// helper and the gaze know them by those). The round buttons that were a set's other eight overlays
+// are rows of the bar's menu (panelmenu.h).
+constexpr const char *kControlPart[kControls] = {"bar", "resize"};
+constexpr const char *kControlWhat[kControls] = {"move, tap for its menu", "resize"};
 // Set k's overlays, made the first time a panel needs it (each told to the pointer helper, as the
 // panels are: its ray and the gaze find them at once). False if SteamVR made them not all.
 bool MakeChromeSet(int k) {
     ChromeSet &set = g_chromeSets[k];
     if (set.made) return true;
-    static const auto curve = CurveTexture(64), roll = RollTexture(64), dock = DockTexture(64), close = CloseTexture(64),
-                      reset = ResetTexture(64), pin = PinTexture(64, false), layout = LayoutTexture(64),
-                      anchor = AnchorTexture(64, 0);
-    const std::vector<uint8_t> *round[kControls] = {nullptr, &curve, &roll, nullptr, &dock, &close, &reset, &pin, &layout, &anchor};
     const auto &bar = BarImage(barhit::Pixels(0.3, g_barPaddingX, g_barPaddingY), false);
     for (int c = 0; c < kControls; ++c) {
         char key[64], name[80];
         std::snprintf(key, sizeof key, "frametop.controls.%d.%s", k + 1, kControlPart[c]);
         std::snprintf(name, sizeof name, "Frametop controls %d: %s", k + 1, kControlWhat[c]);
-        set.part[c] = c == 0   ? MakeChrome(key, name, bar.pixels, bar.width, bar.height)
-                      : c == 3 ? MakeChrome(key, name, HandleTexture(false), HandlePixels(), HandlePixels())
-                               : MakeChrome(key, name, *round[c], 64, 64);
+        set.part[c] = c == kBarPart ? MakeChrome(key, name, bar.pixels, bar.width, bar.height)
+                                    : MakeChrome(key, name, HandleTexture(false), HandlePixels(), HandlePixels());
         if (set.part[c] == vr::k_ulOverlayHandleInvalid) {
             for (int d = 0; d < c; ++d) overlaytex::Forget(set.part[d]), vr::VROverlay()->DestroyOverlay(set.part[d]);
             set.part.fill(vr::k_ulOverlayHandleInvalid);
@@ -6953,7 +6741,7 @@ bool MakeChromeSet(int k) {
         }
         AnnounceOverlay(key);
     }
-    for (int c : {0, 2, 8}) vr::VROverlay()->SetOverlayFlag(set.part[c], vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
+    vr::VROverlay()->SetOverlayFlag(set.part[kBarPart], vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (push and pull)
     set.made = true;
     return true;
 }
@@ -6962,17 +6750,16 @@ bool MakeChromeSet(int k) {
 void ReturnChrome(Screen &s) {
     for (auto o : s.Controls())
         if (o != vr::k_ulOverlayHandleInvalid) PinHide(o), vr::VROverlay()->SetOverlayAlpha(o, 0);
-    s.bar = s.handle = s.curveButton = s.rollButton = s.dockButton = s.closeButton = s.resetButton = s.pinButton =
-        s.layoutButton = s.anchorButton = vr::k_ulOverlayHandleInvalid;
-    s.anchorDownMs = -1;
+    s.bar = s.handle = vr::k_ulOverlayHandleInvalid;
+    s.barPressMs = -1;
     std::fill(std::begin(s.hover), std::end(s.hover), false);
     s.controls = 0, s.controlsUp = false;
     s.barBuzz.Leave(), s.resizeBuzz.Leave();
     s.resizeRegionMessage.clear();
 }
 
-// Set k lent to the panel: the controls its kind has, painted, sized and placed for it (shown by
-// UpdateControls); the others hidden. Events still queued from the set's last panel are dropped.
+// Set k lent to the panel: its bar and corner, painted, sized and placed for it (shown by
+// UpdateControls). Events still queued from the set's last panel are dropped.
 void LendChrome(Screen &s, int k) {
     if (!MakeChromeSet(k)) {
         static bool told = false;
@@ -6983,28 +6770,14 @@ void LendChrome(Screen &s, int k) {
     vr::VREvent_t ev;
     for (auto o : set.part)
         while (vr::VROverlay()->PollNextOverlayEvent(o, &ev, sizeof ev)) {}
-    vr::VROverlayHandle_t *mine[kControls] = {&s.bar,        &s.curveButton, &s.rollButton,  &s.handle,     &s.dockButton,
-                                              &s.closeButton, &s.resetButton, &s.pinButton, &s.layoutButton,
-                                              &s.anchorButton};
+    vr::VROverlayHandle_t *mine[kControls] = {&s.bar, &s.handle};
     for (int c = 0; c < kControls; ++c) {
-        if (!s.HasControl(c)) {
-            PinHide(set.part[c]), vr::VROverlay()->SetOverlayAlpha(set.part[c], 0);
-            *mine[c] = vr::k_ulOverlayHandleInvalid;
-            continue;
-        }
         *mine[c] = set.part[c];
-        vr::VROverlay()->SetOverlayName(set.part[c], (s.label + ": " + (c == 4 && s.gsapp ? "View in Theater" : kControlWhat[c])).c_str());
+        vr::VROverlay()->SetOverlayName(set.part[c], (s.label + ": " + kControlWhat[c]).c_str());
     }
-    // the dock button's slot: a game's View in Theater, else a floating window's way back to the desktop
-    static const auto dockTex = DockTexture(64), theaterTex = TheaterTexture(64);
-    if (s.dockButton != vr::k_ulOverlayHandleInvalid)
-        overlaytex::Set(s.dockButton, (s.gsapp ? theaterTex : dockTex).data(), 64, 64);
     // a floating window's tab scrolls its density (the event loop)
     vr::VROverlay()->SetOverlayFlag(s.handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, s.floating);
-    static const auto pinNormal = PinTexture(64, false);
-    if (s.pinButton != vr::k_ulOverlayHandleInvalid) overlaytex::Set(s.pinButton, pinNormal.data(), 64, 64);
-    s.pinLit = false;           // (LightPin paints it blue again if it's pinned to the head)
-    s.anchorLit = -1;           // (LightAnchor paints it for its anchor; -1: whatever the set's last panel had)
+    s.barPressMs = -1;
     s.cornerLit = false;        // (UpdateCorner lights it again while resizing)
     s.barPaintedVersion = 0;    // (PaintBar)
     s.resizePaintedVersion = 0; // (PaintResizeMask, which tells the pointer helper its tab's shape)
@@ -7397,40 +7170,6 @@ void ShiftCommand(vrcmd::Verb verb, const vrcmd::Cmd &c, char *reply, int size) 
     ShiftRoom({c.x, c.z, c.yaw * M_PI / 180}, reply, size);
 }
 
-// ---------------------------------------------------------------- the layout button
-// The layout button, the outermost left of a screen's bar (user, 2026-11-14: "when you grab it, it
-// grabs your entire Frametop layout and moves it ... interactable with the laser pinch underneath a
-// display, and not just with a key binding": carry_toggle's carry-all, the 3D mouse's, was the only way
-// to move the room's panels together). Held by a laser, its screen is carried as by its bar, and every
-// other panel in the room (not pinned; shown or not) keeps its place in a level frame at that screen
-// (layoutgrab.h): the layout turns about you, rises and comes nearer with it in one piece, and nothing
-// in it tilts. The front slot's home and a stopped remote display's place are in the layout too. The
-// panels it moves wear carry-all's fuchsia border (UpdateCarryGlow). One held otherwise meanwhile stays
-// where that has it; the carried screen arms no wrist pin. It ends when the button is let go.
-bool LayoutFrame(const Screen &s, Mat *out) {
-    Mat p, head;
-    return ScreenPose(s, &p) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) && layoutgrab::Frame(p, head, out);
-}
-
-void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
-    if (g_layoutGrab.on()) return;
-    for (const auto &[i, o] : g_screens)
-        if (o.toggleCarry) return;   // (the 3D mouse's carry has the room)
-    StartDrag(s, Drag::Move, dev);
-    Mat f;
-    if (s.drag != Drag::Move) return;
-    if (!LayoutFrame(s, &f)) return (void)std::printf("screen %d: its layout button: carried alone (it's above or below you)\n", index + 1);
-    g_layoutGrab.Begin(index, f);
-    for (auto &[i, o] : g_screens) {
-        Mat p;
-        if (i == index || o.pinned != kNone || !ScreenPose(o, &p)) continue;
-        g_layoutGrab.Take(i, p);
-        g_spin.base.erase(i);   // (turning: it goes on from where the layout leaves it)
-    }
-    s.layoutHeld = true;
-    ApplyAlpha(s);
-    std::printf("screen %d: its layout button: %zu other panel(s) go with it\n", index + 1, g_layoutGrab.rel.size());
-}
 
 void LayoutGrabEnd() {
     bool screens = false;
@@ -7530,7 +7269,6 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             g_palm = palmmenu::PalmMenu(g_palm.params());
             g_grabThat = grabthat::Detector(g_grabThat.params());
             g_far = {};
-            g_resetHold = {};
         }
         wasDenied = denied;
         if (denied) {
@@ -7701,7 +7439,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             if (!on && ev.eventType != vr::VREvent_FocusLeave) return;
             if (s.hover[k] != on) s.hover[k] = on, ApplyAlpha(s);
         };
-        // The bar: move (and push/pull with the wheel while moving).
+        // The bar: pressed, it moves (the wheel pushes and pulls meanwhile); a tap opens its menu (BarTap).
         while (vr::VROverlay()->PollNextOverlayEvent(s.bar, &ev, sizeof ev)) {
             if (ev.eventType == vr::VREvent_FocusLeave) s.barBuzz.Leave(int(ev.trackedDeviceIndex));
             if (ev.eventType == vr::VREvent_FocusEnter || ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_MouseButtonDown) {
@@ -7710,16 +7448,21 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     s.barBuzz.Enter(int(ev.trackedDeviceIndex), IsHandController(ev.trackedDeviceIndex), g_barPreview.haptics) && s.drag == Drag::None)
                     vr::VRSystem()->TriggerHapticPulse(ev.trackedDeviceIndex, 0, 1500);
             }
-            hover(0);
+            hover(kBarPart);
             if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
                 continue;
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
+            const double along = ev.data.mouse.x / 1000.0 - barhit::Width(s.chrome, g_barPaddingX) / 2;   // (mm: its mouse scale)
+            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
+                BarPressed(s, ev.trackedDeviceIndex);
                 StartDrag(s, Drag::Move, ev.trackedDeviceIndex);
+            }
             // A right click: the menu of edges the bar can go on (vrbarmenu.cpp), at the spot clicked along it.
             else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Right && s.drag == Drag::None)
-                OpenBarMenu(index, ev.data.mouse.x / 1000.0 - barhit::Width(s.chrome, g_barPaddingX) / 2);
+                OpenBarMenu(index, along, true);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
+                const bool tap = ev.data.mouse.button == vr::VRMouseButton_Left && BarTap(s, ev.trackedDeviceIndex);
                 EndDragsBy(ev.trackedDeviceIndex);
+                if (tap) OpenBarMenu(index, along, false);
                 ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
             }
             else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
@@ -7730,7 +7473,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         while (vr::VROverlay()->PollNextOverlayEvent(s.handle, &ev, sizeof ev)) {
             if ((ev.eventType == vr::VREvent_MouseMove || ev.eventType == vr::VREvent_MouseButtonDown) &&
                 !overlayregion::Contains(s.resizeRegion, ev.data.mouse.x / HandlePixels(), ev.data.mouse.y / HandlePixels())) {
-                if (s.hover[3]) s.hover[3] = false, ApplyAlpha(s);
+                if (s.hover[kResizePart]) s.hover[kResizePart] = false, ApplyAlpha(s);
                 s.resizeBuzz.Leave(int(ev.trackedDeviceIndex));
                 continue;
             }
@@ -7740,7 +7483,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                     // Explicit device index: never pulse the other hand or the virtual mouse.
                     vr::VRSystem()->TriggerHapticPulse(ev.trackedDeviceIndex, 0, 1500);
             }
-            hover(3);
+            hover(kResizePart);
             if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
                 StartDrag(s, Drag::Resize, ev.trackedDeviceIndex);
             else if (ev.eventType == vr::VREvent_MouseButtonUp) {
@@ -7753,107 +7496,6 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
                        ev.data.scroll.ydelta != 0) {
                 s.keepX = s.cornerX, s.keepY = s.cornerY;   // (this corner stays put: the tab stays under the laser)
                 SendFloat("density " + std::to_string(index + 1) + (ev.data.scroll.ydelta > 0 ? " 1" : " -1"));
-            }
-        }
-        // The curve button.
-        while (vr::VROverlay()->PollNextOverlayEvent(s.curveButton, &ev, sizeof ev)) {
-            hover(1);
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
-                ToggleCurve(s);
-            else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
-                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-            }
-        }
-        // A floating window's buttons: back to the desktop, and close (ft-floatd does both). A Steam
-        // game's panel has View in Theater in the first one's place.
-        for (int k : {4, 5}) {
-            const vr::VROverlayHandle_t o = s.Controls()[k];
-            if (o == vr::k_ulOverlayHandleInvalid) continue;
-            while (vr::VROverlay()->PollNextOverlayEvent(o, &ev, sizeof ev)) {
-                hover(k);
-                if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left && s.gsapp) {
-                    std::printf("screen %d: View in Theater button (%s)\n", index + 1, DeviceLabel(ev.trackedDeviceIndex).c_str());
-                    GsToTheater(index);
-                } else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                    SendFloat((k == 4 ? "dock " : "close ") + std::to_string(index + 1));
-                } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                    EndDragsBy(ev.trackedDeviceIndex);
-                    ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-                }
-            }
-        }
-        // The reset button: the profile in use opened again, or every screen back in the layout,
-        // around where you are now (`ft-layout reset`, like Meta+Shift+R; it refuses a second copy).
-        while (s.resetButton != vr::k_ulOverlayHandleInvalid &&
-               vr::VROverlay()->PollNextOverlayEvent(s.resetButton, &ev, sizeof ev)) {
-            hover(6);
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                ResetHoldStart(index, ev.trackedDeviceIndex, -1);   // (held g_resetHoldMs: the layout resets)
-            } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                ResetHoldEnd(ev.trackedDeviceIndex);
-                EndDragsBy(ev.trackedDeviceIndex);
-                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-            }
-        }
-        // The pin button: pinned to the head as it is now, or back in the room (TogglePinView).
-        while (s.pinButton != vr::k_ulOverlayHandleInvalid &&
-               vr::VROverlay()->PollNextOverlayEvent(s.pinButton, &ev, sizeof ev)) {
-            hover(7);
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                TogglePinView(s, index, DeviceLabel(ev.trackedDeviceIndex).c_str());
-            } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
-                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-            }
-        }
-        // The layout button: held, its screen is carried as by its bar and the room goes with it
-        // (LayoutGrabStart); the wheel pushes and pulls as on the bar.
-        while (s.layoutButton != vr::k_ulOverlayHandleInvalid &&
-               vr::VROverlay()->PollNextOverlayEvent(s.layoutButton, &ev, sizeof ev)) {
-            hover(8);
-            if ((ev.eventType == vr::VREvent_MouseButtonDown || ev.eventType == vr::VREvent_MouseButtonUp) && CarryClick(ev))
-                continue;
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
-                LayoutGrabStart(s, index, ev.trackedDeviceIndex);
-            else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                EndDragsBy(ev.trackedDeviceIndex);
-                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-            } else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::Move)
-                Push(s, ev.data.scroll.ydelta);
-        }
-        // The anchor button: a click anchors to the dashboard or lets go, a long press stays shown (AnchorButtonUp).
-        while (s.anchorButton != vr::k_ulOverlayHandleInvalid &&
-               vr::VROverlay()->PollNextOverlayEvent(s.anchorButton, &ev, sizeof ev)) {
-            hover(9);
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left) {
-                s.anchorDownMs = NowMs();
-            } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                if (ev.data.mouse.button == vr::VRMouseButton_Left)
-                    AnchorButtonUp(index, DeviceLabel(ev.trackedDeviceIndex).c_str());
-                EndDragsBy(ev.trackedDeviceIndex);
-                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-            }
-        }
-        // The roll button: drag around like a knob, or scroll.
-        while (vr::VROverlay()->PollNextOverlayEvent(s.rollButton, &ev, sizeof ev)) {
-            hover(2);
-            if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left)
-                StartDrag(s, Drag::Roll, ev.trackedDeviceIndex);
-            else if (ev.eventType == vr::VREvent_MouseButtonUp) {
-                // its own press let go on it, not turned: a click, which levels the screen (not another
-                // button's release, or a controller lost mid-press, which end the roll as they are)
-                const bool click = ev.data.mouse.button == vr::VRMouseButton_Left && s.dragDevice == ev.trackedDeviceIndex &&
-                                   RollClick(s);
-                EndDragsBy(ev.trackedDeviceIndex);
-                if (click) LevelScreen(s, index, DeviceLabel(ev.trackedDeviceIndex).c_str());
-                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
-            }
-            else if (ev.eventType == vr::VREvent_ScrollDiscrete && s.drag == Drag::None) {
-                Mat p;
-                if (!ScreenPose(s, &p)) continue;
-                s.rollFrom = s.pinned != kNone ? s.pinRel : p;
-                ApplyRoll(s, ev.data.scroll.ydelta * kRollStep * M_PI / 180);
             }
         }
         if (s.drag != Drag::None) UpdateDrag(s, index);
@@ -7873,6 +7515,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateLayoutGrab();   // (after the carried screen's own move, above)
     PollPill(handle, data);
     PollBarMenu(handle, data);
+    PollResetAsk(handle, data);
     UpdateHandInput(handle, data);
     DockPushed(handle, data);   // (after UpdateHandInput's dock aims)
     PlacePulled();
@@ -7897,8 +7540,6 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     ++g_tick;
     UpdateSpin();
     UpdateFront();
-    UpdateResetHold();
-    UpdateAnchorHold();
     if (g_spin.front >= 0) {
         ft_event e{};
         e.type = FT_FRONT;
@@ -7990,8 +7631,8 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
     case vrcmd::BarSide: {
         if (!Find(n)) return (void)std::snprintf(reply, size, "error no screen %d", n);
         barside::Side side;
-        if (!std::strcmp(word, "menu")) OpenBarMenu(n - 1, 0);
-        else if (!barside::Parse(word, &side)) return (void)std::snprintf(reply, size, "error bottom, top, left, right or menu");
+        if (!std::strcmp(word, "menu") || !std::strcmp(word, "edges")) OpenBarMenu(n - 1, 0, word[0] == 'e');
+        else if (!barside::Parse(word, &side)) return (void)std::snprintf(reply, size, "error bottom, top, left, right, menu or edges");
         else SetBarSide(n - 1, side, "command");
         std::snprintf(reply, size, "ok");
         return;

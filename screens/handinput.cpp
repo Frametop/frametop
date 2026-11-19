@@ -2,6 +2,7 @@
 #include "handinput.h"
 
 #include "handshape.h"
+#include "posemath.h"
 
 #include <cstdlib>
 #include <algorithm>
@@ -231,16 +232,10 @@ void LimitTurn(const Mat &from, Mat *to, double maxDeg, const double at[3], cons
 Hit Locate(const Panel &p, const double pt[3]) {
     double q[3];
     ToLocal(p.pose, pt, q);
+    double s[3];
+    posemath::OnPanel(p.curve, q, s);   // (vr.cpp's OnSurface, RayOnSurface)
     Hit h;
-    if (p.curve <= 0) {
-        h.u = q[0], h.v = q[1], h.d = q[2];
-    } else {
-        // the cylinder's axis at (0, *, r), the viewer inside (vr.cpp's OnSurface, RayOnSurface)
-        const double r = p.curve;
-        h.d = r - std::hypot(q[0], q[2] - r);
-        h.u = r * std::atan2(q[0], r - q[2]);
-        h.v = q[1];
-    }
+    h.u = s[0], h.v = s[1], h.d = s[2];
     return h;
 }
 
@@ -1135,7 +1130,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     // off the content and its buttons (a hand reaching for the bar or a corner): counted, logged
     // once, no poke
     Side::Attempt &a = sd.attempt;
-    const bool button = PressableButton(ctl);
+    const bool button = PokeButton(ctl);
     if (crossed && !a.on && !over && !button) {
         if (sd.below == 1) {
             ++stats.offContent;

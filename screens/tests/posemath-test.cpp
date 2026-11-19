@@ -1,4 +1,4 @@
-// ft-screens' pose math (screens/posemath.h): rigid poses, PanelPose, RollZ, LevelRoll and FacingPose.
+// ft-screens' pose math (screens/posemath.h): rigid poses, PanelPose, RollZ, LevelRoll, RollLever and FacingPose.
 #include "../posemath.h"
 
 #include <cmath>
@@ -130,5 +130,30 @@ int main() {
     check("Inverse: q * q^-1 is the identity", same(Mul(q, Inverse(q)), I) && same(Mul(Inverse(q), q), I));
     const M b = Mul(Translation<M>(0, 0, -1), Translation<M>(0, 2, 0));
     check("Mul: translations add", near(b.m[1][3], 2) && near(b.m[2][3], -1));
+    // Rotate's lever: a 5 cm sweep right turns the panel the same way wherever the row was pressed (the
+    // bar's menu on any edge, any width), far enough not to count as a click (3 degrees, 1.5 cm round:
+    // vr.cpp's RollClick), clockwise held at the top, counterclockwise at the bottom (council, 2026-11-18).
+    {
+        int sweeps = 0, ok = 0;
+        for (bool top : {false, true})
+            for (double edge : {0.15, 0.2, 0.41})
+                for (double hx = -0.8; hx <= 0.801; hx += 0.1)
+                    for (double hy = -0.3; hy <= 0.301; hy += 0.1) {
+                        double lx, ly;
+                        RollLever(hx, hy, top ? edge : -edge, top, &lx, &ly);
+                        const double a0 = std::atan2(hy + ly, hx + lx), a1 = std::atan2(hy + ly, hx + 0.05 + lx);
+                        const double turn = std::remainder(a1 - a0, 2 * M_PI), r = std::hypot(hx + lx, hy + ly);
+                        ++sweeps;
+                        ok += (top ? turn < 0 : turn > 0) && std::fabs(turn) >= 3 * M_PI / 180 && std::fabs(turn) * r >= 0.015;
+                    }
+        std::printf("Rotate's lever: %d of %d sweeps right turned the way the edge held goes\n", ok, sweeps);
+        check("RollLever: every press spot turns the panel the same way, not a click", ok == sweeps);
+        double lx, ly;
+        RollLever(0.3, 0.1, -0.2, false, &lx, &ly);
+        check("RollLever: the spot goes straight below the centre, as far out as it was",
+              near(0.3 + lx, 0) && near(0.1 + ly, -std::hypot(0.3, 0.1)));
+        RollLever(0.05, 0.0, 0.41, true, &lx, &ly);
+        check("RollLever: near the middle, out to the bar's edge", near(0.05 + lx, 0) && near(ly, 0.41));
+    }
     return failed ? 1 : 0;
 }

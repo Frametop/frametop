@@ -58,12 +58,11 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 
 | Do this | To get this |
 | --- | --- |
-| Point near the bottom of a screen | Its controls fade in: the bar, the curve and roll buttons, and, near a corner, a soft glow round it: press there and drag to resize |
+| Point near the bottom of a screen | Its grab bar fades in, and, near a corner, a soft glow round it: press there and drag to resize |
 | Drag the bar under a screen | Moves the screen; scroll while dragging to push it away or pull it closer. With the mouse, hold right while dragging to tilt it |
+| Click the bar, or poke it with a finger | Opens the screen's menu: Curved (curves it around you, or flattens it), Rotate (hold and drag sideways to roll it, snapping level near straight; a click levels it), Keep in View, On Dashboard, Move All Screens (hold to carry the whole layout), Bar Position and Reset Layout. Floating windows have Back to Desktop and Close Window; Steam's tile and Steam games have View in Theater |
+| Right-click the bar | Opens the menu at Bar Position: put the bar on the screen's bottom, top, left or right edge |
 | Drag the tab on a screen's bottom right corner | Resizes the screen |
-| Click the curve button (next to the bar) | Curves the screen around you, or flattens it |
-| Drag the roll button sideways, or scroll on it | Rolls the screen; it snaps level near straight |
-| Click the roll button, or poke it with a finger | Levels the screen where it is: its tilt goes back to 0, nothing else moves |
 | While carrying a screen, sweep its laser across your other controller's ring, then let go | Pins it to that wrist, at its size and distance, as you hold it when you let go; it shows while you see its front. Grab its bar to adjust it (it stays pinned); sweep across the ring again to take it off |
 | Set a screen to On your head (Frametop Settings, Visibility & pins) | Pins it to your head where it is, like a HUD. Grab its bar to move it; it stays on your head |
 | Set a screen to On the dashboard (Frametop Settings, Visibility & pins) | Pins it next to the SteamVR dashboard where it is: drag the dashboard, or close it and open it again in front of you, and the screen goes with it. With the dashboard closed it stays where it was (show the screens only with the dashboard on the same tab). Pinned before the dashboard has opened, it waits in the room until it does. Grab its bar to move it; it stays on the dashboard |

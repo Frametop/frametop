@@ -57,9 +57,8 @@ constexpr double kDotRange = 0.35;   // the guide dot shows while the laser is t
 constexpr double kMinWidth = 0.15;
 constexpr double kFade = 10;         // degrees over which a pinned screen fades out
 constexpr double kRollSnap = 2.5;    // degrees from level where rolling snaps level
-constexpr double kRollStep = 5;      // degrees per scroll notch on the roll button
-constexpr double kRollTap = 3;       // degrees: a press on the roll button turned less than this is a click (levels it),
-constexpr double kRollTapM = 0.015;  // ...or less than this far round (metres, at the laser): a small screen's button is near its centre
+constexpr double kRollTap = 3;       // degrees: Rotate pressed and turned less than this is a click (levels it),
+constexpr double kRollTapM = 0.015;  // ...or less than this far round (metres, at its lever: RollLever)
 constexpr float kChromeIdle = 0.55f; // the controls' opacity without a laser on them
 constexpr long kControlsLinger = 35; // ticks (~0.4 s) the controls stay after a laser leaves
 constexpr long kAimLinger = 25;      // ticks (~0.3 s) a panel keeps the laser on after the aim leaves it
@@ -75,23 +74,16 @@ struct Sub {
     int x = 0, y = 0, w = 0, h = 0;  // in the output's buffer, pixels
 };
 
-// A panel's controls (Screen::Controls), and the ones hand input knows, by their index there
-// (handinput::Control; not the layout button, a laser's so far).
-constexpr int kControls = 10;
-constexpr std::pair<int, handinput::Control> kHandControls[] = {
-    {0, handinput::Control::Bar},   {1, handinput::Control::Curve}, {2, handinput::Control::Roll},
-    {3, handinput::Control::Tab},   {4, handinput::Control::Dock},  {5, handinput::Control::Close},
-    {6, handinput::Control::Reset}, {7, handinput::Control::Pin},   {9, handinput::Control::Anchor}};
+// A panel's controls (Screen::Controls): its grab bar and its resize corner. Everything else is a
+// row of the bar's menu (panelmenu.h, vrbarmenu.cpp): a tap on the bar opens it (Option C, 2026-11-18).
+// Hand input knows both, by their index there (handinput::Control).
+constexpr int kBarPart = 0, kResizePart = 1, kControls = 2;
+constexpr std::pair<int, handinput::Control> kHandControls[] = {{kBarPart, handinput::Control::Bar},
+                                                                {kResizePart, handinput::Control::Tab}};
 
 struct Screen {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid, bar = vr::k_ulOverlayHandleInvalid,
-                          handle = vr::k_ulOverlayHandleInvalid, curveButton = vr::k_ulOverlayHandleInvalid,
-                          rollButton = vr::k_ulOverlayHandleInvalid, dockButton = vr::k_ulOverlayHandleInvalid,
-                          closeButton = vr::k_ulOverlayHandleInvalid,  // the last two: floating windows
-                          resetButton = vr::k_ulOverlayHandleInvalid,  // the last three: desktop screens and
-                          pinButton = vr::k_ulOverlayHandleInvalid,    // remote displays
-                          layoutButton = vr::k_ulOverlayHandleInvalid,
-                          anchorButton = vr::k_ulOverlayHandleInvalid; // every kind (the dashboard tiles)
+                          handle = vr::k_ulOverlayHandleInvalid;   // (bar and handle: a pooled set's, while lent)
     int width = 0, height = 0;    // current buffer size (mouse scale)
     double metres = 1;
     double curve = 0;             // cylinder radius in metres; 0 = flat
@@ -115,7 +107,7 @@ struct Screen {
     Mat dragRel = Identity();                 // device -> screen, while moving
     double grabX = 0, grabY = 0;              // resize: the grab point relative to the corner
     bool dragFacing = false;                  // move: kept facing the head (a hand ray carries it: HandRay)
-    // The resize handle (Controls()[3], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
+    // The resize handle (Controls()[kResizePart], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
     // or a hand aims at (UpdateCorner; the bottom right otherwise), brighter the closer the aim, lit
     // while resizing. Any corner resizes, the opposite one staying put.
     int cornerX = 1, cornerY = -1;            // +1 right, top
@@ -128,9 +120,18 @@ struct Screen {
     Mat resizeTurn = Identity();              // grabbed, which it turns back to when let go (FaceAfterResize)
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
-    double rollRadius = 0;                    // roll: the laser's distance from the centre then (m)
+    double rollRadius = 0;                    // roll: the lever's length then (m)
+    double rollLeverX = 0, rollLeverY = 0;    // roll: added to the laser's spot, so it turns the panel as a knob held at its top or bottom
+                                              // would, wherever on the menu it's held (RollLever)
     double rollTurned = 0;                    // roll: the most the laser has gone round since (rad; RollClick)
-    bool hover[kControls] = {};               // a laser is on the bar, curve, roll, resize, dock, close, reset, pin, layout control
+    bool hover[kControls] = {};               // a laser is on the bar, the resize corner
+    // The bar's press, to tell a tap (the menu) from a move when it comes up (panelmenu::IsTap).
+    int64_t barPressMs = -1;
+    vr::TrackedDeviceIndex_t barPressDevice = kNone;
+    Mat barPressFrom{}, barPressPose{};       // the device's laser then, and the panel's pose in the room
+    uint64_t barPressUniverse = 0;            // ...and its universe (universefix.h)
+    vr::TrackedDeviceIndex_t barPressPinned = kNone;   // ...what it was pinned to, and how
+    Mat barPressPinRel{};
     unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
@@ -152,9 +153,6 @@ struct Screen {
     overlayregion::Region resizeRegion;
     std::string resizeRegionMessage;
     resizecorner::HoverBuzz resizeBuzz;
-    bool pinLit = false;          // the pin button shows it pinned to the head (LightPin)
-    int anchorLit = 0;            // the anchor button shows it anchored (1), staying shown too (2) (LightAnchor)
-    int64_t anchorDownMs = -1;    // the anchor button's press (a long one: stay, else anchor)
     const void *key = nullptr;    // the client buffer on it now, and its dmabuf (for cutouts)
     ft_dmabuf buf{};
     vr::SharedTextureHandle_t plain = 0;  // that buffer's SteamVR import
@@ -244,19 +242,8 @@ struct Screen {
     // Buffer pixels from OpenVR's mouse position on the panel (its origin is bottom left).
     // A cropped panel too: SteamVR gives the position in the whole texture, not the crop.
     void ToBuffer(double mx, double my, double *x, double *y) const { *x = mx, *y = height - my; }
-    std::array<vr::VROverlayHandle_t, kControls> Controls() const {
-        return {bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton, anchorButton};
-    }
-    std::array<vr::VROverlayHandle_t, kControls + 1> All() const {
-        return {overlay, bar, curveButton, rollButton, handle, dockButton, closeButton, resetButton, pinButton, layoutButton,
-                anchorButton};
-    }
-    // Whether its kind has control k (Controls()' order), whether or not it holds a set of them now
-    // (chromepool.h): a floating window has dock and close, a desktop screen or remote display reset,
-    // pin and layout, a gamescope app none of those; every kind the anchor. A glued one has none.
-    bool HasControl(int k) const {
-        return glueTo < 0 && (k < 4 || k == 9 || (gsapp ? k == 4 && theater : floating ? k < 6 : k >= 6));
-    }
+    std::array<vr::VROverlayHandle_t, kControls> Controls() const { return {bar, handle}; }
+    std::array<vr::VROverlayHandle_t, kControls + 1> All() const { return {overlay, bar, handle}; }
     // One of KWin's outputs: a desktop screen (not a floating window's, a remote display or an app's).
     bool Desktop() const { return !floating && !remote && !gsapp; }
 };
@@ -317,7 +304,6 @@ int PictureW(const Screen &s);
 int PictureH(const Screen &s);
 void Stretch(Screen &s, int w, int h);
 void SendStretch(Screen &s);
-std::vector<uint8_t> AnchorTexture(int n, int lit);
 const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dashboard pins ride on it)
 Mat DashFrame();
 Mat OnSurface(const Screen &s, double u, double v, double dz);   // a point on its surface (along the arc when curved)
@@ -368,8 +354,7 @@ void TileDrop(Screen &s, int i);
 void TileResized(Screen &s, int i);
 void UpdateDashTiles();
 void PlaceTileBorder();
-void AnchorButtonUp(int i, const char *by);
-void LightAnchor(Screen &s);
+void TileStay(int i, bool on, const char *by);   // anchored: shown with the dashboard closed too, or not
 void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size);
 
 // ---------------------------------------------------------------- vrbarmenu.cpp's
@@ -379,9 +364,14 @@ void LoadBarSides();
 void BarSideKnown(int i, const std::string &key);   // its key now: its remembered edge, if any
 void BarSideGone(int i);
 bool SetBarSide(int i, barside::Side side, const char *by);   // false: no such panel
-void OpenBarMenu(int i, double along);   // a right click on its bar, `along` metres from the bar's middle
+// Its menu (panelmenu.h): a tap on its bar opens the main page, a right click the edges, `along` metres
+// from the bar's middle; again on the same bar, it closes.
+void OpenBarMenu(int i, double along, bool edges);
 bool BarMenuOn(int i);   // its menu is open (its controls stay)
-void UpdateBarMenu();
+// Hand input leaves the panel to its menu: while the menu's open, and after a fingertip pressed a row or
+// closed it until that tip has come back out (so the same poke doesn't go on into the panel's content).
+bool BarMenuHasHands(int i);
+void UpdateBarMenu();    // each tick: it follows its panel; a fingertip through a row presses it
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data);
 
 // ---------------------------------------------------------------- vrgsapps.cpp's
@@ -414,6 +404,20 @@ void SteamDashTheater(bool on);
 void SteamDashToTheater();   // Steam's page into SteamVR's theater (its tile's grab bar menu)
 bool SteamDashInTheater();   // SteamVR's theater shows Steam's page (the tiles hide then)
 void SteamDashShutdown();
+
+// ---------------------------------------------------------------- vr.cpp's, for the bar's menu
+
+void ToggleCurve(Screen &s);
+void LevelScreen(Screen &s, int index, const char *by);
+void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev);
+bool RollClick(const Screen &s);   // a roll pressed and let go, not turned: a click (levels it)
+void TogglePinView(Screen &s, int index, const char *by);
+void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev);
+void ShowResetAsk(int panel);   // "Reset the layout?": a click or a tap on it resets
+void SendFloat(const std::string &msg);   // to ft-floatd
+bool HandsFrame();   // hand input had a new hands frame this tick
+bool IndexTipIn(int side, const Mat &frame, double out[3]);   // that hand's index fingertip in `frame`'s coordinates, if it's seen
+std::string DeviceLabel(vr::TrackedDeviceIndex_t dev);
 
 // ---------------------------------------------------------------- vr.cpp's gamepad pill
 

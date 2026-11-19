@@ -49,7 +49,7 @@ Steps for each are in `~/Desktop/Projects/HEADSET-TESTS.md`, newest first.
 
 1. **Tiles stay, theater switch, sidebar shut** (~3 min). Click in the room: panels stay. Point at
    the sidebar and away: icons come back before it narrows. A game in the theater: panels hide,
-   then stay with "In the theater" on. A long press on one anchor button: only that panel hides.
+   then stay with "In the theater" on. Stay Shown off in one panel's bar menu: only that panel hides.
 2. **Steam sidebar, its corners, the front tile's height** (~2 min). Sidebar icons show, no corner
    glow or resize from the sidebar, front tile clear above the bar (say if higher or lower).
 3. **Gamepad mode round 2, steps 4-7** (desktop pill): the dashboard dims with the card, the pad

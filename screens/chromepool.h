@@ -1,4 +1,5 @@
-// Which panels have controls (the bar and its buttons, the resize tab) right now.
+// Which panels have controls (the grab bar and the resize tab: two overlays a set since Option C,
+// 2026-11-18, the round buttons being rows of the bar's one menu, panelmenu.h) right now.
 //
 // SteamVR allows k_unMaxOverlayCount (128) overlays for every app together, SteamVR's own
 // included, and a panel with controls of its own took nine of them: desktopless mode ran out

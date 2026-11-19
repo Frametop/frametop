@@ -66,6 +66,9 @@ inline bool PressableButton(Control c) {
     return c == Control::Curve || c == Control::Roll || c == Control::Reset || c == Control::Pin || c == Control::Dock ||
            c == Control::Close || c == Control::Anchor;
 }
+// ...and what a poke presses: those, and the grab bar (Option C: a tap on it opens its menu; a pinch
+// or a grab on it still moves the panel).
+inline bool PokeButton(Control c) { return PressableButton(c) || c == Control::Bar; }
 const char *ControlName(Control c);
 
 // A control on (or by) the panel's surface: its centre u (right) and v (up), metres from

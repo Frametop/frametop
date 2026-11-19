@@ -80,9 +80,38 @@ struct {
     int64_t openedMs = -1, usedMs = -1;   // opened; opened, or a laser moved on it, then
     vr::TrackedDeviceIndex_t holding = kNone;   // a held row's device (Rotate, Move All Screens) till it's let go
     tiptap::Tap tip[2];        // each index tip's way through it
+    tiptap::Tap beside[2];     // ...and through its panel beside it (a tap there closes it)
     std::string drawn;         // what its texture shows
     bool lasers = false;       // MakeOverlaysInteractiveIfVisible is set
 } g_menu;
+
+// After a fingertip pressed a row or closed the menu: its panel stays out of hand input until that tip
+// has come back out in front of it (council, 2026-11-18: the same poke went on into the panel's content
+// and clicked what was under the row).
+struct {
+    int panel = -1, side = 0;
+    Mat frame{};               // the panel then
+    int64_t sinceMs = -1, seenMs = -1;
+} g_handsOff;
+constexpr double kHandsOffOut = 0.02;     // the tip this far in front of the panel: it's out
+constexpr int64_t kHandsOffLostMs = 300;  // ...or not seen this long
+constexpr int64_t kHandsOffMostMs = 3000;
+
+void HandsOff(int panel, int side, const Mat &frame) {
+    g_handsOff.panel = panel, g_handsOff.side = side, g_handsOff.frame = frame;
+    g_handsOff.sinceMs = g_handsOff.seenMs = NowMs();
+}
+
+void UpdateHandsOff() {
+    if (g_handsOff.panel < 0) return;
+    double l[3];
+    const int64_t now = NowMs();
+    if (IndexTipIn(g_handsOff.side, g_handsOff.frame, l)) g_handsOff.seenMs = now;
+    else l[2] = -1;
+    if ((now == g_handsOff.seenMs && l[2] > kHandsOffOut) || now - g_handsOff.seenMs >= kHandsOffLostMs ||
+        now - g_handsOff.sinceMs >= kHandsOffMostMs || !g_screens.count(g_handsOff.panel))
+        g_handsOff.panel = -1;
+}
 
 void CloseMenu(const char *why) {
     if (g_menu.panel < 0) return;
@@ -215,21 +244,31 @@ int RowAtFace(double x, double y) {
                           int(g_menu.rows.size()));
 }
 
-// Each hands frame: a fingertip near it lights the row under it, and one coming through it presses that row.
-void HandsOnMenu() {
+// Each hands frame: a fingertip near it lights the row under it (and keeps it open), one coming through
+// it presses that row, and one coming through its panel beside it closes it, as a tap outside a menu
+// does. Hand input has none of the panel meanwhile (BarMenuHasHands), so neither goes on into it.
+void HandsOnMenu(const Screen &s, const Mat &panel) {
     if (!HandsFrame()) return;
-    const Mat in = Inverse(g_menu.pose);
     g_menu.handHover = -1;
+    const int i = g_menu.panel;
     for (int k = 0; k < 2; ++k) {
-        double tip[3], l[3];
-        const bool seen = IndexTip(k, tip);
-        if (seen)
-            for (int r = 0; r < 3; ++r) l[r] = in.m[r][0] * tip[0] + in.m[r][1] * tip[1] + in.m[r][2] * tip[2] + in.m[r][3];
+        double l[3], q[3];
+        const bool seen = IndexTipIn(k, g_menu.pose, l), onPanel = IndexTipIn(k, panel, q);
         const bool through = g_menu.tip[k].Step(seen ? l : nullptr, g_menu.w / 2, g_menu.h / 2);
-        if (seen && g_menu.tip[k].Near()) g_menu.handHover = RowAtFace(l[0], l[1]);
-        if (through && NowMs() - g_menu.openedMs >= kMenuLeastMs) {
+        const bool overMenu = seen && std::fabs(l[0]) <= g_menu.w / 2 + tiptap::Tap::kMargin &&
+                              std::fabs(l[1]) <= g_menu.h / 2 + tiptap::Tap::kMargin;
+        const bool beside = g_menu.beside[k].Step(onPanel && !overMenu ? q : nullptr, s.metres / 2, s.heightMetres() / 2);
+        if (seen && g_menu.tip[k].Near()) g_menu.handHover = RowAtFace(l[0], l[1]), g_menu.usedMs = NowMs();
+        if (NowMs() - g_menu.openedMs < kMenuLeastMs) continue;
+        const char *by = k ? "the right hand" : "the left hand";
+        if (through) {
             g_menu.usedMs = NowMs();
-            return PressRow(RowAtFace(l[0], l[1]), kNone, k ? "the right hand" : "the left hand");
+            HandsOff(i, k, panel);
+            return PressRow(RowAtFace(l[0], l[1]), kNone, by);
+        }
+        if (beside) {
+            HandsOff(i, k, panel);
+            return CloseMenu("tapped beside it");
         }
     }
 }
@@ -284,9 +323,16 @@ bool SetBarSide(int i, barside::Side side, const char *by) {
 }
 
 bool BarMenuOn(int i) { return g_menu.panel >= 0 && g_menu.panel == i; }
+bool BarMenuHasHands(int i) { return BarMenuOn(i) || (g_handsOff.panel >= 0 && g_handsOff.panel == i); }
 
 void OpenBarMenu(int i, double along, bool edges) {
-    if (g_menu.panel == i) return CloseMenu("its bar tapped again");
+    if (g_menu.panel == i && g_menu.edges == edges) return CloseMenu("its bar tapped again");
+    if (g_menu.panel == i) {   // (a right click on its bar with the main page open, or a tap with the edges open)
+        g_menu.edges = edges, g_menu.back = false, g_menu.hover = -1, g_menu.usedMs = NowMs();
+        const auto it = g_screens.find(i);
+        if (it != g_screens.end()) Rows(it->second, i);
+        return;
+    }
     const auto it = g_screens.find(i);
     if (it == g_screens.end()) return;
     if (g_menu.overlay == vr::k_ulOverlayHandleInvalid) {
@@ -303,6 +349,7 @@ void OpenBarMenu(int i, double along, bool edges) {
     g_menu.hover = g_menu.handHover = -1, g_menu.holding = kNone;
     g_menu.openedMs = g_menu.usedMs = NowMs(), g_menu.drawn.clear();
     for (tiptap::Tap &t : g_menu.tip) t.Reset();
+    for (tiptap::Tap &t : g_menu.beside) t.Reset();
     Rows(it->second, i);
     std::printf("screen %d: grab bar menu open (%s; its bar on the %s)\n", i + 1, edges ? "its edges" : "tapped",
                 barside::Name(it->second.barSide));
@@ -314,6 +361,7 @@ void OpenBarMenu(int i, double along, bool edges) {
 // Each tick: it follows its panel's bar (moved, rolled, or turned to another edge), its rows follow the
 // panel (anchored: Stay Shown), and it goes when it's done.
 void UpdateBarMenu() {
+    UpdateHandsOff();
     if (g_menu.panel < 0) return;
     const int i = g_menu.panel;
     const auto it = g_screens.find(i);
@@ -344,7 +392,7 @@ void UpdateBarMenu() {
     g_menu.pose = Mul(p, OnSurface(s, c.u, c.v, 0.004));
     vr::VROverlay()->SetOverlayWidthInMeters(g_menu.overlay, float(g_menu.w));
     vr::VROverlay()->SetOverlayTransformAbsolute(g_menu.overlay, vr::TrackingUniverseStanding, &g_menu.pose);
-    if (g_menu.holding == kNone) HandsOnMenu();
+    if (g_menu.holding == kNone) HandsOnMenu(s, p);
     if (g_menu.panel >= 0) DrawMenu(s, i);
 }
 

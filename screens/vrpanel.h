@@ -57,9 +57,8 @@ constexpr double kDotRange = 0.35;   // the guide dot shows while the laser is t
 constexpr double kMinWidth = 0.15;
 constexpr double kFade = 10;         // degrees over which a pinned screen fades out
 constexpr double kRollSnap = 2.5;    // degrees from level where rolling snaps level
-constexpr double kRollStep = 5;      // degrees per scroll notch on the roll button
-constexpr double kRollTap = 3;       // degrees: a press on the roll button turned less than this is a click (levels it),
-constexpr double kRollTapM = 0.015;  // ...or less than this far round (metres, at the laser): a small screen's button is near its centre
+constexpr double kRollTap = 3;       // degrees: Rotate pressed and turned less than this is a click (levels it),
+constexpr double kRollTapM = 0.015;  // ...or less than this far round (metres, at its lever: RollLever)
 constexpr float kChromeIdle = 0.55f; // the controls' opacity without a laser on them
 constexpr long kControlsLinger = 35; // ticks (~0.4 s) the controls stay after a laser leaves
 constexpr long kAimLinger = 25;      // ticks (~0.3 s) a panel keeps the laser on after the aim leaves it
@@ -121,14 +120,18 @@ struct Screen {
     Mat resizeTurn = Identity();              // grabbed, which it turns back to when let go (FaceAfterResize)
     Mat rollFrom = Identity();                // roll: the pose at the press (pinRel when pinned)
     double rollAngle = 0;                     // roll: the laser's angle around the centre then
-    double rollRadius = 0;                    // roll: the laser's distance from the centre then (m)
+    double rollRadius = 0;                    // roll: the lever's length then (m)
+    double rollLeverX = 0, rollLeverY = 0;    // roll: added to the laser's spot, so it turns the panel as a knob at its bar
+                                              // would, wherever on the menu it's held (RollLever)
     double rollTurned = 0;                    // roll: the most the laser has gone round since (rad; RollClick)
     bool hover[kControls] = {};               // a laser is on the bar, the resize corner
     // The bar's press, to tell a tap (the menu) from a move when it comes up (panelmenu::IsTap).
     int64_t barPressMs = -1;
     vr::TrackedDeviceIndex_t barPressDevice = kNone;
-    Mat barPressFrom{}, barPressPose{};       // the device's pose then, and the panel's in the room
+    Mat barPressFrom{}, barPressPose{};       // the device's laser then, and the panel's pose in the room
     uint64_t barPressUniverse = 0;            // ...and its universe (universefix.h)
+    vr::TrackedDeviceIndex_t barPressPinned = kNone;   // ...what it was pinned to, and how
+    Mat barPressPinRel{};
     unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
@@ -364,7 +367,10 @@ bool SetBarSide(int i, barside::Side side, const char *by);   // false: no such 
 // Its menu (panelmenu.h): a tap on its bar opens the main page, a right click the edges, `along` metres
 // from the bar's middle; again on the same bar, it closes.
 void OpenBarMenu(int i, double along, bool edges);
-bool BarMenuOn(int i);   // its menu is open (its controls stay; hand input leaves the panel to the menu)
+bool BarMenuOn(int i);   // its menu is open (its controls stay)
+// Hand input leaves the panel to its menu: while the menu's open, and after a fingertip pressed a row or
+// closed it until that tip has come back out (so the same poke doesn't go on into the panel's content).
+bool BarMenuHasHands(int i);
 void UpdateBarMenu();    // each tick: it follows its panel; a fingertip through a row presses it
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data);
 
@@ -410,7 +416,7 @@ void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev);
 void ShowResetAsk(int panel);   // "Reset the layout?": a click or a tap on it resets
 void SendFloat(const std::string &msg);   // to ft-floatd
 bool HandsFrame();   // hand input had a new hands frame this tick
-bool IndexTip(int side, double out[3]);   // that hand's index fingertip in the room, if it's seen
+bool IndexTipIn(int side, const Mat &frame, double out[3]);   // that hand's index fingertip in `frame`'s coordinates, if it's seen
 std::string DeviceLabel(vr::TrackedDeviceIndex_t dev);
 
 // ---------------------------------------------------------------- vr.cpp's gamepad pill

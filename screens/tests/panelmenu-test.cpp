@@ -1,5 +1,5 @@
 // The grab bar's menu (panelmenu.h): the rows each kind of panel gets, the tap, and the fingertip tap
-// on a target of ours (tiptap.h).
+// on a target of ours (tiptap.h), at every poke speed.
 #include "../panelmenu.h"
 #include "../tiptap.h"
 
@@ -62,7 +62,8 @@ int main() {
 
     // The tap: quick, the device still.
     check("a quick still press is a tap", panelmenu::IsTap(120, 0.004, 0.01));
-    check("held too long: a move", !panelmenu::IsTap(250, 0.0, 0.0));
+    check("held too long: a move", !panelmenu::IsTap(350, 0.0, 0.0));
+    check("a soft 300 ms pull is still a tap", panelmenu::IsTap(300, 0.002, 0.0));
     check("moved: a move", !panelmenu::IsTap(100, 0.02, 0.0));
     check("turned: a move", !panelmenu::IsTap(100, 0.0, 0.07));
     check("no press: not a tap", !panelmenu::IsTap(-1, 0, 0));
@@ -91,6 +92,42 @@ int main() {
         t.Step(far, 0.05, 0.02);
         check("from far off in one frame: no tap", !t.Step(face, 0.05, 0.02));
         check("no hand: nothing", !t.Step(nullptr, 0.05, 0.02));
+    }
+    // Pokes at every speed a hand makes, straight in, at hand tracking's frame rates and any phase:
+    // one tap each (council, 2026-11-18: one frame through a 5 mm band missed slow and quick ones).
+    {
+        int pokes = 0, once = 0;
+        for (double hz : {15.0, 30.0})
+            for (double v : {0.05, 0.1, 0.15, 0.2, 0.36, 0.6, 1.0, 1.5, 2.0})
+                for (int phase = 0; phase < 8; ++phase) {
+                    tiptap::Tap t;
+                    int taps = 0;
+                    for (double z = 0.3 - v / hz * phase / 8; z > -0.2; z -= v / hz) {
+                        const double at[3] = {0.01, -0.005, z};
+                        taps += t.Step(at, 0.05, 0.02);
+                    }
+                    ++pokes, once += taps == 1;
+                }
+        std::printf("pokes from 5 cm/s to 2 m/s at 15 and 30 Hz: %d of %d tapped once\n", once, pokes);
+        check("every poke speed taps once", once == pokes);
+    }
+    {
+        tiptap::Tap t;
+        const double front[3] = {0.0, 0.0, 0.02}, rest[3] = {0.0, 0.0, 0.005}, face[3] = {0.0, 0.0, 0.002};
+        t.Step(front, 0.05, 0.02);
+        check("slowing just in front of it: no tap yet", !t.Step(rest, 0.05, 0.02) && !t.Step(rest, 0.05, 0.02));
+        check("...then on to its face: the tap", t.Step(face, 0.05, 0.02));
+        check("held there: once", !t.Step(face, 0.05, 0.02));
+        check("back out a little, not past kFront: no second tap", !t.Step(rest, 0.05, 0.02) && !t.Step(face, 0.05, 0.02));
+        t.Step(front, 0.05, 0.02);
+        check("out past kFront and in again: a second tap", t.Step(face, 0.05, 0.02));
+    }
+    {
+        tiptap::Tap t;
+        const double in[3] = {0.0, 0.0, 0.03}, side[3] = {0.2, 0.0, 0.03}, face[3] = {0.0, 0.0, 0.0};
+        t.Step(in, 0.05, 0.02);
+        t.Step(side, 0.05, 0.02);
+        check("in front, then off to the side: disarmed", !t.Step(face, 0.05, 0.02));
     }
     std::printf(failed ? "%d FAILED\n" : "all passed\n", failed);
     return failed != 0;

@@ -111,7 +111,7 @@ inline bool RuleAbove(const std::vector<Row> &rows, size_t at) {
 // with the pressing device barely moved was a tap: the panel goes back where it was and the menu opens.
 // The device's own movement, not the panel's: a 1 degree wobble moves a panel 2 m out 3.5 cm.
 struct TapLimits {
-    int64_t ms = 250;          // held under this long
+    int64_t ms = 350;          // held under this long (a soft trigger pull takes 300 to 400 ms)
     double metres = 0.015;     // the device moved under this
     double radians = 0.0524;   // ...and turned under this (3 degrees: the roll button's click, kRollTap)
 };

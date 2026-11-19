@@ -100,10 +100,10 @@ inline int StickyTileAt(int prev, double x, double y) {
 // (council, 2026-11-19: tiptap arms again 8 mm out, and one poke pressed twice). It's spent until it's
 // seen kOut in front of the card, or in front of it and tiptap's reach (kMargin) past the tile it pressed: off
 // the card on an outer side, or as far into another tile (StickyTileAt's hold alone is a tremble's
-// width: council, 2026-11-19, a pull-back drifting sideways pressed the neighbour; and only in front: a
-// slanted poke goes on sideways behind the card, and off it), or out of
+// width: council, 2026-11-19, a pull-back drifting sideways pressed the neighbour; and only in front, or
+// where a poke went in: a slanted poke goes on sideways behind the card, and off it), or out of
 // sight for kLostMs (one lost frame isn't the hand gone: holds last through 10, palmmenu waits 250 ms).
-// While it's spent the tile it pressed stays the lit one, so what's lit is what a poke would press.
+// While it's spent the tile it pressed stays lit (from the frame it's pressed), not the one beside it.
 // A press is the tile under the tip, or, when the tip is behind the face by then, where it crossed it,
 // between this frame and the last: a quick or slanted poke is centimetres on, and to the side.
 class Poke {
@@ -130,22 +130,24 @@ public:
         } else {
             hover_ = -1;
         }
+        // where it crossed the face (tiptap's through follows a frame in front, past kFront); still in front
+        // of it (within kFace: a slow poke), where it is: council, 2026-11-19, the lerp's reach past the
+        // last frame took a careful poke's jitter a tile over
+        double at[3] = {l ? l[0] : 0, l ? l[1] : 0, 0};
+        if (through && haveLast_ && l[2] < 0 && last_[2] > 0) {
+            const double f = last_[2] / (last_[2] - l[2]);
+            at[0] = last_[0] + f * (l[0] - last_[0]), at[1] = last_[1] + f * (l[1] - last_[1]);
+        }
         if (spent_ >= 0 && !l) {
             if (lostMs_ < 0) lostMs_ = nowMs;
             if (nowMs - lostMs_ >= kLostMs) spent_ = -1;
         } else if (spent_ >= 0) {
             lostMs_ = -1;
-            if (l[2] > kOut || (l[2] > 0 && Past(spent_, l, w, h, m))) spent_ = -1;
+            // (a slanted jab onto the next tile can be in reach in front and behind it the next frame: where
+            // it went in counts too)
+            if (l[2] > kOut || (l[2] > 0 && Past(spent_, l, w, h, m)) || (through && Past(spent_, at, w, h, m))) spent_ = -1;
         }
         if (spent_ >= 0 && hover_ >= 0) hover_ = spent_;
-        // where it crossed the face (tiptap's through follows a frame in front, past kFront); still in front
-        // of it (within kFace: a slow poke), where it is: council, 2026-11-19, the lerp's reach past the
-        // last frame took a careful poke's jitter a tile over
-        double at[2] = {l ? l[0] : 0, l ? l[1] : 0};
-        if (through && haveLast_ && l[2] < 0 && last_[2] > 0) {
-            const double f = last_[2] / (last_[2] - l[2]);
-            at[0] = last_[0] + f * (l[0] - last_[0]), at[1] = last_[1] + f * (l[1] - last_[1]);
-        }
         haveLast_ = l != nullptr;
         if (l) last_[0] = l[0], last_[1] = l[1], last_[2] = l[2];
         if (!through || spent_ >= 0) return -1;
@@ -154,6 +156,7 @@ public:
         const int t = StickyTileAt(held, x, y);
         if (t < 0) return -1;
         spent_ = t, lostMs_ = -1;   // (too soon after it showed: spent, so it comes out before it presses)
+        if (near_) hover_ = t;
         return nowMs - shownMs_ >= kShownMs ? t : -1;
     }
     int hover() const { return hover_; }   // -1 none

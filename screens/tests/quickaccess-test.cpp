@@ -182,6 +182,28 @@ int main() {
                     }
             check("slow careful pokes with 2 mm jitter: the tile aimed at, once, every time", wrong == 0 && none == 0 && twice == 0);
         }
+        // Spin Right pressed, the tip lifted 25 mm over its right edge, then a 30 degree jab at 1 m/s onto
+        // Dock Windows: in reach of Spin Right in front, behind Dock Windows the next frame; it presses it
+        {
+            int sx0, sy0, sx1, sy1;
+            Box(4, &sx0, &sy0, &sx1, &sy1);
+            const double e = (sx1 - kW / 2.0) * w / kW;   // Spin Right's right edge (m)
+            Poke p;
+            p.Reset(0);
+            int64_t t = 1000;
+            int got = -1, presses = 0;
+            for (const double mm : {40.0, 10.0, -3.0}) {   // press Spin Right
+                const double l[3] = {u4, v4, mm / 1000};
+                presses += p.Step(l, w, h, t += 33) >= 0;
+            }
+            const double s = std::tan(30 * 3.14159265358979 / 180);
+            for (const double zmm : {25.0, 10.6, -18.3}) {   // at the edge, then the jab (1 m/s, 30 Hz)
+                const double z = zmm / 1000, l[3] = {zmm > 20 ? e : e + 0.0083 + s * (0.0106 - z), v4, z};
+                const int k = p.Step(l, w, h, t += 33);
+                if (k >= 0) got = k, ++presses;
+            }
+            check("a slanted jab from over Spin Right's edge onto Dock Windows presses Dock Windows", presses == 2 && got == 5);
+        }
         // the last two frames 3.1 then 2.9 mm out, 2 mm apart sideways (the lerp once took that a tile over)
         check("a slow poke's last frames 3.1 -> 2.9 mm, 2 mm jitter: Spin Right",
               run({{u4, v4, 40}, {u4, v4, 20}, {u4, v4, 10}, {u4, v4, 5}, {u4, v4, 3.1}, {u4 + 0.002, v4, 2.9}}, 30, tiles) == 1 && tiles[0] == 4);
@@ -192,8 +214,9 @@ int main() {
             check("an outer tile's press, the tip wandering 7 mm off the card's edge and back: one press",
                   run({{ex, v5, 40}, {ex, v5, 10}, {ex, v5, 1}, {w / 2 + 0.007, v5, 4}, {w / 2 + 0.007, v5, 9}, {ex, v5, 9}, {ex, v5, 1}}, 30) == 1);
         }
-        // a 20 or 30 degree poke at 1 m/s ending 5 cm behind, then a noisy pull-back along the same line: one
-        // press (at 45 the pull-back's 28 mm frame is 28 mm aside, a centimetre past the tile: it left it)
+        // a 20 or 30 degree poke at 1 m/s at Spin Right's centre, ending 5 cm behind, then a noisy pull-back
+        // along the same line: one press (at 45, or at 30 aimed 12 mm or more off centre toward the hand, the
+        // pull-back's 28 mm frame is a centimetre past the tile: it left it, and may press it again)
         {
             bool once = true;
             for (const double deg : {20.0, 30.0})
@@ -255,6 +278,30 @@ int main() {
             const double far[3] = {u4, v4, 0.12};
             p.Step(far, w, h, 1033);
             check("...12 cm: not near, nothing lit", !p.near() && p.hover() == -1);
+        }
+        // while spent, the tile it pressed is the lit one: from the press frame of a 45 degree poke (a tile
+        // over by then), and with the tip 6 mm into Spin Left after
+        {
+            Poke p;
+            p.Reset(0);
+            int64_t t = 1000;
+            int pressed = -1, litAtPress = -2;
+            for (const double mm : {40.0, 15.0, -25.0}) {   // through 25 mm behind, over Spin Left by then
+                const double z = mm / 1000, l[3] = {u4 + z, v4, z};
+                const int got = p.Step(l, w, h, t += 33);
+                if (got >= 0) pressed = got, litAtPress = p.hover();
+            }
+            check("a slanted poke's press frame lights the tile it pressed", pressed == 4 && litAtPress == 4);
+            int bx0, by0, bx1, by1;
+            Box(4, &bx0, &by0, &bx1, &by1);
+            const double in6 = (bx0 - kGap - 6 / 1000.0 * kW / w - kW / 2.0) * w / kW;   // 6 mm inside Spin Left
+            bool held = true;
+            for (const double mm : {15.0, 10.0, 1.0, -3.0}) {
+                const double l[3] = {in6, v4, mm / 1000};
+                const int got = p.Step(l, w, h, t += 33);
+                held = held && got < 0 && p.hover() == 4;
+            }
+            check("...and stays lit while spent with the tip over Spin Left", held);
         }
         // too soon after it showed: no press, and the tip comes out before it can
         {

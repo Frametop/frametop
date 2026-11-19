@@ -127,6 +127,7 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
 class Board {
 public:
     tiling::Params params;
+    int absent = -1;            // a tiled panel laid out at no size (Steam's window, hidden with the dashboard closed: no gap left for it)
     bool stayDefault = false;   // DASH_TILE_STAY: a panel whose stay is Default stays shown
 
     bool Anchored(int id) const { return spots_.count(id) != 0; }
@@ -278,7 +279,7 @@ public:
         for (const tilegrid::Col &gc : grid_.Cols()) {
             tiling::Column c;
             for (const tilegrid::Cell &cell : gc.cells) {
-                const Info i = info(cell.id);
+                const Info i = cell.id == absent ? Info{0, 0} : info(cell.id);
                 c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale});
             }
             cols.push_back(c);

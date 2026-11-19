@@ -31,7 +31,7 @@ NUMBERS = {
     "DASH_TILE_DESK_DEG": (-12.0, -40.0, 20.0),     # the desk line the columns stand on, up from your eyes
     "DASH_TILE_RADIUS": (2.7, 0.8, 6.0),            # metres from your head to the tiles' corners
     "DASH_TILE_PX_PER_DEG": (48.0, 15.0, 120.0),    # a panel's natural size: this many of its pixels a degree
-    "DASH_TILE_WALL_DEG": (120.0, 30.0, 300.0),     # how wide the desk gets before new panels stack up
+    "DASH_TILE_WALL_DEG": (80.0, 30.0, 300.0),      # how wide the desk gets before new panels stack up
 }
 
 

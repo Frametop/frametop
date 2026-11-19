@@ -48,7 +48,7 @@ class DashTiles(unittest.TestCase):
     def test_defaults(self):
         self.assertTrue(self.t.stay)
         self.assertFalse(self.t.stayTheater)
-        self.assertEqual((self.t.deskDeg, self.t.radius, self.t.pxPerDeg, self.t.wallDeg), (-12, 2.7, 48, 120))
+        self.assertEqual((self.t.deskDeg, self.t.radius, self.t.pxPerDeg, self.t.wallDeg), (-12, 2.7, 48, 80))
 
     def test_stay_written_and_sent(self):
         self.t.setStay(True)
@@ -113,7 +113,7 @@ class DashTiles(unittest.TestCase):
     def test_bad_conf_value_is_the_default(self):
         with open(fds.CONF_PATH, "a") as f:
             f.write("DASH_TILE_WALL_DEG=400\nDASH_TILE_RADIUS=junk\n")
-        self.assertEqual(self.t.wallDeg, 120)
+        self.assertEqual(self.t.wallDeg, 80)
         self.assertEqual(self.t.radius, 2.7)
 
     def test_not_sent_without_ft_screens(self):

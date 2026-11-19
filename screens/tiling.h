@@ -62,7 +62,7 @@ struct Params {
     double deskDeg = -12;       // the desk line, up from your eyes: the bottom panels' lower edges
     double pxPerDeg = 48;       // a panel's natural size: this many of its pixels a degree (1920 wide: about 40)
     double gapDeg = 0.8;        // between columns, and between the panels in one (about 4 cm at 2.7 m)
-    double wallDeg = 120;       // the desk this wide round you: a new panel goes on top of a column
+    double wallDeg = 80;        // the desk this wide round you: a new panel goes on top of a column
     double maxSpanDeg = 360;    // the strip round you, gaps included, at most
     double reserveAzDeg = 0;    // Steam's menu, a slot kept clear when the strip would reach it: its middle
     double reserveDeg = 0;      // ...and its width (0: none; the strip is centred on 0 then)
@@ -71,6 +71,22 @@ constexpr double kMaxTopDeg = 80;   // no column reaches higher: the wall shrink
 
 // A panel's natural size: metres a pixel at the wall, `pxPerDeg` of them a degree in its middle.
 inline double MetresPerPx(const Params &p) { return 2 * p.radius * std::tan(Rad(1 / std::max(1.0, p.pxPerDeg)) / 2); }
+
+// The command-center arc (user, 2026-11-19: "let's not make the tiles literally always be facing the
+// center ... more like a command center view"): the wall's centre `backM` behind your eyes, so the
+// tiles face a point behind you, like a curved wall of monitors, and more of them fit in a turn of
+// the head. The wall, the desk, the gaps and the desk's width are given as your eyes see them (the
+// wall `Eyes::radius` in front of you); these are them as the centre sees them.
+struct Eyes {
+    double radius = 2.7, deskDeg = -12, gapDeg = 0.8, wallDeg = 80;
+};
+inline void FromEyes(const Eyes &e, double backM, Params *p) {
+    const double r = e.radius, c = r + backM, d = Rad(e.deskDeg);
+    p->radius = c;
+    p->deskDeg = Deg(std::atan2(r * std::sin(d), r * std::cos(d) + backM));
+    p->gapDeg = e.gapDeg * r / c;
+    p->wallDeg = e.wallDeg * r / c;
+}
 
 struct Placed {
     int id = 0;

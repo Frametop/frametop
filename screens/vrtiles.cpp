@@ -42,9 +42,14 @@ Wall g_tileWallSet, g_tileWallBar;        // the settings', and the bar's at the
 bool g_tileAtBar = true;
 bool g_tileWallAtBar = false;
 bool g_tileSteamOverBar = false;          // ...and Steam's tile turned over it (Regroup again once it's tiled)
+// The command-center arc (tiling::FromEyes): its centre this far behind your eyes. The wall's numbers
+// (Wall, DASH_TILE_GAP_DEG, DASH_TILE_WALL_DEG) are as your eyes see them, a panel's size too (TileInfo).
+constexpr double kFocusBackM = 2.0;
+tiling::Eyes g_tileEyes;                  // the gaps' and the desk's width (the wall and the desk line: Wall's)
 void ApplyWall() {
     const Wall &w = g_tileWallAtBar ? g_tileWallBar : g_tileWallSet;
-    g_tiles.params.radius = w.radius, g_tiles.params.deskDeg = w.deskDeg;
+    g_tileEyes.radius = w.radius, g_tileEyes.deskDeg = w.deskDeg;
+    tiling::FromEyes(g_tileEyes, kFocusBackM, &g_tiles.params);
 }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
@@ -112,7 +117,9 @@ dashtiles::Info TileInfo(int id) {
     const auto it = g_screens.find(id);
     if (it == g_screens.end()) return info;
     const int pw = PictureW(it->second) + GluedPx(id), ph = PictureH(it->second);
-    const double mpp = tiling::MetresPerPx(g_tiles.params);
+    tiling::Params at = g_tiles.params;
+    at.radius = g_tileEyes.radius;   // (as big as it was with the wall round your eyes: the arc's centre is further)
+    const double mpp = tiling::MetresPerPx(at);
     if (pw > 0 && ph > 0) info.widthM = pw * mpp, info.heightM = ph * mpp;
     return info;
 }
@@ -152,7 +159,7 @@ void RetileDash() {
     const auto &l = g_tiles.Arrange(TileInfo);
     for (const tiling::Placed &p : l.tiles) {
         auto it = g_screens.find(p.id);
-        if (it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        if (p.id == g_tiles.absent || it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
         // (a floating window or an app with a stretch on its way: its width once its pixels are there)
@@ -191,6 +198,7 @@ bool Regroup() {
     g_tileWallAtBar = g_tileAtBar && dashtiles::AtBar(h, b, barUp, DashHeight(), dashtiles::kOverBarDeg, g,
                                                       &g_tileWallBar.radius, &g_tileWallBar.deskDeg);
     if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
+    for (int r = 0; r < 3; ++r) g[r][3] += g[r][2] * kFocusBackM;   // (the arc's centre behind your eyes: its +Z)
     ApplyWall();
     const double barW = DashWidth();
     // (at the bar, Steam's page over it, just in front of the tiles: the slot as wide as the page, or they'd show behind it)
@@ -230,8 +238,8 @@ std::array<TileSetting, 5> TileSettings() {
     return {{{"DASH_TILE_DESK_DEG", &g_tileWallSet.deskDeg, -40, 20},   // the desk line, up from your eyes
              {"DASH_TILE_RADIUS", &g_tileWallSet.radius, 0.8, 6},   // the wall: the tiles' corners from you, metres
              {"DASH_TILE_PX_PER_DEG", &g_tiles.params.pxPerDeg, 15, 120},   // a panel's natural size
-             {"DASH_TILE_GAP_DEG", &g_tiles.params.gapDeg, 0, 10},   // between tiles, round you and up
-             {"DASH_TILE_WALL_DEG", &g_tiles.params.wallDeg, 30, 300}}};   // the desk's width before panels stack
+             {"DASH_TILE_GAP_DEG", &g_tileEyes.gapDeg, 0, 10},   // between tiles, round you and up
+             {"DASH_TILE_WALL_DEG", &g_tileEyes.wallDeg, 30, 300}}};   // the desk's width before panels stack
 }
 // One of them live: false if it isn't one, or out of its range. The tiles go round again.
 bool SetTileSetting(const char *name, double value) {
@@ -239,6 +247,7 @@ bool SetTileSetting(const char *name, double value) {
         if (std::strcmp(t.name, name) != 0) continue;
         if (!(value >= t.lo && value <= t.hi)) return false;
         *t.value = value;
+        ApplyWall();
         RetileDash();
         return true;
     }
@@ -465,10 +474,16 @@ void UpdateDashTiles() {
     const bool up = vr::VROverlay()->IsDashboardVisible();
     if (up && !g_dashWasUp) g_tileRegroup = true;
     g_dashWasUp = up;
+    // Steam's window hides with the dashboard closed (TileShown: Steam paints it only then, and SteamVR
+    // won't show its page without the dashboard): the others close up its gap meanwhile (user, 2026-11-19).
+    const int steam = SteamDashIndex();
+    if (const int absent = up || steam < 0 ? -1 : steam; absent != g_tiles.absent) {
+        g_tiles.absent = absent;
+        if (g_tileGroupSet) RetileDash();
+    }
     // (a read that counts: this opening's, or before the group was ever set the last good one)
     const bool fresh = !Dash().why || (!g_tileGroupSet && !std::strcmp(Dash().why, "hidden"));
     // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
-    const int steam = SteamDashIndex();
     if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
     if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
     UpdateTileFocus();

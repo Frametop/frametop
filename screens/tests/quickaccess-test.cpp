@@ -155,6 +155,62 @@ int main() {
                             slanted = slanted && wrong == 0 && (right == 1 || (!reach && right == 0));
                         }
         check("slanted quick pokes (20-45 degrees, either way): Spin Right once, never another tile", slanted);
+        // slow careful pokes easing in (speed 3|z|, at least 1 cm/s) with +-2 mm sideways jitter, aimed all
+        // over every tile but its outer 3 mm: that tile once, every time
+        {
+            unsigned seed = 12345;
+            auto noise = [&] { seed = seed * 1103515245u + 12345u; return ((seed >> 8) % 4001) / 1000.0 - 2.0; };   // mm
+            int wrong = 0, none = 0, twice = 0;
+            for (const double hz : {15.0, 30.0})
+                for (int i = 0; i < kTiles; ++i)
+                    for (int a = 0; a < 25; ++a) {
+                        Box(i, &x0, &y0, &x1, &y1);
+                        const double in = 3 / 1000.0 * kW / w;   // 3 mm in px
+                        const double ax = x0 + in + (x1 - x0 - 2 * in) * (a % 5) / 4.0, ay = y0 + in + (y1 - y0 - 2 * in) * (a / 5) / 4.0;
+                        const double u = (ax / kW - 0.5) * w, v = (0.5 - ay / kH) * h;
+                        Poke p;
+                        p.Reset(0);
+                        int64_t t = 1000;
+                        int right = 0, other = 0;
+                        for (double z = 0.04; z > -0.004; t += int64_t(1000 / hz)) {
+                            const double l[3] = {u + noise() / 1000, v + noise() / 1000, z};
+                            const int got = p.Step(l, w, h, t);
+                            right += got == i, other += got >= 0 && got != i;
+                            z -= std::fmax(3 * std::fabs(z), 0.01) / hz;
+                        }
+                        wrong += other > 0, none += right == 0, twice += right > 1;
+                    }
+            check("slow careful pokes with 2 mm jitter: the tile aimed at, once, every time", wrong == 0 && none == 0 && twice == 0);
+        }
+        // the last two frames 3.1 then 2.9 mm out, 2 mm apart sideways (the lerp once took that a tile over)
+        check("a slow poke's last frames 3.1 -> 2.9 mm, 2 mm jitter: Spin Right",
+              run({{u4, v4, 40}, {u4, v4, 20}, {u4, v4, 10}, {u4, v4, 5}, {u4, v4, 3.1}, {u4 + 0.002, v4, 2.9}}, 30, tiles) == 1 && tiles[0] == 4);
+        // Dock Windows pressed 2.5 mm in from the card's right edge; the tip wanders 7 mm off the edge, lifts
+        // to 9 mm and comes back in: within tiptap's reach, one press
+        {
+            const double ex = w / 2 - 0.0025;
+            check("an outer tile's press, the tip wandering 7 mm off the card's edge and back: one press",
+                  run({{ex, v5, 40}, {ex, v5, 10}, {ex, v5, 1}, {w / 2 + 0.007, v5, 4}, {w / 2 + 0.007, v5, 9}, {ex, v5, 9}, {ex, v5, 1}}, 30) == 1);
+        }
+        // a 20 or 30 degree poke at 1 m/s ending 5 cm behind, then a noisy pull-back along the same line: one
+        // press (at 45 the pull-back's 28 mm frame is 28 mm aside, a centimetre past the tile: it left it)
+        {
+            bool once = true;
+            for (const double deg : {20.0, 30.0})
+                for (const double dir : {-1.0, 1.0}) {
+                    const double s = std::tan(deg * 3.14159265358979 / 180) * dir;
+                    Poke p;
+                    p.Reset(0);
+                    int64_t t = 1000;
+                    int presses = 0;
+                    for (const double mm : {80.0, 51.0, 22.0, -7.0, -36.0, -50.0, -50.0, 10.0, 2.0, 12.0, 28.0, 9.0, 2.0, 14.0, 1.0, 35.0}) {
+                        const double z = mm / 1000, l[3] = {u4 + s * z, v4, z};
+                        presses += p.Step(l, w, h, t += 33) >= 0;
+                    }
+                    once = once && presses == 1;
+                }
+            check("a slanted poke on past the card, then a noisy pull-back: one press", once);
+        }
 
         check("resting 6 mm in front after it: spent", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 6}, {u4, v4, 10}, {u4, v4, 1}}, 30) == 1);
         check("...3 cm out and in again: a second press", run({{u4, v4, 40}, {u4, v4, -2}, {u4, v4, 31}, {u4, v4, 10}, {u4, v4, 1}}, 30) == 2);

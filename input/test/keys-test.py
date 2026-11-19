@@ -78,6 +78,17 @@ relay.game_pause.GamePause = StubPause
 for name in ("SCREENS", "HELPER", "FLOAT", "GAZED", "VOICE", "FRUNNER"):
     setattr(relay, name, f"\0{tag}_{name.lower()}")
 OUT = tempfile.mkdtemp(prefix="ft-keys-test-")
+# Native Desktop's focus is the test's, not the live gamescope's, and its layout a file of its own.
+FOCUS = {"native": False}
+
+
+class FakeFocus:
+    def native(self, now):
+        return FOCUS["native"]
+
+
+relay.GamescopeFocus = FakeFocus
+relay.NATIVE_KXKBRC = os.path.join(OUT, "native-kxkbrc")
 steam_log, cmd_log = f"{OUT}/steam.log", f"{OUT}/cmd.log"
 relay.FT_STEAM = f"{OUT}/ft-steam"
 with open(relay.FT_STEAM, "w") as f:
@@ -919,11 +930,15 @@ def tests():
               [f"key {c} {v}" for c, v in keys_for("way @ f\u00fcr", de)])
         to_relay("type a\u00e9b")
         time.sleep(0.3)
-        check("...a character it has no key for (a dead key's accent) is dropped", typed(),
+        check("...an accent its dead key types: the dead key (\u00b4), then the letter", typed(),
+              ["key 30 1", "key 30 0", "key 13 1", "key 13 0", "key 18 1", "key 18 0", "key 48 1", "key 48 0"])
+        to_relay("type a\u0436b")
+        time.sleep(0.3)
+        check("...a character it has no key for is dropped", typed(),
               [f"key {c} {v}" for c, v in keys_for("ab", de)])
         check("...and the log says which", [m for m in LOG if m.startswith("typing: 1 characters")][-1:],
               ["typing: 1 characters the desktop's layout (de), with no text field taking text from the input "
-               "method, has no key for: \u00e9"])
+               "method, has no key for: \u0436"])
         to_relay("keyboard steam")
         to_relay("type way")
         time.sleep(0.3)
@@ -1140,9 +1155,9 @@ def tests():
     check("...logged", [m for m in LOG if m.startswith("Full Keyboard")][-1:], ["Full Keyboard connected"])
     to_relay("keyboard desktop 1")
     time.sleep(0.1)
-    check("typing goes to the desktop, the screens show: it hears at once", heard(), ["kb 1 1"])
+    check("typing goes to the desktop, the screens show: it hears at once, with its layout", heard(), ["kb 1 1 us"])
     from_kb("kbhello 1")
-    check("a hello always gets the word", heard(), ["kb 1 1"])
+    check("a hello always gets the word", heard(), ["kb 1 1 us"])
     check("...and ft-screens hears it's up", [m for m in typed() if m.startswith("fullkb")], ["fullkb 1"])
     from_kb("kbkey 30 1")
     from_kb("kbkey 30 0")
@@ -1209,6 +1224,42 @@ def tests():
     time.sleep(0.1)
     check("paused: typing to Steam, and not over the screens", heard(), ["kb 0 0"])
     pause("off")
+    # Native Desktop (SteamOS's own, in gamescope), focused, with a French layout: Full Keyboard's
+    # typing comes through the relay and goes on the virtual keyboard, as that layout's keys.
+    with open(relay.NATIVE_KXKBRC, "w") as f:
+        f.write("[Layout]\nLayoutList=fr\nUse=true\n")
+    try:
+        fr = relay.layout_keys("fr")
+    except OSError as e:
+        fr = None
+        print(f"skip  Native Desktop typing: {e}")
+    if fr:
+        to_relay("keyboard steam 1")
+        time.sleep(0.1)
+        heard()
+        FOCUS["native"] = True
+        from_kb("kbhello 1")
+        check("Native Desktop focused: its typing goes through the relay, with its layout", heard()[-1:], ["kb 1 1 fr"])
+        typed(), emitted()
+        from_kb("kbtext aéê")
+        from_kb(f"kbkey {ENTER} 1")
+        from_kb(f"kbkey {ENTER} 0")
+        time.sleep(0.3)
+        check("...AZERTY keys (a on Q's key, é the 2 key, ê ^ then e), then its key, on the virtual keyboard",
+              (emitted(), [m for m in typed() if not m.startswith("fullkb")]),
+              ([("keyboard", c, v) for c in (16, 3, 26, 18, ENTER) for v in (1, 0)], []))
+        to_relay("type ça")
+        time.sleep(0.3)
+        check("...dictation too", emitted(), [("keyboard", c, v) for c in (10, 16) for v in (1, 0)])
+        from_kb(f"kbkey {SHIFT} 1")
+        FOCUS["native"] = False
+        from_kb("kbhello 1")
+        check("focus elsewhere: Steam again, no layout", heard()[-1:], ["kb 0 1"])
+        from_kb(f"kbkey {SHIFT} 0")
+        time.sleep(0.1)
+        check("...a key held from before comes up on the virtual keyboard", emitted(),
+              [("keyboard", SHIFT, 1), ("keyboard", SHIFT, 0)])
+        typed()
     to_relay("keyboard desktop 1")
     from_kb("kbhello 1")
     heard()

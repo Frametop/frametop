@@ -142,6 +142,8 @@ The Laser model's `Waits` config (let-go paths wait for a touch) was the other w
 
 The chart (`G3-input.mmd`, `.svg`) still draws K1 to K7 red. It is due a redraw.
 
+The relay's typing has a third target the models don't draw: Native Desktop while it has gamescope's focus (`typing_target`, `GamescopeFocus` in `input/input-relay.py`). Full Keyboard's keys and text come through the relay then, but go on the virtual keyboard like Steam's, and a held key still comes up where it went down (`kb_held`), so the Keys model's two sides cover it.
+
 Fixed bugs:
 
 | Id | Ticket | Rule | What happened | Fix |

@@ -52,7 +52,7 @@ class Host:
     def send(self, op, **fields):
         if op == "sink":
             self.echoes.append(("sink" if fields.get("on") else "normal", self.clock()))
-        elif op in ("context", "show") or (op == "hide" and fields.get("end_context")):
+        elif op == "context" or (op == "show" and "context" in fields) or (op == "hide" and fields.get("end_context")):
             self.echoes.append(("sink" if self.sink else "normal", self.clock()))
         return self.keyboard.send(op, **fields)
 
@@ -106,7 +106,8 @@ class Host:
                 self.pending_spot = (kind, pose)
         elif not self.visible:
             self.send("recenter")
-        self.send("show", view="keyboard", context=self.context)
+        # No context here: update_route set it with its hints, and a show's context comes without them.
+        self.send("show", view="keyboard")
 
     def place(self, kind, pose):
         _, width, height = self.geometry
@@ -215,8 +216,11 @@ class Host:
                     self.pending_spot = None
         elif event == "target":
             # "Stop shell typing" on the panel: typing goes to gamescope until the route changes.
-            # The keyboard also sends one for each sink and context request: those aren't it.
-            if not self.is_echo(message.get("owner")) and message.get("owner") == "normal" and self.sink:
+            # The keyboard also sends one for each sink and context request: those aren't it, and
+            # nor is a late one for a context that's gone (a Stop names the context it stopped).
+            owner = message.get("owner")
+            if (not self.is_echo(owner) and owner == "normal" and self.sink
+                    and self.context is not None and message.get("context") == self.context):
                 self.stopped = (self.route, self.context)
                 self.sink = False
                 self.route = "normal"

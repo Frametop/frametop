@@ -159,7 +159,8 @@ def check_program(folder, tag):
 
     def say(flag):
         try:
-            return subprocess.run([program, flag], capture_output=True, text=True, timeout=30).stdout.split()
+            return subprocess.run([program, flag], capture_output=True, text=True, timeout=30,
+                                  env=_without_token()).stdout.split()
         except (OSError, subprocess.SubprocessError) as error:
             raise FetchError(f"its program didn't run: {error}") from None
     said = say("--version")
@@ -168,6 +169,11 @@ def check_program(folder, tag):
     protocols = say("--protocols")
     if str(PROTOCOL) not in protocols:
         raise FetchError(f"{tag} doesn't speak hosted protocol {PROTOCOL} (it says {protocols})")
+
+
+def _without_token():
+    """The environment for the downloaded program: the build's GitHub token isn't its business."""
+    return {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
 
 
 def installed(dest):

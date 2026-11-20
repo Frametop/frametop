@@ -63,10 +63,14 @@ class Hosted:
         data = json.dumps(message, separators=(",", ":")).encode() + b"\n"
         try:
             _send_whole(self.sock, data)
-        except OSError:
-            # Gone, or stuck for SEND_TIMEOUT (it reads every frame): either way this keyboard is
-            # done. Shutting the socket down makes it quit, and the next receive() say so.
+        except TimeoutError:
+            # Stuck for SEND_TIMEOUT (it reads every frame): this keyboard is done. Shutting the
+            # socket down makes it quit, and the next receive() say so.
             self._shut("stuck")
+            return None
+        except OSError:
+            # Its end closed (Quit, or it failed): the next receive() says so, with its status.
+            self.closed = True
             return None
         self.sent_at = time.monotonic()
         return message.get("id")

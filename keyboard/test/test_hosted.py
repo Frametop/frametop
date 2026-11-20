@@ -146,6 +146,16 @@ class HostedTest(unittest.TestCase):
         self.assertFalse(self.pump(keyboard, 2.0, until=lambda: keyboard.closed))
         self.assertEqual(keyboard.why, "oversize")
 
+    def test_a_send_after_it_quit_is_not_a_reason(self):
+        keyboard = self.start()
+        self.pump(keyboard, until=lambda: keyboard.greeted)
+        keyboard.process.terminate()   # (as Quit: its end closes)
+        keyboard.process.wait(timeout=5)
+        for _ in range(3):
+            keyboard.send("pointer", hand="left", phase="up", u=0.5, v=0.5)
+        self.assertTrue(keyboard.closed)
+        self.assertIsNone(keyboard.why)
+
     def test_closing_our_end_is_not_a_reason(self):
         keyboard = self.start()
         self.pump(keyboard, until=lambda: keyboard.greeted)

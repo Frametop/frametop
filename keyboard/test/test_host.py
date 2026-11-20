@@ -89,7 +89,7 @@ class HostTest(unittest.TestCase):
         for op, fields in self.keyboard.sent:
             if op == "sink":
                 owner = "sink" if fields["on"] else "normal"
-            elif op in ("context", "show") or (op == "hide" and fields.get("end_context")):
+            elif op == "context" or (op == "show" and "context" in fields) or (op == "hide" and fields.get("end_context")):
                 context = fields.get("context")
             else:
                 continue
@@ -218,7 +218,7 @@ class HostTest(unittest.TestCase):
         self.host.on_relay(0.0, ["show"])
         self.shown()
         self.ops()
-        self.host.on_keyboard(0.1, {"event": "target", "owner": "normal"})
+        self.host.on_keyboard(0.1, {"event": "target", "owner": "normal", "context": "desktop"})
         self.host.tick(0.2)
         self.assertEqual(self.ops(), [])   # still the desktop's route, but the user stopped it
         self.host.on_relay(0.3, ["0", "1", "0"])
@@ -243,14 +243,32 @@ class HostTest(unittest.TestCase):
 
     def test_a_stop_after_an_echo_that_never_came(self):
         self.host.on_relay(0.0, ["1", "1", "0"])
-        self.host.on_relay(0.0, ["show"])   # (a refused request has no echo)
+        self.host.on_relay(0.0, ["show"])
         self.shown()
+        self.echo()
         self.ops()
+        self.host.echoes.append(("normal", 0.0))   # a request whose echo never came (it was refused)
         self.clock = hostmod.ECHO_WAIT + 0.1
-        self.host.on_keyboard(self.clock, {"event": "target", "owner": "sink", "context": "desktop"})
         self.host.on_keyboard(self.clock, {"event": "target", "owner": "normal", "context": "desktop"})
         self.assertEqual(self.host.stopped, ("desktop", "desktop"))
         self.assertFalse(self.host.sink)
+
+    def test_a_late_echo_for_a_context_that_went_is_not_a_stop(self):
+        self.host.on_relay(0.0, ["1", "1", "0"])
+        self.host.on_relay(0.0, ["show"])
+        self.shown()
+        self.ops()
+        self.clock = hostmod.ECHO_WAIT + 0.1   # its echoes are late: no longer expected
+        for context in (None, "steam-9"):
+            self.host.on_keyboard(self.clock, {"event": "target", "owner": "normal", "context": context})
+        self.assertEqual((self.host.sink, self.host.route, self.host.stopped), (True, "desktop", None))
+
+    def test_a_steam_fields_hints_hold_when_it_shows(self):
+        self.host.on_steam(0.0, [("event", {"open": 2, "purpose": "password"})])
+        self.host.on_relay(0.1, ["show", "dash", *POSE_WORDS])
+        sent = [f for o, f in self.keyboard.sent if o in ("context", "show") and "context" in f]
+        self.assertEqual(sent, [{"context": "steam-2", "hints": {"purpose": "password"}}])
+        self.assertNotIn("context", self.last("show"))
 
     def test_steam_turned_down_while_shown_types_where_it_would(self):
         self.host.on_relay(0.0, ["1", "1", "0"])

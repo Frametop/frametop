@@ -217,6 +217,21 @@ class CheckProgram(unittest.TestCase):
             with self.subTest(f"{version_out} / {protocols_out}"), self.assertRaises(fetch.FetchError):
                 self.check(version_out, protocols_out)
 
+    def test_it_runs_without_the_builds_github_token(self):
+        envs = []
+        def run(command, **kw):
+            envs.append(kw.get("env"))
+            return mock.Mock(stdout="0.19.1" if command[1] == "--version" else "1")
+        with mock.patch.dict(fetch.os.environ, {"GITHUB_TOKEN": "t", "HOME": "/h"}), \
+                mock.patch.object(fetch.os, "uname", lambda: mock.Mock(machine="aarch64")), \
+                mock.patch.object(fetch, "OPENVR", mock.Mock(is_file=lambda: True)), \
+                mock.patch.object(fetch.subprocess, "run", run):
+            fetch.check_program(Path("/x"), "0.19.1")
+        self.assertEqual(len(envs), 2)
+        for env in envs:
+            self.assertNotIn("GITHUB_TOKEN", env)
+            self.assertEqual(env["HOME"], "/h")
+
     def test_a_program_that_wont_run(self):
         with mock.patch.object(fetch.os, "uname", lambda: mock.Mock(machine="aarch64")), \
                 mock.patch.object(fetch, "OPENVR", mock.Mock(is_file=lambda: True)), \

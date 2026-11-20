@@ -188,7 +188,7 @@ void RetileDash() {
 namespace {
 // The group to where the dashboard is now, in front of your head, with Steam's menu a slot in it
 // when the strip reaches it (the split kept for where it opened: Board::SlotMoved): false without a head pose.
-// atHead: round where you face, not at Steam's bar (a reset with the dashboard closed: the bar is where it last was).
+// atHead: round where you face, not at Steam's bar (a reset: the bar is where the dashboard last opened).
 bool Regroup(bool atHead = false) {
     Mat head;
     if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
@@ -490,8 +490,10 @@ void UpdateDashTiles() {
     // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
     if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
     if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
-    // (a reset: now, the dashboard open or not; ft-layout leaves the tiled panels to this)
-    if (g_tileReset && (g_tiles.Ids().empty() || (Dash().ever && Regroup(!up)))) g_tileReset = false, g_tileRegroup = false;
+    // (a reset: now, the dashboard open or not, round where you face: SteamVR doesn't move its bar while
+    // the dashboard is open, so at the bar a reset after turning did nothing; ft-layout leaves the tiled
+    // panels to this. The next opening puts them at the bar again, which SteamVR opens in front of you.)
+    if (g_tileReset && (g_tiles.Ids().empty() || (Dash().ever && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
     UpdateTileFocus();
 }
 

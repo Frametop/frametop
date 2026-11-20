@@ -92,9 +92,12 @@ RUN gaze/build.sh \
  && install -t /runtime/opt/frametop/bin gaze/build/ft-gaze gaze/build/ft-gazepanel
 # Frametop's keyboard: TaiKeid's Full Keyboard, the newest stable release when the image is
 # built (FULLKB_VERSION picks one; keyboard/fetch.py checks its sha256), unpacked unmodified in
-# keyboard/build/release, where ft-kbhost (frametop-keyboard.service) starts it from.
+# keyboard/build/release, where ft-kbhost (frametop-keyboard.service) starts it from. `ft dev
+# build` passes FULLKB_VERSION, and GITHUB_TOKEN as the github_token secret, which no layer keeps.
 ARG FULLKB_VERSION=
-RUN FULLKB_VERSION="$FULLKB_VERSION" keyboard/build.sh \
+RUN --mount=type=secret,id=github_token,required=false \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" \
+    FULLKB_VERSION="$FULLKB_VERSION" keyboard/build.sh \
  && test -x keyboard/build/release/bin/framekeyboard
 RUN power/build.sh \
  && install -t /runtime/opt/frametop/bin power/build/ft-powerd

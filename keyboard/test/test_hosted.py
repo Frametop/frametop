@@ -117,6 +117,7 @@ class HostedTest(unittest.TestCase):
         keyboard.send("split")
         self.pump(keyboard, until=lambda: len(self.events) >= 3)
         self.assertEqual([e.get("error") or e.get("event") for e in self.events], ["ready", "nope", "geometry"])
+        self.assertEqual(self.events[1]["op"], "fail")   # a refusal says what it refused
         pointer = [m for m in self.requests() if m["op"] == "pointer"][0]
         self.assertNotIn("id", pointer)
 
@@ -135,6 +136,21 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(keyboard.wait(timeout=5), 0)   # its end closed: it exits
         self.assertEqual(self.requests(), [])           # and was never greeted
         self.assertIsNone(keyboard.send("show"))
+        self.assertEqual((keyboard.why, keyboard.version), ("protocol", "9.9.9"))
+
+    def test_a_line_over_the_limit_closes_it(self):
+        keyboard = self.start()
+        self.pump(keyboard, 0.3)   # hello's and subscribe's answers in
+        keyboard.buffer = b"x" * hosted.MAX_LINE
+        keyboard.send("split")   # one more piece without a newline goes over
+        self.assertFalse(self.pump(keyboard, 2.0, until=lambda: keyboard.closed))
+        self.assertEqual(keyboard.why, "oversize")
+
+    def test_closing_our_end_is_not_a_reason(self):
+        keyboard = self.start()
+        self.pump(keyboard, until=lambda: keyboard.greeted)
+        keyboard.close()
+        self.assertIsNone(keyboard.why)
 
     def test_closing_our_end_makes_it_quit(self):
         keyboard = self.start()

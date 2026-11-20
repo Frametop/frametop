@@ -117,6 +117,16 @@ class TouchTest(unittest.TestCase):
         self.assertIn(("pointer", {"hand": "left", "phase": "cancel"}), self.sent)
         self.assertEqual(self.sent[-1], ("pointer_mode", {"mode": "native"}))
 
+    def test_a_stuck_press_is_cancelled_while_the_other_hand_pokes(self):
+        self.touch.poke(0.0, self.centre_words("left", "press"), self.GEOMETRY)   # its up is lost
+        for t in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0):
+            self.touch.poke(t, self.centre_words("right", "hover"), self.GEOMETRY)
+            self.touch.tick(t)
+        self.assertIn(("pointer", {"hand": "left", "phase": "cancel"}), self.sent)
+        self.assertNotIn(("pointer_mode", {"mode": "native"}), self.sent)   # the right hand is still there
+        self.touch.tick(3.0 + 0.6)
+        self.assertEqual(self.sent[-1], ("pointer_mode", {"mode": "native"}))
+
     def test_malformed_pokes_and_no_geometry(self):
         self.touch.poke(0.0, self.centre_words("right", "press"), None)
         self.touch.poke(0.0, ["middle", "press", "0", "0", "0"], self.GEOMETRY)

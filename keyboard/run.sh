@@ -21,6 +21,10 @@ if systemctl --user is-enabled --quiet framekeyboard-autostart.service 2>/dev/nu
   echo 'note: Full Keyboard is also installed on its own (framekeyboard-autostart.service). Frametop runs its own hosted copy;'
   echo '      turn the standalone one off in its settings (Start with SteamOS), or: systemctl --user disable --now framekeyboard-autostart.service'
 fi
+# Before 0.19.1, Frametop's keyboard ran in the box in a scope of its own, which stopping the
+# unit doesn't end: end it (and any other copy), so the hosted one gets the instance.
+systemctl --user stop $unit 2>/dev/null || true
+pkill -x framekeyboard || true
 $(start_with_steamvr $unit)" ;;
   uninstall) "$frame" --host "systemctl --user disable --now $unit 2>/dev/null; rm -f ~/.config/systemd/user/$unit; systemctl --user daemon-reload; echo removed" ;;
   start|stop|restart|status) "$frame" --host "systemctl --user $1 $unit; systemctl --user is-active $unit" || true ;;

@@ -27,6 +27,7 @@ leaving what was there before.
 """
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -82,7 +83,7 @@ def get(url, limit, accept=None):
     try:
         with opener.open(request, timeout=60) as response:
             data = response.read(limit + 1)
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:   # (a cut-short read is the latter)
         raise FetchError(f"download failed: {url}: {error}") from None
     if len(data) > limit:
         raise FetchError(f"{url} is larger than {limit} bytes")
@@ -205,9 +206,15 @@ def fetch(dest, force=False, exact=None):
         (folder / "RELEASE").write_text(json.dumps(
             {"version": tag, "sha256": sha, "package": package["name"], "from": package["browser_download_url"]},
             indent=1) + "\n")
+        old = work / "old"
         if dest.exists():
-            dest.rename(work / "old")   # removed with work below
-        folder.rename(dest)
+            dest.rename(old)   # removed with work below
+        try:
+            folder.rename(dest)
+        except OSError:
+            if old.exists():
+                old.rename(dest)   # what was there stays
+            raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print(f"Full Keyboard {tag} in {dest} (sha256 {sha})")

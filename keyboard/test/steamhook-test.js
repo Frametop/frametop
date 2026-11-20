@@ -109,6 +109,83 @@ check("a password field says so; a number field keeps Steam's keyboard", () => {
     main.shown.length = 0;
     api().close(3);
 });
+// Opens a session for element in main's window; returns its open event.
+function open(element) {
+    doc.activeElement = element;
+    main.SetVirtualKeyboardShownInternal(true);
+    const events = api().poll(true).events;
+    assert.strictEqual(events.length, 1);
+    assert.ok(events[0].open, JSON.stringify(events));
+    return events[0];
+}
+check("each field says what it's for", () => {
+    const purposes = [["email", {inputMode: "email"}], ["url", {type: "url"}], ["search", {type: "search"}],
+                      ["number", {type: "tel"}], ["number", {inputMode: "numeric"}], ["text", {type: "text"}]];
+    for (const [purpose, extra] of purposes) {
+        const event = open(Object.assign(makeField(doc), extra));
+        assert.strictEqual(event.purpose, purpose, JSON.stringify(extra));
+        assert.strictEqual(event.multiline, false);
+        api().close(event.open);
+    }
+    assert.deepStrictEqual(main.shown, []);
+});
+check("the other editing keys", () => {
+    const one = makeField(doc), two = makeField(doc);
+    for (const f of [one, two]) { f.tabIndex = 0; f.getClientRects = () => [{}]; f.focus = () => { doc.activeElement = f; }; }
+    doc.querySelectorAll = () => [one, two];
+    const {open: id} = open(one);
+    doc.commands.length = 0;
+    for (const [name, mods] of [["Delete", []], ["Delete", ["Ctrl"]], ["Home", []], ["End", ["Shift"]],
+                                ["KeyA", ["Ctrl"]], ["KeyC", ["Ctrl"]], ["KeyX", ["Ctrl"]], ["KeyV", ["Ctrl"]],
+                                ["F5", []]])
+        assert.strictEqual(api().key(id, name, mods), true, name);
+    assert.deepStrictEqual(doc.commands, ["forwardDelete", "modify:extend,forward,word", "forwardDelete",
+        "modify:move,backward,lineboundary", "modify:extend,forward,lineboundary", "selectAll", "copy", "cut", "paste"]);
+    assert.strictEqual(api().key(id, "Tab", []), true);
+    assert.strictEqual(doc.activeElement, two);   // focus moved on: that ends this field's session
+    assert.deepStrictEqual(api().poll(true).events, [{close: id, reason: "blur"}]);
+    const {open: next} = open(two);
+    assert.strictEqual(api().key(next, "Escape", []), true);
+    assert.deepStrictEqual(api().poll(true).events, [{close: next, reason: "escape"}]);
+    assert.strictEqual(api().type(next, "x"), false);
+    doc.querySelectorAll = () => [];
+});
+check("Enter: a new line in a textarea or contentEditable, a submit in a one-line field", () => {
+    const area = makeField(doc, "", "TEXTAREA");
+    let event = open(area);
+    assert.strictEqual(event.multiline, true);
+    doc.commands.length = 0;
+    api().key(event.open, "Enter", []);
+    assert.deepStrictEqual(doc.commands, ["insertText:\n"]);
+    api().close(event.open);
+    const editor = Object.assign(makeField(doc, "", "DIV"), {isContentEditable: true});
+    event = open(editor);
+    assert.strictEqual(event.multiline, true);
+    doc.commands.length = 0;
+    api().key(event.open, "Enter", []);
+    api().key(event.open, "Enter", ["Shift"]);
+    assert.deepStrictEqual(doc.commands, ["insertParagraph", "insertLineBreak"]);
+    api().close(event.open);
+    assert.deepStrictEqual(main.shown, []);
+});
+check("a Steam window whose overlay key comes late is hooked once it does", () => {
+    let key;
+    const lateDoc = makeDoc(), late = new Manager(undefined, lateDoc);
+    late.m_Instance.GetVROverlayKey = () => key;
+    root.SteamUIStore.WindowStore.SteamUIWindows.push({VirtualKeyboardManager: late});
+    api().poll(true);
+    lateDoc.activeElement = makeField(lateDoc);
+    late.SetVirtualKeyboardShownInternal(true);
+    assert.deepStrictEqual(late.shown, [true]);   // not Steam's own yet: Steam's keyboard
+    key = "valve.steam.gamepadui.appoverlay.7";
+    api().poll(true);
+    late.SetVirtualKeyboardShownInternal(true);
+    assert.deepStrictEqual(late.shown, [true]);   // now Full Keyboard's
+    const events = api().poll(true).events;
+    assert.strictEqual(events[0].key, key);
+    api().close(events[0].open);
+    root.SteamUIStore.WindowStore.SteamUIWindows.pop();
+});
 check("while fields may not take it, and in a window that isn't Steam's own: Steam's keyboard", () => {
     doc.activeElement = field;
     api().poll(false);

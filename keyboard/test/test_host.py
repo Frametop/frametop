@@ -68,7 +68,8 @@ class HostTest(unittest.TestCase):
     def setUp(self):
         self.keyboard, self.relay, self.steam = FakeKeyboard(), FakeRelay(), FakeSteam()
         self.allowed = True
-        self.host = Host(self.keyboard, self.relay, self.steam, lambda: self.allowed)
+        self.clock = 0.0
+        self.host = Host(self.keyboard, self.relay, self.steam, lambda: self.allowed, clock=lambda: self.clock)
         self.host.on_keyboard(0.0, {"event": "ready"})
 
     def ops(self):
@@ -81,6 +82,18 @@ class HostTest(unittest.TestCase):
 
     def shown(self, now=0.0):
         self.host.on_keyboard(now, {"event": "visibility", "visible": True})
+
+    def echo(self, now=0.0):
+        """The target events the real keyboard sends for the sink and context requests so far."""
+        owner, context = "normal", None
+        for op, fields in self.keyboard.sent:
+            if op == "sink":
+                owner = "sink" if fields["on"] else "normal"
+            elif op in ("context", "show") or (op == "hide" and fields.get("end_context")):
+                context = fields.get("context")
+            else:
+                continue
+            self.host.on_keyboard(now, {"event": "target", "owner": owner, "context": context})
 
     def test_desktop_show_from_the_relay_places_it_once_geometry_is_known(self):
         self.host.on_relay(0.0, ["1", "1", "0"])   # typing to the desktop, screens shown
@@ -213,6 +226,45 @@ class HostTest(unittest.TestCase):
         self.assertEqual(self.ops()[-2:], ["sink", "context"])
         self.assertTrue(self.host.sink)
 
+    def test_the_keyboards_own_target_events_are_not_a_stop(self):
+        self.host.on_relay(0.0, ["1", "1", "0"])
+        self.host.on_relay(0.0, ["show"])
+        self.shown()
+        self.echo()
+        self.ops()
+        # The desktop's route goes and comes back before the keyboard says anything.
+        self.host.on_relay(0.01, ["0", "1", "0"])
+        self.host.on_relay(0.02, ["1", "1", "0"])
+        self.echo(0.03)
+        self.assertEqual((self.host.sink, self.host.route, self.host.stopped), (True, "desktop", None))
+        self.ops()
+        self.host.on_relay(1.0, ["0", "1", "0"])   # then a game: the sink goes off
+        self.assertEqual(self.keyboard.sent[0], ("sink", {"on": False}))
+
+    def test_a_stop_after_an_echo_that_never_came(self):
+        self.host.on_relay(0.0, ["1", "1", "0"])
+        self.host.on_relay(0.0, ["show"])   # (a refused request has no echo)
+        self.shown()
+        self.ops()
+        self.clock = hostmod.ECHO_WAIT + 0.1
+        self.host.on_keyboard(self.clock, {"event": "target", "owner": "sink", "context": "desktop"})
+        self.host.on_keyboard(self.clock, {"event": "target", "owner": "normal", "context": "desktop"})
+        self.assertEqual(self.host.stopped, ("desktop", "desktop"))
+        self.assertFalse(self.host.sink)
+
+    def test_steam_turned_down_while_shown_types_where_it_would(self):
+        self.host.on_relay(0.0, ["1", "1", "0"])
+        self.host.on_relay(0.0, ["show"])
+        self.shown()
+        self.host.on_steam(0.1, [("event", {"open": 2, "purpose": "text"})])
+        self.assertEqual(self.host.route, "steam")
+        self.host.on_relay(0.2, ["nosteam"])
+        self.assertEqual((self.host.route, self.host.context), ("desktop", "desktop"))
+        self.ops()
+        self.host.on_keyboard(0.2, {"event": "commit", "seq": 1, "context": "steam-2", "text": "x"})
+        self.assertEqual(self.keyboard.sent, [("ack", {"context": "steam-2", "seq": 1})])   # dropped, no crash
+        self.assertEqual(self.steam.typed, [])
+
     def test_fingertips_while_shown(self):
         self.host.on_relay(0.0, ["poke", "right", "press", "0", "1.2", "-0.7"])
         self.assertEqual(self.ops(), [])   # hidden
@@ -228,8 +280,13 @@ class HostTest(unittest.TestCase):
         self.host.on_relay(0.0, ["show"])
         self.shown()
         self.ops()
+        self.host.on_keyboard(1.0, GEOMETRY)
+        self.host.on_steam(1.0, [("event", {"open": 5, "purpose": "text"})])
+        self.ops()
         self.host.on_keyboard(1.0, {"event": "ready"})   # an update's successor
         self.assertFalse(self.host.visible)
+        self.assertEqual(self.steam.closed, [5])
+        self.assertIsNone(self.host.geometry)
         self.host.on_relay(1.1, ["show"])
         self.assertEqual(self.ops(), ["sink", "context", "recenter", "show"])
 

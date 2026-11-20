@@ -8,7 +8,7 @@ fingertip is near: from the first poke until both hands' last one is IDLE second
 import placement
 
 IDLE = 0.6
-STUCK = 3.0   # a press heard nothing more of for this long is cancelled (it never types)
+STUCK = 3.0   # a hand's press heard nothing more of for this long is cancelled (it never types)
 SIDES = ("left", "right")
 
 
@@ -16,7 +16,7 @@ class Touch:
     def __init__(self, send):
         self.send = send          # Hosted.send
         self.forwarded = False
-        self.last = 0.0
+        self.last = {}            # side -> when it was last heard of
         self.pressed = set()
 
     def poke(self, now, words, geometry):
@@ -28,7 +28,7 @@ class Touch:
             if self.forwarded:
                 self.send("pointer", hand=side, phase="cancel")
             self.pressed.discard(side)
-            self.last = now
+            self.last[side] = now
             return
         if len(words) != 5:
             return
@@ -40,7 +40,7 @@ class Touch:
             self.send("pointer_mode", mode="forwarded")
             self.forwarded = True
             self.pressed.clear()
-        self.last = now
+        self.last[side] = now
         u, v = placement.touch(point, *geometry)
         where = {"u": round(u, 5), "v": round(v, 5)}
         if verb in ("hover", "move"):
@@ -54,9 +54,13 @@ class Touch:
             self.pressed.discard(side)
 
     def tick(self, now):
-        if self.forwarded and now - self.last >= (STUCK if self.pressed else IDLE):
-            for side in sorted(self.pressed):
+        if not self.forwarded:
+            return
+        for side in sorted(self.pressed):
+            if now - self.last.get(side, 0.0) >= STUCK:   # its up or end was lost
                 self.send("pointer", hand=side, phase="cancel")
+                self.pressed.discard(side)
+        if not self.pressed and now - max(self.last.values(), default=0.0) >= IDLE:
             self.native()
 
     def native(self):
@@ -64,8 +68,10 @@ class Touch:
             self.send("pointer_mode", mode="native")
         self.forwarded = False
         self.pressed.clear()
+        self.last.clear()
 
     def reset(self):
         """The keyboard restarted: it begins with its own pointers."""
         self.forwarded = False
         self.pressed.clear()
+        self.last.clear()

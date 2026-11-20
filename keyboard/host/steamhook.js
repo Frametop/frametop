@@ -66,11 +66,12 @@
         }
         return true;
     }
+    // A window whose overlay key isn't known yet is looked at again on the next poll.
     function adopt(manager) {
         if (hooked.has(manager)) return;
-        hooked.add(manager);
         const key = manager.m_Instance?.GetVROverlayKey?.();
         if (!own(key) || typeof manager.SetVirtualKeyboardShownInternal !== "function") return;
+        hooked.add(manager);
         hook(manager, "SetVirtualKeyboardShownInternal", original => function(open, ...args) {
             try {
                 if (open && take && fresh()) {

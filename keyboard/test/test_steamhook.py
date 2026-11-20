@@ -78,6 +78,9 @@ class SteamHookTest(unittest.TestCase):
         finally:
             hook.stop()
         self.assertTrue(session.closed)
+        self.assertEqual(session.seen[-1], f"{steamhook.GLOBAL}?.dispose()")   # out at once
+        with self.assertRaises(OSError):
+            os.fstat(hook.fileno())   # its wake pipe is closed
 
     def test_steam_going_away_fails_typing_and_tries_again(self):
         sessions = []

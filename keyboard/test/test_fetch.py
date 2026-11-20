@@ -155,11 +155,74 @@ class FetchTest(unittest.TestCase):
             fetch.get(f"{BASE}/{NAME}", 100)
         self.assertEqual(seen, [(f"{fetch.API}/latest", "Bearer t0ken"), (f"{BASE}/{NAME}", None)])
 
+    def test_redirects_stay_on_github_and_the_token_stays_on_the_api(self):
+        handler = fetch._OnlyGitHub()
+        request = fetch.urllib.request.Request(f"{fetch.API}/latest", headers={"Authorization": "Bearer t0ken"})
+        asset = "https://release-assets.githubusercontent.com/x"
+        new = handler.redirect_request(request, None, 302, "Found", {}, asset)
+        self.assertEqual(new.full_url, asset)
+        self.assertIsNone(new.get_header("Authorization"))
+        new = handler.redirect_request(request, None, 302, "Found", {}, f"{fetch.API}/other")
+        self.assertEqual(new.get_header("Authorization"), "Bearer t0ken")
+        for elsewhere in ("https://example.com/x", "http://github.com/x"):
+            with self.subTest(elsewhere), self.assertRaises(fetch.FetchError):
+                handler.redirect_request(request, None, 302, "Found", {}, elsewhere)
+
+    def test_a_download_cut_short_is_a_fetch_error(self):
+        class Opener:
+            def open(self, request, timeout):
+                raise fetch.http.client.IncompleteRead(b"part", 10)
+        with mock.patch.object(fetch.urllib.request, "build_opener", lambda *a: Opener()), \
+                self.assertRaises(fetch.FetchError):
+            fetch.get(f"{BASE}/{NAME}", 100)
+
+    def test_a_swap_that_fails_keeps_the_release_that_was_there(self):
+        self.fetch(Release())
+        real = Path.rename
+
+        def rename(path, target):
+            if Path(target) == self.dest and path.name != "old":   # the new one going in
+                raise OSError("no room")
+            return real(path, target)
+        with mock.patch.object(Path, "rename", rename), self.assertRaises(OSError):
+            self.fetch(Release("0.21.0"))
+        self.assertEqual(json.loads((self.dest / "RELEASE").read_text())["version"], TAG)
+
     def test_main_says_why_and_exits_1(self):
         with mock.patch.object(fetch, "get", Release(draft=True).get), \
                 mock.patch("sys.stderr", io.StringIO()) as err:
             self.assertEqual(fetch.main(["--dest", str(self.dest)]), 1)
         self.assertIn("draft", err.getvalue())
+
+
+class CheckProgram(unittest.TestCase):
+    """What the release's program says when it's run, on the Frame."""
+
+    def check(self, version_out, protocols_out):
+        def run(command, **kw):
+            out = version_out if command[1] == "--version" else protocols_out
+            return mock.Mock(stdout=out)
+        with mock.patch.object(fetch.os, "uname", lambda: mock.Mock(machine="aarch64")), \
+                mock.patch.object(fetch, "OPENVR", mock.Mock(is_file=lambda: True)), \
+                mock.patch.object(fetch.subprocess, "run", run):
+            fetch.check_program(Path("/x"), "0.19.1")
+
+    def test_the_right_version_with_protocol_1(self):
+        self.check("framekeyboard 0.19.1\n", "1\n")
+        self.check("0.19.1", "0 1 2")
+
+    def test_another_version_or_no_protocol_1(self):
+        for version_out, protocols_out in (("framekeyboard 0.19.0", "1"), ("", "1"),
+                                           ("framekeyboard 0.19.1", "2"), ("framekeyboard 0.19.1", "")):
+            with self.subTest(f"{version_out} / {protocols_out}"), self.assertRaises(fetch.FetchError):
+                self.check(version_out, protocols_out)
+
+    def test_a_program_that_wont_run(self):
+        with mock.patch.object(fetch.os, "uname", lambda: mock.Mock(machine="aarch64")), \
+                mock.patch.object(fetch, "OPENVR", mock.Mock(is_file=lambda: True)), \
+                mock.patch.object(fetch.subprocess, "run", side_effect=OSError("exec format error")), \
+                self.assertRaises(fetch.FetchError):
+            fetch.check_program(Path("/x"), "0.19.1")
 
 
 if __name__ == "__main__":

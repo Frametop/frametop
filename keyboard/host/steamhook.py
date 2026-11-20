@@ -68,10 +68,19 @@ class SteamHook:
             except queue.Empty:
                 return out
 
-    def stop(self):
+    def stop(self, timeout=3):
+        """Takes the hook out of Steam (Steam's own keyboard works at once) and ends the thread."""
         self.stopping.set()
         self.commands.put(None)
-        self.thread.join(timeout=3)
+        if self.thread.is_alive():
+            self.thread.join(timeout=timeout)
+        if self.thread.is_alive():
+            return   # still in a call to Steam: its pipe stays, since the thread may yet write to it
+        for fd in (self.wake_r, self.wake_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def _post(self, item):
         self.out.put(item)
@@ -79,6 +88,8 @@ class SteamHook:
             os.write(self.wake_w, b"x")
         except BlockingIOError:
             pass  # already readable
+        except OSError:
+            pass  # stopped: nobody reads it
 
     def _run(self):
         while not self.stopping.is_set():
@@ -89,6 +100,7 @@ class SteamHook:
                     raise steamui.SteamUnreachable("the hook didn't go in")
                 self._post(("steam", True))
                 self._serve(session)
+                session.evaluate(f"{GLOBAL}?.dispose()")   # stopping: out at once, not at lease's end
             except steamui.SteamUnreachable:
                 pass
             finally:

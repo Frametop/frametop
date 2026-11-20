@@ -23,7 +23,8 @@ UNANSWERED = ("pointer", "ack", "reject", "quiesced")
 
 
 class Hosted:
-    """One running keyboard. on_event(message) gets each event and each failed answer."""
+    """One running keyboard. on_event(message) gets each event and each failed answer (with the
+    request's "op" added). why says what closed it from this end, if this end did."""
 
     def __init__(self, program, data_dir, config_dir, on_event, client_version="0",
                  popen=subprocess.Popen):
@@ -42,6 +43,8 @@ class Hosted:
         self.next_id = 0
         self.greeted = False
         self.closed = False
+        self.why = None               # "protocol" | "stuck" | "oversize": this end closed it
+        self.asked = {}               # id -> op, until answered
         self.sent_at = time.monotonic()
         self.version = None
 
@@ -56,17 +59,14 @@ class Hosted:
         if op not in UNANSWERED:
             self.next_id += 1
             message["id"] = self.next_id
+            self.asked[self.next_id] = op
         data = json.dumps(message, separators=(",", ":")).encode() + b"\n"
         try:
             _send_whole(self.sock, data)
         except OSError:
             # Gone, or stuck for SEND_TIMEOUT (it reads every frame): either way this keyboard is
             # done. Shutting the socket down makes it quit, and the next receive() say so.
-            self.closed = True
-            try:
-                self.sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
+            self._shut("stuck")
             return None
         self.sent_at = time.monotonic()
         return message.get("id")
@@ -92,7 +92,7 @@ class Hosted:
                 line, self.buffer = self.buffer.split(b"\n", 1)
                 self._line(line)
             if len(self.buffer) > MAX_LINE:
-                self.closed = True
+                self._shut("oversize")
                 return False
 
     def _line(self, line):
@@ -106,16 +106,32 @@ class Hosted:
             # Each keyboard process on this connection says it: the first, and a successor an
             # update or a rollback starts (integration.md, Handover), which wants hello again.
             if PROTOCOL not in (message.get("protocol") or []):
-                self.closed = True
-                self.sock.shutdown(socket.SHUT_RDWR)
+                self.version = message.get("version")
+                self._shut("protocol")
                 return
+            self.asked.clear()   # a new process answers only what's asked of it
             self.version = message.get("version")
             self.greeted = True
             self.send("hello", protocol=PROTOCOL, client="Frametop", client_version=self.client_version,
                       lease_ms=LEASE_MS)
             self.send("subscribe", events=EVENTS)
-        if "event" in message or message.get("ok") is False:
+        if "event" in message:
             self.on_event(message)
+            return
+        answered = message.get("id")
+        op = self.asked.pop(answered, None) if isinstance(answered, int) else None
+        if message.get("ok") is False:
+            self.on_event({**message, "op": op})
+
+    def _shut(self, why):
+        """This end ends it: the keyboard sees its connection close and quits."""
+        if self.why is None and not self.closed:
+            self.why = why
+        self.closed = True
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
     def close(self):
         """Closing our end makes the keyboard quit as Settings -> Quit does."""
@@ -125,13 +141,14 @@ class Hosted:
         except OSError:
             pass
 
-    def wait(self, timeout=10):
+    def wait(self, timeout=10, grace=5):
+        """Its exit status; after timeout it's sent SIGTERM, and after grace more, SIGKILL."""
         try:
             return self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self.process.terminate()
             try:
-                return self.process.wait(timeout=5)
+                return self.process.wait(timeout=grace)
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 return self.process.wait()

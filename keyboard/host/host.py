@@ -14,36 +14,58 @@ field that opened it closes, when the screens it opened over hide, and while Ste
 lock holds (it then opens for nothing).
 
 Collaborators come in (DIP): keyboard (hosted.Hosted's send), relay (relaylink.RelayLink),
-steam (steamhook.SteamHook), allowed (ft_pinlock.allowed).
+steam (steamhook.SteamHook), allowed (ft_pinlock.allowed), clock.
 """
+import collections
+import time
+
 import keys
 import placement
 from touch import Touch
 
 STEAM_FALLBACK = 0.6   # s: a Steam field's opening the relay didn't answer opens where it is
 PIN_EVERY = 0.25
+ECHO_WAIT = 1.0        # s: the target event a request causes comes well within this (one local round trip)
 
 
 class Host:
-    def __init__(self, keyboard, relay, steam, allowed):
+    def __init__(self, keyboard, relay, steam, allowed, clock=time.monotonic):
         self.keyboard, self.relay, self.steam, self.allowed = keyboard, relay, steam, allowed
+        self.clock = clock
         self.touch = Touch(self.send)
         self.visible = False
         self.geometry = None          # (matrix, width, height)
         self.pending_spot = None      # (kind, pose) to place once geometry is known
         self.desktop = self.surface = self.take = False
-        self.steam_field = None       # {"id", "purpose", "multiline"} while a Steam field holds it
+        self.steam_field = None       # {"id", "purpose"} while a Steam field holds it
         self.steam_asked_at = None
         self.opened_for = None        # "steam" | "frametop"
         self.route = None             # "steam" | "desktop" | "normal"
         self.context = None
         self.sink = False
         self.stopped = None           # (route, context) the panel's "Stop shell typing" ended
+        # The keyboard sends a target event for every sink change and context it's given, and for
+        # the panel's "Stop shell typing": (owner, sent_at) for those our requests will cause.
+        self.echoes = collections.deque()
         self.pin_ok, self.pin_checked = True, -1.0
-        self.done = None              # set when the host should exit (its status)
 
     def send(self, op, **fields):
+        if op == "sink":
+            self.echoes.append(("sink" if fields.get("on") else "normal", self.clock()))
+        elif op in ("context", "show") or (op == "hide" and fields.get("end_context")):
+            self.echoes.append(("sink" if self.sink else "normal", self.clock()))
         return self.keyboard.send(op, **fields)
+
+    def is_echo(self, owner):
+        """Whether a target event is one our own request caused (else it's the user's)."""
+        stale = self.clock() - ECHO_WAIT
+        while self.echoes and self.echoes[0][1] < stale:
+            self.echoes.popleft()   # a request that was refused, or an echo that didn't come
+        if self.echoes and self.echoes[0][0] == owner:
+            self.echoes.popleft()
+            return True
+        self.echoes.clear()         # out of step: what it says now is what holds
+        return False
 
     # ---- where typing goes
     def want_route(self, now):
@@ -65,7 +87,7 @@ class Host:
         sink = route != "normal"
         if sink != self.sink:
             self.send("sink", on=sink)
-            self.sink = sink
+            self.sink = sink   # before the context below, whose echo says it
         hints = {"purpose": self.steam_field["purpose"]} if route == "steam" else {"purpose": "text"}
         self.send("context", context=context, hints=hints if context else {})
         self.route, self.context = route, context
@@ -122,6 +144,8 @@ class Host:
             # the field keeps its focus for that keyboard.
             self.end_steam_field()
             self.steam_asked_at = None
+            if self.visible:
+                self.update_route(now)   # what it shows types where it would without the field
         elif words == ["hide"]:
             if self.visible or self.opened_for:
                 self.hide()
@@ -162,11 +186,14 @@ class Host:
         event = message.get("event")
         if event == "ready":
             # A keyboard process (again, after an update or rollback): hidden, with no sink,
-            # context or forwarded pointer until they're sent again.
+            # context, placement or forwarded pointer until they're sent again.
+            self.end_steam_field()   # a new tap on the field opens it again
             self.visible = False
             self.sink = False
             self.route = self.context = self.stopped = None
-            self.opened_for = None
+            self.opened_for = self.steam_asked_at = None
+            self.geometry = self.pending_spot = None
+            self.echoes.clear()
             self.touch.reset()
         elif event == "visibility":
             visible = message.get("visible") is True
@@ -188,7 +215,8 @@ class Host:
                     self.pending_spot = None
         elif event == "target":
             # "Stop shell typing" on the panel: typing goes to gamescope until the route changes.
-            if message.get("owner") == "normal" and self.sink:
+            # The keyboard also sends one for each sink and context request: those aren't it.
+            if not self.is_echo(message.get("owner")) and message.get("owner") == "normal" and self.sink:
                 self.stopped = (self.route, self.context)
                 self.sink = False
                 self.route = "normal"
@@ -198,7 +226,7 @@ class Host:
     def on_typed(self, now, message):
         context, seq = message.get("context"), message.get("seq")
         ack = lambda ok: self.send("ack" if ok else "reject", context=context, seq=seq)  # noqa: E731
-        if context is None or context != self.context:
+        if context is None or context != self.context or (self.route == "steam" and self.steam_field is None):
             ack(True)  # for a field it no longer types into: dropped
             return
         if message["event"] == "commit":

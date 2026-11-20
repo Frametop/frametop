@@ -26,6 +26,7 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+os.environ["FT_STEAM_PIN_LOCK"] = "0"   # Steam's PIN lock off, whatever this machine's setting
 relay_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "input-relay.py")
 tag = f"ft_keys_test_{os.getpid()}"
 with open(relay_path) as f:
@@ -1274,6 +1275,16 @@ def tests():
     from_kb("kbsteam")
     check("a Steam field, a keyboard connected (default setting): kb nosteam, nothing opens",
           (heard(), [m for m in typed() if m.startswith("vrkeyboard")]), (["kb nosteam"], []))
+    keyboards = relay.Relay.physical_keyboards
+    relay.Relay.physical_keyboards = lambda self: []
+    from_kb("kbhello 0")
+    check("...with no keyboard connected: the word says Steam's fields may take it",
+          [m.split()[-1] for m in heard()[-1:]], ["1"])
+    from_kb("kbsteam")
+    check("...and a Steam field opens it", [m for m in typed() if m.startswith("vrkeyboard")], ["vrkeyboard show steam"])
+    relay.Relay.physical_keyboards = keyboards
+    from_kb("kbhello 0")
+    heard()
     vr_keyboard["mode"] = "always"
     use({})
     from_kb("kbhello 0")
@@ -1286,12 +1297,25 @@ def tests():
     from_kb("kbsteam", other)
     check("...only from the address that said hello", [m for m in typed() if m.startswith("vrkeyboard")], [])
     other.close()
+    pin_allowed = relay.ft_pinlock.allowed
+    relay.ft_pinlock.allowed = lambda: False
+    from_kb("kbsteam")
+    check("...but not while Steam's PIN lock holds: kb nosteam",
+          (heard(), [m for m in typed() if m.startswith("vrkeyboard")]), (["kb nosteam"], []))
+    relay.ft_pinlock.allowed = pin_allowed
+    screens_up = relay.Relay.vr_keyboard
+    relay.Relay.vr_keyboard = lambda self, command: False
+    from_kb("kbsteam")
+    check("...and without ft-screens it opens where it is: kb show", heard(), ["kb show"])
+    relay.Relay.vr_keyboard = screens_up
     vr_keyboard["mode"] = "never"
     use({})
     from_kb("kbsteam")
     check("the rule never: kb nosteam", heard()[-1:], ["kb nosteam"])
     vr_keyboard["mode"] = None
     use({})
+    to_relay("keyboard desktop 1")   # ft-screens' word lasts 3 s: say it again for what follows
+    time.sleep(0.1)
     heard(), typed()
     to_relay("kbpoke right press 0.1200 1.0500 -0.6500")
     to_relay("kbpoke left end")

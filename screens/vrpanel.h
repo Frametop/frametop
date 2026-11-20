@@ -359,6 +359,7 @@ void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (dash
 void RetileDash();
 void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
+void TileInRoom(int i, const char *by);   // Placement's In the Room: off the tiles, its app (a window's) kept in the room
 void TileKnown(int i, const std::string &key);
 void TileGone(int i);
 bool TileShown(const Screen &s, int i, bool dashUp);

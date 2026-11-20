@@ -1048,7 +1048,16 @@ def start_remote(sock, n, host, d):
     w, h = stream_size(*d.get("size", [2560, 1440]))
     label = f"{host.get('name') or host['address']}: {d.get('label') or d['id']}"
     return sock.ask(f"remote {n} start {d['client']} {display_target(host, d)} {d['app']} {int(w)}x{int(h)} "
-                    f"{int(d.get('fps', 60))} {int(d.get('bitrate', 0))} {remote_size(d)[0]:.3f} {label}")
+                    f"{int(d.get('fps', 60))} {int(d.get('bitrate', 0))} {remote_size(d)[0]:.3f} {tile_key(d)}{label}")
+
+
+def tile_key(d):
+    """A PC window panel's "key=APP " for ft-screens (desktopless keeps its app in "key", HOST|APP):
+    its tiles remember the app, so the app's next window comes tiled, or in the room if it was put
+    there (screens/remote.c). Other panels: none."""
+    app = str(d.get("key") or "").partition("|")[2] if d.get("window") else ""
+    app = re.sub(r"[^A-Za-z0-9._-]", "_", app)[:60]
+    return f"key={app} " if app else ""
 
 
 def place_remote(sock, n, d, t, eye, heading):

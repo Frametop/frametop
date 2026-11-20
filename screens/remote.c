@@ -9,11 +9,13 @@
 // room's panel also hears "leave" when the pointer has left it (pointer_on, below).
 //
 // Commands (on @ft_screens, from ft-layout):
-//   remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]
+//   remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [key=APP] [label]
 //       runs remote screen N (FT_REMOTE_FIRST and up): ft-stream's client name (its paired
 //       certificate), the host's address, what to stream (display:DEVICE, monitor, primary),
 //       the stream's size and rate (kbit/s 0: ft-stream picks), the panel's width until the
-//       layout says, and the panel's name. Again with the same settings: nothing changes;
+//       layout says, and the panel's name. key=APP (a PC window's app): its tile memory's key
+//       is that app's, not the window's, so its next window comes as this one was (tiled, or in
+//       the room: vrtiles.cpp's TileKnown). Again with the same settings: nothing changes;
 //       with others, the stream starts over.
 //   remote <N> peer <panel> <W>x<H> <metres> [label]
 //       (from ft-roompanels) remote screen N shows a panel someone shares in a Together room
@@ -58,6 +60,7 @@ struct remote {
     bool used;
     int index;  // the screen's index (its number - 1)
     char client[64], host[64], app[192], label[96];
+    char key[96];   // its tile memory's app ("app:APP": a PC window's, the same for each of the app's windows), or empty: app
     int width, height, fps, bitrate;
     double metres;
     pid_t pid;  // ft-stream, 0 when not running
@@ -575,13 +578,22 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
         snprintf(c.app, sizeof c.app, "peer:%d", panel);
     } else if (sscanf(cmd, "remote %*d start %63s %63s %191s %dx%d %d %d %lf %n", c.client, c.host, c.app, &c.width,
                       &c.height, &c.fps, &c.bitrate, &c.metres, &label_at) != 8) {
-        return snprintf(reply, size, "error remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [label]"), true;
+        return snprintf(reply, size, "error remote <N> start <client> <host> <app> <W>x<H> <fps> <kbit/s> <metres> [key=APP] [label]"), true;
     } else if (!plain(c.client, "._-") || !plain(c.host, ".:-") || !plain(c.app, "{}._:-") || !strncmp(c.app, "peer:", 5)) {
         return snprintf(reply, size, "error client, host or app has other characters"), true;
     }
     const bool rate = peer || (c.fps >= 1 && c.fps <= 240 && c.bitrate >= 0 && c.bitrate <= 500000);   // a room's panel has its sender's
     if (c.width < 64 || c.height < 64 || c.width > 8192 || c.height > 8192 || !rate || !(c.metres >= 0.15 && c.metres <= 20))
         return snprintf(reply, size, "error size, fps, bitrate or width out of range"), true;
+    if (!peer && label_at && !strncmp(cmd + label_at, "key=", 4)) {   // a PC window's app: its tile memory's key
+        const char *k = cmd + label_at + 4;
+        const int n = (int)strcspn(k, " ");
+        char app[64] = "";
+        if (n < (int)sizeof app) memcpy(app, k, (size_t)n), app[n] = 0;
+        if (plain(app, "._-")) snprintf(c.key, sizeof c.key, "app:%s", app);
+        label_at += 4 + n;
+        while (cmd[label_at] == ' ') ++label_at;
+    }
     snprintf(c.label, sizeof c.label, "%s", label_at && cmd[label_at] ? cmd + label_at : c.client);
     const bool same = r && !strcmp(r->client, c.client) && !strcmp(r->host, c.host) && !strcmp(r->app, c.app) &&
                       r->width == c.width && r->height == c.height && r->fps == c.fps && r->bitrate == c.bitrate;
@@ -600,7 +612,8 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
     memcpy(r->host, c.host, sizeof r->host);
     memcpy(r->app, c.app, sizeof r->app);
     memcpy(r->label, c.label, sizeof r->label);
-    ft_vr_remote_named(index, r->host, r->app);   // (a new slot, or new settings on this one)
+    memcpy(r->key, c.key, sizeof r->key);
+    ft_vr_remote_named(index, r->host, *r->key ? r->key : r->app);   // (a new slot, or new settings on this one)
     r->width = c.width, r->height = c.height, r->fps = c.fps, r->bitrate = c.bitrate, r->metres = c.metres;
     if (peer && !*g_peerpanel) return snprintf(reply, size, "error no ft-peerpanel (together/build, or $FT_PEERPANEL)"), true;
     if (!peer && !*g_stream) return snprintf(reply, size, "error no ft-stream next to ft-screens (or $FT_STREAM)"), true;

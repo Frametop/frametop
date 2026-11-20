@@ -792,6 +792,27 @@ int main() {
                                 "tile 0 1 0 1 1 1", "", "tile 0 1.5 0 1 1 1 0", "sat 1 1 0 0 0 0 1 0 0 0 0 1 inf"})
             junk |= dashtiles::Parse(bad, &s);
         check("state: junk refused", !junk);
+        check("state: room parses, off with room set", dashtiles::Parse(" room\n", &s) && s.kind == dashtiles::State::Kind::Off && s.room &&
+                                                           dashtiles::Text(s) == "room");
+        check("state: off isn't room", dashtiles::Parse("off", &s) && !s.room && dashtiles::Text(s) == "off" && !dashtiles::Parse("room 1", &s));
+        {
+            using W = dashtiles::WhenKnown;
+            using dashtiles::TileWhenKnown;
+            check("new window: tiled", TileWhenKnown("app:org.kde.dolphin", "") == W::Anchor &&
+                                           TileWhenKnown("remote:10.0.0.5/app:code", "") == W::Anchor &&
+                                           TileWhenKnown("remote:10.0.0.5/window:0x55aa", "") == W::Anchor);
+            check("a window unanchored before (not in the room on purpose): tiled", TileWhenKnown("app:firefox", "off") == W::Anchor);
+            check("a window put in the room: stays there", TileWhenKnown("app:firefox", "room") == W::Leave &&
+                                                              TileWhenKnown("remote:h/app:code", "room") == W::Leave);
+            check("a window's tile: back as it was", TileWhenKnown("app:firefox", "tile 0 1 0 1 1") == W::Restore &&
+                                                         TileWhenKnown("app:firefox", "sat 0 1 0 0 0 0 1 0 0 0 0 1 0") == W::Restore);
+            check("screens and remote displays: as before", TileWhenKnown("screen:2", "") == W::Leave &&
+                                                                TileWhenKnown("screen:2", "off") == W::Restore &&
+                                                                TileWhenKnown("remote:10.0.0.5/display:DP-1", "") == W::Leave &&
+                                                                TileWhenKnown("steam:dashboard", "") == W::Leave);
+            check("a junk line: Restore (which says it isn't one)", TileWhenKnown("screen:1", "junk") == W::Restore &&
+                                                                       TileWhenKnown("app:x", "junk") == W::Anchor);
+        }
         check("state: a satellite parses", dashtiles::Parse("sat 0 1 0 0 0.5 0 1 0 0 0 0 1 -2", &s) &&
                                                s.kind == dashtiles::State::Kind::Sat && near(s.rel[0][3], 0.5) &&
                                                near(s.rel[2][3], -2));

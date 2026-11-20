@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +29,7 @@ dashtiles::Memory g_tileMemory;
 namespace {
 dashtiles::Board g_tiles;
 std::map<int, std::string> g_tileKey;     // panel -> its memory key ("screen:2", "app:ID", "remote:HOST/APP")
+std::set<int> g_tileRoom;                 // panels put in the room on purpose (TileInRoom): remembered as "room"
 Mat g_tileGroupRel = Identity();          // the dashboard's frame (DashFrame) -> the group frame
 bool g_tileGroupSet = false;              // ...since the dashboard was first seen with a panel anchored
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
@@ -105,10 +107,14 @@ void FlushTileMemory() {
     if (g_tileSave.Flush()) WriteTileMemory();
 }
 namespace {
+// A panel's state to remember: the grid's, or "room" when it was put there on purpose.
+std::string TileLine(int i) {
+    return !g_tiles.Anchored(i) && g_tileRoom.count(i) ? "room" : g_tiles.Remember(i);
+}
 // Every panel with a key remembered as it is now (a change to one moves the others on the grid too).
 void RememberTiles() {
     bool changed = false;
-    for (const auto &[i, key] : g_tileKey) changed |= g_tileMemory.Set(key, g_tiles.Remember(i));
+    for (const auto &[i, key] : g_tileKey) changed |= g_tileMemory.Set(key, TileLine(i));
     if (changed) SaveTileMemory();
 }
 }  // namespace
@@ -287,6 +293,7 @@ void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     if (Mat p; it->second.pinned != kNone && it->second.pinned != kDashboard && ScreenPose(it->second, &p)) SetAbsolute(it->second, p);
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
     const dashtiles::Info info = TileInfo(i);
+    g_tileRoom.erase(i);
     g_tiles.Anchor(i, after, stay, leftOf, &info);
     if (!g_tileGroupSet) g_tileRegroup = true;
     RetileDash();
@@ -306,6 +313,12 @@ void TileUnanchor(int i, const char *by) {
     RetileDash();
     RememberTiles();
     std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
+}
+// Placement's In the Room: off the tiles, and its app (a window's) stays in the room next time too.
+void TileInRoom(int i, const char *by) {
+    TileUnanchor(i, by);
+    if (!g_screens.count(i) || !g_tileRoom.insert(i).second) return;
+    RememberTiles();
 }
 void TileStay(int i, bool on, const char *by) {
     if (g_screens[i].steamDash) {   // (Steam paints its window only with its tab showing: black with the dashboard closed)
@@ -328,15 +341,22 @@ void TileKnown(int i, const std::string &key) {
     const auto was = g_tileKey.find(i);
     if (was != g_tileKey.end() && was->second == k) return;
     if (was != g_tileKey.end()) {   // another app on the panel now: the last one's state is its own
-        if (g_tileMemory.Set(was->second, g_tiles.Remember(i))) SaveTileMemory();
+        if (g_tileMemory.Set(was->second, TileLine(i))) SaveTileMemory();
         g_tileKey.erase(was);
+        g_tileRoom.erase(i);
         TileUnanchor(i, "another app on it");   // (left in the room, off the grid; nothing remembered for it)
     }
     g_tileKey[i] = k;
     BarSideKnown(i, k);   // (its bar's edge is remembered by the same key)
     if (g_tileMemory.Used(k)) SaveTileMemory();   // (its use kept over a restart: the last to go when it's full)
     const std::string line = g_tileMemory.Get(k);
-    if (line.empty()) return;
+    switch (dashtiles::TileWhenKnown(k, line)) {
+        case dashtiles::WhenKnown::Leave:
+            if (line == "room") g_tileRoom.insert(i);
+            return;
+        case dashtiles::WhenKnown::Anchor: return TileAnchor(i, dashtiles::Stay::Default, "a new window: tiled unless put in the room");
+        case dashtiles::WhenKnown::Restore: break;
+    }
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
     if (!g_tiles.Restore(i, line, after)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
     if (g_tiles.Anchored(i)) {
@@ -349,8 +369,9 @@ void TileKnown(int i, const std::string &key) {
 void TileGone(int i) {
     BarSideGone(i);
     const auto k = g_tileKey.find(i);
-    if (k != g_tileKey.end() && g_tileMemory.Set(k->second, g_tiles.Remember(i))) SaveTileMemory();
+    if (k != g_tileKey.end() && g_tileMemory.Set(k->second, TileLine(i))) SaveTileMemory();
     if (k != g_tileKey.end()) g_tileKey.erase(k);
+    g_tileRoom.erase(i);
     if (g_tileFocus == i) g_tileFocus = -1;
     if (g_tiles.Unanchor(i)) RetileDash(), RememberTiles();
 }

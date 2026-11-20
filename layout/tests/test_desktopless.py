@@ -148,6 +148,9 @@ class Desktopless(unittest.TestCase):
         # the special workspace's window stays; the rest come out shown first, then by recent use
         self.assertEqual([d["app"] for d in self.panels(layout)], ["window:0x30", "window:0x20", "window:0x10"])
         self.assertEqual([d["key"] for d in self.panels(layout)], ["oma7|foot", "oma7|brave.desktop", "oma7|slack.desktop"])
+        # ...and ft-screens hears each one's app: its tiles remember the app, not the window
+        starts = [a for a in self.screens.asked if a.startswith("remote ") and " start " in a and "window:" in a]
+        self.assertEqual([a.split()[10] for a in starts], ["key=foot", "key=brave.desktop", "key=slack.desktop"])
         # the Frame's floating panel 21 is fanned out with them
         self.assertTrue(any(a.startswith("place 21 ") for a in self.screens.asked))
         self.assertEqual(self.m.load_layout()["desktopless"]["on"], True)

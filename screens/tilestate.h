@@ -1,7 +1,7 @@
 // A dashboard panel's remembered state as a record (dashtiles.h's Board writes and reads it), and
 // the batch of them a profile put back last. The text form is what ft-screens' tile memory and the
-// `tiles` command carry: "off", "tile STAY COL ROW ALONE SCALE" or "sat STAY" and the satellite's 12
-// numbers. STAY: 0 as DASH_TILE_STAY says, 1 shown with the dashboard closed, 2 hidden then (any
+// `tiles` command carry: "off", "room" (off, and put in the room on purpose: Placement's In the
+// Room), "tile STAY COL ROW ALONE SCALE" or "sat STAY" and the satellite's 12 numbers. STAY: 0 as DASH_TILE_STAY says, 1 shown with the dashboard closed, 2 hidden then (any
 // other number is 1, as it was when STAY was a yes or no: its 0 was "no", the default then). Parse takes any whitespace between the words and nothing else, and the sphere's older
 // "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" (its scale taken as the size, the rest dropped).
 // Header only, no OpenVR, so its test runs anywhere (screens/tests/dashtiles-test.cpp).
@@ -32,6 +32,7 @@ struct State {
     bool alone = true;      // a column of its own
     double scale = 1;       // its size, times its natural one
     double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // a satellite's: group frame -> panel
+    bool room = false;      // off: put in the room on purpose (a window stays there next time: TileWhenKnown)
 
     // A tile with a place on the grid (else it goes where a new one would).
     bool Placed() const { return kind == Kind::Tile && col >= 0 && row >= 0; }
@@ -73,6 +74,7 @@ inline bool Parse(const std::string &text, State *out) {
     State s;
     int stay = 0, alone = 1;
     if (w[0] == "off" && w.size() == 1) return *out = s, true;
+    if (w[0] == "room" && w.size() == 1) return s.room = true, *out = s, true;
     if (w[0] == "tile" && (w.size() == 6 || w.size() == 8)) {
         double old = 0;   // (the old form's weight and width)
         const bool ok = w.size() == 6 ? detail::Num(w[5], &s.scale)
@@ -102,7 +104,7 @@ inline std::string Text(const State &s) {
         return std::string(b);
     };
     switch (s.kind) {
-        case State::Kind::Off: return "off";
+        case State::Kind::Off: return s.room ? "room" : "off";
         case State::Kind::Tile:
             return "tile " + std::to_string(StayNumber(s.stay)) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
                    std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.scale);
@@ -139,5 +141,26 @@ private:
     std::vector<std::pair<int, State>> states_;
     Mode mode_ = Mode::None;
 };
+
+// A window's panel (a Frame window floating, "app:ID"; a PC window, "remote:HOST/app:APP" or
+// "remote:HOST/window:ADDRESS") goes on the tiles when it comes, unless its app was put in the room
+// on purpose (user, 2026-11-19: "make the default for windows be tiled mode when they are created
+// unless they are configured for free float in the room"). Others (screens, remote displays) as
+// they were.
+inline bool IsWindowKey(const std::string &key) {
+    return key.rfind("app:", 0) == 0 ||
+           (key.rfind("remote:", 0) == 0 && (key.find("/app:") != std::string::npos || key.find("/window:") != std::string::npos));
+}
+enum class WhenKnown { Restore, Anchor, Leave };
+// What the panel with `key` does when it comes, its app's remembered `line` (empty: none): Restore
+// that line, Anchor it as a new tile, or Leave it where it is.
+inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line) {
+    State s;
+    const bool parsed = !line.empty() && Parse(line, &s);
+    if (parsed && s.kind != State::Kind::Off) return WhenKnown::Restore;
+    if (parsed && s.room) return WhenKnown::Leave;
+    if (IsWindowKey(key)) return WhenKnown::Anchor;
+    return line.empty() ? WhenKnown::Leave : WhenKnown::Restore;   // (a line that isn't one: Restore says so)
+}
 
 }  // namespace dashtiles

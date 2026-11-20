@@ -1952,7 +1952,7 @@ void TogglePinView(Screen &s, int index, const char *by) {
 // Placement's In the Room: off the dashboard (a tile, or pinned to it), the head or a wrist, left in the
 // room where it is.
 void PlaceInRoom(Screen &s, int index, const char *by) {
-    if (TileAnchored(index)) TileUnanchor(index, by);
+    TileInRoom(index, by);   // (a window's app stays in the room next time too: not tiled when it comes)
     Mat p;
     if (s.pinned == kNone || !ScreenPose(s, &p)) return;
     EndDrag(s);

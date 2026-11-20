@@ -6948,6 +6948,9 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
         }
         PlaceChrome(s);  // the height changed
         std::printf("screen %d: %dx%d\n", index + 1, s.width, s.height);
+        // a tile its new size (a remote display tiled before its stream said its size kept the
+        // default's tile, a quarter too big, till something else laid the strip out again)
+        if (TileAnchored(index)) RetileDash();
     }
     if (s.heldFloat) ReleaseHold(s);   // the crop that waited for this buffer
     s.key = key, s.buf = *b, s.plain = it->second, ++s.frames;

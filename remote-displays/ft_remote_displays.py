@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """Frametop Remote Displays: other computers' monitors as Frametop screens, streamed with
-Moonlight's protocol from Vibepollo, or from Sunshine on a Mac (docs/remote-displays.md).
+Moonlight's protocol from Vibepollo or Sunshine, or with macOS High Performance Screen Sharing
+from a Mac (docs/remote-displays.md).
 
 A Kirigami (QML) app with a Python backend, like Frametop Settings. It runs in
 the dev container:
-  - Hosts: computers running Vibepollo, found on the network (they announce _nvstream._tcp
-    over mDNS; avahi-browse on the host) or typed in. You sign in once with the host's Web UI
-    user name and password: Frametop asks it for an API token that can do only what it needs
-    (conf/ft_hostsignin.py), keeps that in ~/.local/share/frametop-stream/hosts/ADDRESS.token,
-    readable only by you, and forgets the password. The Web UI's certificate is self-signed, so
-    the one seen then is pinned (ADDRESS.pin, its public key's SHA-256): ft-stream and later
-    sign-ins refuse another. Whether each host answers on its Web UI port is checked now and then.
-    Plain Sunshine (a Mac: host/macos runs one instance per display, each on its own port) has
-    no tokens: the login is kept in memory only until the displays picked right after signing
-    in are paired with it (ft-layout remote add --login), then forgotten. Adding more later
-    signs in again.
+  - Hosts: computers running Vibepollo, Sunshine or macOS Screen Sharing, found on the network
+    (they announce _nvstream._tcp or _rfb._tcp over mDNS; avahi-browse on the host) or typed in.
+    For Vibepollo, you sign in once with the host's Web UI user name and password: Frametop asks
+    it for an API token that can do only what it needs (conf/ft_hostsignin.py), keeps that in
+    ~/.local/share/frametop-stream/hosts/ADDRESS.token, readable only by you, and forgets the
+    password. The Web UI's certificate is self-signed, so the one seen then is pinned
+    (ADDRESS.pin, its public key's SHA-256): ft-stream and later sign-ins refuse another.
+    For macOS Screen Sharing (TCP/UDP 5900, kind "apple"), ft-appless verifies your Mac login
+    over Apple's SRP-6a / RSA handshake and keeps it in ADDRESS.apple (0600) for reconnecting.
+    Plain Sunshine (host/macos runs one instance per display, each on its own port) has no
+    tokens: the login is kept in memory only until the displays picked right after signing in
+    are paired with it (ft-layout remote add --login), then forgotten. Adding more later signs
+    in again.
   - App windows, per host: the switch signs in to the Vibepollo on it that shares its apps'
     windows (a Windows PC's own, a Linux PC's second one in its Hyprland session), keeps that
     one's token (ADDRESS-PORT.token) and sets the host's "windows" port in the layout, which is
@@ -37,6 +40,7 @@ import html
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -67,13 +71,13 @@ RESOLUTIONS = ft_layout.SCREEN_RESOLUTIONS
 
 
 def parse_avahi(text):
-    """avahi-browse -rpt _nvstream._tcp -> [{name, address, dongle}]: a host's address on the
-    network, and on the Frame's hotspot (wlanap: its Steam Link dongle), if it's there."""
+    """avahi-browse -rpt _nvstream._tcp / _rfb._tcp -> [{name, address, dongle}]: a host's
+    address on the network, and on the Frame's hotspot (wlanap: its Steam Link dongle)."""
     unescape = lambda v: re.sub(r"\\(\d{3})", lambda m: chr(int(m.group(1))), v).replace("\\.", ".")
     found = {}
     for line in text.splitlines():
         f = line.split(";")
-        if len(f) < 9 or f[0] != "=" or f[2] != "IPv4" or f[1].startswith("tailscale"):
+        if len(f) < 9 or f[0] != "=" or f[2] != "IPv4" or f[1] == "lo" or f[1].startswith("tailscale"):
             continue
         # A Mac's Sunshine instances all announce its name; mDNS numbers the ones after the
         # first ("Mac (2)"). They're one computer.
@@ -231,15 +235,18 @@ class Backend(QObject):
                     state = self._states.get(n, "not running")
                 displays.append({"id": d["id"], "number": n, "label": d.get("label") or d["id"], "app": d["app"],
                                  "key": f"{d['app']}@{d['port']}" if d.get("port") else d["app"],
-                                 "virtual": d["app"] == "monitor", "width": int(w), "height": int(hh),
+                                 "virtual": d["app"] == "monitor" or str(d["app"]).startswith("apple:virtual"),
+                                 "width": int(w), "height": int(hh),
                                  "fps": int(d.get("fps", 60)), "bitrate": int(d.get("bitrate", 0)),
                                  "metres": ft_layout.remote_size(d)[0], "shown": not d.get("hidden"),
                                  "connected": not d.get("off"), "state": state})
             address = h.get("address", "")
-            sunshine = h.get("kind") == "sunshine"
-            out.append({"name": h.get("name", ""), "address": address, "kind": h.get("kind", "vibepollo"),
-                        "hasToken": address in self._logins if sunshine
-                        else os.path.exists(ft_hostapi.token_path(address)),
+            kind = h.get("kind", "vibepollo")
+            has_token = (address in self._logins if kind == "sunshine"
+                         else os.path.exists(ft_hostapi.apple_path(address)) if kind == "apple"
+                         else os.path.exists(ft_hostapi.token_path(address)))
+            out.append({"name": h.get("name", ""), "address": address, "kind": kind,
+                        "hasToken": has_token,
                         "online": self._online.get(address), "route": h.get("route", "auto"),
                         "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
                         "inputKeyboard": "keyboard" in host_input.lent(h),
@@ -251,14 +258,17 @@ class Backend(QObject):
     # --- hosts ---
     @Slot()
     def discoverHosts(self):
-        """Vibepollo (and Sunshine) computers on the network (answer: hostsFound)."""
+        """Vibepollo, Sunshine and macOS Screen Sharing computers on the network (answer: hostsFound)."""
         def work():
-            try:
-                r = subprocess.run(host_command("avahi-browse", "-rpt", "_nvstream._tcp"), capture_output=True,
-                                   text=True, timeout=15)
-                found = parse_avahi(r.stdout)
-            except (OSError, subprocess.SubprocessError):
-                found = []
+            lines = []
+            for svc in ("_nvstream._tcp", "_rfb._tcp"):
+                try:
+                    r = subprocess.run(host_command("avahi-browse", "-rpt", svc), capture_output=True,
+                                       text=True, timeout=10)
+                    lines.append(r.stdout)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+            found = parse_avahi("\n".join(lines))
             known = {h.get("address") for h in ft_layout.load_layout().get("hosts", [])}
             for h in found:
                 h["added"] = h["address"] in known
@@ -267,10 +277,10 @@ class Backend(QObject):
 
     @Slot(str, str, str, str, str)
     def signIn(self, name, address, dongle, user, password):
-        """Asks the host for Frametop's API token with its Web UI login (answer: signedIn).
-        Over its dongle when it has one that answers, so the password skips the router. A host
-        without tokens is plain Sunshine: the login is checked, and kept in memory for pairing
-        the displays picked next."""
+        """Asks the host for Frametop's API token with its Web UI login, or verifies a Mac's
+        Screen Sharing login on port 5900 (answer: signedIn). Over its dongle when it has one
+        that answers, so the password skips the router. A host without tokens on 47990 is plain
+        Sunshine: the login is checked, and kept in memory for pairing the displays picked next."""
         name, address, dongle = " ".join(name.split()), address.strip(), dongle.strip()
         if not re.fullmatch(NAME_RE, name):
             return self.signedIn.emit(name, False, "A host's name needs 1 to 40 letters, digits, spaces, dots, dashes or apostrophes")
@@ -279,29 +289,52 @@ class Backend(QObject):
         layout = ft_layout.load_layout()
         if any(h.get("name") == name and h.get("address") != address for h in layout.get("hosts", [])):
             return self.signedIn.emit(name, False, f"There's already a host called {name}")
+        existing_kind = next((h.get("kind") for h in layout.get("hosts", []) if h.get("address") == address), None)
 
         def work():
+            web_err = ""
+            if existing_kind != "apple":
+                try:
+                    token, pin, kind = ft_hostsignin.sign_in(([dongle] if dongle else []) + [address], user, password,
+                                                             known=ft_hostapi.first_word(ft_hostapi.pin_path(address)))
+                    if kind == "sunshine":
+                        self._logins[address] = f"{user}\n{password}\n"
+                    return self._signInDone.emit(name, address, dongle, token, pin, kind, "")
+                except ft_hostsignin.SignInError as e:
+                    web_err = str(e)
+                    if existing_kind in ("vibepollo", "sunshine") or web_err.startswith("Its certificate"):
+                        return self._signInDone.emit(name, address, dongle, "", "", "", web_err)
+
+            # macOS High Performance Screen Sharing (screensharingd on TCP 5900, RFB 003.889):
+            # verifies credentials over SRP-6a / RSA and writes ADDRESS.apple (0600).
             try:
-                token, pin, kind = ft_hostsignin.sign_in(([dongle] if dongle else []) + [address], user, password,
-                                                         known=ft_hostapi.first_word(ft_hostapi.pin_path(address)))
-            except ft_hostsignin.SignInError as e:
-                return self._signInDone.emit(name, address, dongle, "", "", "", str(e))
-            if kind == "sunshine":
-                self._logins[address] = f"{user}\n{password}\n"
-            self._signInDone.emit(name, address, dongle, token, pin, kind, "")
+                args = ["auth", address, "--login", *(["--via", dongle] if dongle else [])]
+                code, out, err = ft_layout.run_appless(*args, timeout=20, stdin=f"{user}\n{password}\n")
+                if code == 0:
+                    return self._signInDone.emit(name, address, dongle, "", "", "apple", "")
+                apple_err = (err or out).strip().splitlines()[-1] if (err or out).strip() else ""
+                if existing_kind == "apple" or (apple_err and ("rejected" in apple_err or "SRP" in apple_err)):
+                    return self._signInDone.emit(name, address, dongle, "", "", "", apple_err or "Authentication failed")
+                if apple_err and not web_err:
+                    web_err = f"Couldn't reach it: {apple_err}"
+            except (OSError, subprocess.SubprocessError) as e:
+                if not web_err:
+                    web_err = f"Couldn't reach it: {str(e) or type(e).__name__}"
+            self._signInDone.emit(name, address, dongle, "", "", "", web_err or "Couldn't reach it")
         threading.Thread(target=work, daemon=True).start()
 
     def _sign_in_done(self, name, address, dongle, token, pin, kind, error):
         if error:
             return self.signedIn.emit(name, False, error)
-        ft_hostsignin.keep(address, token, pin)
+        if kind != "apple":
+            ft_hostsignin.keep(address, token, pin)
         layout = ft_layout.load_layout()
         host = next((h for h in layout.setdefault("hosts", []) if h.get("address") == address), None)
         if host is None:
             host = {"name": name, "address": address, "displays": []}
             layout["hosts"].append(host)
-        if kind == "sunshine":
-            host["kind"] = "sunshine"
+        if kind in ("sunshine", "apple"):
+            host["kind"] = kind
         else:
             host.pop("kind", None)
         if dongle and dongle not in host.get("direct", []):
@@ -425,6 +458,16 @@ class Backend(QObject):
             m = re.search(r"<uniqueid>([^<]+)</uniqueid>", r.read().decode(errors="replace"))
         return m.group(1) if m else None
 
+    @staticmethod
+    def _is_apple_rfb(address):
+        """Whether `address` speaks Apple Screen Sharing's RFB 003.889 banner on TCP 5900."""
+        try:
+            with socket.create_connection((address, ft_layout.APPLE_PORT), timeout=2) as s:
+                s.settimeout(2)
+                return s.recv(12) == b"RFB 003.889\n"
+        except OSError:
+            return False
+
     @Slot(str)
     def findDongle(self, name):
         """The host among the Frame hotspot's clients (answer: dongleFound)."""
@@ -434,12 +477,20 @@ class Backend(QObject):
 
         def work():
             try:
-                want = self._host_id(host["address"])
-                if not want:
-                    return self.dongleFound.emit(name, "", "it didn't say who it is at its own address")
                 with open("/proc/net/arp") as f:  # IP, HW type, flags, MAC, mask, device
                     rows = [line.split() for line in f.read().splitlines()[1:]]
                 candidates = [r[0] for r in rows if len(r) >= 6 and r[5] == "wlanap" and r[2] != "0x0"]
+                if host.get("kind") == "apple":
+                    matches = [ip for ip in candidates if self._is_apple_rfb(ip)]
+                    if len(matches) == 1:
+                        return self.dongleFound.emit(name, matches[0], "")
+                    if len(matches) > 1:
+                        return self.dongleFound.emit(name, "", "more than one Mac is on the Frame's hotspot: type its address")
+                    return self.dongleFound.emit(name, "", "it isn't on the Frame's hotspot" if candidates else
+                                                 "nothing is on the Frame's hotspot (is Steam Link's dongle paired?)")
+                want = self._host_id(host["address"])
+                if not want:
+                    return self.dongleFound.emit(name, "", "it didn't say who it is at its own address")
                 for ip in candidates:
                     try:
                         if self._host_id(ip) == want:
@@ -482,6 +533,11 @@ class Backend(QObject):
 
         def work():
             monitors, error = [], ""
+            if host.get("kind") == "apple":
+                monitors = [{"app": "apple:physical", "port": 0, "key": "apple:physical",
+                             "name": "Main display", "width": 1920, "height": 1080,
+                             "primary": True, "active": True, "virtual": False}]
+                return self.monitorsReady.emit(address, monitors, "")
             if host.get("kind") == "sunshine":
                 monitors = self._sunshine_monitors(address)
                 return self.monitorsReady.emit(address, monitors, "" if monitors else "no Sunshine instance answers")
@@ -514,7 +570,9 @@ class Backend(QObject):
         h = next((x for x in layout.get("hosts", []) if x.get("name") == host), None)
         if h is None:
             return self.message.emit(f"No host called {host}", True)
-        label = " ".join(label.split()) or ("Virtual" if app == "monitor" else "Display")
+        label = " ".join(label.split()) or (
+            "Virtual" if app == "monitor" or app.startswith("apple:virtual")
+            else "Main" if app == "apple:physical" else "Display")
         args = ["remote", "add", host, h["address"], app, "--label", label, "--size", f"{width}x{height}",
                 "--fps", str(fps), "--bitrate", str(bitrate)]
         login = None

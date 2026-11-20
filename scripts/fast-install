@@ -85,7 +85,7 @@ COMPONENTS = {
     'keyboard': ((OPENVR,), ('frametop/framekeyboard', 'frametop/framekeyboard-native-guard',
                              'frametop/engines/*', 'frametop/bridge/*', 'frametop/vr/*')),
     'power': ((OPENVR,), ('ft-powerd',)),
-    'stream': ((OPENVR,), ('ft-stream', 'ft-clip')),   # the spikes only with build.sh --spikes
+    'stream': ((OPENVR,), ('ft-stream', 'ft-appless', 'ft-clip')),   # the spikes only with build.sh --spikes
     'voice': ((), ('bin/whisper-server',)),
     'hands': ((), ('ft-hands', 'ft-camd')),
     'hands/rec': ((OPENVR, STB), ('ft-handpanel',)),

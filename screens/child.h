@@ -1,5 +1,5 @@
-// A helper program of ft-screens' with a socket to it: ft-stream and ft-peerpanel, which bring a
-// panel its pictures (remote.c), and ft-sharepanel, which takes a screen's (share.c).
+// A helper program of ft-screens' with a socket to it: ft-stream, ft-appless and ft-peerpanel,
+// which bring a panel its pictures (remote.c), and ft-sharepanel, which takes a screen's (share.c).
 #pragma once
 
 #include <stdbool.h>

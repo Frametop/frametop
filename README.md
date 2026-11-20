@@ -121,7 +121,7 @@ Each computer needs a host kit once:
 | Computer | What it streams | Set up with |
 | --- | --- | --- |
 | Windows PC | Its monitors, and virtual monitors at any size | Vibepollo with Frametop's build: [host/windows/README.md](host/windows/README.md) |
-| Mac with Apple silicon | Its monitors | Sunshine, one instance per monitor, and Frametop Streams in the menu bar to turn them on and off: [host/macos/README.md](host/macos/README.md) |
+| Mac with Apple silicon | Its main monitor or a Retina / ultrawide virtual monitor with nothing installed, or every real monitor | Built-in macOS Screen Sharing, or Sunshine for multiple monitors: [host/macos/README.md](host/macos/README.md) |
 | Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build, not tested yet: [host/linux/README.md](host/linux/README.md) |
 
 On a Windows PC, open PowerShell (Start, type `powershell`, Enter) and run:
@@ -309,7 +309,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `menu/` | The Frametop menu: one Launch a program entry for Frametop's apps and commands, and Update Frametop. |
 | `remote/` | Remote desktop over VNC, and Frametop Settings' Remote access page that turns it on and off. |
 | `remote-displays/` | Frametop Settings' Remote displays page, which adds other computers' monitors as screens. |
-| `stream/` | ft-stream, one per remote display: receives and decodes its stream for ft-screens. |
+| `stream/` | ft-stream (Moonlight) and ft-appless (macOS High Performance Screen Sharing), one per remote display: receives and decodes its stream for ft-screens. |
 | `host/` | The host kits for remote displays: Windows, macOS and Linux. |
 | `setup/` | The build container and the Bluetooth fixes. See [setup/README.md](setup/README.md). |
 | `commands/` | Frametop commands: your own shell commands, saved under a name and run in the background (`ft-cmd`). |

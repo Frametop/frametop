@@ -1291,6 +1291,81 @@ int main() {
             fg.Restore(9, four6, -1, "app:a"), fg.Arrange(same);
             check("settle: back onto a stack a gap fill made: checked", filled6 && fits8 && cols(fg) == "[ 10 1 ][ 9 3 8 ]" && fg.Settle() &&
                                                                           cols(fg) == "[ 10 1 ][ 3 8 ][ 9 ]");
+            // (council pass 8) a wide one hidden at the bottom: the narrow ones over it on shelves of their own, taller than they'll be
+            const auto wide = [](int id) {
+                return id == 2 ? dashtiles::Info{2.4, 0.9} : id == 4 || id == 5 || id == 60 || id == 9 ? dashtiles::Info{0.9, 1.25} : dashtiles::Info{1.6, 0.9};
+            };
+            const auto wideBoard = [&](int mid) {   // [ 10 1 ][ mid 2 ][ 30 3 ], 2 Steam's
+                dashtiles::Board w = full();
+                w.steam = 2, w.Arrange(wide);
+                for (const auto &[i, c] : {std::pair{10, 0}, {mid, 1}, {30, 2}})
+                    w.Anchor(i, -1, dashtiles::Stay::Default), w.Drop(i, {tiling::Drop::Into, c, 0}), w.Arrange(wide);
+                return w;
+            };
+            const dashtiles::Info narrowGuess{0.9, 0.9};
+            dashtiles::Board sh = wideBoard(5);
+            sh.Anchor(60, -1, dashtiles::Stay::Default, -1, &narrowGuess, false), sh.absent = {2, 60}, sh.Arrange(wide);
+            const std::string sh0 = cols(sh);
+            sh.absent = {2}, sh.Arrange(wide);
+            const bool tallHidden = !sh.Laid().ColumnFits(1, sh.Laid().fills[1].height), waitsSh = !sh.Settle();
+            sh.absent = {}, sh.Arrange(wide);
+            check("settle: too tall only while a wide one under it is hidden: waits, then left", sh0 == "[ 10 1 ][ 60 5 2 ][ 30 3 ]" && tallHidden &&
+                                                                                                   waitsSh && !sh.Settle() && cols(sh) == sh0);
+            dashtiles::Board shr = wideBoard(4);   // ...back where another took its gap, the same
+            const std::string four7 = shr.Remember(4);
+            shr.Leave(4, 0, "app:a"), shr.Arrange(wide), shr.FillGap(tilegap::kQuietMs);
+            const dashtiles::Info i5 = wide(5);
+            shr.Anchor(5, -1, dashtiles::Stay::Default, -1, &i5), shr.Arrange(wide);
+            shr.absent = {2}, shr.Arrange(wide), shr.Restore(9, four7, -1, "app:a"), shr.Arrange(wide);
+            const std::string shr0 = cols(shr);
+            check("settle: back, too tall only while a wide one under it is hidden: waits", !shr.Settle() && cols(shr) == shr0);
+            // (council pass 8) one you put into a stack: its shown stackmates are yours, as you saw them
+            const auto tall4 = [](int id) { return id == 4 ? dashtiles::Info{1.6, 1.6} : dashtiles::Info{1.6, 0.9}; };
+            dashtiles::Board jn = full();
+            jn.steam = 2, jn.Arrange(tall4);
+            for (const auto &[i, c] : {std::pair{10, 0}, {30, 2}})
+                jn.Anchor(i, -1, dashtiles::Stay::Default), jn.Drop(i, {tiling::Drop::Into, c, 0}), jn.Arrange(tall4);
+            jn.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), jn.absent = {2, 60}, jn.Arrange(tall4);
+            jn.absent = {2}, jn.Arrange(tall4);
+            const bool waitsJn = !jn.Settle();
+            jn.Anchor(4, -1, dashtiles::Stay::Default), jn.Drop(4, {tiling::Drop::Into, 1, 0}), jn.Arrange(tall4);
+            check("settle: one dropped onto a stack with one waiting there: that one's yours", waitsJn && cols(jn) == "[ 10 1 ][ 4 60 2 ][ 30 3 ]" &&
+                                                                                                 !jn.Settle() && cols(jn) == "[ 10 1 ][ 4 60 2 ][ 30 3 ]");
+            // (council pass 8) reordered, resized or leaned in a stack made for you: still made for you
+            const char *edits[] = {"reordered by key", "resized by its corner", "made smaller by key"};
+            for (int e = 0; e < 3; ++e) {
+                dashtiles::Board ed;   // [ 10 1 ][ 4 2 ][ 30 3 ], 4 goes (no gap fill), 60 put on 2 for you
+                for (const int i : {1, 2, 3}) ed.Anchor(i, -1, dashtiles::Stay::Default);
+                ed.Arrange(same);
+                for (const auto &[i, c] : {std::pair{10, 0}, {4, 1}, {30, 2}})
+                    ed.Anchor(i, -1, dashtiles::Stay::Default), ed.Drop(i, {tiling::Drop::Into, c, 0}), ed.Arrange(same);
+                const std::string four8 = ed.Remember(4);
+                ed.Leave(4, 0, "app:a"), ed.Arrange(same), ed.FillGap(tilegap::kQuietMs);
+                ed.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), ed.Arrange(same);
+                const bool edited = e == 0 ? ed.Press(2, dashtiles::Key::Up) : e == 1 ? ed.Resized(2, 0.9) : ed.Press(2, dashtiles::Key::Shorter);
+                ed.Arrange(same), ed.Restore(9, four8, -1, "app:a"), ed.Arrange(same);
+                const bool out = ed.Settle();
+                ed.Arrange(same);
+                check((std::string("settle: a stackmate ") + edits[e] + ": a return there still checked").c_str(),
+                      edited && out && cols(ed).find("[ 9 ]") != std::string::npos);
+            }
+            const auto lean = [](int id) {
+                return id == 5 ? dashtiles::Info{1.0, 0.7} : id == 60 ? dashtiles::Info{1.0, 0.8} : id == 4 || id == 9 ? dashtiles::Info{1.0, 1.0}
+                                                                                                  : dashtiles::Info{1.6, 0.7};
+            };
+            const dashtiles::Info i60s{1.0, 0.8};
+            dashtiles::Board ln = full();
+            ln.Arrange(lean);
+            for (const auto &[i, c] : {std::pair{10, 0}, {5, 1}, {4, 1}, {30, 2}})
+                ln.Anchor(i, -1, dashtiles::Stay::Default), ln.Drop(i, {tiling::Drop::Into, c, 0}), ln.Arrange(lean);
+            const std::string four9 = ln.Remember(4);
+            ln.Leave(4, 0, "app:a"), ln.Arrange(lean), ln.FillGap(tilegap::kQuietMs);
+            ln.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60s), ln.Arrange(lean);
+            const std::string ln0 = cols(ln);
+            const bool leaned = ln.Press(5, dashtiles::Key::Left);
+            ln.Arrange(lean), ln.Restore(9, four9, -1, "app:a"), ln.Arrange(lean);
+            check("settle: a stackmate leaned by key: a return there still checked", ln0 == "[ 10 1 ][ 60 5 2 ][ 30 3 ]" && leaned && ln.Settle() &&
+                                                                                       (ln.Arrange(lean), cols(ln) == "[ 10 1 ][ 60 5 2 ][ 9 ][ 30 3 ]"));
         }
         b = stack();   // (council, 2026-11-20) a gap undone long ago doesn't count against the next one
         b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);

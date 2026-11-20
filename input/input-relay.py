@@ -165,7 +165,8 @@ that keyboard. While it isn't running, nothing opens (ft-screens' old panel was 
 from this user, and gets "kb DESKTOP SURFACE STEAM" back: whether typing goes to the desktop,
 whether the screens show with Frametop not paused (it may show over them with the dashboard
 closed), and whether Steam's own text fields may open it (steam_takes_keyboard: the same
-"vr_keyboard" rule). The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens
+"vr_keyboard" rule, unless "steam_fields_keyboard" is "steam": Steam's own keyboard there, for a
+Steam Controller's navigation, issue 102). The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens
 passes its "vrkeyboard" commands on as "kbpanel show [head|dash POSE] | hide", which the relay
 sends on as "kb show ... | hide". A Steam field that wants it comes as "kbsteam": the relay
 answers "kb nosteam" when the rule or Steam's PIN lock says no, and otherwise has ft-screens open
@@ -399,6 +400,7 @@ KB_POKES = ("hover", "press", "move", "up", "end")  # a fingertip on Full Keyboa
 KB_COORD = re.compile(r"-?\d{1,3}(\.\d{1,6})?")
 TYPE_MAX = 20000  # characters waiting to be typed, at most
 VR_KEYBOARD_MODES = ("always", "no_keyboard", "button", "never")  # when Frametop's keyboard opens
+STEAM_FIELDS_KEYBOARDS = ("frametop", "steam")  # Steam's text fields: as the desktop's, or Steam's own
 HELPER = "\0ft_pointer_helper"
 # VR_BUTTONS, the Frame controller buttons the pointer helper can read, is ft_input_actions'.
 VR_DEVICE = "frame_controller"  # the id controller buttons have in watch events
@@ -692,7 +694,8 @@ def read_rules(path=RULES_PATH):
     """{"devices": {id: {"role", "name"}}, "buttons": {id: {"<code>": action}},
     "controller_buttons": {"<hand>/<button>": action}, "controller_in_games": bool,
     "key_bindings": {"<code>+<code>...": action}, "meta_tap": bool,
-    "vr_keyboard": one of VR_KEYBOARD_MODES, "vr_keyboard_persist": bool}."""
+    "vr_keyboard": one of VR_KEYBOARD_MODES, "vr_keyboard_persist": bool,
+    "steam_fields_keyboard": one of STEAM_FIELDS_KEYBOARDS}."""
     try:
         with open(path) as f:
             rules = json.load(f)
@@ -1469,7 +1472,10 @@ class Relay:
 
     def steam_takes_keyboard(self):
         """Steam's own text fields open Full Keyboard instead of Steam's keyboard: as a desktop
-        text field would open it (the Keyboard setting, and connected keyboards)."""
+        text field would open it (the Keyboard setting, and connected keyboards), unless the
+        setting for Steam's fields keeps Steam's own keyboard there."""
+        if self.rules.get("steam_fields_keyboard") == "steam":
+            return False
         mode = self.vr_keyboard_mode()
         return mode == "always" or (mode == "no_keyboard" and not self.physical_keyboards())
 

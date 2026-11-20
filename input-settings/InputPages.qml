@@ -737,6 +737,23 @@ Item {
                     enabled: backend.vrKeyboard !== "never"
                     onToggled: backend.setVrKeyboardPersist(checked)
                 }
+                Controls.ComboBox {
+                    objectName: "steamFieldsKeyboard"
+                    Kirigami.FormData.label: "In Steam's text fields:"
+                    model: backend.steamFieldsKeyboards
+                    textRole: "text"
+                    valueRole: "value"
+                    Component.onCompleted: currentIndex = indexOfValue(backend.steamFieldsKeyboard)
+                    onActivated: backend.setSteamFieldsKeyboard(currentValue)
+                }
+                Controls.Label {
+                    visible: backend.steamFieldsKeyboard === "steam"
+                    text: "Steam and its games open Steam's keyboard, which a Steam Controller or gamepad can type on. "
+                          + "The desktop keeps the setting above."
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                }
                 Controls.Label {
                     objectName: "keyboardsConnected"
                     Kirigami.FormData.label: "Keyboards connected:"

@@ -233,6 +233,12 @@ VR_KEYBOARD_MODES = {
     "button": "Only with a mapped mouse or controller button",
     "never": "Never",
 }
+# Which keyboard Steam's own text fields open ("steam_fields_keyboard"; the relay's
+# STEAM_FIELDS_KEYBOARDS). "frametop" is the default.
+STEAM_FIELDS_KEYBOARDS = {
+    "frametop": "Frametop's keyboard, as set above",
+    "steam": "Steam's own keyboard",
+}
 # "combo" splits a device by node (the relay's node_role): a keyboard's touchpad is the pointer, its
 # keys pass through. The Devices page offers it only for devices with a mouse and a keyboard node.
 ROLE_LABELS = {"pointer": "3D pointer", "passthrough": "Pass through", "combo": "Keyboard + 3D pointer",
@@ -1031,6 +1037,23 @@ class Backend(QObject):
     def vrKeyboard(self):
         mode = read_json(RULES_PATH).get("vr_keyboard")
         return mode if mode in VR_KEYBOARD_MODES else "no_keyboard"
+
+    @Property("QVariantList", constant=True)
+    def steamFieldsKeyboards(self):
+        return [{"value": k, "text": v} for k, v in STEAM_FIELDS_KEYBOARDS.items()]
+
+    @Property(str, notify=mappingsChanged)
+    def steamFieldsKeyboard(self):
+        which = read_json(RULES_PATH).get("steam_fields_keyboard")
+        return which if which in STEAM_FIELDS_KEYBOARDS else "frametop"
+
+    @Slot(str)
+    def setSteamFieldsKeyboard(self, which):
+        if which not in STEAM_FIELDS_KEYBOARDS:
+            return
+        if self._edit_rules(lambda rules: rules.update(steam_fields_keyboard=which)) is NOT_SAVED:
+            return
+        self.message.emit(f"Steam's text fields: {STEAM_FIELDS_KEYBOARDS[which]}", False)
 
     @Property(bool, notify=mappingsChanged)
     def vrKeyboardPersist(self):

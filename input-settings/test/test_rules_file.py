@@ -131,6 +131,16 @@ class RulesFile(unittest.TestCase):
         self.assertEqual((saved["pause_auto"], saved["vr_keyboard"]), (False, "no_keyboard"))
         self.assertEqual(saved["buttons"], {"dev1": {"275": "frunner"}})
 
+    def test_steam_fields_keyboard(self):
+        """Issue 102: Steam's text fields may keep Steam's own keyboard; anything else is ignored."""
+        self.assertEqual(self.b.steamFieldsKeyboard, "frametop")
+        self.b.setSteamFieldsKeyboard("steam")
+        self.assertEqual(json.loads(self.path.read_text())["steam_fields_keyboard"], "steam")
+        self.assertEqual(self.b.steamFieldsKeyboard, "steam")
+        self.b.setSteamFieldsKeyboard("bogus")
+        self.assertEqual(json.loads(self.path.read_text())["steam_fields_keyboard"], "steam")
+        self.assertEqual(self.said[-1], ("Steam's text fields: Steam's own keyboard", False))
+
     def test_what_a_change_found_is_said(self):
         self.path.write_text(json.dumps({"devices": {"dev1": {"name": "Mouse"}},
                                          "buttons": {"dev1": {"275": "frunner", "276": "none"}}}))

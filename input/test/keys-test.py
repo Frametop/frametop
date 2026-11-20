@@ -112,7 +112,7 @@ LOG = []  # the relay's own log
 relay.log = lambda *args: LOG.append(" ".join(map(str, args)))
 bindings = {"now": None}  # the rules' key_bindings; None: the relay's defaults
 devices = {"roles": {}, "buttons": {}, "controller": {}}  # the rules' roles, per-device "buttons", controller_buttons
-vr_keyboard = {"mode": None}  # the rules' vr_keyboard (Frametop's keyboard); None: the default
+vr_keyboard = {"mode": None, "steam": None}  # the rules' vr_keyboard and steam_fields_keyboard; None: the default
 meta_tap = {"on": None}  # the rules' meta_tap (Meta taps do their binding); None: not in the file
 MOUSE_ID = "usb:0003:0004:test mouse"  # the fake mouse's id (Node.id)
 
@@ -124,6 +124,8 @@ def read_rules(path=None):
     rules["key_bindings"] = dict(relay.DEFAULT_KEY_BINDINGS if bindings["now"] is None else bindings["now"])
     if vr_keyboard["mode"]:
         rules["vr_keyboard"] = vr_keyboard["mode"]
+    if vr_keyboard["steam"]:
+        rules["steam_fields_keyboard"] = vr_keyboard["steam"]
     if meta_tap["on"] is not None:
         rules["meta_tap"] = meta_tap["on"]
     return rules
@@ -1308,6 +1310,17 @@ def tests():
     from_kb("kbsteam")
     check("...and without ft-screens it opens where it is: kb show", heard(), ["kb show"])
     relay.Relay.vr_keyboard = screens_up
+    vr_keyboard["steam"] = "steam"  # issue 102: Steam's own keyboard in Steam's fields
+    use({})
+    from_kb("kbhello 0")
+    check("Steam's fields set to Steam's keyboard: the word says they don't take it", heard()[-1:], ["kb 1 1 0"])
+    from_kb("kbsteam")
+    check("...and a Steam field gets kb nosteam, nothing opens",
+          (heard()[-1:], [m for m in typed() if m.startswith("vrkeyboard")]), (["kb nosteam"], []))
+    vr_keyboard["steam"] = None
+    use({})
+    from_kb("kbhello 0")
+    heard()
     vr_keyboard["mode"] = "never"
     use({})
     from_kb("kbsteam")

@@ -62,6 +62,7 @@ class Page(unittest.TestCase):
         root = engine.rootObjects()[0]
         hint, counted = root.findChild(QObject, "keyedPointers"), root.findChild(QObject, "keyboardsConnected")
         self.assertIsNotNone(hint, "the Keyboard page didn't open")
+        self.assertIsNotNone(root.findChild(QObject, "steamFieldsKeyboard"), "no Steam text fields setting (issue 102)")
         lines = (ROOT / "input-settings" / "InputPages.qml").read_text().split("\n")
         first = next(i for i, t in enumerate(lines) if "id: keyboardPage" in t) + 1
         last = next(i for i in range(first, len(lines)) if "// ------" in lines[i]) + 1

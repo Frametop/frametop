@@ -162,8 +162,7 @@ public:
             return;
         }
         if (d.kind == tiling::Drop::Lift) {   // (refused: nothing changed, nothing forgotten)
-            recentre_ = false;
-            if (Lift(id, d.align)) EndBatch(), spots_[id].satellite = false;
+            if (Lift(id, d.align)) EndBatch(), spots_[id].satellite = false, recentre_ = false;
             return;
         }
         moved_ = id, movedAz_ = az, recentre_ = false;   // (where you let it go wins)
@@ -205,7 +204,7 @@ public:
     bool FillGap(int64_t nowMs) {
         const tilegap::Gap g = gaps_.Due(nowMs);
         const tilegrid::Where w = grid_.Find(g.stayed);
-        if (g.stayed < 0 || !w.ok() || params.fit || Anchored(g.gone)) return false;
+        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone))) return false;
         double span = 0;
         for (const tiling::Placed &p : last_.tiles)
             if (p.col == w.col) span = std::max(span, p.az1 - p.az0);
@@ -216,7 +215,9 @@ public:
             if (c < 0 || grid_.Cols()[size_t(c)].cells.size() != 1) continue;
             const int other = grid_.Cols()[size_t(c)].cells.front().id;
             const tiling::Placed *q = PlacedOf(other);
-            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || Unshrunk(q->el1 - q->el0) > g.heightDeg + kFitSlackDeg) continue;
+            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || Unshrunk(q->el1 - q->el0) > g.heightDeg + kFitSlackDeg ||
+                !FitsUnder(w.col, other))   // (as the column is now: a panel opened meanwhile may stand in the gap)
+                continue;
             const double area = (q->az1 - q->az0) * (q->el1 - q->el0);
             if (area > bestArea) best = c, side = dir, bestArea = area;
         }

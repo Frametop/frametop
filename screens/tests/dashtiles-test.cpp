@@ -1045,6 +1045,28 @@ int main() {
         b.Leave(4, 0, "app:a"), b.Arrange(same);
         b.RestoreAll({{1, "tile 0 0 0 1 1.000"}, {2, "tile 0 1 0 1 1.000"}, {3, "tile 0 2 0 1 1.000"}}), b.Arrange(same);
         check("gap: a profile put back meanwhile: nothing filled", !b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 ][ 2 ][ 3 ]");
+        // (council, 2026-11-20) the panel a waiting gap stood on going too is still two gone
+        b = stack();
+        b.Anchor(5, -1, dashtiles::Stay::Default), b.Drop(5, {tiling::Drop::Into, 1, 1}), b.Arrange(same);
+        const bool three = cols(b) == "[ 1 ][ 4 5 2 ][ 3 ]";
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Leave(2, 500, "app:b"), b.Arrange(same);
+        check("gap: the one it stood on goes too: two gone, none filled", three && !b.FillGap(500 + tilegap::kQuietMs) && cols(b) == "[ 1 ][ 5 ][ 3 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, "off", -1, "app:e"), b.Arrange(same);
+        check("gap: another app on its panel number meanwhile: still filled", b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 2 ][ 3 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Anchor(4, -1, dashtiles::Stay::Default), b.Arrange(same);
+        check("gap: a new panel on its number meanwhile: still filled", b.FillGap(tilegap::kQuietMs) && cols(b).rfind("[ 1 2 ]", 0) == 0);
+        dashtiles::Board o;   // [ 1 ][ 50 2 ][ 3 ], 50 goes, a new 60 opens into its place
+        for (const int i : {1, 2, 3}) o.Anchor(i, -1, dashtiles::Stay::Default);
+        o.Arrange(same);
+        o.Anchor(50, -1, dashtiles::Stay::Default), o.Drop(50, {tiling::Drop::Into, 1, 0}), o.Arrange(same);
+        o.Leave(50, 0, "app:x"), o.Arrange(same);
+        const dashtiles::Info info{1.6, 0.9};
+        o.Anchor(60, -1, dashtiles::Stay::Default, -1, &info), o.Arrange(same);
+        const std::string opened = cols(o);
+        check("gap: a panel opened into it meanwhile: no third on that stack", opened == "[ 1 ][ 60 2 ][ 3 ]" &&
+                                                                                  !o.FillGap(tilegap::kQuietMs) && cols(o) == opened);
         dashtiles::Board h;   // [ 1 ][ 2 3 ]: 2 on the desk, 3 hanging under it
         for (const int i : {1, 2, 3}) h.Anchor(i, -1, dashtiles::Stay::Default);
         h.Press(3, dashtiles::Key::Down);
@@ -1117,6 +1139,17 @@ int main() {
             wide.Arrange(mid);
             check(n == 3 ? "keys: up, two 1.5 m panels a stack too tall: nothing" : "keys: ...the strip shrunk: still nothing",
                   (n == 3 || wide.Last().shrink < 0.9) && !wide.Press(2, dashtiles::Key::Up));
+        }
+        {   // a drag-lift refused leaves the strip turned as asked (council, 2026-11-20)
+            const auto mid = [](int) { return dashtiles::Info{2.6, 1.5}; };
+            dashtiles::Board a, r;
+            for (const int i : {1, 2}) a.Anchor(i, -1, dashtiles::Stay::Default), r.Anchor(i, -1, dashtiles::Stay::Default);
+            a.Arrange(mid), r.Arrange(mid);
+            a.Recentre(1), r.Recentre(1);
+            r.Drop(2, {tiling::Drop::Lift, 1, 0});
+            a.Arrange(mid), r.Arrange(mid);
+            check("drag: a lift refused: the strip still turns as asked", cols(r) == "[ 1 ][ 2 ]" && std::fabs(a.PanDeg()) > 1 &&
+                                                                               std::fabs(r.PanDeg() - a.PanDeg()) < 1e-6);
         }
     }
     {   // dragged mostly over a column's top or under the desk line: into the nearest column, no quarters

@@ -163,11 +163,14 @@ p.motion(relay.REL_X, 50, 10.0)
 p.step_aside("tilekey")
 p.dashboard(20.0)  # (woken: its press 0.4 s later)
 p.motion(relay.REL_X, 60, 20.1)
-p.step_aside("tilekey")  # a tiling key right after the dashboard key
 mark = len(p.sock.sent)
+aside = p.step_aside("tilekey")  # a tiling key right after the dashboard key
 for t in (20.5, 20.6, 21.0):
     p.tick(t)
-check("...a dashboard key just before it still toggles the dashboard (council, 2026-11-20)", "btn system 1" in since(p, mark), True)
+sent = since(p, mark)
+check("...a dashboard key just before it: it stays on, and the dashboard still toggles (council, 2026-11-20)",
+      (aside, p.active, "btn system 1" in sent, any(c.startswith("hide") for c in sent)), (False, True, True, False))
+check("...and once the press is let go, the next tiling key steps aside", (p.step_aside("tilekey"), p.active), (True, False))
 
 print()
 if failures:

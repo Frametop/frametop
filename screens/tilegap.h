@@ -48,9 +48,9 @@ public:
         return g;
     }
     // App `key` back, on panel `id`: the gap it left isn't filled, and its fill is taken to be undone
-    // (none: an empty key).
+    // (none: an empty key). By panel number only when either has no key (panel numbers are reused).
     Fill Back(int id, const std::string &key) {
-        if (went_ > 0 && (last_.gone == id || (!key.empty() && last_.key == key))) Cancel();
+        if (key.empty() || last_.key.empty() ? last_.gone == id : last_.key == key) Void();
         const auto it = key.empty() ? fills_.end() : fills_.find(key);
         if (it == fills_.end()) return {};
         const Fill f = it->second;
@@ -62,17 +62,21 @@ public:
     }
     // Panel `id` gone or off the grid: no fill it's in is undone, and no gap it stands in is filled.
     void Forget(int id) {
-        if (went_ > 0 && last_.stayed == id) Cancel();
+        if (last_.stayed == id) Void();
         for (auto it = fills_.begin(); it != fills_.end();)
             it = it->second.pulled == id || it->second.stayed == id ? fills_.erase(it) : std::next(it);
     }
     // The grid changed by hand (a drop, a key, a resize): the gap waiting isn't filled (Undo checks a
     // fill is still as it was left).
-    void Changed() { Cancel(); }
+    void Changed() { Void(); }
     // A profile put back: nothing waits, nothing is undone.
-    void Clear() { Cancel(), fills_.clear(); }
+    void Clear() { Void(), fills_.clear(); }
 
 private:
+    // The gap waiting isn't filled, but the panels gone still count: one more going within
+    // kQuietMs is still more than one (council, 2026-11-20: Leave's own Unanchor forgets the panel
+    // the gap stood on).
+    void Void() { last_ = {}; }
     void Cancel() { went_ = 0, last_ = {}; }
     int went_ = 0;
     int64_t at_ = 0;

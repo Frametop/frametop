@@ -357,7 +357,7 @@ void SetTileStayDefault(bool on);   // DASH_TILE_STAY: anchored panels stay show
 void SetTileStayTheater(bool on);   // DASH_TILE_STAY_THEATER: ...over a game in SteamVR's theater too
 void SetTileLookFocus(bool on);   // DASH_TILE_LOOK: the tiling keys act on the panel you look at when no pointer is on one
 bool TileStays(const Screen &s, int i);   // shown with the dashboard closed
-void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (dashtiles.h's AtBar), else as set
+void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (tileframe.h's AtBar), else as set
 void RetileDash();
 void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);

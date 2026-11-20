@@ -1063,20 +1063,21 @@ class Pointer:
     def step_aside(self, why):
         """Out of the way until the mouse moves again, as an idle one is (a tiling key, user
         2026-11-20: the cursor left where a tile was focused the panel moved in under it, so a
-        second key moved that one). Not with a button held. True if it was on."""
-        if not self.active or self.driver_down:
+        second key moved that one). Not with a button held, nor with a dashboard key's press not
+        made or not let go yet (sent after the hide, it woke the helper with the relay thinking it
+        off: council, 2026-11-20). True if it was on."""
+        if not self.active or self.driver_down or self.system_at is not None or self.system_release is not None:
             return False
-        self.end_pulses(keep_dashboard=True)
+        self.end_pulses()
         self.send(f"hide {why}")
         self.active = False
         log(f"pointer off ({why})")
         return True
 
-    def end_pulses(self, keep_dashboard=False):
+    def end_pulses(self):
         """A press or push under way (the dashboard's system button, the claim, a scroll) ends
         now, its release sent, and the presses not made yet and the motion waiting to go are
-        dropped. keep_dashboard: a dashboard key's press not made yet still goes (a tiling key's
-        step aside: the dashboard key just before it still opens the dashboard)."""
+        dropped."""
         releases = []
         if self.system_release is not None:
             releases.append("btn system 0")
@@ -1086,9 +1087,7 @@ class Pointer:
             releases.append("scroll 0 0")
         for command in releases:
             self.send(command)
-        self.system_release = self.claim_at = self.claim_release = self.scroll_until = None
-        if not keep_dashboard:
-            self.system_at = None
+        self.system_at = self.system_release = self.claim_at = self.claim_release = self.scroll_until = None
         self.dx = self.dy = self.pending = 0
 
     def stand_down(self, why="paused"):

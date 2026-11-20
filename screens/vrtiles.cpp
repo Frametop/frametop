@@ -36,7 +36,7 @@ bool g_tileRegroup = true;                // the dashboard opened: the group goe
 bool g_tileReset = false;                 // "tiles recentre" (ft-layout's reset): the group in front of your head now
 bool g_dashWasUp = false;
 bool g_tileStayTheater = false;           // DASH_TILE_STAY_THEATER: staying ones stay over a game in SteamVR's theater too
-// The wall: at Steam's bar (DASH_TILE_AT_BAR, dashtiles.h's AtBar), or where DASH_TILE_RADIUS and
+// The wall: at Steam's bar (DASH_TILE_AT_BAR, tileframe.h's AtBar), or where DASH_TILE_RADIUS and
 // DASH_TILE_DESK_DEG put it; which one the group has now (the last Regroup's: the bar may not be placed).
 struct Wall {
     double radius = tiling::Params().radius, deskDeg = tiling::Params().deskDeg;

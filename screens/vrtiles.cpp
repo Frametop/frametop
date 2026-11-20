@@ -141,6 +141,13 @@ dashtiles::Info TileInfo(int id) {
     if (pw > 0 && ph > 0) info.widthM = pw * mpp, info.heightM = ph * mpp;
     return info;
 }
+// A tile being dragged: the others stay as they are under it (no gap filled, nothing settled) till
+// it's let go (a drop there: the gap waiting is yours).
+bool TileDragging() {
+    for (const int id : g_tiles.Ids())
+        if (const auto it = g_screens.find(id); it != g_screens.end() && it->second.drag != Drag::None) return true;
+    return false;
+}
 // TileInfo is its own size, not Info's guess (it has no picture size yet).
 bool TileSized(int id) {
     const auto it = g_screens.find(id);
@@ -373,7 +380,9 @@ void TileKnown(int i, const std::string &key) {
         case dashtiles::WhenKnown::Restore: break;
     }
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
+    const bool tiledBefore = g_tiles.Anchored(i);
     if (!g_tiles.Restore(i, line, after, k)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
+    if (tiledBefore && !g_tiles.Anchored(i)) RetileDash(), RememberTiles();   // (tiled before its app was known, off for it: the others close up)
     if (g_tiles.Anchored(i)) {
         if (!g_tileGroupSet) g_tileRegroup = true;
         RetileDash();
@@ -566,12 +575,13 @@ void UpdateDashTiles() {
     // the dashboard is open, so at the bar a reset after turning did nothing; ft-layout leaves the tiled
     // panels to this. The next opening puts them at the bar again, which SteamVR opens in front of you.)
     if (g_tileReset && (g_tiles.Ids().empty() || (Dash().ever && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
-    if (!g_tilesStopping && g_tiles.FillGap(NowMs())) {
+    const bool settling = !g_tilesStopping && !TileDragging();
+    if (settling && g_tiles.FillGap(NowMs())) {
         RetileDash();
         RememberTiles();
         std::printf("tiles: the gap a panel left filled\n");
     }
-    if (!g_tilesStopping && g_tiles.Settle()) {
+    if (settling && g_tiles.Settle()) {
         RetileDash();
         RememberTiles();
         std::printf("tiles: a panel too tall for its stack, once its size was known: a column of its own\n");

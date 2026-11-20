@@ -263,7 +263,12 @@ public:
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed.
     bool Press(int id, Key k) {
         if (!grid_.Has(id)) return false;
-        return Changed(Pressed(id, k)) && (unsized_.erase(id), true);
+        const int moved = moved_;
+        const double movedAz = movedAz_;
+        const bool recentre = recentre_;
+        if (Changed(Pressed(id, k))) return unsized_.erase(id), true;
+        moved_ = moved, movedAz_ = movedAz, recentre_ = recentre;   // (refused: nothing changed, nothing forgotten)
+        return false;
     }
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     bool Resized(int id, double factor) {

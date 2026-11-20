@@ -1285,6 +1285,12 @@ int main() {
             a.Arrange(mid), r.Arrange(mid);
             check("drag: a lift refused: the strip still turns as asked", cols(r) == "[ 1 ][ 2 ]" && std::fabs(a.PanDeg()) > 1 &&
                                                                                std::fabs(r.PanDeg() - a.PanDeg()) < 1e-6);
+            dashtiles::Board k;   // ...and a key refused (council, 2026-11-20)
+            for (const int i : {1, 2}) k.Anchor(i, -1, dashtiles::Stay::Default);
+            k.Arrange(mid), k.Recentre(1);
+            const bool refused = !k.Press(2, dashtiles::Key::Up);
+            k.Arrange(mid);
+            check("keys: one refused: the strip still turns as asked", refused && cols(k) == "[ 1 ][ 2 ]" && std::fabs(k.PanDeg() - a.PanDeg()) < 1e-6);
         }
     }
     {   // dragged mostly over a column's top or under the desk line: into the nearest column, no quarters

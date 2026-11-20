@@ -169,7 +169,7 @@ void RetileDash() {
     const auto &l = g_tiles.Arrange(TileInfo);
     for (const tiling::Placed &p : l.tiles) {
         auto it = g_screens.find(p.id);
-        if (p.id == g_tiles.absent || it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        if (g_tiles.absent.count(p.id) || it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
         // (a floating window or an app with a stretch on its way: its width once its pixels are there)
@@ -506,9 +506,14 @@ void UpdateDashTiles() {
     g_dashWasUp = up;
     // Steam's window hides with the dashboard closed (TileShown: Steam paints it only then, and SteamVR
     // won't show its page without the dashboard): the others close up its gap meanwhile (user, 2026-11-19).
+    // So do they round a panel with no picture yet or hidden on its own (Board::absent).
     const int steam = SteamDashIndex();
-    if (const int absent = up || steam < 0 ? -1 : steam; absent != g_tiles.absent) {
-        g_tiles.absent = absent;
+    std::set<int> absent;
+    if (!up && steam >= 0) absent.insert(steam);
+    for (const int id : g_tiles.Ids())
+        if (const auto it = g_screens.find(id); it != g_screens.end() && (!it->second.shown || it->second.alone)) absent.insert(id);
+    if (absent != g_tiles.absent) {
+        g_tiles.absent = std::move(absent);
         if (g_tileGroupSet) RetileDash();
     }
     // (a read that counts: this opening's, or before the group was ever set the last good one)

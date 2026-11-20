@@ -662,6 +662,20 @@ int main() {
               b.Grid().Cols().size() == 3 && screen.col == 1 && b.Grid().Cols()[1].cells.size() == 1 &&
                   b.Grid().Cols()[0].cells.size() + b.Grid().Cols()[2].cells.size() == 5);
         check("repack: remembered as packed", b.Remember(1).rfind("tile 0 ", 0) == 0);
+
+        // A hidden panel (absent) at no size: its neighbours close up; a repack still packs it at its own.
+        const auto span = [&] {
+            const tiling::Layout &l = b.Arrange(sized);
+            return l.az1 - l.az0;
+        };
+        const double whole = span();
+        b.absent = {1};
+        const double without = span();
+        check("absent: the screen hidden, the strip closes up its width", whole - without > 25);
+        b.Repack(sized);
+        check("absent: a repack keeps its place in the middle", b.Grid().Find(1).col == 1);
+        b.absent.clear();
+        check("absent: shown again, back at its size", std::fabs(span() - whole) < 1e-6);
     }
     // --- memory
     {

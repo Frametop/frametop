@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -129,7 +130,11 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
 class Board {
 public:
     tiling::Params params;
-    int absent = -1;            // a tiled panel laid out at no size (Steam's window, hidden with the dashboard closed: no gap left for it)
+    // Tiled panels laid out at no size, so the others close up their gap: Steam's window with the
+    // dashboard closed, and any panel not shown (user, 2026-11-19: desktopless mode hid the desktop's
+    // screen and a PC's display wasn't live, and their columns left "a massive gap in the middle").
+    // A reset packs them at their own size (Repack), so one shown again comes back where it was.
+    std::set<int> absent;
     bool stayDefault = false;   // DASH_TILE_STAY: a panel whose stay is Default stays shown
 
     bool Anchored(int id) const { return spots_.count(id) != 0; }
@@ -320,7 +325,7 @@ public:
         for (const tilegrid::Col &gc : grid_.Cols()) {
             tiling::Column c;
             for (const tilegrid::Cell &cell : gc.cells) {
-                const Info i = cell.id == absent ? Info{0, 0} : info(cell.id);
+                const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);
                 c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale});
             }
             cols.push_back(c);

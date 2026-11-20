@@ -14,13 +14,16 @@
 namespace tilepack {
 
 constexpr double kSimilar = 1.6;     // a column's panels: none more than this many times as wide as another
-constexpr double kColumnDeg = 45;    // a column this tall at most (a taller panel has one of its own)
+constexpr double kColumnDeg = 45;    // a column this tall at most, as your eyes see it (a taller panel has one of its own)
 
 // Whether a panel `w` wide may share a column whose widest is `widest`.
 inline bool Similar(double widest, double w) { return widest <= w * kSimilar && w <= widest * kSimilar; }
 
-// Whether a panel `h` tall still fits on a column `height` tall (its panels and their gaps).
-inline bool Room(double height, double h, double gapDeg) { return height + gapDeg + h <= kColumnDeg + 1e-9; }
+// Whether a panel `h` tall still fits on a column `height` tall (its panels and their gaps), one
+// `maxDeg` tall at most: kColumnDeg in the degrees round the arc's centre (tiling::Params::columnDeg).
+inline bool Room(double height, double h, double gapDeg, double maxDeg = kColumnDeg) {
+    return height + gapDeg + h <= maxDeg + 1e-9;
+}
 
 struct Item {
     int id = 0;
@@ -30,7 +33,7 @@ struct Item {
 // The items in columns, each listed from the desk up (the widest at the bottom), the columns left to
 // right with the widest in the middle and the rest alternately right and left of it. Widest first,
 // each goes on the lowest column it's Similar to with Room for it, else a column of its own.
-inline std::vector<std::vector<int>> Pack(std::vector<Item> items, double gapDeg) {
+inline std::vector<std::vector<int>> Pack(std::vector<Item> items, double gapDeg, double maxDeg = kColumnDeg) {
     std::stable_sort(items.begin(), items.end(), [](const Item &a, const Item &b) { return a.wDeg > b.wDeg; });
     struct Col {
         double widest, height;
@@ -40,7 +43,7 @@ inline std::vector<std::vector<int>> Pack(std::vector<Item> items, double gapDeg
     for (const Item &it : items) {
         int best = -1;
         for (size_t c = 0; c < cols.size(); ++c)
-            if (Similar(cols[c].widest, it.wDeg) && Room(cols[c].height, it.hDeg, gapDeg) &&
+            if (Similar(cols[c].widest, it.wDeg) && Room(cols[c].height, it.hDeg, gapDeg, maxDeg) &&
                 (best < 0 || cols[c].height < cols[size_t(best)].height))
                 best = int(c);
         if (best < 0) {

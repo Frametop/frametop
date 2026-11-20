@@ -282,7 +282,7 @@ private:
         for (const tiling::Placed &p : last_.tiles) {
             if (p.col >= int(grid_.Cols().size())) continue;
             const ColNow &c = cols[p.col];
-            if (!tilepack::Similar(c.widest, span) || !tilepack::Room(c.top - c.bottom, tall, params.gapDeg)) continue;
+            if (!tilepack::Similar(c.widest, span) || !tilepack::Room(c.top - c.bottom, tall, params.gapDeg, params.columnDeg)) continue;
             const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
             if (c.top < low - 1e-6 || (c.top < low + 1e-6 && off < front)) best = p.col, low = c.top, front = off;
         }
@@ -303,7 +303,7 @@ public:
             }
         if (items.empty()) return;
         EndBatch();
-        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg);
+        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg, params.columnDeg);
         grid_ = tilegrid::Grid{};
         for (size_t c = 0; c < cols.size(); ++c)
             for (size_t r = 0; r < cols[c].size(); ++r)   // (row 0 is the top: each one up goes in over the rest)

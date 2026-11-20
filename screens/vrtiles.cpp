@@ -60,6 +60,10 @@ void ApplyWall() {
     g_tiles.params.fit = g_tileFit >= 0.5;
 }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
+int g_tileHold = -1;                      // ...the one a tiling key moved, until the 3D mouse is back on a panel
+int64_t g_tileHoldMs = 0;
+constexpr int64_t kTileHoldSettleMs = 500;   // the cursor's panel changing this soon after a key: the tiles moved under it
+bool g_tileLook = true;                   // DASH_TILE_LOOK: with no pointer on a panel, the one you look at has the focus
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
 constexpr std::chrono::seconds kTilesAddWindow{5};
 int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus, 0 not
@@ -375,6 +379,8 @@ bool g_tilesStopping = false;
 void TilesStopping() { g_tilesStopping = true; }
 // The panel goes (its window, its display): what it was is remembered under its key. Its gap is
 // filled (dashtiles.h's Leave) unless every panel is going (a stop: a restart puts them back).
+void SetTileLookFocus(bool on) { g_tileLook = on; }
+
 void TileGone(int i) {
     BarSideGone(i);
     const auto k = g_tileKey.find(i);
@@ -433,15 +439,23 @@ void TileResized(Screen &s, int i) {
 }
 
 namespace {
-// The panel the tiling keys act on: the one under the pointer, else the one you're looking at
-// (within 25 degrees of straight ahead). The relay is told when it's an anchored one (the keys are
-// the desktop's otherwise), and it gets a thin border.
+// The panel the tiling keys act on: the one a tiling key just moved (HoldTileFocus), else the one
+// under the pointer, else the one you're looking at (within 25 degrees of straight ahead; unless
+// DASH_TILE_LOOK is off). The relay is told when it's an anchored one (the keys are the desktop's
+// otherwise), and it gets a thin border.
 void UpdateTileFocus() {
-    int f = -1;
+    const int64_t now = NowMs();
+    if (g_tileHold >= 0) {
+        const auto h = g_screens.find(g_tileHold);
+        if (h == g_screens.end() || !h->second.visible || !g_tiles.Anchored(g_tileHold)) g_tileHold = -1;
+        else if (now - g_tileHoldMs < kTileHoldSettleMs) g_mouseScreen = -1;   // (the tiles moving under the cursor: not you)
+        else if (g_mouseScreen >= 0) g_tileHold = -1;   // the 3D mouse nudged back onto a panel: it leads again
+    }
+    int f = g_tileHold;
     const auto m = g_screens.find(g_mouseScreen);
-    if (m != g_screens.end() && m->second.visible) f = g_mouseScreen;
+    if (f < 0 && m != g_screens.end() && m->second.visible) f = g_mouseScreen;
     Mat head;
-    if (f < 0 && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
+    if (f < 0 && g_tileLook && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
         const double fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]};
         double best = std::cos(25 * M_PI / 180);
         for (auto &[i, s] : g_screens) {
@@ -454,7 +468,6 @@ void UpdateTileFocus() {
     }
     g_tileFocus = f;
     const bool tile = f >= 0 && g_tiles.Anchored(f);
-    const int64_t now = NowMs();
     if (int(tile) != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
         SendRelay(tile ? "tilefocus 1" : "tilefocus 0");
         g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
@@ -639,6 +652,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         if (!dashtiles::ParseKey(parsed.word, &key)) return (void)std::snprintf(reply, size, "error no such tiling key");
         const int i = g_tileFocus;
         if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
+        g_tileHold = i, g_tileHoldMs = NowMs(), g_mouseScreen = -1;   // (the relay hid the 3D mouse: it keeps the focus)
         if (!g_tiles.Press(i, key)) return (void)std::snprintf(reply, size, "ok nothing to do");
         RetileDash();
         RememberTiles();

@@ -23,6 +23,7 @@ from ft_layout import ft_conf  # noqa: E402
 
 STAY = "DASH_TILE_STAY"   # on unless "0", as ft-screens reads it
 STAY_THEATER = "DASH_TILE_STAY_THEATER"   # off unless "1"
+LOOK = "DASH_TILE_LOOK"   # on unless "0": with no pointer on a panel, the tiling keys act on the one you look at
 GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
 STEAM_WINDOWS = "STEAM_DASH_PANEL"   # off unless "1", as ft-screens reads it
 AT_BAR = "DASH_TILE_AT_BAR"   # on unless "0": the wall at Steam's bar, its desk line and distance (not the two below)
@@ -72,6 +73,14 @@ class DashTiles(QObject):
     @Slot(bool)
     def setStayTheater(self, on):
         self._set_value(STAY_THEATER, "1" if on else "0")
+
+    @Property(bool, notify=changed)
+    def lookFocus(self):
+        return ft_layout.read_conf().get(LOOK, "1") != "0"
+
+    @Slot(bool)
+    def setLookFocus(self, on):
+        self._set_value(LOOK, "1" if on else "0")
 
     @Property(bool, notify=changed)
     def gsApps(self):

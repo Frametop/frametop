@@ -1058,6 +1058,18 @@ class Pointer:
             wait = max(0.0, min(wait, self.move_at + self.MOVE_EVERY - time.monotonic()))
         return wait
 
+    def step_aside(self, why):
+        """Out of the way until the mouse moves again, as an idle one is (a tiling key, user
+        2026-11-20: the cursor left where a tile was focused the panel moved in under it, so a
+        second key moved that one). Not with a button held. True if it was on."""
+        if not self.active or self.driver_down:
+            return False
+        self.send(f"hide {why}")
+        self.active = False
+        self.dx = self.dy = self.pending = 0
+        log(f"pointer off ({why})")
+        return True
+
     def stand_down(self, why="paused"):
         """Frametop is pausing (or POINTER=0 drops this pointer: why): a pulse under way ends
         now, and the pointer lets go.
@@ -1540,6 +1552,8 @@ class Relay:
                 log(action)
         elif action in TILE_ACTIONS:
             if value == 1:
+                if action in TILE_FOCUS_ACTIONS and source == "keyboard" and self.lease.current:
+                    self.lease.current.step_aside("tilekey")  # (ft-screens keeps the moved tile focused)
                 try:
                     self.screens_sock.sendto(TILE_ACTIONS[action].encode(), SCREENS)
                 except OSError:

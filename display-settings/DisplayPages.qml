@@ -1531,6 +1531,12 @@ Item {
                         onToggled: backend.dashTiles.setStayTheater(checked)
                     }
                     Controls.Switch {
+                        Kirigami.FormData.label: "Look to focus:"
+                        text: "With no mouse or laser on a panel, Meta+Shift+arrows move the tile you're looking at"
+                        checked: backend.dashTiles.lookFocus
+                        onToggled: backend.dashTiles.setLookFocus(checked)
+                    }
+                    Controls.Switch {
                         Kirigami.FormData.label: "Dashboard apps:"
                         text: "Apps started from the dashboard open as Frametop panels"
                         checked: backend.dashTiles.gsApps

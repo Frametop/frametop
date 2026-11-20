@@ -354,7 +354,8 @@ bool TileAnchored(int i);
 bool TileTiled(int i);
 double TileGapM();   // the gap between tiles at the wall, metres (a tiled panel's resize corner stays out of it)
 void SetTileStayDefault(bool on);   // DASH_TILE_STAY: anchored panels stay shown with the dashboard closed (unless set per panel)
-void SetTileStayTheater(bool on);   // DASH_TILE_STAY_THEATER: ...over a game in SteamVR's theater too
+void SetTileStayTheater(bool on);
+void SetTileLookFocus(bool on);   // DASH_TILE_LOOK: the tiling keys act on the panel you look at when no pointer is on one   // DASH_TILE_STAY_THEATER: ...over a game in SteamVR's theater too
 bool TileStays(const Screen &s, int i);   // shown with the dashboard closed
 void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (dashtiles.h's AtBar), else as set
 void RetileDash();

@@ -5503,6 +5503,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "SCREEN_FRONT_AWAY") g_frontAway = on;
     else if (n == "DASH_TILE_STAY") SetTileStayDefault(on);   // (each anchored panel not set the other way)
     else if (n == "DASH_TILE_STAY_THEATER") SetTileStayTheater(on);
+    else if (n == "DASH_TILE_LOOK") SetTileLookFocus(on);
     else if (n == "DASH_TILE_AT_BAR") SetTileAtBar(on);
     else if (n == "GSAPP_PANELS") GsSwitch(on);
     else if (n == "STEAM_DASH_PANEL") SteamDashSwitch(on);
@@ -5939,6 +5940,7 @@ bool ft_vr_init(void) {
     for (const TileSetting &t : TileSettings()) num(t.name, *t.value, t.lo, t.hi);
     SetTileStayDefault(handcut::Setting("DASH_TILE_STAY", "1") != "0");
     SetTileStayTheater(handcut::Setting("DASH_TILE_STAY_THEATER", "0") == "1");
+    SetTileLookFocus(handcut::Setting("DASH_TILE_LOOK", "1") != "0");
     SetTileAtBar(handcut::Setting("DASH_TILE_AT_BAR", "1") != "0");   // the wall at Steam's bar
     LoadTileMemory();
     LoadBarSides();
@@ -7856,7 +7858,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
     switch (verb) {
     case vrcmd::HandSetting: {
         if (!std::strncmp(key, "DASH_TILE_", 10) && std::strcmp(key, "DASH_TILE_STAY") != 0 && std::strcmp(key, "DASH_TILE_STAY_THEATER") != 0 &&
-            std::strcmp(key, "DASH_TILE_AT_BAR") != 0) {
+            std::strcmp(key, "DASH_TILE_AT_BAR") != 0 && std::strcmp(key, "DASH_TILE_LOOK") != 0) {
             double value;
             if (!ft_conf_number(word, &value) || !SetTileSetting(key, value))
                 return (void)std::snprintf(reply, size, "error invalid dashboard tile setting");

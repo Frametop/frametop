@@ -64,6 +64,13 @@ class DashTiles(unittest.TestCase):
         self.assertEqual(self.asked[-1], "handsetting DASH_TILE_STAY_THEATER 1")
         self.assertIn("# mine", self.conf())
 
+    def test_look_focus_on_unless_off(self):
+        self.assertTrue(self.t.lookFocus)
+        self.t.setLookFocus(False)
+        self.assertIn("DASH_TILE_LOOK=0", self.conf())
+        self.assertEqual(self.asked[-1], "handsetting DASH_TILE_LOOK 0")
+        self.assertFalse(self.t.lookFocus)
+
     def test_gamescope_apps_on_unless_off(self):
         self.assertTrue(self.t.gsApps)
         self.t.setGsApps(False)

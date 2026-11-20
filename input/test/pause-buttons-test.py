@@ -134,6 +134,21 @@ mark = len(p.sock.sent)
 p.stand_down()
 check("gaze holds: stand_down sends only hide (the helper ends them)", since(p, mark), ["hide pause"])
 
+# A tiling key steps the pointer aside (ft-screens keeps the moved tile focused) until the mouse
+# moves on purpose again; not with a button held.
+p = pointer()
+p.motion(relay.REL_X, 50, 10.0)
+mark = len(p.sock.sent)
+check("tiling key: the pointer steps aside", (p.step_aside("tilekey"), since(p, mark), p.active), (True, ["hide tilekey"], False))
+check("...already off: nothing", (p.step_aside("tilekey"), since(p, mark)), (False, ["hide tilekey"]))
+p.motion(relay.REL_X, 5, 10.5)
+check("...a twitch doesn't bring it back", p.active, False)
+p.motion(relay.REL_X, 60, 10.6)
+check("...a nudge does, recentred", (p.active, "show" in since(p, mark), "recenter" in since(p, mark)), (True, True, True))
+p = pointer()
+p.action("left", 1, 10.0)
+check("...a drag held: it stays", (p.step_aside("tilekey"), p.active), (False, True))
+
 print()
 if failures:
     print(f"{len(failures)} failed: {', '.join(failures)}")

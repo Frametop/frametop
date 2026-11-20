@@ -19,6 +19,7 @@ import socket
 import sys
 import tempfile
 import types
+os.environ["FT_KWIN_EI"] = "0"  # the relay's wheel sender stays off the live desktop's KWin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOLDEN = os.path.join(HERE, "control-golden.json")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""scripts/update-check.py: what it says about the KWin effects the session turns off, and about
-the eye cameras' rate.
+"""scripts/update-check.py: what it says about the KWin effects the session turns off, KWin's EIS,
+and the eye cameras' rate.
 
 KWin 6.2 has a blur and a contrast effect, each with a factory named in kwin_wayland. KWin 6.6
 (SteamOS 0.5.8) has no contrast effect of its own, which is not something to warn about; a
@@ -47,6 +47,31 @@ class KWinEffects(unittest.TestCase):
                 state, _, detail = self.m.kwin_effects(blob)
                 self.assertEqual(state, "warn")
                 self.assertIn(named, detail)
+
+
+class KWinEis(unittest.TestCase):
+    """The wheel's steps go through KWin's EIS plugin (input/kwin_ei.py, issue 108)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load()
+
+    def plugin(self, data):
+        import tempfile
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())) / "eis.so"
+        path.write_bytes(data)
+        return str(path)
+
+    def test_plugin_with_connect_to_eis(self):
+        state, label, _ = self.m.kwin_eis(self.plugin(b"\0org.kde.KWin.EIS.RemoteDesktop\0connectToEIS\0"))
+        self.assertEqual((state, label), ("ok", "KWin EIS"))
+
+    def test_no_plugin_or_no_call_warns(self):
+        for path in ("/nonexistent/eis.so", self.plugin(b"org.kde.KWin.EIS.InputCapture")):
+            with self.subTest(path=path):
+                state, _, detail = self.m.kwin_eis(path)
+                self.assertEqual(state, "warn")
+                self.assertIn("Zed", detail)
 
 
 class EyeRate(unittest.TestCase):

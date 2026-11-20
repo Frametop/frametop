@@ -21,6 +21,7 @@ with open(relay_path) as f:
     exec(compile(f.read(), relay_path, "exec"), relay.__dict__)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "hands"))
 import handsmode  # noqa: E402
+os.environ["FT_KWIN_EI"] = "0"  # the relay's wheel sender stays off the live desktop's KWin
 
 failures = []
 DIR = tempfile.mkdtemp()

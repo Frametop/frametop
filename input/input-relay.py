@@ -238,6 +238,9 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
                     every 5 s), so pc_game.py asks the PC whether it runs a game
+  kwinscroll DX DY  from ft-screens, while the relay tells it "kwinei 1" (each second): a KWin
+                    screen's wheel in 120ths of a notch, through KWin's EIS (kwin_ei.py, issue 108);
+                    ignored from another user
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
                     hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
   gamepad desktop|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a desktop
@@ -318,6 +321,9 @@ import ft_commands  # noqa: E402  (your commands, "run:NAME")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_pinlock  # noqa: E402
+import kwin_ei  # noqa: E402  (the desktop's wheel through KWin's EIS, issue 108)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "input-settings"))
+import desktop_layout  # noqa: E402  (desktop_env: the running desktop's bus)
 from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabulary)
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
@@ -1366,6 +1372,9 @@ class Relay:
         self.grab_waiting = False  # a keyboard's grab waits for its keys to come up
         self.volume = Volume()
         self.desktop_layout = DesktopLayout()
+        # FT_KWIN_EI=0 (the tests): no sender, so nothing reaches a running desktop's KWin.
+        self.kwin_ei = kwin_ei.KwinEi(log, lambda: desktop_layout.desktop_env().get("DBUS_SESSION_BUS_ADDRESS"),
+                                      lib=None if os.environ.get("FT_KWIN_EI") == "0" else kwin_ei.load_libei)
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
         self.pc_game = pc_game.PcGame(log)
@@ -2226,6 +2235,12 @@ class Relay:
         if cmd == "vrlink" and len(words) == 2:
             self.pc_game.link_state(words[1] == "1", now)
             return
+        if cmd == "kwinscroll" and len(words) == 3:
+            # From ft-screens (no reply), while we said "kwinei 1": a KWin screen's wheel, in 120ths
+            # of a notch, through KWin's EIS (kwin_ei.py). It scrolls the desktop, so only from this user.
+            if uid == os.getuid():
+                self.kwin_ei.scroll(int(words[1]), int(words[2]))
+            return
         if cmd == "vrdash" and len(words) == 2:
             self.pause.dashboard_state(words[1] == "1")
             self.gamepad.dashboard_state(words[1] == "1")
@@ -2478,7 +2493,8 @@ class Relay:
             # looks the controllers up again (game_pause.py).
             if self.lease.holding_changed():
                 self.pause.controllers_changed()
-            ready, _, _ = select.select(list(self.nodes) + [self.control], [], [],
+            ready, _, _ = select.select(list(self.nodes) + [self.control]
+                                        + ([self.kwin_ei] if self.kwin_ei.fileno() >= 0 else []), [], [],
                                         self.typing_timeout(now, min(self.volume.timeout(now, pointer.timeout() if pointer else 0.5),
                                                                      self.pause.timeout(now), self.gamepad.timeout(now))))
             now = time.monotonic()
@@ -2486,12 +2502,20 @@ class Relay:
             for fd in ready:
                 if fd is self.control:
                     self.handle_control(now)
+                elif fd is self.kwin_ei:
+                    self.kwin_ei.dispatch()
                 elif fd in self.nodes:  # (not dropped earlier in this batch: a host's "hostbye")
                     self.read_node(self.nodes[fd], now)
 
     def scan(self, now):
         """Once a second: hosts gone quiet, keys no device holds, and event nodes come and gone."""
         self.next_scan = now + 1.0
+        self.kwin_ei.poll(now)
+        if self.kwin_ei.ready():
+            try:
+                self.screens_sock.sendto(b"kwinei 1", SCREENS)  # ft-screens sends its wheel here
+            except OSError:
+                pass  # ft-screens not running
         for node in [n for n in self.nodes.values() if n.network and now > n.until]:
             self.drop(node, "its host went quiet")
         self.reconcile_desktop_keys()

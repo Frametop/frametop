@@ -186,6 +186,9 @@ struct server {
     // the "vrkeyboard" commands open and close it (see keyboard_command).
     unsigned kb_close_at;   // ticks: close it then (a text field lost focus), 0 not
     uint32_t fullkb_until;  // ms; it counts as running until then, 0 not
+    // The input relay's wheel into KWin's EIS ("kwinei 1" every second while it has one;
+    // input/kwin_ei.py): a KWin screen's wheel goes there instead of through the seat until then.
+    uint32_t kwinei_until;  // ms; 0 never said
     bool fullkb_open;       // it's up for Frametop
     bool fullkb_auto;       // ...opened for a focused text field
     bool vr;               // connected to SteamVR (not --no-vr)
@@ -230,6 +233,10 @@ static void relay_send(struct server *s, const char *msg) {
 static void float_send(struct server *s, const char *msg) {
     static struct ft_sock_log to = {FT_SOCK_FLOAT, 0, 0, 0};
     sock_send(s, &to, msg);
+}
+
+static bool kwin_ei(const struct server *s) {
+    return s->kwinei_until && (int32_t)(s->kwinei_until - now_ms()) > 0;
 }
 
 static bool fullkb(const struct server *s) {
@@ -662,6 +669,15 @@ static void seat_event(struct server *s, const struct ft_event *e) {
                 char msg[48];
                 snprintf(msg, sizeof msg, "scale %d %d", sc->index + 1, e->dy < 0 ? 1 : -1);
                 float_send(s, msg);
+                break;
+            }
+            if (kwin_ei(s)) {
+                // KWin's nested backend passes a seat's wheel on without its steps or source, and
+                // an app that reads a wheel only from its steps (Zed) never scrolls: KWin's EIS
+                // passes the steps on (issue 108). The motion above has put KWin's pointer here.
+                char msg[48];
+                snprintf(msg, sizeof msg, "kwinscroll %d %d", (int)lround(e->dx * 120), (int)lround(e->dy * 120));
+                relay_send(s, msg);
                 break;
             }
             if (e->dy != 0)
@@ -1294,7 +1310,8 @@ static void keys_state(struct server *s, char *reply, int size) {
 // "key <code> <value>", "peer ..." (input from the others in a Together room, from ft-roominput:
 // peerinput.h), "pad ..." (gamepad mode's pad, from the input relay: to the remote screen
 // SteamVR's Gamepad mode is for), "vrkeyboard show|hide|toggle|close" (Full Keyboard,
-// from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not),
+// from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not), "kwinei 1"
+// (the relay: a KWin screen's wheel goes to it, as "kwinscroll", for KWin's EIS),
 // "frunner on|off" (frunner's search has the typing; see spot_open), "keys" (what's held:
 // keys_state), "keys release" (every key up: release_all_keys), and "click <overlay key>"
 // (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest is in
@@ -1411,6 +1428,12 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             snprintf(reply, sizeof reply, "%s", peer_command(s, buf + 5));
         } else if (strncmp(buf, "vrkeyboard ", 11) == 0) {
             keyboard_command(s, buf + 11, reply, sizeof reply);
+        } else if (strcmp(buf, "kwinei 1") == 0) {
+            // From the input relay (unbound, no reply): its wheel into KWin's EIS is ready.
+            if (!kwin_ei(s)) wlr_log(WLR_INFO, "the desktop's wheel goes through KWin's EIS (the input relay)");
+            s->kwinei_until = (now_ms() + 3000) | 1;
+            len = sizeof from;
+            continue;
         } else if (strcmp(buf, "fullkb 0") == 0 || strcmp(buf, "fullkb 1") == 0) {
             // From the input relay (unbound, no reply): Full Keyboard runs, and is up or not.
             if (!fullkb(s)) wlr_log(WLR_INFO, "Full Keyboard is the keyboard");

@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+os.environ["FT_KWIN_EI"] = "0"  # the relay's wheel sender stays off the live desktop's KWin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 relay_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "input-relay.py")

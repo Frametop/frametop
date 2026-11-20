@@ -85,7 +85,9 @@ PACKAGES = {
             "logging out with a Deskflow client connected (6.2.5 crashes there, and the session's "
             "logout watcher ends it: if it no longer crashes, the watcher can go); a layout "
             "picked on Frametop Settings' Keyboard page applies at once (KWin's "
-            "org.kde.keyboard.reloadConfig on /Layouts)",
+            "org.kde.keyboard.reloadConfig on /Layouts); the wheel scrolls Zed (the input relay's "
+            "libei sender into KWin's EIS, input/kwin_ei.py: its log says \"KWin's EIS has the scroll "
+            "device\"), and if KWin's Wayland backend now sends a wheel's steps itself, kwin_ei can go",
     "plasma-workspace": "the taskbar and panels after a desktop restart; no DiscoverNotifier or "
                         "ibus-daemon inside the desktop; a notification in the desktop shows in the "
                         "Steam session and its buttons work (ft-notifyfwd)",
@@ -95,7 +97,8 @@ PACKAGES = {
                  "Full Keyboard types into a Steam field and a game (libei); a Steam game with "
                  "steam/ft-ondesktop in its launch options opens on a Frametop screen, with no theater",
     "libei": "Full Keyboard types into a game and a gamescope app (its own libei client, in its "
-             "release, talks to gamescope's EIS server from this package)",
+             "release, talks to gamescope's EIS server from this package); the wheel scrolls Zed "
+             "(input/kwin_ei.py loads libei.so.1 through ctypes into KWin's EIS)",
     "deckard-steamvr-session": "Full Keyboard starts with SteamVR and its panel draws (frametop-keyboard.service "
                                "reads its /usr/share/deckard/mesavars.sh)",
     "bluez": "a Bluetooth mouse reconnecting after it sleeps",
@@ -282,6 +285,7 @@ def check_host():
         report("FAIL", "KWin", "no --output-count option: the desktop gets one screen at most")
     report(*kwin_effects(kwin))
     check_kwin_host_protocols()
+    report(*kwin_eis())
 
     # Frunner (frunner/ft_frunner.py) runs on the host's Python: GdkPixbuf's SVG loader
     # draws the apps' icons, and libxkbcommon turns keys into text on the desktop's layout.
@@ -443,6 +447,20 @@ def ft_screens_binary():
                                              "../screens/build/ft-screens"))
     except NameError:
         return os.path.join(HOME, "frametop/screens/build/ft-screens")
+
+
+def kwin_eis(plugin="/usr/lib/qt6/plugins/kwin/plugins/eis.so"):
+    """Whether KWin's EIS plugin still offers connectToEIS on org.kde.KWin.EIS.RemoteDesktop: the
+    input relay sends the desktop's wheel through it, with its steps (input/kwin_ei.py, issue 108)."""
+    try:
+        with open(plugin, "rb") as f:
+            data = f.read()
+    except OSError:
+        data = b""
+    if b"org.kde.KWin.EIS.RemoteDesktop" in data and b"connectToEIS" in data:
+        return "ok", "KWin EIS", "has connectToEIS (the desktop's wheel keeps its steps)"
+    return ("warn", "KWin EIS", "no org.kde.KWin.EIS.RemoteDesktop connectToEIS: the wheel goes through "
+            "KWin's nested backend without its steps, and Zed doesn't scroll (input/kwin_ei.py)")
 
 
 def check_kwin_host_protocols():

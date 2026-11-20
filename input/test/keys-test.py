@@ -24,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+os.environ["FT_KWIN_EI"] = "0"  # the relay's wheel sender stays off the live desktop's KWin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 os.environ["FT_STEAM_PIN_LOCK"] = "0"   # Steam's PIN lock off, whatever this machine's setting

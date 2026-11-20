@@ -168,7 +168,7 @@ def desktopless_key(path):
 
 
 def tile_keys(path):
-    return add_bindings(path, TILE_KEYS_KEY, TILE_COMBOS, "Meta+arrows, Meta+Ctrl+arrows and Meta+/",
+    return add_bindings(path, TILE_KEYS_KEY, TILE_COMBOS, "Meta+Shift+arrows, Meta+Ctrl+arrows and Meta+/",
                         "move and size the dashboard tiles, list the key combinations", "Dashboard tile: ...")
 
 

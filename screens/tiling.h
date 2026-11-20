@@ -427,11 +427,17 @@ inline void Direction(const double pt[3], double *azDeg, double *elDeg) {
 // off the grid (torn off: it stays anchored where it is). A drop on a column's middle half stacks it
 // there, above or below the panel it's on (under the desk line: hanging under it), leaning to the
 // side of the column it was let go on; on its outer quarters, or a gap, a new column that side.
+//
+// Let go in the space over its own column's top, already the top: it goes up, a neighbouring column's
+// top panel in under it (Lift; user, 2026-11-20: dragged up into an empty space "it just pulls the
+// display back down to where it was before instead of pulling displays from the right or left to
+// fill in the gap and put the display up higher").
 struct Drop {
-    enum Kind { Into, NewColumn, TearOff } kind = TearOff;
+    enum Kind { Into, NewColumn, TearOff, Lift } kind = TearOff;
     int col = 0, row = 0;   // Into: the column and the row it takes; NewColumn: the index it takes
     bool below = false;     // Into: under the desk line
-    int align = 0;          // Into: the side of the column it leans against (tilegrid.h's Cell::align)
+    int align = 0;          // Into: the side of the column it leans against (tilegrid.h's Cell::align); Lift: the side to pull from first
+    bool over = false;      // Into: let go over every panel in the column
     bool leftOfSlot = false;   // NewColumn: let go left of Steam's slot (at the split: which side it goes)
 };
 constexpr double kTearMarginDeg = 10;   // this far past the strip, under the desk or over the tallest column: torn off
@@ -462,16 +468,17 @@ inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, 
     const int n = int(cols[c].tiles.size()), b = cols[c].Base();
     d.kind = Drop::Into, d.col = c, d.below = el < l.deskDeg;
     d.row = d.below ? n : b + 1;   // (the lowest under the desk line, or the new base)
-    double c0 = 1e9, c1 = -1e9;
+    double c0 = 1e9, c1 = -1e9, top = -1e9;
     for (const Placed &p : l.tiles) {
         if (p.col != c) continue;
-        c0 = std::min(c0, p.az0), c1 = std::max(c1, p.az1);
+        c0 = std::min(c0, p.az0), c1 = std::max(c1, p.az1), top = std::max(top, p.el1);
         if (p.below != d.below) continue;
         if (el >= (p.el0 + p.el1) / 2) {   // above this one's middle: before it (rows go top down)
             d.row = std::min(d.row, p.row);
         }
     }
     d.align = az < (c0 + c1) / 2 ? -1 : 1;
+    d.over = !d.below && el > top;
     return d;
 }
 

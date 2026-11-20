@@ -231,6 +231,12 @@ public:
             return;
         }
         moved_ = id, movedAz_ = az, recentre_ = false;   // (where you let it go wins)
+        if (d.kind == tiling::Drop::Lift) {
+            EndBatch();
+            spots_[id].satellite = false;
+            Lift(id, d.align);
+            return;
+        }
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
         EndBatch();
@@ -242,6 +248,36 @@ public:
             return true;
         });
     }
+
+    // Off the grid, and the gap it leaves filled (user, 2026-11-20: a PC window's panel opening or
+    // closing, "have all of our displays adjust to fill in the gap"): a panel that stood in a stack
+    // leaves its column short, so a neighbouring column's only panel that fits in its place (no
+    // wider than the column, no taller than it was) goes up there, and that column closes up. Not
+    // Unanchor's other callers (Restore puts it back). False if it wasn't anchored.
+    bool Leave(int id) {
+        const tilegrid::Where w = grid_.Find(id);
+        const tiling::Placed *gone = PlacedOf(id);
+        const bool stacked = !params.fit && w.ok() && gone && !gone->below && grid_.Cols()[size_t(w.col)].cells.size() > 1;
+        const tiling::Placed was = gone ? *gone : tiling::Placed{};
+        if (!Unanchor(id)) return false;
+        if (!stacked) return true;
+        double span = 0;
+        for (const tiling::Placed &p : last_.tiles)
+            if (p.col == w.col && p.id != id) span = std::max(span, p.az1 - p.az0);
+        int best = -1;
+        double bestArea = 0;
+        for (const int c : {w.col - 1, w.col + 1}) {
+            if (c < 0 || c >= int(grid_.Cols().size()) || grid_.Cols()[size_t(c)].cells.size() != 1) continue;
+            const int other = grid_.Cols()[size_t(c)].cells.front().id;
+            const tiling::Placed *q = PlacedOf(other);
+            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || q->el1 - q->el0 > was.el1 - was.el0 + kFitSlackDeg) continue;
+            const double area = (q->az1 - q->az0) * (q->el1 - q->el0);
+            if (area > bestArea) best = c, bestArea = area;
+        }
+        if (best >= 0) slot_.Move(grid_, grid_.Cols()[size_t(best)].cells.front().id, [&] { return grid_.PullTop(best, w.col, 0); });
+        return true;
+    }
+    int steam = -1;   // Steam's window (vrtiles.cpp): never pulled into another column
 
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed.
     bool Press(int id, Key k) {
@@ -544,11 +580,26 @@ private:
         }
     }
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
+    static constexpr double kFitSlackDeg = 0.5;
+    bool Pullable(int id) const { return id != steam && !absent.count(id); }
+    // Let go over its own column, already its top: a neighbouring column's top panel in under it, the
+    // one on side `side` first (none there that can move: nothing).
+    void Lift(int id, int side) {
+        const tilegrid::Where w = grid_.Find(id);
+        if (!w.ok() || grid_.Cols()[size_t(w.col)].Below(w.row)) return;
+        for (const int c : {w.col + (side < 0 ? -1 : 1), w.col + (side < 0 ? 1 : -1)}) {
+            if (c < 0 || c >= int(grid_.Cols().size()) || !Pullable(grid_.Cols()[size_t(c)].cells.front().id)) continue;
+            const int other = grid_.Cols()[size_t(c)].cells.front().id;
+            slot_.Move(grid_, other, [&] { return grid_.PullTop(c, w.col, w.row + 1); });
+            return;
+        }
+    }
     static tiling::Drop Without(const tilegrid::Grid &g, int id, tiling::Drop d) {
         const tilegrid::Where w = g.Find(id);
         if (!w.ok() || d.kind == tiling::Drop::TearOff) return d;
         const bool alone = g.Cols()[size_t(w.col)].cells.size() == 1;   // (its column goes with it)
         if (d.kind == tiling::Drop::Into && d.col == w.col) {
+            if (d.over && w.row == 0) return d.kind = tiling::Drop::Lift, d;   // over itself: up (the grid's indices, with it)
             if (alone) return d.kind = tiling::Drop::NewColumn, d;   // onto itself: back where it was
             if (w.row < d.row) --d.row;
             return d;

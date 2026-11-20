@@ -377,7 +377,7 @@ void TileGone(int i) {
     if (k != g_tileKey.end()) g_tileKey.erase(k);
     g_tileRoom.erase(i);
     if (g_tileFocus == i) g_tileFocus = -1;
-    if (g_tiles.Unanchor(i)) RetileDash(), RememberTiles();
+    if (g_tiles.Leave(i)) RetileDash(), RememberTiles();
 }
 
 // Stays shown with the dashboard closed: as set for it or as DASH_TILE_STAY says (on unless set:
@@ -412,7 +412,7 @@ void TileDrop(Screen &s, int i) {
     tiling::Direction(pt, &az, &el);
     const tiling::Drop d = g_tiles.DropFor(i, az, el, TileInfo);
     g_tiles.Drop(i, d, az);
-    static const char *kinds[] = {"into column", "a new column at", "pulled off: back in its place, column"};
+    static const char *kinds[] = {"into column", "a new column at", "pulled off: back in its place, column", "up, a neighbour pulled in under it, column"};
     std::printf("%s: let go at %.0f, %.0f degrees: %s %d", TileLabel(i).c_str(), az, el, kinds[d.kind], d.col + 1);
     RetileDash();
     std::printf("; the strip %.0f..%.0f (turned %.0f from centred)\n", g_tiles.Last().az0, g_tiles.Last().az1, g_tiles.PanDeg());
@@ -512,6 +512,7 @@ void UpdateDashTiles() {
     // won't show its page without the dashboard): the others close up its gap meanwhile (user, 2026-11-19).
     // So do they round a panel with no picture yet or hidden on its own (Board::absent).
     const int steam = SteamDashIndex();
+    g_tiles.steam = steam;
     std::set<int> absent;
     if (!up && steam >= 0) absent.insert(steam);
     for (const int id : g_tiles.Ids())

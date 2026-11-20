@@ -946,6 +946,48 @@ int main() {
         t.RestoreAll({{11, "tile 0 1 0 1 1 1 0"}}, true);
         check("an add after the set ended goes after the others", order(t) == "[ 10 ][ 50 ][ 11 ]");
     }
+    {   // dragged up into the space over its own column (user, 2026-11-20: it went back down; a
+        // neighbour's panel goes in under it), and a panel leaving a stack (a PC window closing) pulls
+        // a neighbour's lone panel that fits into the gap
+        const auto cols = [](const dashtiles::Board &b) {
+            std::string o;
+            for (const auto &c : b.Grid().Cols()) {
+                o += "[";
+                for (const auto &cell : c.cells) o += " " + std::to_string(cell.id);
+                o += " ]";
+            }
+            return o;
+        };
+        const auto same = [](int) { return dashtiles::Info{1.6, 0.9}; };
+        dashtiles::Board b;
+        for (const int i : {1, 2, 3}) b.Anchor(i, -1, dashtiles::Stay::Default);
+        b.Arrange(same);
+        const tiling::Placed p2 = *b.PlacedOf(2);
+        const double az = p2.azDeg - 2, el = p2.el1 + 4;   // (over it, left of its middle)
+        const tiling::Drop d = b.DropFor(2, az, el, same);
+        check("lift: over its own column's top: a lift", d.kind == tiling::Drop::Lift);
+        b.Drop(2, d, az);
+        b.Arrange(same);
+        check("lift: the left neighbour's panel in under it", cols(b) == "[ 2 1 ][ 3 ]");
+        check("lift: ...and it higher than it was", b.PlacedOf(2)->el0 > p2.el1);
+        const tiling::Drop on = b.DropFor(2, b.PlacedOf(2)->azDeg, b.PlacedOf(2)->elDeg, same);
+        b.Drop(2, on, b.PlacedOf(2)->azDeg);
+        check("lift: let go on itself: nothing moves", cols(b) == "[ 2 1 ][ 3 ]");
+        b.steam = 3;
+        dashtiles::Board s = b;
+        s.Drop(2, s.DropFor(2, s.PlacedOf(2)->azDeg + 2, s.PlacedOf(2)->el1 + 4, same), 0);
+        check("lift: Steam's window is never pulled: nothing", cols(s) == "[ 2 1 ][ 3 ]");
+        b.steam = -1;
+        check("leave: the stack's top goes: its neighbour's lone panel in its place", b.Leave(2) && cols(b) == "[ 3 1 ]");
+        b.Arrange(same);
+        check("leave: a lone panel goes: nothing pulled", b.Leave(3) && cols(b) == "[ 1 ]");
+        dashtiles::Board w;
+        const auto wide = [](int id) { return id == 3 ? dashtiles::Info{3.5, 1.97} : dashtiles::Info{1.6, 0.9}; };
+        for (const int i : {1, 2, 3}) w.Anchor(i, -1, dashtiles::Stay::Default);
+        w.Drop(2, {tiling::Drop::Into, 0, 0});
+        w.Arrange(wide);
+        check("leave: a neighbour wider than the column: not pulled", w.Leave(2) && cols(w) == "[ 1 ][ 3 ]");
+    }
     {   // the memory's file: one write a moment after a burst of changes, and a flush on the way out
         dashtiles::SaveTimer s;
         check("nothing changed: never due", !s.Due(0) && !s.Due(100000) && !s.Flush());

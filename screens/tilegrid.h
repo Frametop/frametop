@@ -99,6 +99,19 @@ public:
         }
         Put(cols_[col], row, Cell{id, Sc(scale)}, below);
     }
+    // Column `from`'s top panel into column `to` at `row`, on the desk line or above it (its column
+    // goes when it was the last in it). False when there's no such move.
+    bool PullTop(int from, int to, int row) {
+        const int n = int(cols_.size());
+        if (from == to || from < 0 || to < 0 || from >= n || to >= n || cols_[size_t(from)].cells.empty()) return false;
+        Cell cell = cols_[size_t(from)].cells.front();
+        cell.align = 0;
+        const bool gone = cols_[size_t(from)].cells.size() == 1;
+        Take(cell.id);
+        if (gone && from < to) --to;
+        Put(cols_[size_t(to)], row, cell, false);
+        return true;
+    }
     // Out of the grid (its column goes when it was the last in it; the splits with the last
     // panel). False if it wasn't in it.
     bool Remove(int id) {

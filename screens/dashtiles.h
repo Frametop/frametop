@@ -1,7 +1,8 @@
 // The dashboard tiles' policy (screens/vrtiles.cpp does the OpenVR side): which panels are
 // anchored to the SteamVR dashboard, which of those tile (tilegrid.h keeps their order and sizes,
-// tiling.h places them) and which are satellites, which stay shown with the dashboard closed, what
-// the tiling keys do, and each app's or display's last state (Memory).
+// tiling.h places them) and which are satellites, which stay shown with the dashboard closed, the
+// tiling keys (tilekeys.h says what each does to the grid; tileview.h, what fits where as laid out
+// last), and each app's or display's last state (Memory).
 //
 // Anchored (user, 2026-11-16): a panel rides with the dashboard. Dragged on the grid, it moves to
 // where it's let go; pulled well off it, it goes back to its place (user, 2026-11-19: tiled mode
@@ -21,10 +22,12 @@
 #include "tilegap.h"
 #include "tilegrid.h"
 #include "tileframe.h"
+#include "tilekeys.h"
 #include "tilememory.h"
 #include "tilepack.h"
 #include "tilefit.h"
 #include "tilestate.h"
+#include "tileview.h"
 #include "tiling.h"
 
 #include <algorithm>
@@ -44,30 +47,6 @@ struct Spot {
     bool satellite = false;   // off the grid, at `rel`
     double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // a satellite's: group frame -> panel
 };
-
-// What the host says about a panel: its natural size at the wall (its pixels, tiling::MetresPerPx each).
-struct Info {
-    double widthM = 1.6, heightM = 0.9;
-};
-
-enum class Key { Left, Right, Up, Down, Wider, Narrower, Taller, Shorter };
-constexpr const char *kKeyNames[] = {"left", "right", "up", "down", "wider", "narrower", "taller", "shorter"};
-inline bool ParseKey(const char *word, Key *k) {
-    for (int i = 0; i < 8; ++i)
-        if (std::strcmp(word, kKeyNames[i]) == 0) return *k = Key(i), true;
-    return false;
-}
-
-// A column `height` tall from the desk line (ctx: the board's tiling::Params): no taller than
-// tilepack::kColumnDeg as your eyes see it.
-inline bool EyeFits(const void *ctx, double height) {
-    const tiling::Params &p = *static_cast<const tiling::Params *>(ctx);
-    return tiling::EyeElDeg(p, p.deskDeg + height) - tiling::EyeElDeg(p, p.deskDeg) <= tilepack::kColumnDeg + 1e-9;
-}
-// ...with `under` of it hanging under the desk line.
-inline bool EyeFitsRound(const tiling::Params &p, double under, double height) {
-    return tiling::EyeElDeg(p, p.deskDeg - under + height) - tiling::EyeElDeg(p, p.deskDeg - under) <= tilepack::kColumnDeg + 1e-9;
-}
 
 class Board {
 public:
@@ -114,7 +93,7 @@ public:
         spots_[id].stay = stay;
         Recentre();
         if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
-        if (const int c = info ? OnTopOf(*info) : -1; c >= 0) {
+        if (const int c = info ? Laid().OnTopOf(*info) : -1; c >= 0) {
             if (!sized) unsized_.insert(id);
             return grid_.Insert(id, c, 0, false);
         }
@@ -168,7 +147,8 @@ public:
             return;
         }
         if (d.kind == tiling::Drop::Lift) {   // (refused: nothing changed, nothing forgotten)
-            if (Lift(id, d.align)) EndBatch(), spots_[id].satellite = false, recentre_ = false;
+            if (int moved; tilekeys::Lift(grid_, Laid(), id, d.align, &moved))
+                EndBatch(), spots_[id].satellite = false, recentre_ = false, moved_ = moved, movedAz_ = NAN;   // (the strip's pan: it's the one that moved)
             return;
         }
         moved_ = id, movedAz_ = az, recentre_ = false;   // (where you let it go wins)
@@ -191,7 +171,7 @@ public:
     bool Leave(int id, int64_t nowMs, const std::string &key = "") {
         const tilegrid::Where w = grid_.Find(id);
         const tiling::Placed *gone = PlacedOf(id);
-        tilegap::Gap gap{id, key, -1, gone ? Unshrunk(gone->el1 - gone->el0) : 0, {}};
+        tilegap::Gap gap{id, key, -1, gone ? Laid().Unshrunk(gone->el1 - gone->el0) : 0, {}};
         if (!params.fit && w.ok() && gone && !gone->below) {
             const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
             for (int r = 0; r < int(col.cells.size()); ++r)
@@ -211,31 +191,16 @@ public:
         const tilegap::Gap g = gaps_.Due(nowMs);
         const tilegrid::Where w = grid_.Find(g.stayed);
         if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone))) return false;
-        if (Newcomer(g, w.col)) return gaps_.Take(g), false;
-        if (!GapOpen(g, w.col)) return false;
-        double span = 0;
-        for (const tiling::Placed &p : last_.tiles)
-            if (p.col == w.col) span = std::max(span, p.az1 - p.az0);
-        int best = -1, side = 0;
-        double bestArea = 0;
-        for (const int dir : {-1, +1}) {
-            const int c = Neighbour(w.col, dir);
-            if (c < 0 || grid_.Cols()[size_t(c)].cells.size() != 1 || !LaidOut(c)) continue;
-            const int other = grid_.Cols()[size_t(c)].cells.front().id;
-            const tiling::Placed *q = PlacedOf(other);
-            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || Unshrunk(q->el1 - q->el0) > g.heightDeg + kFitSlackDeg ||
-                !FitsUnder(w.col, other))   // (with what hangs under it now)
-                continue;
-            const double area = (q->az1 - q->az0) * (q->el1 - q->el0);
-            if (area > bestArea) best = c, side = dir, bestArea = area;
-        }
-        if (best < 0) return false;
-        const int other = grid_.Cols()[size_t(best)].cells.front().id;
-        grid_.PullTop(best, w.col, 0);   // (on its side of the slot: the split stays a default)
-        gaps_.Filled({g.key, other, g.stayed, side});
+        if (Laid().Newcomer(g, w.col)) return gaps_.Take(g), false;
+        if (!Laid().GapOpen(g, w.col)) return false;
+        const View::Pick pick = Laid().FillFor(g, w.col);
+        if (pick.col < 0) return false;
+        const int other = grid_.Cols()[size_t(pick.col)].cells.front().id;
+        grid_.PullTop(pick.col, w.col, 0);   // (on its side of the slot: the split stays a default)
+        gaps_.Filled({g.key, other, g.stayed, pick.side});
         return true;
     }
-    int steam = -1;   // Steam's window (vrtiles.cpp): never pulled into another column
+    int steam = -1;   // Steam's window (vrtiles.cpp): never pulled into another column (View::Pullable)
 
     // A panel put on a stack before its size was known (Anchor's guess for one with no picture yet,
     // or Restore's place in a stack another panel took its gap in), shown and laid out since: out
@@ -246,14 +211,14 @@ public:
         for (auto it = unsized_.begin(); it != unsized_.end();) {
             const int id = *it;
             const tilegrid::Where w = grid_.Find(id);
-            if (w.ok() && (absent.count(id) || !LaidOut(w.col))) {   // (its size not known yet)
+            if (w.ok() && (absent.count(id) || !Laid().LaidOut(w.col))) {   // (its size not known yet)
                 ++it;
                 continue;
             }
             it = unsized_.erase(it);
-            if (!w.ok() || grid_.Cols()[size_t(w.col)].cells.size() < 2 || ColumnFits(w.col, fills_[size_t(w.col)].height)) continue;
+            if (!w.ok() || grid_.Cols()[size_t(w.col)].cells.size() < 2 || Laid().ColumnFits(w.col, fills_[size_t(w.col)].height)) continue;
             moved_ = id, movedAz_ = NAN;   // (the others keep their places)
-            grid_.Insert(id, w.col + 1, 0, true, grid_.CellOf(id)->scale, SideOf(w.col) < 0);
+            grid_.Insert(id, w.col + 1, 0, true, grid_.CellOf(id)->scale, Laid().SideOf(w.col) < 0);
             grid_.SetAlign(id, 0);
             return true;
         }
@@ -263,12 +228,10 @@ public:
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed.
     bool Press(int id, Key k) {
         if (!grid_.Has(id)) return false;
-        const int moved = moved_;
-        const double movedAz = movedAz_;
-        const bool recentre = recentre_;
-        if (Changed(Pressed(id, k))) return unsized_.erase(id), true;
-        moved_ = moved, movedAz_ = movedAz, recentre_ = recentre;   // (refused: nothing changed, nothing forgotten)
-        return false;
+        int moved = id;
+        if (!Changed(tilekeys::Press(grid_, slot_, Laid(), id, k, &moved))) return false;   // (refused: nothing changed, nothing forgotten)
+        moved_ = moved, movedAz_ = NAN, recentre_ = false;   // (moved by a key: the others keep their places, not it)
+        return unsized_.erase(id), true;
     }
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     bool Resized(int id, double factor) {
@@ -276,58 +239,6 @@ public:
         return Changed(grid_.Scale(id, factor)) && (unsized_.erase(id), true);
     }
 
-private:
-    // Meta+Ctrl+Right or Up: bigger; Left or Down: smaller (its natural shape kept).
-    bool Pressed(int id, Key k) {
-        moved_ = id, movedAz_ = NAN, recentre_ = false;   // (moved by a key: the others keep their places, not it)
-        switch (k) {
-            case Key::Left:
-            case Key::Right: {
-                // narrower than its column and not against that edge yet: it goes there first (user,
-                // 2026-11-19: "a 600 pixel wide display that I can either set on the right, or the left")
-                const int dir = k == Key::Left ? -1 : +1;
-                if (const tiling::Placed *p = PlacedOf(id); p && p->narrow && p->lean != dir) return grid_.SetAlign(id, dir);
-                return slot_.Move(grid_, id, [&] { return grid_.MoveSide(id, dir, slot_.Key()); });
-            }
-            case Key::Up: return grid_.MoveUpDown(id, -1) || (Alone(id) && Lift(id, -1));
-            case Key::Down: return grid_.MoveUpDown(id, +1) || (Alone(id) && Hang(id));
-            case Key::Wider:
-            case Key::Taller: return grid_.Scale(id, tilegrid::kStep);
-            case Key::Narrower:
-            case Key::Shorter: return grid_.Scale(id, 1 / tilegrid::kStep);
-        }
-        return false;
-    }
-    // The desk full (another column would take the strip past params.wallDeg): the column a new
-    // panel `info` goes on top of (tilepack.h): where it adds the least height (beside others on its
-    // top shelf), then the lowest, then the nearer in front, of those it fits under kColumnDeg and is
-    // no wider than; -1 while there's room, before the grid has been laid out, or when none takes it
-    // (a column of its own then).
-    // A size in metres as degrees round you, at the wall.
-    double Span(double m) const { return tiling::Deg(2 * std::atan2(m / 2, params.radius)); }
-    int OnTopOf(const Info &info) const {
-        if (grid_.Empty() || last_.tiles.empty() || fills_.size() != grid_.Cols().size()) return -1;
-        const tilepack::Item it{-1, Span(info.widthM), Span(info.heightM)};
-        if (last_.az1 - last_.az0 + params.gapDeg + it.wDeg <= params.wallDeg) return -1;
-        std::map<int, double> front;   // (each column's nearest in front)
-        for (const tiling::Placed &p : last_.tiles) {
-            const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
-            if (!front.count(p.col) || off < front[p.col]) front[p.col] = off;
-        }
-        int best = -1;
-        double bestAdd = 0;
-        for (size_t c = 0; c < fills_.size(); ++c) {
-            const tilepack::Fill &f = fills_[c];
-            const double h = tilepack::Grown(f, it, params.gapDeg);
-            if (h < 0 || !ColumnFits(int(c), h)) continue;
-            const double add = h - f.height;
-            const tilepack::Fill &b = best < 0 ? f : fills_[size_t(best)];
-            const bool lower = f.height < b.height - 1e-6 || (f.height < b.height + 1e-6 && front[int(c)] < front[best]);
-            if (best < 0 || add < bestAdd - 1e-9 || (add < bestAdd + 1e-9 && lower)) best = int(c), bestAdd = add;
-        }
-        return best;
-    }
-public:
     // Every tile packed into columns again (tilepack.h), sizes kept: a reset's (user, 2026-11-19:
     // "Tiling looks way broken ... There's a massive gap in the middle").
     template <typename InfoOf>
@@ -337,7 +248,7 @@ public:
         for (const tilegrid::Col &col : grid_.Cols())
             for (const tilegrid::Cell &cell : col.cells) {
                 const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);   // (not shown: a column of its own)
-                items.push_back({cell.id, Span(i.widthM * cell.scale), Span(i.heightM * cell.scale)});
+                items.push_back({cell.id, Laid().Span(i.widthM * cell.scale), Laid().Span(i.heightM * cell.scale)});
                 scales[cell.id] = cell.scale;
             }
         if (items.empty()) return;
@@ -385,9 +296,10 @@ public:
     const tiling::Layout &Arrange(InfoOf info) {
         const std::vector<tiling::Column> cols = Columns(info);
         fills_.clear();
+        const View at = Laid();
         for (const tiling::Column &c : cols) {   // (each column's shelves so far, from the desk up: OnTopOf)
             std::vector<tilepack::Item> deskUp;
-            for (int r = c.Base(); r >= 0; --r) deskUp.push_back({c.tiles[size_t(r)].id, Span(c.tiles[size_t(r)].widthM), Span(c.tiles[size_t(r)].heightM)});
+            for (int r = c.Base(); r >= 0; --r) deskUp.push_back({c.tiles[size_t(r)].id, at.Span(c.tiles[size_t(r)].widthM), at.Span(c.tiles[size_t(r)].heightM)});
             fills_.push_back(tilepack::FillOf(deskUp, params.gapDeg));
         }
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
@@ -405,11 +317,9 @@ public:
     // The split in use now (-1: no slot in the strip, or not chosen yet).
     int Split() const { return slot_.Split(grid_); }
     const tiling::Layout &Last() const { return last_; }
-    const tiling::Placed *PlacedOf(int id) const {
-        for (const auto &p : last_.tiles)
-            if (p.id == id) return &p;
-        return nullptr;
-    }
+    const tiling::Placed *PlacedOf(int id) const { return Laid().PlacedOf(id); }
+    // The board as laid out last, to ask what fits where (tileview.h).
+    View Laid() const { return {params, grid_, last_, fills_, absent, slot_, steam}; }
 
     // A panel's state, to remember it (tilestate.h's text).
     std::string Remember(int id) const { return Text(StateOf(id)); }
@@ -449,7 +359,7 @@ public:
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
         int col = st.col;   // (back in the stack it left: the panel pulled into its gap goes back first)
-        if (!st.alone && fill.pulled >= 0 && tilegap::Undo(grid_, fill, SideOf(grid_.Find(fill.stayed).col) < 0)) col = grid_.Find(fill.stayed).col;
+        if (!st.alone && fill.pulled >= 0 && tilegap::Undo(grid_, fill, Laid().SideOf(grid_.Find(fill.stayed).col) < 0)) col = grid_.Find(fill.stayed).col;
         grid_.Insert(id, col, st.row, st.alone, st.scale, false, st.below);
         grid_.SetAlign(id, st.align);
         if (taken && !st.alone) unsized_.insert(id);   // (its stack isn't as it left it: Settle)
@@ -572,97 +482,6 @@ private:
         }
     }
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
-    static constexpr double kFitSlackDeg = 0.5;
-    // Degrees as laid out last, as they'd be unshrunk (tiling::Layout::shrink: the sizes fills_ has).
-    double Unshrunk(double deg) const { return last_.shrink > 0 ? deg / last_.shrink : deg; }
-    // Column `col` with `height` from the desk line up (unshrunk) and what hangs under it as laid
-    // out last: no taller than tilepack::kColumnDeg as your eyes see it (OnTopOf's, Lift's test).
-    bool ColumnFits(int col, double height) const {
-        double under = 0;
-        for (const tiling::Placed &p : last_.tiles)
-            if (p.col == col) under = std::max(under, Unshrunk(params.deskDeg - p.el0));
-        return EyeFitsRound(params, under, height + under);   // (`under` from the desk line: its gap and all)
-    }
-    bool Pullable(int id) const { return id != steam && !absent.count(id); }
-    // Column `col` as laid out last: each of its panels where Arrange put it (a column added or
-    // taken away since shifts the others: their sizes there are another column's).
-    bool LaidOut(int col) const {
-        if (fills_.size() != grid_.Cols().size()) return false;
-        for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)
-            if (const tiling::Placed *p = PlacedOf(c.id); !p || p->col != col) return false;
-        return true;
-    }
-    // Gap `g`, in column `col`, still as Leave left it (council, 2026-11-20): standing there only
-    // panels it left (another there took the gap, whatever its size: one opened into it, or one swapped
-    // for one that went), none not shown yet (no size to test), and laid out since.
-    bool GapOpen(const tilegap::Gap &g, int col) const {
-        for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)
-            if (absent.count(c.id)) return false;
-        return !Newcomer(g, col) && LaidOut(col);
-    }
-    // A panel stands in gap `g`'s stack (column `col`) that Leave didn't leave there: it took the gap.
-    bool Newcomer(const tilegap::Gap &g, int col) const {
-        const tilegrid::Col &c = grid_.Cols()[size_t(col)];
-        for (int r = 0; r < int(c.cells.size()); ++r)
-            if (!c.Below(r) && std::find(g.stack.begin(), g.stack.end(), c.cells[size_t(r)].id) == g.stack.end()) return true;
-        return false;
-    }
-    int SideOf(int col) const { return slot_.SideOfCol(grid_, col); }
-    // Nothing in column `col` is shown (Board::absent: laid out at no size).
-    bool Ghost(int col) const {
-        for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)
-            if (!absent.count(c.id)) return false;
-        return true;
-    }
-    // The column next to `col` on side `dir` (-1 left) as you see them (past columns with nothing
-    // shown), on its side of Steam's slot (only Meta+Shift+Left/Right step across it); -1: none.
-    int Neighbour(int col, int dir) const {
-        const int n = int(grid_.Cols().size());
-        int c = col + dir;
-        while (c >= 0 && c < n && Ghost(c)) c += dir;
-        return c < 0 || c >= n || SideOf(c) != SideOf(col) ? -1 : c;
-    }
-    // Panel `other` would fit standing under column `col` on the desk line (not laid out yet: yes).
-    bool FitsUnder(int col, int other) const {
-        const tiling::Placed *q = PlacedOf(other);
-        if (!q || fills_.size() != grid_.Cols().size()) return true;
-        return ColumnFits(col, fills_[size_t(col)].height + params.gapDeg + Unshrunk(q->el1 - q->el0));
-    }
-    // Let go over its own column, already its top (or Meta+Shift+Up alone in its column, user
-    // 2026-11-20: "tile it up"): a neighbouring column's top panel in under it, the one on side `side`
-    // first, if it fits (none that can: nothing). It stays where it is; the one pulled in moves.
-    // False when nothing changed.
-    bool Lift(int id, int side) {
-        const tilegrid::Where w = grid_.Find(id);
-        if (!w.ok() || grid_.Cols()[size_t(w.col)].Below(w.row)) return false;
-        for (const int dir : {side < 0 ? -1 : 1, side < 0 ? 1 : -1}) {
-            const int c = Neighbour(w.col, dir);
-            if (c < 0) continue;
-            const int other = grid_.Cols()[size_t(c)].cells.front().id;
-            if (!Pullable(other) || !FitsUnder(w.col, other)) continue;
-            moved_ = other, movedAz_ = NAN;   // (the strip's pan: it's the one that moved)
-            return grid_.PullTop(c, w.col, w.row + 1);
-        }
-        return false;
-    }
-    // Meta+Shift+Down alone in its column ("tile it down"): it hangs under the neighbouring column,
-    // the left one first, lowest there (its own column goes, as a drop under that column does). Not
-    // under Steam's window or a column with nothing shown, nor across Steam's slot.
-    bool Hang(int id) {
-        const tilegrid::Where w = grid_.Find(id);
-        if (!w.ok()) return false;
-        for (const int dir : {-1, +1}) {
-            const int c = Neighbour(w.col, dir);
-            if (c < 0) continue;
-            const tilegrid::Col &col = grid_.Cols()[size_t(c)];
-            if (Pullable(col.cells[size_t(col.base)].id)) return grid_.HangUnder(id, c);
-        }
-        return false;
-    }
-    bool Alone(int id) const {
-        const tilegrid::Where w = grid_.Find(id);
-        return w.ok() && grid_.Cols()[size_t(w.col)].cells.size() == 1;
-    }
     static tiling::Drop Without(const tilegrid::Grid &g, int id, tiling::Drop d) {
         const tilegrid::Where w = g.Find(id);
         if (!w.ok() || d.kind == tiling::Drop::TearOff) return d;

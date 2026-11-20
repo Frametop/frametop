@@ -9,18 +9,22 @@ and this script writes them in from the pin:
   host/linux/get.sh                       TAG, PACKAGE and both SHA-256s
   host/windows/frametop-host-setup.ps1    the release URL and each file's SHA-256; the build it
                                           replaces goes on $OlderBuildShas
-  README.md, host/*/README.md             the tag and package names (links, the Windows exe)
+  README.md, host/*/README.md             every mention of the pinned tag and package (links,
+                                          steps): a sentence there about an earlier build has
+                                          to name that build, not the pinned one
 
-  scripts/pin-vibepollo.py pin [TAG]   pin TAG, or the fork's latest release (the GitHub API,
+  scripts/pin-vibepollo.py pin [TAG] [--base VERSION]
+                                       pin TAG, or the fork's latest release (the GitHub API,
                                        each file's .sha256 asset, and Vibepollo's Linux installer
-                                       at the tag, hashed here); then apply
+                                       at the tag, hashed here); then apply. The Windows base
+                                       comes from the release notes, or --base
   scripts/pin-vibepollo.py apply       write the pin into the files (after editing it by hand)
   scripts/pin-vibepollo.py check       exit 1 if a file doesn't match the pin; changes nothing
 
 Windows: Frametop's files go into a stock Vibepollo install (windows.base, the kit's
-$VibepolloVersion). A release built for another base needs the kit changed by hand first
-(its installer URL and hash, the stock files' hashes, $EarlierShas), so pin and apply refuse
-when the two don't match.
+$VibepolloVersion), which the release notes name. A release built for another base needs the
+kit changed by hand first (its installer URL and hash, the stock files' hashes, $EarlierShas),
+so pin and apply refuse when the two don't match, and change nothing.
 """
 import hashlib
 import json
@@ -35,9 +39,11 @@ PIN = "host/vibepollo-pin.json"
 GET_SH = "host/linux/get.sh"
 KIT = "host/windows/frametop-host-setup.ps1"
 DOCS = ("README.md", "host/linux/README.md", "host/windows/README.md")
-# The Windows host setup as a program, on each release since frametop-2.0.4 (the fork's
-# packaging/windows/frametop-host-setup). It holds no pins: it runs the kit from main.
+# The Windows host setup as a program (the fork's packaging/windows/frametop-host-setup), on
+# the fork's releases after frametop-2.0.4. It holds no pins (it runs the kit from main), so
+# the pages link the latest release's copy.
 SETUP_EXE = "FrametopHostSetup.exe"
+SETUP_EXE_URL = f"https://github.com/{REPO}/releases/latest/download/{SETUP_EXE}"
 WINDOWS_FILES = ("sunshine.exe", "tools\\sunshine_wgc_capture.exe", "tools\\frametop_clipboard.exe")
 SHA = re.compile(r"[0-9a-f]{64}")
 
@@ -85,8 +91,14 @@ def sha_asset(fetch, assets, name):
     return fields[0].lower()
 
 
-def pin_from_release(fetch, tag=None):
-    """The pin for TAG (or the latest release), from the release's assets. FETCH(url) -> bytes."""
+# The fork's release notes say which stock Vibepollo the Windows files go into
+# (.github/frametop-release-notes.md: "... go into a Vibepollo 2.0.3 install").
+BASE_IN_NOTES = re.compile(r"go into a Vibepollo ([0-9]+(?:\.[0-9]+)+) install")
+
+
+def pin_from_release(fetch, tag=None, base=None):
+    """The pin for TAG (or the latest release), from the release's assets and notes; BASE
+    overrides the Windows base the notes give. FETCH(url) -> bytes."""
     api = f"https://api.github.com/repos/{REPO}/releases/" + (f"tags/{tag}" if tag else "latest")
     release = json.loads(fetch(api))
     tag = release["tag_name"]
@@ -98,6 +110,11 @@ def pin_from_release(fetch, tag=None):
     packages = [n for n in assets if re.fullmatch(r"vibepollo-[0-9A-Za-z.-]+-x86_64\.pkg\.tar\.zst", n) and "-debug-" not in n]
     if len(packages) != 1:
         raise PinError(f"{tag}: expected one Arch package, found {len(packages)}")
+    if base is None:
+        found = BASE_IN_NOTES.findall(release.get("body") or "")
+        if len(set(found)) != 1:
+            raise PinError(f"{tag}'s notes don't say which Vibepollo its Windows files go into; give it with --base VERSION")
+        base = found[0]
     installer = fetch(f"https://raw.githubusercontent.com/{REPO}/{tag}/scripts/linux_install.sh")
     pin = {
         "tag": tag,
@@ -107,7 +124,7 @@ def pin_from_release(fetch, tag=None):
             "installer_sha256": hashlib.sha256(installer).hexdigest(),
         },
         "windows": {
-            "base": None,  # kept from the current pin: a release doesn't say
+            "base": base,
             "files": {p: sha_asset(fetch, assets, p.split("\\")[-1]) for p in WINDOWS_FILES},
         },
     }
@@ -133,10 +150,17 @@ def one(text, pattern, where):
     return found[0]
 
 
-def current(root):
-    """The values the files hold now: what apply replaces."""
-    sh = (root / GET_SH).read_text()
-    kit = (root / KIT).read_text()
+# $OlderBuildShas = @() or a list closed by a line that is just ")".
+OLDER = r"^\$OlderBuildShas = @\((?:\)|\n((?:.*\n)*?)\))$"
+
+
+def read_texts(root):
+    return {p: (root / p).read_text() for p in (GET_SH, KIT) + DOCS}
+
+
+def current(texts):
+    """The values the kits hold: what a new pin replaces."""
+    sh, kit = texts[GET_SH], texts[KIT]
     files = {}
     for path in WINDOWS_FILES:
         files[path] = one(kit, r'^\s*@\{ Path = "' + re.escape(path) + r'"; Sha = "([0-9A-F]{64})"', KIT).lower()
@@ -149,18 +173,22 @@ def current(root):
             "installer_sha256": one(sh, r"^INSTALLER_SHA256=(\S+)$", GET_SH),
         },
         "windows": {"base": one(kit, r'^\$VibepolloVersion = "([^"]+)"$', KIT), "files": files},
-        "older": [s.lower() for s in re.findall(r'"([0-9A-F]{64})"', one(kit, r"^\$OlderBuildShas = @\(((?:.|\n)*?)\)$", KIT))],
+        "older": [s.lower() for s in re.findall(r'"([0-9A-F]{64})"', one(kit, OLDER, KIT))],
     }
 
 
-def name_pattern(name):
-    """NAME as a whole word: frametop-2.0.4 but not frametop-2.0.40 or frametop-2.0.4.1."""
-    return r"(?<![0-9A-Za-z.-])" + re.escape(name) + r"(?!\.?[0-9A-Za-z])"
+def tag_pattern(tag):
+    """TAG as a whole name: frametop-2.0.4, not frametop-2.0.40, frametop-2.0.4.1 or frametop-2.0.4-1."""
+    return r"(?<![0-9A-Za-z.-])" + re.escape(tag) + r"(?![.-]?[0-9A-Za-z])"
 
 
-def check(root):
-    pin = read_pin(root)
-    now = current(root)
+def package_pattern(package):
+    """PACKAGE as a whole name; its .sha256 file's name has it too."""
+    return r"(?<![0-9A-Za-z.-])" + re.escape(package) + r"(?![0-9A-Za-z_-])"
+
+
+def problems_in(pin, texts):
+    now = current(texts)
     problems = []
     if now["tag"] != pin["tag"] or now["kit_tag"] != pin["tag"]:
         problems.append(f"the kits pin {now['tag']} (Linux) and {now['kit_tag']} (Windows), the pin says {pin['tag']}")
@@ -170,16 +198,22 @@ def check(root):
         problems.append(f"{KIT} goes into Vibepollo {now['windows']['base']}, the pin says {pin['windows']['base']}")
     if now["windows"]["files"] != pin["windows"]["files"]:
         problems.append(f"{KIT}'s file SHA-256s don't match the pin's")
-    exe = f"https://github.com/{REPO}/releases/download/{pin['tag']}/{SETUP_EXE}"
+    for doc in DOCS:
+        if not re.search(tag_pattern(pin["tag"]), texts[doc]):
+            problems.append(f"{doc} doesn't name {pin['tag']}")
     for doc in ("README.md", "host/windows/README.md"):
-        if exe not in (root / doc).read_text():
-            problems.append(f"{doc} doesn't link {exe}")
+        if SETUP_EXE_URL not in texts[doc]:
+            problems.append(f"{doc} doesn't link {SETUP_EXE_URL}")
     return problems
 
 
-def apply(root):
-    pin = read_pin(root)
-    now = current(root)
+def check(root):
+    return problems_in(read_pin(root), read_texts(root))
+
+
+def render(pin, texts):
+    """TEXTS with PIN written in: a new dict; refuses (PinError) rather than half-writing."""
+    now = current(texts)
     if now["windows"]["base"] != pin["windows"]["base"]:
         raise PinError(
             f"the pin's Windows files go into Vibepollo {pin['windows']['base']}, but {KIT} installs "
@@ -189,14 +223,14 @@ def apply(root):
     old_tag, new_tag = now["tag"], pin["tag"]
     old_pkg, new_pkg = now["linux"]["package"], pin["linux"]["package"]
 
-    texts = {p: (root / p).read_text() for p in (GET_SH, KIT) + DOCS}
+    texts = dict(texts)
     # Names first: every mention of the pinned tag and package (links, steps) moves along, so a
-    # doc that means an earlier build names another one.
+    # sentence in these files that means an earlier build has to name another one.
     for p in texts:
         if old_tag != new_tag:
-            texts[p] = re.sub(name_pattern(old_tag), new_tag, texts[p])
+            texts[p] = re.sub(tag_pattern(old_tag), new_tag, texts[p])
         if old_pkg != new_pkg:
-            texts[p] = re.sub(name_pattern(old_pkg), new_pkg, texts[p])
+            texts[p] = re.sub(package_pattern(old_pkg), new_pkg, texts[p])
     sh = texts[GET_SH]
     sh = sub_once(sh, r"^TAG=\S+$", f"TAG={new_tag}", GET_SH)
     sh = sub_once(sh, r"^PACKAGE=\S+$", f"PACKAGE={new_pkg}", GET_SH)
@@ -213,51 +247,64 @@ def apply(root):
     old_exe, new_exe = now["windows"]["files"]["sunshine.exe"], pin["windows"]["files"]["sunshine.exe"]
     if old_exe != new_exe and old_exe not in now["older"]:
         entry = f'    "{old_exe.upper()}"  # {old_tag}\n'
-        kit = sub_once(kit, r"^\$OlderBuildShas = @\(((?:.|\n)*?)\)$",
-                       lambda m: "$OlderBuildShas = @(\n" + m.group(1).strip("\n") + ("\n" if m.group(1).strip() else "") + entry + ")",
-                       KIT)
+        kit = sub_once(kit, OLDER, lambda m: "$OlderBuildShas = @(\n" + (m.group(1) or "") + entry + ")", KIT)
     texts[KIT] = kit
 
-    changed = [p for p, t in texts.items() if t != (root / p).read_text()]
-    for p in changed:
-        (root / p).write_text(texts[p])
-    problems = check(root)
+    problems = problems_in(pin, texts)
     if problems:
-        raise PinError("after applying: " + "; ".join(problems))
+        raise PinError("the files wouldn't match the pin: " + "; ".join(problems))
+    return texts
+
+
+def write_texts(root, before, after):
+    changed = [p for p in after if after[p] != before[p]]
+    for p in changed:
+        (root / p).write_text(after[p])
     return changed
 
 
-def pin(root, tag=None, fetch=http_get):
+def apply(root):
+    texts = read_texts(root)
+    return write_texts(root, texts, render(read_pin(root), texts))
+
+
+def pin(root, tag=None, base=None, fetch=http_get):
     old = read_pin(root)
-    new, warnings = pin_from_release(fetch, tag)
-    new["windows"]["base"] = old["windows"]["base"]
-    if new == old:
-        return new, apply(root), warnings
-    write_pin(root, new)
-    try:
-        return new, apply(root), warnings
-    except PinError:
-        write_pin(root, old)  # apply changed nothing; leave the pin as it was too
-        raise
+    new, warnings = pin_from_release(fetch, tag, base)
+    texts = read_texts(root)
+    after = render(new, texts)  # refuses before anything is written
+    if new != old:
+        write_pin(root, new)
+    return new, write_texts(root, texts, after), warnings
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("pin", "apply", "check") or len(argv) > (3 if argv[1] == "pin" else 2):
-        print("usage: pin-vibepollo.py pin [TAG] | apply | check", file=sys.stderr)
+    args = argv[1:]
+    base = None
+    if "--base" in args:
+        i = args.index("--base")
+        if i + 1 >= len(args):
+            args = []
+        else:
+            base = args[i + 1]
+            del args[i:i + 2]
+    if not args or args[0] not in ("pin", "apply", "check") or len(args) > (2 if args[0] == "pin" else 1) \
+            or (base and args[0] != "pin"):
+        print("usage: pin-vibepollo.py pin [TAG] [--base VERSION] | apply | check", file=sys.stderr)
         return 2
     try:
-        if argv[1] == "check":
+        if args[0] == "check":
             problems = check(ROOT)
             for p in problems:
                 print(f"pin-vibepollo: {p}", file=sys.stderr)
             if not problems:
                 print(f"pin-vibepollo: every file pins {read_pin(ROOT)['tag']}")
             return 1 if problems else 0
-        if argv[1] == "apply":
+        if args[0] == "apply":
             changed = apply(ROOT)
             tag = read_pin(ROOT)["tag"]
         else:
-            new, changed, warnings = pin(ROOT, argv[2] if len(argv) == 3 else None)
+            new, changed, warnings = pin(ROOT, args[1] if len(args) == 2 else None, base)
             tag = new["tag"]
             for w in warnings:
                 print(f"pin-vibepollo: warning: {w}", file=sys.stderr)

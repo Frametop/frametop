@@ -5,8 +5,10 @@ GitHub; the files are copies in a temp folder).
 
   python3 scripts/tests/test_pin_vibepollo.py
 """
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import shutil
 import tempfile
@@ -33,7 +35,11 @@ def sha(name):
     return hashlib.sha256(name.encode()).hexdigest()
 
 
-def fake_release(tag=NEW_TAG, prerelease=False, drop=(), extra=(), setup_exe=True):
+NOTES = "- Windows: `sunshine.exe` ... go into a Vibepollo 2.0.3 install (Nonary's setup).\n"
+
+
+def fake_release(tag=NEW_TAG, prerelease=False, draft=False, drop=(), extra=(), setup_exe=True, notes=NOTES,
+                 by_tag=False):
     names = [NEW_PKG, "vibepollo-debug-2.0.5-1-x86_64.pkg.tar.zst", "sunshine.exe",
              "sunshine_wgc_capture.exe", "frametop_clipboard.exe", *extra]
     if setup_exe:
@@ -43,9 +49,10 @@ def fake_release(tag=NEW_TAG, prerelease=False, drop=(), extra=(), setup_exe=Tru
         if n not in drop:
             assets[n] = f"https://dl/{n}"
             assets[f"{n}.sha256"] = f"https://dl/{n}.sha256"
+    api = f"https://api.github.com/repos/{pv.REPO}/releases/" + (f"tags/{tag}" if by_tag else "latest")
     urls = {
-        f"https://api.github.com/repos/{pv.REPO}/releases/latest": json.dumps({
-            "tag_name": tag, "draft": False, "prerelease": prerelease,
+        api: json.dumps({
+            "tag_name": tag, "draft": draft, "prerelease": prerelease, "body": notes,
             "assets": [{"name": n, "browser_download_url": u} for n, u in assets.items()],
         }).encode(),
         f"https://raw.githubusercontent.com/{pv.REPO}/{tag}/scripts/linux_install.sh": INSTALLER,
@@ -106,10 +113,17 @@ class TestPin(Copy):
         linux = self.text("host/linux/README.md")
         self.assertNotIn(old["tag"], linux)
         self.assertIn(f"sudo bash linux_install.sh --package ./{NEW_PKG}", linux)
+        self.assertIn(f"sha256sum -c {NEW_PKG}.sha256", linux)  # the package's .sha256 too
+        self.assertNotIn(old["linux"]["package"], linux)
         self.assertIn("Builds before frametop-2.0.3", linux)  # an earlier build, left alone
         for doc in ("README.md", "host/windows/README.md"):
-            self.assertIn(f"releases/download/{NEW_TAG}/{pv.SETUP_EXE}", self.text(doc))
+            self.assertIn(pv.SETUP_EXE_URL, self.text(doc))  # no pins in it: the latest copy
+            self.assertIn(f"releases/tag/{NEW_TAG}", self.text(doc))
         self.assertEqual(pv.check(self.root), [])
+
+    def test_pin_a_named_tag(self):
+        new, _, _ = pv.pin(self.root, NEW_TAG, fetch=fake_release(by_tag=True))
+        self.assertEqual(new["tag"], NEW_TAG)
 
     def test_again_changes_nothing(self):
         pv.pin(self.root, fetch=fake_release())
@@ -129,7 +143,7 @@ class TestPin(Copy):
         kit = self.text(pv.KIT)
         self.assertIn("  # frametop-2.0.4\n", kit)
         self.assertIn(f'"{sha("sunshine.exe").upper()}"  # {NEW_TAG}\n', kit)
-        self.assertEqual(pv.current(self.root)["older"][-1], sha("sunshine.exe"))
+        self.assertEqual(pv.current(pv.read_texts(self.root))["older"][-1], sha("sunshine.exe"))
 
     def test_no_setup_exe_warns(self):
         _, _, warnings = pv.pin(self.root, fetch=fake_release(setup_exe=False))
@@ -139,6 +153,10 @@ class TestPin(Copy):
     def test_refusals_change_nothing(self):
         for name, fetch in [
             ("prerelease", fake_release(prerelease=True)),
+            ("draft", fake_release(draft=True)),
+            ("no base in the notes", fake_release(notes="Built on upstream 2.0.2.")),
+            # Another base: the kit needs changing by hand, and the pin stays as it was.
+            ("other base", fake_release(notes=NOTES.replace("2.0.3", "2.0.6"))),
             ("not ours", fake_release(tag="2.18.9")),
             ("missing file", fake_release(drop=("frametop_clipboard.exe",))),
             ("two packages", fake_release(extra=("vibepollo-2.0.5-2-x86_64.pkg.tar.zst",))),
@@ -158,11 +176,39 @@ class TestPin(Copy):
         for p in (pv.GET_SH, pv.KIT) + pv.DOCS:
             self.assertEqual(self.text(p), self.before[p], p)
 
+    def test_base_given_by_hand(self):
+        new, _, _ = pv.pin(self.root, base="2.0.3", fetch=fake_release(notes=""))
+        self.assertEqual(new["windows"]["base"], "2.0.3")
+
+    def test_older_list_closed_by_its_own_line(self):
+        # A hand-written entry whose comment ends in ")" stays inside the list.
+        kit = self.text(pv.KIT).replace("$OlderBuildShas = @()", '$OlderBuildShas = @(\n    "' + "A" * 64 + '"  # a test build (by hand)\n)')
+        (self.root / pv.KIT).write_text(kit)
+        pv.pin(self.root, fetch=fake_release())
+        kit = self.text(pv.KIT)
+        self.assertIn('  # a test build (by hand)\n    "F3CF', kit)
+        self.assertEqual(pv.current(pv.read_texts(self.root))["older"][0], "a" * 64)
+        self.assertEqual(len(pv.current(pv.read_texts(self.root))["older"]), 2)
+
+    def test_suffixed_tag_left_alone(self):
+        doc = self.root / "host/linux/README.md"
+        doc.write_text(doc.read_text() + "\nframetop-2.0.4-1 was a test build.\n")
+        pv.pin(self.root, fetch=fake_release())
+        self.assertIn("frametop-2.0.4-1 was a test build.", doc.read_text())
+
     def test_check_names_drift(self):
         (self.root / pv.GET_SH).write_text(self.text(pv.GET_SH).replace("\nTAG=frametop-2.0.4\n", "\nTAG=frametop-2.0.3\n"))
         problems = pv.check(self.root)
         self.assertEqual(len(problems), 1)
         self.assertIn("frametop-2.0.3", problems[0])
+
+    def test_check_names_windows_drift(self):
+        kit = self.text(pv.KIT)
+        sha = pv.read_pin(self.root)["windows"]["files"]["tools\\frametop_clipboard.exe"].upper()
+        (self.root / pv.KIT).write_text(kit.replace(sha, "0" * 64))
+        self.assertEqual(len(pv.check(self.root)), 1)
+        (self.root / "README.md").write_text(self.text("README.md").replace(pv.SETUP_EXE_URL, "x"))
+        self.assertEqual(len(pv.check(self.root)), 2)
 
     def test_bad_sha_asset_refused(self):
         fetch = fake_release()
@@ -173,6 +219,40 @@ class TestPin(Copy):
             return fetch(url)
         with self.assertRaisesRegex(pv.PinError, "sunshine.exe.sha256"):
             pv.pin(self.root, fetch=bad)
+
+
+class TestMain(unittest.TestCase):
+    def run_main(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = pv.main(["pin-vibepollo.py", *args])
+        return code, out.getvalue() + err.getvalue()
+
+    def test_check_on_the_repo(self):
+        code, out = self.run_main("check")
+        self.assertEqual(code, 0, out)
+        self.assertIn("every file pins", out)
+
+    def test_usage(self):
+        for args in [(), ("nope",), ("check", "x"), ("apply", "--base", "2.0.3"), ("pin", "--base")]:
+            with self.subTest(args):
+                self.assertEqual(self.run_main(*args)[0], 2)
+
+    def test_check_drift_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for p in (pv.PIN, pv.GET_SH, pv.KIT) + pv.DOCS:
+                (root / p).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(ROOT / p, root / p)
+            (root / pv.GET_SH).write_text((root / pv.GET_SH).read_text().replace("TAG=frametop-2.0.4", "TAG=frametop-2.0.3"))
+            saved = pv.ROOT
+            pv.ROOT = root
+            try:
+                code, out = self.run_main("check")
+            finally:
+                pv.ROOT = saved
+            self.assertEqual(code, 1)
+            self.assertIn("frametop-2.0.3", out)
 
 
 if __name__ == "__main__":

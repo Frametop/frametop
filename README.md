@@ -56,7 +56,7 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 
 A Windows or Linux PC streams its monitors to Frametop with Frametop's build of Vibepollo, from our fork [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo). Both installers below are pinned to the fork's release [`frametop-2.0.4`](https://github.com/Frametop/frametop-vibepollo/releases/tag/frametop-2.0.4) and check the SHA-256 of everything they download, so you get the build Frametop was tested with, not a newer upstream Vibepollo. A Mac uses Sunshine instead: see [host/macos/README.md](host/macos/README.md).
 
-**Windows 10 or 11 (64-bit):** download [FrametopHostSetup.exe](https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.4/FrametopHostSetup.exe) and run it. It isn't signed, so Windows may say "Windows protected your PC": choose More info, then Run anyway. Confirm the admin prompt. The setup installs Vibepollo 2.0.3 if it isn't there (follow its installer, then go back to the setup window), puts in Frametop's build, and asks for the Web UI login the Frame signs in with. Run it again to update. The same from PowerShell (Start, type `powershell`, Enter):
+**Windows 10 or 11 (64-bit):** download [FrametopHostSetup.exe](https://github.com/Frametop/frametop-vibepollo/releases/latest/download/FrametopHostSetup.exe) from the fork's releases and run it. It installs the pinned build whichever copy you have, so you can keep it to update later. It isn't signed, so Windows may say "Windows protected your PC": choose More info, then Run anyway. Confirm the admin prompt. The setup installs Vibepollo 2.0.3 if it isn't there (follow its installer, then go back to the setup window), puts in Frametop's build, and asks for the Web UI login the Frame signs in with. The same from PowerShell (Start, type `powershell`, Enter):
 
 ```powershell
 irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex
@@ -68,7 +68,7 @@ irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps
 curl -fsSL https://frametop.github.io/frametop/host/linux/get.sh | bash
 ```
 
-It downloads Frametop's Arch package and Vibepollo's installer, asks for your `sudo` password, installs, then lists what's left: a restart, the Web UI login and one setting. Run it again to update.
+It downloads Frametop's Arch package and Vibepollo's installer, asks for your `sudo` password, installs, then lists what's left: a restart, the Web UI login and one setting. Run it again to update. The Linux build is newer and less tested than the Windows one.
 
 Then add the PC on the Frame, in Frametop Settings → Remote displays → Add computer (see [Remote displays](#remote-displays)). [host/windows/README.md](host/windows/README.md) and [host/linux/README.md](host/linux/README.md) have the steps by hand, what each setup changes, and how to undo it.
 

@@ -978,15 +978,119 @@ int main() {
         s.Drop(2, s.DropFor(2, s.PlacedOf(2)->azDeg + 2, s.PlacedOf(2)->el1 + 4, same), 0);
         check("lift: Steam's window is never pulled: nothing", cols(s) == "[ 2 1 ][ 3 ]");
         b.steam = -1;
-        check("leave: the stack's top goes: its neighbour's lone panel in its place", b.Leave(2) && cols(b) == "[ 3 1 ]");
+        check("leave: the stack's top goes: its column short a moment", b.Leave(2, 1000) && cols(b) == "[ 1 ][ 3 ]");
         b.Arrange(same);
-        check("leave: a lone panel goes: nothing pulled", b.Leave(3) && cols(b) == "[ 1 ]");
+        check("leave: ...nothing filled before the quiet's over", !b.FillGap(1000 + tilegap::kQuietMs - 1));
+        check("leave: ...then its neighbour's lone panel in its place", b.FillGap(1000 + tilegap::kQuietMs) && cols(b) == "[ 3 1 ]");
+        check("leave: ...filled once", !b.FillGap(9000));
+        b.Arrange(same);
+        check("leave: a lone panel goes: nothing pulled", b.Leave(3, 10000) && !b.FillGap(20000) && cols(b) == "[ 1 ]");
         dashtiles::Board w;
         const auto wide = [](int id) { return id == 3 ? dashtiles::Info{3.5, 1.97} : dashtiles::Info{1.6, 0.9}; };
         for (const int i : {1, 2, 3}) w.Anchor(i, -1, dashtiles::Stay::Default);
         w.Drop(2, {tiling::Drop::Into, 0, 0});
         w.Arrange(wide);
-        check("leave: a neighbour wider than the column: not pulled", w.Leave(2) && cols(w) == "[ 1 ][ 3 ]");
+        check("leave: a neighbour wider than the column: not pulled", w.Leave(2, 0) && (w.Arrange(wide), !w.FillGap(5000)) && cols(w) == "[ 1 ][ 3 ]");
+    }
+    {   // the gap a panel leaves (council, 2026-11-20): none filled when several go at once (a desktop
+        // stopping), the fill undone when it comes back, never across Steam's slot or onto a hanging one
+        const auto cols = [](const dashtiles::Board &b) {
+            std::string o;
+            for (const auto &c : b.Grid().Cols()) {
+                o += "[";
+                for (const auto &cell : c.cells) o += " " + std::to_string(cell.id);
+                o += " ]";
+            }
+            return o;
+        };
+        const auto same = [](int) { return dashtiles::Info{1.6, 0.9}; };
+        const auto stack = [&] {   // [ 1 ][ 4 2 ][ 3 ]
+            dashtiles::Board b;
+            for (const int i : {1, 2, 3}) b.Anchor(i, -1, dashtiles::Stay::Default);
+            b.Anchor(4, -1, dashtiles::Stay::Default);
+            b.Drop(4, {tiling::Drop::Into, 1, 0});
+            b.Arrange(same);
+            return b;
+        };
+        dashtiles::Board b = stack();
+        check("gap: the stack to start", cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
+        b.Leave(4, 0), b.Arrange(same), b.Leave(3, 900), b.Arrange(same);
+        check("gap: two gone in a moment: none filled", !b.FillGap(5000) && cols(b) == "[ 1 ][ 2 ]");
+        b = stack();
+        const std::string line = b.Remember(4);
+        b.Leave(4, 0), b.Arrange(same);
+        check("gap: one gone: filled", b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 2 ][ 3 ]");
+        b.Arrange(same);
+        check("gap: back: its place again, the fill undone", b.Restore(4, line, -1) && cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
+        b = stack();
+        b.Leave(4, 0), b.Arrange(same), b.FillGap(tilegap::kQuietMs), b.Arrange(same);
+        b.Press(1, dashtiles::Key::Right);
+        check("gap: moved by hand since: back as remembered, nothing undone", b.Restore(4, line, -1) && cols(b).find("[ 1 ]") == std::string::npos);
+        dashtiles::Board h;   // [ 1 ][ 2 3 ]: 2 on the desk, 3 hanging under it
+        for (const int i : {1, 2, 3}) h.Anchor(i, -1, dashtiles::Stay::Default);
+        h.Press(3, dashtiles::Key::Down);
+        h.Arrange(same);
+        const bool hung = cols(h) == "[ 1 ][ 2 3 ]";
+        h.Leave(2, 0), h.Arrange(same);
+        check("gap: the base goes, one hanging under it: no gap (it takes the desk)", hung && !h.FillGap(5000) && cols(h) == "[ 1 ][ 3 ]");
+        dashtiles::Board s;   // [ 1 ] |slot| [ 4 2 ][ 3 ]
+        s.params.reserveAzDeg = 0, s.params.reserveDeg = 66;
+        for (const int i : {1, 2, 3}) s.Anchor(i, -1, dashtiles::Stay::Default);
+        s.Arrange(same);
+        const int split = s.Grid().Split(0);
+        s.Anchor(4, -1, dashtiles::Stay::Default);
+        s.Drop(4, {tiling::Drop::Into, 1, 0});
+        s.Arrange(same);
+        const std::string before = cols(s);
+        s.Leave(4, 0), s.Arrange(same);
+        check("gap: never across Steam's slot (council, 2026-11-20)", split == 1 && before == "[ 1 ][ 4 2 ][ 3 ]" &&
+                                                                         s.FillGap(tilegap::kQuietMs) && cols(s) == "[ 1 ][ 3 2 ]" && s.Grid().Split(0) == 1);
+        // the keys alone in a column keep to their side of the slot, step over a column with nothing
+        // shown, and leave the strip where it was (council, 2026-11-20)
+        dashtiles::Board k;   // [ 1 ] |slot| [ 2 ][ 3 ]
+        k.params.reserveAzDeg = 0, k.params.reserveDeg = 66;
+        for (const int i : {1, 2, 3}) k.Anchor(i, -1, dashtiles::Stay::Default);
+        k.Arrange(same);
+        check("keys: down next to the slot: under the right one, not across",
+              k.Grid().Split(0) == 1 && k.Press(2, dashtiles::Key::Down) && cols(k) == "[ 1 ][ 3 2 ]" && k.Grid().Split(0) == 1);
+        dashtiles::Board k2;
+        k2.params.reserveAzDeg = 0, k2.params.reserveDeg = 66;
+        for (const int i : {1, 2, 3}) k2.Anchor(i, -1, dashtiles::Stay::Default);
+        k2.Arrange(same);
+        check("keys: up next to the slot: the right one in under it, not across",
+              k2.Press(2, dashtiles::Key::Up) && cols(k2) == "[ 1 ][ 2 3 ]" && k2.Grid().Split(0) == 1);
+        dashtiles::Board g;   // [ 1 ][ 2 ][ 3 ], 2 not shown
+        for (const int i : {1, 2, 3}) g.Anchor(i, -1, dashtiles::Stay::Default);
+        g.absent = {2};
+        g.Arrange(same);
+        check("keys: up past a column with nothing shown", g.Press(3, dashtiles::Key::Up) && cols(g) == "[ 2 ][ 3 1 ]");
+        dashtiles::Board gd;   // [ 1 ][ 2 ][ 3 ], 2 not shown: 3 dragged down under itself
+        for (const int i : {1, 2, 3}) gd.Anchor(i, -1, dashtiles::Stay::Default);
+        gd.absent = {2};
+        gd.Arrange(same);
+        const tiling::Placed q3 = *gd.PlacedOf(3);
+        const tiling::Drop down = gd.DropFor(3, q3.azDeg, gd.Last().deskDeg - (q3.el1 - q3.el0) / 2 - 1, same);
+        check("drag: down past a column with nothing shown: under the one you see", down.kind == tiling::Drop::Into && down.below && down.col == 0);
+        dashtiles::Board g2;
+        for (const int i : {1, 2, 3}) g2.Anchor(i, -1, dashtiles::Stay::Default);
+        g2.absent = {1};
+        g2.Arrange(same);
+        check("keys: down, nothing shown to the left: under the right one", g2.Press(2, dashtiles::Key::Down) && cols(g2) == "[ 1 ][ 3 2 ]");
+        dashtiles::Board pan;
+        for (const int i : {1, 2, 3}) pan.Anchor(i, -1, dashtiles::Stay::Default);
+        pan.Arrange(same);
+        const double az2 = pan.PlacedOf(2)->azDeg, az3 = pan.PlacedOf(3)->azDeg;
+        pan.Press(2, dashtiles::Key::Up);
+        pan.Arrange(same);
+        check("keys: up: it and the others stay where they were (the pulled one moves)",
+              cols(pan) == "[ 2 1 ][ 3 ]" && std::fabs(pan.PlacedOf(2)->azDeg - az2) < 1 && std::fabs(pan.PlacedOf(3)->azDeg - az3) < 1);
+        dashtiles::Board tall;   // a stack two high already: a third under it would pass 50 degrees
+        const auto big = [](int) { return dashtiles::Info{3.5, 1.97}; };
+        for (const int i : {1, 2, 3}) tall.Anchor(i, -1, dashtiles::Stay::Default);
+        tall.Press(2, dashtiles::Key::Up);
+        tall.Arrange(big);
+        const std::string two = cols(tall);
+        check("keys: up when the one pulled in won't fit: nothing", !tall.Press(2, dashtiles::Key::Up) && cols(tall) == two);
     }
     {   // dragged mostly over a column's top or under the desk line: into the nearest column, no quarters
         // (user, 2026-11-20: a middle-row panel "near impossible" to move up or down)

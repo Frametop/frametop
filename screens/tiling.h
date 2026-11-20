@@ -468,11 +468,17 @@ inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, 
         *dAz = az < p.az0 ? p.az0 - az : az > p.az1 ? az - p.az1 : 0;
         *dEl = el < p.el0 ? p.el0 - el : el > p.el1 ? el - p.el1 : 0;
     };
+    // (a column with nothing shown, laid out at no size: Board::absent's, never aimed at)
+    const auto ghost = [&](int col) {
+        for (const Tile &t : cols[size_t(col)].tiles)
+            if (t.widthM > 0 || t.heightM > 0) return false;
+        return true;
+    };
     const auto over = [&](int skipCol) {
         int col = -1;
         double bAz = 1e9, bEl = 1e9, dAz, dEl;
         for (const Placed &p : l.tiles) {
-            if (p.col == skipCol) continue;
+            if (p.col == skipCol || ghost(p.col)) continue;
             gap(p, &dAz, &dEl);
             if (dAz < bAz - 1e-9 || (dAz < bAz + 1e-9 && dEl < bEl)) bAz = dAz, bEl = dEl, col = p.col;
         }
@@ -496,6 +502,7 @@ inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, 
     if (!under && el <= topOf(c) + past) {   // beside a panel: the nearest one's column, its outer quarters a new one
         double best = 1e9, a0 = 0, a1 = 0, dAz, dEl;
         for (const Placed &p : l.tiles) {
+            if (ghost(p.col)) continue;
             gap(p, &dAz, &dEl);
             if (dAz + dEl < best) best = dAz + dEl, c = p.col, a0 = p.az0, a1 = p.az1;
         }

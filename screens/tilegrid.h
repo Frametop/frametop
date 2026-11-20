@@ -113,6 +113,19 @@ public:
         Put(cols_[size_t(to)], row, cell, false);
         return true;
     }
+    // Panel `id` hung lowest under column `col`'s desk line, out of its own (which goes when it was
+    // the last in it). False when there's no such move.
+    bool HangUnder(int id, int col) {
+        const Where w = Find(id);
+        if (!w.ok() || col == w.col || col < 0 || col >= int(cols_.size())) return false;
+        Cell cell = cols_[size_t(w.col)].cells[size_t(w.row)];
+        cell.align = 0;
+        const bool gone = cols_[size_t(w.col)].cells.size() == 1;
+        Take(id);
+        if (gone && w.col < col) --col;
+        Put(cols_[size_t(col)], int(cols_[size_t(col)].cells.size()), cell, true);
+        return true;
+    }
     // Out of the grid (its column goes when it was the last in it; the splits with the last
     // panel). False if it wasn't in it.
     bool Remove(int id) {

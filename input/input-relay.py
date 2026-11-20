@@ -110,7 +110,9 @@ seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the 
 It says the same during ft-screens' carry-all, in games too (the head carries the panels then).
 When something else let the pointer go, the gaze takes it back and the helper says "gazewoke"
 (the pointer is on again here too). The hides here say why: "hide toggle" (pointer_toggle: the
-gaze leaves it off until something wakes it), "hide idle", "hide pause".
+gaze leaves it off until something wakes it), "hide idle", "hide pause", "hide tilekey" (a
+dashboard tiling key: off until the mouse moves, so the moved tile keeps the focus; as with idle,
+the gaze can take it back).
 Typing on a keyboard sends the helper "typing" (at most 4 times a second): it takes no hand
 pinches right after a key, since typing touches thumb to index like a pinch.
 
@@ -1064,11 +1066,26 @@ class Pointer:
         second key moved that one). Not with a button held. True if it was on."""
         if not self.active or self.driver_down:
             return False
+        self.end_pulses()
         self.send(f"hide {why}")
         self.active = False
-        self.dx = self.dy = self.pending = 0
         log(f"pointer off ({why})")
         return True
+
+    def end_pulses(self):
+        """A press or push under way (the dashboard's system button, the claim, a scroll) ends
+        now, its release sent, and the motion waiting to go is dropped."""
+        releases = []
+        if self.system_release is not None:
+            releases.append("btn system 0")
+        if self.claim_release is not None:
+            releases.append("btn a 0")
+        if self.scroll_until is not None:
+            releases.append("scroll 0 0")
+        for command in releases:
+            self.send(command)
+        self.system_at = self.system_release = self.claim_at = self.claim_release = self.scroll_until = None
+        self.dx = self.dy = self.pending = 0
 
     def stand_down(self, why="paused"):
         """Frametop is pausing (or POINTER=0 drops this pointer: why): a pulse under way ends
@@ -1090,18 +1107,10 @@ class Pointer:
         reads "hide" in the same loop as the release, as it normally does. If its socket was
         full, the rest of these wait in the queue (send), "hide" can land a loop later, and
         that press clicks once as the pause starts."""
-        releases = [f"btn {driver} 0" for driver in sorted(self.driver_down)]
+        for driver in sorted(self.driver_down):
+            self.send(f"btn {driver} 0")
         self.driver_down.clear()
-        if self.system_release is not None:
-            releases.append("btn system 0")
-        if self.claim_release is not None:
-            releases.append("btn a 0")
-        if self.scroll_until is not None:
-            releases.append("scroll 0 0")
-        for command in releases:
-            self.send(command)
-        self.system_at = self.system_release = self.claim_at = self.claim_release = self.scroll_until = None
-        self.dx = self.dy = self.pending = 0
+        self.end_pulses()
         self.gaze_awake_until = 0.0
         self.send("hide pause")
         if self.active:

@@ -18,6 +18,7 @@
 #pragma once
 
 #include "slotsplit.h"
+#include "tilegap.h"
 #include "tilegrid.h"
 #include "tilememory.h"
 #include "tilepack.h"
@@ -192,6 +193,7 @@ public:
     // Not anchored any more (or gone). False if it wasn't.
     bool Unanchor(int id) {
         Forget(id);
+        gaps_.Forget(id);
         grid_.Remove(id);
         return spots_.erase(id) != 0;
     }
@@ -249,32 +251,50 @@ public:
         });
     }
 
-    // Off the grid, and the gap it leaves filled (user, 2026-11-20: a PC window's panel opening or
-    // closing, "have all of our displays adjust to fill in the gap"): a panel that stood in a stack
-    // leaves its column short, so a neighbouring column's only panel that fits in its place (no
-    // wider than the column, no taller than it was) goes up there, and that column closes up. Not
-    // Unanchor's other callers (Restore puts it back). False if it wasn't anchored.
-    bool Leave(int id) {
+    // Off the grid, its gap filled later (FillGap): a panel that stood in a stack (at or above the
+    // desk line) leaves its column short. Not Unanchor's other callers (Restore puts it back). False
+    // if it wasn't anchored.
+    bool Leave(int id, int64_t nowMs) {
         const tilegrid::Where w = grid_.Find(id);
         const tiling::Placed *gone = PlacedOf(id);
-        const bool stacked = !params.fit && w.ok() && gone && !gone->below && grid_.Cols()[size_t(w.col)].cells.size() > 1;
-        const tiling::Placed was = gone ? *gone : tiling::Placed{};
+        tilegap::Gap gap{id, -1, gone ? gone->el1 - gone->el0 : 0};
+        if (!params.fit && w.ok() && gone && !gone->below) {
+            const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
+            for (int r = 0; r < int(col.cells.size()); ++r)
+                if (col.cells[size_t(r)].id != id && !col.Below(r)) gap.stayed = col.cells[size_t(r)].id;
+        }
         if (!Unanchor(id)) return false;
-        if (!stacked) return true;
+        gaps_.Went(gap, nowMs);
+        return true;
+    }
+    // The gap Leave left, filled once no other panel has gone for tilegap::kQuietMs (user,
+    // 2026-11-20: a PC window's panel opening or closing, "have all of our displays adjust to fill
+    // in the gap"): a neighbouring column's only panel that fits in its place (no wider than the
+    // column, no taller than the one that went, on its side of Steam's slot) goes up there, and
+    // that column closes up. None when more than one went (a desktop stopping or restarting: they
+    // come back where they were). Laid out (Arrange) since the Leave. False when nothing changed.
+    bool FillGap(int64_t nowMs) {
+        const tilegap::Gap g = gaps_.Due(nowMs);
+        const tilegrid::Where w = grid_.Find(g.stayed);
+        if (g.stayed < 0 || !w.ok() || params.fit) return false;
         double span = 0;
         for (const tiling::Placed &p : last_.tiles)
-            if (p.col == w.col && p.id != id) span = std::max(span, p.az1 - p.az0);
-        int best = -1;
+            if (p.col == w.col) span = std::max(span, p.az1 - p.az0);
+        int best = -1, side = 0;
         double bestArea = 0;
-        for (const int c : {w.col - 1, w.col + 1}) {
-            if (c < 0 || c >= int(grid_.Cols().size()) || grid_.Cols()[size_t(c)].cells.size() != 1) continue;
+        for (const int dir : {-1, +1}) {
+            const int c = Neighbour(w.col, dir);
+            if (c < 0 || grid_.Cols()[size_t(c)].cells.size() != 1) continue;
             const int other = grid_.Cols()[size_t(c)].cells.front().id;
             const tiling::Placed *q = PlacedOf(other);
-            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || q->el1 - q->el0 > was.el1 - was.el0 + kFitSlackDeg) continue;
+            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || q->el1 - q->el0 > g.heightDeg + kFitSlackDeg) continue;
             const double area = (q->az1 - q->az0) * (q->el1 - q->el0);
-            if (area > bestArea) best = c, bestArea = area;
+            if (area > bestArea) best = c, side = dir, bestArea = area;
         }
-        if (best >= 0) slot_.Move(grid_, grid_.Cols()[size_t(best)].cells.front().id, [&] { return grid_.PullTop(best, w.col, 0); });
+        if (best < 0) return false;
+        const int other = grid_.Cols()[size_t(best)].cells.front().id;
+        grid_.PullTop(best, w.col, 0);   // (on its side of the slot: the split stays a default)
+        gaps_.Filled({g.gone, other, g.stayed, side});
         return true;
     }
     int steam = -1;   // Steam's window (vrtiles.cpp): never pulled into another column
@@ -453,6 +473,7 @@ public:
         return Parse(line, &s) && (Restore(id, s, focused), true);
     }
     void Restore(int id, const State &st, int focused) {
+        const tilegap::Fill fill = gaps_.Back(id);   // (before Unanchor forgets it)
         Unanchor(id);
         if (st.kind == State::Kind::Off) return;
         Recentre();   // (as Anchor)
@@ -460,7 +481,9 @@ public:
         s.stay = st.stay;
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
-        grid_.Insert(id, st.col, st.row, st.alone, st.scale, false, st.below);
+        int col = st.col;   // (back in the stack it left: the panel pulled into its gap goes back first)
+        if (!st.alone && fill.gone >= 0 && tilegap::Undo(grid_, fill, SideOf(grid_.Find(fill.stayed).col) < 0)) col = grid_.Find(fill.stayed).col;
+        grid_.Insert(id, col, st.row, st.alone, st.scale, false, st.below);
         grid_.SetAlign(id, st.align);
     }
     // The profile put back last is done with: an add after this goes after the other tiles.
@@ -476,6 +499,7 @@ public:
     // number of lines taken.
     int RestoreAll(const std::vector<std::pair<int, std::string>> &saved, bool more = false) {
         const bool after = more && batch_.mode() != Batch::Mode::First;   // an add on its own: after the others
+        gaps_.ForgetFills();
         std::vector<std::pair<int, State>> good;
         if (more)
             for (const auto &[id, s] : batch_.States())
@@ -517,7 +541,7 @@ public:
 
 private:
     Batch batch_;   // RestoreAll's (a panel unanchored since: forgotten)
-    void EndBatch() { batch_.End(); }
+    void EndBatch() { batch_.End(), gaps_.ForgetFills(); }   // (the grid changed by hand)
     void Forget(int id) { batch_.Forget(id); }
     // A state's place for restoring in order: a placed tile's (column, row); others after, as they came.
     static std::pair<int, int> RestoreOrder(const State &s) {
@@ -582,34 +606,66 @@ private:
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
     static constexpr double kFitSlackDeg = 0.5;
     bool Pullable(int id) const { return id != steam && !absent.count(id); }
+    // Which side of Steam's slot column `col` is on (-1 left, +1 right; 0: no slot in the strip).
+    int SideOf(int col) const {
+        const int s = slot_.Split(grid_);
+        return s < 0 || col < 0 ? 0 : col < s ? -1 : 1;
+    }
+    // Nothing in column `col` is shown (Board::absent: laid out at no size).
+    bool Ghost(int col) const {
+        for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)
+            if (!absent.count(c.id)) return false;
+        return true;
+    }
+    // The column next to `col` on side `dir` (-1 left) as you see them (past columns with nothing
+    // shown), on its side of Steam's slot (only Meta+Shift+Left/Right step across it); -1: none.
+    int Neighbour(int col, int dir) const {
+        const int n = int(grid_.Cols().size());
+        int c = col + dir;
+        while (c >= 0 && c < n && Ghost(c)) c += dir;
+        return c < 0 || c >= n || SideOf(c) != SideOf(col) ? -1 : c;
+    }
+    // Panel `other` would fit standing under column `col` on the desk line (OnTopOf's test; not laid
+    // out yet: yes).
+    bool FitsUnder(int col, int other) const {
+        const tiling::Placed *q = PlacedOf(other);
+        if (!q || fills_.size() != grid_.Cols().size()) return true;
+        double under = 0;
+        for (const tiling::Placed &p : last_.tiles)
+            if (p.col == col) under = std::max(under, params.deskDeg - p.el0);
+        const double h = fills_[size_t(col)].height + params.gapDeg + (q->el1 - q->el0);
+        return EyeFitsRound(params, under, h + (under > 0 ? params.gapDeg + under : 0));
+    }
     // Let go over its own column, already its top (or Meta+Shift+Up alone in its column, user
     // 2026-11-20: "tile it up"): a neighbouring column's top panel in under it, the one on side `side`
-    // first (none there that can move: nothing). False when nothing changed.
+    // first, if it fits (none that can: nothing). It stays where it is; the one pulled in moves.
+    // False when nothing changed.
     bool Lift(int id, int side) {
         const tilegrid::Where w = grid_.Find(id);
         if (!w.ok() || grid_.Cols()[size_t(w.col)].Below(w.row)) return false;
-        for (const int c : {w.col + (side < 0 ? -1 : 1), w.col + (side < 0 ? 1 : -1)}) {
-            if (c < 0 || c >= int(grid_.Cols().size()) || !Pullable(grid_.Cols()[size_t(c)].cells.front().id)) continue;
+        for (const int dir : {side < 0 ? -1 : 1, side < 0 ? 1 : -1}) {
+            const int c = Neighbour(w.col, dir);
+            if (c < 0) continue;
             const int other = grid_.Cols()[size_t(c)].cells.front().id;
-            return slot_.Move(grid_, other, [&] { return grid_.PullTop(c, w.col, w.row + 1); });
+            if (!Pullable(other) || !FitsUnder(w.col, other)) continue;
+            moved_ = other, movedAz_ = NAN;   // (the strip's pan: it's the one that moved)
+            return grid_.PullTop(c, w.col, w.row + 1);
         }
         return false;
     }
     // Meta+Shift+Down alone in its column ("tile it down"): it hangs under the neighbouring column,
-    // the left one first, lowest there (its own column goes, as a drop under that column does).
+    // the left one first, lowest there (its own column goes, as a drop under that column does). Not
+    // under Steam's window or a column with nothing shown, nor across Steam's slot.
     bool Hang(int id) {
         const tilegrid::Where w = grid_.Find(id);
-        const int n = int(grid_.Cols().size());
         if (!w.ok()) return false;
-        const int c = w.col > 0 ? w.col - 1 : w.col + 1;
-        if (c >= n) return false;
-        const int to = c > w.col ? c - 1 : c, rows = int(grid_.Cols()[size_t(c)].cells.size());
-        const double scale = grid_.Cols()[size_t(w.col)].cells[size_t(w.row)].scale;
-        return slot_.Move(grid_, id, [&] {
-            grid_.Insert(id, to, rows, false, scale, false, true);
-            grid_.SetAlign(id, 0);
-            return true;
-        });
+        for (const int dir : {-1, +1}) {
+            const int c = Neighbour(w.col, dir);
+            if (c < 0) continue;
+            const tilegrid::Col &col = grid_.Cols()[size_t(c)];
+            if (Pullable(col.cells[size_t(col.base)].id)) return grid_.HangUnder(id, c);
+        }
+        return false;
     }
     bool Alone(int id) const {
         const tilegrid::Where w = grid_.Find(id);
@@ -633,6 +689,7 @@ private:
     tiling::Layout last_;
     std::vector<tilepack::Fill> fills_;   // each column as laid out last (OnTopOf)
     slotsplit::Policy slot_;   // which split round Steam's menu, and when it's chosen again
+    tilegap::Book gaps_;       // the gaps panels left (Leave, FillGap), and the fills to undo
 };
 
 }  // namespace dashtiles

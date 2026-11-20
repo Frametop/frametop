@@ -148,6 +148,16 @@ check("...a nudge does, recentred", (p.active, "show" in since(p, mark), "recent
 p = pointer()
 p.action("left", 1, 10.0)
 check("...a drag held: it stays", (p.step_aside("tilekey"), p.active), (False, True))
+p = pointer()
+p.motion(relay.REL_X, 50, 10.0)
+p.wheel_to = lambda notches: False  # (off a Frametop panel: the joystick push)
+p.scroll(3, 10.1)
+mark = len(p.sock.sent)
+p.step_aside("tilekey")
+for t in (10.2, 10.5, 12.0):
+    p.tick(t)
+check("...a scroll under way ends, and nothing more goes to the hidden pointer (council, 2026-11-20)",
+      since(p, mark), ["scroll 0 0", "hide tilekey"])
 
 print()
 if failures:

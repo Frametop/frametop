@@ -60,9 +60,11 @@ void ApplyWall() {
     g_tiles.params.fit = g_tileFit >= 0.5;
 }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
-int g_tileHold = -1;                      // ...the one a tiling key moved, until the 3D mouse is back on a panel
+int g_tileHold = -1;                      // ...the one a tiling key moved, until the 3D mouse is back on a panel or you look away
 int64_t g_tileHoldMs = 0;
 constexpr int64_t kTileHoldSettleMs = 500;   // the cursor's panel changing this soon after a key: the tiles moved under it
+double g_tileHoldFwd[3] = {0, 0, 0};      // where you faced at that key (all 0: not known)
+constexpr double kTileHoldTurnDeg = 20;   // turned this far from it: you look at another panel now
 bool g_tileLook = true;                   // DASH_TILE_LOOK: with no pointer on a panel, the one you look at has the focus
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
 constexpr std::chrono::seconds kTilesAddWindow{5};
@@ -377,10 +379,11 @@ namespace {
 bool g_tilesStopping = false;
 }  // namespace
 void TilesStopping() { g_tilesStopping = true; }
-// The panel goes (its window, its display): what it was is remembered under its key. Its gap is
-// filled (dashtiles.h's Leave) unless every panel is going (a stop: a restart puts them back).
 void SetTileLookFocus(bool on) { g_tileLook = on; }
 
+// The panel goes (its window, its display): what it was is remembered under its key. Its gap is
+// filled a moment later (dashtiles.h's Leave and FillGap, from UpdateDashTiles) unless every panel
+// is going (a stop: a restart puts them back) or others go with it.
 void TileGone(int i) {
     BarSideGone(i);
     const auto k = g_tileKey.find(i);
@@ -388,7 +391,7 @@ void TileGone(int i) {
     if (k != g_tileKey.end()) g_tileKey.erase(k);
     g_tileRoom.erase(i);
     if (g_tileFocus == i) g_tileFocus = -1;
-    if (g_tilesStopping ? g_tiles.Unanchor(i) : g_tiles.Leave(i)) RetileDash(), RememberTiles();
+    if (g_tilesStopping ? g_tiles.Unanchor(i) : g_tiles.Leave(i, NowMs())) RetileDash(), RememberTiles();
 }
 
 // Stays shown with the dashboard closed: as set for it or as DASH_TILE_STAY says (on unless set:
@@ -439,24 +442,33 @@ void TileResized(Screen &s, int i) {
 }
 
 namespace {
-// The panel the tiling keys act on: the one a tiling key just moved (HoldTileFocus), else the one
-// under the pointer, else the one you're looking at (within 25 degrees of straight ahead; unless
-// DASH_TILE_LOOK is off). The relay is told when it's an anchored one (the keys are the desktop's
-// otherwise), and it gets a thin border.
+// Which way the headset faces (false: no pose).
+bool HeadForward(Mat *head, double fwd[3]) {
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, head)) return false;
+    fwd[0] = -head->m[0][2], fwd[1] = -head->m[1][2], fwd[2] = -head->m[2][2];
+    return true;
+}
+// The panel the tiling keys act on: the one a tiling key just moved (g_tileHold: until the 3D mouse
+// is back on a panel or you turn to another), else the one under the pointer, else the one you're
+// looking at (within 25 degrees of straight ahead; unless DASH_TILE_LOOK is off). The relay is told
+// when it's an anchored one (the keys are the desktop's otherwise), and it gets a thin border.
 void UpdateTileFocus() {
     const int64_t now = NowMs();
+    Mat head;
+    double fwd[3];
+    const bool facing = HeadForward(&head, fwd);
     if (g_tileHold >= 0) {
         const auto h = g_screens.find(g_tileHold);
+        const bool known = g_tileHoldFwd[0] != 0 || g_tileHoldFwd[1] != 0 || g_tileHoldFwd[2] != 0;
+        const bool turned = facing && known && Dot3(fwd, g_tileHoldFwd) < std::cos(kTileHoldTurnDeg * M_PI / 180);
         if (h == g_screens.end() || !h->second.visible || !g_tiles.Anchored(g_tileHold)) g_tileHold = -1;
         else if (now - g_tileHoldMs < kTileHoldSettleMs) g_mouseScreen = -1;   // (the tiles moving under the cursor: not you)
-        else if (g_mouseScreen >= 0) g_tileHold = -1;   // the 3D mouse nudged back onto a panel: it leads again
+        else if (g_mouseScreen >= 0 || turned) g_tileHold = -1;   // the 3D mouse nudged back onto a panel, or you look at another: it leads again
     }
     int f = g_tileHold;
     const auto m = g_screens.find(g_mouseScreen);
     if (f < 0 && m != g_screens.end() && m->second.visible) f = g_mouseScreen;
-    Mat head;
-    if (f < 0 && g_tileLook && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
-        const double fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]};
+    if (f < 0 && g_tileLook && facing) {
         double best = std::cos(25 * M_PI / 180);
         for (auto &[i, s] : g_screens) {
             Mat p;
@@ -548,6 +560,11 @@ void UpdateDashTiles() {
     // the dashboard is open, so at the bar a reset after turning did nothing; ft-layout leaves the tiled
     // panels to this. The next opening puts them at the bar again, which SteamVR opens in front of you.)
     if (g_tileReset && (g_tiles.Ids().empty() || (Dash().ever && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
+    if (!g_tilesStopping && g_tiles.FillGap(NowMs())) {
+        RetileDash();
+        RememberTiles();
+        std::printf("tiles: the gap a panel left filled\n");
+    }
     UpdateTileFocus();
 }
 
@@ -653,6 +670,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         const int i = g_tileFocus;
         if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
         g_tileHold = i, g_tileHoldMs = NowMs(), g_mouseScreen = -1;   // (the relay hid the 3D mouse: it keeps the focus)
+        if (Mat head; !HeadForward(&head, g_tileHoldFwd)) g_tileHoldFwd[0] = g_tileHoldFwd[1] = g_tileHoldFwd[2] = 0;
         if (!g_tiles.Press(i, key)) return (void)std::snprintf(reply, size, "ok nothing to do");
         RetileDash();
         RememberTiles();

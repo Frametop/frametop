@@ -23,7 +23,8 @@ user removes afterwards stays removed.
   dashboard-tile-keys (2026-11-16): the dashboard tiling keys, Meta+Shift+arrows and Meta+Ctrl+arrows,
   and Meta+/ for the key list (ft_input_actions.TILE_KEY_BINDINGS, new defaults; docs/design.md,
   Dashboard tiles). Each one the list lacks is added the same way, in one change; one the list
-  binds already stays the user's.
+  binds already stays the user's. (The moves were Meta+arrows until 2026-11-20, changed here
+  before any release had this change, so no install outside development ran that version.)
 
   input/rules-migrate.py [RULES [STATE]]
 Python 3 standard library only: it runs on the SteamOS host.

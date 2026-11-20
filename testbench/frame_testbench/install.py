@@ -5,6 +5,8 @@ from pathlib import Path
 import tempfile
 
 LIBRARIES = ('libframe_loader.so', 'libframe_input.so')
+# The boot race's failed session, forgiven (its header); staged next to the libraries.
+FORGIVE = Path(__file__).resolve().parent.parent / 'steamvr-forgive'
 MARKER = '# Managed by frame-testbench. Remove this file to disable injection.\n'
 
 
@@ -19,11 +21,13 @@ def dropin(directory):
         raise ValueError('LD_PRELOAD library directory cannot contain whitespace or colons')
     value = value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%')
     # A crashing preload must not loop: SteamOS's health check repairs Steam after three
-    # failed SteamVR sessions and boots the other OS slot after four (install.sh).
+    # failed SteamVR sessions and boots the other OS slot after four (install.sh). After its
+    # ExecStopPost, steamvr-forgive notes whether the failure it counted was the boot race.
     return (MARKER + '[Service]\n'
             'RestartSec=30\n'
             f'Environment="LD_PRELOAD={value}/libframe_loader.so"\n'
-            f'Environment="FRAME_TESTBENCH_PROXY={value}/libframe_input.so"\n')
+            f'Environment="FRAME_TESTBENCH_PROXY={value}/libframe_input.so"\n'
+            f'ExecStopPost=-/bin/bash "{value}/steamvr-forgive" stopped\n')
 
 
 def atomic(path, data, mode=0o600):
@@ -44,6 +48,7 @@ def atomic(path, data, mode=0o600):
 def stage(build, home):
     build, home = Path(build), Path(home)
     files = {name: (build / name).read_bytes() for name in LIBRARIES}
+    files['steamvr-forgive'] = FORGIVE.read_bytes()
     digest = hashlib.sha256()
     for name, data in files.items():
         digest.update(name.encode() + b'\0' + data)

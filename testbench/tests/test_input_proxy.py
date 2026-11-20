@@ -758,9 +758,20 @@ class InputProxyTests(unittest.TestCase):
 
     def test_loader_skips_the_proxy_while_steamos_counts_a_failed_session(self):
         tracker = Path(self.temp.name) / "steamvr-short-session-tracker"
+        forgiven = Path(self.temp.name) / "frame-testbench-forgiven"
         env = dict(self.env, FRAME_TESTBENCH_SOCKET=str(Path(self.temp.name) / "after-failure"))
-        for text, injected in (("frog:glasses:", False), ("", True)):
+        # (forgiven: steamvr-forgive's count of the boot race's failures; None: no file yet)
+        for text, forgive, injected in (("frog:glasses:", None, False), ("", None, True),
+                                        ("frog:glasses:", "1\n", True),                  # only the boot race
+                                        ("frog:glasses:frog:glasses:", "1\n", False),    # and one more
+                                        ("frog:glasses:", "0\n", False),
+                                        ("frog:glasses:", "5\n", False),                 # more than counted: none
+                                        ("frog:glasses:", "junk", False)):
             tracker.write_text(text)
+            if forgive is None:
+                forgiven.unlink(missing_ok=True)
+            else:
+                forgiven.write_text(forgive)
             p = subprocess.Popen([str(BUILD / "vrserver")], env=env, text=True,
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.addCleanup(lambda p=p: p.poll() is None and p.kill())

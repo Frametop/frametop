@@ -41,8 +41,13 @@ mcp_venv() {
 
 # On the SteamOS host, from here down.
 steamvr() { systemctl --user show -p "$1" --value steamvr.service; }
-# Failed sessions the health check has counted. A session that ends well clears them.
-frogs() { { grep -o frog "$tracker" 2>/dev/null || true; } | wc -l; }
+# Failed sessions the health check has counted, less the boot race's (steamvr-forgive). A
+# session that ends well clears them.
+forgive=$root/testbench/steamvr-forgive
+frogs() {
+  [ -e "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/frame-testbench-forgiven" ] || "$forgive" scan
+  "$forgive" count
+}
 
 # restart_steamvr install|uninstall
 restart_steamvr() {
@@ -62,7 +67,7 @@ restart_steamvr() {
     exit 1
   fi
   if [ "$(frogs)" -gt 0 ]; then
-    echo "SteamOS already counts a failed SteamVR session ($tracker), and a restart could add another." >&2
+    echo "SteamOS already counts a failed SteamVR session ($tracker; not the boot race), and a restart could add another." >&2
     [ "$1" = install ] || { echo "Not restarting: SteamVR starts without the preload when it next starts." >&2; exit 0; }
     echo "Not restarting: restart SteamVR yourself once it has run normally." >&2
     exit 1

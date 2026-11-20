@@ -18,6 +18,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn('LD_PRELOAD=', text)
         self.assertIn('FRAME_TESTBENCH_PROXY=', text)
         self.assertIn('RestartSec=30', text)
+        self.assertIn('ExecStopPost=-/bin/bash "/home/test/project/build/steamvr-forgive" stopped', text)
         self.assertNotIn('ExecStart=', text)
         self.assertNotIn('sshd', text)
 
@@ -33,6 +34,7 @@ class InstallTests(unittest.TestCase):
             target = Path(record['dropin'])
             self.assertTrue(target.exists())
             self.assertTrue(all((Path(record['library_dir']) / n).exists() for n in mod.LIBRARIES))
+            self.assertEqual((Path(record['library_dir']) / 'steamvr-forgive').read_bytes(), mod.FORGIVE.read_bytes())
             unrelated = target.parent / 'other.conf'
             unrelated.write_text('leave alone')
             self.assertEqual(mod.stage(build, home), record)

@@ -1,0 +1,70 @@
+#!/bin/bash
+# Which of SteamOS's counted failed SteamVR sessions the testbench forgives: only the boot race.
+#
+# SteamOS's health check (/usr/share/deckard/steamvr-health-check) appends "frog:glasses:" to
+# $XDG_RUNTIME_DIR/steamvr-short-session-tracker for every failed SteamVR session and clears it
+# after a good one. On the Frame, the first SteamVR start of every boot fails with
+# VRInitError_Init_HmdNotFound (the headset isn't up yet) and systemd starts it again, so every
+# boot begins with one counted failure, and the loader (native/interpose.cpp) and
+# `install.sh --restart` would never let the testbench in (user, 2026-11-19: "change the guard").
+#
+# This keeps $XDG_RUNTIME_DIR/frame-testbench-forgiven: how many of the tracker's failures are
+# that boot race (0 or 1). Both guards count the tracker's failures minus that. Any other failure
+# still counts, and a good stop (the tracker cleared) sets it back to 0.
+#
+#   steamvr-forgive stopped   the drop-in's ExecStopPost, after the health check's: at every stop
+#   steamvr-forgive scan      install.sh, when no stop has written the file this boot (the drop-in
+#                             came after the boot race): reads this boot's journal instead
+#   steamvr-forgive count     prints the failures that count (the tracker's, less the forgiven)
+set -u
+run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+tracker=${FRAME_TESTBENCH_TRACKER:-$run/steamvr-short-session-tracker}
+out=${FRAME_TESTBENCH_FORGIVEN:-$run/frame-testbench-forgiven}
+boot_s=180   # a failure this soon after boot, with HmdNotFound, is the race
+
+frogs() { { grep -o frog "$tracker" 2>/dev/null || true; } | wc -l; }
+forgiven() { local n; n=$(head -c 8 "$out" 2>/dev/null | tr -dc 0-9); echo "${n:-0}"; }
+write() { printf '%s\n' "$1" >"$out.tmp" && mv -f "$out.tmp" "$out"; }
+uptime_s() { echo "${FRAME_TESTBENCH_UPTIME:-$(cut -d. -f1 /proc/uptime)}"; }   # (the override: tests)
+# the journal this boot (FRAME_TESTBENCH_JOURNAL: a file standing in for it, in tests)
+journal() {
+  if [ -n "${FRAME_TESTBENCH_JOURNAL:-}" ]; then cat "$FRAME_TESTBENCH_JOURNAL"
+  else journalctl --user -b -q -o short-monotonic "$@" 2>/dev/null; fi
+}
+secs() { sed -n 's/^\[ *\([0-9]*\)\..*/\1/p' | head -1; }
+
+case ${1:-} in
+  stopped)
+    n=$(frogs)
+    if [ "$n" -eq 0 ]; then write 0; exit 0; fi
+    # (the file is missing only until this boot's first stop: this is it)
+    if [ ! -e "$out" ]; then
+      race=0
+      if [ "$n" -eq 1 ] && [ "$(uptime_s)" -lt "$boot_s" ] && [ -n "${INVOCATION_ID:-}" ] &&
+         journal _SYSTEMD_INVOCATION_ID="$INVOCATION_ID" | grep -q VRInitError_Init_HmdNotFound; then
+        race=1
+      fi
+      write "$race"
+    fi
+    # (otherwise as it was: no good stop since, so the failure it forgave is still in the tracker)
+    ;;
+  scan)
+    n=$(frogs) log=$(journal -u steamvr.service)
+    marks=$(grep -c "Marking as failure" <<<"$log")
+    first=$(grep "Marking as failure" <<<"$log" | secs)
+    race=$(grep VRInitError_Init_HmdNotFound <<<"$log" | secs)
+    # every failure this boot still in the tracker (no good stop since), the first one the race
+    if [ "$n" -ge 1 ] && [ "$n" -eq "$marks" ] && [ -n "$race" ] && [ -n "$first" ] &&
+       [ "$race" -lt "$boot_s" ] && [ "$first" -lt "$boot_s" ] && [ "$race" -le "$first" ]; then
+      write 1
+    else
+      write 0
+    fi
+    ;;
+  count)
+    n=$(frogs) f=$(forgiven)
+    [ "$f" -le "$n" ] || f=0
+    echo $(( n - f ))
+    ;;
+  *) echo "usage: $0 stopped|scan|count" >&2; exit 2 ;;
+esac

@@ -25,19 +25,28 @@ bool vrserver() {
 // here for every failed SteamVR session and clears it after a good one. It repairs Steam
 // after three and boots the other OS slot after four, so after a failure SteamVR starts
 // once without the proxy: a proxy that crashes vrserver costs one failed session, not four.
-bool failure_counted() {
+// The boot race's failure (every boot's first start: HmdNotFound) doesn't count:
+// steamvr-forgive keeps how many of the tracker's failures that is in frame-testbench-forgiven.
+int read_file(const char *dir, const char *name, char *text, int size) {
     char path[PATH_MAX];
-    const char *dir = std::getenv("XDG_RUNTIME_DIR");
-    if (dir && dir[0] == '/') snprintf(path, sizeof(path), "%s/steamvr-short-session-tracker", dir);
-    else snprintf(path, sizeof(path), "/run/user/%u/steamvr-short-session-tracker", getuid());
+    if (dir && dir[0] == '/') snprintf(path, sizeof(path), "%s/%s", dir, name);
+    else snprintf(path, sizeof(path), "/run/user/%u/%s", getuid(), name);
     const int fd = open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
-    char text[64];
-    const auto n = read(fd, text, sizeof(text) - 1);
+    if (fd < 0) return 0;
+    const auto n = read(fd, text, size - 1);
     close(fd);
-    if (n <= 0) return false;
-    text[n] = 0;
-    return strstr(text, "frog") != nullptr;
+    text[n > 0 ? n : 0] = 0;
+    return n > 0 ? int(n) : 0;
+}
+bool failure_counted() {
+    const char *dir = std::getenv("XDG_RUNTIME_DIR");
+    char text[128];
+    int frogs = 0;
+    if (read_file(dir, "steamvr-short-session-tracker", text, sizeof(text)))
+        for (const char *p = text; (p = strstr(p, "frog")); p += 4) ++frogs;
+    char num[16];
+    const int forgiven = read_file(dir, "frame-testbench-forgiven", num, sizeof(num)) ? atoi(num) : 0;
+    return frogs > (forgiven >= 0 && forgiven <= frogs ? forgiven : 0);
 }
 }
 extern "C" __attribute__((visibility("default")))

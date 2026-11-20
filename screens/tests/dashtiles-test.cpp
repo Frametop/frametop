@@ -200,6 +200,27 @@ int main() {
         b.Arrange(desk);
         check("pan: a key press: the strip still reaches straight ahead", b.Last().az0 <= 1e-9 && b.Last().az1 >= -1e-9);
     }
+    // --- panels that come after the strip was laid out (back from a profile, or anchored): the strip
+    // centred with them, not grown off to one side (testbench, 2026-11-19: one tile up when the
+    // dashboard opened, two more after it, the strip -52..23)
+    {
+        dashtiles::Board b;
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Arrange(desk);
+        b.Drop(1, b.DropFor(1, 15, 0, desk), 15);   // (moved: off centre)
+        b.Arrange(desk);
+        b.Anchor(2, -1, dashtiles::Stay::Default);
+        const tiling::Layout &a = b.Arrange(desk);
+        check("late: an anchored one: the strip centred", near(a.az0, -a.az1, 1e-9));
+        dashtiles::State st;
+        dashtiles::Parse(b.Remember(2), &st);
+        b.Restore(3, st, 2);
+        const tiling::Layout &r = b.Arrange(desk);
+        check("late: a restored one: the strip centred", near(r.az0, -r.az1, 1e-9) && b.PlacedOf(3));
+        b.Drop(3, b.DropFor(3, r.az0 + 5, 0, desk), r.az0 + 5);
+        const tiling::Layout &m = b.Arrange(desk);
+        check("late: then moved: not centred again", !near(m.az0, -m.az1, 1e-3));
+    }
     // --- a narrow panel flipping its lean doesn't move the other columns (testbench, 2026-11-18: one
     // flip took the column next to it 6 degrees)
     {

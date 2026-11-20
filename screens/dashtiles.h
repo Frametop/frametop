@@ -158,9 +158,12 @@ public:
     // strip's end that brings its middle nearer in front of you, the left one when Steam's slot has
     // pushed it right). On a full desk (OnTopOf, with its `info`): on top of the lowest column.
     // With `leftOf` tiled: a column of its own just left of its.
+    // The strip centred again with it (user, 2026-11-19: "the tiling doesn't keep itself centered";
+    // a panel that came back after the dashboard opened grew the strip off to one side).
     void Anchor(int id, int focused, dashtiles::Stay stay, int leftOf = -1, const Info *info = nullptr) {
         if (Anchored(id)) return;
         spots_[id].stay = stay;
+        Recentre();
         if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
         if (const int c = info ? OnTopOf(*info) : -1; c >= 0) return grid_.Insert(id, c, 0, false);
         if (grid_.Has(focused)) return grid_.Add(id, focused);
@@ -209,7 +212,7 @@ public:
             if (Satellite(id)) EndBatch(), spots_[id].satellite = false, grid_.Add(id, -1);
             return;
         }
-        moved_ = id, movedAz_ = az;
+        moved_ = id, movedAz_ = az, recentre_ = false;   // (where you let it go wins)
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
         EndBatch();
@@ -234,7 +237,7 @@ public:
 private:
     // Meta+Ctrl+Right or Up: bigger; Left or Down: smaller (its natural shape kept).
     bool Pressed(int id, Key k) {
-        moved_ = id, movedAz_ = NAN;   // (moved by a key: the others keep their places, not it)
+        moved_ = id, movedAz_ = NAN, recentre_ = false;   // (moved by a key: the others keep their places, not it)
         switch (k) {
             case Key::Left:
             case Key::Right: {
@@ -344,6 +347,7 @@ public:
     void Restore(int id, const State &st, int focused) {
         Unanchor(id);
         if (st.kind == State::Kind::Off) return;
+        Recentre();   // (as Anchor)
         Spot &s = spots_[id];
         s.stay = st.stay;
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)

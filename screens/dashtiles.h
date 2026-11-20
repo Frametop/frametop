@@ -161,13 +161,16 @@ public:
         EndBatch();
         spots_[id].satellite = false;
         const std::vector<int> mates = Marks::Mates(grid_, id);
+        const std::string was = Remember(id);
+        const int split = Split();
         slot_.Move(grid_, id, [&] {   // (Insert moves it)
             const bool into = d.kind == tiling::Drop::Into;
             grid_.Insert(id, d.col, d.row, !into, scale, d.leftOfSlot, into && d.below);
             grid_.SetAlign(id, into ? d.align : 0);
             return true;
         });
-        ByHand(id, mates);   // (where you put it stays, and a stack you put it in is yours)
+        // Where you put it stays, and a stack you put it in is yours. Let go where it was: nothing.
+        if (Remember(id) != was || Split() != split) ByHand(id, mates);
     }
 
     // Off the grid, its gap filled later (FillGap): a panel that stood in a stack (at or above the
@@ -255,8 +258,11 @@ public:
         return ByHand(id, mates), true;   // (a lift's: the one pulled in, a new stackmate)
     }
     // Resized by its corner on the grid: `factor` times as big as its tile was.
+    // Within kResizeSlack of 1: a corner let go where it was (vrtiles.cpp's size there is only kept
+    // to 2 mm), nothing.
+    static constexpr double kResizeSlack = 0.005;
     bool Resized(int id, double factor) {
-        if (!grid_.Has(id) || !(factor > 0)) return false;
+        if (!grid_.Has(id) || !(factor > 0) || std::fabs(factor - 1) < kResizeSlack) return false;
         const std::vector<int> mates = Marks::Mates(grid_, id);
         return Changed(grid_.Scale(id, factor)) && (ByHand(id, mates), true);
     }

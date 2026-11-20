@@ -1392,6 +1392,21 @@ int main() {
                 check(resize ? "settle: the one waiting made bigger by you: left where you made it" : "settle: the one waiting reordered by you: left where you put it",
                       waitsWr && edited && stays && !wr.Settle() && cols(wr) == wr0 && wr0.find("60") != std::string::npos && wr.Grid().Find(60).col == wr.Grid().Find(5).col);
             }
+            // (council pass 11) touched by you but changed nothing: still waiting, checked once its stackmate shows
+            for (const int how : {0, 1, 2}) {
+                dashtiles::Board wn = waiting();
+                const bool waitsWn = !wn.Settle();
+                if (how == 0) wn.Drop(60, {tiling::Drop::Into, wn.Grid().Find(60).col, wn.Grid().Find(60).row});   // let go where it was
+                if (how == 1) wn.Resized(60, 1.000001);                                                            // a corner let go where it was
+                if (how == 2) wn.absent = {2, 60}, wn.Arrange(same), wn.Resized(60, 1.1), wn.absent = {2};         // sized while it's not shown
+                wn.Arrange(same);
+                const bool on5 = wn.Grid().Find(60).col == wn.Grid().Find(5).col;
+                wn.absent = {}, wn.Arrange(same);
+                check(how == 0   ? "settle: the one waiting let go where it was: still checked"
+                      : how == 1 ? "settle: the one waiting, a corner let go where it was: still checked"
+                                 : "settle: the one waiting sized while not shown: still checked",
+                      waitsWn && on5 && wn.Settle() && wn.Grid().Find(60).col != wn.Grid().Find(5).col);
+            }
             // (council pass 10) put there for you, alone once its stackmate went, moved alone: a return into its column still checked
             dashtiles::Board al = full();
             al.Anchor(4, -1, dashtiles::Stay::Default), al.Drop(4, {tiling::Drop::Into, 0, 0}), al.Arrange(same);

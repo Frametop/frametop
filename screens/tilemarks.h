@@ -1,8 +1,8 @@
 // Which dashboard tiles Board::Settle (dashtiles.h) still checks, and why (council, 2026-11-20):
 // one put on a stack before its size was known (unsized), and one put on a stack for you (stacked:
-// Anchor's OnTopOf, FillGap), so one coming back to that stack is checked too. A stack you change
-// by hand is yours: those marks go. Header only, no OpenVR, so its test (tests/dashtiles-test.cpp)
-// runs anywhere.
+// Anchor's OnTopOf, FillGap), so one coming back to that stack is checked too. A panel you put into
+// a stack by hand makes that stack yours (ByHand says which marks go for each edit). Header only,
+// no OpenVR, so its test (tests/dashtiles-test.cpp) runs anywhere.
 #pragma once
 
 #include "tilegrid.h"
@@ -43,15 +43,15 @@ public:
     // Off the grid: nothing to check for it.
     void Unmark(int id) { unsized_.erase(id), stacked_.erase(id); }
     // `id` moved, sized or leaned by hand, its Mates `before` that (council, 2026-11-20). Its own
-    // unsized mark goes: you've placed or sized it yourself where it is, as with one you put on a
-    // stack. Reordered, resized or leaned in its stack, or moved still alone (the same mates), the
-    // stacked marks stay: the stack's still one made for you, and a panel coming back to it is
-    // checked. Out of its stack, its stacked mark goes too. Put by hand into a stack it wasn't in
+    // unsized mark goes once it's shown: you've placed or sized it yourself where it is, as with one
+    // you put on a stack. Reordered, resized or leaned in its stack, or moved still alone (the same
+    // mates), the stacked marks stay: the stack's still one made for you, and a panel coming back to
+    // it is checked. Out of its stack, its stacked mark goes too. Put by hand into a stack it wasn't in
     // (others with it now that weren't), that stack is yours: its panels' stacked marks go, and so
     // do the unsized ones of those shown (`absent`: not shown, so you haven't seen how tall the
     // stack is with them). A lift's: the one pulled in is a new stackmate of `id`'s.
     void ByHand(const tilegrid::Grid &g, const std::set<int> &absent, int id, const std::vector<int> &before) {
-        unsized_.erase(id);
+        if (!absent.count(id)) unsized_.erase(id);
         const std::vector<int> now = Mates(g, id);
         if (now == before) return;
         stacked_.erase(id);

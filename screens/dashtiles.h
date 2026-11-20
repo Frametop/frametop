@@ -303,8 +303,8 @@ private:
                 if (const tiling::Placed *p = PlacedOf(id); p && p->narrow && p->lean != dir) return grid_.SetAlign(id, dir);
                 return slot_.Move(grid_, id, [&] { return grid_.MoveSide(id, dir, slot_.Key()); });
             }
-            case Key::Up: return grid_.MoveUpDown(id, -1);
-            case Key::Down: return grid_.MoveUpDown(id, +1);
+            case Key::Up: return grid_.MoveUpDown(id, -1) || (Alone(id) && Lift(id, -1));
+            case Key::Down: return grid_.MoveUpDown(id, +1) || (Alone(id) && Hang(id));
             case Key::Wider:
             case Key::Taller: return grid_.Scale(id, tilegrid::kStep);
             case Key::Narrower:
@@ -582,17 +582,38 @@ private:
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
     static constexpr double kFitSlackDeg = 0.5;
     bool Pullable(int id) const { return id != steam && !absent.count(id); }
-    // Let go over its own column, already its top: a neighbouring column's top panel in under it, the
-    // one on side `side` first (none there that can move: nothing).
-    void Lift(int id, int side) {
+    // Let go over its own column, already its top (or Meta+Shift+Up alone in its column, user
+    // 2026-11-20: "tile it up"): a neighbouring column's top panel in under it, the one on side `side`
+    // first (none there that can move: nothing). False when nothing changed.
+    bool Lift(int id, int side) {
         const tilegrid::Where w = grid_.Find(id);
-        if (!w.ok() || grid_.Cols()[size_t(w.col)].Below(w.row)) return;
+        if (!w.ok() || grid_.Cols()[size_t(w.col)].Below(w.row)) return false;
         for (const int c : {w.col + (side < 0 ? -1 : 1), w.col + (side < 0 ? 1 : -1)}) {
             if (c < 0 || c >= int(grid_.Cols().size()) || !Pullable(grid_.Cols()[size_t(c)].cells.front().id)) continue;
             const int other = grid_.Cols()[size_t(c)].cells.front().id;
-            slot_.Move(grid_, other, [&] { return grid_.PullTop(c, w.col, w.row + 1); });
-            return;
+            return slot_.Move(grid_, other, [&] { return grid_.PullTop(c, w.col, w.row + 1); });
         }
+        return false;
+    }
+    // Meta+Shift+Down alone in its column ("tile it down"): it hangs under the neighbouring column,
+    // the left one first, lowest there (its own column goes, as a drop under that column does).
+    bool Hang(int id) {
+        const tilegrid::Where w = grid_.Find(id);
+        const int n = int(grid_.Cols().size());
+        if (!w.ok()) return false;
+        const int c = w.col > 0 ? w.col - 1 : w.col + 1;
+        if (c >= n) return false;
+        const int to = c > w.col ? c - 1 : c, rows = int(grid_.Cols()[size_t(c)].cells.size());
+        const double scale = grid_.Cols()[size_t(w.col)].cells[size_t(w.row)].scale;
+        return slot_.Move(grid_, id, [&] {
+            grid_.Insert(id, to, rows, false, scale, false, true);
+            grid_.SetAlign(id, 0);
+            return true;
+        });
+    }
+    bool Alone(int id) const {
+        const tilegrid::Where w = grid_.Find(id);
+        return w.ok() && grid_.Cols()[size_t(w.col)].cells.size() == 1;
     }
     static tiling::Drop Without(const tilegrid::Grid &g, int id, tiling::Drop d) {
         const tilegrid::Where w = g.Find(id);

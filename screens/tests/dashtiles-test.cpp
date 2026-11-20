@@ -560,7 +560,7 @@ int main() {
                                                      near(b.Grid().CellOf(10)->scale, 1));
         check("smaller: below natural size too", b.Press(1, dashtiles::Key::Narrower) && b.Grid().CellOf(1)->scale < 1);
         check("left: the columns swap", b.Press(10, dashtiles::Key::Left) && b.Grid().Cols()[0].cells[0].id == 10);
-        check("down alone: nothing", !b.Press(10, dashtiles::Key::Down));
+        check("down alone: it hangs under the next column", b.Press(10, dashtiles::Key::Down) && b.Grid().Cols()[0].cells.back().id == 10);
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         b.TearOff(10, rel);
         check("a satellite: the keys do nothing", !b.Press(10, dashtiles::Key::Right));
@@ -1032,6 +1032,15 @@ int main() {
         p = *b.PlacedOf(2);
         d = b.DropFor(2, p.az1 - 1, p.elDeg, info);
         check("past: beside, on the row: the quarters still make a new column", d.kind == tiling::Drop::NewColumn);
+        // the keys, alone in a column: Meta+Shift+Up lifts it (a neighbour in under it), Down hangs it
+        b = fresh();
+        check("keys: up, alone: the left neighbour in under it", b.Press(2, dashtiles::Key::Up) && cols(b) == "[ 2 1 ][ 3 ][ 4 ]");
+        b = fresh();
+        check("keys: down, alone: under the left neighbour", b.Press(2, dashtiles::Key::Down) && cols(b) == "[ 1 2 ][ 3 ][ 4 ]" &&
+                                                                  (b.Arrange(info), b.PlacedOf(2)->below));
+        b = fresh();
+        check("keys: down, the first column: under the right one", b.Press(1, dashtiles::Key::Down) && cols(b) == "[ 2 1 ][ 3 ][ 4 ]");
+        check("keys: up again: the base, standing on the desk", b.Press(1, dashtiles::Key::Up) && (b.Arrange(info), !b.PlacedOf(1)->below));
     }
     {   // the memory's file: one write a moment after a burst of changes, and a flush on the way out
         dashtiles::SaveTimer s;

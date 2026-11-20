@@ -20,7 +20,7 @@ user removes afterwards stays removed.
   desktopless-key (2026-11-07): Meta+Shift+D turns desktopless mode on or off ("42+125+32":
   desktopless_toggle, a new default; docs/desktopless.md). Added the same way.
 
-  dashboard-tile-keys (2026-11-16): the dashboard tiling keys, Meta+arrows and Meta+Ctrl+arrows,
+  dashboard-tile-keys (2026-11-16): the dashboard tiling keys, Meta+Shift+arrows and Meta+Ctrl+arrows,
   and Meta+/ for the key list (ft_input_actions.TILE_KEY_BINDINGS, new defaults; docs/design.md,
   Dashboard tiles). Each one the list lacks is added the same way, in one change; one the list
   binds already stays the user's.
@@ -47,7 +47,7 @@ DESKTOPLESS_KEY = "desktopless-key"
 DESKTOPLESS_COMBO, DESKTOPLESS_ACTION = "42+125+32", "desktopless_toggle"
 TILE_KEYS_KEY = "dashboard-tile-keys"
 # ft_input_actions.TILE_KEY_BINDINGS, copied: this runs on the host before conf/ may be importable
-TILE_COMBOS = {"125+105": "tile_left", "125+106": "tile_right", "125+103": "tile_up", "125+108": "tile_down",
+TILE_COMBOS = {"42+125+105": "tile_left", "42+125+106": "tile_right", "42+125+103": "tile_up", "42+125+108": "tile_down",
                "29+125+106": "tile_wider", "29+125+105": "tile_narrower", "29+125+103": "tile_taller",
                "29+125+108": "tile_shorter", "125+53": "keys_list"}
 

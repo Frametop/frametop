@@ -3,9 +3,10 @@
 // What the tiling keys, a drag and the anchor button change (vr.cpp's dashboard tiling). Panels
 // are their ft-screens numbers (0-based); it doesn't know what kind each is.
 //
-// The keys (user, 2026-11-16, like Omarchy's, rebindable): Meta+Left/Right moves the focused panel
-// to the next column that way (alone in its column: the columns swap; with others: it joins the
-// next one, or at the end, a new column of its own), Meta+Up/Down moves it within its column, and
+// The keys (user, 2026-11-16, like Omarchy's, rebindable; Meta+Shift+arrows since 2026-11-20, here
+// called Meta+arrows): Meta+Left/Right moves the focused panel to the next column that way (alone in
+// its column: the columns swap; with others: it joins the next one, or at the end, a new column of
+// its own), Meta+Up/Down moves it within its column (alone in it: dashtiles.h's Board), and
 // Meta+Ctrl+arrows make it bigger or smaller (dashtiles.h). A panel anchored gets a column of its
 // own right of the focused one (or goes on top of one: dashtiles.h's Board).
 //

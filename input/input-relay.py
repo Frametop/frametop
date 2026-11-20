@@ -1694,7 +1694,7 @@ class Relay:
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return combo, None
         if action in TILE_FOCUS_ACTIONS and time.monotonic() >= self.tile_focus_until:
-            return combo, None  # no anchored tile has the focus: the desktop's key (KWin's Meta+arrows)
+            return combo, None  # no anchored tile has the focus: the desktop's key (KWin's, or a PC's)
         return combo, action
 
     def release_combo(self, code):

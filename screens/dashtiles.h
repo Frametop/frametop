@@ -219,7 +219,7 @@ public:
         const auto cols = Columns(info);
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : tiling::Arrange(cols, params, Split());
         if (l.split < 0) tiling::Turn(&l, pan_);   // (as you see it)
-        return Without(grid_, id, tiling::DropAt(l, cols, az, el));
+        return Without(grid_, id, tiling::DropAt(l, cols, az, el, id));
     }
     // Let go at `az` round you: where DropFor said (a column's indices are the grid's without it), or
     // torn off at `rel`. The strip then goes where it keeps it nearest `az` (Arrange; NAN: the others

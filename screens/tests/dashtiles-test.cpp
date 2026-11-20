@@ -988,6 +988,51 @@ int main() {
         w.Arrange(wide);
         check("leave: a neighbour wider than the column: not pulled", w.Leave(2) && cols(w) == "[ 1 ][ 3 ]");
     }
+    {   // dragged mostly over a column's top or under the desk line: into the nearest column, no quarters
+        // (user, 2026-11-20: a middle-row panel "near impossible" to move up or down)
+        const auto cols = [](const dashtiles::Board &b) {
+            std::string o;
+            for (const auto &c : b.Grid().Cols()) {
+                o += "[";
+                for (const auto &cell : c.cells) o += " " + std::to_string(cell.id);
+                o += " ]";
+            }
+            return o;
+        };
+        const auto info = [](int id) { return id == 3 ? dashtiles::Info{3.5, 1.97} : dashtiles::Info{1.6, 0.9}; };
+        const auto fresh = [&] {
+            dashtiles::Board b;
+            for (const int i : {1, 2, 3, 4}) b.Anchor(i, -1, dashtiles::Stay::Default);
+            b.Arrange(info);
+            return b;
+        };
+        dashtiles::Board b = fresh();
+        tiling::Placed p = *b.PlacedOf(2);
+        double half = (p.el1 - p.el0) / 2, desk = b.Last().deskDeg;
+        tiling::Drop d = b.DropFor(2, p.az1 - 1, p.el1 + half, info);   // (up, on its right quarter)
+        check("past: up off its middle, still a lift", d.kind == tiling::Drop::Lift);
+        d = b.DropFor(2, p.azDeg + 2, desk - half - 1, info);   // (straight down, a little right)
+        check("past: down under itself: under the nearest other column", d.kind == tiling::Drop::Into && d.below);
+        b.Drop(2, d, p.azDeg);
+        check("past: ...hanging under the big one", cols(b) == "[ 1 ][ 3 2 ][ 4 ]");
+        b = fresh();
+        p = *b.PlacedOf(2);
+        const tiling::Placed p4 = *b.PlacedOf(4);
+        d = b.DropFor(2, p4.az0 + 1, p4.el1 + half, info);   // (up, over the far neighbour's left quarter)
+        b.Drop(2, d, p4.az0 + 1);
+        check("past: up over a neighbour's edge: on top of it", d.kind == tiling::Drop::Into && cols(b) == "[ 1 ][ 3 ][ 2 4 ]");
+        b = fresh();
+        const tiling::Placed big = *b.PlacedOf(3);
+        half = (big.el1 - big.el0) / 2, desk = b.Last().deskDeg;
+        check("past: a tall one dragged under the strip isn't torn off", desk - half - 1 < b.Last().el0 - tiling::kTearMarginDeg);
+        d = b.DropFor(3, p4.azDeg, desk - half - 1, info);
+        b.Drop(3, d, p4.azDeg);
+        check("past: ...it hangs under the nearest column", d.kind == tiling::Drop::Into && cols(b) == "[ 1 ][ 2 ][ 4 3 ]");
+        b = fresh();
+        p = *b.PlacedOf(2);
+        d = b.DropFor(2, p.az1 - 1, p.elDeg, info);
+        check("past: beside, on the row: the quarters still make a new column", d.kind == tiling::Drop::NewColumn);
+    }
     {   // the memory's file: one write a moment after a burst of changes, and a flush on the way out
         dashtiles::SaveTimer s;
         check("nothing changed: never due", !s.Due(0) && !s.Due(100000) && !s.Flush());

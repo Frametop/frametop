@@ -26,6 +26,7 @@ $VibepolloVersion), which the release notes name. A release built for another ba
 kit changed by hand first (its installer URL and hash, the stock files' hashes, $EarlierShas),
 so pin and apply refuse when the two don't match, and change nothing.
 """
+import argparse
 import hashlib
 import json
 import re
@@ -59,7 +60,11 @@ def http_get(url):
 
 
 def read_pin(root):
-    pin = json.loads((root / PIN).read_text())
+    return validate(json.loads((root / PIN).read_text()))
+
+
+def validate(pin):
+    """PIN, if every value is one the kits can take as it is (get.sh is piped to bash)."""
     if not re.fullmatch(r"frametop-[0-9][0-9A-Za-z.-]*", pin["tag"]):
         raise PinError(f"{PIN}: tag {pin['tag']!r} isn't a frametop-* release tag")
     if not re.fullmatch(r"vibepollo-[0-9A-Za-z.-]+-x86_64\.pkg\.tar\.zst", pin["linux"]["package"]):
@@ -72,6 +77,8 @@ def read_pin(root):
     for path, sha in pin["windows"]["files"].items():
         if not SHA.fullmatch(sha):
             raise PinError(f"{PIN}: windows.files[{path!r}] isn't a lowercase SHA-256")
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", pin["windows"]["base"] or ""):
+        raise PinError(f"{PIN}: windows.base {pin['windows']['base']!r} isn't a Vibepollo version")
     return pin
 
 
@@ -99,11 +106,13 @@ BASE_IN_NOTES = re.compile(r"go into a Vibepollo ([0-9]+(?:\.[0-9]+)+) install")
 def pin_from_release(fetch, tag=None, base=None):
     """The pin for TAG (or the latest release), from the release's assets and notes; BASE
     overrides the Windows base the notes give. FETCH(url) -> bytes."""
-    api = f"https://api.github.com/repos/{REPO}/releases/" + (f"tags/{tag}" if tag else "latest")
+    tag_asked = tag is not None
+    api = f"https://api.github.com/repos/{REPO}/releases/" + (f"tags/{tag}" if tag_asked else "latest")
     release = json.loads(fetch(api))
     tag = release["tag_name"]
     if not tag.startswith("frametop-"):
         raise PinError(f"{REPO}'s release {tag} isn't a frametop-* release")
+    latest = json.loads(fetch(f"https://api.github.com/repos/{REPO}/releases/latest")) if tag_asked else release
     if release.get("draft") or release.get("prerelease"):
         raise PinError(f"{tag} is a draft or a prerelease")
     assets = {a["name"]: a["browser_download_url"] for a in release["assets"]}
@@ -129,9 +138,12 @@ def pin_from_release(fetch, tag=None, base=None):
         },
     }
     warnings = []
-    if SETUP_EXE not in assets:
-        warnings.append(f"{tag} has no {SETUP_EXE}: the pages' Windows download link won't work until it's uploaded")
-    return pin, warnings
+    # The pages link the latest release's copy, whichever release is pinned.
+    if SETUP_EXE not in {a["name"] for a in latest["assets"]}:
+        warnings.append(f"the latest release ({latest['tag_name']}) has no {SETUP_EXE}: "
+                        "the pages' Windows download link won't work until one has")
+    return validate(pin), warnings
+
 
 
 # --- the files ------------------------------------------------------------------------------
@@ -279,32 +291,30 @@ def pin(root, tag=None, base=None, fetch=http_get):
 
 
 def main(argv):
-    args = argv[1:]
-    base = None
-    if "--base" in args:
-        i = args.index("--base")
-        if i + 1 >= len(args):
-            args = []
-        else:
-            base = args[i + 1]
-            del args[i:i + 2]
-    if not args or args[0] not in ("pin", "apply", "check") or len(args) > (2 if args[0] == "pin" else 1) \
-            or (base and args[0] != "pin"):
-        print("usage: pin-vibepollo.py pin [TAG] [--base VERSION] | apply | check", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(prog="pin-vibepollo.py", description="Pin the hosts' Vibepollo (see the docstring).")
+    sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("pin", help="pin TAG, or the fork's latest release, then apply")
+    p.add_argument("tag", nargs="?")
+    p.add_argument("--base", help="the Vibepollo the Windows files go into, if the release notes don't say")
+    sub.add_parser("apply", help="write the pin into the files")
+    sub.add_parser("check", help="exit 1 if a file doesn't match the pin")
     try:
-        if args[0] == "check":
+        args = parser.parse_args(argv[1:])
+    except SystemExit as e:
+        return e.code
+    try:
+        if args.command == "check":
             problems = check(ROOT)
-            for p in problems:
-                print(f"pin-vibepollo: {p}", file=sys.stderr)
+            for problem in problems:
+                print(f"pin-vibepollo: {problem}", file=sys.stderr)
             if not problems:
                 print(f"pin-vibepollo: every file pins {read_pin(ROOT)['tag']}")
             return 1 if problems else 0
-        if args[0] == "apply":
+        if args.command == "apply":
             changed = apply(ROOT)
             tag = read_pin(ROOT)["tag"]
         else:
-            new, changed, warnings = pin(ROOT, args[1] if len(args) == 2 else None, base)
+            new, changed, warnings = pin(ROOT, args.tag, args.base)
             tag = new["tag"]
             for w in warnings:
                 print(f"pin-vibepollo: warning: {w}", file=sys.stderr)

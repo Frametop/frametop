@@ -42,13 +42,16 @@ struct Wall {
 Wall g_tileWallSet, g_tileWallBar;        // the settings', and the bar's at the last Regroup
 bool g_tileAtBar = true;
 bool g_tileWallAtBar = false;
+bool g_tileWallBarKnown = false;          // the bar's wall measured once (a Regroup at the bar)
+bool g_tileWallKeepBar = false;           // a reset: round where you face, the wall as far as at the bar (or it
+                                          // jumped nearer on the reset and back on the next opening)
 bool g_tileSteamOverBar = false;          // ...and Steam's tile turned over it (Regroup again once it's tiled)
 // The command-center arc (tiling::FromEyes): its centre this far behind your eyes. The wall's numbers
 // (Wall, DASH_TILE_GAP_DEG, DASH_TILE_WALL_DEG) are as your eyes see them, a panel's size too (TileInfo).
 constexpr double kFocusBackM = 2.0;
 tiling::Eyes g_tileEyes;                  // the gaps' and the desk's width (the wall and the desk line: Wall's)
 void ApplyWall() {
-    const Wall &w = g_tileWallAtBar ? g_tileWallBar : g_tileWallSet;
+    const Wall &w = g_tileWallAtBar || g_tileWallKeepBar ? g_tileWallBar : g_tileWallSet;
     g_tileEyes.radius = w.radius, g_tileEyes.deskDeg = w.deskDeg;
     tiling::FromEyes(g_tileEyes, kFocusBackM, &g_tiles.params);
 }
@@ -200,6 +203,8 @@ bool Regroup(bool atHead = false) {
     g_tileWallAtBar = g_tileAtBar && !atHead && dashtiles::AtBar(h, b, barUp, DashHeight(), dashtiles::kOverBarDeg, g,
                                                       &g_tileWallBar.radius, &g_tileWallBar.deskDeg);
     if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
+    g_tileWallBarKnown = g_tileWallBarKnown || g_tileWallAtBar;
+    g_tileWallKeepBar = atHead && g_tileAtBar && g_tileWallBarKnown;
     for (int r = 0; r < 3; ++r) g[r][3] += g[r][2] * kFocusBackM;   // (the arc's centre behind your eyes: its +Z)
     ApplyWall();
     const double barW = DashWidth();
@@ -227,7 +232,7 @@ bool Regroup(bool atHead = false) {
                 "round, %.2f m wide, its slot %.0f degrees (0: none), %d columns left of it (-1: the strip doesn't reach it); "
                 "the wall %.2f m away %s%s, the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
                 h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split,
-                g_tiles.params.radius, g_tileWallAtBar ? "(at Steam's bar)" : "(as set)",
+                g_tiles.params.radius, g_tileWallAtBar ? "(at Steam's bar)" : g_tileWallKeepBar ? "(as at Steam's bar)" : "(as set)",
                 g_tileSteamOverBar ? ", Steam's page over the bar" : "", l.el0, l.el1, l.az0, l.az1);
     return true;
 }

@@ -389,8 +389,8 @@ void TileKnown(int i, const std::string &key) {
     bool restored = false;
     const auto restore = [&] { return (restored = g_tiles.Restore(i, line, after, k)) && !g_tiles.Anchored(i); };
     const auto sit = g_screens.find(i);
-    if (g_tiles.Anchored(i) && sit != g_screens.end()) {   // (tiled before its app was known, off for it: the others close up)
-        if (OffTheTiles(sit->second, restore)) RetileDash(), RememberTiles();
+    if (g_tiles.Anchored(i)) {   // (tiled before its app was known, off for it: the others close up)
+        if (sit != g_screens.end() ? OffTheTiles(sit->second, restore) : restore()) RetileDash(), RememberTiles();
     } else restore();
     if (!restored) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
     if (g_tiles.Anchored(i)) {

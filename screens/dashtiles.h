@@ -108,7 +108,7 @@ public:
     bool Unanchor(int id) {
         Forget(id);
         gaps_.Forget(id);
-        ByHand(id);
+        Unmark(id);
         grid_.Remove(id);
         return spots_.erase(id) != 0;
     }
@@ -123,7 +123,7 @@ public:
     // Off the grid, a satellite at `rel` (the group frame's -> the panel's).
     void TearOff(int id, const double rel[3][4]) {
         if (!Anchored(id)) return;
-        EndBatch(), ByHand(id);
+        EndBatch(), Unmark(id);
         grid_.Remove(id);
         Spot &s = spots_[id];
         s.satellite = true;
@@ -153,7 +153,6 @@ public:
                     ByHand(id), ByHand(moved);
             return;
         }
-        ByHand(id);   // (where you put it stays)
         moved_ = id, movedAz_ = az, recentre_ = false;   // (where you let it go wins)
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
@@ -165,6 +164,7 @@ public:
             grid_.SetAlign(id, into ? d.align : 0);
             return true;
         });
+        ByHand(id);   // (where you put it stays, and the stack it's in is yours)
     }
 
     // Off the grid, its gap filled later (FillGap): a panel that stood in a stack (at or above the
@@ -200,6 +200,7 @@ public:
         if (pick.col < 0) return false;
         const int other = grid_.Cols()[size_t(pick.col)].cells.front().id;
         grid_.PullTop(pick.col, w.col, 0);   // (on its side of the slot: the split stays a default)
+        stacked_.insert(other);   // (on that stack for you: one coming back to it is checked)
         gaps_.Filled({g.key, other, g.stayed, pick.side});
         return true;
     }
@@ -214,12 +215,22 @@ public:
         for (auto it = unsized_.begin(); it != unsized_.end();) {
             const int id = *it;
             const tilegrid::Where w = grid_.Find(id);
-            if (w.ok() && (!Laid().AllShown(w.col) || !Laid().LaidOut(w.col))) {   // (its size, or a stackmate's, not known yet)
+            if (!w.ok()) {
+                it = unsized_.erase(it);
+                continue;
+            }
+            const View v = Laid();
+            if (absent.count(id) || !v.LaidOut(w.col)) {   // (its size not known yet)
+                ++it;
+                continue;
+            }
+            const bool fits = grid_.Cols()[size_t(w.col)].cells.size() < 2 || v.ColumnFits(w.col, fills_[size_t(w.col)].height);
+            if (fits && !v.AllShown(w.col)) {   // (fits so far, a stackmate's size not known yet: one shown can only add)
                 ++it;
                 continue;
             }
             it = unsized_.erase(it);
-            if (!w.ok() || grid_.Cols()[size_t(w.col)].cells.size() < 2 || Laid().ColumnFits(w.col, fills_[size_t(w.col)].height)) continue;
+            if (fits) continue;
             moved_ = id, movedAz_ = NAN;   // (the others keep their places)
             gaps_.Forget(id), stacked_.erase(id);   // (a gap it stayed in goes with it: nothing climbs onto it)
             grid_.Insert(id, w.col + 1, 0, true, grid_.CellOf(id)->scale, Laid().SideOf(w.col) < 0);
@@ -235,7 +246,7 @@ public:
         int moved = id;
         if (!Changed(tilekeys::Press(grid_, slot_, Laid(), id, k, &moved))) return false;   // (refused: nothing changed, nothing forgotten)
         moved_ = moved, movedAz_ = NAN, recentre_ = false;   // (moved by a key: the others keep their places, not it)
-        return ByHand(id), true;
+        return ByHand(id), ByHand(moved), true;   // (a lift's: the one pulled in too)
     }
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     bool Resized(int id, double factor) {
@@ -252,7 +263,7 @@ public:
         for (const tilegrid::Col &col : grid_.Cols())
             for (const tilegrid::Cell &cell : col.cells) {
                 const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);   // (not shown: a column of its own)
-                items.push_back({cell.id, Laid().Span(i.widthM * cell.scale), Laid().Span(i.heightM * cell.scale)});
+                items.push_back({cell.id, SpanDeg(params, i.widthM * cell.scale), SpanDeg(params, i.heightM * cell.scale)});
                 scales[cell.id] = cell.scale;
             }
         if (items.empty()) return;
@@ -362,7 +373,8 @@ public:
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
         int col = st.col;   // (back in the stack it left: the panel pulled into its gap goes back first)
-        if (!st.alone && fill.pulled >= 0 && tilegap::Undo(grid_, fill, Laid().SideOf(grid_.Find(fill.stayed).col) < 0)) col = grid_.Find(fill.stayed).col;
+        if (!st.alone && fill.pulled >= 0 && tilegap::Undo(grid_, fill, Laid().SideOf(grid_.Find(fill.stayed).col) < 0))
+            col = grid_.Find(fill.stayed).col, stacked_.erase(fill.pulled);   // (back in its own column)
         grid_.Insert(id, col, st.row, st.alone, st.scale, false, st.below);
         grid_.SetAlign(id, st.align);
         if (!st.alone && (taken || AutoStacked(grid_.Find(id).col))) unsized_.insert(id);   // (its stack isn't as it left it: Settle)
@@ -505,8 +517,16 @@ private:
     slotsplit::Policy slot_;   // which split round Steam's menu, and when it's chosen again
     tilegap::Book gaps_;       // the gaps panels left (Leave, FillGap), and the fills to undo
     std::set<int> unsized_;    // on a stack before their size was known (Settle)
-    std::set<int> stacked_;    // put on a stack for you (Anchor's OnTopOf), not moved by hand since
-    void ByHand(int id) { unsized_.erase(id), stacked_.erase(id); }
+    std::set<int> stacked_;    // put on a stack for you (Anchor's OnTopOf, FillGap), that stack not changed by hand since
+    // Off the grid: nothing to check for it.
+    void Unmark(int id) { unsized_.erase(id), stacked_.erase(id); }
+    // Moved or sized by hand where it is now: that's yours, and so is the stack it's in (council,
+    // 2026-11-20: one built on a stack made for you, then back in it, stays where you put it).
+    void ByHand(int id) {
+        Unmark(id);
+        if (const tilegrid::Where w = grid_.Find(id); w.ok())
+            for (const tilegrid::Cell &c : grid_.Cols()[size_t(w.col)].cells) stacked_.erase(c.id);
+    }
     // Column `col` holds a panel put on it for you: one coming back to its stack there may not fit.
     bool AutoStacked(int col) const {
         for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)

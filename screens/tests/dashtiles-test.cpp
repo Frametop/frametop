@@ -1244,6 +1244,53 @@ int main() {
             r.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), r.absent = {60}, r.Arrange(big);
             r.Drop(60, {tiling::Drop::TearOff, 0, 0}), r.absent = {}, r.Arrange(big);
             check("settle: a tile pulled off and snapped back: still checked", r.Settle() && cols(r).find("[ 60 ]") != std::string::npos);
+            // (council pass 7) a stack built on by hand is yours, whichever way you built it
+            const auto onTopOf4 = [&] {   // [ 4 1 ][ 60 2 ][ 3 ]: 60 put on 2 for you, then 4 goes
+                dashtiles::Board k = full();
+                k.Anchor(4, -1, dashtiles::Stay::Default), k.Drop(4, {tiling::Drop::Into, 0, 0}), k.Arrange(same);
+                k.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), k.Arrange(same);
+                return k;
+            };
+            for (const bool byKey : {true, false}) {
+                dashtiles::Board k = onTopOf4();
+                const std::string four4 = k.Remember(4);
+                k.Leave(4, 0, "app:a"), k.Arrange(same);
+                const bool lifted = byKey ? k.Press(1, dashtiles::Key::Up) : (k.Drop(1, {tiling::Drop::Lift, 0, 0, false, +1}), true);
+                k.Arrange(same);
+                const std::string mine1 = cols(k);
+                k.Restore(9, four4, -1, "app:a"), k.Arrange(same);
+                check(byKey ? "settle: a stack you lifted by key: yours" : "settle: a stack you lifted by a drag: yours",
+                      lifted && mine1 == "[ 1 60 ][ 2 ][ 3 ]" && !k.Settle() && cols(k) == "[ 9 1 60 ][ 2 ][ 3 ]");
+            }
+            dashtiles::Board hb = full();   // one dropped by hand onto a stack made for you, then back
+            hb.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), hb.Arrange(same);
+            hb.Anchor(4, -1, dashtiles::Stay::Default), hb.Drop(4, {tiling::Drop::Into, 1, 0}), hb.Arrange(same);
+            const std::string built = cols(hb), four5 = hb.Remember(4);
+            hb.Leave(4, 0, "app:a"), hb.Arrange(same), hb.Restore(9, four5, -1, "app:a"), hb.Arrange(same);
+            check("settle: built on a stack made for you by hand: yours", built == "[ 1 ][ 4 60 2 ][ 3 ]" && !hb.Settle() && cols(hb) == "[ 1 ][ 9 60 2 ][ 3 ]");
+            dashtiles::Board over = full();   // too tall already with a stackmate not shown: no wait
+            over.steam = 2;
+            for (const auto &[i, c] : {std::pair{10, 0}, {5, 1}, {30, 2}})
+                over.Anchor(i, -1, dashtiles::Stay::Default), over.Drop(i, {tiling::Drop::Into, c, 0}), over.Arrange(big);
+            over.absent = {2}, over.Arrange(big);
+            over.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), over.absent = {2, 60}, over.Arrange(big);
+            const std::string over0 = cols(over);
+            over.absent = {2}, over.Arrange(big);
+            check("settle: too tall already, a stackmate not shown: out at once", over0 == "[ 10 1 ][ 60 5 2 ][ 30 3 ]" && over.Settle() &&
+                                                                                 cols(over) == "[ 10 1 ][ 5 2 ][ 60 ][ 30 3 ]");
+            dashtiles::Board fg;   // one a gap fill put on a stack: a return to that stack is checked
+            for (const int i : {1, 2, 3}) fg.Anchor(i, -1, dashtiles::Stay::Default);
+            fg.Arrange(same);
+            fg.Anchor(10, -1, dashtiles::Stay::Default), fg.Drop(10, {tiling::Drop::Into, 0, 0}), fg.Arrange(same);
+            fg.Anchor(4, -1, dashtiles::Stay::Default), fg.Drop(4, {tiling::Drop::Into, 1, 0}), fg.Arrange(same);
+            const std::string four6 = fg.Remember(4), two6 = fg.Remember(2);
+            fg.Leave(4, 0, "app:a"), fg.Arrange(same);
+            const bool filled6 = fg.FillGap(tilegap::kQuietMs);
+            fg.Arrange(same), fg.Leave(2, 5000, "app:b"), fg.Arrange(same), fg.Restore(8, two6, -1, "app:b"), fg.Arrange(same);
+            const bool fits8 = !fg.Settle();   // (8 back where it was, and it fits)
+            fg.Restore(9, four6, -1, "app:a"), fg.Arrange(same);
+            check("settle: back onto a stack a gap fill made: checked", filled6 && fits8 && cols(fg) == "[ 10 1 ][ 9 3 8 ]" && fg.Settle() &&
+                                                                          cols(fg) == "[ 10 1 ][ 3 8 ][ 9 ]");
         }
         b = stack();   // (council, 2026-11-20) a gap undone long ago doesn't count against the next one
         b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);

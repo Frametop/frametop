@@ -1,7 +1,8 @@
 // The dashboard tiles as laid out last (Board::Arrange, dashtiles.h): what fits where. Read only:
 // the board owns the grid and the layout; it, the tiling keys (tilekeys.h) and the gap fill
 // (tilefill.h) ask this. It sees the grid as it is now but the layout as it was last, so ask it
-// before changing the grid, not after (a column added since: FitsUnder's yes, LaidOut's no). Header only, no OpenVR, so its test (tests/dashtiles-test.cpp) runs anywhere.
+// before changing the grid, not after (a column added since: FitsUnder's yes, LaidOut's no).
+// Header only, no OpenVR, so its test (tests/dashtiles-test.cpp) runs anywhere.
 #pragma once
 
 #include "slotsplit.h"
@@ -50,7 +51,6 @@ struct View {
             if (p.id == id) return &p;
         return nullptr;
     }
-    double Span(double m) const { return SpanDeg(params, m); }
     // Degrees as laid out last, as they'd be unshrunk (tiling::Layout::shrink: the sizes fills has).
     double Unshrunk(double deg) const { return last.shrink > 0 ? deg / last.shrink : deg; }
     // Column `col` with `height` from the desk line up (unshrunk) and what hangs under it as laid
@@ -111,7 +111,7 @@ struct View {
     // (a column of its own then).
     int OnTopOf(const Info &info) const {
         if (grid.Empty() || last.tiles.empty() || fills.size() != grid.Cols().size()) return -1;
-        const tilepack::Item it{-1, Span(info.widthM), Span(info.heightM)};
+        const tilepack::Item it{-1, SpanDeg(params, info.widthM), SpanDeg(params, info.heightM)};
         if (last.az1 - last.az0 + params.gapDeg + it.wDeg <= params.wallDeg) return -1;
         std::map<int, double> front;   // (each column's nearest in front)
         for (const tiling::Placed &p : last.tiles) {

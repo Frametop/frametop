@@ -141,6 +141,11 @@ dashtiles::Info TileInfo(int id) {
     if (pw > 0 && ph > 0) info.widthM = pw * mpp, info.heightM = ph * mpp;
     return info;
 }
+// TileInfo is its own size, not Info's guess (it has no picture size yet).
+bool TileSized(int id) {
+    const auto it = g_screens.find(id);
+    return it != g_screens.end() && PictureW(it->second) > 0 && PictureH(it->second) > 0;
+}
 // The part of a tile's width that's the panel's own (the rest is glued left of it), 0..1.
 double OwnShare(int id, const Screen &s) {
     const int own = PictureW(s), glued = GluedPx(id);
@@ -304,7 +309,7 @@ void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
     const dashtiles::Info info = TileInfo(i);
     g_tileRoom.erase(i);
-    g_tiles.Anchor(i, after, stay, leftOf, &info);
+    g_tiles.Anchor(i, after, stay, leftOf, &info, TileSized(i));
     if (!g_tileGroupSet) g_tileRegroup = true;
     RetileDash();
     RememberTiles();
@@ -565,6 +570,11 @@ void UpdateDashTiles() {
         RetileDash();
         RememberTiles();
         std::printf("tiles: the gap a panel left filled\n");
+    }
+    if (!g_tilesStopping && g_tiles.Settle()) {
+        RetileDash();
+        RememberTiles();
+        std::printf("tiles: a panel too tall for its stack, once its size was known: a column of its own\n");
     }
     UpdateTileFocus();
 }

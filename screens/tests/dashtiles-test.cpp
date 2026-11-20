@@ -1129,6 +1129,66 @@ int main() {
             check("gap: one back hanging under its stack (it took no gap): still filled",
                   h2.FillGap(tilegap::kQuietMs) && cols(h2) == "[ 1 2 7 ][ 3 ]");
         }
+        {   // (council, 2026-11-20) the fit test as the layout stacks it: under the desk line its gap counted once
+            const auto info = [](int id) {
+                return id == 1 ? dashtiles::Info{1.6, 0.78} : id == 3 ? dashtiles::Info{2.6, 0.5} : id == 4 ? dashtiles::Info{1.6, 1.2}
+                     : id == 5 ? dashtiles::Info{1.6, 0.6} : dashtiles::Info{1.6, 0.9};
+            };
+            dashtiles::Board f;   // [ 1 ][ 4 2 ][ 3 ]: 4 goes, 5 hangs under 2, 1 fits on 2 with half a gap to spare
+            for (const int i : {1, 2, 3}) f.Anchor(i, -1, dashtiles::Stay::Default);
+            f.Arrange(info);
+            f.Anchor(4, -1, dashtiles::Stay::Default), f.Drop(4, {tiling::Drop::Into, 1, 0}), f.Arrange(info);
+            f.Leave(4, 0, "app:a"), f.Arrange(info), f.Restore(5, "tile 0 1 1 0 1.000 dc", -1, "app:h"), f.Arrange(info);
+            const bool filled = f.FillGap(tilegap::kQuietMs);
+            f.Arrange(info);
+            double lo = 1e9, hi = -1e9;
+            for (const tiling::Placed &p : f.Last().tiles)
+                if (p.col == f.Grid().Find(2).col) lo = std::min(lo, p.el0), hi = std::max(hi, p.el1);
+            const double eye = tiling::EyeElDeg(f.params, hi) - tiling::EyeElDeg(f.params, lo);
+            check("fit: a stack with one hanging under it that fits takes one more", filled && cols(f) == "[ 1 2 5 ][ 3 ]" &&
+                                                                                   eye <= tilepack::kColumnDeg && eye > tilepack::kColumnDeg - f.params.gapDeg);
+        }
+        {   // (council, 2026-11-20) put on a stack before its size was known: settled once it's known
+            const auto big = [](int id) { return id == 60 ? dashtiles::Info{1.6, 1.6} : dashtiles::Info{1.6, 0.9}; };
+            const auto full = [&] {   // [ 1 ][ 2 ][ 3 ]: the desk full
+                dashtiles::Board d;
+                for (const int i : {1, 2, 3}) d.Anchor(i, -1, dashtiles::Stay::Default);
+                d.Arrange(same);
+                return d;
+            };
+            const dashtiles::Info guess;   // (Info's default: no picture yet)
+            for (const bool sized : {false, true}) {
+                dashtiles::Board d = full();
+                d.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, sized), d.absent = {60}, d.Arrange(big);
+                const std::string onTop = cols(d);
+                const bool waits = !d.Settle();
+                d.absent = {}, d.Arrange(big);
+                if (!sized) {
+                    check("settle: a new one with no picture on a stack: left until it has one", onTop.find("60") != std::string::npos &&
+                                                                                               onTop.find("[ 60 ]") == std::string::npos && waits);
+                    check("settle: ...too tall with its picture: a column of its own beside it", d.Settle() && cols(d).find("[ 60 ]") != std::string::npos && !d.Settle());
+                } else {
+                    check("settle: one put there at its own size: left as it is", !d.Settle() && cols(d) == onTop);
+                }
+            }
+            dashtiles::Board d = full();
+            d.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), d.Arrange(same);
+            const std::string fits = cols(d);
+            check("settle: ...one that fits with its picture: left there", !d.Settle() && cols(d) == fits);
+            dashtiles::Board hand = full();   // three on a stack by hand, too tall: yours
+            hand.Drop(1, {tiling::Drop::Into, 0, 0}), hand.Arrange(same), hand.Drop(3, {tiling::Drop::Into, 0, 0}), hand.Arrange(same);
+            check("settle: a stack made too tall by hand: left as it is", cols(hand) == "[ 3 1 2 ]" && !hand.Settle());
+            dashtiles::Board t = stack();   // [ 1 ][ 4 2 ][ 3 ]: 4 goes, 60 opens into its gap, 4's app comes back there
+            const std::string four = t.Remember(4);
+            t.Leave(4, 0, "app:a"), t.Arrange(same);
+            const dashtiles::Info i60;
+            t.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), t.Arrange(same);
+            const bool tookIt = cols(t) == "[ 1 ][ 60 2 ][ 3 ]" && !t.FillGap(tilegap::kQuietMs);
+            t.Restore(9, four, -1, "app:a"), t.Arrange(same);
+            const std::string back = cols(t);
+            check("settle: back where another took its gap, too tall: a column of its own", tookIt && back == "[ 1 ][ 9 60 2 ][ 3 ]" &&
+                                                                                           t.Settle() && (t.Arrange(same), cols(t) == "[ 1 ][ 60 2 ][ 9 ][ 3 ]"));
+        }
         b = stack();   // (council, 2026-11-20) a gap undone long ago doesn't count against the next one
         b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);
         b.Leave(4, 10000, "app:a"), b.Arrange(same);

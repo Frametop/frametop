@@ -108,12 +108,16 @@ public:
     // With `leftOf` tiled: a column of its own just left of its.
     // The strip centred again with it (user, 2026-11-19: "the tiling doesn't keep itself centered";
     // a panel that came back after the dashboard opened grew the strip off to one side).
-    void Anchor(int id, int focused, dashtiles::Stay stay, int leftOf = -1, const Info *info = nullptr) {
+    // `sized`: `info` is its own size, not a guess (no picture yet: Settle checks it once it has one).
+    void Anchor(int id, int focused, dashtiles::Stay stay, int leftOf = -1, const Info *info = nullptr, bool sized = true) {
         if (Anchored(id)) return;
         spots_[id].stay = stay;
         Recentre();
         if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
-        if (const int c = info ? OnTopOf(*info) : -1; c >= 0) return grid_.Insert(id, c, 0, false);
+        if (const int c = info ? OnTopOf(*info) : -1; c >= 0) {
+            if (!sized) unsized_.insert(id);
+            return grid_.Insert(id, c, 0, false);
+        }
         if (grid_.Has(focused)) return grid_.Add(id, focused);
         // none: the end that brings the strip's middle nearer in front (its left one when it leans
         // right; centred, the right one, however the sums round)
@@ -123,6 +127,7 @@ public:
     bool Unanchor(int id) {
         Forget(id);
         gaps_.Forget(id);
+        unsized_.erase(id);
         grid_.Remove(id);
         return spots_.erase(id) != 0;
     }
@@ -137,7 +142,7 @@ public:
     // Off the grid, a satellite at `rel` (the group frame's -> the panel's).
     void TearOff(int id, const double rel[3][4]) {
         if (!Anchored(id)) return;
-        EndBatch();
+        EndBatch(), unsized_.erase(id);
         grid_.Remove(id);
         Spot &s = spots_[id];
         s.satellite = true;
@@ -157,6 +162,7 @@ public:
     // where they were, it as it falls).
     void Drop(int id, const tiling::Drop &d, double az = NAN) {
         if (!Anchored(id)) return;
+        unsized_.erase(id);   // (where you put it stays)
         if (d.kind == tiling::Drop::TearOff) {   // (pulled off: a tile stays where it was, a satellite joins the grid)
             if (Satellite(id)) EndBatch(), spots_[id].satellite = false, grid_.Add(id, -1);
             return;
@@ -204,7 +210,9 @@ public:
     bool FillGap(int64_t nowMs) {
         const tilegap::Gap g = gaps_.Due(nowMs);
         const tilegrid::Where w = grid_.Find(g.stayed);
-        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone)) || !GapOpen(g, w.col)) return false;
+        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone))) return false;
+        if (Newcomer(g, w.col)) return gaps_.Take(g), false;
+        if (!GapOpen(g, w.col)) return false;
         double span = 0;
         for (const tiling::Placed &p : last_.tiles)
             if (p.col == w.col) span = std::max(span, p.az1 - p.az0);
@@ -229,15 +237,38 @@ public:
     }
     int steam = -1;   // Steam's window (vrtiles.cpp): never pulled into another column
 
+    // A panel put on a stack before its size was known (Anchor's guess for one with no picture yet,
+    // or Restore's place in a stack another panel took its gap in), shown and laid out since: out
+    // into a column of its own beside that stack when the stack's too tall with it (council,
+    // 2026-11-20). Otherwise left as it is, as any stack made by hand is. False when nothing changed.
+    bool Settle() {
+        if (params.fit) return unsized_.clear(), false;
+        for (auto it = unsized_.begin(); it != unsized_.end();) {
+            const int id = *it;
+            const tilegrid::Where w = grid_.Find(id);
+            if (w.ok() && (absent.count(id) || !LaidOut(w.col))) {   // (its size not known yet)
+                ++it;
+                continue;
+            }
+            it = unsized_.erase(it);
+            if (!w.ok() || grid_.Cols()[size_t(w.col)].cells.size() < 2 || ColumnFits(w.col, fills_[size_t(w.col)].height)) continue;
+            moved_ = id, movedAz_ = NAN;   // (the others keep their places)
+            grid_.Insert(id, w.col + 1, 0, true, grid_.CellOf(id)->scale, SideOf(w.col) < 0);
+            grid_.SetAlign(id, 0);
+            return true;
+        }
+        return false;
+    }
+
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed.
     bool Press(int id, Key k) {
         if (!grid_.Has(id)) return false;
-        return Changed(Pressed(id, k));
+        return Changed(Pressed(id, k)) && (unsized_.erase(id), true);
     }
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     bool Resized(int id, double factor) {
         if (!grid_.Has(id) || !(factor > 0)) return false;
-        return Changed(grid_.Scale(id, factor));
+        return Changed(grid_.Scale(id, factor)) && (unsized_.erase(id), true);
     }
 
 private:
@@ -404,6 +435,7 @@ public:
     }
     void Restore(int id, const State &st, int focused, const std::string &key = "") {
         const tilegap::Fill fill = gaps_.Back(id, key);   // (before Unanchor forgets its panel)
+        const bool taken = gaps_.Took(key);
         Unanchor(id);
         if (st.kind == State::Kind::Off) return;
         Recentre();   // (as Anchor)
@@ -415,6 +447,7 @@ public:
         if (!st.alone && fill.pulled >= 0 && tilegap::Undo(grid_, fill, SideOf(grid_.Find(fill.stayed).col) < 0)) col = grid_.Find(fill.stayed).col;
         grid_.Insert(id, col, st.row, st.alone, st.scale, false, st.below);
         grid_.SetAlign(id, st.align);
+        if (taken && !st.alone) unsized_.insert(id);   // (its stack isn't as it left it: Settle)
     }
     // The profile put back last is done with: an add after this goes after the other tiles.
     void EndRestore() { batch_.End(); }
@@ -543,7 +576,7 @@ private:
         double under = 0;
         for (const tiling::Placed &p : last_.tiles)
             if (p.col == col) under = std::max(under, Unshrunk(params.deskDeg - p.el0));
-        return EyeFitsRound(params, under, height + (under > 0 ? params.gapDeg + under : 0));
+        return EyeFitsRound(params, under, height + under);   // (`under` from the desk line: its gap and all)
     }
     bool Pullable(int id) const { return id != steam && !absent.count(id); }
     // Column `col` as laid out last: each of its panels where Arrange put it (a column added or
@@ -558,12 +591,16 @@ private:
     // panels it left (another there took the gap, whatever its size: one opened into it, or one swapped
     // for one that went), none not shown yet (no size to test), and laid out since.
     bool GapOpen(const tilegap::Gap &g, int col) const {
+        for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)
+            if (absent.count(c.id)) return false;
+        return !Newcomer(g, col) && LaidOut(col);
+    }
+    // A panel stands in gap `g`'s stack (column `col`) that Leave didn't leave there: it took the gap.
+    bool Newcomer(const tilegap::Gap &g, int col) const {
         const tilegrid::Col &c = grid_.Cols()[size_t(col)];
-        for (int r = 0; r < int(c.cells.size()); ++r) {
-            const int id = c.cells[size_t(r)].id;
-            if (absent.count(id) || (!c.Below(r) && std::find(g.stack.begin(), g.stack.end(), id) == g.stack.end())) return false;
-        }
-        return LaidOut(col);
+        for (int r = 0; r < int(c.cells.size()); ++r)
+            if (!c.Below(r) && std::find(g.stack.begin(), g.stack.end(), c.cells[size_t(r)].id) == g.stack.end()) return true;
+        return false;
     }
     int SideOf(int col) const { return slot_.SideOfCol(grid_, col); }
     // Nothing in column `col` is shown (Board::absent: laid out at no size).
@@ -640,6 +677,7 @@ private:
     std::vector<tilepack::Fill> fills_;   // each column as laid out last (OnTopOf)
     slotsplit::Policy slot_;   // which split round Steam's menu, and when it's chosen again
     tilegap::Book gaps_;       // the gaps panels left (Leave, FillGap), and the fills to undo
+    std::set<int> unsized_;    // on a stack before their size was known (Settle)
 };
 
 }  // namespace dashtiles

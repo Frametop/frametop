@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -38,7 +39,7 @@ public:
     // Panel `g.gone` went at `nowMs`.
     void Went(const Gap &g, int64_t nowMs) {
         if (went_ > 0 && nowMs - at_ >= kQuietMs) Cancel();   // (the last went long enough ago: Due not asked meanwhile)
-        if (!g.key.empty()) fills_.erase(g.key);
+        if (!g.key.empty()) fills_.erase(g.key), taken_.erase(g.key);
         ++went_, last_ = g, at_ = nowMs;
     }
     // The gap to fill now: the only panel that went since the last one was due, once kQuietMs passed
@@ -63,6 +64,12 @@ public:
     void Filled(const Fill &f) {
         if (!f.key.empty()) fills_[f.key] = f;
     }
+    // The gap `g` left was taken (another panel opened into its stack): when its app comes back to
+    // its place there, the stack may be too tall with it (Took, once).
+    void Take(const Gap &g) {
+        if (!g.key.empty()) taken_.insert(g.key);
+    }
+    bool Took(const std::string &key) { return !key.empty() && taken_.erase(key) != 0; }
     // Panel `id` gone or off the grid: no fill it's in is undone, and no gap it stands in is filled.
     void Forget(int id) {
         if (last_.stayed == id) Void();
@@ -73,7 +80,7 @@ public:
     // fill is still as it was left).
     void Changed() { Void(); }
     // A profile put back: nothing waits, nothing is undone.
-    void Clear() { Cancel(), fills_.clear(); }
+    void Clear() { Cancel(), fills_.clear(), taken_.clear(); }
 
 private:
     // The gap waiting isn't filled, but the panels gone still count: one more going within
@@ -85,6 +92,7 @@ private:
     int64_t at_ = 0;
     Gap last_;
     std::map<std::string, Fill> fills_;   // by the app that went
+    std::set<std::string> taken_;         // the apps whose gap another took
 };
 
 // Fill `f` undone on `g`: f.pulled out of f.stayed's stack, into a column of its own on the side it

@@ -3,6 +3,7 @@
 // it, neighbours never touch at their corners however high a column goes, a strip past a full turn
 // (or a column past kMaxTopDeg) shrinks to fit, drops land where they're let go, and the keys move
 // and size panels as Omarchy's do.
+#include "../tilefit.h"
 #include "../tiling.h"
 #include "../tilegrid.h"
 
@@ -522,6 +523,37 @@ int main() {
         check("grid: moved right from under the desk: under it there too", g.MoveSide(3, +1) && g.Cols()[1].cells[1].id == 3 &&
                                                                               g.Cols()[1].Below(1));
         check("grid: align", g.SetAlign(3, -1) && g.CellOf(3)->align == -1 && !g.SetAlign(3, -1));
+    }
+    // --- fitted by size, no columns (tilefit.h; user, 2026-11-19: "have displays auto-fit based off of
+    // their size to try to make the best use of real estate")
+    {
+        std::vector<tiling::Column> cols = {col({px(1, 1400, 900)}), col({px(2, 1300, 800)}), col({px(3, 600, 500), px(4, 600, 500)}),
+                                            col({px(5, 600, 500)}), col({hd(6)}), col({px(7, 800, 1200)}), col({px(8, 500, 700)})};
+        tiling::Params q = p;
+        const tiling::Layout f = tilefit::Fit(cols, q);
+        bool clear = f.tiles.size() == 8;
+        for (const auto &a : f.tiles)
+            for (const auto &b : f.tiles)
+                if (a.id < b.id && !tilefit::Clear({a.az0, a.az1, a.el0, a.el1}, {b.az0, b.az1, b.el0, b.el1}, q.gapDeg)) clear = false;
+        check("fit: every panel placed, a gap from every other", clear);
+        bool up = false, down = false;
+        for (const auto &a : f.tiles) up |= a.el0 > f.tiles[0].el1 - 1e-6, down |= a.el1 < f.tiles[0].el0 + 1e-6;
+        check("fit: the largest on the desk line, the rest round it", near(f.tiles[0].el0, q.deskDeg) && f.tiles[0].id == 6);
+        check("fit: some over it and some under it", up && down);
+        check("fit: corners at the radius", cornersInColumns(f));
+        const tiling::Layout g = tiling::Arrange(cols, q);
+        std::printf("      (grid: %.0f x %.0f degrees, fit: %.0f x %.0f)\n", g.az1 - g.az0, g.el1 - g.el0, f.az1 - f.az0, f.el1 - f.el0);
+        check("fit: narrower round you than the grid's single row", f.az1 - f.az0 < g.az1 - g.az0);
+        tiling::Params s = q;
+        s.reserveDeg = 30, s.reserveAzDeg = 0;
+        const tiling::Layout fs = tilefit::Fit(cols, s);
+        bool slotClear = true;
+        for (const auto &a : fs.tiles) slotClear &= a.az1 <= -15 + 1e-6 || a.az0 >= 15 - 1e-6;
+        check("fit: Steam's slot kept clear", slotClear && fs.split >= 0);
+        std::vector<tiling::Column> many;
+        for (int i = 0; i < 40; ++i) many.push_back(col({hd(100 + i)}));
+        const tiling::Layout fm = tilefit::Fit(many, q);
+        check("fit: forty screens shrink to fit in a turn", fm.shrink < 1 && fm.az1 - fm.az0 <= q.maxSpanDeg);
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

@@ -21,6 +21,7 @@
 #include "tilegrid.h"
 #include "tilememory.h"
 #include "tilepack.h"
+#include "tilefit.h"
 #include "tilestate.h"
 #include "tiling.h"
 
@@ -216,7 +217,7 @@ public:
     template <typename InfoOf>
     tiling::Drop DropFor(int id, double az, double el, InfoOf info) const {
         const auto cols = Columns(info);
-        tiling::Layout l = tiling::Arrange(cols, params, Split());
+        tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : tiling::Arrange(cols, params, Split());
         if (l.split < 0) tiling::Turn(&l, pan_);   // (as you see it)
         return Without(grid_, id, tiling::DropAt(l, cols, az, el));
     }
@@ -368,8 +369,8 @@ public:
             for (int r = c.Base(); r >= 0; --r) deskUp.push_back({c.tiles[size_t(r)].id, Span(c.tiles[size_t(r)].widthM), Span(c.tiles[size_t(r)].heightM)});
             fills_.push_back(tilepack::FillOf(deskUp, params.gapDeg));
         }
-        tiling::Layout l = slot_.Arrange(grid_, cols, params);
-        pan_ = l.split >= 0 ? 0 : Pan(l);
+        tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
+        pan_ = l.split >= 0 || params.fit ? 0 : Pan(l);   // (fitted: always round the middle)
         if (pan_ != 0) tiling::Turn(&l, pan_);
         moved_ = -1, recentre_ = false;
         return last_ = std::move(l);

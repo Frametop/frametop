@@ -72,6 +72,7 @@ struct Params {
     double maxSpanDeg = 360;    // the strip round you, gaps included, at most
     double reserveAzDeg = 0;    // Steam's menu, a slot kept clear when the strip would reach it: its middle
     double reserveDeg = 0;      // ...and its width (0: none; the strip is centred on 0 then)
+    bool fit = false;           // fitted by size, no columns (tilefit.h; DASH_TILE_FIT)
 };
 constexpr double kMaxTopDeg = 80;   // no column reaches higher: the wall shrinks first
 

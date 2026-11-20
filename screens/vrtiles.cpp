@@ -52,10 +52,12 @@ bool g_tileSteamOverBar = false;          // ...and Steam's tile turned over it 
 // (Wall, DASH_TILE_GAP_DEG, DASH_TILE_WALL_DEG) are as your eyes see them, a panel's size too (TileInfo).
 constexpr double kFocusBackM = 2.0;
 tiling::Eyes g_tileEyes;                  // the gaps' and the desk's width (the wall and the desk line: Wall's)
+double g_tileFit = 0;                     // DASH_TILE_FIT: 1, the tiles fitted by size with no columns (tilefit.h)
 void ApplyWall() {
     const Wall &w = g_tileWallAtBar || g_tileWallKeepBar ? g_tileWallBar : g_tileWallSet;
     g_tileEyes.radius = w.radius, g_tileEyes.deskDeg = w.deskDeg;
     tiling::FromEyes(g_tileEyes, kFocusBackM, &g_tiles.params);
+    g_tiles.params.fit = g_tileFit >= 0.5;
 }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
@@ -245,7 +247,7 @@ bool Regroup(bool atHead = false) {
 }  // namespace
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
-std::array<TileSetting, 5> TileSettings() {
+std::array<TileSetting, 6> TileSettings() {
     // (the desk and the wall while they aren't at Steam's bar, DASH_TILE_AT_BAR, which keeps to their ranges)
     static_assert(dashtiles::kDeskMinDeg == -40 && dashtiles::kDeskMaxDeg == 20 && dashtiles::kWallMinM == 0.8 &&
                   dashtiles::kWallMaxM == 6, "AtBar's ranges are DASH_TILE_DESK_DEG's and DASH_TILE_RADIUS's");
@@ -253,7 +255,8 @@ std::array<TileSetting, 5> TileSettings() {
              {"DASH_TILE_RADIUS", &g_tileWallSet.radius, 0.8, 6},   // the wall: the tiles' corners from you, metres
              {"DASH_TILE_PX_PER_DEG", &g_tiles.params.pxPerDeg, 15, 120},   // a panel's natural size
              {"DASH_TILE_GAP_DEG", &g_tileEyes.gapDeg, 0, 10},   // between tiles, round you and up
-             {"DASH_TILE_WALL_DEG", &g_tileEyes.wallDeg, 30, 300}}};   // the desk's width before panels stack
+             {"DASH_TILE_WALL_DEG", &g_tileEyes.wallDeg, 30, 300},   // the desk's width before panels stack
+             {"DASH_TILE_FIT", &g_tileFit, 0, 1}}};   // 1: fitted by size, no columns (tilefit.h)
 }
 // One of them live: false if it isn't one, or out of its range. The tiles go round again.
 bool SetTileSetting(const char *name, double value) {

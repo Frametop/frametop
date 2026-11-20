@@ -368,7 +368,7 @@ void TileKnown(int i, const std::string &key) {
         case dashtiles::WhenKnown::Restore: break;
     }
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
-    if (!g_tiles.Restore(i, line, after)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
+    if (!g_tiles.Restore(i, line, after, k)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
     if (g_tiles.Anchored(i)) {
         if (!g_tileGroupSet) g_tileRegroup = true;
         RetileDash();
@@ -387,11 +387,12 @@ void SetTileLookFocus(bool on) { g_tileLook = on; }
 void TileGone(int i) {
     BarSideGone(i);
     const auto k = g_tileKey.find(i);
+    const std::string key = k != g_tileKey.end() ? k->second : "";
     if (k != g_tileKey.end() && g_tileMemory.Set(k->second, TileLine(i))) SaveTileMemory();
     if (k != g_tileKey.end()) g_tileKey.erase(k);
     g_tileRoom.erase(i);
     if (g_tileFocus == i) g_tileFocus = -1;
-    if (g_tilesStopping ? g_tiles.Unanchor(i) : g_tiles.Leave(i, NowMs())) RetileDash(), RememberTiles();
+    if (g_tilesStopping ? g_tiles.Unanchor(i) : g_tiles.Leave(i, NowMs(), key)) RetileDash(), RememberTiles();
 }
 
 // Stays shown with the dashboard closed: as set for it or as DASH_TILE_STAY says (on unless set:
@@ -449,7 +450,7 @@ bool HeadForward(Mat *head, double fwd[3]) {
     return true;
 }
 // The panel the tiling keys act on: the one a tiling key just moved (g_tileHold: until the 3D mouse
-// is back on a panel or you turn to another), else the one under the pointer, else the one you're
+// is back on a panel or, with DASH_TILE_LOOK, you turn to another), else the one under the pointer, else the one you're
 // looking at (within 25 degrees of straight ahead; unless DASH_TILE_LOOK is off). The relay is told
 // when it's an anchored one (the keys are the desktop's otherwise), and it gets a thin border.
 void UpdateTileFocus() {
@@ -460,7 +461,7 @@ void UpdateTileFocus() {
     if (g_tileHold >= 0) {
         const auto h = g_screens.find(g_tileHold);
         const bool known = g_tileHoldFwd[0] != 0 || g_tileHoldFwd[1] != 0 || g_tileHoldFwd[2] != 0;
-        const bool turned = facing && known && Dot3(fwd, g_tileHoldFwd) < std::cos(kTileHoldTurnDeg * M_PI / 180);
+        const bool turned = g_tileLook && facing && known && Dot3(fwd, g_tileHoldFwd) < std::cos(kTileHoldTurnDeg * M_PI / 180);
         if (h == g_screens.end() || !h->second.visible || !g_tiles.Anchored(g_tileHold)) g_tileHold = -1;
         else if (now - g_tileHoldMs < kTileHoldSettleMs) g_mouseScreen = -1;   // (the tiles moving under the cursor: not you)
         else if (g_mouseScreen >= 0 || turned) g_tileHold = -1;   // the 3D mouse nudged back onto a panel, or you look at another: it leads again

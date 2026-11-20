@@ -1014,18 +1014,37 @@ int main() {
         };
         dashtiles::Board b = stack();
         check("gap: the stack to start", cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
-        b.Leave(4, 0), b.Arrange(same), b.Leave(3, 900), b.Arrange(same);
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Leave(3, 900, "app:c"), b.Arrange(same);
         check("gap: two gone in a moment: none filled", !b.FillGap(5000) && cols(b) == "[ 1 ][ 2 ]");
         b = stack();
         const std::string line = b.Remember(4);
-        b.Leave(4, 0), b.Arrange(same);
+        b.Leave(4, 0, "app:a"), b.Arrange(same);
         check("gap: one gone: filled", b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 2 ][ 3 ]");
         b.Arrange(same);
-        check("gap: back: its place again, the fill undone", b.Restore(4, line, -1) && cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
+        check("gap: back: its place again, the fill undone", b.Restore(4, line, -1, "app:a") && cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
         b = stack();
-        b.Leave(4, 0), b.Arrange(same), b.FillGap(tilegap::kQuietMs), b.Arrange(same);
-        b.Press(1, dashtiles::Key::Right);
-        check("gap: moved by hand since: back as remembered, nothing undone", b.Restore(4, line, -1) && cols(b).find("[ 1 ]") == std::string::npos);
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.FillGap(tilegap::kQuietMs), b.Arrange(same);
+        check("gap: back on another panel number: still undone (council, 2026-11-20)",
+              b.Restore(9, line, -1, "app:a") && cols(b) == "[ 1 ][ 9 2 ][ 3 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.FillGap(tilegap::kQuietMs), b.Arrange(same);
+        check("gap: another app on its panel number: not undone for it",
+              b.Restore(4, "tile 0 1 0 0 1.000", -1, "app:e") && cols(b) == "[ 1 2 ][ 4 3 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.FillGap(tilegap::kQuietMs), b.Arrange(same);
+        b.Press(3, dashtiles::Key::Wider), b.Press(3, dashtiles::Key::Narrower), b.Arrange(same);
+        check("gap: an unrelated tile resized since: still undone", b.Restore(4, line, -1, "app:a") && cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);
+        check("gap: back before the quiet's over: nothing filled", !b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 ][ 4 2 ][ 3 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Press(1, dashtiles::Key::Right), b.Arrange(same);
+        const std::string byHand = cols(b);
+        check("gap: a tile moved by hand meanwhile: nothing filled", !b.FillGap(tilegap::kQuietMs) && cols(b) == byHand);
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same);
+        b.RestoreAll({{1, "tile 0 0 0 1 1.000"}, {2, "tile 0 1 0 1 1.000"}, {3, "tile 0 2 0 1 1.000"}}), b.Arrange(same);
+        check("gap: a profile put back meanwhile: nothing filled", !b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 ][ 2 ][ 3 ]");
         dashtiles::Board h;   // [ 1 ][ 2 3 ]: 2 on the desk, 3 hanging under it
         for (const int i : {1, 2, 3}) h.Anchor(i, -1, dashtiles::Stay::Default);
         h.Press(3, dashtiles::Key::Down);
@@ -1091,6 +1110,14 @@ int main() {
         tall.Arrange(big);
         const std::string two = cols(tall);
         check("keys: up when the one pulled in won't fit: nothing", !tall.Press(2, dashtiles::Key::Up) && cols(tall) == two);
+        for (const int n : {3, 13}) {   // (13 columns shrink the strip: the test is on unshrunk sizes, council 2026-11-20)
+            dashtiles::Board wide;
+            const auto mid = [](int) { return dashtiles::Info{2.6, 1.5}; };
+            for (int i = 1; i <= n; ++i) wide.Anchor(i, -1, dashtiles::Stay::Default);
+            wide.Arrange(mid);
+            check(n == 3 ? "keys: up, two 1.5 m panels a stack too tall: nothing" : "keys: ...the strip shrunk: still nothing",
+                  (n == 3 || wide.Last().shrink < 0.9) && !wide.Press(2, dashtiles::Key::Up));
+        }
     }
     {   // dragged mostly over a column's top or under the desk line: into the nearest column, no quarters
         // (user, 2026-11-20: a middle-row panel "near impossible" to move up or down)

@@ -44,6 +44,11 @@ public:
     int Key() const { return inUse_ ? key_ : -1; }
     // The split in use now (-1: no slot in the strip, or not chosen yet).
     int Split(const tilegrid::Grid &g) const { return inUse_ ? g.Split(key_) : -1; }
+    // Which side of the slot in use column `col` is on (-1 left, +1 right; 0: no slot, or no column).
+    int SideOfCol(const tilegrid::Grid &g, int col) const {
+        const int s = Split(g);
+        return col < 0 || s < 0 ? 0 : col < s ? -1 : 1;
+    }
 
     // `cols` (the grid's) laid out with `p`, the split chosen, chosen again or kept in `g`.
     tiling::Layout Arrange(tilegrid::Grid &g, const std::vector<tiling::Column> &cols, const tiling::Params &p) {
@@ -80,11 +85,7 @@ private:
         return Off(tiling::Arrange(cols, p, from)) > Off(tiling::Arrange(cols, p, to)) + kResplitDeg;
     }
     // Which side of the slot in use a panel is on (-1 left, +1 right; 0: no slot, or not tiled).
-    int SideOf(const tilegrid::Grid &g, int id) const {
-        const tilegrid::Where w = g.Find(id);
-        const int s = Split(g);
-        return !w.ok() || s < 0 ? 0 : w.col < s ? -1 : 1;
-    }
+    int SideOf(const tilegrid::Grid &g, int id) const { return SideOfCol(g, g.Find(id).col); }
 
     int key_ = 0;           // KeyOf Steam's menu now
     bool inUse_ = false;    // the slot is in the strip, this open

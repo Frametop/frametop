@@ -158,6 +158,16 @@ for t in (10.2, 10.5, 12.0):
     p.tick(t)
 check("...a scroll under way ends, and nothing more goes to the hidden pointer (council, 2026-11-20)",
       since(p, mark), ["scroll 0 0", "hide tilekey"])
+p = pointer()
+p.motion(relay.REL_X, 50, 10.0)
+p.step_aside("tilekey")
+p.dashboard(20.0)  # (woken: its press 0.4 s later)
+p.motion(relay.REL_X, 60, 20.1)
+p.step_aside("tilekey")  # a tiling key right after the dashboard key
+mark = len(p.sock.sent)
+for t in (20.5, 20.6, 21.0):
+    p.tick(t)
+check("...a dashboard key just before it still toggles the dashboard (council, 2026-11-20)", "btn system 1" in since(p, mark), True)
 
 print()
 if failures:

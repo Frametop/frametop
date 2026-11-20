@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <map>
+#include <string>
 
 namespace tilegap {
 
@@ -19,12 +20,14 @@ constexpr int64_t kQuietMs = 1500;   // nothing else gone for this long: the gap
 
 struct Gap {
     int gone = -1;          // the panel that went
+    std::string key;        // ...its app or display (vrtiles.cpp's tile memory key; panel numbers are reused)
     int stayed = -1;        // one still standing in its stack (-1: it left no gap)
-    double heightDeg = 0;   // how tall it was
+    double heightDeg = 0;   // how tall it was, unshrunk (tiling::Layout::shrink)
 };
-// A neighbouring column's only panel pulled up into the gap `gone` left, on top of `stayed`'s stack.
+// A neighbouring column's only panel pulled up into the gap app `key` left, on top of `stayed`'s stack.
 struct Fill {
-    int gone = -1, pulled = -1, stayed = -1;
+    std::string key;
+    int pulled = -1, stayed = -1;
     int side = 0;   // where `pulled` came from: -1 the left, +1 the right
 };
 
@@ -32,7 +35,7 @@ class Book {
 public:
     // Panel `g.gone` went at `nowMs`.
     void Went(const Gap &g, int64_t nowMs) {
-        Forget(g.gone);
+        if (!g.key.empty()) fills_.erase(g.key);
         ++went_, last_ = g, at_ = nowMs;
     }
     // The gap to fill now: the only panel that went since the last one was due, once kQuietMs passed
@@ -41,31 +44,40 @@ public:
     Gap Due(int64_t nowMs) {
         if (went_ == 0 || nowMs - at_ < kQuietMs) return {};
         const Gap g = went_ == 1 ? last_ : Gap{};
-        went_ = 0, last_ = {};
+        Cancel();
         return g;
     }
-    void Filled(const Fill &f) { fills_[f.gone] = f; }
-    // The fill panel `id` left behind, taken (none: gone -1).
-    Fill Back(int id) {
-        const auto it = fills_.find(id);
+    // App `key` back, on panel `id`: the gap it left isn't filled, and its fill is taken to be undone
+    // (none: an empty key).
+    Fill Back(int id, const std::string &key) {
+        if (went_ > 0 && (last_.gone == id || (!key.empty() && last_.key == key))) Cancel();
+        const auto it = key.empty() ? fills_.end() : fills_.find(key);
         if (it == fills_.end()) return {};
         const Fill f = it->second;
         fills_.erase(it);
         return f;
     }
-    // Panel `id` gone or moved: no fill it's in is undone.
-    void Forget(int id) {
-        for (auto it = fills_.begin(); it != fills_.end();)
-            it = it->second.gone == id || it->second.pulled == id || it->second.stayed == id ? fills_.erase(it) : std::next(it);
+    void Filled(const Fill &f) {
+        if (!f.key.empty()) fills_[f.key] = f;
     }
-    // The grid changed by hand (a drop, a key, a resize, a profile put back): no fill is undone.
-    void ForgetFills() { fills_.clear(); }
+    // Panel `id` gone or off the grid: no fill it's in is undone, and no gap it stands in is filled.
+    void Forget(int id) {
+        if (went_ > 0 && last_.stayed == id) Cancel();
+        for (auto it = fills_.begin(); it != fills_.end();)
+            it = it->second.pulled == id || it->second.stayed == id ? fills_.erase(it) : std::next(it);
+    }
+    // The grid changed by hand (a drop, a key, a resize): the gap waiting isn't filled (Undo checks a
+    // fill is still as it was left).
+    void Changed() { Cancel(); }
+    // A profile put back: nothing waits, nothing is undone.
+    void Clear() { Cancel(), fills_.clear(); }
 
 private:
+    void Cancel() { went_ = 0, last_ = {}; }
     int went_ = 0;
     int64_t at_ = 0;
     Gap last_;
-    std::map<int, Fill> fills_;   // by the panel that went
+    std::map<std::string, Fill> fills_;   // by the app that went
 };
 
 // Fill `f` undone on `g`: f.pulled out of f.stayed's stack, into a column of its own on the side it

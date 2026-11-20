@@ -63,7 +63,7 @@ constexpr std::chrono::seconds kTilesAddWindow{5};
 int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus, 0 not
 int64_t g_tileFocusSaidMs = 0;
 constexpr int64_t kTileFocusRenewMs = 2000;   // said again this often (the relay lapses it after 5 s)
-constexpr double kTileBorder = 0.012;         // the focused tile's border, metres each side
+constexpr double kTileBorder = 0.003;         // the focused tile's border, metres each side (user, 2026-11-19: "far, far, far less pronounced")
 struct TileBorder {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
     int on = -1;                  // the panel it's round, or -1 (hidden)
@@ -270,6 +270,7 @@ bool SetTileSetting(const char *name, double value) {
 
 bool TileAnchored(int i) { return g_tiles.Anchored(i); }
 bool TileTiled(int i) { return g_tiles.Tiled(i); }
+double TileGapM() { return tiling::Rad(g_tiles.params.gapDeg) * g_tiles.params.radius; }
 void SetTileStayDefault(bool on) {
     if (on == g_tiles.stayDefault) return;
     g_tiles.stayDefault = on;   // (each one that follows it: shown or hidden next tick)
@@ -475,15 +476,15 @@ void PlaceTileBorder() {
     Mat p;
     if (!ScreenPose(s, &p)) return;
     const double w = s.metres + 2 * kTileBorder, h = s.heightMetres() + 2 * kTileBorder;
-    const int tw = 256, th = std::clamp(int(std::lround(256 * h / w)), 8, 2048);
+    const int tw = 1024, th = std::clamp(int(std::lround(1024 * h / w)), 8, 4096);   // (fine enough for a 3 mm line)
     if (tw != b.texW || th != b.texH) {
-        const int edgeX = std::max(2, int(std::lround(tw * kTileBorder / w))), edgeY = std::max(2, int(std::lround(th * kTileBorder / h)));
+        const int edgeX = std::max(1, int(std::lround(tw * kTileBorder / w))), edgeY = std::max(1, int(std::lround(th * kTileBorder / h)));
         std::vector<uint8_t> px(size_t(tw) * th * 4, 0);
         for (int y = 0; y < th; ++y)
             for (int x = 0; x < tw; ++x) {
                 if (x >= edgeX && x < tw - edgeX && y >= edgeY && y < th - edgeY) continue;
                 uint8_t *q = &px[(size_t(y) * tw + x) * 4];
-                q[0] = 90, q[1] = 160, q[2] = 255, q[3] = 220;
+                q[0] = 230, q[1] = 236, q[2] = 245, q[3] = 70;   // (a faint light line, not a blue frame)
             }
         overlaytex::Set(b.overlay, px.data(), tw, th);
         b.texW = tw, b.texH = th;

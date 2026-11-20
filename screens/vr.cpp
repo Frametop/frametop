@@ -865,8 +865,13 @@ Mat BarOffset(const Screen &s) {
 void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
     const barside::UV c = BarSpot(s, 0);
     u[kBarPart] = c.u, v[kBarPart] = c.v;
-    // Visual, preview and hit-mask canvases share the screen's actual corner.
-    const double out = g_resizeCorner.sharp ? 0 : HandleSize(s) / 2;
+    // Visual, preview and hit-mask canvases share the screen's actual corner. The glow tab sits on the
+    // corner, half over the panel, so aiming at the corner you see takes it (user, 2026-11-19: "make
+    // it easier to grab and resize ... the grab-resize doesn't seem to have high enough priority";
+    // it sat wholly outside, so the corner itself was the panel's); a tiled one's comes no further
+    // out than half the gap, so it never lies over a neighbour's corner.
+    const int index = ScreenIndexOf(s);
+    const double out = g_resizeCorner.sharp ? 0 : TileTiled(index) ? std::min(0.0, TileGapM() / 2 - HandleSize(s) / 2) : 0;
     u[kResizePart] = s.cornerX * (s.metres / 2 + out);
     v[kResizePart] = s.cornerY * (s.heightMetres() / 2 + out);
 }

@@ -352,6 +352,7 @@ void SaveTileMemoryDue();   // on the tick: written once it's 2 s after a change
 void FlushTileMemory();     // stopping: a change not written yet, written now
 bool TileAnchored(int i);
 bool TileTiled(int i);
+double TileGapM();   // the gap between tiles at the wall, metres (a tiled panel's resize corner stays out of it)
 void SetTileStayDefault(bool on);   // DASH_TILE_STAY: anchored panels stay shown with the dashboard closed (unless set per panel)
 void SetTileStayTheater(bool on);   // DASH_TILE_STAY_THEATER: ...over a game in SteamVR's theater too
 bool TileStays(const Screen &s, int i);   // shown with the dashboard closed

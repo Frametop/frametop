@@ -111,7 +111,7 @@ class Harness:
             if self.on_place:
                 self.on_place()
             return "ok"
-        if command.startswith("pin ") or command == "vrkeyboard close":
+        if command.startswith("pin ") or command in ("vrkeyboard close", "tiles recentre"):
             return "ok"
         raise AssertionError("Reset sent a non-geometric command: " + command)
 

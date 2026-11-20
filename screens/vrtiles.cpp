@@ -31,6 +31,7 @@ std::map<int, std::string> g_tileKey;     // panel -> its memory key ("screen:2"
 Mat g_tileGroupRel = Identity();          // the dashboard's frame (DashFrame) -> the group frame
 bool g_tileGroupSet = false;              // ...since the dashboard was first seen with a panel anchored
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
+bool g_tileReset = false;                 // "tiles recentre" (ft-layout's reset): the group in front of your head now
 bool g_dashWasUp = false;
 bool g_tileStayTheater = false;           // DASH_TILE_STAY_THEATER: staying ones stay over a game in SteamVR's theater too
 // The wall: at Steam's bar (DASH_TILE_AT_BAR, dashtiles.h's AtBar), or where DASH_TILE_RADIUS and
@@ -187,7 +188,8 @@ void RetileDash() {
 namespace {
 // The group to where the dashboard is now, in front of your head, with Steam's menu a slot in it
 // when the strip reaches it (the split kept for where it opened: Board::SlotMoved): false without a head pose.
-bool Regroup() {
+// atHead: round where you face, not at Steam's bar (a reset with the dashboard closed: the bar is where it last was).
+bool Regroup(bool atHead = false) {
     Mat head;
     if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
     const Mat bar = DashFrame();
@@ -195,7 +197,7 @@ bool Regroup() {
                  fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, up[3] = {head.m[0][1], head.m[1][1], head.m[2][1]};
     const double barUp[3] = {bar.m[0][1], bar.m[1][1], bar.m[2][1]};
     double g[3][4];
-    g_tileWallAtBar = g_tileAtBar && dashtiles::AtBar(h, b, barUp, DashHeight(), dashtiles::kOverBarDeg, g,
+    g_tileWallAtBar = g_tileAtBar && !atHead && dashtiles::AtBar(h, b, barUp, DashHeight(), dashtiles::kOverBarDeg, g,
                                                       &g_tileWallBar.radius, &g_tileWallBar.deskDeg);
     if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
     for (int r = 0; r < 3; ++r) g[r][3] += g[r][2] * kFocusBackM;   // (the arc's centre behind your eyes: its +Z)
@@ -211,10 +213,11 @@ bool Regroup() {
     if (steam >= 0) slot = 0;
     g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
     g_tiles.SlotMoved();
-    // the strip centred again (moves since kept it where it was): at the bar, Steam's page (tiled) over
-    // it as Steam's own stands, not the strip's middle
+    // the strip centred again (moves since kept it where it was), its middle straight ahead, Steam's
+    // page too (user, 2026-11-19: "the tiling doesn't keep itself centered"; Steam's page over the bar
+    // put the strip all off to one side)
     g_tileSteamOverBar = g_tileWallAtBar && steam >= 0 && g_tiles.Tiled(steam);
-    g_tiles.Recentre(g_tileSteamOverBar ? steam : -1);
+    g_tiles.Recentre(-1);
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
     RetileDash();
@@ -487,6 +490,8 @@ void UpdateDashTiles() {
     // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
     if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
     if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
+    // (a reset: now, the dashboard open or not; ft-layout leaves the tiled panels to this)
+    if (g_tileReset && (g_tiles.Ids().empty() || (Dash().ever && Regroup(!up)))) g_tileReset = false, g_tileRegroup = false;
     UpdateTileFocus();
 }
 
@@ -613,6 +618,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             return;
         }
         if (!std::strcmp(parsed.rest, "gaps")) return TileGaps(reply, size);
+        if (!std::strcmp(parsed.rest, "recentre")) return g_tileReset = true, (void)std::snprintf(reply, size, "ok");
         if (!std::strcmp(parsed.rest, "clear")) {
             for (const int id : g_tiles.Ids()) TileUnanchor(id, "tiles clear");
             return (void)std::snprintf(reply, size, "ok");

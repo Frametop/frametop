@@ -128,6 +128,7 @@ int main() {
     check("the pointer's pose (6 numbers) is no panel pose", V("pose 1 2 3 4 5") == Unknown);
     { Cmd t; check("tiles set: the rest after it", Parse("tiles set 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "set 2 off")); }
     { Cmd t; check("tiles add: the rest after it", Parse("tiles add 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "add 2 off")); }
+    { Cmd t; check("tiles recentre: the rest after it", Parse("tiles recentre", t) == Tiles && t.rest && !std::strcmp(t.rest, "recentre")); }
     { Cmd t; check("tiles clear", Parse("tiles clear", t) == Tiles && t.rest && !std::strcmp(t.rest, "clear")); }
     { Cmd t; check("tiles gaps", Parse("tiles gaps", t) == Tiles && t.rest && !std::strcmp(t.rest, "gaps")); }
     { Cmd t; check("tiles alone: no rest", Parse("tiles", t) == Tiles && !t.rest); }

@@ -722,6 +722,17 @@ def apply_screens(wait=0):
     return results
 
 
+def recenter_tiles(sock):
+    """The tiled panels (pinned to the dashboard, so left alone above): ft-screens puts their
+    group in front of you, its middle straight ahead."""
+    try:
+        sock.ask("tiles recentre")
+    except NoAnswer:
+        raise
+    except RuntimeError:
+        pass  # an older ft-screens
+
+
 def recenter_screens():
     """Recenter existing panels without restoring apps or display state.
 
@@ -760,6 +771,7 @@ def recenter_screens():
             head_pin = saved if saved and saved.get("hand") == "head" and len(saved.get("rel", [])) == 12 else None
             movable.append((n, t, head_pin))
         if not movable:
+            recenter_tiles(sock)
             log("recenter: no unpinned panels available")
             return []
         # Sample once, after the countdown and inspection, immediately before moving.
@@ -773,6 +785,7 @@ def recenter_screens():
                                     (n, *center, t["face"][0] + heading, t["face"][1], t["roll"])))
             if head_pin:
                 sock.ask(f"pin {n} head " + " ".join(f"{v:.5f}" for v in head_pin["rel"]))
+        recenter_tiles(sock)
         try:
             sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset
         except RuntimeError:

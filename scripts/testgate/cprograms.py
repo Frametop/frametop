@@ -224,10 +224,15 @@ def items(root, env=os.environ):
         P("calibfile-test", "hands/tests/calibfile_test.cpp", "hands/track/calibfile.cpp",
           flags=f"{CXX2} -Wno-unused-parameter"),
         single("hands/tests/xrcams_test.c", GNU11, out="xrcams-test"),
-        # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled
-        P("ft-powerd", "power/ft-powerd.cpp", flags="-std=c++17 -Wall -Werror -Wno-unused-parameter",
-          cflags="-Ikeyboard/third_party/openvr", test="power/ft-powerd.cpp (compiles)", syntax=True),
     ]
+    # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled, against
+    # the pinned OpenVR header power/build.sh fetches (no download in a test)
+    if has("power/build/include/openvr.h"):
+        out.append(P("ft-powerd", "power/ft-powerd.cpp", flags="-std=c++17 -Wall -Werror -Wno-unused-parameter",
+                     cflags="-Ipower/build/include", test="power/ft-powerd.cpp (compiles)", syntax=True))
+    else:
+        out.append(Skip("power/ft-powerd.cpp (compiles): SKIPPED: no power/build/include/openvr.h "
+                        "(power/build.sh fetches it)"))
     if has("hands/build/ncnn/install/lib/libncnn.a"):
         make = ("make", "-s", "-C", "hands", "build/sides-test", "build/pinch-test", "build/flagbuf-test")
         out += [Check(f"hands/tests/{n}_test.cpp", (f"hands/build/{n}-test",), prep=make, watch=("hands",))

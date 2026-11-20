@@ -1,0 +1,119 @@
+#!/usr/bin/python3 -I
+"""Frametop's keyboard: Full Keyboard for Steam Frame (TaiKeid's, keyboard/build/release, unmodified) in
+hosted mode, with Frametop as its shell (keyboard/FRAMETOP.md).
+
+  ft-kbhost [--keyboard DIR]
+
+It starts the keyboard on a socket pair and keeps its lease (hosted.py), talks to the input
+relay as Frametop's keyboard always has (relaylink.py), opens it for Steam's own text fields
+(steamhook.py), and decides the rest (host.py). frametop-keyboard.service runs it with SteamVR.
+
+Exits 3 when the user quit the keyboard from its panel (the service then leaves it closed until
+SteamVR starts again), 1 when the keyboard failed (the service starts both again), 0 on SIGTERM.
+"""
+import argparse
+import json
+import os
+import selectors
+import signal
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent.parent / "conf"))
+import ft_pinlock  # noqa: E402
+import hosted  # noqa: E402
+from host import Host  # noqa: E402
+from relaylink import RelayLink  # noqa: E402
+from steamhook import SteamHook  # noqa: E402
+
+HELLO_EVERY = 1.0
+TICK = 0.1
+QUIT = 3
+
+
+def log(text):
+    print(text, flush=True)
+
+
+def release(dist):
+    try:
+        return json.loads((dist / "RELEASE").read_text()).get("version", "?")
+    except (OSError, ValueError):
+        return "?"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Frametop's keyboard host")
+    parser.add_argument("--keyboard", type=Path, default=HERE.parent / "build" / "release",
+                        help="Full Keyboard's release folder (keyboard/build.sh puts it there)")
+    args = parser.parse_args()
+    dist = args.keyboard.resolve()
+    program = dist / "bin" / "framekeyboard"
+    if not program.is_file():
+        log(f"no Full Keyboard in {dist}: run keyboard/build.sh")
+        return 1
+    os.makedirs(hosted.config_dir(), exist_ok=True)
+
+    stopping = []
+    signal.signal(signal.SIGTERM, lambda *_: stopping.append(True))
+    signal.signal(signal.SIGINT, lambda *_: stopping.append(True))
+
+    relay, steam = RelayLink(), SteamHook()
+    messages = []
+    keyboard = hosted.Hosted(program, dist / "share" / "framekeyboard", hosted.config_dir(),
+                             messages.append, client_version=release(dist))
+    host = Host(keyboard, relay, steam, ft_pinlock.allowed)
+    log(f"Full Keyboard {release(dist)} (hosted) started")
+    steam.start()
+
+    selector = selectors.DefaultSelector()
+    selector.register(keyboard, selectors.EVENT_READ, "keyboard")
+    selector.register(relay, selectors.EVENT_READ, "relay")
+    selector.register(steam, selectors.EVENT_READ, "steam")
+    hello_at = 0.0
+    steam_up = None
+    try:
+        while not stopping:
+            for key, _ in selector.select(TICK):
+                now = time.monotonic()
+                if key.data == "keyboard":
+                    alive = keyboard.receive()
+                    for message in messages:
+                        host.on_keyboard(now, message)
+                    messages.clear()
+                    if not alive:
+                        selector.unregister(keyboard)
+                        code = keyboard.wait()
+                        log(f"Full Keyboard exited ({code})")
+                        return QUIT if code == 0 else 1
+                elif key.data == "relay":
+                    for words in relay.receive(now):
+                        host.on_relay(now, words)
+                else:
+                    results = steam.results()
+                    for item in results:
+                        if item[0] == "steam" and item[1] != steam_up:
+                            steam_up = item[1]
+                            log("Steam's text fields open Full Keyboard" if steam_up else
+                                "Steam's UI isn't reachable: its own keyboard serves its fields")
+                    host.on_steam(now, results)
+            now = time.monotonic()
+            keyboard.tick(now)
+            host.tick(now)
+            if now - hello_at >= HELLO_EVERY:
+                hello_at = now
+                relay.hello(host.visible)
+        return 0
+    finally:
+        keyboard.close()  # the keyboard quits as Settings -> Quit does
+        keyboard.wait(timeout=5)
+        steam.stop()
+        relay.hello(False)
+        relay.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

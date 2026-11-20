@@ -216,8 +216,8 @@ fi
 [ "$assume_yes" = 1 ] || step "What to install (every question comes now; the rest runs without asking)"
 
 # keyboard choice: begin
-# Frametop's keyboard is its own copy of Full Keyboard (keyboard/FRAMETOP.md). Its service stops
-# every other framekeyboard when it starts, so a Full Keyboard someone runs themselves (its own
+# Frametop's keyboard is its own copy of Full Keyboard (keyboard/FRAMETOP.md), hosted by Frametop.
+# When it starts it asks every other framekeyboard to quit, so a Full Keyboard someone runs themselves (its own
 # install, or one from Nix, with framekeyboard-autostart.service; GitHub #80) only stays with
 # --no-keyboard, or a no here. Yes is the default, as before. Asked with the other questions;
 # step 7 builds and installs it, or leaves it out.
@@ -405,7 +405,7 @@ build "$root/layout/countdown/build.sh"  # visible three-second reset countdown
 build "$root/stream/build.sh"  # ft-stream: remote displays (Frametop Settings > Remote displays)
 # keyboard build: begin
 if [ "$keyboard" = 1 ]; then
-  build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard, by TaiKeid (keyboard/FRAMETOP.md)
+  build "$root/keyboard/build.sh"  # Frametop's keyboard: Full Keyboard's newest release, by TaiKeid (keyboard/FRAMETOP.md)
 fi
 # keyboard build: end
 "$root/desktops.sh" install >/dev/null

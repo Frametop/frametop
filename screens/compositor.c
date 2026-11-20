@@ -1221,9 +1221,13 @@ static int focused_screen(struct server *s) {
 }
 
 static void keyboard_command(struct server *s, const char *what, char *reply, int size) {
+    // "show steam": a Steam text field asks (the relay's "kbsteam"). It opens over Steam's page,
+    // with the screens hidden too, and closes with the field (ft-kbhost), not here.
+    const bool steam = strcmp(what, "show steam") == 0;
+    if (steam) what = "show";
     const bool toggle = strcmp(what, "toggle") == 0;
     if (strcmp(what, "hide") && strcmp(what, "close") && strcmp(what, "show") && !toggle)
-        return (void)snprintf(reply, size, "error show|hide|toggle|close");
+        return (void)snprintf(reply, size, "error show|show steam|hide|toggle|close");
     if (!fullkb(s)) {
         s->kb_close_at = 0;
         if (strcmp(what, "show") == 0 || toggle)
@@ -1241,15 +1245,19 @@ static void keyboard_command(struct server *s, const char *what, char *reply, in
         s->fullkb_open = false;
         return (void)snprintf(reply, size, toggle ? "ok closed" : "ok");
     }
-    if (s->fullkb_open) return (void)snprintf(reply, size, "ok open");
-    if (!ft_vr_screens_shown()) {
+    if (s->fullkb_open && !steam) return (void)snprintf(reply, size, "ok open");
+    if (!steam && !ft_vr_screens_shown()) {
         wlr_log(WLR_INFO, "Full Keyboard not opened (%s): the screens are hidden", toggle ? "button" : "text field");
         return (void)snprintf(reply, size, "ok screens hidden");
     }
-    wlr_log(WLR_INFO, "Full Keyboard open (%s)", toggle ? "button" : "text field");
-    relay_send(s, "kbpanel show");
+    const char *why = steam ? "Steam text field" : toggle ? "button" : "text field";
+    wlr_log(WLR_INFO, "Full Keyboard open (%s)", why);
+    // Where: keyboard/host/placement.py places it from this (an open one moves there again).
+    char msg[320] = "kbpanel show", spot[300];
+    if (ft_vr_keyboard_spot(spot, sizeof spot)) snprintf(msg, sizeof msg, "kbpanel show %s", spot);
+    relay_send(s, msg);
     s->fullkb_open = true;
-    s->fullkb_auto = !toggle;
+    s->fullkb_auto = !toggle && !steam;
     snprintf(reply, size, "ok opened");
 }
 

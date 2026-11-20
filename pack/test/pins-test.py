@@ -7,7 +7,9 @@
   venvs listed below;
 - scripts/stb.sh keeps a matching download, refuses one that doesn't match and a header it has
   no pin for, and doesn't fetch a good copy again (curl is a made-up one on PATH);
-- the OpenVR header vendored with Full Keyboard is the one scripts/openvr.sh pins;
+- the OpenVR SDK is pinned by commit;
+- Full Keyboard is the one input that isn't pinned (keyboard/fetch.py takes its newest release,
+  as Daenon asked): AGENTS.md says so, and the fetch still checks a sha256;
 - the dev container and the image read their packages from setup/packages.txt, and the dev
   container starts from the image's digest-pinned base (the sed lines both use, run here).
 
@@ -162,18 +164,21 @@ class Stb(unittest.TestCase):
 
 
 class OpenVR(unittest.TestCase):
-    def test_keyboard_vendored_header_is_the_pinned_one(self):
-        text = (REPO / 'scripts/openvr.sh').read_text()
-        pin = re.search(r'^openvr_fetch openvr\.h ([0-9a-f]{64})$', text, re.M).group(1)
-        vendored = (REPO / 'keyboard/third_party/openvr/openvr.h').read_bytes()
-        self.assertEqual(hashlib.sha256(vendored).hexdigest(), pin)
-
     def test_pinned_by_commit(self):
         text = (REPO / 'scripts/openvr.sh').read_text()
         commit = re.search(r'^openvr_commit=([0-9a-f]{40})\b', text, re.M).group(1)
         self.assertTrue(f'openvr/raw/{commit}/' in (REPO / 'pack/Containerfile').read_text(),
                         'pack/Containerfile fetches libopenvr_api.so at another commit')
         self.assertIn('$openvr_commit/headers', text)
+
+
+class Keyboard(unittest.TestCase):
+    def test_the_one_unpinned_input_is_written_down_and_still_checked(self):
+        self.assertIn('keyboard/fetch.py', (REPO / 'AGENTS.md').read_text())
+        fetch = (REPO / 'keyboard/fetch.py').read_text()
+        self.assertIn('SHA256SUMS', fetch)
+        self.assertIn('hashlib.sha256(data).hexdigest() != sha', fetch)
+        self.assertIn('FULLKB_VERSION', (REPO / 'pack/Containerfile').read_text())
 
 
 class Containers(unittest.TestCase):

@@ -16,8 +16,8 @@
 
 A full build (`ft dev build`, then get.sh --zip; or CI) makes a release. This is the quick way
 to try commits on it while developing: seconds for Python, QML and scripts, a minute or two for
-a rebuilt component (the first build of hands, voice, stream or keyboard fetches and builds
-their libraries, which takes longer). It installs committed code only (git, not the working
+a rebuilt component (the first build of hands, voice or stream fetches and builds their
+libraries, which takes longer; keyboard's build downloads Full Keyboard's newest release). It installs committed code only (git, not the working
 tree), so what runs is a commit you can name. The full build still comes before a push or a
 release: this never runs the installers, never changes the image, and never restarts SteamVR.
 
@@ -62,7 +62,7 @@ IMAGE = {'pack/Containerfile', 'pack/pyside-runtime.py', 'uv.lock', 'pyproject.t
 # Components with a build.sh: the paths outside their folder their build reads, and the
 # outputs that go into the live tree (in COMPONENT/build; the Containerfile keeps the same).
 # Their own folder's build inputs are its sources and build files (BUILD_SUFFIXES,
-# BUILD_NAMES), or, for WHOLE ones, every file but docs and tests. Headers outside the folder
+# BUILD_NAMES), not docs and tests. Headers outside the folder
 # that those sources #include "..." count too, found from the include lines (include_graph), so
 # they aren't listed here: only what an include line doesn't name (scripts, -I folders, a source
 # built from elsewhere) is.
@@ -82,8 +82,8 @@ COMPONENTS = {
     'pointer/driver': (('pointer/common', OPENVR), ('driver_ft_pointer.so',)),
     'gaze': (('pointer/common', OPENVR, STB), ('ft-gaze', 'ft-gazepanel')),
     'gaze/tracker': ((), ('ft-eyegrab',)),
-    'keyboard': ((OPENVR,), ('frametop/framekeyboard', 'frametop/framekeyboard-native-guard',
-                             'frametop/engines/*', 'frametop/bridge/*', 'frametop/vr/*')),
+    # Full Keyboard's newest release (keyboard/fetch.py), unpacked as it comes: a fetch is its build
+    'keyboard': (('keyboard/fetch.py',), ('release/**/*',)),
     'power': ((OPENVR,), ('ft-powerd',)),
     'stream': ((OPENVR,), ('ft-stream', 'ft-clip')),   # the spikes only with build.sh --spikes
     'voice': ((), ('bin/whisper-server',)),
@@ -93,7 +93,6 @@ COMPONENTS = {
     # msquic is fetched at the commit together/build.sh pins, and stays built in the stage
     'together': ((*ROOM_CLIENT, MODELFILE, OPENVR), ('ft-together', 'ft-sharepanel', 'ft-peerpanel', 'ft-roomvoice', 'ft-roompoints', 'libmsquic.so.2')),
 }
-WHOLE = {'keyboard'}   # its CMake build embeds layouts, languages and themes, and copies scripts
 BUILD_SUFFIXES = {'.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.S', '.glsl', '.vert', '.frag',
                   '.patch', '.cmake', '.xml'}   # .xml: Wayland protocols (stream/protocols)
 BUILD_NAMES = {'build.sh', 'Makefile', 'CMakeLists.txt', 'meson.build', 'Cargo.toml', 'Cargo.lock'}
@@ -118,6 +117,7 @@ EXTRA_DIRS = {
                                  'commands', 'steam', 'conf'),   # conf/: ftipc, ft_conf
     'frametop-input-relay.service': ('commands', 'conf'),
     'frametop-dashpatch.service': ('steam',),
+    'frametop-keyboard.service': ('keyboard', 'conf', 'steam'),   # ft-kbhost: the release, ft_pinlock, steamui
     'frametop-voice.service': ('input', 'commands', 'conf'),
     'frametop-gaze.service': ('models', 'conf'),
     'frametop-camwatch.service': ('conf', 'recorder'),
@@ -230,7 +230,7 @@ def builds(comp, path):
     if documentation(path):
         return False
     name = path.rsplit('/', 1)[-1]
-    return comp in WHOLE or name in BUILD_NAMES or os.path.splitext(name)[1] in BUILD_SUFFIXES
+    return name in BUILD_NAMES or os.path.splitext(name)[1] in BUILD_SUFFIXES
 
 
 def read_blobs(blobs):

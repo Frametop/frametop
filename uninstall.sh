@@ -93,6 +93,7 @@ running() {
     pgrep -x "$n" >/dev/null && out+=("$n")
   done
   pgrep -f '[i]nput/input-relay\.py' >/dev/null && out+=("input relay")
+  pgrep -f '[k]eyboard/host/ft-kbhost' >/dev/null && out+=("ft-kbhost")
   pgrep -f '[g]aze/ft-gazed' >/dev/null && out+=("gaze service")
   pgrep -f '[f]rametop-session\.sh' >/dev/null && out+=("desktop session")
   echo "${out[*]}"

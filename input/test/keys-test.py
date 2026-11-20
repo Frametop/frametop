@@ -1174,8 +1174,9 @@ def tests():
     key(ENTER, 1); key(ENTER, 0)
     check("panel claim lapsed: Enter is typed", (cal_keys(), typed()), ([], ["key 28 1", "key 28 0"]))
 
-    # Full Keyboard (keyboard/, --frametop): it says hello, hears where typing goes and whether
-    # the screens show, and types on the desktop through the relay.
+    # Full Keyboard (keyboard/host/ft-kbhost): it says hello, hears where typing goes, whether
+    # the screens show and whether Steam's fields may open it, and types on the desktop through
+    # the relay.
     use({})
     kb = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     kb.bind("")  # autobound, as Full Keyboard's
@@ -1196,14 +1197,14 @@ def tests():
 
     typed(), emitted()
     from_kb("kbhello 0")
-    check("Full Keyboard's hello: the word back (Steam, nothing shown)", heard(), ["kb 0 0"])
+    check("Full Keyboard's hello: the word back (Steam, nothing shown)", heard(), ["kb 0 0 0"])
     check("...and ft-screens hears it's there", [m for m in typed() if m.startswith("fullkb")], ["fullkb 0"])
     check("...logged", [m for m in LOG if m.startswith("Full Keyboard")][-1:], ["Full Keyboard connected"])
     to_relay("keyboard desktop 1")
     time.sleep(0.1)
-    check("typing goes to the desktop, the screens show: it hears at once", heard(), ["kb 1 1"])
+    check("typing goes to the desktop, the screens show: it hears at once", heard(), ["kb 1 1 0"])
     from_kb("kbhello 1")
-    check("a hello always gets the word", heard(), ["kb 1 1"])
+    check("a hello always gets the word", heard(), ["kb 1 1 0"])
     check("...and ft-screens hears it's up", [m for m in typed() if m.startswith("fullkb")], ["fullkb 1"])
     from_kb("kbkey 30 1")
     from_kb("kbkey 30 0")
@@ -1220,7 +1221,7 @@ def tests():
     from_kb(f"kbkey {SHIFT} 1")
     to_relay("keyboard steam 1")
     time.sleep(0.1)
-    check("typing goes to Steam: it hears", heard(), ["kb 0 1"])
+    check("typing goes to Steam: it hears", heard(), ["kb 0 1 0"])
     from_kb(f"kbkey {SHIFT} 0")
     from_kb("kbkey 30 1")
     from_kb("kbkey 30 0")
@@ -1258,6 +1259,40 @@ def tests():
     check("ft-screens' kbpanel show: Full Keyboard opens", heard(), ["kb show"])
     to_relay("kbpanel hide")
     check("...and hide", heard(), ["kb hide"])
+    pose = " ".join(["1.0000", "0.0000", "0.0000", "0.1000"] + ["0.0000", "1.0000", "0.0000", "1.6000"]
+                    + ["0.0000", "0.0000", "1.0000", "-0.2000"])
+    to_relay(f"kbpanel show head {pose}")
+    to_relay(f"kbpanel show dash {pose}")
+    check("...and where: the head's pose, or the dashboard's spot", heard(),
+          [f"kb show head {pose}", f"kb show dash {pose}"])
+    to_relay("kbpanel show head 1 2 3")
+    to_relay(f"kbpanel show knee {pose}")
+    to_relay("kbpanel show head " + " ".join(["1e9"] * 12))
+    to_relay("kbpanel toggle")
+    check("...malformed ones don't go on", heard(), [])
+    typed()
+    from_kb("kbsteam")
+    check("a Steam field, a keyboard connected (default setting): kb nosteam, nothing opens",
+          (heard(), [m for m in typed() if m.startswith("vrkeyboard")]), (["kb nosteam"], []))
+    vr_keyboard["mode"] = "always"
+    use({})
+    from_kb("kbhello 0")
+    check("the rule always: the word says Steam's fields may take it", heard()[-1:], ["kb 1 1 1"])
+    from_kb("kbsteam")
+    check("...and a Steam field has ft-screens open it, where it says",
+          (heard(), [m for m in typed() if m.startswith("vrkeyboard")]), ([], ["vrkeyboard show steam"]))
+    other = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    other.bind("")
+    from_kb("kbsteam", other)
+    check("...only from the address that said hello", [m for m in typed() if m.startswith("vrkeyboard")], [])
+    other.close()
+    vr_keyboard["mode"] = "never"
+    use({})
+    from_kb("kbsteam")
+    check("the rule never: kb nosteam", heard()[-1:], ["kb nosteam"])
+    vr_keyboard["mode"] = None
+    use({})
+    heard(), typed()
     to_relay("kbpoke right press 0.1200 1.0500 -0.6500")
     to_relay("kbpoke left end")
     check("ft-screens' kbpoke: a fingertip's poke goes on to Full Keyboard", heard(),
@@ -1268,7 +1303,7 @@ def tests():
     check("...malformed ones don't", heard(), [])
     pause("on")
     time.sleep(0.1)
-    check("paused: typing to Steam, and not over the screens", heard(), ["kb 0 0"])
+    check("paused: typing to Steam, and not over the screens", heard(), ["kb 0 0 0"])
     pause("off")
     to_relay("keyboard desktop 1")
     from_kb("kbhello 1")

@@ -16,7 +16,7 @@
 # vrgsapps.cpp is the gamescope apps' panels, on OpenVR (vrpanel.h: what it shares with vr.cpp).
 # vrsteamwin.cpp is Steam's own windows as panels (steamwin.h; STEAM_DASH_PANEL, a Display Settings switch), and
 # vrsteamfollow.cpp its popups, placed with them (steamplace.h), its menu glued to its page (steamglue.h), vrsteamhit.cpp
-# Steam's own (empty) overlays shrunk to nothing (steamshrink.h); steamcdp.cpp sends the laser on
+# Steam's own (empty) overlays shrunk to nothing (steamshrink.h); vrkbspot.cpp where Full Keyboard opens; steamcdp.cpp sends the laser on
 # them to their pages in Steam's CEF, on a thread of its own (X's pointer doesn't reach them).
 # vrtiles.cpp is the dashboard tiles' glue (the anchor, the grid's places, the focus, the memory, the tiles commands).
 # vr.cpp needs OpenVR's IVRIPCResourceManagerClient (ImportDmabuf), which the header
@@ -54,6 +54,7 @@ $cxx -c -o build/vrstats.o vrstats.cpp
 $cxx -c -o build/vrsteamwin.o vrsteamwin.cpp
 $cxx -c -o build/vrsteamfollow.o vrsteamfollow.cpp
 $cxx -c -o build/vrsteamhit.o vrsteamhit.cpp
+$cxx -c -o build/vrkbspot.o vrkbspot.cpp
 $cxx -c -o build/label.o label.cpp
 $cxx -c -o build/overlaytex.o overlaytex.cpp
 $cxx -c -o build/handcut.o handcut.cpp
@@ -92,7 +93,7 @@ for f in micear ownface; do   # the face of the avatar you wear: its mouth from 
   avatars="$avatars build/avatars-$f.o"
 done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrbarmenu.o build/vrbarhold.o build/vrbarside.o build/vrresetask.o build/vrquick.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/steamcdp.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrbarmenu.o build/vrbarhold.o build/vrbarside.o build/vrresetask.o build/vrquick.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/vrkbspot.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/steamcdp.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1 xcb xcb-xtest xcb-icccm) $vrlibs -pthread
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs

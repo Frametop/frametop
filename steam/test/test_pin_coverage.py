@@ -58,8 +58,19 @@ class Coverage(unittest.TestCase):
 
     def test_auxiliary_panels_have_security_gate(self):
         for name in ("frunner/ft-spotpanel.cpp", "gaze/panel/ft-gazepanel.cpp",
-                     "hands/rec/panel/ft-handpanel.cpp", "screens/handview.cpp", "keyboard/src/vr.cpp"):
+                     "hands/rec/panel/ft-handpanel.cpp", "screens/handview.cpp"):
             self.assertIn("ft_pin_allowed()", (ROOT / name).read_text(), name)
+
+    def test_full_keyboard_has_security_gate(self):
+        # ft-kbhost hosts TaiKeid's release unmodified, so the gate is in Frametop's host: it
+        # hides the keyboard and keeps Steam's fields off it while locked (keyboard/test/test_host.py),
+        # and the relay won't open it for a Steam field then.
+        self.assertIn("Host(keyboard, relay, steam, ft_pinlock.allowed)", (ROOT / "keyboard/host/ft-kbhost").read_text())
+        host = (ROOT / "keyboard/host/host.py").read_text()
+        self.assertIn("ok = self.allowed()", host)
+        self.assertIn("self.steam.take = self.take and ok", host)
+        relay = (ROOT / "input/input-relay.py").read_text()
+        self.assertIn("if not self.steam_takes_keyboard() or not ft_pinlock.allowed():", relay)
 
 
 if __name__ == "__main__":

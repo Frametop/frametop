@@ -122,8 +122,7 @@ def plan(changed, root=TREE):
     if any(under(c, ("session",)) for c in changed):
         runs.append(("session/tests", ["pytest", "-q", "session/tests"], None))
     runs.append(("C/C++ tests", ["python3", "scripts/testgate/ctests.py", "--changed", "-"], "\n".join(changed)))
-    for roots, recipe in ((("keyboard", "scripts/openvr.sh"), "test-keyboard"),
-                          (("testbench", ".claude/skills/verify-frametop"), "test-testbench"),
+    for roots, recipe in ((("testbench", ".claude/skills/verify-frametop"), "test-testbench"),
                           (("scripts/fast-install", "scripts/tests/test_fast_install.py"), "test-fast-install")):
         if any(under(c, roots) for c in changed):
             runs.append((recipe, ["just", recipe], None))

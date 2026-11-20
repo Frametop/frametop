@@ -1,10 +1,10 @@
 // The dashboard tiles as laid out last (Board::Arrange, dashtiles.h): what fits where. Read only:
-// the board owns the grid and the layout; it, the tiling keys (tilekeys.h) and the gap fill ask
-// this. Header only, no OpenVR, so its test (tests/dashtiles-test.cpp) runs anywhere.
+// the board owns the grid and the layout; it, the tiling keys (tilekeys.h) and the gap fill
+// (tilefill.h) ask this. It sees the grid as it is now but the layout as it was last, so ask it
+// before changing the grid, not after (a column added since: FitsUnder's yes, LaidOut's no). Header only, no OpenVR, so its test (tests/dashtiles-test.cpp) runs anywhere.
 #pragma once
 
 #include "slotsplit.h"
-#include "tilegap.h"
 #include "tilegrid.h"
 #include "tilepack.h"
 #include "tiling.h"
@@ -33,6 +33,9 @@ inline bool EyeFitsRound(const tiling::Params &p, double under, double height) {
     return tiling::EyeElDeg(p, p.deskDeg - under + height) - tiling::EyeElDeg(p, p.deskDeg - under) <= tilepack::kColumnDeg + 1e-9;
 }
 
+// A size in metres as degrees round you, at the wall.
+inline double SpanDeg(const tiling::Params &p, double m) { return tiling::Deg(2 * std::atan2(m / 2, p.radius)); }
+
 struct View {
     const tiling::Params &params;
     const tilegrid::Grid &grid;
@@ -42,15 +45,12 @@ struct View {
     const slotsplit::Policy &slot;
     int steam;                                  // Steam's window: never pulled into another column
 
-    static constexpr double kFitSlackDeg = 0.5;
-
     const tiling::Placed *PlacedOf(int id) const {
         for (const auto &p : last.tiles)
             if (p.id == id) return &p;
         return nullptr;
     }
-    // A size in metres as degrees round you, at the wall.
-    double Span(double m) const { return tiling::Deg(2 * std::atan2(m / 2, params.radius)); }
+    double Span(double m) const { return SpanDeg(params, m); }
     // Degrees as laid out last, as they'd be unshrunk (tiling::Layout::shrink: the sizes fills has).
     double Unshrunk(double deg) const { return last.shrink > 0 ? deg / last.shrink : deg; }
     // Column `col` with `height` from the desk line up (unshrunk) and what hangs under it as laid
@@ -62,28 +62,21 @@ struct View {
         return EyeFitsRound(params, under, height + under);   // (`under` from the desk line: its gap and all)
     }
     bool Pullable(int id) const { return id != steam && !absent.count(id); }
-    // Column `col` as laid out last: each of its panels where Arrange put it (a column added or
-    // taken away since shifts the others: their sizes there are another column's).
+    // Column `col` as laid out last: each of its panels where Arrange put it, and no others (a column
+    // added or taken away since shifts the others: their sizes there are another column's; a panel
+    // gone from it since is still in its height).
     bool LaidOut(int col) const {
         if (fills.size() != grid.Cols().size()) return false;
-        for (const tilegrid::Cell &c : grid.Cols()[size_t(col)].cells)
+        const auto &cells = grid.Cols()[size_t(col)].cells;
+        for (const tilegrid::Cell &c : cells)
             if (const tiling::Placed *p = PlacedOf(c.id); !p || p->col != col) return false;
-        return true;
+        return size_t(std::count_if(last.tiles.begin(), last.tiles.end(), [&](const tiling::Placed &p) { return p.col == col; })) == cells.size();
     }
-    // A panel stands in gap `g`'s stack (column `col`) that Leave didn't leave there: it took the gap.
-    bool Newcomer(const tilegap::Gap &g, int col) const {
-        const tilegrid::Col &c = grid.Cols()[size_t(col)];
-        for (int r = 0; r < int(c.cells.size()); ++r)
-            if (!c.Below(r) && std::find(g.stack.begin(), g.stack.end(), c.cells[size_t(r)].id) == g.stack.end()) return true;
-        return false;
-    }
-    // Gap `g`, in column `col`, still as Leave left it (council, 2026-11-20): standing there only
-    // panels it left (another there took the gap, whatever its size: one opened into it, or one swapped
-    // for one that went), none not shown yet (no size to test), and laid out since.
-    bool GapOpen(const tilegap::Gap &g, int col) const {
+    // Every panel in column `col` is shown (none laid out at no size: its height there is its own).
+    bool AllShown(int col) const {
         for (const tilegrid::Cell &c : grid.Cols()[size_t(col)].cells)
             if (absent.count(c.id)) return false;
-        return !Newcomer(g, col) && LaidOut(col);
+        return true;
     }
     int SideOf(int col) const { return slot.SideOfCol(grid, col); }
     // Nothing in column `col` is shown (Board::absent: laid out at no size).
@@ -139,31 +132,6 @@ struct View {
         return best;
     }
 
-    // The neighbouring column whose only panel goes up into gap `g` in column `col` (Board::FillGap):
-    // it fits in its place (no wider than the column, no taller than the one that went, on its side
-    // of Steam's slot, and standing under what hangs there now); of two, the bigger. col -1: none.
-    struct Pick {
-        int col = -1, side = 0;
-    };
-    Pick FillFor(const tilegap::Gap &g, int col) const {
-        double span = 0;
-        for (const tiling::Placed &p : last.tiles)
-            if (p.col == col) span = std::max(span, p.az1 - p.az0);
-        Pick best;
-        double bestArea = 0;
-        for (const int dir : {-1, +1}) {
-            const int c = Neighbour(col, dir);
-            if (c < 0 || grid.Cols()[size_t(c)].cells.size() != 1 || !LaidOut(c)) continue;
-            const int other = grid.Cols()[size_t(c)].cells.front().id;
-            const tiling::Placed *q = PlacedOf(other);
-            if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || Unshrunk(q->el1 - q->el0) > g.heightDeg + kFitSlackDeg ||
-                !FitsUnder(col, other))   // (with what hangs under it now)
-                continue;
-            const double area = (q->az1 - q->az0) * (q->el1 - q->el0);
-            if (area > bestArea) best = {c, dir}, bestArea = area;
-        }
-        return best;
-    }
 };
 
 }  // namespace dashtiles

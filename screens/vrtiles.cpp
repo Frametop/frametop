@@ -323,15 +323,21 @@ void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     std::printf("%s: anchored to the dashboard%s (%s)%s\n", TileLabel(i).c_str(), TileStays(it->second, i) ? ", staying shown" : "", by,
                 g_tileGroupSet ? "" : "; it goes on when the dashboard opens");
 }
+// Off the tiles, left in the room where it is: `off()` takes it off the board (false: it's still
+// on, and nothing else changes). True when it went.
+template <typename Off>
+bool OffTheTiles(Screen &s, Off off) {
+    Mat p;
+    const bool placed = ScreenPose(s, &p);   // (where it is on the tiles, before they close up)
+    if (!off()) return false;
+    EndDrag(s);
+    if (placed && s.pinned == kDashboard) SetAbsolute(s, p);
+    return true;
+}
 void TileUnanchor(int i, const char *by) {
     auto it = g_screens.find(i);
     if (it == g_screens.end() || !g_tiles.Anchored(i)) return;
-    Screen &s = it->second;
-    Mat p;
-    const bool placed = ScreenPose(s, &p);
-    EndDrag(s);
-    g_tiles.Unanchor(i);
-    if (placed && s.pinned == kDashboard) SetAbsolute(s, p);   // left in the room where it is
+    OffTheTiles(it->second, [&] { return g_tiles.Unanchor(i); });
     RetileDash();
     RememberTiles();
     std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
@@ -380,9 +386,13 @@ void TileKnown(int i, const std::string &key) {
         case dashtiles::WhenKnown::Restore: break;
     }
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
-    const bool tiledBefore = g_tiles.Anchored(i);
-    if (!g_tiles.Restore(i, line, after, k)) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
-    if (tiledBefore && !g_tiles.Anchored(i)) RetileDash(), RememberTiles();   // (tiled before its app was known, off for it: the others close up)
+    bool restored = false;
+    const auto restore = [&] { return (restored = g_tiles.Restore(i, line, after, k)) && !g_tiles.Anchored(i); };
+    const auto sit = g_screens.find(i);
+    if (g_tiles.Anchored(i) && sit != g_screens.end()) {   // (tiled before its app was known, off for it: the others close up)
+        if (OffTheTiles(sit->second, restore)) RetileDash(), RememberTiles();
+    } else restore();
+    if (!restored) return (void)std::printf("%s: %s's remembered state isn't one: ignored\n", TileLabel(i).c_str(), k.c_str());
     if (g_tiles.Anchored(i)) {
         if (!g_tileGroupSet) g_tileRegroup = true;
         RetileDash();

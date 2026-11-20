@@ -1188,6 +1188,62 @@ int main() {
             const std::string back = cols(t);
             check("settle: back where another took its gap, too tall: a column of its own", tookIt && back == "[ 1 ][ 9 60 2 ][ 3 ]" &&
                                                                                            t.Settle() && (t.Arrange(same), cols(t) == "[ 1 ][ 60 2 ][ 9 ][ 3 ]"));
+            dashtiles::Board q = stack();   // (council pass 6) ...back within the quiet time: the same
+            q.Leave(4, 0, "app:a"), q.Arrange(same), q.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), q.Arrange(same);
+            q.Restore(9, four, -1, "app:a"), q.Arrange(same);
+            check("settle: back within 1.5 s where another took its gap: a column of its own", cols(q) == "[ 1 ][ 9 60 2 ][ 3 ]" && q.Settle() &&
+                                                                                               (q.Arrange(same), cols(q) == "[ 1 ][ 60 2 ][ 9 ][ 3 ]"));
+            dashtiles::Board late;   // ...or after its gap was given up ([ 10 1 ][ 4 2 ][ 30 3 ]: no lone neighbour), 60 opening into it later
+            for (const int i : {1, 2, 3}) late.Anchor(i, -1, dashtiles::Stay::Default);
+            late.Arrange(same);
+            for (const auto &[i, c] : {std::pair{10, 0}, {4, 1}, {30, 2}})
+                late.Anchor(i, -1, dashtiles::Stay::Default), late.Drop(i, {tiling::Drop::Into, c, 0}), late.Arrange(same);
+            const std::string four3 = late.Remember(4);
+            late.Leave(4, 0, "app:a"), late.Arrange(same);
+            const bool none = !late.FillGap(tilegap::kQuietMs);
+            late.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), late.Arrange(same);
+            const std::string before = cols(late);
+            late.Restore(9, four3, -1, "app:a"), late.Arrange(same);
+            check("settle: back after its gap was given up, onto a stack made for you: a column of its own",
+                  none && before == "[ 10 1 ][ 60 2 ][ 30 3 ]" && late.Settle() && (late.Arrange(same), cols(late) == "[ 10 1 ][ 60 2 ][ 9 ][ 30 3 ]"));
+            dashtiles::Board mine = stack();   // ...a stack you made: yours, too tall or not
+            mine.Leave(4, 0, "app:a"), mine.Arrange(same);
+            mine.Anchor(60, -1, dashtiles::Stay::Default), mine.Arrange(same), mine.Drop(60, {tiling::Drop::Into, 1, 0}), mine.Arrange(same);
+            const std::string mine0 = cols(mine);
+            mine.Restore(9, four, -1, "app:a"), mine.Arrange(same);
+            check("settle: back onto a stack you made: left as it is", mine0 == "[ 1 ][ 60 2 ][ 3 ]" && !mine.Settle() && cols(mine) == "[ 1 ][ 9 60 2 ][ 3 ]");
+            dashtiles::Board s2 = full();   // a stackmate not shown yet: no size to test with
+            s2.steam = 2;
+            s2.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), s2.absent = {60}, s2.Arrange(big);
+            const std::string on2 = cols(s2);
+            s2.absent = {2}, s2.Arrange(big);
+            const bool waited = !s2.Settle();
+            s2.absent = {}, s2.Arrange(big);
+            check("settle: waits for a stackmate not shown, then checks", on2 == "[ 1 ][ 60 2 ][ 3 ]" && waited && s2.Settle() &&
+                                                                         (s2.Arrange(big), cols(s2) == "[ 1 ][ 2 ][ 60 ][ 3 ]"));
+            dashtiles::Board u = stack();   // a stackmate gone, not laid out since: no stale height (Neon, pass 6)
+            u.Leave(4, 0, "app:a"), u.Arrange(same), u.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), u.Arrange(same);
+            u.FillGap(tilegap::kQuietMs), u.Restore(9, four, -1, "app:a"), u.Arrange(same), u.Unanchor(60);
+            const bool waitsU = !u.Settle();
+            u.Arrange(same);
+            check("settle: a stackmate gone since the layout: waits, then leaves one that fits", waitsU && !u.Settle() && cols(u) == "[ 1 ][ 9 2 ][ 3 ]");
+            const auto hinfo = [](int id) {   // (Neutral, pass 6: [ 60 2 | 7 ], 2 goes, 60 settles out)
+                return id == 60 ? dashtiles::Info{1.6, 1.9} : id == 7 ? dashtiles::Info{1.4, 0.6} : id == 2 ? dashtiles::Info{1.6, 0.7}
+                                                                       : id == 3 ? dashtiles::Info{1.2, 0.3} : dashtiles::Info{1.6, 2.0};
+            };
+            dashtiles::Board g;
+            for (const int i : {1, 2, 3}) g.Anchor(i, -1, dashtiles::Stay::Default);
+            g.Arrange(hinfo), g.Restore(7, "tile 0 1 1 0 1.000 dc", -1, "app:h"), g.Arrange(hinfo);
+            g.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), g.absent = {60}, g.Arrange(hinfo);
+            const bool on = g.Grid().Find(60).col == g.Grid().Find(2).col;
+            g.Leave(2, 0, "app:b"), g.Arrange(hinfo), g.absent = {}, g.Arrange(hinfo);
+            const bool moved = g.Settle();
+            g.Arrange(hinfo);
+            check("settle: a gap it stayed in doesn't follow it", on && moved && cols(g) == "[ 1 ][ 7 ][ 60 ][ 3 ]" && !g.FillGap(tilegap::kQuietMs));
+            dashtiles::Board r = full();   // a refused drop keeps it marked
+            r.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), r.absent = {60}, r.Arrange(big);
+            r.Drop(60, {tiling::Drop::TearOff, 0, 0}), r.absent = {}, r.Arrange(big);
+            check("settle: a tile pulled off and snapped back: still checked", r.Settle() && cols(r).find("[ 60 ]") != std::string::npos);
         }
         b = stack();   // (council, 2026-11-20) a gap undone long ago doesn't count against the next one
         b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);

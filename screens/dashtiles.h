@@ -149,10 +149,10 @@ public:
             return;
         }
         if (d.kind == tiling::Drop::Lift) {   // (refused: nothing changed, nothing forgotten)
-            const Hands hands = Before(id);
+            const std::vector<int> mates = Marks::Mates(grid_, id);
             if (int moved; tilekeys::Lift(grid_, Laid(), id, d.align, &moved))
                 EndBatch(), spots_[id].satellite = false, recentre_ = false, moved_ = moved, movedAz_ = NAN,   // (the strip's pan: it's the one that moved)
-                    ByHand(hands.Also(moved));
+                    ByHand(id, mates);   // (the one pulled in: a new stackmate)
             return;
         }
         moved_ = id, movedAz_ = az, recentre_ = false;   // (where you let it go wins)
@@ -160,14 +160,14 @@ public:
         const double scale = c ? c->scale : 1;
         EndBatch();
         spots_[id].satellite = false;
-        const Hands hands = Before(id);
+        const std::vector<int> mates = Marks::Mates(grid_, id);
         slot_.Move(grid_, id, [&] {   // (Insert moves it)
             const bool into = d.kind == tiling::Drop::Into;
             grid_.Insert(id, d.col, d.row, !into, scale, d.leftOfSlot, into && d.below);
             grid_.SetAlign(id, into ? d.align : 0);
             return true;
         });
-        ByHand(hands);   // (where you put it stays, and a stack you put it in is yours)
+        ByHand(id, mates);   // (where you put it stays, and a stack you put it in is yours)
     }
 
     // Off the grid, its gap filled later (FillGap): a panel that stood in a stack (at or above the
@@ -226,13 +226,16 @@ public:
             if (absent.count(id) || !v.LaidOut(w.col)) continue;   // (its size not known yet)
             // Too tall with it? Laid out with its hidden stackmates at no size, and as it'll be with them
             // shown (Neon, 2026-11-20: not always shorter, as a wide one hidden at the bottom
-            // lets the narrow ones over it stand side by side no more). Told both ways only.
+            // lets the narrow ones over it stand side by side no more).
             const bool stack = grid_.Cols()[size_t(w.col)].cells.size() >= 2;
             const bool fits = !stack || v.ColumnFits(w.col, fills_[size_t(w.col)].height);
             const bool fitsShown = !stack || v.ColumnFits(w.col, shownFills_[size_t(w.col)].height);
-            if (!v.AllShown(w.col) && fits != fitsShown) continue;   // (a stackmate's shown yet: then)
+            // (a stackmate not shown: out early only when too tall both ways. Fitting isn't sure till
+            // it's shown: one hanging under the desk line isn't in those heights, and one with no
+            // picture yet has only a guess for a size.)
+            if (!v.AllShown(w.col) && (fits || fitsShown)) continue;
             marks_.Sized(id);
-            if (fits || fitsShown) continue;
+            if (fits) continue;
             moved_ = id, movedAz_ = NAN;   // (the others keep their places)
             gaps_.Forget(id), marks_.NotStacked(id);   // (a gap it stayed in goes with it: nothing climbs onto it)
             grid_.Insert(id, w.col + 1, 0, true, grid_.CellOf(id)->scale, v.SideOf(w.col) < 0);
@@ -246,16 +249,15 @@ public:
     bool Press(int id, Key k) {
         if (!grid_.Has(id)) return false;
         int moved = id;
-        const Hands hands = Before(id);
+        const std::vector<int> mates = Marks::Mates(grid_, id);
         if (!Changed(tilekeys::Press(grid_, slot_, Laid(), id, k, &moved))) return false;   // (refused: nothing changed, nothing forgotten)
         moved_ = moved, movedAz_ = NAN, recentre_ = false;   // (moved by a key: the others keep their places, not it)
-        return ByHand(hands.Also(moved)), true;   // (a lift's: the one pulled in too)
+        return ByHand(id, mates), true;   // (a lift's: the one pulled in, a new stackmate)
     }
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     bool Resized(int id, double factor) {
         if (!grid_.Has(id) || !(factor > 0)) return false;
-        const Hands hands = Before(id);
-        return Changed(grid_.Scale(id, factor)) && (ByHand(hands), true);
+        return Changed(grid_.Scale(id, factor));   // (in its stack still: its marks stay, Marks::ByHand)
     }
 
     // Every tile packed into columns again (tilepack.h), sizes kept: a reset's (user, 2026-11-19:
@@ -533,19 +535,7 @@ private:
     slotsplit::Policy slot_;   // which split round Steam's menu, and when it's chosen again
     tilegap::Book gaps_;       // the gaps panels left (Leave, FillGap), and the fills to undo
     Marks marks_;              // the tiles Settle still checks (tilemarks.h)
-    // Who a hand edit moved, and their stackmates before it (Marks::ByHand).
-    struct Hands {
-        std::vector<std::pair<int, std::vector<int>>> ids;
-        Hands Also(int pulled) const {   // (a lift's, pulled into a stack: none with it before there)
-            Hands h = *this;
-            if (pulled != ids.front().first) h.ids.push_back({pulled, {}});
-            return h;
-        }
-    };
-    Hands Before(int id) const { return {{{id, Marks::Mates(grid_, id)}}}; }
-    void ByHand(const Hands &h) {
-        for (const auto &[id, before] : h.ids) marks_.ByHand(grid_, absent, id, before);
-    }
+    void ByHand(int id, const std::vector<int> &mates) { marks_.ByHand(grid_, absent, id, mates); }
 };
 
 }  // namespace dashtiles

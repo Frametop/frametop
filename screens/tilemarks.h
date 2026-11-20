@@ -42,15 +42,17 @@ public:
 
     // Off the grid: nothing to check for it.
     void Unmark(int id) { unsized_.erase(id), stacked_.erase(id); }
-    // `id` moved, sized or leaned by hand, its Mates `before` that: its own marks go. Put by hand
-    // into a stack it wasn't in (others with it now that weren't), that stack is yours: its panels'
-    // stacked marks go, and so do the unsized ones of those shown (`absent`: not shown, so you
-    // haven't seen how tall the stack is with them). Leaving a stack, reordering one or resizing in
-    // it, the others keep theirs.
+    // `id` moved, sized or leaned by hand, its Mates `before` that. Reordered, resized or leaned in
+    // its stack (the same mates), every mark stays: you haven't changed which stack it's in, and a
+    // stackmate not shown yet you haven't seen (council, 2026-11-20). Out of its stack, its own marks
+    // go. Put by hand into a stack it wasn't in (others with it now that weren't), that stack is
+    // yours: its panels' stacked marks go, and so do the unsized ones of those shown (`absent`: not
+    // shown, so you haven't seen how tall the stack is with them). A lift's: the one pulled in is a
+    // new stackmate of `id`'s.
     void ByHand(const tilegrid::Grid &g, const std::set<int> &absent, int id, const std::vector<int> &before) {
-        Unmark(id);
         const std::vector<int> now = Mates(g, id);
-        if (now.empty() || now == before) return;
+        if (now == before) return;
+        Unmark(id);
         for (const int m : now) {
             stacked_.erase(m);
             if (!absent.count(m)) unsized_.erase(m);

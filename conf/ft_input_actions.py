@@ -91,6 +91,21 @@ MENU_ACTION_NAMES = tuple(name for name, _, _ in MENU_ACTIONS)
 # What frunner's key list (keys_list) may run with Enter, besides those: the tiling keys.
 KEY_LIST_RUNNABLE = MENU_ACTION_NAMES + tuple(TILE_ACTIONS)
 
+# The palm menu's Quick Settings toggles (screens/quicksettings.h keeps the same list, in the same
+# order: quicksettings/test checks it): (name, label). Which ones it shows is QUICK_SETTINGS in
+# frametop.conf (Frametop Settings' Quick Settings page; unset: all). The input relay runs these from
+# ft-screens as it does the menu actions; keyboard_toggle and dictate aren't menu actions (frunner
+# has its own keyboard item, and dictation is a hold-or-press key there).
+QUICK_SETTINGS_ACTIONS = (
+    ("screens_toggle", "Screens"),
+    ("keyboard_toggle", "Keyboard"),
+    ("desktopless_toggle", "Desktopless"),
+    ("hands_toggle", "Hand Tracking"),
+    ("pause_toggle", "Game Pause"),
+    ("dictate", "Dictation"),
+)
+QUICK_SETTINGS_KEY = "QUICK_SETTINGS"
+
 # Each action's name where people pick or read one: Input Settings' lists and frunner's key list.
 ACTION_LABELS = MappingProxyType({
     "left": "Left click", "right": "Right click", "middle": "Middle click", "back": "Back",

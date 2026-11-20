@@ -15,6 +15,7 @@
 #include "levelpin.h"
 #include "posemath.h"
 #include "resizecorner.h"
+#include "sysstats.h"
 #include "vrcmd.h"
 
 #include <openvr.h>
@@ -386,6 +387,13 @@ bool QuickAccessHasHand(int side);   // that hand's fingertip is at the other pa
 void PalmSteamMenu(int side);
 void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data);
 void DestroyQuickAccess();
+
+// ---------------------------------------------------------------- vrstats.cpp's
+
+// The palm card's readouts (sysstats.h), read again when a second has passed; ForgetStats when it hides,
+// so the next show's CPU is over a fresh second.
+const sysstats::Words &SystemStats(int64_t nowMs);
+void ForgetStats();
 
 // ---------------------------------------------------------------- vrresetask.cpp's
 

@@ -47,13 +47,14 @@ Kirigami.ApplicationWindow {
     }
 
     readonly property var loaders: ({ input: inputArea, display: displayArea, remote: remoteArea, access: accessArea,
-                                      avatar: avatarArea, together: togetherArea })
+                                      avatar: avatarArea, together: togetherArea, quick: quickArea })
     Loader { id: inputArea }
     Loader { id: displayArea }
     Loader { id: remoteArea }
     Loader { id: accessArea }
     Loader { id: avatarArea }
     Loader { id: togetherArea }
+    Loader { id: quickArea }
 
     Connections {
         target: settings

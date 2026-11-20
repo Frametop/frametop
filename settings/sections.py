@@ -16,6 +16,7 @@ AREAS = {
     "access": ("remote", "remote_access", "RemoteAccessPages.qml"),
     "avatar": ("avatar", "ft_avatar_settings", "AvatarPages.qml"),
     "together": ("together", "ft_together_settings", "TogetherPages.qml"),
+    "quick": ("quicksettings", "ft_quick_settings", "QuickSettingsPages.qml"),
 }
 # The sidebar, in its order: (section name, area, group, title, icon, search words).
 SECTIONS = [
@@ -48,6 +49,8 @@ SECTIONS = [
      "dictation speech wake word microphone"),
     ("games", "input", "System", "Game optimization", "applications-games",
      "pause vr game performance gesture"),
+    ("quick-settings", "quick", "System", "Quick Settings", "configure",
+     "palm menu quick access toggles resources cpu gpu memory temperature"),
     ("power", "display", "System", "Power", "preferences-system-power-management",
      "display off sleep idle plugged autostart start with steamvr"),
     ("remote-access", "access", "System", "Remote access", "preferences-desktop-remote-desktop",

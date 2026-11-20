@@ -315,6 +315,7 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
     KEY_LIST_RUNNABLE,
+    QUICK_SETTINGS_ACTIONS,
     TILE_ACTIONS,
     TILE_FOCUS_ACTIONS,
     VOICE_ACTIONS,
@@ -451,6 +452,9 @@ def needs_pointer(a):
             and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "keys_list", "hands_toggle", "release_keys",
                           "desktopless_toggle")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
+
+
+QUICK_SETTINGS_NAMES = frozenset(name for name, _ in QUICK_SETTINGS_ACTIONS)
 
 
 def works_paused(a):
@@ -2206,11 +2210,13 @@ class Relay:
             return
         if cmd == "action" and len(words) == 2:
             # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu; or
-            # from ft-screens (unbound, no reply): a tile of the palm's Quick Access. Only those (KEY_LIST_RUNNABLE), and only from this user: never run:, command: or keys:.
+            # from ft-screens (unbound, no reply): a tile of the palm's Quick Access, or one of its Quick
+            # Settings toggles. Only those (KEY_LIST_RUNNABLE, QUICK_SETTINGS_ACTIONS), and only from this
+            # user: never run:, command: or keys:.
             name = words[1]
             if uid != os.getuid():
                 self.reply(addr, {"t": "error", "error": "another user's"})
-            elif name not in KEY_LIST_RUNNABLE:
+            elif name not in KEY_LIST_RUNNABLE and name not in QUICK_SETTINGS_NAMES:
                 self.reply(addr, {"t": "error", "error": f"not a menu action {name!r}"})
             elif self.pause.paused and not works_paused(name):
                 self.reply(addr, {"t": "error", "error": "paused"})

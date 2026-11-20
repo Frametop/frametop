@@ -22,6 +22,7 @@ avatar/tests/test_*.py
 together/tests/test_*.py
 menu/test/*.py
 settings/test/*.py
+quicksettings/test/*.py
 remote/test/*.py
 steam/test/*.py
 float/test/*.py

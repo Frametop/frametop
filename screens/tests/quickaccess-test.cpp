@@ -4,11 +4,13 @@
 // that end well behind the card, the tip spent after a press through tremble and lost frames, the easier
 // 1 cm press) and the palm hand's pinch drag.
 #include "../quickaccess.h"
+#include "../quicksettings.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <vector>
 
 int main() {
     int failed = 0;
@@ -45,7 +47,7 @@ int main() {
     check("each tile's centre is it, in pixels, mouse and face", centres);
     check("the top left tile is Steam Menu, top on the face", TileAtFace(-0.04, 0.02, 0.12, 0.12 * kH / kW) == 0);
     check("the bottom right is Dock Windows", kSpecs[TileAtFace(0.04, -0.02, 0.12, 0.12 * kH / kW)].tile == Tile::DockAll);
-    check("the mouse's y is up: low y is the bottom row", TileAtMouse(kW / 2.0, 20) == 4 && TileAtMouse(kW / 2.0, kH - 20) == 1);
+    check("the mouse's y is up: low y is the bottom row", TileAtMouse(kW / 2.0, 20) == 4 && TileAtMouse(kW / 2.0, kH - kTop - 20) == 1);
 
     // The gaps go to the nearer tile.
     int a0, ay0, a1, ay1;
@@ -54,7 +56,23 @@ int main() {
     check("...just left of tile 1: tile 1", TileAt(a1 + kGap / 2.0 + 1, (ay0 + ay1) / 2.0) == 1);
     check("just below tile 0 in the gap: tile 0", TileAt((a0 + a1) / 2.0, ay1 + kGap / 2.0 - 1) == 0);
     check("...just above tile 3: tile 3", TileAt((a0 + a1) / 2.0, ay1 + kGap / 2.0 + 1) == 3);
-    check("in the padding: the edge tile", TileAt(kPad - 2, kPad - 2) == 0 && TileAt(kW - kPad + 2, kH - kPad + 2) == 5);
+    check("in the padding: the edge tile", TileAt(kPad - 2, kTop + 2) == 0 && TileAt(kW - kPad + 2, kH - kPad + 2) == 5 &&
+                                              TileAt(kW - kPad + 2, kPad - 2) == kButton);
+    {
+        // the header: the readouts on its left aren't a tile; its right is the button, over tile 2
+        int s0, sy0, s1, sy1, b0, by0, b1, by1, t0, ty0, t1, ty1;
+        StatsBox(&s0, &sy0, &s1, &sy1);
+        Box(kButton, &b0, &by0, &b1, &by1);
+        Box(2, &t0, &ty0, &t1, &ty1);
+        check("the readouts: nothing", TileAt((s0 + s1) / 2.0, (sy0 + sy1) / 2.0) == -1 && TileAt(s0 + 1, sy0 + 1) == -1);
+        check("the header button's middle: the button", TileAt((b0 + b1) / 2.0, (by0 + by1) / 2.0) == kButton);
+        check("...over tile 2, as wide, with the gap between", b0 == t0 && b1 == t1 && ty0 - by1 == kGap && by0 == kPad);
+        check("...the gap below it to the nearer one", TileAt((b0 + b1) / 2.0, by1 + kGap / 2.0 - 1) == kButton &&
+                                                      TileAt((b0 + b1) / 2.0, by1 + kGap / 2.0 + 1) == 2);
+        check("the readouts end where the button's gap starts", s1 + kGap == b0 && sy0 == by0 && sy1 == by1);
+        check("held, the button keeps by its edge", StickyTileAt(kButton, (b0 + b1) / 2.0, by1 + kGap / 2.0 + 2) == kButton);
+        check("the card is the header taller", kH == kTop + kPad + kRows * kTile + (kRows - 1) * kGap && kTop == kPad + kHead + kGap);
+    }
 
     // Past the padding's outer half, and off the card, nothing.
     check("the card's very edge: nothing", TileAt(1, kH / 2.0) == -1 && TileAt(kW - 1, kH / 2.0) == -1);
@@ -399,15 +417,25 @@ int main() {
               d.Step(at(pitch / 2 + 2 * w / kW, 0), w, h, true) == 0);
         check("...past kStick: Hide Screens", d.Step(at(pitch / 2 + (kGap / 2.0 + kStick + 1) * w / kW, 0), w, h, true) == 1);
         // a still pinch drifting off Steam Menu's top or left edge keeps it to kCancel past the card
-        const double toTop = (kPad + kTile / 2.0) * w / kW;   // Steam Menu's middle to the card's top edge
+        const double toTop = (kTop + kTile / 2.0) * w / kW;   // Steam Menu's middle to the card's top edge (over the readouts)
+        const double toLeft = (kPad + kTile / 2.0) * w / kW;   // ...and to its left edge
         for (const int k : {0, 1}) {
             Drag e;
             e.Start();
             e.Step(at(0, 0), w, h, true);
             const double sx = k ? -1 : 0, sy = k ? 0 : 1;   // up, then left
-            const bool near = e.Step(at(sx * (toTop + 0.01), sy * (toTop + 0.01)), w, h, true) == 0;
-            const bool far = e.Step(at(sx * (toTop + 0.02), sy * (toTop + 0.02)), w, h, true) == -1;
+            const double to = k ? toLeft : toTop;
+            const bool near = e.Step(at(sx * (to + 0.01), sy * (to + 0.01)), w, h, true) == 0;
+            const bool far = e.Step(at(sx * (to + 0.02), sy * (to + 0.02)), w, h, true) == -1;
             check(k ? "1 cm past the card's left edge: Steam Menu; 2 cm: nothing" : "1 cm past its top edge: Steam Menu; 2 cm: nothing", near && far);
+        }
+        {
+            // on the Quick Settings page it starts on Back, the header's button; a pinch down a tile is tile 2
+            Drag b;
+            b.Start(kButton);
+            check("a pinch there starts on Back", b.tile() == kButton && b.Step(at(0, 0), w, h, true) == kButton);
+            check("...down to the row below: tile 2", b.Step(at(0, -(kHead / 2.0 + kGap + kTile / 2.0) * w / kW), w, h, true) == 2);
+            check("...left over the readouts: the tile below them", b.Step(at(-pitch, 0.002), w, h, true) == 1);
         }
         Drag z;
         z.Start();
@@ -417,6 +445,23 @@ int main() {
     check("paused for a game, only Steam Menu works", WorksPaused(Tile::SteamMenu) && !WorksPaused(Tile::Screens) &&
                                                           !WorksPaused(Tile::Reset) && !WorksPaused(Tile::SpinLeft) &&
                                                           !WorksPaused(Tile::SpinRight) && !WorksPaused(Tile::DockAll));
+
+    // Quick Settings (quicksettings.h): QUICK_SETTINGS's names, in the catalogue's order
+    {
+        using quicksettings::Chosen;
+        check("unset: every toggle", Chosen(nullptr).size() == size_t(quicksettings::kCount));
+        check("empty: none", Chosen("").empty() && Chosen(",").empty());
+        const std::vector<int> some = Chosen("dictate,bogus,screens_toggle,dictate,,screens");
+        check("picked ones in the catalogue's order, unknown and repeats left out",
+              some.size() == 2 && !std::strcmp(quicksettings::kAll[some[0]].action, "screens_toggle") &&
+                  !std::strcmp(quicksettings::kAll[some[1]].action, "dictate"));
+        check("a name's prefix isn't it", Chosen("screens").empty() && Chosen("screens_toggle_x").empty());
+        int paused = 0;
+        for (int i = 0; i < quicksettings::kCount; ++i) paused += quicksettings::WorksPaused(i);
+        check("paused for a game, only Game Pause works", paused == 1 && quicksettings::WorksPaused(int(Chosen("pause_toggle")[0])) &&
+                                                          !quicksettings::WorksPaused(-1) && !quicksettings::WorksPaused(99));
+        check("every toggle fits the page", quicksettings::kCount <= kTiles);
+    }
 
     std::printf(failed ? "%d failed\n" : "all passed\n", failed);
     return failed ? 1 : 0;

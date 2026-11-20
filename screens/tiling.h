@@ -18,7 +18,7 @@
 // slot is always in the strip. Without one (none chosen yet: dashtiles.h's Board keeps one for
 // each place the menu opens), the slot is there only when the strip centred in front of you would
 // reach it, with the split that puts the strip's middle nearest in front of you. Past a full turn
-// round you, or with a column reaching past kMaxTopDeg up, everything shrinks until it fits.
+// round you, or with a column reaching past kMaxTopDeg up (or down), everything shrinks until it fits.
 //
 // Every panel's corners are `radius` from the centre, not its middle (user, 2026-11-17: "make the
 // distances of the displays be based off the edges and not the center ... some are wider than
@@ -53,10 +53,13 @@ inline double Deg(double rad) { return rad * 180 / kPi; }
 struct Tile {
     int id = 0;
     double widthM = 1.6, heightM = 0.9;   // its size with its middle at the wall: natural, times its own
+    int align = 0;              // its shelf against the column's left edge (-1), right (+1), or as Lean says (0)
 };
 
 struct Column {
-    std::vector<Tile> tiles;    // top to bottom (the last one on the desk)
+    std::vector<Tile> tiles;    // top to bottom
+    int base = -1;              // the one on the desk (-1: the last): the ones after it hang under the desk line
+    int Base() const { return base < 0 || base >= int(tiles.size()) ? int(tiles.size()) - 1 : base; }
 };
 
 struct Params {
@@ -107,12 +110,16 @@ struct Placed {
     double distM = 0;                     // its middle from the centre (its corners: Params::radius)
     double az0 = 0, az1 = 0;              // its own span round you
     double el0 = 0, el1 = 0;              // its own span up, bottom to top
+    bool below = false;                   // hanging under the desk line
+    int lean = 0;                         // its shelf against its column's left edge (-1), right (+1), or centred
+    bool narrow = false;                  // its shelf narrower than its column (so it can lean)
 };
 
 struct Layout {
     std::vector<Placed> tiles;
     double az0 = 0, az1 = 0;              // the strip
-    double el0 = 0, el1 = 0;              // the desk line, and the tallest column's top
+    double el0 = 0, el1 = 0;              // the lowest panel's bottom (the desk line, none under it), and the tallest column's top
+    double deskDeg = 0;                   // the desk line
     double shrink = 1;                    // 1, or less when it took more than a turn (or reached past kMaxTopDeg)
     int split = -1;                       // the columns left of Steam's slot (-1: no slot in the strip)
     double slotAz = 0;                    // ...the slot's middle (a drop left or right of it)
@@ -156,49 +163,68 @@ inline double SpanFor(double radius, double widthM, double heightM, double elDeg
 // side can run past 180 degrees: an azimuth seen from the head is in -180..180).
 inline double WrapNear(double az, double centre) { return az - 360 * std::round((az - centre) / 360); }
 
-// A column's panels stacked on the desk at size `k` (index as its tiles: the last one on the desk):
-// each one's span up, its size, and its span round you.
+// A column's panels stacked at size `k` (index as its tiles): each one's span up, its size, and its
+// span round you. Its base and the ones before it stand on the desk line, from the base up; the
+// ones after it hang under it, from the desk line down (Column::base).
 // Narrower panels share a shelf, side by side, while it fits across the column's widest
-// (tilepack.h's Shelves), the first from the desk up on the left; a shelf is as tall as its
-// tallest, and its panels stand on its bottom.
+// (tilepack.h's Shelves), the first from the desk out on the left; a shelf is as tall as its
+// tallest, and its panels stand on its bottom (hang from its top, under the desk line).
 struct Stacked {
     double el0 = 0, el1 = 0, widthM = 0, heightM = 0, spanDeg = 0;
     double shelfDeg = 0;     // its shelf's span round you, gaps and all
     double inShelfDeg = 0;   // its middle from its shelf's
     double offDeg = 0;       // its middle from its column's, round you (Pack's lean)
+    int align = 0;           // its shelf's (the first of its panels that says one: Tile::align)
+    int lean = 0;            // the way its shelf leans (Pack's: its align, else its column's)
+    bool below = false;      // under the desk line
 };
 inline std::vector<Stacked> Stack(const Column &c, const Params &p, double k) {
-    const size_t n = c.tiles.size();
-    std::vector<Stacked> out(n);
-    std::vector<double> flat(n);   // (from the desk up)
-    for (size_t i = 0; i < n; ++i) {
-        const Tile &t = c.tiles[n - 1 - i];
-        Stacked &s = out[n - 1 - i];
+    const int n = int(c.tiles.size()), b = c.Base();
+    std::vector<Stacked> out(size_t(std::max(0, n)));
+    std::vector<double> flat(out.size());
+    double widest = 0;
+    for (int i = 0; i < n; ++i) {
+        const Tile &t = c.tiles[size_t(i)];
+        Stacked &s = out[size_t(i)];
         s.widthM = std::max(0.01, t.widthM) * k, s.heightM = std::max(0.01, t.heightM) * k;
-        flat[i] = Deg(2 * std::atan2(s.widthM / 2, p.radius));
+        flat[size_t(i)] = Deg(2 * std::atan2(s.widthM / 2, p.radius));
+        widest = std::max(widest, flat[size_t(i)]);
+        s.below = i > b;
     }
     const double gap = p.gapDeg * k;
-    const std::vector<int> shelf = tilepack::Shelves(flat, gap);
-    double el = p.deskDeg;
-    for (size_t i = 0; i < n;) {
-        size_t j = i;
-        while (j < n && shelf[j] == shelf[i]) ++j;
-        double top = el, across = 0;
-        for (size_t m = i; m < j; ++m) {
-            Stacked &s = out[n - 1 - m];
-            s.el0 = el, s.el1 = el + Deg(2 * std::atan2(s.heightM / 2, p.radius));
-            s.spanDeg = SpanFor(p.radius, s.widthM, s.heightM, (s.el0 + s.el1) / 2);
-            top = std::max(top, s.el1);
-            across += (m > i ? gap : 0) + s.spanDeg;
+    // one side: `order` its rows from the desk line out, `dir` +1 up, -1 down
+    const auto side = [&](const std::vector<int> &order, int dir) {
+        std::vector<double> w;
+        for (const int r : order) w.push_back(flat[size_t(r)]);
+        const std::vector<int> shelf = tilepack::Shelves(w, gap, widest);
+        double el = p.deskDeg - (dir < 0 ? gap : 0);
+        for (size_t i = 0; i < order.size();) {
+            size_t j = i;
+            while (j < order.size() && shelf[j] == shelf[i]) ++j;
+            double far = el, across = 0;
+            int align = 0;
+            for (size_t m = i; m < j; ++m) {
+                Stacked &s = out[size_t(order[m])];
+                const double h = Deg(2 * std::atan2(s.heightM / 2, p.radius));
+                if (dir > 0) s.el0 = el, s.el1 = el + h, far = std::max(far, s.el1);
+                else s.el1 = el, s.el0 = el - h, far = std::min(far, s.el0);
+                s.spanDeg = SpanFor(p.radius, s.widthM, s.heightM, (s.el0 + s.el1) / 2);
+                across += (m > i ? gap : 0) + s.spanDeg;
+                if (align == 0) align = c.tiles[size_t(order[m])].align;
+            }
+            double x = -across / 2;
+            for (size_t m = i; m < j; ++m) {
+                Stacked &s = out[size_t(order[m])];
+                s.shelfDeg = across, s.inShelfDeg = x + s.spanDeg / 2, s.align = align;
+                x += s.spanDeg + gap;
+            }
+            el = far + dir * gap, i = j;
         }
-        double x = -across / 2;
-        for (size_t m = i; m < j; ++m) {
-            Stacked &s = out[n - 1 - m];
-            s.shelfDeg = across, s.inShelfDeg = x + s.spanDeg / 2;
-            x += s.spanDeg + gap;
-        }
-        el = top + gap, i = j;
-    }
+    };
+    std::vector<int> up, down;
+    for (int r = b; r >= 0; --r) up.push_back(r);
+    for (int r = b + 1; r < n; ++r) down.push_back(r);
+    side(up, +1), side(down, -1);
     return out;
 }
 
@@ -217,11 +243,12 @@ struct Packed {
     double slotMid = -1;                        // the slot's (-1: none)
     double width = 0;                           // the strip, round you
     double top = 0;                             // the tallest column's top
+    double bottom = 0;                          // the lowest panel's bottom
 };
 inline Packed Pack(const std::vector<Column> &cols, const Params &p, double k, double slot, int slotAt,
                    const std::vector<int> &lean = {}) {
     Packed out;
-    out.top = p.deskDeg;
+    out.top = out.bottom = p.deskDeg;
     const double gap = p.gapDeg * k;
     struct Box {
         double lo, hi, el0, el1;   // (round you from its column's middle)
@@ -251,9 +278,10 @@ inline Packed Pack(const std::vector<Column> &cols, const Params &p, double k, d
         const int l = c < lean.size() ? lean[c] : 0;
         std::vector<Box> boxes;
         for (Stacked &s : st) {
-            s.offDeg = l * (widest - s.shelfDeg / 2) + s.inShelfDeg;
+            s.lean = s.align != 0 ? s.align : l;
+            s.offDeg = s.lean * (widest - s.shelfDeg / 2) + s.inShelfDeg;
             boxes.push_back({s.offDeg - s.spanDeg / 2, s.offDeg + s.spanDeg / 2, s.el0, s.el1});
-            out.top = std::max(out.top, s.el1);
+            out.top = std::max(out.top, s.el1), out.bottom = std::min(out.bottom, s.el0);
         }
         out.mid.push_back(place(boxes));
     }
@@ -300,7 +328,7 @@ struct Fit {
     double k = 1;
 };
 inline Fit FitStrip(const std::vector<Column> &cols, const Params &p, double slot, int slotAt, const std::vector<int> &lean) {
-    const auto fits = [&](const Packed &q, double k) { return q.width + p.gapDeg * k <= p.maxSpanDeg && q.top <= kMaxTopDeg; };
+    const auto fits = [&](const Packed &q, double k) { return q.width + p.gapDeg * k <= p.maxSpanDeg && q.top <= kMaxTopDeg && q.bottom >= -kMaxTopDeg; };
     Fit f;
     f.packed = Pack(cols, p, 1, slot, slotAt, lean);
     if (cols.empty() || fits(f.packed, 1)) return f;
@@ -343,7 +371,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int spli
     out.az0 = reserve ? slotAz - pk.slotMid : -pk.width / 2;   // (the slot where Steam's menu is, or the strip centred)
     out.az1 = out.az0 + pk.width;
     if (reserve) out.split = left, out.slotAz = slotAz;
-    out.el0 = out.el1 = p.deskDeg;
+    out.el0 = out.el1 = out.deskDeg = p.deskDeg;
     for (size_t c = 0; c < cols.size(); ++c) {
         const double mid = out.az0 + pk.mid[c];
         const std::vector<Stacked> &st = pk.stacks[c];
@@ -355,8 +383,12 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int spli
             pl.az0 = pl.azDeg - st[r].spanDeg / 2, pl.az1 = pl.azDeg + st[r].spanDeg / 2;
             pl.elDeg = (pl.el0 + pl.el1) / 2;
             pl.widthM = st[r].widthM, pl.heightM = st[r].heightM;
+            pl.below = st[r].below, pl.lean = st[r].lean;
+            double widest = 0;
+            for (const Stacked &s : st) widest = std::max(widest, s.shelfDeg);
+            pl.narrow = st[r].shelfDeg < widest - 1e-6;
             CornersOnSphere(p.radius, &pl);
-            out.el1 = std::max(out.el1, pl.el1);
+            out.el1 = std::max(out.el1, pl.el1), out.el0 = std::min(out.el0, pl.el0);
             out.tiles.push_back(pl);
         }
     }
@@ -392,10 +424,13 @@ inline void Direction(const double pt[3], double *azDeg, double *elDeg) {
 
 // Where a dragged tile let go at (az, el) goes: into a column at a row, a new column at an index, or
 // off the grid (torn off: it stays anchored where it is). A drop on a column's middle half stacks it
-// there, above or below the panel it's on; on its outer quarters, or a gap, a new column that side.
+// there, above or below the panel it's on (under the desk line: hanging under it), leaning to the
+// side of the column it was let go on; on its outer quarters, or a gap, a new column that side.
 struct Drop {
     enum Kind { Into, NewColumn, TearOff } kind = TearOff;
     int col = 0, row = 0;   // Into: the column and the row it takes; NewColumn: the index it takes
+    bool below = false;     // Into: under the desk line
+    int align = 0;          // Into: the side of the column it leans against (tilegrid.h's Cell::align)
     bool leftOfSlot = false;   // NewColumn: let go left of Steam's slot (at the split: which side it goes)
 };
 constexpr double kTearMarginDeg = 10;   // this far past the strip, under the desk or over the tallest column: torn off
@@ -423,13 +458,19 @@ inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, 
     const double u = (az - a0) / std::max(1e-6, a1 - a0);
     if (u < 0.25) return d.kind = Drop::NewColumn, d.col = c, d;
     if (u > 0.75) return d.kind = Drop::NewColumn, d.col = c + 1, d;
-    d.kind = Drop::Into, d.col = c, d.row = int(cols[c].tiles.size());
+    const int n = int(cols[c].tiles.size()), b = cols[c].Base();
+    d.kind = Drop::Into, d.col = c, d.below = el < l.deskDeg;
+    d.row = d.below ? n : b + 1;   // (the lowest under the desk line, or the new base)
+    double c0 = 1e9, c1 = -1e9;
     for (const Placed &p : l.tiles) {
         if (p.col != c) continue;
+        c0 = std::min(c0, p.az0), c1 = std::max(c1, p.az1);
+        if (p.below != d.below) continue;
         if (el >= (p.el0 + p.el1) / 2) {   // above this one's middle: before it (rows go top down)
             d.row = std::min(d.row, p.row);
         }
     }
+    d.align = az < (c0 + c1) / 2 ? -1 : 1;
     return d;
 }
 

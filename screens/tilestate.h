@@ -1,7 +1,8 @@
 // A dashboard panel's remembered state as a record (dashtiles.h's Board writes and reads it), and
 // the batch of them a profile put back last. The text form is what ft-screens' tile memory and the
 // `tiles` command carry: "off", "room" (off, and put in the room on purpose: Placement's In the
-// Room), "tile STAY COL ROW ALONE SCALE" or "sat STAY" and the satellite's 12 numbers. STAY: 0 as DASH_TILE_STAY says, 1 shown with the dashboard closed, 2 hidden then (any
+// Room), "tile STAY COL ROW ALONE SCALE [PLACE]" (PLACE: u or d, above the desk line or under it, then
+// l, c or r, the way it leans; left out: "uc") or "sat STAY" and the satellite's 12 numbers. STAY: 0 as DASH_TILE_STAY says, 1 shown with the dashboard closed, 2 hidden then (any
 // other number is 1, as it was when STAY was a yes or no: its 0 was "no", the default then). Parse takes any whitespace between the words and nothing else, and the sphere's older
 // "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" (its scale taken as the size, the rest dropped).
 // Header only, no OpenVR, so its test runs anywhere (screens/tests/dashtiles-test.cpp).
@@ -31,6 +32,8 @@ struct State {
     int col = 0, row = 0;   // a tile's place on the grid when it was saved (negative: none)
     bool alone = true;      // a column of its own
     double scale = 1;       // its size, times its natural one
+    bool below = false;     // hanging under the desk line (tilegrid.h's Col::base)
+    int align = 0;          // leaning against its column's left (-1) or right (+1) edge
     double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // a satellite's: group frame -> panel
     bool room = false;      // off: put in the room on purpose (a window stays there next time: TileWhenKnown)
 
@@ -75,10 +78,15 @@ inline bool Parse(const std::string &text, State *out) {
     int stay = 0, alone = 1;
     if (w[0] == "off" && w.size() == 1) return *out = s, true;
     if (w[0] == "room" && w.size() == 1) return s.room = true, *out = s, true;
-    if (w[0] == "tile" && (w.size() == 6 || w.size() == 8)) {
+    if (w[0] == "tile" && (w.size() == 6 || w.size() == 7 || w.size() == 8)) {
         double old = 0;   // (the old form's weight and width)
-        const bool ok = w.size() == 6 ? detail::Num(w[5], &s.scale)
+        const bool ok = w.size() != 8 ? detail::Num(w[5], &s.scale)
                                       : detail::Num(w[5], &old) && detail::Num(w[6], &s.scale) && detail::Num(w[7], &old);
+        if (w.size() == 7) {
+            const std::string &pl = w[6];
+            if (pl.size() != 2 || !std::strchr("ud", pl[0]) || !std::strchr("lcr", pl[1])) return false;
+            s.below = pl[0] == 'd', s.align = pl[1] == 'l' ? -1 : pl[1] == 'r' ? 1 : 0;
+        }
         if (!ok || !detail::Int(w[1], &stay) || !detail::Int(w[2], &s.col) || !detail::Int(w[3], &s.row) ||
             !detail::Int(w[4], &alone))
             return false;
@@ -107,7 +115,8 @@ inline std::string Text(const State &s) {
         case State::Kind::Off: return s.room ? "room" : "off";
         case State::Kind::Tile:
             return "tile " + std::to_string(StayNumber(s.stay)) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
-                   std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.scale);
+                   std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.scale) +
+                   (s.below || s.align ? std::string(" ") + (s.below ? 'd' : 'u') + (s.align < 0 ? 'l' : s.align > 0 ? 'r' : 'c') : "");
         case State::Kind::Sat: {
             std::string t = "sat " + std::to_string(StayNumber(s.stay));
             for (int r = 0; r < 3; ++r)

@@ -133,6 +133,10 @@ inline bool EyeFits(const void *ctx, double height) {
     const tiling::Params &p = *static_cast<const tiling::Params *>(ctx);
     return tiling::EyeElDeg(p, p.deskDeg + height) - tiling::EyeElDeg(p, p.deskDeg) <= tilepack::kColumnDeg + 1e-9;
 }
+// ...with `under` of it hanging under the desk line.
+inline bool EyeFitsRound(const tiling::Params &p, double under, double height) {
+    return tiling::EyeElDeg(p, p.deskDeg - under + height) - tiling::EyeElDeg(p, p.deskDeg - under) <= tilepack::kColumnDeg + 1e-9;
+}
 
 class Board {
 public:
@@ -231,7 +235,9 @@ public:
         EndBatch();
         spots_[id].satellite = false;
         slot_.Move(grid_, id, [&] {   // (Insert moves it)
-            grid_.Insert(id, d.col, d.row, d.kind == tiling::Drop::NewColumn, scale, d.leftOfSlot);
+            const bool into = d.kind == tiling::Drop::Into;
+            grid_.Insert(id, d.col, d.row, !into, scale, d.leftOfSlot, into && d.below);
+            grid_.SetAlign(id, into ? d.align : 0);
             return true;
         });
     }
@@ -254,7 +260,11 @@ private:
         switch (k) {
             case Key::Left:
             case Key::Right: {
-                return slot_.Move(grid_, id, [&] { return grid_.MoveSide(id, k == Key::Left ? -1 : +1, slot_.Key()); });
+                // narrower than its column and not against that edge yet: it goes there first (user,
+                // 2026-11-19: "a 600 pixel wide display that I can either set on the right, or the left")
+                const int dir = k == Key::Left ? -1 : +1;
+                if (const tiling::Placed *p = PlacedOf(id); p && p->narrow && p->lean != dir) return grid_.SetAlign(id, dir);
+                return slot_.Move(grid_, id, [&] { return grid_.MoveSide(id, dir, slot_.Key()); });
             }
             case Key::Up: return grid_.MoveUpDown(id, -1);
             case Key::Down: return grid_.MoveUpDown(id, +1);
@@ -276,17 +286,18 @@ private:
         if (grid_.Empty() || last_.tiles.empty() || fills_.size() != grid_.Cols().size()) return -1;
         const tilepack::Item it{-1, Span(info.widthM), Span(info.heightM)};
         if (last_.az1 - last_.az0 + params.gapDeg + it.wDeg <= params.wallDeg) return -1;
-        std::map<int, double> front;
+        std::map<int, double> front, under;   // (each column's nearest in front, and how far it hangs under the desk line)
         for (const tiling::Placed &p : last_.tiles) {
             const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
             if (!front.count(p.col) || off < front[p.col]) front[p.col] = off;
+            under[p.col] = std::max(under[p.col], params.deskDeg - p.el0);
         }
         int best = -1;
         double bestAdd = 0;
         for (size_t c = 0; c < fills_.size(); ++c) {
             const tilepack::Fill &f = fills_[c];
             const double h = tilepack::Grown(f, it, params.gapDeg);
-            if (h < 0 || !EyeFits(&params, h)) continue;
+            if (h < 0 || !EyeFitsRound(params, under[int(c)], h + (under[int(c)] > 0 ? params.gapDeg + under[int(c)] : 0))) continue;
             const double add = h - f.height;
             const tilepack::Fill &b = best < 0 ? f : fills_[size_t(best)];
             const bool lower = f.height < b.height - 1e-6 || (f.height < b.height + 1e-6 && front[int(c)] < front[best]);
@@ -310,10 +321,17 @@ public:
         if (items.empty()) return;
         EndBatch();
         const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg, EyeFits, &params);
+        std::map<int, tilepack::Item> byId;
+        for (const tilepack::Item &it : items) byId[it.id] = it;
         grid_ = tilegrid::Grid{};
-        for (size_t c = 0; c < cols.size(); ++c)
-            for (size_t r = 0; r < cols[c].size(); ++r)   // (row 0 is the top: each one up goes in over the rest)
-                grid_.Insert(cols[c][r], int(c), 0, r == 0, scales[cols[c][r]]);
+        for (size_t c = 0; c < cols.size(); ++c) {
+            std::vector<tilepack::Item> deskUp;
+            for (const int id : cols[c]) deskUp.push_back(byId[id]);
+            const tilepack::Sides s = tilepack::UpAndDown(deskUp, params.gapDeg);   // (round the desk line: up, then down)
+            for (size_t r = 0; r < s.up.size(); ++r)   // (row 0 is the top: each one up goes in over the rest)
+                grid_.Insert(s.up[r], int(c), 0, r == 0, scales[s.up[r]]);
+            for (const int id : s.down) grid_.Insert(id, int(c), INT_MAX, false, scales[id], false, true);
+        }
         Recentre();
     }
 
@@ -330,9 +348,10 @@ public:
         std::vector<tiling::Column> cols;
         for (const tilegrid::Col &gc : grid_.Cols()) {
             tiling::Column c;
+            c.base = gc.base;
             for (const tilegrid::Cell &cell : gc.cells) {
                 const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);
-                c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale});
+                c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale, cell.align});
             }
             cols.push_back(c);
         }
@@ -344,9 +363,9 @@ public:
     const tiling::Layout &Arrange(InfoOf info) {
         const std::vector<tiling::Column> cols = Columns(info);
         fills_.clear();
-        for (const tiling::Column &c : cols) {   // (each column's shelves so far: OnTopOf)
+        for (const tiling::Column &c : cols) {   // (each column's shelves so far, from the desk up: OnTopOf)
             std::vector<tilepack::Item> deskUp;
-            for (size_t r = c.tiles.size(); r-- > 0;) deskUp.push_back({c.tiles[r].id, Span(c.tiles[r].widthM), Span(c.tiles[r].heightM)});
+            for (int r = c.Base(); r >= 0; --r) deskUp.push_back({c.tiles[size_t(r)].id, Span(c.tiles[size_t(r)].widthM), Span(c.tiles[size_t(r)].heightM)});
             fills_.push_back(tilepack::FillOf(deskUp, params.gapDeg));
         }
         tiling::Layout l = slot_.Arrange(grid_, cols, params);
@@ -387,7 +406,7 @@ public:
         const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
         const tilegrid::Cell &cell = col.cells[size_t(w.row)];
         st.kind = State::Kind::Tile, st.col = w.col, st.row = w.row, st.alone = col.cells.size() == 1;
-        st.scale = cell.scale;
+        st.scale = cell.scale, st.below = col.Below(w.row), st.align = cell.align;
         return st;
     }
     // Back as it was remembered (`focused`: a new tile's neighbour when its column is gone). False
@@ -404,7 +423,8 @@ public:
         s.stay = st.stay;
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
-        grid_.Insert(id, st.col, st.row, st.alone, st.scale);
+        grid_.Insert(id, st.col, st.row, st.alone, st.scale, false, st.below);
+        grid_.SetAlign(id, st.align);
     }
     // The profile put back last is done with: an add after this goes after the other tiles.
     void EndRestore() { batch_.End(); }
@@ -517,8 +537,10 @@ private:
 
     static void AppendColumn(tilegrid::Grid &g, const tilegrid::Col &c) {
         const int at = int(g.Cols().size());
-        for (size_t r = 0; r < c.cells.size(); ++r)
-            g.Insert(c.cells[r].id, at, int(r), r == 0, c.cells[r].scale);
+        for (size_t r = 0; r < c.cells.size(); ++r) {
+            g.Insert(c.cells[r].id, at, int(r), r == 0, c.cells[r].scale, false, c.Below(int(r)));
+            g.SetAlign(c.cells[r].id, c.cells[r].align);
+        }
     }
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
     static tiling::Drop Without(const tilegrid::Grid &g, int id, tiling::Drop d) {

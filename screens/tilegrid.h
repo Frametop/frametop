@@ -20,6 +20,13 @@
 // -1: not chosen yet (the tiling chooses one; Board keeps it, or chooses again while it's only
 // a default); a grid emptied by Remove has none.
 //
+// A column has a base row, the one on the desk line (user, 2026-11-19: "displays go from the center
+// row down or up"): the panels before it stand above it, the ones after it hang under the desk line.
+// Meta+Down on the lowest panel, the base, hangs it under the one above it; Meta+Up on the top one,
+// the base, stands it on the one under it. A panel narrower than its column can lean against its left
+// or right edge (`align`; user: "a 600 pixel wide display that I can either set on the right, or the
+// left of below the 1400"; 0: as the tiling packs the strip narrowest, tiling.h's Lean).
+//
 // Header only, so its test runs anywhere.
 #pragma once
 
@@ -39,9 +46,12 @@ constexpr int kSplits = 3;            // a split round Steam's menu for each pla
 struct Cell {
     int id = 0;
     double scale = 1;   // its size, times its natural one
+    int align = 0;      // -1 against its column's left edge, +1 its right, 0 as the tiling chooses
 };
 struct Col {
     std::vector<Cell> cells;
+    int base = 0;       // the row on the desk line: the ones after it hang under it
+    bool Below(int row) const { return row > base; }
 };
 
 // Where a panel is: its column and row, or -1s.
@@ -77,17 +87,17 @@ public:
         InsertCol(left ? 0 : int(cols_.size()), Col{{Cell{id, 1}}}, left);
     }
     // Into column `col` at row `row` (clamped), or a new column at `col` when `newColumn` or no such
-    // column (at the split: left of Steam's slot when `leftOfSlot`).
-    void Insert(int id, int col, int row, bool newColumn, double scale = 1, bool leftOfSlot = false) {
+    // column (at the split: left of Steam's slot when `leftOfSlot`). `below`: hanging under the desk
+    // line (its row clamped to those), else standing on it or above (a row past the base's: the new
+    // base, the old one on it).
+    void Insert(int id, int col, int row, bool newColumn, double scale = 1, bool leftOfSlot = false, bool below = false) {
         Take(id);   // (moved: the splits stay, even with the grid empty for a moment)
         col = std::clamp(col, 0, int(cols_.size()));
         if (newColumn || col == int(cols_.size())) {
             InsertCol(col, Col{{Cell{id, Sc(scale)}}}, leftOfSlot);
             return;
         }
-        auto &cells = cols_[col].cells;
-        row = std::clamp(row, 0, int(cells.size()));
-        cells.insert(cells.begin() + row, Cell{id, Sc(scale)});
+        Put(cols_[col], row, Cell{id, Sc(scale)}, below);
     }
     // Out of the grid (its column goes when it was the last in it; the splits with the last
     // panel). False if it wasn't in it.
@@ -114,8 +124,11 @@ public:
             std::swap(cols_[w.col], cols_[next]);
             return true;
         }
-        const Cell cell = col.cells[w.row];
-        col.cells.erase(col.cells.begin() + w.row);
+        Cell cell = col.cells[w.row];
+        cell.align = 0;   // (its new column's own way)
+        const bool below = col.Below(w.row);
+        const int fromBase = w.row - col.base;   // (rows from the desk line: negative above)
+        Erase(col, w.row);
         if (across) {
             // across the slot: into a column of its own, the slot's nearest that side
             InsertCol(split, Col{{cell}}, dir < 0);
@@ -126,18 +139,36 @@ public:
             InsertCol(next < 0 ? 0 : int(cols_.size()), Col{{cell}}, next < 0);
             return true;
         }
-        auto &into = cols_[next].cells;
-        into.insert(into.begin() + std::min(w.row, int(into.size())), cell);
+        Col &into = cols_[next];   // (as far from the desk line, on the same side of it)
+        Put(into, below ? into.base + fromBase : into.base + 1 + fromBase, cell, below);
         return true;
     }
-    // Meta+Up (-1) / Meta+Down (+1): one row up or down its column.
+    // Meta+Up (-1) / Meta+Down (+1): one row up or down its column. Across the desk line it keeps its
+    // place and the line moves: the one on it, down under it (the one above it takes the desk); the
+    // first under it, back up onto it. The only one on the desk swaps with the one under it, and the
+    // top one, with nothing above it but the desk, stands on the one under it.
     bool MoveUpDown(int id, int dir) {
         const Where w = Find(id);
         if (!w.ok() || dir == 0) return false;
-        auto &cells = cols_[w.col].cells;
+        Col &col = cols_[w.col];
+        auto &cells = col.cells;
+        const int n = int(cells.size());
+        if (dir > 0 && w.row == col.base && col.base > 0) return --col.base, true;
+        if (dir < 0 && w.row == col.base + 1) return ++col.base, true;
+        if (dir < 0 && w.row == 0 && col.base == 0 && n >= 2) return col.base = 1, true;
         const int to = w.row + (dir < 0 ? -1 : 1);
-        if (to < 0 || to >= int(cells.size())) return false;
+        if (to < 0 || to >= n) return false;
         std::swap(cells[w.row], cells[to]);
+        return true;
+    }
+    // Which way it leans in its column (Cell::align). False when nothing changed.
+    bool SetAlign(int id, int align) {
+        const Where w = Find(id);
+        if (!w.ok()) return false;
+        int &a = cols_[w.col].cells[w.row].align;
+        align = std::clamp(align, -1, 1);
+        if (a == align) return false;
+        a = align;
         return true;
     }
     // Its size `factor` times. False when nothing changed.
@@ -167,12 +198,26 @@ public:
 
 private:
     static double Sc(double s) { return std::isfinite(s) ? std::clamp(s, kMinScale, kMaxScale) : 1; }
+    // Into a column at `row`: under the desk line (`below`) or on it and above, the base kept.
+    static void Put(Col &c, int row, const Cell &cell, bool below) {
+        const int n = int(c.cells.size());
+        if (n == 0) return c.cells.push_back(cell), void(c.base = 0);
+        row = below ? std::clamp(row, c.base + 1, n) : std::clamp(row, 0, c.base + 1);
+        c.cells.insert(c.cells.begin() + row, cell);
+        if (!below) ++c.base;   // (the old base under it moved down a row, or it's the new base)
+    }
+    // Out of a column at `row`, the base kept: the one above it takes the desk line when it was the
+    // base (none above: the one under it).
+    static void Erase(Col &c, int row) {
+        c.cells.erase(c.cells.begin() + row);
+        if (row <= c.base) c.base = std::max(0, c.base - 1);
+    }
     // Out of its cell (its column too when it was the last in it), the splits counting columns.
     bool Take(int id) {
         const Where w = Find(id);
         if (!w.ok()) return false;
         auto &cells = cols_[w.col].cells;
-        cells.erase(cells.begin() + w.row);
+        Erase(cols_[w.col], w.row);
         if (cells.empty()) {
             cols_.erase(cols_.begin() + w.col);
             for (int &s : split_) s -= w.col < s;

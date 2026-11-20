@@ -673,6 +673,18 @@ int main() {
         for (const tiling::Placed &p : l.tiles) onShelf += p.id != 1 && near(p.el0, b.PlacedOf(2)->el0);
         check("repack: four windows on the shelf over the screen, the fifth over them", onShelf == 4);
         check("repack: remembered as packed", b.Remember(1).rfind("tile 0 ", 0) == 0);
+        int under = 0;
+        for (const tiling::Placed &p : l.tiles) under += p.below && p.el1 < l.deskDeg;
+        check("repack: round the desk line: the fifth hangs under the screen", under == 1 && b.PlacedOf(1)->el0 > l.deskDeg - 1e-6);
+        dashtiles::State st;
+        check("state: under the desk, leaning right, kept", dashtiles::Parse("tile 0 1 2 0 1.000 dr", &st) && st.below && st.align == 1 &&
+                                                              dashtiles::Text(st) == "tile 0 1 2 0 1.000 dr");
+        check("state: a place that isn't one", !dashtiles::Parse("tile 0 1 2 0 1.000 xr", &st));
+        const int narrow = b.Grid().Cols()[0].cells[0].id;   // (the top shelf's first: narrower than the column)
+        b.Arrange(sized);
+        const int was = b.PlacedOf(narrow)->lean;
+        check("keys: a narrow one leans the way first, then stays in its column",
+              b.Press(narrow, was == -1 ? dashtiles::Key::Right : dashtiles::Key::Left) && b.Grid().Cols().size() == 1);
 
         // A hidden panel (absent) at no size: its neighbours close up; a repack packs the shown ones
         // and gives it a column of its own (not a shelf the others stand on while it's away).

@@ -347,7 +347,11 @@ int main() {
                                                                                 g.Cols().size() == 4 && g.Cols()[3].cells[0].id == 4);
         g.Insert(5, 0, 0, false);   // over 3
         check("move down: swaps with the one under", g.MoveUpDown(5, +1) && g.Cols()[0].cells[1].id == 5);
-        check("move down at the bottom: nothing", !g.MoveUpDown(5, +1));
+        check("move down at the bottom: hangs under the desk line", g.MoveUpDown(5, +1) && g.Cols()[0].base == 0 &&
+                                                                      g.Cols()[0].Below(1) && g.Cols()[0].cells[1].id == 5);
+        check("move down under the desk at the bottom: nothing", !g.MoveUpDown(5, +1));
+        check("move up from under the desk: back on it", g.MoveUpDown(5, -1) && g.Cols()[0].base == 1 && g.Cols()[0].cells[1].id == 5);
+        check("down and up: as it was", g.MoveUpDown(5, +1) && g.MoveUpDown(5, -1) && g.Cols()[0].base == 1);
         check("bigger: its size grows", g.Scale(5, tilegrid::kStep) && near(g.CellOf(5)->scale, 1.1));
         check("bigger: past its natural size, to the most", g.Scale(5, 100) && near(g.CellOf(5)->scale, tilegrid::kMaxScale) &&
                                                                !g.Scale(5, 2));
@@ -473,6 +477,51 @@ int main() {
         const double before = std::atan2(one.widthM / 2, q.radius);
         tiling::CornersOnSphere(q.radius, &one);
         check("corners: the same span seen from the centre", near(std::atan2(one.widthM / 2, one.distM), before, 1e-12));
+    }
+    // --- round the desk line (user, 2026-11-19: "displays go from the center row down or up", and a
+    // 600 px one "on the right, or the left of below the 1400")
+    {
+        tiling::Column c = col({px(1, 1300, 700), px(2, 1400, 800), px(3, 600, 400)});
+        c.base = 1;   // 1 over 2 on the desk, 3 hanging under it
+        const tiling::Layout l = tiling::Arrange({c}, p);
+        const auto &t1 = l.tiles[0], &t2 = l.tiles[1], &t3 = l.tiles[2];
+        check("under the desk: the base on the desk line", near(t2.el0, p.deskDeg) && !t2.below);
+        check("under the desk: the one after the base hangs under it, a gap down", t3.below && near(t3.el1, p.deskDeg - p.gapDeg) &&
+                                                                                      t3.el0 < t3.el1);
+        check("under the desk: the one before it above", t1.el0 > t2.el1 && !t1.below);
+        check("under the desk: the layout reaches down to it", near(l.el0, t3.el0) && near(l.deskDeg, p.deskDeg));
+        check("under the desk: the narrow one can lean", t3.narrow && !t2.narrow);
+        tiling::Column left = c, right = c;
+        left.tiles[2].align = -1, right.tiles[2].align = 1;
+        const tiling::Layout ll = tiling::Arrange({left}, p), lr = tiling::Arrange({right}, p);
+        check("align: left, against the column's left edge", near(ll.tiles[2].az0, ll.tiles[1].az0, 1e-6) && ll.tiles[2].lean == -1);
+        check("align: right, against its right edge", near(lr.tiles[2].az1, lr.tiles[1].az1, 1e-6) && lr.tiles[2].lean == 1);
+        // two 600s side by side on a shelf over the 1300
+        tiling::Column four = col({px(4, 600, 400), px(5, 600, 400), px(1, 1300, 700), px(2, 1400, 800)});
+        const tiling::Layout lf = tiling::Arrange({four}, p);
+        check("sub-columns: the 600s share a shelf over the 1300", near(lf.tiles[0].el0, lf.tiles[1].el0) &&
+                                                                     lf.tiles[0].el0 > lf.tiles[2].el1);
+        // a drop under the desk line hangs it there, leaning the side it was let go
+        const std::vector<tiling::Column> cols = {c};
+        const tiling::Drop d = tiling::DropAt(l, cols, t3.az0 + 0.3 * (t3.az1 - t3.az0), t3.el0 - 1);
+        check("drop: under the desk line, below", d.kind == tiling::Drop::Into && d.below && d.row == 3 && d.align == -1);
+        const tiling::Drop up = tiling::DropAt(l, cols, t2.azDeg + 1, t2.el0 + 0.5);
+        check("drop: low on the base, above the desk: the new base", up.kind == tiling::Drop::Into && !up.below && up.row == 2 &&
+                                                                       up.align == 1);
+    }
+    {
+        tilegrid::Grid g;
+        g.Add(1), g.Insert(2, 0, 1, false), g.Insert(3, 0, 2, false, 1, false, true);   // 1 over 2, 3 under the desk
+        check("grid: below keeps the base", g.Cols()[0].base == 1 && g.Cols()[0].Below(2));
+        g.Insert(4, 0, 0, false);   // on top
+        check("grid: one on top moves the base down a row", g.Cols()[0].base == 2 && g.Cols()[0].cells[2].id == 2);
+        g.Remove(2);
+        check("grid: the base gone, the one above takes the desk", g.Cols()[0].base == 1 && g.Cols()[0].cells[1].id == 1 &&
+                                                                    g.Cols()[0].Below(2));
+        g.Add(5);
+        check("grid: moved right from under the desk: under it there too", g.MoveSide(3, +1) && g.Cols()[1].cells[1].id == 3 &&
+                                                                              g.Cols()[1].Below(1));
+        check("grid: align", g.SetAlign(3, -1) && g.CellOf(3)->align == -1 && !g.SetAlign(3, -1));
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

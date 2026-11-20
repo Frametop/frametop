@@ -27,10 +27,10 @@ inline bool AsIs(const void *, double height) { return height <= kColumnDeg + 1e
 // Whether a panel `w` wide goes beside the ones on a shelf `used` wide, in a column `widest` wide.
 inline bool Beside(double used, double w, double widest, double gapDeg) { return used + gapDeg + w <= widest + 1e-9; }
 
-// A column's panels from the desk up, `wDeg` wide: each one's shelf (0 on the desk). Each goes
-// beside the one before it while the shelf fits across the widest, else on a shelf above.
-inline std::vector<int> Shelves(const std::vector<double> &wDeg, double gapDeg) {
-    double widest = 0;
+// A column's panels from the desk up (or down), `wDeg` wide: each one's shelf (0 on the desk). Each
+// goes beside the one before it while the shelf fits across the widest (`widest`, or theirs: 0),
+// else on a shelf above.
+inline std::vector<int> Shelves(const std::vector<double> &wDeg, double gapDeg, double widest = 0) {
     for (const double w : wDeg) widest = std::max(widest, w);
     std::vector<int> out;
     int shelf = -1;
@@ -73,6 +73,21 @@ inline void Put(Fill *f, const Item &it, double gapDeg) {
     f->used = it.wDeg, f->height += gapDeg + it.hDeg, f->topH = it.hDeg;
 }
 // A column's Fill, its panels from the desk up (as Shelves puts them).
+// The shelves of a column packed from the desk up (`deskUp`, as Pack lists it) shared out round the
+// desk line (user, 2026-11-19: "using the bottom and top equally ... displays go from the center
+// row down or up"): the first on the desk, then one above it, one under it, and so on. The ones
+// that go up, from the desk up, and the ones that hang under it, from the desk down.
+struct Sides {
+    std::vector<int> up, down;
+};
+inline Sides UpAndDown(const std::vector<Item> &deskUp, double gapDeg) {
+    std::vector<double> w;
+    for (const Item &it : deskUp) w.push_back(it.wDeg);
+    const std::vector<int> shelf = Shelves(w, gapDeg);
+    Sides s;
+    for (size_t i = 0; i < deskUp.size(); ++i) (shelf[i] > 0 && shelf[i] % 2 == 0 ? s.down : s.up).push_back(deskUp[i].id);
+    return s;
+}
 inline Fill FillOf(const std::vector<Item> &deskUp, double gapDeg) {
     Fill f;
     for (const Item &it : deskUp) f.widest = std::max(f.widest, it.wDeg);

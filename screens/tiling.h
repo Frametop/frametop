@@ -63,7 +63,7 @@ struct Params {
     double pxPerDeg = 48;       // a panel's natural size: this many of its pixels a degree (1920 wide: about 40)
     double gapDeg = 0.8;        // between columns, and between the panels in one (about 4 cm at 2.7 m)
     double wallDeg = 80;        // the desk this wide round you: a new panel goes on top of a column
-    double columnDeg = 45;      // ...one this tall at most (tilepack.h's kColumnDeg)
+    double columnDeg = 50;      // ...one this tall at most (tilepack.h's kColumnDeg)
     double maxSpanDeg = 360;    // the strip round you, gaps included, at most
     double reserveAzDeg = 0;    // Steam's menu, a slot kept clear when the strip would reach it: its middle
     double reserveDeg = 0;      // ...and its width (0: none; the strip is centred on 0 then)
@@ -79,7 +79,7 @@ inline double MetresPerPx(const Params &p) { return 2 * p.radius * std::tan(Rad(
 // the head. The wall, the desk, the gaps and the desk's width are given as your eyes see them (the
 // wall `Eyes::radius` in front of you); these are them as the centre sees them.
 struct Eyes {
-    double radius = 2.7, deskDeg = -12, gapDeg = 0.8, wallDeg = 80, columnDeg = 45;
+    double radius = 2.7, deskDeg = -12, gapDeg = 0.8, wallDeg = 80, columnDeg = 50;
 };
 inline void FromEyes(const Eyes &e, double backM, Params *p) {
     const double r = e.radius, c = r + backM, d = Rad(e.deskDeg);
@@ -87,7 +87,7 @@ inline void FromEyes(const Eyes &e, double backM, Params *p) {
     p->deskDeg = Deg(std::atan2(r * std::sin(d), r * std::cos(d) + backM));
     p->gapDeg = e.gapDeg * r / c;
     p->wallDeg = e.wallDeg * r / c;
-    p->columnDeg = e.columnDeg * r / c;   // (user, 2026-11-19: 45 round the arc's centre stood four windows 90 degrees tall in front of you)
+    p->columnDeg = e.columnDeg * r / c;   // (user, 2026-11-19: the cap round the arc's centre stood four windows 90 degrees tall in front of you)
 }
 
 struct Placed {

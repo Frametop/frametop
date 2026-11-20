@@ -653,10 +653,10 @@ int main() {
         tiling::Params far;
         tiling::FromEyes(tiling::Eyes{}, 2.0, &far);
         check("pack: the column cap as your eyes see it, scaled round the arc's centre",
-              std::fabs(far.columnDeg - 45 * 2.7 / 4.7) < 1e-9);
-        check("pack: four windows 10 degrees tall fit under 45, two a column under 26",
-              tilepack::Pack({{1, 5, 10}, {2, 5, 10}, {3, 5, 10}, {4, 5, 10}}, 0.5).size() == 1 &&
-                  tilepack::Pack({{1, 5, 10}, {2, 5, 10}, {3, 5, 10}, {4, 5, 10}}, 0.5, far.columnDeg).size() == 2);
+              std::fabs(far.columnDeg - 50 * 2.7 / 4.7) < 1e-9);
+        check("pack: four windows 11 degrees tall fit under 50, two a column under 29",
+              tilepack::Pack({{1, 5, 11}, {2, 5, 11}, {3, 5, 11}, {4, 5, 11}}, 0.5).size() == 1 &&
+                  tilepack::Pack({{1, 5, 11}, {2, 5, 11}, {3, 5, 11}, {4, 5, 11}}, 0.5, far.columnDeg).size() == 2);
 
         dashtiles::Board b;
         const auto sized = [](int id) { return id == 1 ? dashtiles::Info{1.48, 0.62} : dashtiles::Info{0.3, 0.53}; };

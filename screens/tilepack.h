@@ -14,7 +14,8 @@
 namespace tilepack {
 
 constexpr double kSimilar = 1.6;     // a column's panels: none more than this many times as wide as another
-constexpr double kColumnDeg = 45;    // a column this tall at most, as your eyes see it (a taller panel has one of its own)
+constexpr double kColumnDeg = 50;    // a column this tall at most, as your eyes see it (a taller panel has one of its own;
+                                     // 50: two 0.5 m windows at 1.4 m, about 43 degrees, still share one)
 
 // Whether a panel `w` wide may share a column whose widest is `widest`.
 inline bool Similar(double widest, double w) { return widest <= w * kSimilar && w <= widest * kSimilar; }

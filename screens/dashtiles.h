@@ -20,6 +20,7 @@
 #include "slotsplit.h"
 #include "tilegrid.h"
 #include "tilememory.h"
+#include "tilepack.h"
 #include "tilestate.h"
 #include "tiling.h"
 
@@ -253,26 +254,59 @@ private:
         return false;
     }
     // The desk full (another column would take the strip past params.wallDeg): the column a new
-    // panel `info` goes on top of, the one whose top is lowest (of two, the nearer in front); -1
-    // while there's room, or before the grid has been laid out.
+    // panel `info` goes on top of, the lowest (of two, the nearer in front) of those about as wide
+    // as it with room for it (tilepack.h); -1 while there's room, before the grid has been laid
+    // out, or when none suits it (a column of its own then).
+    // A size in metres as degrees round you, at the wall.
+    double Span(double m) const { return tiling::Deg(2 * std::atan2(m / 2, params.radius)); }
     int OnTopOf(const Info &info) const {
         if (grid_.Empty() || last_.tiles.empty()) return -1;
-        const double span = tiling::Deg(2 * std::atan2(info.widthM / 2, params.radius));
+        const double span = Span(info.widthM), tall = Span(info.heightM);
         if (last_.az1 - last_.az0 + params.gapDeg + span <= params.wallDeg) return -1;
-        std::map<int, double> tops;   // column -> its top
+        struct ColNow {
+            double widest = 0, bottom = 1e9, top = -1e9;
+        };
+        std::map<int, ColNow> cols;
         for (const tiling::Placed &p : last_.tiles) {
-            const auto [it, added] = tops.try_emplace(p.col, p.el1);
-            if (!added) it->second = std::max(it->second, p.el1);
+            ColNow &c = cols[p.col];
+            c.widest = std::max(c.widest, Span(p.widthM));
+            c.bottom = std::min(c.bottom, p.el0), c.top = std::max(c.top, p.el1);
         }
         int best = -1;
         double low = 1e9, front = 1e9;
         for (const tiling::Placed &p : last_.tiles) {
-            const double top = tops[p.col], off = std::fabs(tiling::WrapNear(p.azDeg, 0));
             if (p.col >= int(grid_.Cols().size())) continue;
-            if (top < low - 1e-6 || (top < low + 1e-6 && off < front)) best = p.col, low = top, front = off;
+            const ColNow &c = cols[p.col];
+            if (!tilepack::Similar(c.widest, span) || !tilepack::Room(c.top - c.bottom, tall, params.gapDeg)) continue;
+            const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
+            if (c.top < low - 1e-6 || (c.top < low + 1e-6 && off < front)) best = p.col, low = c.top, front = off;
         }
         return best;
     }
+public:
+    // Every tile packed into columns again (tilepack.h), sizes kept: a reset's (user, 2026-11-19:
+    // "Tiling looks way broken ... There's a massive gap in the middle").
+    template <typename InfoOf>
+    void Repack(InfoOf info) {
+        std::vector<tilepack::Item> items;
+        std::map<int, double> scales;
+        for (const tilegrid::Col &col : grid_.Cols())
+            for (const tilegrid::Cell &cell : col.cells) {
+                const Info i = info(cell.id);
+                items.push_back({cell.id, Span(i.widthM * cell.scale), Span(i.heightM * cell.scale)});
+                scales[cell.id] = cell.scale;
+            }
+        if (items.empty()) return;
+        EndBatch();
+        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg);
+        grid_ = tilegrid::Grid{};
+        for (size_t c = 0; c < cols.size(); ++c)
+            for (size_t r = 0; r < cols[c].size(); ++r)   // (row 0 is the top: each one up goes in over the rest)
+                grid_.Insert(cols[c][r], int(c), 0, r == 0, scales[cols[c][r]]);
+        Recentre();
+    }
+
+private:
     bool Changed(bool changed) {
         if (changed) EndBatch();
         return changed;

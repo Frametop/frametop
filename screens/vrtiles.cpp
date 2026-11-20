@@ -646,7 +646,13 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             return;
         }
         if (!std::strcmp(parsed.rest, "gaps")) return TileGaps(reply, size);
-        if (!std::strcmp(parsed.rest, "recentre")) return g_tileReset = true, (void)std::snprintf(reply, size, "ok");
+        if (!std::strcmp(parsed.rest, "recentre")) {   // (a reset: packed again too, tilepack.h)
+            g_tiles.Repack(TileInfo);
+            RetileDash();
+            RememberTiles();
+            std::printf("dashboard tiles: packed again (a reset): %zu columns\n", g_tiles.Grid().Cols().size());
+            return g_tileReset = true, (void)std::snprintf(reply, size, "ok");
+        }
         if (!std::strcmp(parsed.rest, "clear")) {
             for (const int id : g_tiles.Ids()) TileUnanchor(id, "tiles clear");
             return (void)std::snprintf(reply, size, "ok");

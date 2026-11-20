@@ -604,6 +604,65 @@ int main() {
         dashtiles::Board fresh;
         check("desk: a first panel: a column", (fresh.Anchor(1, -1, dashtiles::Stay::Default, -1, &in), fresh.Grid().Cols().size() == 1));
     }
+    // --- the desk full: a narrow window doesn't go on a wide screen's column (user, 2026-11-19: "a
+    // massive gap in the middle"), nor on one already as tall as a column gets
+    {
+        dashtiles::Board b;
+        b.params.wallDeg = 70;   // (two screens fit, 67 degrees; a third column doesn't)
+        const auto sized = [](int id) { return id <= 2 ? dashtiles::Info{1.6, 0.9} : dashtiles::Info{0.3, 0.53}; };
+        for (int i = 1; i <= 2; ++i) {
+            const dashtiles::Info in = sized(i);
+            b.Anchor(i, i - 1, dashtiles::Stay::Default, -1, &in), b.Arrange(sized);
+        }
+        const dashtiles::Info narrow = sized(3);
+        b.Anchor(3, 2, dashtiles::Stay::Default, -1, &narrow), b.Arrange(sized);
+        const auto alone = [&](int id) {
+            const tilegrid::Where w = b.Grid().Find(id);
+            return w.ok() && b.Grid().Cols()[size_t(w.col)].cells.size() == 1;
+        };
+        check("desk full: a narrow window gets a column of its own, not the screens'",
+              b.Grid().Cols().size() == 3 && alone(1) && alone(2) && alone(3));
+        for (int i = 4; i <= 12; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default, -1, &narrow), b.Arrange(sized);
+        size_t most = 0;
+        for (const auto &c : b.Grid().Cols()) most = std::max(most, c.cells.size());
+        check("desk full: ten narrow windows stack with each other, no column past its height",
+              alone(1) && alone(2) && most >= 2 && most <= 4);
+    }
+    // --- a reset packs them again: like widths together, the widest at the bottom and in the middle
+    {
+        using tilepack::Item;
+        const auto cols = tilepack::Pack({{1, 5, 9}, {2, 26, 11}, {3, 5, 9}, {4, 20, 12}, {5, 6, 9}, {6, 15, 9}, {7, 5, 9},
+                                          {8, 5, 5}},
+                                         0.8);
+        const auto colOf = [&](int id) {
+            for (size_t c = 0; c < cols.size(); ++c)
+                for (int x : cols[c])
+                    if (x == id) return int(c);
+            return -1;
+        };
+        bool all = true;
+        for (int id = 1; id <= 8; ++id) all &= colOf(id) >= 0;
+        check("pack: every one in a column", all);
+        check("pack: the two screens together, the widest at the bottom", colOf(2) == colOf(4) && cols[size_t(colOf(2))][0] == 2);
+        check("pack: no narrow window with them", cols[size_t(colOf(2))].size() == 2);
+        check("pack: the narrow ones together, at most kColumnDeg tall",
+              colOf(1) == colOf(3) && colOf(1) != colOf(2) && cols[size_t(colOf(1))].size() <= 5);
+        check("pack: the widest column in the middle", colOf(2) == int(cols.size() / 2) || colOf(2) == int((cols.size() - 1) / 2));
+        check("pack: a panel taller than a column: alone", tilepack::Pack({{1, 10, 50}, {2, 10, 5}}, 0.8).size() == 2);
+        check("pack: nothing", tilepack::Pack({}, 0.8).empty());
+
+        dashtiles::Board b;
+        const auto sized = [](int id) { return id == 1 ? dashtiles::Info{1.48, 0.62} : dashtiles::Info{0.3, 0.53}; };
+        for (int i = 1; i <= 6; ++i) b.Anchor(i, -1, dashtiles::Stay::Default);
+        for (int i = 2; i <= 6; ++i) b.Drop(i, {tiling::Drop::Into, 0, 0});   // (all in one column with the screen)
+        b.Repack(sized);
+        b.Arrange(sized);
+        const tilegrid::Where screen = b.Grid().Find(1);
+        check("repack: the screen alone in the middle, the windows in columns of their own either side",
+              b.Grid().Cols().size() == 3 && screen.col == 1 && b.Grid().Cols()[1].cells.size() == 1 &&
+                  b.Grid().Cols()[0].cells.size() + b.Grid().Cols()[2].cells.size() == 5);
+        check("repack: remembered as packed", b.Remember(1).rfind("tile 0 ", 0) == 0);
+    }
     // --- memory
     {
         dashtiles::Board b;

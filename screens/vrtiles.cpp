@@ -369,7 +369,12 @@ void TileKnown(int i, const std::string &key) {
         std::printf("%s: back on the dashboard, as %s was (%s)\n", TileLabel(i).c_str(), k.c_str(), line.c_str());
     }
 }
-// The panel goes (its window, its display): what it was is remembered under its key.
+namespace {
+bool g_tilesStopping = false;
+}  // namespace
+void TilesStopping() { g_tilesStopping = true; }
+// The panel goes (its window, its display): what it was is remembered under its key. Its gap is
+// filled (dashtiles.h's Leave) unless every panel is going (a stop: a restart puts them back).
 void TileGone(int i) {
     BarSideGone(i);
     const auto k = g_tileKey.find(i);
@@ -377,7 +382,7 @@ void TileGone(int i) {
     if (k != g_tileKey.end()) g_tileKey.erase(k);
     g_tileRoom.erase(i);
     if (g_tileFocus == i) g_tileFocus = -1;
-    if (g_tiles.Leave(i)) RetileDash(), RememberTiles();
+    if (g_tilesStopping ? g_tiles.Unanchor(i) : g_tiles.Leave(i)) RetileDash(), RememberTiles();
 }
 
 // Stays shown with the dashboard closed: as set for it or as DASH_TILE_STAY says (on unless set:

@@ -363,6 +363,8 @@ void TileUnanchor(int i, const char *by);
 void TileInRoom(int i, const char *by);   // Placement's In the Room: off the tiles, its app (a window's) kept in the room
 void TileKnown(int i, const std::string &key);
 void TileGone(int i);
+// Frametop is stopping: a panel going from now on leaves no gap to fill (TileGone).
+void TilesStopping();
 bool TileShown(const Screen &s, int i, bool dashUp);
 void TileDrop(Screen &s, int i);
 void TileResized(Screen &s, int i);

@@ -6078,6 +6078,7 @@ void ft_vr_shutdown(void) {
     // the pointer helper's carry modes end with us (they'd freeze its cursor or keep the laser)
     if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;
     if (g_carryFollow.on) SendPointer("follow carry off");
+    TilesStopping();   // (the panels about to go are coming back: no gaps filled for them)
     // (a change from the last 2 seconds; before GsShutdown on purpose: the apps going back to gamescope
     // aren't the user's changes, so their panels' last states stay as they were)
     FlushTileMemory();

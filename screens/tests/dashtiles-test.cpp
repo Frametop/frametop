@@ -651,12 +651,12 @@ int main() {
         check("pack: a panel taller than a column: alone", tilepack::Pack({{1, 10, 50}, {2, 10, 5}}, 0.8).size() == 2);
         check("pack: nothing", tilepack::Pack({}, 0.8).empty());
         tiling::Params far;
-        tiling::FromEyes(tiling::Eyes{}, 2.0, &far);
-        check("pack: the column cap as your eyes see it, scaled round the arc's centre",
-              std::fabs(far.columnDeg - 50 * 2.7 / 4.7) < 1e-9);
-        check("pack: four windows 11 degrees tall fit under 50, two a column under 29",
-              tilepack::Pack({{1, 5, 11}, {2, 5, 11}, {3, 5, 11}, {4, 5, 11}}, 0.5).size() == 1 &&
-                  tilepack::Pack({{1, 5, 11}, {2, 5, 11}, {3, 5, 11}, {4, 5, 11}}, 0.5, far.columnDeg).size() == 2);
+        tiling::FromEyes(tiling::Eyes{1.4, -12, 0.8, 80}, 2.0, &far);
+        check("eyes: the desk line seen from the eyes again (about: it is on their sphere, not the wall's)", std::fabs(tiling::EyeElDeg(far, far.deskDeg) + 12) < 0.5);
+        // (two windows 0.62 m tall at a 1.4 m wall: about 22 degrees each to the eyes, 10.5 round the centre)
+        const double win = tiling::Deg(2 * std::atan2(0.31, far.radius));
+        check("eyes: two windows share a column, three don't",
+              tilepack::Pack({{1, 5, win}, {2, 5, win}, {3, 5, win}, {4, 5, win}}, far.gapDeg, dashtiles::EyeFits, &far).size() == 2);
 
         dashtiles::Board b;
         const auto sized = [](int id) { return id == 1 ? dashtiles::Info{1.48, 0.62} : dashtiles::Info{0.3, 0.53}; };

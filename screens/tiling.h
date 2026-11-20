@@ -63,7 +63,7 @@ struct Params {
     double pxPerDeg = 48;       // a panel's natural size: this many of its pixels a degree (1920 wide: about 40)
     double gapDeg = 0.8;        // between columns, and between the panels in one (about 4 cm at 2.7 m)
     double wallDeg = 80;        // the desk this wide round you: a new panel goes on top of a column
-    double columnDeg = 50;      // ...one this tall at most (tilepack.h's kColumnDeg)
+    double backM = 0;           // your eyes this far in front of the wall's centre (FromEyes; a column's height as they see it: EyeElDeg)
     double maxSpanDeg = 360;    // the strip round you, gaps included, at most
     double reserveAzDeg = 0;    // Steam's menu, a slot kept clear when the strip would reach it: its middle
     double reserveDeg = 0;      // ...and its width (0: none; the strip is centred on 0 then)
@@ -79,7 +79,7 @@ inline double MetresPerPx(const Params &p) { return 2 * p.radius * std::tan(Rad(
 // the head. The wall, the desk, the gaps and the desk's width are given as your eyes see them (the
 // wall `Eyes::radius` in front of you); these are them as the centre sees them.
 struct Eyes {
-    double radius = 2.7, deskDeg = -12, gapDeg = 0.8, wallDeg = 80, columnDeg = 50;
+    double radius = 2.7, deskDeg = -12, gapDeg = 0.8, wallDeg = 80;
 };
 inline void FromEyes(const Eyes &e, double backM, Params *p) {
     const double r = e.radius, c = r + backM, d = Rad(e.deskDeg);
@@ -87,7 +87,14 @@ inline void FromEyes(const Eyes &e, double backM, Params *p) {
     p->deskDeg = Deg(std::atan2(r * std::sin(d), r * std::cos(d) + backM));
     p->gapDeg = e.gapDeg * r / c;
     p->wallDeg = e.wallDeg * r / c;
-    p->columnDeg = e.columnDeg * r / c;   // (user, 2026-11-19: the cap round the arc's centre stood four windows 90 degrees tall in front of you)
+    p->backM = backM;
+}
+// A height round the wall's centre (straight ahead), as your eyes see it: FromEyes' desk line the
+// other way round (user, 2026-11-19: a column capped round the centre stood four windows 90 degrees
+// tall in front of you; scaled by r/c, one).
+inline double EyeElDeg(const Params &p, double elDeg) {
+    const double e = Rad(elDeg);
+    return Deg(std::atan2(p.radius * std::sin(e), p.radius * std::cos(e) - p.backM));
 }
 
 struct Placed {

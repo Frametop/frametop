@@ -127,6 +127,13 @@ inline bool AtBar(const double head[3], const double bar[3], const double barUp[
     return true;
 }
 
+// A column `height` tall from the desk line (ctx: the board's tiling::Params): no taller than
+// tilepack::kColumnDeg as your eyes see it.
+inline bool EyeFits(const void *ctx, double height) {
+    const tiling::Params &p = *static_cast<const tiling::Params *>(ctx);
+    return tiling::EyeElDeg(p, p.deskDeg + height) - tiling::EyeElDeg(p, p.deskDeg) <= tilepack::kColumnDeg + 1e-9;
+}
+
 class Board {
 public:
     tiling::Params params;
@@ -282,7 +289,7 @@ private:
         for (const tiling::Placed &p : last_.tiles) {
             if (p.col >= int(grid_.Cols().size())) continue;
             const ColNow &c = cols[p.col];
-            if (!tilepack::Similar(c.widest, span) || !tilepack::Room(c.top - c.bottom, tall, params.gapDeg, params.columnDeg)) continue;
+            if (!tilepack::Similar(c.widest, span) || !tilepack::Room(c.top - c.bottom, tall, params.gapDeg, EyeFits, &params)) continue;
             const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
             if (c.top < low - 1e-6 || (c.top < low + 1e-6 && off < front)) best = p.col, low = c.top, front = off;
         }
@@ -303,7 +310,7 @@ public:
             }
         if (items.empty()) return;
         EndBatch();
-        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg, params.columnDeg);
+        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg, EyeFits, &params);
         grid_ = tilegrid::Grid{};
         for (size_t c = 0; c < cols.size(); ++c)
             for (size_t r = 0; r < cols[c].size(); ++r)   // (row 0 is the top: each one up goes in over the rest)

@@ -263,6 +263,18 @@ class HostTest(unittest.TestCase):
             self.host.on_keyboard(self.clock, {"event": "target", "owner": "normal", "context": context})
         self.assertEqual((self.host.sink, self.host.route, self.host.stopped), (True, "desktop", None))
 
+    def test_a_stop_that_races_a_hide_leaves_no_wrong_sink(self):
+        self.host.on_relay(0.0, ["1", "1", "0"])
+        self.host.on_relay(0.0, ["show"])
+        self.shown()
+        self.echo()
+        self.ops()
+        self.host.on_relay(0.1, ["hide"])   # the user's Stop comes in just after it
+        self.host.on_keyboard(0.1, {"event": "target", "owner": "normal", "context": "desktop"})
+        self.ops()
+        self.host.on_relay(0.2, ["show"])
+        self.assertEqual(self.keyboard.sent[0], ("sink", {"on": True}))   # said again, not assumed
+
     def test_a_steam_fields_hints_hold_when_it_shows(self):
         self.host.on_steam(0.0, [("event", {"open": 2, "purpose": "password"})])
         self.host.on_relay(0.1, ["show", "dash", *POSE_WORDS])

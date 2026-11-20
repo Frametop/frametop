@@ -42,7 +42,7 @@ class Host:
         self.opened_for = None        # "steam" | "frametop"
         self.route = None             # "steam" | "desktop" | "normal"
         self.context = None
-        self.sink = False
+        self.sink = False             # None: not known (a Stop may have raced the end of a context)
         self.stopped = None           # (route, context) the panel's "Stop shell typing" ended
         # The keyboard sends a target event for every sink change and context it's given, and for
         # the panel's "Stop shell typing": (owner, sent_at) for those our requests will cause.
@@ -120,6 +120,7 @@ class Host:
         self.opened_for = None
         self.steam_asked_at = None
         self.route = self.context = None  # the context ended; the next show sets one
+        self.sink = None                  # and the sink: a Stop it raced no longer names a context
 
     def end_steam_field(self):
         if self.steam_field is not None:
@@ -206,6 +207,7 @@ class Host:
                     self.touch.native()
                     self.opened_for = None
                     self.route = self.context = None
+                    self.sink = None
         elif event == "geometry":
             matrix, width, height = message.get("matrix"), message.get("width"), message.get("height")
             if (isinstance(matrix, list) and len(matrix) == 3 and isinstance(width, (int, float))

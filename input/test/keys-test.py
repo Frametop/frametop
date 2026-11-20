@@ -1409,6 +1409,23 @@ def tests():
     to_relay("gamepad off")
     check("SteamVR's Gamepad mode ended: off", (reader(), pad_log()),
           ([False], ["gamepad mode off (SteamVR's Gamepad mode ended)"]))
+    # Issue 105: on SteamOS 0.4.5 the helper still calls the dashboard open after the pill closed it.
+    to_relay("vrdash 1")
+    to_relay("gamepad remote")
+    to_relay("vrpad 0 0 0 0 0 0 0")
+    to_relay("vrpad 2000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("a dashboard called open before gamepad mode came on doesn't hold the pad", typed()[-1:],
+          ["pad 2000 0 0 0 0 0 0"])
+    to_relay("vrdash 0")
+    to_relay("vrdash 1")
+    to_relay("vrpad 2000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("...one that opens during it does", typed(), ["pad off"])
+    to_relay("gamepad off")
+    to_relay("vrdash 0")
+    time.sleep(0.05)
+    typed(), reader()
     to_relay("gamepad desktop")
     reader()
     time.sleep(3.2)

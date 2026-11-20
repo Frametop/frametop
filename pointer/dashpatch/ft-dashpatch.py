@@ -179,8 +179,17 @@ STEAMVR_STATE = """(() => {
       // One token: a key with a space in it would fail the reply's check and drop the Gamepad update too.
       if (entry.m_bPanelVisible && entry.m_bCanTakeKeyboardFocus && /^\\S+$/.test(o.sOverlayKey || '')) key = o.sOverlayKey;
     }
-  const pad = f.m_eSystemPanelInteractionMode == 2 && !ours;
-  const mine = pad && pid && f.m_unPIDForVRInput == pid && (!f.m_unSteamInputAppID || padTop);
+  // Armed by the gamepad pill on a SteamVR 2.18 that kept the focus where it was (gamepadmode.ARM):
+  // its next Gamepad mode is ours however the stack looks, until it ends, or ARM_S if it never starts.
+  const gp = f.m_eSystemPanelInteractionMode == 2;
+  const a = window.__ftPadArmed;
+  let armed = false;
+  if (a) {
+    if (gp) { a.active = true; armed = true; }
+    else if (a.active || Date.now() - a.at > %d) window.__ftPadArmed = null;
+  }
+  const pad = gp && (!ours || armed);
+  const mine = pad && (armed || (pid && f.m_unPIDForVRInput == pid && (!f.m_unSteamInputAppID || padTop)));
   const inTheater = new Set(((window.DashboardStore && window.DashboardStore.m_rgTheaterFrameStack) || [])
                             .map(t => t && t.m_unFrameID).filter(Boolean));
   let shown = 0;
@@ -191,7 +200,7 @@ STEAMVR_STATE = """(() => {
         if (m && +m[1] > 0) shown = +m[1];
       }
   return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0) + ' ' + shown + ' ' + key;
-})()""" % (GAMEPAD_KEY, GAMEPAD_KEY)
+})()""" % (GAMEPAD_KEY, GAMEPAD_KEY, gamepadmode.ARM_S * 1000)
 DASHPATCH = "\0ft_dashpatch"
 STRIP = steampage.StripLease()  # ft-screens' "steamstrip" (listen), read by the watch
 PAD = gamepadmode.Session()  # the pill's diminished Gamepad mode (listen), ended by the watch

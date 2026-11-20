@@ -4650,6 +4650,11 @@ void UpdatePad() {
         if (want >= 0) std::printf("gamepad mode: the pad is for panel %d (%s)\n", want + 1, remote ? "a remote display" : "the desktop");
         else std::printf("gamepad mode: off%s\n", PadMine() ? " (no panel for it)" : "");
         std::fflush(stdout);
+        // The remote display that had the pad lets it go now: the relay's own "pad off" comes after
+        // our "gamepad off" below, once the pad is no screen's, and compositor.c drops it (issue 105:
+        // the host kept an idle Xbox pad for about 30 s).
+        if (g_pill.pad >= 0 && g_screens.count(g_pill.pad) && g_screens[g_pill.pad].remote)
+            ft_remote_pad(g_pill.pad, "pad off");
     }
     g_pill.pad = want, g_pill.padSaidMs = now;
     SendRelay(want < 0 ? "gamepad off" : remote ? "gamepad remote" : "gamepad desktop");

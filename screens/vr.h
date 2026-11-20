@@ -85,6 +85,8 @@ void ft_vr_remote_named(int index, const char *host, const char *app);
 // "Desktop"), as ft-layout started it (remote.c); NULL for a screen that isn't a remote one.
 const char *ft_remote_host(int index);
 const char *ft_remote_app(int index);
+// Gamepad mode's pad for remote screen `index` (remote.c): "pad B LT RT LX LY RX RY" or "pad off".
+void ft_remote_pad(int index, const char *msg);
 // A second ft-screens next to the running desktop (--beside): nothing goes to ft-floatd or
 // ft-layout.
 void ft_vr_beside(void);

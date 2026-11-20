@@ -16,8 +16,11 @@ up-positive sticks) on each change and every 250 ms. The relay sends it on:
     gives the host a Moonlight Xbox controller (stream/ft-stream.cpp)
   - a Frametop desktop panel: VirtualPad, an Xbox 360 pad on uinput, which its apps read.
 It ends too when Frametop pauses, a VR game starts, or ft-screens goes quiet for LEASE. With the
-dashboard open (the helper's "vrdash 1") the pad lets go, and buttons held as it comes on or the
-dashboard closes (the pill's click) wait for their release. A pad with no word from the reader for
+dashboard opening during gamepad mode (the helper's "vrdash 1") the pad lets go until it closes, and
+buttons held as it comes on or the dashboard closes (the pill's click) wait for their release. Only
+an opening counts, not a dashboard the helper still calls open as gamepad mode starts: on SteamOS
+0.4.5 IsDashboardVisible() stays true after the pill closed it, and that dropped every state
+(issue 105). SteamVR leaves Gamepad mode itself when its dashboard really opens. A pad with no word from the reader for
 STALE lets go of everything, and one that changes targets lets go on the old one.
 """
 
@@ -163,7 +166,8 @@ class GamepadMode:
         self.state = NEUTRAL
         self.seen = 0.0  # the reader's last state came then
         self.pad = None
-        self.dash = False  # the dashboard is open: the controllers are its
+        self.dash = False  # the helper says the dashboard is open
+        self.dash_opened = False  # ...and it opened during this gamepad mode: the controllers are its
         self.fresh = False  # the next state's buttons are held from before: they wait for release
         self.held = 0
         self.refused = None  # why the last "gamepad" from ft-screens was turned down (logged once)
@@ -196,6 +200,7 @@ class GamepadMode:
         self.until = now + LEASE
         if not self.on:
             self.on, self.target, self.state, self.seen, self.fresh = True, target, NEUTRAL, now, True
+            self.dash_opened = False
             self.log(f"gamepad mode on: the controllers are a gamepad for {self.where()}")
             self.read(True)
             self.sound(True)
@@ -214,13 +219,17 @@ class GamepadMode:
         self.sound(False)
 
     def dashboard_state(self, on):
-        """The helper's "vrdash 1|0": while the dashboard is open it has the controllers."""
+        """The helper's "vrdash 1|0": a dashboard opened during gamepad mode has the controllers
+        until it closes."""
         if on == self.dash:
             return
         self.dash = on
-        if on and self.on and self.state != NEUTRAL:
-            self.let_go()
+        if on and self.on:
+            self.dash_opened = True
+            if self.state != NEUTRAL:
+                self.let_go()
         if not on:
+            self.dash_opened = False
             self.fresh = True
 
     def where(self):
@@ -239,7 +248,7 @@ class GamepadMode:
         if not self.on:
             return
         self.seen = now
-        if self.dash:
+        if self.dash_opened:
             return
         buttons = state[0]
         if self.fresh:

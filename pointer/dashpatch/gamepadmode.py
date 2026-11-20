@@ -4,7 +4,10 @@ The pill's click ("gamepad" on @ft_dashpatch) gives SteamVR's controllers to fra
 dashboard overlay ft-screens owns, which hands the pad to the input relay (input/vrpad.py).
 
 Up to SteamVR 2.18 that was SteamVR's own Enter Gamepad Mode for a tab that isn't in front: push
-the page's input focus, then close the dashboard. SteamVR 2.19 (SteamOS 0.5) ignores a focus push
+the page's input focus, then close the dashboard. Some 2.18 builds (SteamOS 0.4.5, issue 105) keep
+the focus on the panel clicked last, though closing the dashboard still puts the controllers in
+Gamepad mode: then the click arms it (ARM), and ft-dashpatch counts SteamVR's next Gamepad mode as
+Frametop's until it ends, or for ARM_S if it never starts. SteamVR 2.19 (SteamOS 0.5) ignores a focus push
 for a page that isn't showing, so that closed the dashboard and nothing took the pad (headset,
 2026-11-18: lasers stuck, grips dead). 2.19 has a diminished dashboard instead, which is what its
 pill does for the tab in front: so this switches the dashboard to frametop.gamepad's tab (ft-screens
@@ -21,6 +24,8 @@ import json
 
 KEY = "frametop.gamepad"
 WAIT_S = 2.0   # for the switch and the focus (well under a second on the testbench, 2026-11-18)
+OLD_WAIT_S = 0.5  # 2.18: the focus push takes at once or never (issue 105)
+ARM_S = 15     # 2.18, the push not taken: the next Gamepad mode is ours if it starts this soon
 STEP_S = 0.1
 HOME_KEY = "valve.steam.gamepadui.main"   # the tab to go back to when the one before isn't known
 
@@ -44,7 +49,7 @@ def _switch(key_js):
 
 
 # One step of entering Gamepad mode: a word, a space, and what to say.
-#   "old <said>"   SteamVR 2.18: the focus is pushed; check it with TOOK, then HIDE
+#   "old <said>"   SteamVR 2.18: the focus is pushed; check it with TOOK (else ARM), then HIDE
 #   "wait <key>"   2.19: switching to our tab (from <key>, the tab it showed): ask again
 #   "dim <key>"    2.19: diminished on our tab; check the focus with TOOK
 #   anything else: why it can't
@@ -64,6 +69,13 @@ STEP = """(() => {%s
 TOOK = """(() => {%s
   return took ? '1' : '0';
 })()""" % _PAGE
+
+# SteamVR 2.18 that kept the focus where it was: ft-dashpatch's STEAMVR_STATE takes the next
+# Gamepad mode as ours (window.__ftPadArmed), as long as it lasts.
+ARM = """(() => {
+  window.__ftPadArmed = {at: Date.now(), active: false};
+  return 'armed';
+})()"""
 
 # SteamVR 2.18: close the dashboard as its Enter Gamepad Mode does.
 HIDE = """(() => {
@@ -99,12 +111,14 @@ def enter(evaluate, sleep):
         said = evaluate(STEP) or ""
         word, _, rest = said.partition(" ")
         if word == "old":
-            for _ in range(tries):
+            for _ in range(int(OLD_WAIT_S / STEP_S)):
                 if evaluate(TOOK) == "1":
                     evaluate(HIDE)
                     return "focus on frametop.gamepad, dashboard closed", None
                 sleep(STEP_S)
-            return "SteamVR didn't give frametop.gamepad the focus: dashboard left open", None
+            evaluate(ARM)
+            evaluate(HIDE)
+            return "SteamVR kept the focus where it was: the next Gamepad mode is Frametop's, dashboard closed", None
         if word == "wait":
             if prev is None and rest not in ("-", KEY):
                 prev = rest

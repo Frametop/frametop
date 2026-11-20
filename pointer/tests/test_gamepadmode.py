@@ -1,6 +1,6 @@
 """The gamepad pill's Gamepad mode (pointer/dashpatch/gamepadmode.py) against a pretend SteamVR
-dashboard: 2.18 (push the focus, then close) and 2.19 (our tab, then the diminished dashboard),
-and the dashboard left as it was when SteamVR doesn't give us the focus.
+dashboard: 2.18 (push the focus, then close; armed when the push isn't taken) and 2.19 (our tab,
+then the diminished dashboard, left as it was when SteamVR doesn't give us the focus).
 
   python3 pointer/tests/test_gamepadmode.py
 
@@ -129,10 +129,14 @@ class Enter(unittest.TestCase):
         self.assertIsNone(prev)
         self.assertEqual(d.state()["calls"], ["push", "hide"])
 
-    def test_2_18_no_focus_leaves_the_dashboard_open(self):
-        d, said, _ = self.enter(version=18, takes=False)
-        self.assertIn("dashboard left open", said)
-        self.assertEqual(d.state()["calls"], ["push"])
+    def test_2_18_no_focus_arms_the_next_gamepad_mode_then_closes(self):
+        # Issue 105: SteamOS 0.4.5's SteamVR keeps the focus on the panel clicked last.
+        d, said, prev = self.enter(version=18, takes=False)
+        self.assertIn("next Gamepad mode is Frametop's", said)
+        self.assertIsNone(prev)
+        self.assertEqual(d.state()["calls"], ["push", "hide"])
+        self.assertTrue(d.evaluate("!!(window.__ftPadArmed && !window.__ftPadArmed.active)"))
+        self.assertLessEqual(sum(self.slept), gamepadmode.OLD_WAIT_S + 1e-9)
 
     def test_no_page(self):
         d, said, prev = self.enter(version=19, takes=True, dims=True, page=False)
@@ -169,6 +173,39 @@ class Leave(unittest.TestCase):
         asked = []
         self.assertFalse(gamepadmode.Session().leave(asked.append))
         self.assertEqual(asked, [])
+
+
+# ft-dashpatch's STEAMVR_STATE on a 2.18 dashboard in Gamepad mode with a Frametop screen still on
+# top of the focus stack (issue 105): laser mode unless the pill armed it.
+STATE = r"""
+const st = {mode: 2};
+globalThis.window = {
+  FrameStore: {frames: [{pages: [{summonOverlayKey: 'frametop.gamepad', mainPanelSGID: 7}]}]},
+  OverlayStore: {m_mapAllOverlays: new Map([[1, {sOverlayKey: 'frametop.screen.1', unStandalonePanelSGID: 3}]])},
+  get inputFocusStore() { return {computedInputFocus: {m_eSystemPanelInteractionMode: st.mode,
+    m_unPIDForVRInput: 0, m_unSteamInputAppID: 769,
+    m_entryAtTopOfStack: {m_unPanelSGID: 3, m_bPanelVisible: true, m_bCanTakeKeyboardFocus: true}}}; },
+};
+const state = () => eval(%s).split(' ').slice(0, 3).join(' ');
+const out = [state()];
+eval(%s);
+out.push(state());
+st.mode = 0; out.push(state(), String(window.__ftPadArmed));
+st.mode = 2; out.push(state());
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(NODE, "the expressions are JavaScript: no node here")
+class Armed(unittest.TestCase):
+    def test_armed_gamepad_mode_is_ours_until_it_ends(self):
+        dspec = importlib.util.spec_from_file_location("dashpatch", ROOT / "pointer/dashpatch/ft-dashpatch.py")
+        dashpatch = importlib.util.module_from_spec(dspec)
+        dspec.loader.exec_module(dashpatch)
+        js = STATE % (json.dumps(dashpatch.STEAMVR_STATE), json.dumps(gamepadmode.ARM))
+        out = json.loads(subprocess.run([NODE, "-e", js], capture_output=True, text=True, check=True).stdout)
+        # before: laser mode; armed: Frametop's; it ended: disarmed; the next one is laser mode again
+        self.assertEqual(out, ["0 0 0", "1 0 1", "0 0 0", "null", "0 0 0"])
 
 
 if __name__ == "__main__":

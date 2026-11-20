@@ -1,72 +1,67 @@
 # Full Keyboard in Frametop
 
-This folder is [Full Keyboard for Steam Frame](https://github.com/TaiKeid/steam-frame-full-keyboard) by TaiKeid and contributors, under the MIT License ([LICENSE](LICENSE), Copyright (c) 2026 TaiKeid and contributors). Its own third-party parts and their licences are in [third_party/README.md](third_party/README.md). Frametop runs it as its keyboard: on the desktop's screens, in the SteamVR dashboard, and in place of Steam's own keyboard.
+Frametop's keyboard is [Full Keyboard for Steam Frame](https://github.com/TaiKeid/steam-frame-full-keyboard) by TaiKeid and contributors, under the MIT License (Copyright (c) 2026 TaiKeid and contributors; the release carries its `LICENSE` and its third-party parts' licences). Frametop runs TaiKeid's own release package, unmodified, as a hosted keyboard: Frametop is its shell, through the keyboard's hosted protocol (protocol 1, [its integration guide](https://github.com/TaiKeid/steam-frame-full-keyboard/blob/main/docs/integration.md)). It shows on the desktop's screens, under the SteamVR dashboard, and in place of Steam's own keyboard in Steam's text fields.
 
-It was imported at 0.8.1, commit `ef915ef75169ac886b7de86d18df2e59150cde2f`, with `git subtree --squash`; the squash commit carries TaiKeid as its author. Everything here is theirs except the changes listed below.
+Until 2026-11-20 this folder held a patched copy of the source (0.8.1, `git subtree`). Now nothing of theirs is in the repository: every build downloads the newest release.
 
-## Frametop's changes
+## The release
 
-- `src/vr.cpp`: the opt-in Steam PIN access gate hides and cancels Full Keyboard while locked or state is uncertain, and leaves native replacement disabled so Steam's PIN UI remains usable. Standalone builds without Frametop's shared header retain upstream behavior.
-- `--frametop` (`src/main.cpp`): the VR keyboard, typing through gamescope (libei) as before, started enabled and hidden. Its settings live in `~/.config/frametop-keyboard`. It has no updater and no startup unit: Frametop's service starts it with SteamVR, and it updates with Frametop. The first run turns the Steam keyboard replacement on. Quitting it from its panel exits with status 3, so the service leaves it closed until SteamVR starts again.
-- `src/frametop.cpp`, `include/framekeyboard/frametop.hpp`: the link to Frametop's input relay (below), and a key sink that sends typing to the desktop or to Steam.
-- `src/frametop_vr.cpp`, `include/framekeyboard/frametop_vr.hpp` (`FrametopVr`): Frametop's part of the VR loop. The panel can show over Frametop's screens with the dashboard closed, while Frametop asked for it; lasers can click it there; it tells Frametop whether it's up; touch typing's tips and fingertips. While ft-screens tiles Steam's dashboard (`STEAM_DASH_PANEL`, Display Settings' Steam's window switch), the panel mounts below Frametop's tile of Steam's page (`steam_tile`, `frametop.steamdash`) instead of Steam's own main overlay, which then shows nothing. It's OpenVR-free and tested in `tests/frametop_tests.cpp`.
-- `src/vr.cpp`: only hook calls into `FrametopVr` in `run_vr` (connect, placement, the visibility gate, the request at each frame's start, touch and fingertips, the between-frame tip reads), and `frametop_vr_access()`, which reads what the hooks need through vr.cpp's runtime-watched wrappers. Keep those blocks as they are when merging upstream; the rest of the file is theirs.
-- `src/placement.cpp`, `include/framekeyboard/placement.hpp`: in Frametop's mode it opens where Frametop's old keyboard did, 0.70 m ahead and 0.35 m under the eyes, facing them, instead of 0.85 m ahead and 0.65 m under, so a hand's laser reaches its bottom row without lowering the hand past where Frametop puts the laser away. Under the dashboard it sits as before.
-- `src/app.cpp`: no Updates button and no Start with SteamOS setting in Frametop's mode.
-- `src/touch.cpp`, `include/framekeyboard/touch.hpp`, `src/frametop_vr.cpp`, `src/app.cpp`, `src/config.cpp`, `tests/touch_tests.cpp`: touch typing. A Frame controller's tip presses the key it touches, in both modes, on by default (General -> Touch typing, `touch_typing`; [configuration](docs/configuration.md)). A hand's fingertip presses keys too, with no laser: ft-screens' hand input decides its hovers and presses as on Frametop's screens, and sends them through the relay (below; `src/frametop.cpp`'s `HandPoke`, `tests/frametop_tests.cpp`).
-- `languages/pl-pl.json`, `docs/languages.md`, `tests/language_tests.cpp`: a Polish profile (Polish programmer's layout: US key places, ą ć ę ł ń ó ś ź ż on AltGr). Another layout is one JSON file like it: in `languages/` here, or in `~/.config/frametop-keyboard/languages/` without a rebuild ([configuration](docs/configuration.md)).
-- `src/japanese.cpp`, `tests/japanese_tests.cpp`: Anthy also loads as `libanthy-unicode.so.0`, Fedora's name for it.
-- `CMakeLists.txt`: the above (`src/frametop.cpp`, `src/frametop_vr.cpp` and `src/touch.cpp` in `keyboard_core`), `frametop-tests`, and `OPENVR_RUNTIME_PATH` can be set, so the build loads SteamVR's own `libopenvr_api` first like Frametop's other programs.
-- Frametop's own files: `build.sh`, `run.sh`, `frametop-keyboard.service`, and this file.
+`keyboard/build.sh` (`keyboard/fetch.py`, standard library only) puts the newest stable release in `keyboard/build/release`, as Daenon asked (2026-11-20): "on future builds, we actually just install the latest version of the keyboard rather than pinning a specific version". It's the one input the root AGENTS.md lets go unpinned. The fetch still:
+
+- takes only TaiKeid's repository, over HTTPS, and only a published, stable release whose tag is a plain version no older than 0.19.1, the first release Frametop's host was tested with;
+- checks the package against the release's `SHA256SUMS` and GitHub's own digest of it, and unpacks it with tarfile's `data` filter, every entry under the package's folder;
+- runs its program where it can (on the Frame, with SteamVR's `libopenvr_api`) to check it says that version and speaks hosted protocol 1;
+- writes what went in to `keyboard/build/release/RELEASE` (version, sha256, where from); ft-kbhost logs it at each start.
+
+`FULLKB_VERSION=x.y.z keyboard/build.sh` takes that exact release instead, for going back to a known-good one while a new release has a problem. `ft dev build` passes it to the image as a build argument (`pack/Containerfile`). `GITHUB_TOKEN`, when set, goes to api.github.com only, for GitHub's rate limit of 60 unauthenticated requests an hour; `ft dev build` passes it as a build secret, which no image layer keeps. CI doesn't set it.
+
+A protocol 1 change upstream (it's marked experimental) could break the host. The tag floor and the program check catch a release that drops protocol 1; a change within it would show in ft-kbhost's log, and `FULLKB_VERSION` goes back meanwhile.
+
+## The host (`keyboard/host/`)
+
+`frametop-keyboard.service` runs `keyboard/host/ft-kbhost` with SteamVR, on the host. It starts the keyboard as `framekeyboard --vr --hosted FD --input ei --start-enabled`, with its settings in `~/.config/frametop-keyboard`, and does what Frametop's patches did before:
+
+- `hosted.py`: the socket pair, the `ready` / `hello` / `subscribe` handshake, the lease (a ping every 2/3 s), one JSON line at a time. A request the keyboard refuses is logged with its name. The keyboard asks a standalone copy of itself to quit when it starts; one too old to understand that (exit 11) is stopped by ft-kbhost as the guide says (its `framekeyboard-autostart.service`, or SIGTERM), and the service starts again.
+- `host.py`: what shows, where, and where typing goes. Typing goes, newest reason first: into a Steam field that opened it (the text sink, then `steamhook.js`); to Frametop's desktop while the relay says typing goes there (the sink, then the relay as `kbtext` / `kbkey`, `keys.py`); otherwise to gamescope's focus through the keyboard's own libei output, with the sink off. The panel's "Stop shell typing" sends typing to gamescope until the route changes.
+- `placement.py`: where it opens. Over the screens it opens 0.70 m ahead and 0.35 m under the eyes, facing them, tilted 26.6°, so a hand's laser reaches its bottom row without lowering the hand past where Frametop puts the laser away. In the dashboard it hangs under the bottom edge of Frametop's tile of Steam's page (`frametop.steamdash`) or Steam's own main overlay. ft-screens says which (`screens/vrkbspot.cpp`).
+- `touch.py`: fingertips, as forwarded pointers. ft-screens sends `kbpoke SIDE VERB [x y z]` (hover, press, move, up, end; the fingertip's point in the standing universe), the relay passes it on as `kb poke ...`, and this puts it on the panel as the keyboard last reported its pose. Forwarding turns the keyboard's own lasers off, so it's on only from a fingertip's first poke until 0.6 s after the last; a press heard nothing more of for 3 s is cancelled.
+- Steam's PIN lock (`conf/ft_pinlock.py`): while it holds, or its state is uncertain, the keyboard hides and opens for nothing, and Steam's fields keep Steam's own keyboard, so its PIN screen stays usable.
+- Quitting it from its panel ends the keyboard; ft-kbhost then exits with 3, and the service leaves it closed until SteamVR starts again. A release without hosted protocol 1 exits with 4 and also stays closed, with a log line naming `FULLKB_VERSION`. A keyboard ft-kbhost closed itself (it stopped reading, or sent a line over 1 MiB) exits with 1 and is restarted, at most 5 times in 2 minutes.
+
+### Steam's text fields (`steamhook.js`, `steamhook.py`)
+
+Hosted mode has no native Steam replacement, so Frametop has its own, much reduced from Full Keyboard's own bridge (`share/framekeyboard/bridge/steam_bridge.js` in the release). `steamhook.py` keeps one connection to Steam's SharedJSContext (`steam/steamui.py`) and installs `steamhook.js` there. Each of Steam's own windows (`valve.steam.gamepadui.main`, `.barpopup`, `.appoverlay.*`) shows Steam's keyboard through its `VirtualKeyboardManager.SetVirtualKeyboardShownInternal`; while the hook's lease is renewed and the relay lets Steam's fields take Full Keyboard, a show for an editable field (text, search, password, tel, url, a textarea or contentEditable) opens Full Keyboard instead. Its text goes in with `execCommand("insertText")`, and its editing keys (Backspace, Delete, arrows, Home, End, Enter, Tab, Escape, Ctrl+A/C/X/V) as typing would. The field's text is never read. Without renewal for 1.5 s the hook takes itself out, and Steam's own keyboard works as before.
+
+The relay decides whether Steam's fields take it: Frametop Settings' Keyboard setting (`always`, or `no_keyboard` while no physical keyboard is connected; a host's keyboard that host input streams in counts as connected). A field asks through the relay (`kbsteam`), which answers `kb nosteam`, has ft-screens open it in place (`vrkeyboard show steam`), or, while ft-screens isn't running, answers `kb show` so it opens where it is. The relay reads the setting when it starts and on `reload`, which Frametop Settings sends after a change; an edit by hand needs `reload` too.
 
 ## Names
 
-Its programs keep upstream's names, `framekeyboard` and `framekeyboard-native-guard`, instead of Frametop's `ft-` names (`ft-keyboard`, `ft-kbguard`). This is a waiver from the root AGENTS.md. The names are upstream's in `CMakeLists.txt`, in `bridge/native_bridge.py`, which finds the guard by name, in `src/startup.cpp`, in its packaging scripts, and in their tests, so renaming them would add Frametop changes to several upstream files that every pull would have to merge. Frametop's own files use them too: `frametop-keyboard.service` (`pkill -x framekeyboard`), `uninstall.sh`, `scripts/fast-install` and `pack/Containerfile`, and installed units would have to move along with them. `framekeyboard` fits in 15 characters for `pkill -x`. Nothing finds the guard by process name, so its longer name is truncated harmlessly. Rename them only together with upstream, or with an install step that moves the installed unit.
+The release's programs keep upstream's names, `framekeyboard` and `framekeyboard-native-guard`, instead of Frametop's `ft-` names. This is a waiver from the root AGENTS.md: they're TaiKeid's, unmodified. `framekeyboard` fits in 15 characters for `pgrep -x`. Frametop's own program is `ft-kbhost`.
 
-## Upstream parts Frametop doesn't use
+## How it works with the relay
 
-These stay in the tree, unchanged, so subtree pulls stay clean. In `--frametop` mode they're never reached, or never shown:
+Frametop's desktop runs in a nested KWin that gamescope never sees, so keys sent to gamescope can't reach it. The input relay (`input/input-relay.py`) owns typing for the desktop already: it knows where typing goes (the panel clicked last, from ft-screens), and it types Frametop Voice's text there. ft-kbhost talks to it over the relay's abstract datagram socket, `@frametop_relay` (`relaylink.py`):
 
-- The updater: `src/updates.cpp`, `include/framekeyboard/updates.hpp`, `update/update_helper.py`, `docs/updates.md`, and the `updates` and `update-helper` tests. `src/app.cpp` hides its button, and `src/vr.cpp` still includes its header.
-- Start with SteamOS: `src/startup.cpp` and the `startup-unit` test. Frametop's service starts it, and `src/app.cpp` hides the setting.
-- Packaging and release: `scripts/package.sh`, `scripts/install-local.sh`, `tools/check_release_binary.py`, `cmake/steam-frame-aarch64.cmake` (Frametop builds natively in its container), `docs/releasing.md` and the `installer` test.
-- Typing through uinput (`--input uinput`, `UInputSink`): Frametop types through libei and its relay.
-- The desktop preview (`src/preview.cpp`, `scripts/preview.sh`): a development window, not the VR keyboard.
-- `design/index.html`: upstream's approved look, for their own reviews.
-
-Their tests still run in `just test-keyboard`, so a pull that breaks them shows up.
-
-Settings follow upstream's pattern: each one has a `pending_*` copy in `src/app.cpp` that Settings edits, applied in several places. `touch_typing` does the same, so a new Frametop setting needs about five edits there too.
-
-## How it works with Frametop
-
-Frametop's desktop runs in a nested KWin that gamescope never sees, so keys sent to gamescope can't reach it. The input relay (`input/input-relay.py`) owns typing for the desktop already: it knows where typing goes (the panel clicked last, from ft-screens), and it types Frametop Voice's text there. Full Keyboard talks to it over the relay's abstract datagram socket, `@frametop_relay`:
-
-- Full Keyboard says `kbhello OPEN` every second, and at once when it opens or closes. The relay answers each hello, and any change, with `kb DESKTOP SURFACE`: whether typing goes to the desktop, and whether the screens show with Frametop not paused (then it may show over them with the dashboard closed).
-- While typing goes to the desktop, its keys go to the relay as `kbkey CODE 0|1` and composed text as `kbtext TEXT`. The relay types them on the desktop's seat through ft-screens, in order with dictation's typing; the text goes through the desktop's keyboard layout and isn't logged. Otherwise they go to gamescope as before. A key comes up where it went down, whichever way typing goes by then, and when Full Keyboard stops, the relay lets go of the keys it held. A release the relay doesn't take (its socket full) is sent again, before the next key and each frame, until it goes; a press that doesn't go isn't sent again, since a late press would type. A relay that restarts has let go of everything and takes keys only after the next `kbhello`, so a release owed then is dropped there, harmlessly. The test's stand-in relay has no hello gate.
-- Opening it: the relay tells ft-screens it runs (`fullkb OPEN`), and ft-screens then passes on its `vrkeyboard` commands (a desktop text field gets focus, a mapped button, frunner, a layout reset) as `kbpanel show|hide`, which the relay sends Full Keyboard as `kb show|hide`. It's the only on-screen keyboard: while it isn't running, ft-screens opens nothing (its older panel, `screens/keyboard.cpp`, was removed in the 2026-10-31 cleanup; [docs/design.md](../docs/design.md)).
-- A fingertip on its panel: ft-screens sends the relay `kbpoke SIDE VERB [x y z]` (hover, press, move, up, end; the fingertip's point in the standing universe), only taken from this user, and the relay sends Full Keyboard `kb poke ...`. Full Keyboard puts the point on its panel as it shows then and presses keys with it like a laser's cursor, but without a laser and without haptics. A press it hears nothing more of for 3 seconds comes up. ft-screens shows the hand's dot on it as on its own screens.
+- ft-kbhost says `kbhello OPEN` every second, and at once when the panel opens or closes. The relay answers each hello, and any change, with `kb DESKTOP SURFACE STEAM`: whether typing goes to the desktop; whether the screens show with Frametop not paused (the panel it opened over them hides when they go); whether Steam's fields may take it.
+- While typing goes to the desktop, keys go to the relay as `kbkey CODE 0|1` and committed text as `kbtext TEXT`. The relay types them on the desktop's seat through ft-screens, in order with dictation's typing; the text goes through the desktop's keyboard layout and isn't logged. A release the relay doesn't take (its socket full) is sent again until it goes; a press that doesn't go isn't, since a late press would type.
+- Opening it: the relay tells ft-screens it runs (`fullkb OPEN`), and ft-screens then passes on its `vrkeyboard` commands (a desktop text field gets focus, a mapped button, frunner, a layout reset) as `kbpanel show SPOT | hide`, which the relay sends as `kb show SPOT | hide`. SPOT is `head` or `dash` and a 3x4 pose. It's the only on-screen keyboard: while it isn't running, ft-screens opens nothing.
 - A click on its panel (`org.framekeyboard.*` overlays) doesn't take typing away from the desktop.
-- Its Steam keyboard replacement (`bridge/`) is theirs, unchanged.
 
-Only same-user messages count on either side. Full Keyboard takes word only from the relay's own name, and sends desktop typing only while that word is under 3 seconds old, so a stopped relay never leaves typing addressed to a name another process could take. The relay takes keys and text only from the address that said hello.
+Only same-user messages count on either side. ft-kbhost takes word only from the relay's own name, and sends desktop typing only while that word is under 3 seconds old, so a stopped relay never leaves typing addressed to a name another process could take. The relay takes keys and text only from the address that said hello.
 
-Known limits: on the desktop, keys go by their place on the keyboard, so pick the same layout in Full Keyboard as the desktop's (Frametop Settings → Keyboard → Desktop layout). Text the desktop's layout has no key for (Chinese, Japanese, Korean, emoji) can't be typed on the desktop yet; it reaches Steam's fields as before.
+## Known limits
+
+- On the desktop, keys go by their place on the keyboard, so pick the same layout in Full Keyboard as the desktop's (Frametop Settings → Keyboard → Desktop layout). Text the desktop's layout has no key for (Chinese, Japanese, Korean, emoji) can't be typed on the desktop yet; it reaches Steam's fields and games.
+- Touch typing with a controller's tip (the old patch's `touch.cpp`) is gone: the release has no such setting. Fingertips and lasers type.
+- fast-install downloads a release only when `keyboard/fetch.py` or `keyboard/build.sh` change; a full build always takes the newest.
 
 ## Building and running
 
 ```
-keyboard/build.sh                          # build/frametop/framekeyboard, in the dev container
-FULL_KEYBOARD_TESTS=1 keyboard/build.sh    # with its tests (ctest)
+keyboard/build.sh                          # the newest release, in keyboard/build/release
+FULLKB_VERSION=0.19.1 keyboard/build.sh    # an exact one
 keyboard/run.sh install | uninstall        # frametop-keyboard.service, starts with SteamVR
 keyboard/run.sh status | restart | log [lines]
+keyboard/test/                             # the host's tests, offline (fakes for the keyboard, relay and Steam)
 input/test/keys-test.py                    # the relay's side, offline
 ```
-
-## Updating from upstream
-
-```
-git subtree pull --prefix keyboard https://github.com/TaiKeid/steam-frame-full-keyboard <tag> --squash
-```
-
-Then build with its tests, run `input/test/keys-test.py`, and update the version and commit above.

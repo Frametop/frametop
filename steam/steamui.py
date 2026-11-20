@@ -8,6 +8,8 @@ ft-steam (the Steam menu shortcut).
 
   evaluate(expression)   the expression's value (awaited, JSON-able); SteamUnreachable when
                          Steam or its UI isn't there, or the script threw
+  Session()              one connection kept open, for a caller that evaluates often
+                         (keyboard/host's Steam hook): .evaluate(expression, timeout), .close()
 """
 import base64
 import json
@@ -70,16 +72,29 @@ class _WebSocket:
                 n = struct.unpack(">H", self._take(2))[0]
             elif n == 127:
                 n = struct.unpack(">Q", self._take(8))[0]
-            message += self._take(n)
+            payload = self._take(n)
+            opcode = b0 & 0x0F
+            if opcode == 0x8:
+                raise SteamUnreachable("Steam closed the connection")
+            if opcode == 0x9:
+                self._control(0x8A, payload)  # a ping: pong
+                continue
+            if opcode == 0xA:
+                continue
+            message += payload
             if b0 & 0x80:
                 return message.decode(errors="replace")
+
+    def _control(self, head, payload):
+        mask = os.urandom(4)
+        self.sock.sendall(struct.pack(">BB", head, 0x80 | len(payload)) + mask +
+                          bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
 
     def close(self):
         self.sock.close()
 
 
-def evaluate(expression):
-    """Runs JavaScript in Steam's SharedJSContext and returns its (awaited) value."""
+def _shared_context_url():
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json", timeout=3) as r:
             targets = json.load(r)
@@ -88,21 +103,51 @@ def evaluate(expression):
     url = next((t["webSocketDebuggerUrl"] for t in targets if t.get("title") == "SharedJSContext"), None)
     if not url:
         raise SteamUnreachable("Steam's UI isn't running")
-    try:
-        ws = _WebSocket(url)
-        try:
-            ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",
-                                "params": {"expression": expression, "awaitPromise": True, "returnByValue": True}}))
-            while True:
-                reply = json.loads(ws.recv())
-                if reply.get("id") == 1:
-                    break
-        finally:
-            ws.close()
-    except OSError as e:
-        raise SteamUnreachable(str(e)) from e
+    if not url.startswith(f"ws://127.0.0.1:{CDP_PORT}/"):
+        raise SteamUnreachable("Steam's debugger isn't on this machine's loopback")
+    return url
+
+
+def _value(reply):
     result = reply.get("result", {})
     if "exceptionDetails" in result:
         details = result["exceptionDetails"]
         raise SteamUnreachable(details.get("exception", {}).get("description") or details.get("text", "error"))
     return result.get("result", {}).get("value")
+
+
+class Session:
+    """One connection to Steam's SharedJSContext, kept open."""
+
+    def __init__(self, timeout=5):
+        try:
+            self.ws = _WebSocket(_shared_context_url(), timeout=timeout)
+        except OSError as e:
+            raise SteamUnreachable(str(e)) from e
+        self.next_id = 0
+
+    def evaluate(self, expression, timeout=2.0):
+        self.next_id += 1
+        try:
+            self.ws.sock.settimeout(timeout)
+            self.ws.send(json.dumps({"id": self.next_id, "method": "Runtime.evaluate",
+                                     "params": {"expression": expression, "awaitPromise": True,
+                                                "returnByValue": True}}))
+            while True:
+                reply = json.loads(self.ws.recv())
+                if reply.get("id") == self.next_id:
+                    return _value(reply)
+        except (OSError, ValueError) as e:
+            raise SteamUnreachable(str(e)) from e
+
+    def close(self):
+        self.ws.close()
+
+
+def evaluate(expression):
+    """Runs JavaScript in Steam's SharedJSContext and returns its (awaited) value."""
+    session = Session()
+    try:
+        return session.evaluate(expression, timeout=5)
+    finally:
+        session.close()

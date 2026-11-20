@@ -67,6 +67,10 @@ bool ft_vr_app_key(uint32_t code, int value, bool elsewhere);
 bool ft_vr_app_typing(void);
 // A click on something that isn't an app (Steam's panels): the typing leaves the apps.
 void ft_vr_app_blur(void);
+// Where Full Keyboard opens, for the relay's "kbpanel show" (vrkbspot.cpp): "dash" and the bottom
+// centre of Steam's page while the dashboard shows it, else "head" and the headset's pose, then
+// twelve numbers (a 3x4 pose, rows, the standing universe). False if neither is known.
+bool ft_vr_keyboard_spot(char *out, int size);
 // The 3D mouse's wheel (notches, + up) during a carry_toggle carry: it pushes the carried panel. False if none.
 bool ft_vr_carry_wheel(int notches);
 // A remote screen's panel (remote.c): another machine's display, streamed by ft-stream. It

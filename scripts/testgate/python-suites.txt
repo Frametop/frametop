@@ -25,6 +25,7 @@ settings/test/*.py
 quicksettings/test/*.py
 remote/test/*.py
 steam/test/*.py
+keyboard/test/test_*.py
 float/test/*.py
 display-settings/tests/*.py
 pointer/tests/*.py

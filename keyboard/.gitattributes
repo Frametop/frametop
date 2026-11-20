@@ -1,2 +1,0 @@
-# Preserve vendored SDK formatting; enforce whitespace checks on our own sources.
-third_party/** -whitespace

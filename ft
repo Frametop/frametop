@@ -105,8 +105,12 @@ case "${1:-help}" in
               else
                 built_commit=unknown
               fi
+              # The keyboard's release (keyboard/FRAMETOP.md): FULLKB_VERSION picks one, and
+              # GITHUB_TOKEN goes in as a build secret (never a layer), for GitHub's rate limit.
+              keyboard_args=(--build-arg "FULLKB_VERSION=${FULLKB_VERSION:-}")
+              [ -z "${GITHUB_TOKEN:-}" ] || keyboard_args+=(--secret id=github_token,env=GITHUB_TOKEN)
               exec "$engine" build -f "$root/pack/Containerfile" --label "org.frametop.commit=$built_commit" \
-                --label "org.frametop.tree=$built_tree" -t "$image" "$root" ;;
+                --label "org.frametop.tree=$built_tree" "${keyboard_args[@]}" -t "$image" "$root" ;;
       shell)  exec "$engine" run --rm -it ${mounts[@]+"${mounts[@]}"} --workdir /src/frametop "$image" bash ;;
       test)   run_in_image just test ;;
       help|-h|--help|"") sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;

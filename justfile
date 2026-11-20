@@ -12,7 +12,7 @@ test_run := uuid()
 
 # everything, strict (the recipes are the source of truth); when it passes, the commit it passed
 # on is where `just test-changed` starts
-test: _mark-start lint test-python test-c test-keyboard test-bash test-testbench test-fast-install
+test: _mark-start lint test-python test-c test-bash test-testbench test-fast-install
     @python3 scripts/testgate/changed.py --mark-green {{test_run}}
 
 # what `just test` tests: the tree as it starts (scripts/testgate/changed.py)
@@ -52,41 +52,6 @@ test-python:
 # build here (no ncnn, no OpenVR header) says SKIPPED and why.
 test-c:
     python3 scripts/testgate/ctests.py
-
-# Full Keyboard's ctest (keyboard/tests), configured and built in build/tests/keyboard, with
-# its own OpenVR header (keyboard/third_party/openvr) and the library scripts/openvr.sh names,
-# without that script's header download. As root (the image, the dev container) the two
-# tests that make a save fail with a read-only folder can't (root writes there anyway), so
-# they run as nobody.
-test-keyboard:
-    #!/usr/bin/env bash
-    set -eo pipefail
-    openvr=${OPENVR_LIB:-/opt/steamvr/bin/linuxarm64}
-    [ -f "$openvr/libopenvr_api.so" ] || { echo "keyboard ctest: SKIPPED: no libopenvr_api.so in $openvr"; exit 0; }
-    out=build/tests/keyboard
-    mkdir -p "$out"
-    cmake -S keyboard -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON \
-      -DOPENVR_LIBRARY="$openvr/libopenvr_api.so" -DOPENVR_RUNTIME_PATH="/opt/steamvr/bin/linuxarm64:$openvr" >/dev/null
-    cmake --build "$out" >"$out/build.log" 2>&1 || { tail -40 "$out/build.log"; exit 1; }
-    cd "$out"
-    # systemd-analyze --user (startup-unit) wants a runtime folder, with a path short enough
-    # for the unix sockets in it
-    export XDG_RUNTIME_DIR=/tmp/ft-keyboard-test-$(id -u)
-    mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
-    status=0
-    if [ "$(id -u)" = 0 ]; then
-        ctest --output-on-failure -E '^(startup|settings)$' || status=1
-        for t in startup settings; do
-            if setpriv --reuid=65534 --regid=65534 --clear-groups env HOME=/tmp "./$t-tests" >"$t.log" 2>&1; then
-                echo "keyboard ctest $t (as nobody): ok"
-            else
-                echo "keyboard ctest $t (as nobody): FAILED"; cat "$t.log"; status=1
-            fi
-        done
-    else
-        ctest --output-on-failure || status=1
-    fi
-    exit $status
 
 # shell scripts: syntax-gate everything that ships, the *.sh files and the
 # scripts named by their #! line alone (ft, ft-layout, in-box, ...); a #!/bin/sh

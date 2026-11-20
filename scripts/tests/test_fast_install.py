@@ -48,8 +48,8 @@ class Paths(unittest.TestCase):
         base = {p: ('100644', p) for p in (
             'screens/vr.cpp', 'screens/README.md', 'screens/tests/t.cpp', 'frunner/ft-spotpanel.cpp',
             'frunner/reserve.h', 'frunner/ft_frunner.py', 'scripts/openvr.sh', 'gaze/tracker/grab.c',
-            'hands/include/fh_hands.h', 'hands/handsmode.py', 'keyboard/layouts/us.json',
-            'keyboard/bridge/native_bridge.py', 'keyboard/docs/x.md', 'voice/build.sh', 'stream/mic.patch',
+            'hands/include/fh_hands.h', 'hands/handsmode.py', 'keyboard/fetch.py',
+            'keyboard/host/host.py', 'keyboard/build.sh', 'keyboard/FRAMETOP.md', 'voice/build.sh', 'stream/mic.patch',
             'screens/glyphs.h', 'layout/countdown/ft-reset-timer.cpp')}
         includes = {'layout/countdown/ft-reset-timer.cpp': b'#include "../../screens/glyphs.h"\n'}
 
@@ -69,16 +69,17 @@ class Paths(unittest.TestCase):
         self.assertEqual(rebuilt('gaze/tracker/grab.c'), {'gaze/tracker'})
         self.assertEqual(rebuilt('hands/include/fh_hands.h'), {'hands', 'screens', 'pointer/helper'})
         self.assertEqual(rebuilt('hands/handsmode.py'), set())       # Python runs as it is
-        self.assertEqual(rebuilt('keyboard/layouts/us.json'), {'keyboard'})   # built in
-        self.assertEqual(rebuilt('keyboard/bridge/native_bridge.py'), {'keyboard'})   # copied by CMake
-        self.assertEqual(rebuilt('keyboard/docs/x.md'), set())
+        self.assertEqual(rebuilt('keyboard/fetch.py'), {'keyboard'})   # what it downloads
+        self.assertEqual(rebuilt('keyboard/build.sh'), {'keyboard'})
+        self.assertEqual(rebuilt('keyboard/host/host.py'), set())   # ft-kbhost runs as it is
+        self.assertEqual(rebuilt('keyboard/FRAMETOP.md'), set())
         self.assertEqual(rebuilt('stream/mic.patch'), {'stream'})
         self.assertEqual(rebuilt('stream/protocols/wlr-data-control-unstable-v1.xml'), {'stream'})
         self.assertEqual(rebuilt('stream/ft-clip.c'), {'stream'})
         self.assertEqual(rebuilt('voice/build.sh'), {'voice'})
         openvr = rebuilt('scripts/openvr.sh')
-        self.assertTrue({'screens', 'power', 'keyboard'} <= openvr)
-        self.assertFalse({'voice', 'hands', 'gaze/tracker'} & openvr)
+        self.assertTrue({'screens', 'power'} <= openvr)
+        self.assertFalse({'voice', 'hands', 'gaze/tracker', 'keyboard'} & openvr)
         self.assertEqual(rebuilt('scripts/stb.sh'), {'screens', 'layout/countdown', 'gaze', 'hands/rec', 'avatar'})
         self.assertEqual(rebuilt('screens/glyphs.h'), {'screens', 'layout/countdown'})   # its include line
         self.assertEqual(rebuilt('avatar/modelfile.cpp'), {'avatar', 'screens', 'together'})   # built into ft-handview and ft-together too
@@ -142,7 +143,7 @@ class Paths(unittest.TestCase):
             self.assertIsNotNone(fi.install_step(path), path)
 
     def test_what_runs(self):
-        for path in ('input/relay.py', 'screens/build/ft-screens', 'keyboard/layouts/us.json'):
+        for path in ('input/relay.py', 'screens/build/ft-screens', 'keyboard/build/release/bin/framekeyboard'):
             self.assertTrue(fi.runs(path), path)
         for path in ('screens/README.md', 'screens/vr.cpp', 'hands/include/fh.h', 'float/test/t.py',
                      'docs/design.md'):
@@ -157,8 +158,9 @@ class Paths(unittest.TestCase):
                                           roots), {'pointer/helper'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-gaze.service', ['python3', '/r/0.1/gaze/ft-gazed'],
                                           roots), {'gaze', 'models', 'conf'})
-            self.assertEqual(fi.dirs_used(tree, 'frametop-keyboard.service', ['--data-dir', '/r/0.1/keyboard'],
-                                          roots), {'keyboard'})
+            self.assertEqual(fi.dirs_used(tree, 'frametop-keyboard.service',
+                                          ['/usr/bin/python3', '-I', '/r/0.1/keyboard/host/ft-kbhost'],
+                                          roots), {'keyboard', 'keyboard/host', 'conf', 'steam'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-away.service', ['python3', '/r/0.1/together/ft-roomaway'],
                                           roots), {'together', 'conf'})
             self.assertEqual(fi.dirs_used(tree, 'frametop-room-input.service', ['python3', '/r/0.1/together/ft-roominput'],

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install, start, stop, or inspect Frametop's keyboard (Full Keyboard, --frametop) on the Frame.
+# Install, start, stop, or inspect Frametop's keyboard (Full Keyboard, hosted by ft-kbhost) on the Frame.
 # Usage: keyboard/run.sh install|uninstall   # user service, starts with SteamVR
 #        keyboard/run.sh start|stop|restart|status|log [lines]
 # Full Keyboard's own startup unit (framekeyboard-autostart.service, from a standalone install)
-# starts a copy of its own: whichever starts first runs, and the other only asks it to recenter,
-# so Frametop's could lose. install says so.
+# starts a copy of its own; Frametop's hosted one asks it to quit, so both would fight at each
+# SteamVR start. install says so.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$root/scripts/_env.sh"
@@ -15,12 +15,16 @@ case ${1:-status} in
   install)
     "$root/scripts/sync.sh" >/dev/null
     install_unit "$root/keyboard/$unit"
-    "$frame" --host "set -e; pkill -x framekeyboard || true
+    "$frame" --host "set -e
 $(enable_units $unit)
 if systemctl --user is-enabled --quiet framekeyboard-autostart.service 2>/dev/null; then
-  echo 'note: Full Keyboard is also installed on its own (framekeyboard-autostart.service). Frametop runs its own copy;'
+  echo 'note: Full Keyboard is also installed on its own (framekeyboard-autostart.service). Frametop runs its own hosted copy;'
   echo '      turn the standalone one off in its settings (Start with SteamOS), or: systemctl --user disable --now framekeyboard-autostart.service'
 fi
+# Before 0.19.1, Frametop's keyboard ran in the box in a scope of its own, which stopping the
+# unit doesn't end: end it (and any other copy), so the hosted one gets the instance.
+systemctl --user stop $unit 2>/dev/null || true
+pkill -x framekeyboard || true
 $(start_with_steamvr $unit)" ;;
   uninstall) "$frame" --host "systemctl --user disable --now $unit 2>/dev/null; rm -f ~/.config/systemd/user/$unit; systemctl --user daemon-reload; echo removed" ;;
   start|stop|restart|status) "$frame" --host "systemctl --user $1 $unit; systemctl --user is-active $unit" || true ;;

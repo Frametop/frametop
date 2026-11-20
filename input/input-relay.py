@@ -159,13 +159,17 @@ doesn't count), "button" (only the keyboard_toggle action opens it), or "never"
 open when the text field loses focus, until its close button, keyboard_toggle, or a layout reset
 (ft-layout reset) closes it.
 
-Full Keyboard (keyboard/, TaiKeid's, run with --frametop; keyboard/FRAMETOP.md) is that keyboard.
-While it isn't running, nothing opens (ft-screens' old panel was removed in the 2026-10-31 cleanup). It says "kbhello OPEN" on the control socket every second, only taken from
-this user, and gets "kb DESKTOP SURFACE" back: whether typing goes to the desktop, and whether
-the screens show with Frametop not paused (it may show over them with the dashboard closed).
-The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens passes its
-"vrkeyboard" commands on as "kbpanel show|hide", which the relay sends Full Keyboard as "kb
-show|hide". A fingertip on its panel comes from ft-screens as "kbpoke SIDE VERB [x y z]" and goes
+Full Keyboard (TaiKeid's release, hosted by keyboard/host/ft-kbhost; keyboard/FRAMETOP.md) is
+that keyboard. While it isn't running, nothing opens (ft-screens' old panel was removed in the
+2026-10-31 cleanup). ft-kbhost says "kbhello OPEN" on the control socket every second, only taken
+from this user, and gets "kb DESKTOP SURFACE STEAM" back: whether typing goes to the desktop,
+whether the screens show with Frametop not paused (it may show over them with the dashboard
+closed), and whether Steam's own text fields may open it (steam_takes_keyboard: the same
+"vr_keyboard" rule). The relay tells ft-screens "fullkb OPEN", and while that's fresh ft-screens
+passes its "vrkeyboard" commands on as "kbpanel show [head|dash POSE] | hide", which the relay
+sends on as "kb show ... | hide". A Steam field that wants it comes as "kbsteam": the relay
+answers "kb nosteam" when the rule or Steam's PIN lock says no, and otherwise has ft-screens open
+it ("vrkeyboard show steam"), or opens it in place ("kb show") while ft-screens isn't there. A fingertip on its panel comes from ft-screens as "kbpoke SIDE VERB [x y z]" and goes
 to it as "kb poke SIDE VERB [x y z]", so its keys take hands as our screens do, with no laser.
 Its typing for the desktop comes as "kbkey CODE 0|1" and "kbtext TEXT", only from
 the address that said hello: they go in order with dictation's typing, keys as they are (a held
@@ -1298,7 +1302,7 @@ class Typing:
 
 
 class FullKeyboardLink:
-    """Full Keyboard (keyboard/, --frametop), as the control socket knows it."""
+    """Full Keyboard (keyboard/host/ft-kbhost), as the control socket knows it."""
 
     def __init__(self):
         self.addr = None  # its address
@@ -1451,11 +1455,23 @@ class Relay:
         return mode if mode in VR_KEYBOARD_MODES else "no_keyboard"
 
     def vr_keyboard(self, command):
-        """Open or close Frametop's keyboard (ft-screens)."""
+        """Open or close Frametop's keyboard (ft-screens). False if ft-screens isn't running."""
         try:
             self.screens_sock.sendto(f"vrkeyboard {command}".encode(), SCREENS)
+            return True
         except OSError:
-            pass  # ft-screens not running
+            return False
+
+    def physical_keyboards(self):
+        """The connected pass-through keyboards' names (a program's uinput keyboard doesn't count)."""
+        return sorted({n.name for n in self.nodes.values()
+                       if n.candidate and n.is_keyboard and n.role == "passthrough" and not n.uinput})
+
+    def steam_takes_keyboard(self):
+        """Steam's own text fields open Full Keyboard instead of Steam's keyboard: as a desktop
+        text field would open it (the Keyboard setting, and connected keyboards)."""
+        mode = self.vr_keyboard_mode()
+        return mode == "always" or (mode == "no_keyboard" and not self.physical_keyboards())
 
     def wheel_to(self, notches, horizontal=False):
         """The 3D mouse's wheel to ft-screens, while its laser is on a panel (Pointer.scroll):
@@ -1476,8 +1492,7 @@ class Relay:
             if not self.rules.get("vr_keyboard_persist", True):
                 self.vr_keyboard("hide")  # ft-screens closes it only if it opened it for a text field
             return
-        keyboards = sorted({n.name for n in self.nodes.values()
-                            if n.candidate and n.is_keyboard and n.role == "passthrough" and not n.uinput})
+        keyboards = self.physical_keyboards()
         if mode == "always" or (mode == "no_keyboard" and not keyboards):
             self.vr_keyboard("show")
             why = "asking ft-screens to open Frametop's keyboard"
@@ -2115,16 +2130,17 @@ class Relay:
             self.watchers.pop(addr, None)
 
     def kb_tell(self, now, message=None):
-        """Tell Full Keyboard message, or with none, "kb DESKTOP SURFACE" if that changed: typing
-        goes to the desktop 0|1, and the screens show with Frametop not paused 0|1 (it may show
-        over them with the dashboard closed). From the control socket: it takes word from
-        @frametop_relay only."""
+        """Tell Full Keyboard message, or with none, "kb DESKTOP SURFACE STEAM" if that changed:
+        typing goes to the desktop 0|1, the screens show with Frametop not paused 0|1 (what it
+        opened over them closes when they hide), and Steam's text fields may open it 0|1
+        (steam_takes_keyboard). From the control socket: it takes word from @frametop_relay only."""
         addr = self.kb.addr
         if addr is None:
             return
         if message is None:
             message = (f"kb {int(now < self.desktop_until)}"
-                       f" {int(now < self.shown_until and not self.pause.paused)}")
+                       f" {int(now < self.shown_until and not self.pause.paused)}"
+                       f" {int(self.steam_takes_keyboard())}")
             if message == self.kb.said:
                 return
             self.kb.said = message
@@ -2294,7 +2310,7 @@ class Relay:
                 log(f"type from another user ({uid}): ignored")
             return
         if cmd == "kbhello":
-            # Full Keyboard (keyboard/, --frametop), every second and when it opens or
+            # Full Keyboard (keyboard/host/ft-kbhost), every second and when it opens or
             # closes: "kbhello OPEN". Only from this user and a bound address: what it
             # types goes to the desktop. It gets the word on every hello, and ft-screens
             # hears it's there ("fullkb OPEN"), so it opens Full Keyboard, not its own.
@@ -2325,11 +2341,25 @@ class Relay:
                   and words[2] in ("0", "1") and len(self.typing.queue) < TYPE_MAX):
                 self.typing.queue.append(("key", int(words[1]), int(words[2])))
             return
-        if cmd == "kbpanel" and len(words) == 2 and words[1] in ("show", "hide"):
+        if cmd == "kbpanel" and (words[1:] == ["hide"] or words[1:2] == ["show"] and (
+                len(words) == 2 or len(words) == 15 and words[2] in ("head", "dash")
+                and all(KB_COORD.fullmatch(w) for w in words[3:]))):
             # From ft-screens (unbound): open or close Full Keyboard, which it does for the
-            # "vrkeyboard" commands while Full Keyboard is there.
+            # "vrkeyboard" commands while Full Keyboard is there; a show says where ("head" or
+            # "dash", and a pose: twelve numbers).
             if uid == os.getuid():
-                self.kb_tell(now, f"kb {words[1]}")
+                self.kb_tell(now, "kb " + " ".join(words[1:]))
+            return
+        if cmd == "kbsteam":
+            # From Full Keyboard (ft-kbhost), only the one that said hello: a Steam text field
+            # asks for it. ft-screens opens it (and says where), as for a desktop text field;
+            # without ft-screens it opens where it is. "kb nosteam" when it shouldn't open.
+            if uid != os.getuid() or addr is None or addr != self.kb.addr:
+                return
+            if not self.steam_takes_keyboard() or not ft_pinlock.allowed():
+                self.kb_tell(now, "kb nosteam")
+            elif not self.vr_keyboard("show steam"):
+                self.kb_tell(now, "kb show")
             return
         if cmd == "kbpoke":
             # From ft-screens (unbound): a fingertip on Full Keyboard's panel, "kbpoke

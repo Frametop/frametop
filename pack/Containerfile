@@ -90,14 +90,15 @@ RUN pointer/helper/build.sh && pointer/driver/build.sh \
  && install -t /runtime/opt/frametop/lib pointer/driver/build/driver_ft_pointer.so
 RUN gaze/build.sh \
  && install -t /runtime/opt/frametop/bin gaze/build/ft-gaze gaze/build/ft-gazepanel
-# Frametop's keyboard (TaiKeid's Full Keyboard): it stays in keyboard/build/frametop,
-# with the input method engines, Steam bridge and SteamVR manifests it finds beside
-# itself, where frametop-keyboard.service runs it from. The rest of the build goes.
-RUN keyboard/build.sh \
- && cd keyboard/build/frametop \
- && find . -mindepth 1 -maxdepth 1 ! -name framekeyboard ! -name framekeyboard-native-guard \
-      ! -name engines ! -name bridge ! -name vr -exec rm -rf {} + \
- && strip --strip-unneeded framekeyboard framekeyboard-native-guard engines/*.so
+# Frametop's keyboard: TaiKeid's Full Keyboard, the newest stable release when the image is
+# built (FULLKB_VERSION picks one; keyboard/fetch.py checks its sha256), unpacked unmodified in
+# keyboard/build/release, where ft-kbhost (frametop-keyboard.service) starts it from. `ft dev
+# build` passes FULLKB_VERSION, and GITHUB_TOKEN as the github_token secret, which no layer keeps.
+ARG FULLKB_VERSION=
+RUN --mount=type=secret,id=github_token,required=false \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" \
+    FULLKB_VERSION="$FULLKB_VERSION" keyboard/build.sh \
+ && test -x keyboard/build/release/bin/framekeyboard
 RUN power/build.sh \
  && install -t /runtime/opt/frametop/bin power/build/ft-powerd
 RUN stream/build.sh \

@@ -38,6 +38,8 @@
 // Header only, no OpenVR, so its test runs anywhere.
 #pragma once
 
+#include "tilepack.h"
+
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -156,20 +158,46 @@ inline double WrapNear(double az, double centre) { return az - 360 * std::round(
 
 // A column's panels stacked on the desk at size `k` (index as its tiles: the last one on the desk):
 // each one's span up, its size, and its span round you.
+// Narrower panels share a shelf, side by side, while it fits across the column's widest
+// (tilepack.h's Shelves), the first from the desk up on the left; a shelf is as tall as its
+// tallest, and its panels stand on its bottom.
 struct Stacked {
     double el0 = 0, el1 = 0, widthM = 0, heightM = 0, spanDeg = 0;
-    double offDeg = 0;   // its middle from its column's, round you (Pack's lean)
+    double shelfDeg = 0;     // its shelf's span round you, gaps and all
+    double inShelfDeg = 0;   // its middle from its shelf's
+    double offDeg = 0;       // its middle from its column's, round you (Pack's lean)
 };
 inline std::vector<Stacked> Stack(const Column &c, const Params &p, double k) {
-    std::vector<Stacked> out(c.tiles.size());
-    double el = p.deskDeg;
-    for (size_t r = c.tiles.size(); r-- > 0;) {
-        const Tile &t = c.tiles[r];
-        Stacked &s = out[r];
+    const size_t n = c.tiles.size();
+    std::vector<Stacked> out(n);
+    std::vector<double> flat(n);   // (from the desk up)
+    for (size_t i = 0; i < n; ++i) {
+        const Tile &t = c.tiles[n - 1 - i];
+        Stacked &s = out[n - 1 - i];
         s.widthM = std::max(0.01, t.widthM) * k, s.heightM = std::max(0.01, t.heightM) * k;
-        s.el0 = el, s.el1 = el + Deg(2 * std::atan2(s.heightM / 2, p.radius));
-        s.spanDeg = SpanFor(p.radius, s.widthM, s.heightM, (s.el0 + s.el1) / 2);
-        el = s.el1 + p.gapDeg * k;
+        flat[i] = Deg(2 * std::atan2(s.widthM / 2, p.radius));
+    }
+    const double gap = p.gapDeg * k;
+    const std::vector<int> shelf = tilepack::Shelves(flat, gap);
+    double el = p.deskDeg;
+    for (size_t i = 0; i < n;) {
+        size_t j = i;
+        while (j < n && shelf[j] == shelf[i]) ++j;
+        double top = el, across = 0;
+        for (size_t m = i; m < j; ++m) {
+            Stacked &s = out[n - 1 - m];
+            s.el0 = el, s.el1 = el + Deg(2 * std::atan2(s.heightM / 2, p.radius));
+            s.spanDeg = SpanFor(p.radius, s.widthM, s.heightM, (s.el0 + s.el1) / 2);
+            top = std::max(top, s.el1);
+            across += (m > i ? gap : 0) + s.spanDeg;
+        }
+        double x = -across / 2;
+        for (size_t m = i; m < j; ++m) {
+            Stacked &s = out[n - 1 - m];
+            s.shelfDeg = across, s.inShelfDeg = x + s.spanDeg / 2;
+            x += s.spanDeg + gap;
+        }
+        el = top + gap, i = j;
     }
     return out;
 }
@@ -219,11 +247,11 @@ inline Packed Pack(const std::vector<Column> &cols, const Params &p, double k, d
         out.stacks.push_back(Stack(cols[c], p, k));
         std::vector<Stacked> &st = out.stacks.back();
         double widest = 0;
-        for (const Stacked &s : st) widest = std::max(widest, s.spanDeg / 2);
+        for (const Stacked &s : st) widest = std::max(widest, s.shelfDeg / 2);
         const int l = c < lean.size() ? lean[c] : 0;
         std::vector<Box> boxes;
         for (Stacked &s : st) {
-            s.offDeg = l * (widest - s.spanDeg / 2);
+            s.offDeg = l * (widest - s.shelfDeg / 2) + s.inShelfDeg;
             boxes.push_back({s.offDeg - s.spanDeg / 2, s.offDeg + s.spanDeg / 2, s.el0, s.el1});
             out.top = std::max(out.top, s.el1);
         }
@@ -243,7 +271,7 @@ inline std::vector<int> Lean(const std::vector<Column> &cols, const Params &p) {
     std::vector<size_t> uneven;
     for (size_t c = 0; c < cols.size(); ++c) {
         double lo = 1e9, hi = 0;
-        for (const Stacked &s : centred.stacks[c]) lo = std::min(lo, s.spanDeg), hi = std::max(hi, s.spanDeg);
+        for (const Stacked &s : centred.stacks[c]) lo = std::min(lo, s.shelfDeg), hi = std::max(hi, s.shelfDeg);
         if (hi - lo < 1e-6) continue;
         const double d = centred.mid[c] - centred.width / 2;
         lean[c] = d < -1e-6 ? 1 : d > 1e-6 ? -1 : 0;

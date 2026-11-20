@@ -604,8 +604,9 @@ int main() {
         dashtiles::Board fresh;
         check("desk: a first panel: a column", (fresh.Anchor(1, -1, dashtiles::Stay::Default, -1, &in), fresh.Grid().Cols().size() == 1));
     }
-    // --- the desk full: a narrow window doesn't go on a wide screen's column (user, 2026-11-19: "a
-    // massive gap in the middle"), nor on one already as tall as a column gets
+    // --- the desk full: a narrow window goes over a wide screen, beside others on a shelf as wide as
+    // the screen (user, 2026-11-19: "a column is defined by its widest screen"), no column past
+    // kColumnDeg tall
     {
         dashtiles::Board b;
         b.params.wallDeg = 70;   // (two screens fit, 67 degrees; a third column doesn't)
@@ -616,73 +617,79 @@ int main() {
         }
         const dashtiles::Info narrow = sized(3);
         b.Anchor(3, 2, dashtiles::Stay::Default, -1, &narrow), b.Arrange(sized);
-        const auto alone = [&](int id) {
-            const tilegrid::Where w = b.Grid().Find(id);
-            return w.ok() && b.Grid().Cols()[size_t(w.col)].cells.size() == 1;
-        };
-        check("desk full: a narrow window gets a column of its own, not the screens'",
-              b.Grid().Cols().size() == 3 && alone(1) && alone(2) && alone(3));
+        const int c3 = b.Grid().Find(3).col;
+        check("desk full: a narrow window on top of a screen", b.Grid().Cols().size() == 2 && (c3 == b.Grid().Find(1).col || c3 == b.Grid().Find(2).col));
         for (int i = 4; i <= 12; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default, -1, &narrow), b.Arrange(sized);
-        size_t most = 0;
-        for (const auto &c : b.Grid().Cols()) most = std::max(most, c.cells.size());
-        check("desk full: ten narrow windows stack with each other, no column past its height",
-              alone(1) && alone(2) && most >= 2 && most <= 4);
+        const tiling::Layout &l = b.Arrange(sized);
+        double tallest = 0;
+        int beside = 0;
+        for (const tiling::Placed &p : l.tiles) {
+            tallest = std::max(tallest, p.el1 - b.params.deskDeg);
+            for (const tiling::Placed &q : l.tiles) beside += p.id < q.id && p.col == q.col && near(p.el0, q.el0);
+        }
+        check("desk full: ten narrow windows share shelves over the screens", beside >= 6);
+        check("desk full: ...two shelves of four over each screen, no column past its height",
+              tallest <= tilepack::kColumnDeg + 1e-6 && b.Grid().Cols().size() == 2);
     }
-    // --- a reset packs them again: like widths together, the widest at the bottom and in the middle
+    // --- a reset packs them again: widest first, narrower ones on shelves over wider ones, the widest
+    // column in the middle
     {
         using tilepack::Item;
         const auto cols = tilepack::Pack({{1, 5, 9}, {2, 26, 11}, {3, 5, 9}, {4, 20, 12}, {5, 6, 9}, {6, 15, 9}, {7, 5, 9},
                                           {8, 5, 5}},
                                          0.8);
-        const auto colOf = [&](int id) {
-            for (size_t c = 0; c < cols.size(); ++c)
-                for (int x : cols[c])
-                    if (x == id) return int(c);
-            return -1;
-        };
-        bool all = true;
-        for (int id = 1; id <= 8; ++id) all &= colOf(id) >= 0;
-        check("pack: every one in a column", all);
-        check("pack: the two screens together, the widest at the bottom", colOf(2) == colOf(4) && cols[size_t(colOf(2))][0] == 2);
-        check("pack: no narrow window with them", cols[size_t(colOf(2))].size() == 2);
-        check("pack: the narrow ones together, at most kColumnDeg tall",
-              colOf(1) == colOf(3) && colOf(1) != colOf(2) && cols[size_t(colOf(1))].size() <= 5);
-        check("pack: the widest column in the middle", colOf(2) == int(cols.size() / 2) || colOf(2) == int((cols.size() - 1) / 2));
-        check("pack: a panel taller than a column: alone", tilepack::Pack({{1, 10, 50}, {2, 10, 5}}, 0.8).size() == 2);
+        check("pack: all in one column, widest first", cols == std::vector<std::vector<int>>{{2, 4, 6, 5, 1, 3, 7, 8}});
+        check("pack: ...on shelves as wide as the widest",
+              tilepack::Shelves({26, 20, 15, 6, 5, 5, 5, 5}, 0.8) == std::vector<int>{0, 1, 2, 2, 3, 3, 3, 3});
+        // (the user's: a window 1,200 pixels across, two of 500 over it; 48 pixels a degree)
+        check("pack: two 500 px windows on a shelf over a 1,200 px one",
+              tilepack::Pack({{2, 500 / 48.0, 14}, {1, 1200 / 48.0, 14}, {3, 500 / 48.0, 14}}, 0.8) ==
+                      std::vector<std::vector<int>>{{1, 2, 3}} &&
+                  tilepack::Shelves({1200 / 48.0, 500 / 48.0, 500 / 48.0}, 0.8) == std::vector<int>{0, 1, 1});
+        const auto two = tilepack::Pack({{1, 30, 14}, {2, 20, 14}, {3, 20, 14}, {4, 20, 14}}, 0.8);
+        check("pack: a full column, the next one beside it", two.size() == 2 && two[0] == std::vector<int>{1, 2, 3} && two[1] == std::vector<int>{4});
+        check("pack: a panel taller than a column: alone", tilepack::Pack({{1, 10, 60}, {2, 10, 5}}, 0.8).size() == 2);
+        check("pack: one not shown (no size): a column of its own", tilepack::Pack({{1, 30, 14}, {2, 0, 0}, {3, 10, 9}}, 0.8).size() == 2);
         check("pack: nothing", tilepack::Pack({}, 0.8).empty());
+        tilepack::Fill f = tilepack::FillOf({{1, 30, 14}, {2, 10, 9}}, 0.8);
+        check("fill: beside on the top shelf adds nothing", near(tilepack::Grown(f, {3, 10, 9}, 0.8), 14 + 0.8 + 9));
+        check("fill: no room beside: a shelf above", near(tilepack::Grown(f, {3, 25, 9}, 0.8), 14 + 0.8 + 9 + 0.8 + 9));
+        check("fill: wider than the column: never", tilepack::Grown(f, {3, 31, 9}, 0.8) < 0);
         tiling::Params far;
         tiling::FromEyes(tiling::Eyes{1.4, -12, 0.8, 80}, 2.0, &far);
         check("eyes: the desk line seen from the eyes again (about: it is on their sphere, not the wall's)", std::fabs(tiling::EyeElDeg(far, far.deskDeg) + 12) < 0.5);
         // (two windows 0.62 m tall at a 1.4 m wall: about 22 degrees each to the eyes, 10.5 round the centre)
         const double win = tiling::Deg(2 * std::atan2(0.31, far.radius));
-        check("eyes: two windows share a column, three don't",
+        check("eyes: two windows one over the other share a column, three don't",
               tilepack::Pack({{1, 5, win}, {2, 5, win}, {3, 5, win}, {4, 5, win}}, far.gapDeg, dashtiles::EyeFits, &far).size() == 2);
 
         dashtiles::Board b;
         const auto sized = [](int id) { return id == 1 ? dashtiles::Info{1.48, 0.62} : dashtiles::Info{0.3, 0.53}; };
         for (int i = 1; i <= 6; ++i) b.Anchor(i, -1, dashtiles::Stay::Default);
-        for (int i = 2; i <= 6; ++i) b.Drop(i, {tiling::Drop::Into, 0, 0});   // (all in one column with the screen)
         b.Repack(sized);
-        b.Arrange(sized);
-        const tilegrid::Where screen = b.Grid().Find(1);
-        check("repack: the screen alone in the middle, the windows in columns of their own either side",
-              b.Grid().Cols().size() == 3 && screen.col == 1 && b.Grid().Cols()[1].cells.size() == 1 &&
-                  b.Grid().Cols()[0].cells.size() + b.Grid().Cols()[2].cells.size() == 5);
+        const tiling::Layout &l = b.Arrange(sized);
+        check("repack: the screen and the five windows in one column", b.Grid().Cols().size() == 1);
+        int onShelf = 0;
+        for (const tiling::Placed &p : l.tiles) onShelf += p.id != 1 && near(p.el0, b.PlacedOf(2)->el0);
+        check("repack: four windows on the shelf over the screen, the fifth over them", onShelf == 4);
         check("repack: remembered as packed", b.Remember(1).rfind("tile 0 ", 0) == 0);
 
-        // A hidden panel (absent) at no size: its neighbours close up; a repack still packs it at its own.
+        // A hidden panel (absent) at no size: its neighbours close up; a repack packs the shown ones
+        // and gives it a column of its own (not a shelf the others stand on while it's away).
         const auto span = [&] {
-            const tiling::Layout &l = b.Arrange(sized);
-            return l.az1 - l.az0;
+            const tiling::Layout &a = b.Arrange(sized);
+            return a.az1 - a.az0;
         };
         const double whole = span();
         b.absent = {1};
-        const double without = span();
-        check("absent: the screen hidden, the strip closes up its width", whole - without > 25);
+        check("absent: the screen hidden, the strip closes up to the windows", span() < whole - 20);
         b.Repack(sized);
-        check("absent: a repack keeps its place in the middle", b.Grid().Find(1).col == 1);
+        const tilegrid::Where screen = b.Grid().Find(1);
+        check("absent: a repack: the screen a column of its own at an end, the windows in others",
+              screen.ok() && b.Grid().Cols()[size_t(screen.col)].cells.size() == 1 &&
+                  (screen.col == 0 || screen.col == int(b.Grid().Cols().size()) - 1));
         b.absent.clear();
-        check("absent: shown again, back at its size", std::fabs(span() - whole) < 1e-6);
+        check("absent: shown again, at its size beside them", span() > whole);
     }
     // --- memory
     {

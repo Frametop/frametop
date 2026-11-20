@@ -266,32 +266,31 @@ private:
         return false;
     }
     // The desk full (another column would take the strip past params.wallDeg): the column a new
-    // panel `info` goes on top of, the lowest (of two, the nearer in front) of those about as wide
-    // as it with room for it (tilepack.h); -1 while there's room, before the grid has been laid
-    // out, or when none suits it (a column of its own then).
+    // panel `info` goes on top of (tilepack.h): where it adds the least height (beside others on its
+    // top shelf), then the lowest, then the nearer in front, of those it fits under kColumnDeg and is
+    // no wider than; -1 while there's room, before the grid has been laid out, or when none takes it
+    // (a column of its own then).
     // A size in metres as degrees round you, at the wall.
     double Span(double m) const { return tiling::Deg(2 * std::atan2(m / 2, params.radius)); }
     int OnTopOf(const Info &info) const {
-        if (grid_.Empty() || last_.tiles.empty()) return -1;
-        const double span = Span(info.widthM), tall = Span(info.heightM);
-        if (last_.az1 - last_.az0 + params.gapDeg + span <= params.wallDeg) return -1;
-        struct ColNow {
-            double widest = 0, bottom = 1e9, top = -1e9;
-        };
-        std::map<int, ColNow> cols;
+        if (grid_.Empty() || last_.tiles.empty() || fills_.size() != grid_.Cols().size()) return -1;
+        const tilepack::Item it{-1, Span(info.widthM), Span(info.heightM)};
+        if (last_.az1 - last_.az0 + params.gapDeg + it.wDeg <= params.wallDeg) return -1;
+        std::map<int, double> front;
         for (const tiling::Placed &p : last_.tiles) {
-            ColNow &c = cols[p.col];
-            c.widest = std::max(c.widest, Span(p.widthM));
-            c.bottom = std::min(c.bottom, p.el0), c.top = std::max(c.top, p.el1);
+            const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
+            if (!front.count(p.col) || off < front[p.col]) front[p.col] = off;
         }
         int best = -1;
-        double low = 1e9, front = 1e9;
-        for (const tiling::Placed &p : last_.tiles) {
-            if (p.col >= int(grid_.Cols().size())) continue;
-            const ColNow &c = cols[p.col];
-            if (!tilepack::Similar(c.widest, span) || !tilepack::Room(c.top - c.bottom, tall, params.gapDeg, EyeFits, &params)) continue;
-            const double off = std::fabs(tiling::WrapNear(p.azDeg, 0));
-            if (c.top < low - 1e-6 || (c.top < low + 1e-6 && off < front)) best = p.col, low = c.top, front = off;
+        double bestAdd = 0;
+        for (size_t c = 0; c < fills_.size(); ++c) {
+            const tilepack::Fill &f = fills_[c];
+            const double h = tilepack::Grown(f, it, params.gapDeg);
+            if (h < 0 || !EyeFits(&params, h)) continue;
+            const double add = h - f.height;
+            const tilepack::Fill &b = best < 0 ? f : fills_[size_t(best)];
+            const bool lower = f.height < b.height - 1e-6 || (f.height < b.height + 1e-6 && front[int(c)] < front[best]);
+            if (best < 0 || add < bestAdd - 1e-9 || (add < bestAdd + 1e-9 && lower)) best = int(c), bestAdd = add;
         }
         return best;
     }
@@ -304,7 +303,7 @@ public:
         std::map<int, double> scales;
         for (const tilegrid::Col &col : grid_.Cols())
             for (const tilegrid::Cell &cell : col.cells) {
-                const Info i = info(cell.id);
+                const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);   // (not shown: a column of its own)
                 items.push_back({cell.id, Span(i.widthM * cell.scale), Span(i.heightM * cell.scale)});
                 scales[cell.id] = cell.scale;
             }
@@ -343,7 +342,14 @@ public:
     // where it was (Pan).
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
-        tiling::Layout l = slot_.Arrange(grid_, Columns(info), params);
+        const std::vector<tiling::Column> cols = Columns(info);
+        fills_.clear();
+        for (const tiling::Column &c : cols) {   // (each column's shelves so far: OnTopOf)
+            std::vector<tilepack::Item> deskUp;
+            for (size_t r = c.tiles.size(); r-- > 0;) deskUp.push_back({c.tiles[r].id, Span(c.tiles[r].widthM), Span(c.tiles[r].heightM)});
+            fills_.push_back(tilepack::FillOf(deskUp, params.gapDeg));
+        }
+        tiling::Layout l = slot_.Arrange(grid_, cols, params);
         pan_ = l.split >= 0 ? 0 : Pan(l);
         if (pan_ != 0) tiling::Turn(&l, pan_);
         moved_ = -1, recentre_ = false;
@@ -530,6 +536,7 @@ private:
     std::map<int, Spot> spots_;
     tilegrid::Grid grid_;
     tiling::Layout last_;
+    std::vector<tilepack::Fill> fills_;   // each column as laid out last (OnTopOf)
     slotsplit::Policy slot_;   // which split round Steam's menu, and when it's chosen again
 };
 

@@ -42,17 +42,19 @@ public:
 
     // Off the grid: nothing to check for it.
     void Unmark(int id) { unsized_.erase(id), stacked_.erase(id); }
-    // `id` moved, sized or leaned by hand, its Mates `before` that. Reordered, resized or leaned in
-    // its stack (the same mates), every mark stays: you haven't changed which stack it's in, and a
-    // stackmate not shown yet you haven't seen (council, 2026-11-20). Out of its stack, its own marks
-    // go. Put by hand into a stack it wasn't in (others with it now that weren't), that stack is
-    // yours: its panels' stacked marks go, and so do the unsized ones of those shown (`absent`: not
-    // shown, so you haven't seen how tall the stack is with them). A lift's: the one pulled in is a
-    // new stackmate of `id`'s.
+    // `id` moved, sized or leaned by hand, its Mates `before` that (council, 2026-11-20). Its own
+    // unsized mark goes: you've placed or sized it yourself where it is, as with one you put on a
+    // stack. Reordered, resized or leaned in its stack, or moved still alone (the same mates), the
+    // stacked marks stay: the stack's still one made for you, and a panel coming back to it is
+    // checked. Out of its stack, its stacked mark goes too. Put by hand into a stack it wasn't in
+    // (others with it now that weren't), that stack is yours: its panels' stacked marks go, and so
+    // do the unsized ones of those shown (`absent`: not shown, so you haven't seen how tall the
+    // stack is with them). A lift's: the one pulled in is a new stackmate of `id`'s.
     void ByHand(const tilegrid::Grid &g, const std::set<int> &absent, int id, const std::vector<int> &before) {
+        unsized_.erase(id);
         const std::vector<int> now = Mates(g, id);
         if (now == before) return;
-        Unmark(id);
+        stacked_.erase(id);
         for (const int m : now) {
             stacked_.erase(m);
             if (!absent.count(m)) unsized_.erase(m);

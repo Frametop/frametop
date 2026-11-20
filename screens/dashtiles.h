@@ -257,7 +257,8 @@ public:
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     bool Resized(int id, double factor) {
         if (!grid_.Has(id) || !(factor > 0)) return false;
-        return Changed(grid_.Scale(id, factor));   // (in its stack still: its marks stay, Marks::ByHand)
+        const std::vector<int> mates = Marks::Mates(grid_, id);
+        return Changed(grid_.Scale(id, factor)) && (ByHand(id, mates), true);
     }
 
     // Every tile packed into columns again (tilepack.h), sizes kept: a reset's (user, 2026-11-19:

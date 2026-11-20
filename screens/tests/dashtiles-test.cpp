@@ -1371,18 +1371,41 @@ int main() {
                                : "settle: the one put there for you leaned by key: a return there still checked",
                       cols(ln) == "[ 10 1 ][ 60 5 2 ][ 30 3 ]" && leaned && l.Settle() && (l.Arrange(lean), cols(l) == "[ 10 1 ][ 60 5 2 ][ 9 ][ 30 3 ]"));
             }
-            // (council pass 9) the one waiting, reordered by key while a stackmate's hidden: still waits, then checked
-            dashtiles::Board wr = full();
-            wr.steam = 2, wr.Arrange(same);
-            for (const auto &[i, c] : {std::pair{10, 0}, {5, 1}, {30, 2}})
-                wr.Anchor(i, -1, dashtiles::Stay::Default), wr.Drop(i, {tiling::Drop::Into, c, 0}), wr.Arrange(same);
-            wr.absent = {2}, wr.Arrange(same);
-            wr.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), wr.absent = {2, 60}, wr.Arrange(same);
-            wr.absent = {2}, wr.Arrange(same);
-            const bool waitsWr = !wr.Settle(), downWr = wr.Press(60, dashtiles::Key::Down);
-            wr.Arrange(same), wr.absent = {}, wr.Arrange(same);
-            check("settle: the one waiting reordered by key: checked once its stackmate shows",
-                  waitsWr && downWr && wr.Settle() && (wr.Arrange(same), cols(wr) == "[ 10 1 ][ 5 2 ][ 60 ][ 30 3 ]"));
+            // (council pass 10) the one waiting, sized or moved in its stack by you while a stackmate's hidden: yours
+            const auto waiting = [&] {   // [ 10 1 ][ 60 5 2 ][ 30 3 ], 2 (Steam's) hidden, 60 shown and waiting on it
+                dashtiles::Board wr = full();
+                wr.steam = 2, wr.Arrange(same);
+                for (const auto &[i, c] : {std::pair{10, 0}, {5, 1}, {30, 2}})
+                    wr.Anchor(i, -1, dashtiles::Stay::Default), wr.Drop(i, {tiling::Drop::Into, c, 0}), wr.Arrange(same);
+                wr.absent = {2}, wr.Arrange(same);
+                wr.Anchor(60, -1, dashtiles::Stay::Default, -1, &guess, false), wr.absent = {2, 60}, wr.Arrange(same);
+                wr.absent = {2}, wr.Arrange(same);
+                return wr;
+            };
+            for (const bool resize : {true, false}) {
+                dashtiles::Board wr = waiting();
+                const bool waitsWr = !wr.Settle(), edited = resize ? wr.Resized(60, 1.8) : wr.Press(60, dashtiles::Key::Down);
+                wr.Arrange(same);
+                const std::string wr0 = cols(wr);
+                const bool stays = !wr.Settle();
+                wr.absent = {}, wr.Arrange(same);
+                check(resize ? "settle: the one waiting made bigger by you: left where you made it" : "settle: the one waiting reordered by you: left where you put it",
+                      waitsWr && edited && stays && !wr.Settle() && cols(wr) == wr0 && wr0.find("60") != std::string::npos && wr.Grid().Find(60).col == wr.Grid().Find(5).col);
+            }
+            // (council pass 10) put there for you, alone once its stackmate went, moved alone: a return into its column still checked
+            dashtiles::Board al = full();
+            al.Anchor(4, -1, dashtiles::Stay::Default), al.Drop(4, {tiling::Drop::Into, 0, 0}), al.Arrange(same);
+            al.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), al.Arrange(same);   // [ 4 1 ][ 60 2 ][ 3 ]
+            al.Unanchor(2), al.Arrange(same);
+            const bool movedAl = al.Press(60, dashtiles::Key::Right);
+            al.Arrange(same);
+            dashtiles::State backSt;
+            backSt.kind = dashtiles::State::Kind::Tile, backSt.col = al.Grid().Find(60).col, backSt.row = 0, backSt.alone = false, backSt.scale = 1;
+            const auto tall9 = [](int id) { return id == 9 ? dashtiles::Info{1.6, 1.9} : dashtiles::Info{1.6, 0.9}; };
+            al.Restore(9, backSt, -1, "app:z"), al.Arrange(tall9);
+            const bool onAl = al.Grid().Find(9).col == al.Grid().Find(60).col;
+            check("settle: put there for you, moved alone: a return into its column still checked", movedAl && onAl && al.Settle() &&
+                                                                                                    al.Grid().Find(9).col != al.Grid().Find(60).col);
             // (council pass 9) fitting so far isn't sure while a stackmate's hidden: waits till it's shown
             const auto hang = [](int id) { return id == 1 || id == 3 ? dashtiles::Info{1.6, 1.4} : dashtiles::Info{1.6, 0.9}; };
             dashtiles::Board hh;   // [ 1 ][ 60 2 _7 ][ 3 ]: 7 hidden, hanging under the desk line

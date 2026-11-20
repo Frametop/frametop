@@ -12,8 +12,8 @@
 // the anchor button's long press set one the other way. Each app or display remembers what it was last: anchored or not,
 // its place on the grid or as a satellite, and whether it stays, for the next time it opens.
 //
-// The group frame: at your head when the dashboard opened, level, -Z toward Steam's bar (AtBar) or the
-// way you faced (GroupFrame).
+// The group frame (tileframe.h): at your head when the dashboard opened, level, -Z toward Steam's bar
+// (AtBar) or the way you faced (GroupFrame).
 // Header only, no OpenVR, so its test runs anywhere.
 #pragma once
 
@@ -190,6 +190,7 @@ public:
             const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
             for (int r = 0; r < int(col.cells.size()); ++r)
                 if (col.cells[size_t(r)].id != id && !col.Below(r)) gap.stayed = col.cells[size_t(r)].id;
+            gap.cells = int(col.cells.size()) - 1;
         }
         if (!Unanchor(id)) return false;
         gaps_.Went(gap, nowMs);
@@ -204,7 +205,13 @@ public:
     bool FillGap(int64_t nowMs) {
         const tilegap::Gap g = gaps_.Due(nowMs);
         const tilegrid::Where w = grid_.Find(g.stayed);
-        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone))) return false;
+        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone)) || fills_.size() != grid_.Cols().size())
+            return false;
+        // a panel opened into the gap meanwhile took it, and one not shown yet has no size to test (council, 2026-11-20)
+        const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
+        if (int(col.cells.size()) > g.cells) return false;
+        for (const tilegrid::Cell &c : col.cells)
+            if (absent.count(c.id)) return false;
         double span = 0;
         for (const tiling::Placed &p : last_.tiles)
             if (p.col == w.col) span = std::max(span, p.az1 - p.az0);

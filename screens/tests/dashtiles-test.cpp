@@ -1067,6 +1067,37 @@ int main() {
         const std::string opened = cols(o);
         check("gap: a panel opened into it meanwhile: no third on that stack", opened == "[ 1 ][ 60 2 ][ 3 ]" &&
                                                                                   !o.FillGap(tilegap::kQuietMs) && cols(o) == opened);
+        {   // (council, 2026-11-20) ...with no picture yet (laid out at no size), or short enough for three
+            const auto shortOnes = [](int) { return dashtiles::Info{1.2, 0.5}; };
+            for (const bool unshown : {true, false}) {
+                dashtiles::Board n;
+                const auto info = unshown ? same : shortOnes;
+                for (const int i : {1, 2, 3}) n.Anchor(i, -1, dashtiles::Stay::Default);
+                n.Arrange(info);
+                n.Anchor(50, -1, dashtiles::Stay::Default), n.Drop(50, {tiling::Drop::Into, 1, 0}), n.Arrange(info);
+                n.Leave(50, 0, "app:x"), n.Arrange(info);
+                const dashtiles::Info i60 = info(60);
+                n.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60);
+                if (unshown) n.absent = {60};
+                n.Arrange(info);
+                const std::string at = cols(n);
+                check(unshown ? "gap: ...one not shown yet opened into it: nothing filled" : "gap: ...short ones: still nothing filled",
+                      at.find("[ 60 2 ]") != std::string::npos && !n.FillGap(tilegap::kQuietMs) && cols(n) == at);
+            }
+        }
+        b = stack();   // (council, 2026-11-20) a gap undone long ago doesn't count against the next one
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);
+        b.Leave(4, 10000, "app:a"), b.Arrange(same);
+        check("gap: one gone long after another came back (no tick between): filled", b.FillGap(10000 + tilegap::kQuietMs) && cols(b) == "[ 1 2 ][ 3 ]");
+        b = stack();
+        b.Leave(3, 0, "app:c"), b.Arrange(same);
+        b.RestoreAll({{1, "tile 0 0 0 1 1.000"}, {2, "tile 0 1 0 1 1.000"}, {4, "tile 0 1 0 0 1.000"}}), b.Arrange(same);
+        const bool reset = cols(b) == "[ 1 ][ 4 2 ]";
+        b.Leave(4, 500, "app:a"), b.Arrange(same);
+        check("gap: a profile put back: the count starts again", reset && b.FillGap(500 + tilegap::kQuietMs) && cols(b) == "[ 1 2 ]");
+        b = stack();
+        b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, "off", -1, ""), b.Arrange(same);
+        check("gap: a panel with no key on its number meanwhile: still filled", b.FillGap(tilegap::kQuietMs) && cols(b) == "[ 1 2 ][ 3 ]");
         dashtiles::Board h;   // [ 1 ][ 2 3 ]: 2 on the desk, 3 hanging under it
         for (const int i : {1, 2, 3}) h.Anchor(i, -1, dashtiles::Stay::Default);
         h.Press(3, dashtiles::Key::Down);

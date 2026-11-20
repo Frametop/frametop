@@ -23,6 +23,7 @@ struct Gap {
     std::string key;        // ...its app or display (vrtiles.cpp's tile memory key; panel numbers are reused)
     int stayed = -1;        // one still standing in its stack (-1: it left no gap)
     double heightDeg = 0;   // how tall it was, unshrunk (tiling::Layout::shrink)
+    int cells = 0;          // the panels left in its stack (more by the fill: one opened into the gap)
 };
 // A neighbouring column's only panel pulled up into the gap app `key` left, on top of `stayed`'s stack.
 struct Fill {
@@ -35,6 +36,7 @@ class Book {
 public:
     // Panel `g.gone` went at `nowMs`.
     void Went(const Gap &g, int64_t nowMs) {
+        if (went_ > 0 && nowMs - at_ >= kQuietMs) Cancel();   // (the last went long enough ago: Due not asked meanwhile)
         if (!g.key.empty()) fills_.erase(g.key);
         ++went_, last_ = g, at_ = nowMs;
     }
@@ -48,9 +50,9 @@ public:
         return g;
     }
     // App `key` back, on panel `id`: the gap it left isn't filled, and its fill is taken to be undone
-    // (none: an empty key). By panel number only when either has no key (panel numbers are reused).
+    // (none: an empty key). By panel number only when neither has a key (panel numbers are reused).
     Fill Back(int id, const std::string &key) {
-        if (key.empty() || last_.key.empty() ? last_.gone == id : last_.key == key) Void();
+        if ((key.empty() && last_.key.empty()) ? last_.gone == id : (!key.empty() && last_.key == key)) Void();
         const auto it = key.empty() ? fills_.end() : fills_.find(key);
         if (it == fills_.end()) return {};
         const Fill f = it->second;
@@ -70,12 +72,12 @@ public:
     // fill is still as it was left).
     void Changed() { Void(); }
     // A profile put back: nothing waits, nothing is undone.
-    void Clear() { Void(), fills_.clear(); }
+    void Clear() { Cancel(), fills_.clear(); }
 
 private:
     // The gap waiting isn't filled, but the panels gone still count: one more going within
     // kQuietMs is still more than one (council, 2026-11-20: Leave's own Unanchor forgets the panel
-    // the gap stood on).
+    // the gap stood on). Cancel: the count starts again.
     void Void() { last_ = {}; }
     void Cancel() { went_ = 0, last_ = {}; }
     int went_ = 0;

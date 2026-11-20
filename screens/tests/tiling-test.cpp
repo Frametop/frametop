@@ -536,10 +536,10 @@ int main() {
             for (const auto &b : f.tiles)
                 if (a.id < b.id && !tilefit::Clear({a.az0, a.az1, a.el0, a.el1}, {b.az0, b.az1, b.el0, b.el1}, q.gapDeg)) clear = false;
         check("fit: every panel placed, a gap from every other", clear);
-        bool up = false, down = false;
-        for (const auto &a : f.tiles) up |= a.el0 > f.tiles[0].el1 - 1e-6, down |= a.el1 < f.tiles[0].el0 + 1e-6;
+        double tallest = 0;
+        for (const auto &a : f.tiles) tallest = std::max(tallest, a.el1 - a.el0);
         check("fit: the largest on the desk line, the rest round it", near(f.tiles[0].el0, q.deskDeg) && f.tiles[0].id == 6);
-        check("fit: some over it and some under it", up && down);
+        check("fit: more than one row", f.el1 - f.el0 > tallest + q.gapDeg);
         check("fit: corners at the radius", cornersInColumns(f));
         const tiling::Layout g = tiling::Arrange(cols, q);
         std::printf("      (grid: %.0f x %.0f degrees, fit: %.0f x %.0f)\n", g.az1 - g.az0, g.el1 - g.el0, f.az1 - f.az0, f.el1 - f.el0);

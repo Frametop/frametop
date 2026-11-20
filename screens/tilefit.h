@@ -3,10 +3,12 @@
 // displays auto-fit based off of their size to try to make the best use of real estate. Let's go
 // ahead and test both options".
 //
-// Largest first, each panel goes where the layout stays smallest round your view: of the spots
-// that touch a panel already placed (beside it, over it or under it, lined up with one of its
-// edges or its middle) and keep a gap from every other one, the one whose far edge is nearest the
-// middle, up and down counting a little more than round you. The first one stands on the desk line
+// Largest first, each panel goes where the layout stays smallest: of the spots that touch a panel
+// already placed (beside it, over it or under it, lined up with one of its edges or its middle) and
+// keep a gap from every other one, the one that leaves the layout's box narrowest plus tallest
+// (kUpDownCost), the box as wide either way as its farthest side so it stays centred; then the one
+// nearest the middle. (A first try put each panel where its own far edge was nearest the middle:
+// it stacked panels up and down, 56 x 45 degrees for 13 panels the columns put in 54 x 27.) The first one stands on the desk line
 // straight ahead (Steam's slot, when there is one, kept clear all the way up, as tiling.h keeps it),
 // and the rest spread round it both ways, up to kBandDeg above or below its middle. Too wide for a
 // turn round you: every panel shrinks by the same factor till it fits.
@@ -25,7 +27,7 @@
 namespace tilefit {
 
 constexpr double kBandDeg = 28;     // panels up to this far above or below the first one's middle (a taller one: centred on it)
-constexpr double kUpDownCost = 1.3; // a degree up or down counts this much more than one round you
+constexpr double kUpDownCost = 1.6; // a degree up or down counts this much more than one round you (1.3 packed 13 real panels 34 x 45 degrees, 1.6: 49 x 32)
 
 struct Box {
     double az0, az1, el0, el1;
@@ -59,6 +61,7 @@ inline tiling::Layout FitAt(const std::vector<tiling::Column> &cols, const tilin
     double ref = p.deskDeg;   // (the first one's middle, up)
     bool any = false;
     double az0 = 0, az1 = 0;
+    double wide = 0, up = 0, down = 0;   // (the layout so far: its farthest round you either way, and up and down from `ref`)
     for (const Item &it : items) {
         const double band = std::max(kBandDeg, it.hDeg / 2);
         std::vector<double> els, azs;
@@ -86,8 +89,9 @@ inline tiling::Layout FitAt(const std::vector<tiling::Column> &cols, const tilin
                         break;
                     }
                 if (!ok) continue;
-                const double far = std::max(std::fabs(b.az0), std::fabs(b.az1)) +
-                                   kUpDownCost * (any ? std::max(std::fabs(b.el0 - ref), std::fabs(b.el1 - ref)) : 0);
+                // (the layout's size with it: as wide either way as its farthest side, and as tall)
+                const double far = 2 * std::max({wide, std::fabs(b.az0), std::fabs(b.az1)}) +
+                                   kUpDownCost * (any ? std::max(up, b.el1 - ref) + std::max(down, ref - b.el0) : 0);
                 const double tie = std::hypot((b.az0 + b.az1) / 2, kUpDownCost * ((b.el0 + b.el1) / 2 - ref));
                 if (far < best - 1e-9 || (far < best + 1e-9 && tie < bestTie - 1e-9)) best = far, bestTie = tie, pick = b;
             }
@@ -99,6 +103,8 @@ inline tiling::Layout FitAt(const std::vector<tiling::Column> &cols, const tilin
             pick = {right + gap, right + gap + span, p.deskDeg, p.deskDeg + it.hDeg};
         }
         if (!any) ref = (pick.el0 + pick.el1) / 2;
+        wide = std::max({wide, std::fabs(pick.az0), std::fabs(pick.az1)});
+        up = std::max(up, pick.el1 - ref), down = std::max(down, ref - pick.el0);
         boxes.push_back(pick);
         az0 = any ? std::min(az0, pick.az0) : pick.az0, az1 = any ? std::max(az1, pick.az1) : pick.az1;
         any = true;

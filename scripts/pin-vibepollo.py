@@ -110,8 +110,8 @@ def pin_from_release(fetch, tag=None, base=None):
     api = f"https://api.github.com/repos/{REPO}/releases/" + (f"tags/{tag}" if tag_asked else "latest")
     release = json.loads(fetch(api))
     tag = release["tag_name"]
-    if not tag.startswith("frametop-"):
-        raise PinError(f"{REPO}'s release {tag} isn't a frametop-* release")
+    if not re.fullmatch(r"frametop-[0-9][0-9A-Za-z.-]*", tag):
+        raise PinError(f"{REPO}'s release {tag!r} isn't a frametop-* release")
     latest = json.loads(fetch(f"https://api.github.com/repos/{REPO}/releases/latest")) if tag_asked else release
     if release.get("draft") or release.get("prerelease"):
         raise PinError(f"{tag} is a draft or a prerelease")
@@ -143,7 +143,6 @@ def pin_from_release(fetch, tag=None, base=None):
         warnings.append(f"the latest release ({latest['tag_name']}) has no {SETUP_EXE}: "
                         "the pages' Windows download link won't work until one has")
     return validate(pin), warnings
-
 
 
 # --- the files ------------------------------------------------------------------------------

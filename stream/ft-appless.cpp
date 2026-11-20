@@ -471,6 +471,7 @@ int RunStream(const std::string &host, const std::string &route, int port, const
     bool owned[3] = {};
     bool live = false;
     bool ended_by_host = false;
+    std::string end_reason;
     uint64_t seq = 0;
     uint32_t cur_sps_w = 0, cur_sps_h = 0;
     uint64_t prev_bytes = 0;
@@ -485,6 +486,7 @@ int RunStream(const std::string &host, const std::string &route, int port, const
         if (!client.PollStep(4, &aus, &poll_err, dec.fd, opt.audio_enabled ? &audio_aus : nullptr)) {
             std::fprintf(stderr, "apple-hp session ended: %s\n", poll_err.c_str());
             ended_by_host = true;
+            end_reason = poll_err;
             break;
         }
         if (!audio_aus.empty()) audio.Enqueue(std::move(audio_aus));
@@ -649,7 +651,9 @@ int RunStream(const std::string &host, const std::string &route, int port, const
 
     g_stop = 1;
     alarm(kExitWatchdogS);
-    viewer.Send(ended_by_host ? "state lost the host ended the stream" : "state lost");
+    viewer.Send(ended_by_host ? ("state lost " + (end_reason.empty() ? std::string("the host ended the stream")
+                                                                     : end_reason.substr(0, 64)))
+                              : "state lost");
     if (!ended_by_host) client.SendInputBlur();
     audio.Stop();
     client.Close();

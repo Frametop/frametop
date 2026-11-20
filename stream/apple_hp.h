@@ -115,6 +115,92 @@ inline int64_t NowNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
 }
 
+inline int64_t BootNs() {
+#ifdef CLOCK_BOOTTIME
+    timespec ts{};
+    if (clock_gettime(CLOCK_BOOTTIME, &ts) == 0) {
+        return int64_t(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
+    }
+#endif
+    return NowNs();
+}
+
+// Tracks peer liveness across both normal streaming and deep-suspend wakeups.
+// On Linux, CLOCK_MONOTONIC freezes during suspend while CLOCK_BOOTTIME keeps advancing:
+// when (delta_boot - delta_mono) exceeds suspend_gap_ns, the client woke from suspend,
+// ignores any stale pre-sleep buffered packets on that wake tick, probes the host, and
+// requires fresh post-wake traffic within wake_grace_ns. During normal operation,
+// sustained silence triggers a probe at rx_probe_ns and terminates the session at
+// rx_timeout_ns so the supervisor (ft-screens) reconnects automatically.
+class SessionLiveness {
+public:
+    enum class Action { kOk, kProbeWake, kProbeIdle, kTimedOutWake, kTimedOutIdle };
+
+    void Reset(int64_t mono_ns, int64_t boot_ns,
+               int64_t suspend_gap_ms = 3000, int64_t wake_grace_ms = 4000,
+               int64_t rx_probe_ms = 6000, int64_t rx_timeout_ms = 15000) {
+        last_mono_ns_ = mono_ns;
+        last_boot_ns_ = boot_ns;
+        last_rx_boot_ns_ = boot_ns;
+        wake_probe_boot_ns_ = 0;
+        idle_probed_ = false;
+        suspend_gap_ns_ = suspend_gap_ms > 0 ? suspend_gap_ms * 1'000'000LL : 0;
+        wake_grace_ns_ = wake_grace_ms > 0 ? wake_grace_ms * 1'000'000LL : 0;
+        rx_probe_ns_ = rx_probe_ms > 0 ? rx_probe_ms * 1'000'000LL : 0;
+        rx_timeout_ns_ = rx_timeout_ms > 0 ? rx_timeout_ms * 1'000'000LL : 0;
+    }
+
+    bool wake_probe_pending() const { return wake_probe_boot_ns_ > 0; }
+
+    Action Step(int64_t mono_ns, int64_t boot_ns, bool got_rx) {
+        const int64_t d_mono = std::max<int64_t>(0, mono_ns - last_mono_ns_);
+        const int64_t d_boot = std::max<int64_t>(0, boot_ns - last_boot_ns_);
+        last_mono_ns_ = mono_ns;
+        last_boot_ns_ = boot_ns;
+
+        if (suspend_gap_ns_ > 0 && d_boot - d_mono >= suspend_gap_ns_) {
+            wake_probe_boot_ns_ = boot_ns;
+            idle_probed_ = false;
+            return Action::kProbeWake;
+        }
+
+        if (got_rx) {
+            last_rx_boot_ns_ = boot_ns;
+            wake_probe_boot_ns_ = 0;
+            idle_probed_ = false;
+            return Action::kOk;
+        }
+
+        if (wake_probe_boot_ns_ > 0) {
+            if (wake_grace_ns_ > 0 && boot_ns - wake_probe_boot_ns_ >= wake_grace_ns_) {
+                return Action::kTimedOutWake;
+            }
+            return Action::kOk;
+        }
+
+        const int64_t silence = boot_ns - last_rx_boot_ns_;
+        if (rx_timeout_ns_ > 0 && silence >= rx_timeout_ns_) {
+            return Action::kTimedOutIdle;
+        }
+        if (rx_probe_ns_ > 0 && !idle_probed_ && silence >= rx_probe_ns_) {
+            idle_probed_ = true;
+            return Action::kProbeIdle;
+        }
+        return Action::kOk;
+    }
+
+private:
+    int64_t last_mono_ns_ = 0;
+    int64_t last_boot_ns_ = 0;
+    int64_t last_rx_boot_ns_ = 0;
+    int64_t wake_probe_boot_ns_ = 0;
+    bool idle_probed_ = false;
+    int64_t suspend_gap_ns_ = 0;
+    int64_t wake_grace_ns_ = 0;
+    int64_t rx_probe_ns_ = 0;
+    int64_t rx_timeout_ns_ = 0;
+};
+
 // ── OpenSSL 3.x / 4.x RAII & Crypto Primitives ───────────────────────────────
 
 struct EvpMdCtxDeleter {
@@ -3298,6 +3384,10 @@ struct SessionOptions {
     int warmup_ms = 1400;
     int settle_ms = 100;
     int toggle_settle_ms = 200;
+    int64_t suspend_gap_ms = 3000;
+    int64_t wake_grace_ms = 4000;
+    int64_t rx_probe_ms = 6000;
+    int64_t rx_timeout_ms = 15000;
     KeyboardMappingConfig keyboard{};
 };
 
@@ -3383,6 +3473,29 @@ inline int OpenTcpIpv4(const in_addr &dest, uint16_t port, const std::string &bi
 #endif
     int nodelay = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof nodelay);
+    // Keepalive + user timeout detect half-open TCP sockets after host/client sleep or link loss
+    // even when no client input is sent (e.g. view_only mode).
+    int keepalive = 1;
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof keepalive);
+#ifdef TCP_KEEPIDLE
+    int keepidle = 5;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof keepidle);
+#elif defined(TCP_KEEPALIVE)
+    int keepidle = 5;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &keepidle, sizeof keepidle);
+#endif
+#ifdef TCP_KEEPINTVL
+    int keepintvl = 2;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof keepintvl);
+#endif
+#ifdef TCP_KEEPCNT
+    int keepcnt = 3;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof keepcnt);
+#endif
+#ifdef TCP_USER_TIMEOUT
+    unsigned int user_timeout_ms = 8000;
+    setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof user_timeout_ms);
+#endif
     if (!bind_ip.empty()) {
         int reuse = 1;
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof reuse);
@@ -3760,7 +3873,11 @@ public:
         }
 
         fcntl(tcp_fd_, F_SETFL, fcntl(tcp_fd_, F_GETFL, 0) | O_NONBLOCK);
-        last_tx_pulse_ns_ = NowNs();
+        const int64_t mono_now = NowNs();
+        const int64_t boot_now = BootNs();
+        last_tx_pulse_ns_ = mono_now;
+        liveness_.Reset(mono_now, boot_now, opt_.suspend_gap_ms, opt_.wake_grace_ms,
+                        opt_.rx_probe_ms, opt_.rx_timeout_ms);
         SendRtcpKeepalive(true);
         return true;
     }
@@ -3779,6 +3896,8 @@ public:
         };
         poll(pfds, extra_poll_fd >= 0 ? 4 : 3, timeout_ms);
 
+        bool got_rx = false;
+
         // 1. Drain UDP video + muxed video RTCP.
         uint8_t udp_buf[2048];
         for (int n = 0; n < 256; ++n) {
@@ -3786,10 +3905,15 @@ public:
             if (r <= 0) break;
             if (r < 12) continue;
             const uint8_t pt_raw = udp_buf[1];
-            if (pt_raw >= 192 && pt_raw <= 223) continue;  // SRTCP from server
+            if (pt_raw >= 192 && pt_raw <= 223) {  // SRTCP from server
+                std::vector<uint8_t> rtcp;
+                if (video_rx_srtp_.DecryptRtcp(udp_buf, size_t(r), &rtcp)) got_rx = true;
+                continue;
+            }
             SrtpContext::RtpHeader hdr{};
             std::vector<uint8_t> pay;
             if (video_rx_srtp_.DecryptRtp(udp_buf, size_t(r), &hdr, &pay)) {
+                got_rx = true;
                 ++video_rtp_pkts_;
                 video_rtp_bytes_ += size_t(r);
                 last_media_ssrc_ = hdr.ssrc;
@@ -3801,12 +3925,18 @@ public:
         for (int n = 0; n < 256; ++n) {
             const ssize_t r = recv(udp_ctrl_fd_, udp_buf, sizeof udp_buf, 0);
             if (r <= 0) break;
-            if (!opt_.audio_enabled || !out_audio_aus || r < 12) continue;
+            if (r < 12) continue;
             const uint8_t pt_raw = udp_buf[1];
-            if (pt_raw >= 192 && pt_raw <= 223) continue;  // SRTCP from server
+            if (pt_raw >= 192 && pt_raw <= 223) {  // SRTCP from server
+                std::vector<uint8_t> rtcp;
+                if (audio_rx_srtp_.DecryptRtcp(udp_buf, size_t(r), &rtcp)) got_rx = true;
+                continue;
+            }
+            if (!opt_.audio_enabled || !out_audio_aus) continue;
             SrtpContext::RtpHeader hdr{};
             std::vector<uint8_t> pay;
             if (audio_rx_srtp_.DecryptRtp(udp_buf, size_t(r), &hdr, &pay) && !pay.empty()) {
+                got_rx = true;
                 ++audio_rtp_pkts_;
                 ParseRfc3640AuPayloads(pay.data(), pay.size(), out_audio_aus);
             }
@@ -3820,21 +3950,40 @@ public:
             SendVideoSrtcp(nack);
         }
 
-        // 4. Periodic 500ms SRTCP RR/SR keepalive.
-        const int64_t now = NowNs();
-        if (now - last_tx_pulse_ns_ >= 500'000'000LL) {
-            last_tx_pulse_ns_ = now;
-            ++pulse_tick_;
-            SendRtcpKeepalive((pulse_tick_ % 10) == 0);
-        }
-
-        // 5. Drain non-blocking TCP control frames.
+        // 4. Drain non-blocking TCP control frames.
         if (pfds[2].revents & (POLLHUP | POLLERR)) {
             if (err_out) *err_out = "server closed TCP control socket";
             return false;
         }
         if (pfds[2].revents & POLLIN) {
-            if (!DrainNonBlockingTcp(err_out)) return false;
+            bool tcp_rx = false;
+            if (!DrainNonBlockingTcp(err_out, &tcp_rx)) return false;
+            if (tcp_rx) got_rx = true;
+        }
+
+        // 5. Evaluate suspend-wake and peer-liveness timers.
+        const int64_t now = NowNs();
+        const int64_t boot = BootNs();
+        const auto act = liveness_.Step(now, boot, got_rx);
+        if (act == SessionLiveness::Action::kTimedOutWake) {
+            if (err_out) *err_out = "no response from host after system wake";
+            return false;
+        }
+        if (act == SessionLiveness::Action::kTimedOutIdle) {
+            if (err_out) *err_out = "no media from host (connection timed out)";
+            return false;
+        }
+        if (act == SessionLiveness::Action::kProbeWake || act == SessionLiveness::Action::kProbeIdle) {
+            last_tx_pulse_ns_ = now;
+            ++pulse_tick_;
+            SendRtcpKeepalive(true);
+            RequestKeyframe();
+        } else if (now - last_tx_pulse_ns_ >= 500'000'000LL) {
+            // 6. Periodic 500ms SRTCP RR/SR keepalive.
+            last_tx_pulse_ns_ = now;
+            ++pulse_tick_;
+            SendRtcpKeepalive((pulse_tick_ % 10) == 0 || liveness_.wake_probe_pending());
+            if (liveness_.wake_probe_pending()) RequestKeyframe();
         }
         return true;
     }
@@ -4225,7 +4374,7 @@ private:
         return false;
     }
 
-    bool DrainNonBlockingTcp(std::string *err_out) {
+    bool DrainNonBlockingTcp(std::string *err_out, bool *got_data = nullptr) {
         for (;;) {
             uint8_t chunk[4096];
             const ssize_t n = recv(tcp_fd_, chunk, sizeof chunk, 0);
@@ -4238,6 +4387,7 @@ private:
                 if (err_out) *err_out = "server closed TCP session";
                 return false;
             }
+            if (got_data) *got_data = true;
             tcp_rx_buf_.insert(tcp_rx_buf_.end(), chunk, chunk + n);
         }
         while (tcp_rx_buf_.size() >= 2) {
@@ -4326,6 +4476,7 @@ private:
     uint64_t audio_rtp_pkts_ = 0;
     int64_t last_tx_pulse_ns_ = 0;
     uint64_t pulse_tick_ = 0;
+    SessionLiveness liveness_{};
 };
 
 }  // namespace ft_apple_hp

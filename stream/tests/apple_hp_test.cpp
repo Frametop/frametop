@@ -1147,6 +1147,203 @@ void TestRfc3640AudioAndCredsStore() {
     rmdir(tmp_dir);
 }
 
+void TestSleepWakeAndIdleLivenessTimeout() {
+    using Action = SessionLiveness::Action;
+    constexpr int64_t kMs = 1'000'000LL;
+
+    // 1. Steady stream with periodic traffic stays healthy indefinitely.
+    SessionLiveness lv;
+    lv.Reset(1000 * kMs, 1000 * kMs, 3000, 4000, 6000, 15000);
+    CHECK(lv.Step(2000 * kMs, 2000 * kMs, true) == Action::kOk);
+    CHECK(!lv.wake_probe_pending());
+
+    // 2. Deep suspend (boottime advances 90 min while monotonic advances 4 ms):
+    //    even if a stale pre-sleep packet is sitting in the kernel socket buffer
+    //    (got_rx == true on the wake tick), Step() must probe and enter wake grace.
+    const int64_t mono_wake = 2004 * kMs;
+    const int64_t boot_wake = (2000 + 5400'000) * kMs;
+    CHECK(lv.Step(mono_wake, boot_wake, true) == Action::kProbeWake);
+    CHECK(lv.wake_probe_pending());
+
+    // 3. No fresh post-wake packet within 3.9 s -> still within wake grace; at 4.0 s -> timeout.
+    CHECK(lv.Step(mono_wake + 3900 * kMs, boot_wake + 3900 * kMs, false) == Action::kOk);
+    CHECK(lv.Step(mono_wake + 4000 * kMs, boot_wake + 4000 * kMs, false) == Action::kTimedOutWake);
+
+    // 4. Short suspend where the remote session survived: fresh packet after wake clears grace.
+    lv.Reset(1000 * kMs, 1000 * kMs, 3000, 4000, 6000, 15000);
+    CHECK(lv.Step(1004 * kMs, 6004 * kMs, false) == Action::kProbeWake);
+    CHECK(lv.wake_probe_pending());
+    CHECK(lv.Step(1050 * kMs, 6050 * kMs, true) == Action::kOk);
+    CHECK(!lv.wake_probe_pending());
+    CHECK(lv.Step(5500 * kMs, 10500 * kMs, false) == Action::kOk);
+
+    // 5. Silent peer (e.g. Mac slept without sending TCP FIN): probe once at 6 s, timeout at 15 s.
+    lv.Reset(1000 * kMs, 1000 * kMs, 3000, 4000, 6000, 15000);
+    CHECK(lv.Step(6999 * kMs, 6999 * kMs, false) == Action::kOk);
+    CHECK(lv.Step(7000 * kMs, 7000 * kMs, false) == Action::kProbeIdle);
+    CHECK(lv.Step(12000 * kMs, 12000 * kMs, false) == Action::kOk);  // probe does not repeat
+    CHECK(lv.Step(16000 * kMs, 16000 * kMs, false) == Action::kTimedOutIdle);
+
+    // 6. Traffic after idle probe resets both the probe flag and timeout.
+    lv.Reset(1000 * kMs, 1000 * kMs, 3000, 4000, 6000, 15000);
+    CHECK(lv.Step(7000 * kMs, 7000 * kMs, false) == Action::kProbeIdle);
+    CHECK(lv.Step(8000 * kMs, 8000 * kMs, true) == Action::kOk);
+    CHECK(lv.Step(13999 * kMs, 13999 * kMs, false) == Action::kOk);
+    CHECK(lv.Step(14000 * kMs, 14000 * kMs, false) == Action::kProbeIdle);
+
+    // 7. Live loopback half-open peer timeout: server accepts handshake and keeps TCP open
+    //    while sending zero UDP/TCP media; PollStep() must time out cleanly so ft-screens reconnects.
+    const int srv_listen = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(srv_listen >= 0);
+    int one = 1;
+    setsockopt(srv_listen, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    sockaddr_in sin{};
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sin.sin_port = 0;
+    CHECK(bind(srv_listen, reinterpret_cast<sockaddr *>(&sin), sizeof sin) == 0);
+    CHECK(listen(srv_listen, 4) == 0);
+    socklen_t slen = sizeof sin;
+    CHECK(getsockname(srv_listen, reinterpret_cast<sockaddr *>(&sin), &slen) == 0);
+    const uint16_t tcp_port = ntohs(sin.sin_port);
+
+    const int probe_u = socket(AF_INET, SOCK_DGRAM, 0);
+    sin.sin_port = 0;
+    CHECK(bind(probe_u, reinterpret_cast<sockaddr *>(&sin), sizeof sin) == 0);
+    CHECK(getsockname(probe_u, reinterpret_cast<sockaddr *>(&sin), &slen) == 0);
+    uint16_t cli_udp_base = ntohs(sin.sin_port);
+    if (cli_udp_base >= 65530) cli_udp_base -= 10;
+    close(probe_u);
+
+    UniquePkey rsa(EVP_RSA_gen(2048));
+    CHECK(rsa != nullptr);
+    const auto spki = EncodeDerSpki(rsa.get());
+
+    std::atomic<bool> stop_srv{false};
+    std::thread srv([&] {
+        const int cfd = accept(srv_listen, nullptr, nullptr);
+        if (cfd < 0) return;
+        const std::string banner = "RFB 003.889\n";
+        SendAll(cfd, reinterpret_cast<const uint8_t *>(banner.data()), banner.size());
+        uint8_t cver[12];
+        RecvExact(cfd, cver, 12);
+        const uint8_t types[2] = {1, 33};
+        uint8_t rsa_init[15];
+        if (!SendAll(cfd, types, 2) || !RecvExact(cfd, rsa_init, 15)) {
+            close(cfd);
+            return;
+        }
+        std::vector<uint8_t> spkt = {0x00, 0x00};
+        AppendBe32(spkt, uint32_t(spki.size()));
+        spkt.insert(spkt.end(), spki.begin(), spki.end());
+        std::vector<uint8_t> spkt_w;
+        AppendBe32(spkt_w, uint32_t(spkt.size()));
+        spkt_w.insert(spkt_w.end(), spkt.begin(), spkt.end());
+        SendAll(cfd, spkt_w);
+
+        uint8_t auth_hdr[4];
+        RecvExact(cfd, auth_hdr, 4);
+        const uint32_t auth_len = ReadBe32(auth_hdr);
+        std::vector<uint8_t> auth_body(auth_len);
+        RecvExact(cfd, auth_body.data(), auth_len);
+        std::vector<uint8_t> wrap_key;
+        if (!RsaPkcs1Decrypt(rsa.get(), auth_body.data() + 8 + 128 + 2, 256, &wrap_key) || wrap_key.size() != 16) {
+            close(cfd);
+            return;
+        }
+        const uint8_t ok_res[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        SendAll(cfd, ok_res, 8);
+
+        uint8_t cinit = 0;
+        RecvExact(cfd, &cinit, 1);
+        std::vector<uint8_t> sinit(28, 0);
+        WriteBe16(&sinit[0], 1920);
+        WriteBe16(&sinit[2], 1080);
+        WriteBe32(&sinit[20], 4);
+        std::memcpy(&sinit[24], "Test", 4);
+        SendAll(cfd, sinit);
+
+        // Read ViewerInfo (66B) + 0x12 followup (12B) + SetEncodings (56B) (no 0x1d since virtual_display=false).
+        std::vector<uint8_t> pre(66 + 12 + 56);
+        if (!RecvExact(cfd, pre.data(), pre.size())) {
+            close(cfd);
+            return;
+        }
+
+        uint8_t cbc_key[16], cbc_iv[16], rekey[36]{};
+        RandomBytes(cbc_key, 16);
+        RandomBytes(cbc_iv, 16);
+        WriteBe32(rekey, 1);
+        Aes128EcbCrypt(true, wrap_key.data(), cbc_key, 16, rekey + 4);
+        Aes128EcbCrypt(true, wrap_key.data(), cbc_iv, 16, rekey + 20);
+        StreamCipher srv_cipher;
+        srv_cipher.InitFromRekey0x44f(rekey, wrap_key.data());
+
+        std::vector<uint8_t> fbu = {0x00, 0x00, 0x00, 0x01};
+        fbu.insert(fbu.end(), 8, 0);
+        AppendBe32(fbu, 1103);
+        fbu.insert(fbu.end(), rekey, rekey + 36);
+        SendAll(cfd, fbu);
+
+        uint8_t tog[8];
+        RecvExact(cfd, tog, 8);
+
+        // Drain SetEncodings and 0x1c, answer with canvas 1920x1080, then go silent while keeping TCP open!
+        for (int k = 0; k < 8; ++k) {
+            uint8_t lbuf[2];
+            if (!RecvExact(cfd, lbuf, 2, 1000)) break;
+            const uint16_t clen = ReadBe16(lbuf);
+            std::vector<uint8_t> body(clen);
+            if (!RecvExact(cfd, body.data(), clen, 1000)) break;
+            std::vector<uint8_t> msg;
+            if (!srv_cipher.DecryptRecordBody(body.data(), body.size(), &msg)) break;
+            if (!msg.empty() && msg[0] == 0x1c) {
+                std::vector<uint8_t> wire;
+                srv_cipher.EncryptMessage(BuildMock0x1cAnswer(1920, 1080, 1), &wire);
+                SendAll(cfd, wire);
+                break;
+            }
+        }
+        while (!stop_srv.load()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        close(cfd);
+    });
+
+    SessionOptions opt;
+    opt.host = "127.0.0.1";
+    opt.port = tcp_port;
+    opt.bind_ip = "127.0.0.1";
+    opt.udp_ctrl_port = cli_udp_base;
+    opt.udp_video_port = uint16_t(cli_udp_base + 1);
+    opt.username = "testuser";
+    opt.password = "pw";
+    opt.auth_mode = AuthMode::kNonSrp;
+    opt.virtual_display = false;
+    opt.warmup_tcp = false;
+    opt.settle_ms = 5;
+    opt.toggle_settle_ms = 5;
+    opt.rx_probe_ms = 60;
+    opt.rx_timeout_ms = 160;
+
+    SessionClient client;
+    std::string err;
+    CHECK(client.Connect(opt, &err));
+    std::vector<H264RtpAssembler::AccessUnit> aus;
+    bool timed_out = false;
+    for (int i = 0; i < 40; ++i) {
+        if (!client.PollStep(15, &aus, &err)) {
+            timed_out = true;
+            break;
+        }
+    }
+    CHECK(timed_out);
+    CHECK(err.find("no media from host") != std::string::npos);
+
+    stop_srv = true;
+    client.Close();
+    srv.join();
+    close(srv_listen);
+}
+
 }  // namespace
 
 int main() {
@@ -1160,6 +1357,7 @@ int main() {
     TestZeroDelayPoc2Rewrite();
     TestInputKeyMappingAndMetaHoldback();
     TestRfc3640AudioAndCredsStore();
+    TestSleepWakeAndIdleLivenessTimeout();
     TestFullLoopbackSession();
     std::printf("apple_hp_test: all %d checks passed\n", g_checks);
     return 0;

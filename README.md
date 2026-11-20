@@ -52,6 +52,26 @@ If you work in the desktop for long stretches, or leave the headset on a stand, 
 3. Move the mouse, and the dot appears where you're looking.
 4. For a keyboard that isn't US English (Polish, German, French and so on), pick its language in Frametop Settings → Keyboard → Desktop layout. That layout is what every keyboard types on the desktop, Full Keyboard and dictation included; pick the same language in Full Keyboard.
 
+## Set up a PC for remote displays
+
+A Windows or Linux PC streams its monitors to Frametop with Frametop's build of Vibepollo, from our fork [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo). Both installers below are pinned to the fork's release [`frametop-2.0.4`](https://github.com/Frametop/frametop-vibepollo/releases/tag/frametop-2.0.4) and check the SHA-256 of everything they download, so you get the build Frametop was tested with, not a newer upstream Vibepollo. A Mac uses Sunshine instead: see [host/macos/README.md](host/macos/README.md).
+
+**Windows 10 or 11 (64-bit):** download [FrametopHostSetup.exe](https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.4/FrametopHostSetup.exe) and run it. It isn't signed, so Windows may say "Windows protected your PC": choose More info, then Run anyway. Confirm the admin prompt. The setup installs Vibepollo 2.0.3 if it isn't there (follow its installer, then go back to the setup window), puts in Frametop's build, and asks for the Web UI login the Frame signs in with. Run it again to update. The same from PowerShell (Start, type `powershell`, Enter):
+
+```powershell
+irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex
+```
+
+**Linux (Arch Linux or CachyOS, KDE Plasma on Wayland, x86_64):** in a terminal, run
+
+```bash
+curl -fsSL https://frametop.github.io/frametop/host/linux/get.sh | bash
+```
+
+It downloads Frametop's Arch package and Vibepollo's installer, asks for your `sudo` password, installs, then lists what's left: a restart, the Web UI login and one setting. Run it again to update.
+
+Then add the PC on the Frame, in Frametop Settings → Remote displays → Add computer (see [Remote displays](#remote-displays)). [host/windows/README.md](host/windows/README.md) and [host/linux/README.md](host/linux/README.md) have the steps by hand, what each setup changes, and how to undo it.
+
 ## Use
 
 ### Screens
@@ -124,21 +144,7 @@ Each computer needs a host kit once:
 | Mac with Apple silicon | Its monitors | Sunshine, one instance per monitor, and Frametop Streams in the menu bar to turn them on and off: [host/macos/README.md](host/macos/README.md) |
 | Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build, not tested yet: [host/linux/README.md](host/linux/README.md) |
 
-On a Windows PC, open PowerShell (Start, type `powershell`, Enter) and run:
-
-```powershell
-irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex
-```
-
-On a Linux PC (Arch Linux or CachyOS, KDE Plasma on Wayland), in a terminal:
-
-```bash
-curl -fsSL https://frametop.github.io/frametop/host/linux/get.sh | bash
-```
-
-Each downloads its kit's setup and runs it, and the setup checks the SHA-256 of everything it installs. On Windows it opens an admin window (confirm the prompt), installs Vibepollo if needed, and asks for the Web UI login the Frame signs in with. On Linux it asks for your `sudo` password, then lists what's left: a restart, the Web UI login and one setting. The kits' READMEs above have the steps by hand and what each one changes.
-
-Then, on the Frame, open Frametop Settings and pick Remote displays (or Remote displays in the Frametop menu), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
+On a Windows or Linux PC, install Vibepollo with [Set up a PC for remote displays](#set-up-a-pc-for-remote-displays). Then, on the Frame, open Frametop Settings and pick Remote displays (or Remote displays in the Frametop menu), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
 
 With Share the clipboard on a computer's card (Vibepollo on Windows or Linux), text or an image you copy on the desktop can be pasted on the computer once you click one of its displays, and what you copy there can be pasted on the desktop once you click back.
 
@@ -310,7 +316,7 @@ A Plasma session runs nested inside ft-screens (`screens/`), a small Wayland com
 | `remote/` | Remote desktop over VNC, and Frametop Settings' Remote access page that turns it on and off. |
 | `remote-displays/` | Frametop Settings' Remote displays page, which adds other computers' monitors as screens. |
 | `stream/` | ft-stream, one per remote display: receives and decodes its stream for ft-screens. |
-| `host/` | The host kits for remote displays: Windows, macOS and Linux. |
+| `host/` | The host kits for remote displays: Windows, macOS and Linux. `host/vibepollo-pin.json` pins the release of Frametop's Vibepollo build that the Windows and Linux kits install; `scripts/pin-vibepollo.py pin` moves it to the fork's latest release and writes it into the kits and READMEs. |
 | `setup/` | The build container and the Bluetooth fixes. See [setup/README.md](setup/README.md). |
 | `commands/` | Frametop commands: your own shell commands, saved under a name and run in the background (`ft-cmd`). |
 | `frunner/` | frunner, the search for apps, remote displays and your commands (Meta+Space). See [docs/frunner.md](docs/frunner.md). |

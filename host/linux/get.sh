@@ -12,8 +12,8 @@
 # Options (piped, they go after "bash -s --"):
 #   --dir DIR        where the downloads go (default ~/frametop-host)
 #   --download-only  download and check them, but don't install
-# When the build changes, update TAG, PACKAGE and both SHA-256s together, from the release's
-# .sha256 file and the installer at that tag, and the README's steps to match.
+# TAG, PACKAGE and both SHA-256s come from host/vibepollo-pin.json: for a new build, run
+# scripts/pin-vibepollo.py pin, which writes them here, in the Windows kit and in the READMEs.
 set -euo pipefail
 
 TAG=frametop-2.0.4

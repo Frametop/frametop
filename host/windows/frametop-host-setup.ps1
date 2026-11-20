@@ -37,6 +37,8 @@ $VibepolloVersion = "2.0.3"
 $SetupUrl = "https://github.com/Nonary/Vibepollo/releases/download/2.0.3/VibepolloSetup-v2.0.3.exe"
 $SetupSha = "D099E2A686D6E4A61A1F8D48E04C2A2FDA2FE27BCFD7D50EF2365758B09AAB05"
 # Frametop's build: Frametop/frametop-vibepollo release frametop-2.0.4 (its CI, from the tag).
+# $BuildUrl, the Sha values and $OlderBuildShas come from host/vibepollo-pin.json: for a new
+# build, run scripts/pin-vibepollo.py pin.
 # Each file: where it goes in the install, its SHA-256, and the SHA-256 of Vibepollo 2.0.3's own
 # (none: 2.0.3 has no such file).
 $BuildUrl = "https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.4"

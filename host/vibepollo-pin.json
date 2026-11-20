@@ -1,0 +1,16 @@
+{
+  "tag": "frametop-2.0.4",
+  "linux": {
+    "package": "vibepollo-2.0.4-1-x86_64.pkg.tar.zst",
+    "package_sha256": "1bff4e8b26ba909344a27d7aab893e1ec2fe384050607ca66da9f9673b624b08",
+    "installer_sha256": "8b3611684341df7bbad0b2f6dc80c3644a8dc182fe0fe5282dcf618c87f27242"
+  },
+  "windows": {
+    "base": "2.0.3",
+    "files": {
+      "sunshine.exe": "f3cfdcc2fb22519f024cbc1969e9bc77a9bb7392ff47e6b3212c844bce681bdf",
+      "tools\\sunshine_wgc_capture.exe": "e16c4eae337e87297d897b7cbc672b4bcf93bd634ac852710ac655afaeff26bb",
+      "tools\\frametop_clipboard.exe": "2e020870d9933f017f6dfebf65abeaeffd41b04765c44dc3a7454f9d3780abdd"
+    }
+  }
+}

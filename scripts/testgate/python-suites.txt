@@ -32,6 +32,7 @@ remote-displays/test/*.py
 scripts/tests/test_app_imports.py
 scripts/tests/test_uninstall.py
 scripts/tests/test_get.py
+scripts/tests/test_pin_vibepollo.py
 scripts/tests/test_install_lib.py
 scripts/tests/test_conf_readers.py
 scripts/tests/test_install_interrupt.py

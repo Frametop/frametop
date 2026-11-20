@@ -14,7 +14,9 @@ If Sunshine runs on this PC, uninstall it first: Vibepollo uses the same ports. 
 
 ## Set up
 
-The quickest way: open PowerShell on the PC (Start, type `powershell`, Enter; no admin needed) and run
+The quickest way: download [FrametopHostSetup.exe](https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.4/FrametopHostSetup.exe) from Frametop's fork of Vibepollo and run it. It isn't signed, so Windows may say "Windows protected your PC": choose More info, then Run anyway. It holds no versions itself: it runs the PowerShell line below, so it always installs the build this kit pins, and you can keep it to update later. Run it from a Command Prompt with `-Check`, `-Undo` or `-SkipLogin` for the options under [Check and remove](#check-and-remove). The kit downloads from GitHub: from [Frametop/frametop](https://github.com/Frametop/frametop) (`main`), from [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo/releases/tag/frametop-2.0.4) (Frametop's build, release `frametop-2.0.4`), and Vibepollo's installer from [Nonary/Vibepollo](https://github.com/Nonary/Vibepollo) when it isn't installed (Frametop's build goes into it: Vibepollo's installer brings the drivers, which only upstream can sign).
+
+Or open PowerShell on the PC (Start, type `powershell`, Enter; no admin needed) and run
 
 ```powershell
 irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex

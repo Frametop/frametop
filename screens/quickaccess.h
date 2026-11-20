@@ -8,14 +8,13 @@
 //   The tiles are actions that touch every screen, the input relay's own (its "action NAME", the ones
 // frunner's OS menu runs: conf/ft_input_actions.py's MENU_ACTIONS), so they keep its rules (this user
 // only; while Frametop is paused for a VR game only Steam Menu works, and the rest dim: WorksPaused);
-// Reset Layout counts down first: its tap turns it red, "Reset in 3" to 1, then it resets; a second tap stops it.
+// Reset Layout resets at once (ft-layout's reset counts 3-2-1 in front of you itself).
 // Pure: the tiles, their layout, a fingertip's pokes and Reset's ask (screens/tests/quickaccess-test.cpp);
 // vrquick.cpp draws the card, places it over the palm and gives it the tip and the clicks.
 #pragma once
 
 #include "tiptap.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -252,35 +251,5 @@ private:
     int place_ = -1, tile_ = -1;   // place_: the tile under it, the palm up or not
 };
 
-// Reset's countdown (user, 2026-11-19: "it should count down to 3 and then do the reset without having
-// to tap"; the hand model loses the tip too often for a second tap): a tap starts it, and kMs later it's
-// due. A tap from kLeastMs on stops it (one poke's tremble, or a double click, sooner: not a second tap).
-class Countdown {
-public:
-    static constexpr int64_t kMs = 3000;
-    static constexpr int64_t kLeastMs = 400;
-    // A tap on Reset at `nowMs`: true, it started; false, it stopped (or was tapped too soon to).
-    bool Tap(int64_t nowMs) {
-        if (On()) {
-            if (nowMs - startMs_ >= kLeastMs) startMs_ = -1;
-            return false;
-        }
-        startMs_ = nowMs;
-        return true;
-    }
-    bool On() const { return startMs_ >= 0; }
-    // The whole seconds left, shown (3, 2, 1), 0 when it isn't counting.
-    int Left(int64_t nowMs) const { return On() ? int(std::max<int64_t>(1, (kMs - (nowMs - startMs_) + 999) / 1000)) : 0; }
-    // True once, when it's run out: reset now.
-    bool Due(int64_t nowMs) {
-        if (!On() || nowMs - startMs_ < kMs) return false;
-        startMs_ = -1;
-        return true;
-    }
-    void Clear() { startMs_ = -1; }
-
-private:
-    int64_t startMs_ = -1;
-};
 
 }  // namespace quickaccess

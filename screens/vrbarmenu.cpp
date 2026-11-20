@@ -4,7 +4,7 @@
 //   A tap on the bar (vr.cpp's BarTap), a poke on it, or `barside N menu` opens the main page: quick tiles
 // on top (Curved, Rotate; a floating window's To Desktop and Close), then Placement, View in Theater,
 // Move All Screens, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
-// Keep in View, On Dashboard (the one it is checked) and Stay Shown while it's on the dashboard.
+// Keep in View, Tiled (the one it is checked) and Stay Shown while it's on the dashboard.
 // A right click on the bar, as before, or `barside N edges` opens the edges page: Bottom, Top, Left,
 // Right (the panel's own checked), and View in Theater where the panel has it. Bar Position goes there
 // with Back first. It opens over the panel beside the bar at the spot clicked, toward its middle
@@ -145,7 +145,7 @@ barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const 
         case Item::Close: l.icon = Icon::Close, l.red = true; break;
         case Item::Placement:
             l.icon = w == Where::View ? Icon::InView : w == Where::Dashboard ? Icon::Dashboard : w == Where::Wrist ? Icon::Controller : Icon::InRoom;
-            l.value = w == Where::View ? "Keep in View" : w == Where::Dashboard ? "On Dashboard" : w == Where::Wrist ? "On a Wrist" : "In the Room";
+            l.value = w == Where::View ? "Keep in View" : w == Where::Dashboard ? "Tiled" : w == Where::Wrist ? "On a Wrist" : "In the Room";
             l.valueBlue = w != Where::Room;
             break;
         case Item::InRoom: l.icon = Icon::InRoom; break;
@@ -251,7 +251,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             if (i == SteamDashIndex()) SteamDashToTheater();
             else GsToTheater(i);
             break;
-        case Item::Reset: ShowResetAsk(i); break;
+        case Item::Reset: DoReset(i, "its bar's menu"); break;   // (ft-layout's reset counts 3-2-1 in front of you first)
         case Item::Edge: SetBarSide(i, r.side, "its bar's menu"); break;
         default: break;
     }

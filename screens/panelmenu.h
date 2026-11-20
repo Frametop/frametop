@@ -102,12 +102,12 @@ inline const char *Label(const Row &r) {
         case Item::Placement: return "Placement";
         case Item::InRoom: return "In the Room";
         case Item::KeepInView: return "Keep in View";
-        case Item::OnDashboard: return "On Dashboard";
+        case Item::OnDashboard: return "Tiled";
         case Item::StayShown: return "Stay Shown";
         case Item::MoveAll: return "Move All Screens";
         case Item::Theater: return "View in Theater";
         case Item::BarPosition: return "Bar Position";
-        case Item::Reset: return "Reset Layout\xe2\x80\xa6";
+        case Item::Reset: return "Reset Layout";
         case Item::Back: return "Back";
         case Item::Edge: return barside::Label(r.side);
     }

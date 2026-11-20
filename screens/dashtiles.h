@@ -4,9 +4,10 @@
 // the tiling keys do, and each app's or display's last state (Memory).
 //
 // Anchored (user, 2026-11-16): a panel rides with the dashboard. Dragged on the grid, it moves to
-// where it's let go; pulled well off it, it tears off and stays anchored as a satellite at its own
-// pose in the group's frame (it comes along when the dashboard opens somewhere else) until its
-// anchor is turned off. Anchored panels stay shown with the dashboard closed as DASH_TILE_STAY says
+// where it's let go; pulled well off it, it goes back to its place (user, 2026-11-19: tiled mode
+// "should always re-orient in the tiled and no longer allow you to pull displays out of the
+// tiling"). A satellite (TearOff: off the grid at its own pose in the group's frame) is only an
+// older memory's or a direct call's now; a drop or a restore puts it on the grid. Anchored panels stay shown with the dashboard closed as DASH_TILE_STAY says
 // (`stayDefault`; on unless set, user 2026-11-18: a click in the room closes the dashboard), unless
 // the anchor button's long press set one the other way. Each app or display remembers what it was last: anchored or not,
 // its place on the grid or as a satellite, and whether it stays, for the next time it opens.
@@ -202,9 +203,12 @@ public:
     // Let go at `az` round you: where DropFor said (a column's indices are the grid's without it), or
     // torn off at `rel`. The strip then goes where it keeps it nearest `az` (Arrange; NAN: the others
     // where they were, it as it falls).
-    void Drop(int id, const tiling::Drop &d, const double rel[3][4], double az = NAN) {
+    void Drop(int id, const tiling::Drop &d, double az = NAN) {
         if (!Anchored(id)) return;
-        if (d.kind == tiling::Drop::TearOff) return TearOff(id, rel);
+        if (d.kind == tiling::Drop::TearOff) {   // (pulled off: a tile stays where it was, a satellite joins the grid)
+            if (Satellite(id)) EndBatch(), spots_[id].satellite = false, grid_.Add(id, -1);
+            return;
+        }
         moved_ = id, movedAz_ = az;
         const tilegrid::Cell *c = grid_.CellOf(id);
         const double scale = c ? c->scale : 1;
@@ -342,11 +346,7 @@ public:
         if (st.kind == State::Kind::Off) return;
         Spot &s = spots_[id];
         s.stay = st.stay;
-        if (st.kind == State::Kind::Sat) {
-            s.satellite = true;
-            std::memcpy(s.rel, st.rel, sizeof s.rel);
-            return;
-        }
+        if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
         grid_.Insert(id, st.col, st.row, st.alone, st.scale);
     }

@@ -418,19 +418,6 @@ int main() {
                                                           !WorksPaused(Tile::Reset) && !WorksPaused(Tile::SpinLeft) &&
                                                           !WorksPaused(Tile::SpinRight) && !WorksPaused(Tile::DockAll));
 
-    // Reset counts down: a tap starts it, it's due kMs on (once), a tap from kLeastMs stops it.
-    Countdown c;
-    check("not counting at first", !c.On() && c.Left(0) == 0 && !c.Due(100000));
-    check("a tap starts it", c.Tap(1000) && c.On() && c.Left(1000) == 3);
-    check("...2 then 1 left", c.Left(2000) == 2 && c.Left(3500) == 1 && c.Left(3999) == 1);
-    check("not due before kMs", !c.Due(1000 + Countdown::kMs - 1) && c.On());
-    check("due at kMs, once", c.Due(1000 + Countdown::kMs) && !c.On() && !c.Due(1000 + Countdown::kMs + 1));
-    check("a tap starts it again", c.Tap(10000));
-    check("a tap 100 ms after: too soon to stop it", !c.Tap(10100) && c.On());
-    check("...from kLeastMs it stops", !c.Tap(10000 + Countdown::kLeastMs) && !c.On() && !c.Due(20000));
-    c.Tap(30000), c.Clear();
-    check("Clear stops it", !c.On() && !c.Due(40000));
-
     std::printf(failed ? "%d failed\n" : "all passed\n", failed);
     return failed ? 1 : 0;
 }

@@ -154,15 +154,14 @@ int main() {
         const auto at = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
         const double w = at(2) - at(1), a1 = at(1), a2 = at(2);
         check("pan: three, centred at first", near(at(2), 0, 1e-9) && w > 20);
-        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         const double left = a1 - w * 0.4;   // (on 1's left edge)
-        b.Drop(3, b.DropFor(3, left, 0, desk), rel, left);
+        b.Drop(3, b.DropFor(3, left, 0, desk), left);
         b.Arrange(desk);
         check("pan: right one to the left end: it's leftmost", at(3) < at(1) && at(1) < at(2));
         check("pan: ...the others stay put", near(at(1), a1, 1e-9) && near(at(2), a2, 1e-9));
         check("pan: ...it roughly where let go", std::fabs(at(3) - left) < w);
         const double b1 = at(1), b2 = at(2), b3 = at(3), mid = (b1 + b2) / 2;
-        b.Drop(3, b.DropFor(3, mid, 0, desk), rel, mid);   // (back between them)
+        b.Drop(3, b.DropFor(3, mid, 0, desk), mid);   // (back between them)
         b.Arrange(desk);
         check("pan: dragged into the middle: it's there", at(1) < at(3) && at(3) < at(2));
         check("pan: ...its neighbours make room both ways", at(1) < b1 - w * 0.25 && at(2) > b2 + w * 0.25 && std::fabs(at(3) - mid) < w * 0.25);
@@ -171,7 +170,7 @@ int main() {
             dashtiles::Board one;
             one.Anchor(5, -1, dashtiles::Stay::Default);
             one.Arrange(desk);
-            one.Drop(5, one.DropFor(5, 20, 0, desk), rel, 20);
+            one.Drop(5, one.DropFor(5, 20, 0, desk), 20);
             one.Arrange(desk);
             const tiling::Placed *p5 = one.PlacedOf(5);
             check("pan: alone, moved: where let go", p5 && near(p5->azDeg, 20, 1e-9));
@@ -182,7 +181,7 @@ int main() {
             int end = -1;
             for (const tiling::Placed &p : l.tiles)
                 if (p.az1 >= l.az1 - 1e-9) end = p.id;
-            b.Drop(end, b.DropFor(end, l.az0 + 5, 0, desk), rel, l.az0 + 5);
+            b.Drop(end, b.DropFor(end, l.az0 + 5, 0, desk), l.az0 + 5);
             const tiling::Layout &m = b.Arrange(desk);
             reach = reach && m.az0 <= 1e-9 && m.az1 >= -1e-9;
         }
@@ -205,11 +204,10 @@ int main() {
     // flip took the column next to it 6 degrees)
     {
         const auto mixed = [](int id) { return id == 2 ? dashtiles::Info{1.4, 0.8} : dashtiles::Info{3.5, 1.97}; };
-        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         dashtiles::Board b;
         for (const int i : {1, 3, 4}) b.Anchor(i, -1, dashtiles::Stay::Default);
         b.Anchor(2, -1, dashtiles::Stay::Default);
-        b.Drop(2, {tiling::Drop::Into, 0, 1}, rel);   // (the narrow one under 1)
+        b.Drop(2, {tiling::Drop::Into, 0, 1});   // (the narrow one under 1)
         const tiling::Layout &l0 = b.Arrange(mixed);
         const auto mid = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
         const auto off = [&](int id) { const tiling::Placed *p = b.PlacedOf(id), *w = b.PlacedOf(1); return p && w ? p->azDeg - w->azDeg : NAN; };
@@ -218,7 +216,7 @@ int main() {
         int first = -1;
         for (const tiling::Placed &p : l0.tiles)
             if (p.az0 <= l0.az0 + 1e-9) first = p.id;
-        b.Drop(first, b.DropFor(first, right - 5, 0, mixed), rel, right - 5);   // (the left end to the right end)
+        b.Drop(first, b.DropFor(first, right - 5, 0, mixed), right - 5);   // (the left end to the right end)
         b.Arrange(mixed);
         check("lean: the wide one moved from the left end: the narrow one alone now", first == 1 && b.PlacedOf(2)->col == 0);
         check("lean: ...the columns not touched stay put (not pulled by the narrow one's)", near(mid(3), a3, 1e-9));
@@ -227,11 +225,11 @@ int main() {
         dashtiles::Board c;
         for (const int i : {1, 3, 4}) c.Anchor(i, -1, dashtiles::Stay::Default);
         c.Anchor(2, -1, dashtiles::Stay::Default);
-        c.Drop(2, {tiling::Drop::Into, 0, 1}, rel);
+        c.Drop(2, {tiling::Drop::Into, 0, 1});
         c.Arrange(mixed);
         const auto cmid = [&](int id) { const tiling::Placed *p = c.PlacedOf(id); return p ? p->azDeg : NAN; };
         const double c1 = cmid(1), c3 = cmid(3), at = (c.PlacedOf(1)->az1 + c.PlacedOf(3)->az0) / 2;
-        c.Drop(4, c.DropFor(4, at, 0, mixed), rel, at);
+        c.Drop(4, c.DropFor(4, at, 0, mixed), at);
         c.Arrange(mixed);
         check("columns: let go between two, it's there", cmid(1) < cmid(4) && cmid(4) < cmid(3));
         check("columns: ...both sides make room, it near where let go",
@@ -253,7 +251,7 @@ int main() {
               b.Grid().Split(0) == 1 && side(1) == -1 && side(2) == 1 && side(3) == 1);
         const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         auto d = b.DropFor(3, -40, 0, desk);   // (on 1's right quarter, left of Steam's menu)
-        b.Drop(3, d, rel);
+        b.Drop(3, d);
         b.Arrange(desk);
         check("split: let go left of the menu, it goes left", side(1) == -1 && side(3) == -1 && side(2) == 1);
         b.Anchor(4, 3, dashtiles::Stay::Default);
@@ -265,7 +263,7 @@ int main() {
         check("split: Meta+Right steps across the menu", b.Press(3, dashtiles::Key::Right) && (b.Arrange(desk), side(3) == 1) &&
                                                              side(1) == -1 && side(2) == 1);
         d = b.DropFor(3, -5, 0, desk);   // (in the slot, left of its middle)
-        b.Drop(3, d, rel);
+        b.Drop(3, d);
         b.Arrange(desk);
         check("split: let go in the slot left of its middle, it goes left", side(3) == -1 && side(2) == 1);
         b.SlotMoved();
@@ -322,11 +320,11 @@ int main() {
             return p ? (p->az1 <= -33 + 1e-9 ? -1 : p->az0 >= 33 - 1e-9 ? 1 : 0) : 9;
         };
         const bool rightFirst = sideIn(one, 1) == 1;
-        one.Drop(1, one.DropFor(1, -20, 0, desk), rel, -20);
+        one.Drop(1, one.DropFor(1, -20, 0, desk), -20);
         one.Arrange(desk);
         const bool wentLeft = sideIn(one, 1) == -1;
         const tiling::Placed *p1 = one.PlacedOf(1);
-        one.Drop(1, one.DropFor(1, p1 ? (p1->az0 + p1->az1) / 2 : 0, 0, desk), rel, p1 ? (p1->az0 + p1->az1) / 2 : 0);
+        one.Drop(1, one.DropFor(1, p1 ? (p1->az0 + p1->az1) / 2 : 0, 0, desk), p1 ? (p1->az0 + p1->az1) / 2 : 0);
         one.Arrange(desk);
         check("split: one panel let go left of the menu goes left, and stays on itself",
               rightFirst && wentLeft && sideIn(one, 1) == -1 && one.Grid().Split(0) == 1);
@@ -350,7 +348,7 @@ int main() {
         const bool swapped = same.Press(3, dashtiles::Key::Right);
         same.Arrange(desk);
         const tiling::Placed *p4 = same.PlacedOf(4);
-        same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), rel, p4 ? (p4->az0 + p4->az1) / 2 : 0);   // (let go where it was)
+        same.Drop(4, same.DropFor(4, p4 ? (p4->az0 + p4->az1) / 2 : 0, 0, desk), p4 ? (p4->az0 + p4->az1) / 2 : 0);   // (let go where it was)
         same.Arrange(desk);
         const bool stillLopsided = same.Grid().Split(0) == 0;
         same.SlotMoved();
@@ -382,7 +380,7 @@ int main() {
         const double at3 = p3 ? (p3->az0 + p3->az1) / 2 : 0;
         dock.TearOff(3, rel);
         dock.Arrange(desk);
-        dock.Drop(3, dock.DropFor(3, at3 - 30, 0, desk), rel, at3 - 30);   // (by its old left edge: a column of its own again)
+        dock.Drop(3, dock.DropFor(3, at3 - 30, 0, desk), at3 - 30);   // (by its old left edge: a column of its own again)
         dock.Arrange(desk);
         const bool docked = dock.Grid().Has(3) && dock.Grid().Split(0) == 0;
         dock.SlotMoved();
@@ -393,7 +391,7 @@ int main() {
         dashtiles::Board across;
         across.params.reserveAzDeg = 0, across.params.reserveDeg = 66;
         for (int i = 1; i <= 2; ++i) across.Anchor(i, i - 1, dashtiles::Stay::Default), across.Arrange(desk);   // S [ 1 ][ 2 ]
-        across.Drop(2, across.DropFor(2, -40, 0, desk), rel, -40);   // (left of the menu)
+        across.Drop(2, across.DropFor(2, -40, 0, desk), -40);   // (left of the menu)
         across.Arrange(desk);
         const bool crossed = across.Grid().Split(0) == 1;   // [ 2 ] S [ 1 ]
         for (int i = 3; i <= 4; ++i) across.Anchor(i, 1, dashtiles::Stay::Default), across.Arrange(desk);   // (next to 1: right)
@@ -487,20 +485,23 @@ int main() {
         const double rel[3][4] = {{1, 0, 0, 0.5}, {0, 1, 0, 2}, {0, 0, 1, -1}};
         auto d = b.DropFor(2, l.az1 + 40, 20, desk);
         check("drop: far off: torn off", d.kind == tiling::Drop::TearOff);
-        b.Drop(2, d, rel);
-        check("torn off: a satellite, still anchored, off the grid", b.Satellite(2) && b.Anchored(2) && !b.Tiled(2) &&
-                                                                         near(b.SpotOf(2)->rel[1][3], 2));
+        b.Drop(2, d);
+        check("pulled off: back in its place, still on the grid", !b.Satellite(2) && b.Anchored(2) && b.Tiled(2));
+        b.TearOff(2, rel);
+        b.Drop(2, d);
+        check("a satellite pulled off again: onto the grid", !b.Satellite(2) && b.Tiled(2));
+        b.TearOff(2, rel);
         b.Arrange(desk);
         const tiling::Placed *one = b.PlacedOf(1);
         d = b.DropFor(2, one->azDeg, one->el1 - 0.5, desk);
         check("dropped on a tile's middle: into its column", d.kind == tiling::Drop::Into && d.col == 0 && d.row == 0);
-        b.Drop(2, d, rel);
+        b.Drop(2, d);
         check("back on the grid: not a satellite", !b.Satellite(2) && b.Tiled(2) && b.Grid().Cols()[0].cells[0].id == 2);
         // dragged out of its own column, the indices are the grid's without it
         b.Arrange(desk);
         const tiling::Placed *three = b.PlacedOf(3);
         d = b.DropFor(1, three->az1 - 0.5, three->elDeg, desk);
-        b.Drop(1, d, rel);
+        b.Drop(1, d);
         check("moved to the right end: a new column there", b.Grid().Cols().back().cells[0].id == 1 &&
                                                                  b.Grid().Cols()[0].cells.size() == 1);
     }
@@ -509,18 +510,17 @@ int main() {
     {
         dashtiles::Board b;
         for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
-        const double rel[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
         b.Arrange(desk);
         const tiling::Placed p2 = *b.PlacedOf(2);
         auto d = b.DropFor(3, p2.azDeg, p2.elDeg - 1, desk);
         check("drop: the right one on the middle one's middle: into it", d.kind == tiling::Drop::Into && d.col == 1);
-        b.Drop(3, d, rel);
+        b.Drop(3, d);
         check("...stacked under 2", b.Grid().Cols().size() == 2 && b.Grid().Cols()[1].cells.size() == 2 &&
                                         b.Grid().Cols()[1].cells[0].id == 2 && b.Grid().Cols()[1].cells[1].id == 3);
         b.Arrange(desk);
         const tiling::Placed p1 = *b.PlacedOf(1);
         d = b.DropFor(1, p1.azDeg, p1.elDeg, desk);
-        b.Drop(1, d, rel);
+        b.Drop(1, d);
         check("drop: onto itself: back where it was", b.Grid().Cols().size() == 2 && b.Grid().Cols()[0].cells[0].id == 1);
     }
     // --- the keys
@@ -551,7 +551,7 @@ int main() {
         dashtiles::Board b;
         b.Anchor(10, -1, dashtiles::Stay::Default);
         b.Anchor(11, 10, dashtiles::Stay::Default);
-        b.Drop(11, {tiling::Drop::Into, 0, 1}, kI);
+        b.Drop(11, {tiling::Drop::Into, 0, 1});
         b.Arrange(info);
         const double h = b.PlacedOf(10)->heightM / b.PlacedOf(10)->distM;   // (its size seen from you)
         check("resized by hand: its size", b.Resized(10, 1.5) && near(b.Grid().CellOf(10)->scale, 1.5));
@@ -589,7 +589,7 @@ int main() {
         b.Anchor(1, -1, dashtiles::Stay::On);
         b.Anchor(2, 1, dashtiles::Stay::Default);
         b.Anchor(3, 2, dashtiles::Stay::Default);
-        b.Drop(3, {tiling::Drop::Into, 1, 1}, kI);
+        b.Drop(3, {tiling::Drop::Into, 1, 1});
         const std::string one = b.Remember(1), three = b.Remember(3);
         check("remember: a tile", one.rfind("tile 1 0 0 1 ", 0) == 0);
         check("remember: under another", three.rfind("tile 0 1 1 0 ", 0) == 0);
@@ -604,7 +604,7 @@ int main() {
                                                             c.Grid().Cols().size() == 2 && c.Grid().Cols()[0].cells[0].id == 1);
         check("restore: under another", c.Restore(3, three, 5) && c.Grid().Cols()[1].cells.size() == 2 &&
                                             c.Grid().Cols()[1].cells[1].id == 3);
-        check("restore: a satellite", c.Restore(2, sat, 5) && c.Satellite(2) && near(c.SpotOf(2)->rel[2][3], -2));
+        check("restore: a satellite goes on the grid", c.Restore(2, sat, 5) && !c.Satellite(2) && c.Tiled(2));
         check("restore: off", c.Restore(2, "off", 5) && !c.Anchored(2));
         check("restore: garbage refused", !c.Restore(4, "tile 1 2", 5) && !c.Restore(4, "sat 1 1 2 3", 5) &&
                                               !c.Restore(4, "tile 1 0 0 1 nan 1 0", 5) && !c.Anchored(4));

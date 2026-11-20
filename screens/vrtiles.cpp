@@ -274,6 +274,9 @@ void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     auto it = g_screens.find(i);
     if (it == g_screens.end() || g_tiles.Anchored(i)) return;
     EndDrag(it->second);
+    // (off the head or a wrist: tiled, it's the tiles' only, user 2026-11-19: Keep in View then On
+    // Dashboard left it pinned in view, and the menu, reading it tiled, offered nothing to undo it)
+    if (Mat p; it->second.pinned != kNone && it->second.pinned != kDashboard && ScreenPose(it->second, &p)) SetAbsolute(it->second, p);
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;
     const dashtiles::Info info = TileInfo(i);
     g_tiles.Anchor(i, after, stay, leftOf, &info);
@@ -366,19 +369,17 @@ bool TileShown(const Screen &s, int i, bool dashUp) {
            (TileStays(s, i) || dashUp || s.drag != Drag::None || i == PadPanel());
 }
 
-// Let go after a move: where on the grid it goes, or torn off as a satellite where it is.
+// Let go after a move: where on the grid it goes; pulled off it, back to its place (dashtiles.h's Drop).
 void TileDrop(Screen &s, int i) {
     Mat p;
     if (!g_tileGroupSet || !ScreenPose(s, &p)) return;
     const Mat q = Mul(Inverse(Mul(DashFrame(), g_tileGroupRel)), p);
     const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
-    double az, el, rel[3][4];
+    double az, el;
     tiling::Direction(pt, &az, &el);
-    for (int r = 0; r < 3; ++r)
-        for (int c = 0; c < 4; ++c) rel[r][c] = q.m[r][c];
     const tiling::Drop d = g_tiles.DropFor(i, az, el, TileInfo);
-    g_tiles.Drop(i, d, rel, az);
-    static const char *kinds[] = {"into column", "a new column at", "torn off (a satellite) at"};
+    g_tiles.Drop(i, d, az);
+    static const char *kinds[] = {"into column", "a new column at", "pulled off: back in its place, column"};
     std::printf("%s: let go at %.0f, %.0f degrees: %s %d", TileLabel(i).c_str(), az, el, kinds[d.kind], d.col + 1);
     RetileDash();
     std::printf("; the strip %.0f..%.0f (turned %.0f from centred)\n", g_tiles.Last().az0, g_tiles.Last().az1, g_tiles.PanDeg());

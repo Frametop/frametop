@@ -185,12 +185,11 @@ public:
     bool Leave(int id, int64_t nowMs, const std::string &key = "") {
         const tilegrid::Where w = grid_.Find(id);
         const tiling::Placed *gone = PlacedOf(id);
-        tilegap::Gap gap{id, key, -1, gone ? Unshrunk(gone->el1 - gone->el0) : 0};
+        tilegap::Gap gap{id, key, -1, gone ? Unshrunk(gone->el1 - gone->el0) : 0, {}};
         if (!params.fit && w.ok() && gone && !gone->below) {
             const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
             for (int r = 0; r < int(col.cells.size()); ++r)
-                if (col.cells[size_t(r)].id != id && !col.Below(r)) gap.stayed = col.cells[size_t(r)].id;
-            gap.cells = int(col.cells.size()) - 1;
+                if (col.cells[size_t(r)].id != id && !col.Below(r)) gap.stayed = col.cells[size_t(r)].id, gap.stack.push_back(gap.stayed);
         }
         if (!Unanchor(id)) return false;
         gaps_.Went(gap, nowMs);
@@ -205,13 +204,7 @@ public:
     bool FillGap(int64_t nowMs) {
         const tilegap::Gap g = gaps_.Due(nowMs);
         const tilegrid::Where w = grid_.Find(g.stayed);
-        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone)) || fills_.size() != grid_.Cols().size())
-            return false;
-        // a panel opened into the gap meanwhile took it, and one not shown yet has no size to test (council, 2026-11-20)
-        const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
-        if (int(col.cells.size()) > g.cells) return false;
-        for (const tilegrid::Cell &c : col.cells)
-            if (absent.count(c.id)) return false;
+        if (g.stayed < 0 || !w.ok() || params.fit || (g.key.empty() && Anchored(g.gone)) || !GapOpen(g, w.col)) return false;
         double span = 0;
         for (const tiling::Placed &p : last_.tiles)
             if (p.col == w.col) span = std::max(span, p.az1 - p.az0);
@@ -219,11 +212,11 @@ public:
         double bestArea = 0;
         for (const int dir : {-1, +1}) {
             const int c = Neighbour(w.col, dir);
-            if (c < 0 || grid_.Cols()[size_t(c)].cells.size() != 1) continue;
+            if (c < 0 || grid_.Cols()[size_t(c)].cells.size() != 1 || !LaidOut(c)) continue;
             const int other = grid_.Cols()[size_t(c)].cells.front().id;
             const tiling::Placed *q = PlacedOf(other);
             if (!q || !Pullable(other) || q->az1 - q->az0 > span + kFitSlackDeg || Unshrunk(q->el1 - q->el0) > g.heightDeg + kFitSlackDeg ||
-                !FitsUnder(w.col, other))   // (as the column is now: a panel opened meanwhile may stand in the gap)
+                !FitsUnder(w.col, other))   // (with what hangs under it now)
                 continue;
             const double area = (q->az1 - q->az0) * (q->el1 - q->el0);
             if (area > bestArea) best = c, side = dir, bestArea = area;
@@ -553,6 +546,25 @@ private:
         return EyeFitsRound(params, under, height + (under > 0 ? params.gapDeg + under : 0));
     }
     bool Pullable(int id) const { return id != steam && !absent.count(id); }
+    // Column `col` as laid out last: each of its panels where Arrange put it (a column added or
+    // taken away since shifts the others: their sizes there are another column's).
+    bool LaidOut(int col) const {
+        if (fills_.size() != grid_.Cols().size()) return false;
+        for (const tilegrid::Cell &c : grid_.Cols()[size_t(col)].cells)
+            if (const tiling::Placed *p = PlacedOf(c.id); !p || p->col != col) return false;
+        return true;
+    }
+    // Gap `g`, in column `col`, still as Leave left it (council, 2026-11-20): standing there only
+    // panels it left (another there took the gap, whatever its size: one opened into it, or one swapped
+    // for one that went), none not shown yet (no size to test), and laid out since.
+    bool GapOpen(const tilegap::Gap &g, int col) const {
+        const tilegrid::Col &c = grid_.Cols()[size_t(col)];
+        for (int r = 0; r < int(c.cells.size()); ++r) {
+            const int id = c.cells[size_t(r)].id;
+            if (absent.count(id) || (!c.Below(r) && std::find(g.stack.begin(), g.stack.end(), id) == g.stack.end())) return false;
+        }
+        return LaidOut(col);
+    }
     int SideOf(int col) const { return slot_.SideOfCol(grid_, col); }
     // Nothing in column `col` is shown (Board::absent: laid out at no size).
     bool Ghost(int col) const {

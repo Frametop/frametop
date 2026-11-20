@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace tilegap {
 
@@ -23,7 +24,7 @@ struct Gap {
     std::string key;        // ...its app or display (vrtiles.cpp's tile memory key; panel numbers are reused)
     int stayed = -1;        // one still standing in its stack (-1: it left no gap)
     double heightDeg = 0;   // how tall it was, unshrunk (tiling::Layout::shrink)
-    int cells = 0;          // the panels left in its stack (more by the fill: one opened into the gap)
+    std::vector<int> stack; // the panels left standing in its stack (another there by the fill: it took the gap)
 };
 // A neighbouring column's only panel pulled up into the gap app `key` left, on top of `stayed`'s stack.
 struct Fill {

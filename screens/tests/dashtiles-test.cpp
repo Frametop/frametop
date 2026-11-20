@@ -1085,6 +1085,50 @@ int main() {
                       at.find("[ 60 2 ]") != std::string::npos && !n.FillGap(tilegap::kQuietMs) && cols(n) == at);
             }
         }
+        {   // (council, 2026-11-20) the gap's stack as Leave left it: which panels, not how many
+            const auto shortOnes = [](int) { return dashtiles::Info{1.2, 0.5}; };
+            const auto three = [&] {   // [ 1 ][ 50 51 2 ][ 3 ]
+                dashtiles::Board t;
+                for (const int i : {1, 2, 3}) t.Anchor(i, -1, dashtiles::Stay::Default);
+                t.Arrange(shortOnes);
+                t.Anchor(50, -1, dashtiles::Stay::Default), t.Drop(50, {tiling::Drop::Into, 1, 0}), t.Arrange(shortOnes);
+                t.Anchor(51, -1, dashtiles::Stay::Default), t.Drop(51, {tiling::Drop::Into, 1, 1}), t.Arrange(shortOnes);
+                return t;
+            };
+            dashtiles::Board t = three();
+            const bool built = cols(t) == "[ 1 ][ 50 51 2 ][ 3 ]";
+            t.Leave(50, 0, "app:x"), t.Arrange(shortOnes), t.Unanchor(51), t.Arrange(shortOnes);
+            const dashtiles::Info i60 = shortOnes(60);
+            t.Anchor(60, -1, dashtiles::Stay::Default, -1, &i60), t.Arrange(shortOnes);
+            const std::string swapped = cols(t);
+            check("gap: one of its stack taken off, another opened into it: nothing filled",
+                  built && swapped == "[ 1 ][ 60 2 ][ 3 ]" && !t.FillGap(tilegap::kQuietMs) && cols(t) == swapped);
+            t = three();
+            t.Leave(50, 0, "app:x"), t.Arrange(shortOnes), t.Unanchor(51), t.Arrange(shortOnes);
+            check("gap: ...one taken off alone: still filled", t.FillGap(tilegap::kQuietMs) && cols(t) == "[ 1 2 ][ 3 ]");
+            dashtiles::Board u;   // [ 1 ][ 70 50 2 ][ 3 ], 70 not shown yet (laid out at no size)
+            for (const int i : {1, 2, 3}) u.Anchor(i, -1, dashtiles::Stay::Default);
+            u.Arrange(same);
+            u.Anchor(50, -1, dashtiles::Stay::Default), u.Drop(50, {tiling::Drop::Into, 1, 0}), u.Arrange(same);
+            u.Anchor(70, -1, dashtiles::Stay::Default), u.Drop(70, {tiling::Drop::Into, 1, 0}), u.absent = {70}, u.Arrange(same);
+            const bool unshown = cols(u) == "[ 1 ][ 70 50 2 ][ 3 ]";
+            u.Leave(50, 0, "app:x"), u.Arrange(same);
+            check("gap: one in its stack not shown yet (no size to test): nothing filled", unshown && !u.FillGap(tilegap::kQuietMs) && cols(u) == "[ 1 ][ 70 2 ][ 3 ]");
+            const auto sizes = [](int id) {
+                return id == 1 ? dashtiles::Info{2.2, 0.4} : id == 2 ? dashtiles::Info{0.8, 1.4} : id == 3 ? dashtiles::Info{2.0, 1.0} : dashtiles::Info{0.8, 1.0};
+            };
+            dashtiles::Board v;   // [ 1 ][ 4 2 ][ 3 ]: 4 goes, then 1 with no layout since and 70 added: the columns shift
+            for (const int i : {1, 2, 3}) v.Anchor(i, -1, dashtiles::Stay::Default);
+            v.Arrange(sizes);
+            v.Anchor(4, -1, dashtiles::Stay::Default), v.Drop(4, {tiling::Drop::Into, 1, 0}), v.Arrange(sizes);
+            v.Leave(4, 0, "app:x"), v.Arrange(sizes), v.Unanchor(1), v.Anchor(70, -1, dashtiles::Stay::Default);
+            const std::string shifted = cols(v);
+            check("gap: the columns shifted since the layout: nothing filled", shifted == "[ 2 ][ 3 ][ 70 ]" && !v.FillGap(tilegap::kQuietMs) && cols(v) == shifted);
+            dashtiles::Board h2 = stack();   // [ 1 ][ 4 2 ][ 3 ]: 4 goes, another app back hanging under 2
+            h2.Leave(4, 0, "app:a"), h2.Arrange(shortOnes), h2.Restore(7, "tile 0 1 1 0 1.000 dc", -1, "app:h"), h2.Arrange(shortOnes);
+            check("gap: one back hanging under its stack (it took no gap): still filled",
+                  h2.FillGap(tilegap::kQuietMs) && cols(h2) == "[ 1 2 7 ][ 3 ]");
+        }
         b = stack();   // (council, 2026-11-20) a gap undone long ago doesn't count against the next one
         b.Leave(4, 0, "app:a"), b.Arrange(same), b.Restore(4, line, -1, "app:a"), b.Arrange(same);
         b.Leave(4, 10000, "app:a"), b.Arrange(same);

@@ -2824,6 +2824,24 @@ inline std::vector<uint8_t> PatchH264SpsPoc2(const std::vector<uint8_t> &sps_nal
     return out;
 }
 
+// Resolve visible frame size when the V4L2 decoder reports macroblock-aligned dimensions
+// (for example 3456x976 for a 3456x972 display because 972 is not a multiple of 16) while
+// either the H.264 SPS frame_cropping or the negotiated backing framebuffer gives the true
+// visible size. Only trims within one H.264 macroblock (< 16 px) so a stale display hint
+// during a mid-stream resolution switch cannot crop a genuinely different decoder frame.
+inline void ResolveVisibleCrop(uint32_t dec_w, uint32_t dec_h,
+                               uint32_t sps_w, uint32_t sps_h,
+                               uint32_t hint_w, uint32_t hint_h,
+                               uint32_t *out_w, uint32_t *out_h) {
+    auto pick = [](uint32_t dec, uint32_t sps, uint32_t hint) -> uint32_t {
+        if (sps > 0 && sps < dec && (dec - sps) < 16) return sps;
+        if (hint > 0 && hint < dec && (dec - hint) < 16) return hint;
+        return dec;
+    };
+    if (out_w) *out_w = pick(dec_w, sps_w, hint_w);
+    if (out_h) *out_h = pick(dec_h, sps_h, hint_h);
+}
+
 inline std::vector<uint8_t> PatchH264SliceHeaderPoc2(const std::vector<uint8_t> &nal,
                                                      const H264SpsInfo &orig_sps,
                                                      const H264PpsInfo &pps) {

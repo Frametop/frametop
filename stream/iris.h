@@ -407,9 +407,10 @@ PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC pImageTargetRenderbuffer;
 
 const char *kVertex = R"(
 attribute vec2 pos;
+uniform vec2 uv_scale;
 varying vec2 uv;
 void main() {
-    uv = pos;  // memory row 0 is y = 0 on both sides, so no flip
+    uv = pos * uv_scale;  // memory row 0 is y = 0 on both sides, so no flip
     gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
 })";
 
@@ -462,6 +463,7 @@ struct Converter {
     EGLDisplay dpy = EGL_NO_DISPLAY;
     gbm_device *gbm = nullptr;
     GLuint prog = 0, vbo = 0;
+    GLint uUvScale = -1;
     std::vector<GLuint> in;  // one external texture per decoder buffer
     struct Out {
         gbm_bo *bo = nullptr;
@@ -473,6 +475,7 @@ struct Converter {
     } out[3];
     int next = 0;
     uint32_t width = 0, height = 0;
+    float uvScaleX = 1.0f, uvScaleY = 1.0f;
     double msSum = 0, msMax = 0;
     bool toSteamVR = true;  // false: no SteamVR import here (ft-stream, or a measurement without the headset)
     // Without SteamVR: the modifiers to allocate the ring with (ft-screens asks SteamVR which
@@ -504,6 +507,7 @@ struct Converter {
         GLint ok = 0;
         glGetProgramiv(prog, GL_LINK_STATUS, &ok);
         if (!ok) return std::fprintf(stderr, "convert: program doesn't link\n"), false;
+        uUvScale = glGetUniformLocation(prog, "uv_scale");
         const float quad[] = {0, 0, 1, 0, 0, 1, 1, 1};
         glGenBuffers(1, &vbo);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -524,15 +528,20 @@ struct Converter {
         next = 0;
     }
 
-    // Imports every decoder buffer, and makes the RGBA ring at the visible size.
-    bool Setup(const Decoder &dec) {
+    // Imports every decoder buffer, and makes the RGBA ring at the visible size (optionally
+    // cropped to crop_w x crop_h via UV scaling while keeping the NV12 EGLImage at dec's full
+    // dimensions so UBWC metadata layout stays exact).
+    bool Setup(const Decoder &dec, uint32_t crop_w = 0, uint32_t crop_h = 0) {
         Reset();
-        width = dec.width, height = dec.height;
+        width = (crop_w > 0 && crop_w <= dec.width) ? crop_w : dec.width;
+        height = (crop_h > 0 && crop_h <= dec.height) ? crop_h : dec.height;
+        uvScaleX = dec.width > 0 ? float(width) / float(dec.width) : 1.0f;
+        uvScaleY = dec.height > 0 ? float(height) / float(dec.height) : 1.0f;
         const EGLint hints[] = {EGL_YUV_COLOR_SPACE_HINT_EXT, matrix, EGL_SAMPLE_RANGE_HINT_EXT, range, EGL_NONE};
         for (const auto &c : dec.cap) {
             const int fds[2] = {c.dmabuf, c.dmabuf};
-            EGLImageKHR image = EglImage(dpy, width, height, DRM_FORMAT_NV12, dec.modifier, 2, fds, dec.layout.offset,
-                                         dec.layout.stride, hints);
+            EGLImageKHR image = EglImage(dpy, dec.width, dec.height, DRM_FORMAT_NV12, dec.modifier, 2, fds,
+                                         dec.layout.offset, dec.layout.stride, hints);
             if (image == EGL_NO_IMAGE_KHR) return std::fprintf(stderr, "convert: EGL can't import a decoder buffer (0x%x)\n", eglGetError()), false;
             GLuint t;
             glGenTextures(1, &t);
@@ -594,6 +603,7 @@ struct Converter {
         glBindFramebuffer(GL_FRAMEBUFFER, o.fbo);
         glViewport(0, 0, GLsizei(width), GLsizei(height));
         glUseProgram(prog);
+        if (uUvScale >= 0) glUniform2f(uUvScale, uvScaleX, uvScaleY);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, in[size_t(i)]);
         glUniform1i(glGetUniformLocation(prog, "tex"), 0);

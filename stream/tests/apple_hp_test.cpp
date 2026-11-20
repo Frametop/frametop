@@ -431,6 +431,22 @@ void TestAvcConfig0x92AndSpsPatch() {
         if (zeros >= 2) CHECK(patched[i] >= 0x03);
         zeros = (patched[i] == 0x00) ? zeros + 1 : 0;
     }
+
+    // Visible crop resolution trims padded macroblock rows/columns (< 16 px) while
+    // ignoring stale/unrelated display hints (>= 16 px or larger than decoded).
+    uint32_t cw = 0, ch = 0;
+    ResolveVisibleCrop(3456, 976, 3456, 972, 3456, 972, &cw, &ch);
+    CHECK(cw == 3456 && ch == 972);
+    ResolveVisibleCrop(3456, 976, 3456, 976, 3456, 972, &cw, &ch);
+    CHECK(cw == 3456 && ch == 972);
+    ResolveVisibleCrop(3024, 1968, 3024, 1964, 1512, 982, &cw, &ch);
+    CHECK(cw == 3024 && ch == 1964);
+    ResolveVisibleCrop(3840, 2160, 3840, 2160, 3840, 2160, &cw, &ch);
+    CHECK(cw == 3840 && ch == 2160);
+    ResolveVisibleCrop(3456, 976, 3456, 976, 1728, 486, &cw, &ch);
+    CHECK(cw == 3456 && ch == 976);
+    ResolveVisibleCrop(1920, 1088, 1920, 1088, 3840, 2160, &cw, &ch);
+    CHECK(cw == 1920 && ch == 1088);
 }
 
 void TestH264RtpAssembler() {

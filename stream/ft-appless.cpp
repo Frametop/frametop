@@ -540,7 +540,17 @@ int RunStream(const std::string &host, const std::string &route, int port, const
         }
 
         if (dec.Events()) {
-            if (!conv.Setup(dec)) break;
+            uint32_t crop_w = 0, crop_h = 0;
+            ft_apple_hp::ResolveVisibleCrop(dec.width, dec.height, sps.width, sps.height,
+                                            client.backing_pointer_w(), client.backing_pointer_h(),
+                                            &crop_w, &crop_h);
+            if (crop_w != dec.width || crop_h != dec.height) {
+                std::printf("apple-hp crop: decoder %ux%u -> visible %ux%u (sps %ux%u, backing %ux%u)\n",
+                            dec.width, dec.height, crop_w, crop_h, sps.width, sps.height,
+                            uint32_t(client.backing_pointer_w()), uint32_t(client.backing_pointer_h()));
+                std::fflush(stdout);
+            }
+            if (!conv.Setup(dec, crop_w, crop_h)) break;
             const int fds[3] = {conv.out[0].fd, conv.out[1].fd, conv.out[2].fd};
             char b[160];
             std::snprintf(b, sizeof b, "buffers %u %u %x %llx %u %u", conv.width, conv.height, DRM_FORMAT_ABGR8888,

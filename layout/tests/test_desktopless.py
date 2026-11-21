@@ -142,7 +142,7 @@ class Desktopless(unittest.TestCase):
         oma7, dody = layout["hosts"]
         self.assertTrue(oma7["displays"][0].get("hidden"))        # the Linux PC's display: hidden
         self.assertFalse(dody["displays"][0].get("hidden"))       # one without a windows instance: as it was
-        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": []})
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["oma7"]})
         for n in (1, 2, 3, 101):
             self.assertIn(f"conceal {n}", self.screens.asked)
         self.assertEqual(self.floats, ["float keep", "float all"])
@@ -247,7 +247,7 @@ class Desktopless(unittest.TestCase):
         self.assertEqual(self.d.use_profile(layout, "Work"), "on")
         self.assertTrue(all(s.get("hidden") for s in layout["screens"]))
         self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))
-        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": []})
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["oma7"]})
         self.assertEqual(self.screens.asked, [])   # (nothing shown or hidden yet: the arrangement does it)
 
     def test_its_pc_apps_that_are_not_open_start_where_they_were(self):
@@ -314,7 +314,7 @@ class Desktopless(unittest.TestCase):
         layout["layouts"] = {"Work": []}
         self.m.use_hidden(layout, "Work")
         self.d.use_profile(layout, "Work")
-        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": []})
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["oma7"]})
 
     def test_a_panel_out_before_the_mode_stays_on_the_pc_once_sent_back(self):
         layout = self.m.load_layout()
@@ -431,6 +431,30 @@ class Desktopless(unittest.TestCase):
         self.assertEqual(self.floats, ["float keep", "float all"])
         self.assertEqual(layout["desktopless"]["before"]["screens"], [1])
         self.assertTrue(any(a.startswith("place 21 ") for a in self.screens.asked))
+
+    def test_off_puts_back_what_an_older_version_took(self):
+        self.d.command(["on"])
+        layout = self.m.load_layout()
+        layout["hosts"][0].pop("desktopless")   # (before the switches: every PC with an instance was in)
+        layout["desktopless"]["before"].pop("hosts")
+        self.m.save_layout(layout)
+        self.d.command(["host", "oma7", "off"])   # out already, but its panels still out: they go back
+        layout = self.m.load_layout()
+        self.assertEqual(self.panels(layout), [])
+        self.assertFalse(layout["hosts"][0]["displays"][0].get("hidden"))
+        self.d.command(["on"])
+        layout = self.m.load_layout()
+        layout["hosts"][0]["displays"][0]["hidden"] = True
+        layout["desktopless"]["before"].pop("hosts")
+        self.m.save_layout(layout)
+        self.d.command(["off"])
+        self.assertFalse(self.m.load_layout()["hosts"][0]["displays"][0].get("hidden"))
+
+    def test_on_records_the_pcs_it_holds(self):
+        self.d.command(["on"])
+        self.assertEqual(self.m.load_layout()["desktopless"]["before"]["hosts"], ["oma7"])
+        self.d.command(["host", "oma7", "off"])
+        self.assertEqual(self.m.load_layout()["desktopless"]["before"]["hosts"], [])
 
     def test_toggle_and_status(self):
         self.d.command(["toggle"])

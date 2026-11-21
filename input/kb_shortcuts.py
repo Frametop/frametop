@@ -10,8 +10,8 @@ DesktopLayout keys). A letter that layout has no plain key for (a Cyrillic or Gr
 its place, where the desktop's Latin fallback finds it.
 
 Full Keyboard also sends the Latin letter of the place for a key that shows punctuation there
-(AZERTY's "," on KeyM, Dvorak's "'" on KeyQ), so Ctrl with one of those reaches the desktop as
-Ctrl with that letter. The two can't be told apart here; letters, the shortcuts that matter,
+(AZERTY's "," on KeyM, Dvorak's "," on KeyW), so Ctrl with one of those reaches the desktop as
+Ctrl with that letter (Dvorak's Ctrl+, closes a tab). The two can't be told apart here; letters, the shortcuts that matter,
 win.
 """
 

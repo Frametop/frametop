@@ -16,6 +16,7 @@ AZERTY = {"a": (KEY_Q, ()), "q": (KEY_A, ()), "z": (KEY_W, ()), "w": (KEY_Z, ())
           "&": (DIGIT1, ()), "1": (DIGIT1, (SHIFT,))}
 QWERTZ = {"z": (KEY_Y, ()), "y": (KEY_Z, ()), "c": (KEY_C, ())}
 RUSSIAN = {"ф": (KEY_A, ()), "с": (KEY_C, ())}  # ф, с: no Latin letters
+US = {letter: (code, ()) for code, letter in US_LETTERS.items()}  # Steam's, and a desktop's without one
 
 
 def test_us_letters():
@@ -37,6 +38,7 @@ def test_place_kept():
     assert shortcut_code(KEY_A, {SHIFT}, AZERTY) == KEY_A
     assert shortcut_code(KEY_A, {ALTGR}, AZERTY) == KEY_A
     assert shortcut_code(KEY_A, {CTRL}, RUSSIAN) == KEY_A        # no Latin a: the desktop's fallback
+    assert all(shortcut_code(code, {CTRL}, US) == code for code in US_LETTERS)  # a US layout: as it came
     assert shortcut_code(DIGIT1, {CTRL}, AZERTY) == DIGIT1       # not a letter
     assert shortcut_code(ENTER, {CTRL}, AZERTY) == ENTER
     assert shortcut_code(KEY_A, {CTRL}, {"a": (KEY_Q, (SHIFT,))}) == KEY_A  # only with Shift: kept

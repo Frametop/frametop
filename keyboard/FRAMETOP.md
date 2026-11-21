@@ -53,7 +53,7 @@ Only same-user messages count on either side. ft-kbhost takes word only from the
 
 ## Known limits
 
-- Keys other than text and a shortcut's letter go by their place on the keyboard, so Ctrl+1 is Ctrl+& on an AZERTY desktop. A key that shows punctuation where another layout has a letter goes as that letter with Ctrl, Alt or Super (Full Keyboard names it so): Ctrl+, on AZERTY is Ctrl+M, and Dvorak's Ctrl+' is Ctrl+Q. Text the desktop's layout has no key for (Chinese, Japanese, Korean, emoji) can't be typed on the desktop yet; it reaches Steam's fields and games.
+- Keys other than text and a shortcut's letter go by their place on the keyboard, so Ctrl+1 is Ctrl+& on an AZERTY desktop. A key that shows punctuation where another layout has a letter goes as that letter with Ctrl, Alt or Super (Full Keyboard names it so): Ctrl+, on AZERTY is Ctrl+M, and on Dvorak Ctrl+, is Ctrl+W (which closes a tab), Ctrl+; is Ctrl+Z and Ctrl+' is Ctrl+Q. Text the desktop's layout has no key for (Chinese, Japanese, Korean, emoji) can't be typed on the desktop yet; it reaches Steam's fields and games.
 - Touch typing with a controller's tip (the old patch's `touch.cpp`) is gone: the release has no such setting. Fingertips and lasers type.
 - fast-install downloads a release only when `keyboard/fetch.py` or `keyboard/build.sh` change; a full build always takes the newest.
 

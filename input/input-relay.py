@@ -636,7 +636,7 @@ def kxkbrc_layout(path=KXKBRC):
     try:
         if not cp.read(path):
             return None
-    except configparser.Error:
+    except (configparser.Error, UnicodeError):  # a file that isn't UTF-8 must not end the relay
         return None
     sec = cp["Layout"] if cp.has_section("Layout") else {}
 

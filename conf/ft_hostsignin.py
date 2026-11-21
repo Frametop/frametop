@@ -189,9 +189,9 @@ def keep(address, token, pin, port=0):
 
 
 def forget(address, ports=WINDOW_PORTS):
-    """Removes the token and pin kept for the address, and its instances' own on `ports`."""
+    """Removes the token, pin and Screen Sharing login kept for the address, and its instances' own on `ports`."""
     paths = [ft_hostapi.token_path(address)] + [ft_hostapi.own_token_path(address, p) for p in ports]
-    for path in paths + [p[:-len(".token")] + ".pin" for p in paths]:
+    for path in paths + [p[:-len(".token")] + ".pin" for p in paths] + [ft_hostapi.apple_path(address)]:
         try:
             os.remove(path)
         except OSError:

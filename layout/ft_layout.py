@@ -107,16 +107,23 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      SteamVR dashboard as they are; unpin all|N
   ft-layout remote list              the remote displays, their numbers and their streams' state
   ft-layout remote monitors ADDRESS  the host's displays (Vibepollo's /api/display-devices, JSON)
+  ft-layout remote auth ADDRESS [--login | --user USER --password-stdin]
+                                     sign in to a Mac's built-in Screen Sharing (ft-appless auth)
   ft-layout remote add HOST ADDRESS APP [--size WxH] [--fps F] [--bitrate KBPS] [--label TEXT]
                      [--port PORT] [--login | --pin]
                                      a display of a host (pairs its client with the host's token
                                      first, or with --login, with the Web UI login read from stdin
                                      as two lines: a Sunshine instance on PORT, or with --pin, a
                                      PIN printed as "PIN NNNN: ..." to type in on the host, which
-                                     it waits up to 3 minutes for: any Moonlight host) -> its id
-  ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
+                                     it waits up to 3 minutes for: any Moonlight host; APP
+                                     apple:virtual, apple:virtual@1, apple:virtual@2 or
+                                     apple:physical is a Mac's built-in Screen Sharing, with --login
+                                     its macOS login) -> its id
+  ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M|
+                          kb_layout=...|keymap=... ...
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
                              input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off
+                             kb_layout=...|keymap=...
                                      how a host's streams reach it (they start over), whether
                                      the Frame's microphone goes to it, and whether its keyboard
                                      and mouse come to Frametop, or one of them (both within 3 s,
@@ -190,9 +197,9 @@ STREAMS_ONLY_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "f
 # The sizes Display Settings offers for a screen and Remote Displays for a stream: (w, h, what).
 # ft-screens has no pixel limit; portrait screens are just tall.
 SCREEN_RESOLUTIONS = [(1920, 1080, ""), (2560, 1440, ""), (3840, 2160, "4K"), (2560, 1080, "ultrawide"),
-                      (3440, 1440, "ultrawide"), (5120, 1440, "super ultrawide"), (1920, 1200, "16:10"),
-                      (2560, 1600, "16:10"), (1080, 1920, "portrait"), (1440, 2560, "portrait"),
-                      (2160, 3840, "portrait 4K")]
+                      (3440, 1440, "ultrawide"), (4096, 1152, "32:9 ultrawide"), (5120, 1440, "super ultrawide"),
+                      (1920, 1200, "16:10"), (2560, 1600, "16:10"), (1080, 1920, "portrait"),
+                      (1440, 2560, "portrait"), (2160, 3840, "portrait 4K")]
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
@@ -201,6 +208,7 @@ import ftipc  # noqa: E402  (questions to the datagram sockets)
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout_geometry  # noqa: E402  (where the screens go, as pure math)
 import host_input  # noqa: E402  (a host's "input": which of its keyboard and mouse it lends)
+import ft_remotekeys  # noqa: E402  (a Mac display's kb_layout and keymap, for ft-appless)
 from layout_geometry import (  # noqa: E402, F401  (re-exported: ft_floatd and the tests use them here)
     chain as _chain,
     cross,
@@ -233,7 +241,9 @@ REMOTE_MAX = 16
 REMOTE_PIXELS_PER_METRE = 2400  # a new remote display's width in VR (5120 px: 2.1 m), at least 1 m
 GAMESTREAM_PORT = 47989  # a host's HTTP port, where ft-stream reaches it
 WEB_UI_PORT = 47990  # Vibepollo's Web UI: a host answers there when it's up
+APPLE_PORT = 5900  # macOS High Performance Screen Sharing (screensharingd, TCP/UDP)
 STREAM = os.path.join(REPO, "stream", "build", "ft-stream")
+APPLESS = os.path.join(REPO, "stream", "build", "ft-appless")
 RESET_TIMER = os.path.join(REPO, "layout", "countdown", "build", "ft-reset-timer")
 
 
@@ -1046,11 +1056,21 @@ def remotes_running(sock):
     return {int(e.split(":")[0]): e.split(":")[2] for e in fields}
 
 
+def is_apple_app(app):
+    return isinstance(app, str) and app.startswith("apple:")
+
+
+def app_ok(app):
+    """A display's app as ft-screens takes it: '@' only in a Mac's (apple:virtual@2)."""
+    return bool(re.fullmatch(r"[A-Za-z0-9{}._:@-]+" if is_apple_app(app) else r"[A-Za-z0-9{}._:-]+", app))
+
+
 def display_target(host, d):
-    """Where ft-stream reaches a display: the host's address, with its instance's port when it
-    has one of its own (HOST:PORT)."""
+    """Where ft-stream or ft-appless reaches a display: the host's address, with its port when
+    it isn't the backend's default (HOST:PORT)."""
     port = d.get("port")
-    return f"{host['address']}:{int(port)}" if port and int(port) != GAMESTREAM_PORT else host["address"]
+    default_port = APPLE_PORT if is_apple_app(d.get("app")) else GAMESTREAM_PORT
+    return f"{host['address']}:{int(port)}" if port and int(port) != default_port else host["address"]
 
 
 def start_remote(sock, n, host, d):
@@ -1093,13 +1113,14 @@ def place_remote(sock, n, d, t, eye, heading):
 def host_answers(host, timeout=1.5):
     """Whether a host answers, at its address or its Steam Link dongle's (as its route allows):
     Vibepollo on its Web UI port, Sunshine instances on any of their displays' ports, a host
-    paired by PIN on its GameStream port."""
+    paired by PIN on its GameStream port, or macOS Screen Sharing on port 5900."""
     route = host.get("route", "auto")
     addresses = ([] if route == "dongle" else [host.get("address")]) + \
         ([] if route == "network" else list(host.get("direct", [])))
     # A host paired by PIN may have no Web UI (issue 107): its GameStream port, then.
+    apple = host.get("kind") == "apple" or any(is_apple_app(d.get("app")) for d in host.get("displays", []))
     ports = sorted({int(d["port"]) for d in host.get("displays", []) if d.get("port")}) or \
-        [GAMESTREAM_PORT if host.get("kind") == "pin" else WEB_UI_PORT]
+        [APPLE_PORT if apple else GAMESTREAM_PORT if host.get("kind") == "pin" else WEB_UI_PORT]
     for address in filter(None, addresses):
         for port in ports:
             try:
@@ -1218,6 +1239,12 @@ def run_stream_live(*args, timeout=None):
     return ft_pinpair.run_live(STREAM, args, in_box, timeout or ft_pinpair.PIN_PAIR_S)
 
 
+def run_appless(*args, timeout=30, stdin=None):
+    """ft-appless (macOS High Performance Screen Sharing), in ft-stream's container."""
+    r = subprocess.run(in_box([APPLESS, *args]), capture_output=True, text=True, timeout=timeout, input=stdin)
+    return r.returncode, r.stdout, r.stderr
+
+
 def slug(text):
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "display"
 
@@ -1264,6 +1291,8 @@ def remote_add_save(layout, host_name, address, port, d, kind=None):
             host["kind"] = kind
         layout["hosts"].append(host)
     host["address"] = address
+    if kind:
+        host["kind"] = kind
     if port:
         d["port"] = port
     host["displays"].append(d)
@@ -1272,7 +1301,7 @@ def remote_add_save(layout, host_name, address, port, d, kind=None):
 
 
 def remote_command(args):
-    """ft-layout remote list|monitors|add|set|connect|disconnect|remove (see the usage)."""
+    """ft-layout remote list|monitors|auth|add|set|host|connect|disconnect|remove (see the usage)."""
     what = args[0] if args else ""
     if what == "list" and len(args) == 1:
         layout = load_layout()
@@ -1287,6 +1316,11 @@ def remote_command(args):
             lent = host_input.lent(host)
             state += "" if not lent else " input" if len(lent) == 2 else f" input-{next(iter(lent))}"
             state += " clipboard" if host.get("clipboard") else ""
+            kb, km = ft_remotekeys.effective_keyboard(host, d)
+            if kb:
+                state += f" kb {kb}"
+            if km:
+                state += " keymap " + ",".join(f"{src}:{dst}" for src, dst in km.items())
             print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
         return
@@ -1315,9 +1349,12 @@ def remote_command(args):
                     host.pop("windows", None)  # its window panels stay until closed
                 else:
                     host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
+            elif ft_remotekeys.apply_keyboard_kv(host, k, v):
+                pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
                 raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
-                                   "mic=on|off input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off)")
+                                   "mic=on|off input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off "
+                                   "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
         if not restart:
             return
@@ -1391,6 +1428,12 @@ def remote_command(args):
             raise RuntimeError(err.strip() or out.strip() or "ft-stream monitors failed")
         print(out.strip())
         return
+    if what == "auth" and len(args) >= 2:
+        code, out, err = run_appless("auth", *args[1:], timeout=30, stdin=sys.stdin.read())
+        if code:
+            raise RuntimeError((err or out).strip() or "ft-appless auth failed")
+        print(out.strip())
+        return
     if what == "add" and len(args) >= 4:
         host_name, address, app = args[1], args[2], args[3]
         rest = args[4:]
@@ -1402,8 +1445,10 @@ def remote_command(args):
         if unknown or len(rest) % 2 or (login and pin):
             raise RuntimeError("remote add: options are --size WxH --fps F --bitrate KBPS --label TEXT --client NAME "
                                "--port PORT, and --login or --pin")
-        if not re.fullmatch(r"[A-Za-z0-9.:-]+", address) or not re.fullmatch(r"[A-Za-z0-9{}._:-]+", app):
+        if not re.fullmatch(r"[A-Za-z0-9.:-]+", address) or not app_ok(app):
             raise RuntimeError("remote add: the address or app has other characters")
+        if pin and is_apple_app(app):
+            raise RuntimeError("remote add: --pin is for a Moonlight host; a Mac signs in with --login")
         port = opts.get("--port", "")
         if port and not (port.isdigit() and 1024 < int(port) < 65535):
             raise RuntimeError("remote add: --port is a port number")
@@ -1419,7 +1464,15 @@ def remote_command(args):
         displays = remote_displays(layout)
         if len(displays) >= REMOTE_MAX:
             raise RuntimeError(f"at most {REMOTE_MAX} remote displays")
-        label = opts.get("--label") or ("Virtual" if app == "monitor" else app.split(":", 1)[-1])
+        apple = is_apple_app(app)
+        if opts.get("--label"):
+            label = opts["--label"]
+        elif app == "monitor" or app.startswith("apple:virtual"):
+            label = "Virtual"
+        elif app == "apple:physical":
+            label = "Main"
+        else:
+            label = app.split(":", 1)[-1]
         ids = {d["id"] for _, _, d in displays}
         display_id = base = slug(f"{host_name}-{label}")
         for k in range(2, 100):
@@ -1429,7 +1482,10 @@ def remote_command(args):
         client = opts.get("--client") or f"frametop-{display_id}"
         if not re.fullmatch(r"[A-Za-z0-9._-]+", client):
             raise RuntimeError("remote add: the client name has other characters")
-        size = [2560, 1440]
+        if apple:
+            size = [3840, 2160] if app in ("apple:virtual", "apple:virtual@2") else [1920, 1080]
+        else:
+            size = [2560, 1440]
         if "--size" in opts:
             size = list(stream_size(*(int(v) for v in opts["--size"].lower().split("x"))))
         elif app.startswith("display:"):  # the monitor's own resolution
@@ -1442,7 +1498,14 @@ def remote_command(args):
             except (ValueError, KeyError, TypeError):
                 pass
         target = f"{address}:{port}" if port else address
-        if login:
+        if apple:
+            # A Mac's Screen Sharing: its login, checked over SRP and kept by ft-appless (0600),
+            # or the one it has. Nothing goes on the Mac, so there's nothing to undo below.
+            code, out, err = (run_appless("auth", target, "--login", timeout=30, stdin=sys.stdin.read()) if login
+                              else run_appless("check", target, timeout=10))
+            if code:
+                raise RuntimeError(f"authenticating with {address} failed: {(err or out).strip()}")
+        elif login:
             code, out, err = run_stream("pair", target, "--id", client, "--login", timeout=30, stdin=sys.stdin.read())
         elif pin:
             import ft_pinpair
@@ -1455,7 +1518,7 @@ def remote_command(args):
             code, out, err = run_stream("pair", target, "--id", client, timeout=30)
         if code:
             raise RuntimeError(f"pairing {client} with {address} failed: {(err or out).strip()}")
-        log(out.strip().splitlines()[-1] if out.strip() else f"paired {client}")
+        log(out.strip().splitlines()[-1] if out.strip() else f"ready for {address}" if apple else f"paired {client}")
         try:
             # The layout as it is now: a pairing can take minutes (a PIN), and what changed
             # meanwhile (another host added, a panel moved) stays.
@@ -1471,8 +1534,10 @@ def remote_command(args):
             remote_add_save(layout, host_name, address, port, {
                 "id": display_id, "client": client, "app": app, "label": label, "size": size, "fps": fps,
                 "bitrate": bitrate, "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)},
-                kind="pin" if pin else None)
+                kind="apple" if apple else "pin" if pin else None)
         except BaseException:
+            if apple:
+                raise
             # Nothing saved: the client just paired would be left on the host with no display,
             # unless a display saved during the wait uses that client name too.
             try:
@@ -1504,10 +1569,13 @@ def remote_command(args):
                 d["label"] = v
             elif k == "metres" and re.fullmatch(r"\d+(\.\d+)?", v) and 0.15 <= float(v) <= 12:
                 d["metres"] = float(v)
-            elif k == "app" and re.fullmatch(r"[A-Za-z0-9{}._:-]+", v):
+            elif k == "app" and app_ok(v):
                 d["app"] = v
+            elif ft_remotekeys.apply_keyboard_kv(d, k, v):
+                pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
-                raise RuntimeError(f"remote set: {kv!r}? (size=WxH fps=F bitrate=KBPS label=TEXT app=APP metres=M)")
+                raise RuntimeError(f"remote set: {kv!r}? (size=WxH fps=F bitrate=KBPS label=TEXT app=APP metres=M "
+                                   "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
         if d.get("off"):
             return  # disconnected: the new settings are for its next connection
@@ -1521,13 +1589,18 @@ def remote_command(args):
         n, host, d = find_display(layout, args[1])
         try:
             screens_socket().ask(f"remote {n} stop")
-            time.sleep(2)  # its stream releases a Remote Monitor on the way out
+            time.sleep(2)  # its stream releases a Remote Monitor or SLVirtualDisplay on the way out
         except RuntimeError:
             pass
-        host["displays"].remove(d)  # the host stays (Remote Displays removes hosts)
+        host["displays"].remove(d)  # the host stays (Frametop Settings removes hosts)
         for profile in layout.get("profiles", {}).values():
             profile.get("remote", {}).pop(d["id"], None)
         save_layout(layout)
+        if is_apple_app(d.get("app")):
+            # A Mac keeps no pairing; its login stays for its other displays, until Frametop
+            # Settings forgets the host (ft_hostsignin.forget).
+            log(f"removed {d['id']}")
+            return
         # A KDE PC's window panels use one of its displays' clients (ft_kwinwindows): the pairing
         # stays while another panel of the host uses it.
         if any(other.get("client") == d["client"] for other in host.get("displays", [])):
@@ -1537,8 +1610,9 @@ def remote_command(args):
         said = (out or err).strip().splitlines()
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return
-    raise RuntimeError("remote list | monitors ADDRESS | add HOST ADDRESS APP [options] | set ID KEY=VALUE... | "
-                       "host NAME route=...|direct=...|mic=...|input=...|clipboard=... | connect ID... | disconnect ID... | remove ID"
+    raise RuntimeError("remote list | monitors ADDRESS | auth ADDRESS [options] | add HOST ADDRESS APP [options] | "
+                       "set ID KEY=VALUE... | host NAME route=...|direct=...|mic=...|input=...|clipboard=...|kb_layout=...|keymap=... | "
+                       "connect ID... | disconnect ID... | remove ID"
                        " | kwin-windows HOST | kwin-add HOST WINDOW [options] | kwin-size N WxH METRES")
 
 

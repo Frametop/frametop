@@ -92,6 +92,7 @@ Item {
             if (byPin) backend.addPinHost(pickedName, pickedAddress, pickedDongle)
             else backend.signIn(pickedName, pickedAddress, pickedDongle, user.text, password.text)
         }
+        onClosed: password.text = ""
         Connections {
             target: backend
             function onHostsFound(list) {
@@ -119,7 +120,7 @@ Item {
         ColumnLayout {
             RowLayout {
                 visible: !hostDialog.existing
-                Controls.Label { text: "Computers running Vibepollo or Sunshine on your network:"; Layout.fillWidth: true }
+                Controls.Label { text: "Computers running Vibepollo, Sunshine or macOS Screen Sharing on your network:"; Layout.fillWidth: true }
                 Controls.ToolButton {
                     icon.name: "view-refresh"
                     text: "Look again"
@@ -168,7 +169,7 @@ Item {
                 wrapMode: Text.Wrap
                 text: hostDialog.byPin
                       ? "For any host that pairs Moonlight clients by PIN, such as an unmodified Sunshine. Each display you add shows a PIN to type in on the host: its Web UI's PIN page, or its own pairing page. Frametop can't list its monitors or set its permissions."
-                      : "Sign in with its Vibepollo or Sunshine Web UI user name and password. From Vibepollo, Frametop keeps a token that can only pair its displays, set their permissions and list the monitors. Sunshine has no tokens: the login pairs the displays you pick next. The password isn't kept."
+                      : "Sign in with its Vibepollo or Sunshine Web UI user name and password, or on a Mac with Screen Sharing turned on, your Mac user name and password. From Vibepollo, Frametop keeps a token that can only pair its displays, set their permissions and list the monitors; for macOS Screen Sharing, it keeps the login in a private file for reconnecting; Sunshine has no tokens, so the login pairs the displays you pick next and isn't kept."
             }
             Kirigami.FormLayout {
                 Layout.fillWidth: true
@@ -218,6 +219,7 @@ Item {
             working = true; error = ""
             backend.appWindowsOn(hostName, windowsUser.text, windowsPassword.text)
         }
+        onClosed: windowsPassword.text = ""
         Connections {
             target: backend
             function onAppWindowsSet(name, ok, why) {
@@ -275,16 +277,23 @@ Item {
         property string host: ""
         property string address: ""
         property string kind: ""
+        onKindChanged: {
+            const wantW = kind === "apple" ? 3840 : 2560, wantH = kind === "apple" ? 2160 : 1440
+            displayRes.currentIndex = Math.max(0, backend.resolutions.findIndex(r => r.width === wantW && r.height === wantH))
+        }
         property var added: []     // its displays' keys, so a monitor isn't added twice
         property var monitors: []
         property var chosen: ({})  // app -> ticked
         property bool virtualChosen: false
         property string error: ""
         property bool loading: false
+        readonly property bool virtualAlready: kind === "apple" && added.some(k => k.startsWith("apple:virtual"))
         readonly property int count: monitors.filter(m => chosen[m.key]).length + (virtualChosen ? 1 : 0)
         function openFor(h) {
             host = h.name; address = h.address; kind = h.kind; added = h.displays.map(d => d.key); pairing = false
             monitors = []; chosen = ({}); virtualChosen = false; error = ""; loading = true
+            const wantW = h.kind === "apple" ? 3840 : 2560, wantH = h.kind === "apple" ? 2160 : 1440
+            displayRes.currentIndex = Math.max(0, backend.resolutions.findIndex(r => r.width === wantW && r.height === wantH))
             open()
             backend.listMonitors(address)
         }
@@ -292,6 +301,7 @@ Item {
             const c = Object.assign({}, chosen)
             c[key] = on
             chosen = c
+            if (on && kind === "apple") virtualChosen = false
         }
         function accept() {
             if (!count) return
@@ -308,7 +318,8 @@ Item {
                     backend.addDisplay(host, m.app, m.name, m.width, m.height, fps, kbps, m.port)
                 }
             }
-            if (virtualChosen) backend.addDisplay(host, "monitor", "Virtual", r.width, r.height, fps, kbps, 0)
+            if (virtualChosen)  // a Mac makes it with its own Screen Sharing (ft-appless)
+                backend.addDisplay(host, kind === "apple" ? "apple:virtual" : "monitor", "Virtual", r.width, r.height, fps, kbps, 0)
             if (kind === "sunshine") backend.forgetLogin(address)  // queued with each display
         }
         function later() {
@@ -325,7 +336,8 @@ Item {
                 displayDialog.loading = false
                 displayDialog.monitors = monitors.filter(m => !m.virtual && m.active)
                 const c = {}
-                for (const m of displayDialog.monitors) c[m.key] = !displayDialog.added.includes(m.key)
+                for (const m of displayDialog.monitors)
+                    c[m.key] = !displayDialog.added.includes(m.key) && !(displayDialog.kind === "apple" && displayDialog.added.length > 0)
                 displayDialog.chosen = c
                 displayDialog.error = error
             }
@@ -363,11 +375,17 @@ Item {
                 }
             }
             Controls.CheckBox {
+                objectName: "virtualDisplayCheck"
                 // Sunshine can't make them on a Mac, nor a host paired by PIN without its API.
                 visible: !displayDialog.loading && displayDialog.kind !== "sunshine" && displayDialog.kind !== "pin"
+                enabled: !displayDialog.virtualAlready
                 text: "A virtual display (the host makes a new monitor at the size you pick)"
+                      + (displayDialog.virtualAlready ? ": added" : "")
                 checked: displayDialog.virtualChosen
-                onToggled: displayDialog.virtualChosen = checked
+                onToggled: {
+                    displayDialog.virtualChosen = checked
+                    if (checked && displayDialog.kind === "apple") displayDialog.chosen = ({})
+                }
             }
             Kirigami.FormLayout {
                 Layout.fillWidth: true
@@ -495,7 +513,7 @@ Item {
                       : backend.streamsOnly
                         ? "Streaming without the desktop: the connected displays are panels on their own. Stop streaming before you start the desktop."
                         : backend.hosts.length === 0
-                        ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo (a Mac: Sunshine, set up with Frametop's host setup): add it, sign in with its Web UI login, then pick its displays."
+                        ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo (a Mac: built-in Screen Sharing, or Sunshine): add it, sign in, then pick its displays."
                         : "Each display is a panel like a screen: move, size, curve and pin it in VR, and Save as profile (Layout & profiles) keeps where it is. A disconnected display keeps its place and settings."
             }
             ColumnLayout {
@@ -508,6 +526,8 @@ Item {
                         readonly property bool anyConnected: modelData.displays.some(d => d.connected)
                         // Sunshine keeps no token: adding displays signs in first, every time.
                         readonly property bool sunshine: modelData.kind === "sunshine"
+                        readonly property bool apple: modelData.kind === "apple"
+                        readonly property bool vibepollo: !sunshine && !apple
                         Layout.fillWidth: true
                         contentItem: ColumnLayout {
                             RowLayout {
@@ -566,7 +586,8 @@ Item {
                                     icon.name: "unlock"
                                     display: Controls.AbstractButton.IconOnly
                                     text: "Sign in again"
-                                    Controls.ToolTip.text: "Sign in again: a new token replaces the one kept here (revoke the old one in its Web UI, API Tokens)"
+                                    Controls.ToolTip.text: hostCard.apple ? "Sign in again to update the saved Mac login"
+                                                           : "Sign in again: a new token replaces the one kept here (revoke the old one in its Web UI, API Tokens)"
                                     Controls.ToolTip.visible: hovered
                                     onClicked: hostDialog.openFor(hostCard.modelData)
                                 }
@@ -634,10 +655,11 @@ Item {
                                     }
                                 }
                             }
-                            // The Frame's microphone rides along with its streams. Sunshine
-                            // and stock Vibepollo ignore it, so Sunshine hosts don't get the switch.
+                            // The Frame's microphone rides along with its streams. Only
+                            // Frametop's build of Vibepollo receives it.
                             Controls.Switch {
-                                visible: !hostCard.sunshine
+                                objectName: "sendMic"
+                                visible: hostCard.vibepollo
                                 text: "Send my microphone"
                                 checked: hostCard.modelData.mic
                                 onToggled: backend.setMic(hostCard.modelData.name, checked)
@@ -648,9 +670,9 @@ Item {
                             }
                             // Its own keyboard and mouse, each lent on its own while the headset is
                             // worn: with only the keyboard lent, its mouse keeps moving its desktop.
-                            // Only Frametop's build lends them, so Sunshine hosts don't get the switches.
+                            // Only Frametop's build of Vibepollo lends them.
                             ColumnLayout {
-                                visible: !hostCard.sunshine
+                                visible: hostCard.vibepollo
                                 spacing: 0
                                 Controls.Label { text: "Use this computer's own" }
                                 RowLayout {
@@ -682,7 +704,7 @@ Item {
                             Controls.Switch {
                                 id: appWindows
                                 objectName: "appWindows"
-                                visible: !hostCard.sunshine
+                                visible: hostCard.vibepollo
                                 text: "Show its apps and windows in the launcher"
                                 checked: hostCard.modelData.appWindows
                                 onToggled: {
@@ -700,10 +722,10 @@ Item {
                                 Controls.ToolTip.visible: hovered
                             }
                             // Copied text and images both ways, at the moments typing changes
-                            // sides. Only Vibepollo has the request, so Sunshine hosts don't get
-                            // the switch.
+                            // sides. Only Vibepollo has the request.
                             Controls.Switch {
-                                visible: !hostCard.sunshine
+                                objectName: "shareClipboard"
+                                visible: hostCard.vibepollo
                                 text: "Share the clipboard"
                                 checked: hostCard.modelData.clipboard
                                 onToggled: backend.setClipboard(hostCard.modelData.name, checked)
@@ -725,6 +747,7 @@ Item {
                                 delegate: ColumnLayout {
                                     id: disp
                                     required property var modelData
+                                    readonly property bool appleMain: modelData.app === "apple:physical"
                                     property bool expanded: false
                                     Layout.fillWidth: true
                                     Kirigami.Separator { Layout.fillWidth: true }
@@ -787,12 +810,14 @@ Item {
                                             Kirigami.FormData.label: "Stream:"
                                             Controls.SpinBox {
                                                 id: sw
+                                                visible: !disp.appleMain
                                                 from: 640; to: 7680; stepSize: 8; editable: true
                                                 value: disp.modelData.width
                                             }
-                                            Controls.Label { text: "×" }
+                                            Controls.Label { visible: !disp.appleMain; text: "×" }
                                             Controls.SpinBox {
                                                 id: sh
+                                                visible: !disp.appleMain
                                                 from: 360; to: 4320; stepSize: 8; editable: true
                                                 value: disp.modelData.height
                                             }
@@ -811,9 +836,12 @@ Item {
                                             Controls.Label { text: sb.value === 0 ? "Mbit/s (auto)" : "Mbit/s" }
                                             Controls.Button {
                                                 text: "Apply"
-                                                enabled: sw.value !== disp.modelData.width || sh.value !== disp.modelData.height
+                                                enabled: (!disp.appleMain && (sw.value !== disp.modelData.width || sh.value !== disp.modelData.height))
                                                          || sr.currentValue !== disp.modelData.fps || sb.value * 1000 !== disp.modelData.bitrate
-                                                onClicked: backend.setStream(disp.modelData.id, sw.value, sh.value, sr.currentValue, sb.value * 1000)
+                                                onClicked: backend.setStream(disp.modelData.id,
+                                                                             disp.appleMain ? disp.modelData.width : sw.value,
+                                                                             disp.appleMain ? disp.modelData.height : sh.value,
+                                                                             sr.currentValue, sb.value * 1000)
                                             }
                                         }
                                         Controls.Label {
@@ -821,7 +849,9 @@ Item {
                                             Layout.fillWidth: true
                                             wrapMode: Text.Wrap
                                             opacity: 0.7
-                                            text: "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
+                                            text: disp.appleMain
+                                                  ? "Streams the Mac's main display at its own resolution, keeping the Mac's keyboard and trackpad working."
+                                                  : "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
                                         }
                                         RowLayout {
                                             Kirigami.FormData.label: "Width in VR:"

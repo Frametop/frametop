@@ -175,7 +175,7 @@ The requirement: each host streams its real displays, and virtual displays it cr
 |---|---|---|
 | Windows | Vibepollo | 1 main session (real or virtual) + up to 4 virtual Remote Monitors |
 | Linux (Arch, CachyOS; beta) | Vibepollo | The same, with at most 4 virtual displays at once |
-| macOS | Sunshine | Every real display, one Sunshine instance each (`host/macos`); no virtual displays |
+| macOS | Built-in Screen Sharing (`ft-appless`) or Sunshine | Main display or 1 Retina / ultrawide virtual display with nothing installed (`ft-appless`), or every real display via one Sunshine instance each (`host/macos`) |
 
 ### Windows and Linux: Vibepollo
 
@@ -219,6 +219,15 @@ Vibepollo has no macOS build. Sunshine (labelled experimental on macOS) is the o
 - Sound comes from a Core Audio tap (macOS 14+), so nothing like BlackHole is needed. Every instance carries it; ft-stream's per-address lock plays one.
 
 Full-motion video can still reach the encoder's limit. Sunshine forces VideoToolbox's low-latency mode, which roughly halves throughput (#5814); an M4 Pro managed 0.36-0.46 Gpix/s in that mode. The super ultrawide at 60 fps is 0.44 Gpix/s; the test Mac is an M3 Max, with two encode engines. Open PR #5817 (ScreenCaptureKit + OBS's VideoToolbox encoder) may raise the limit. Its capture (AVFoundation) also sends 30-55 fps of a still desktop, not `minimum_fps_target`'s 1 fps, at a low bitrate (1-6 Mbit/s).
+
+### macOS: High Performance Screen Sharing (`ft-appless`)
+
+Apple Silicon Macs (macOS 14+) also include Apple's High Performance Screen Sharing server inside `screensharingd` and `ScreensharingAgent` on TCP/UDP 5900-5901, needing only System Settings > General > Sharing > Screen Sharing turned on. `stream/ft-appless.cpp` and `stream/apple_hp.h` implement a clean-room MIT client for it, speaking the same `ft-screens` `SOCK_SEQPACKET` + `SCM_RIGHTS` ring-buffer protocol as `ft-stream`:
+
+- **Control and auth (TCP 5900).** Negotiates `RFB 003.889`, authenticates with 4096-bit SRP-6a (`kdf=SALTED-SHA512-PBKDF2`, subtype `36`) or RSA-2048 + AES-128 (`30`/`35`), switches to Apple's `enc1103` AES-128-CBC + sequence-SHA1 control stream (`0x44f`), and exchanges `AVCMediaStreamNegotiator` `bplist00` / zlib-protobuf offers (`0x1c`, handling both macOS 14/15 `bplist00` answers and macOS 26+ raw-zlib answers). Credentials live in `~/.local/share/frametop-stream/hosts/ADDRESS.apple` (`0600`, `O_NOFOLLOW`).
+- **Zero-delay H.264 decode and audio (UDP 5900/5901).** Decrypts RFC 3711 `AES_CM_256_HMAC_SHA1_80` SRTP video and audio, extracts `0x92` `avcC` parameter sets, and rewrites Apple VideoToolbox's `pic_order_cnt_type=0` SPS + CABAC slice headers into `pic_order_cnt_type=2` with VUI `max_num_reorder_frames=0` so Qualcomm Iris (`V4L2_PIX_FMT_QC08C`) emits every frame immediately with zero reorder hold (~0.45 ms GLES conversion at 4K60, ~14% of one Frame core). Stereo 48 kHz AAC-ELD audio (RFC 3640) is decoded dynamically through `dlopen("libfdk-aac.so.2")` into PipeWire/PulseAudio under the shared per-host audio lock.
+- **Virtual vs main display (`apple:virtual`, `apple:virtual@1`, `apple:virtual@2`, `apple:physical`).** `apple:virtual` sends `0x1d` (`SLVirtualDisplay`) for an isolated 3840x2160@60 (1920x1080@2x Retina) or 4096x1152@60 (32:9 ultrawide 1x) virtual monitor; Apple's `screensharingd` runs `VirtualDisplayHIDFilter` while `0x1d` is active, which blocks the Mac's local keyboard and trackpad. `apple:physical` omits `0x1d` and mirrors `CGMainDisplayID()` with the cursor composited, keeping the Mac's attached keyboard, mouse and Magic Trackpad native; `host/macos/ft-apple-vdisplay.swift` optionally mounts a local `CGVirtualDisplay` on the Mac and mirrors the physical display onto any custom resolution (such as `3456x972@60`) for `apple:physical`.
+- **Input and custom keymaps.** Pointer coordinates scale into `0x451` backing pixels (`CGMouseButton` bit order: left `0x01`, right `0x02`, middle `0x04`, pure scroll ticks `0x08`/`0x10`), Frametop's `KEY_F24` shortcut-cancel suppresses held Command keys cleanly, and `kb_layout` / `keymap` support `qwerty`, `dvorak`, `dvorak-qwerty-cmd`, `colemak`, non-transitive key remaps, and macOS's **Globe / Fn** key via Apple's `0x10` AES-128-ECB `kVK_Function` (`0x3f`) packet.
 
 ### PC app windows (split compute, DEE-345)
 

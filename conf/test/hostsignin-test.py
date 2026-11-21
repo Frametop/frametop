@@ -230,6 +230,9 @@ check("...which is the one ft_hostapi asks that port with",
        ft_hostapi.first_word(ft_hostapi.pin_path("192.0.2.20", 48989))), ("win2", 48990, PIN))
 ft_hostsignin.keep("192.0.2.21", "", PIN)
 check("Sunshine: the pin alone", sorted(n for n in kept() if n.startswith("192.0.2.21")), ["192.0.2.21.pin"])
+with open(ft_hostapi.apple_path("192.0.2.20"), "w") as f:
+    f.write("alice\nsecret\n")
+os.chmod(ft_hostapi.apple_path("192.0.2.20"), 0o600)
 ft_hostsignin.keep("192.0.2.2", "other", PIN)
 ft_hostsignin.forget("192.0.2.20")
 check("forgetting a host removes all of its files and nobody else's", sorted(kept()),

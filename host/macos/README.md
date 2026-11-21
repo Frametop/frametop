@@ -1,8 +1,39 @@
 # Frametop host for macOS
 
-This kit makes a Mac a host for Frametop's remote displays: the Mac's monitors appear as screens on a Steam Frame. Vibepollo has no macOS build, so the Mac uses LizardByte's Sunshine, one copy (an instance) per display. Frametop Streams, a menu bar icon, turns them on and off.
+A Mac with Apple silicon can stream to Frametop in two ways:
 
-## Requirements
+1. **Built-in macOS High Performance Screen Sharing (no host install needed).** Turn on System Settings > General > Sharing > Screen Sharing on the Mac, then add the Mac in Frametop Settings > Remote displays with your Mac user name and password. It streams either the Mac's main display (`apple:physical`, keeping the Mac's own keyboard and trackpad active) or a virtual display (`apple:virtual`, up to 3840x2160 Retina or 4096x1152 32:9 ultrawide at 60 fps) with stereo audio.
+2. **Sunshine, one instance per real monitor (`frametop-host-setup.sh`, below).** Use this when you want several real monitors of one Mac in Frametop at the same time. Frametop Streams, a menu bar icon, turns them on and off.
+
+## Built-in macOS Screen Sharing
+
+1. On the Mac (Apple silicon, macOS 14 or later), open System Settings > General > Sharing and turn on **Screen Sharing**.
+2. On the Steam Frame, open **Remote displays** in **Frametop Settings**, choose **Add computer**, pick the Mac, and sign in with your Mac user name and password.
+3. Choose **Main display** (mirrors the Mac's main display and keeps the Mac's own keyboard, mouse and trackpad working) or **A virtual display** (mounts an isolated virtual monitor on the Mac; Apple's `screensharingd` blocks the Mac's local keyboard and trackpad while its virtual display is open).
+
+### Custom resolution while keeping the Mac's trackpad and keyboard
+
+If you want an arbitrary ultrawide or custom resolution in `apple:physical` mode while still using the Mac's attached keyboard and Magic Trackpad, run `host/macos/ft-apple-vdisplay.swift` on the Mac:
+
+```bash
+swift host/macos/ft-apple-vdisplay.swift 3456x972@60
+```
+
+By default (`--mirror`), it mounts a local `CGVirtualDisplay` and mirrors your active display onto it ("Optimize for Frametop Virtual Display"), so macOS has a single custom-resolution desktop that `apple:physical` streams at 60 fps with native local trackpad gestures. Press Ctrl+C to unmount it and restore your normal display arrangement.
+
+### Custom keyboard layout and key remapping
+
+`ft-appless` supports host- and display-level keyboard layouts (`qwerty`, `dvorak`, `dvorak-qwerty-cmd`, `colemak`) and non-transitive key remaps (including macOS's **Globe / Fn** key) from the Frame terminal, hot-reloaded within 2 seconds:
+
+```bash
+layout/ft-layout remote host "My Mac" kb_layout=dvorak keymap=capslock:leftctrl,leftctrl:globe
+```
+
+---
+
+## Sunshine host kit (multiple real monitors)
+
+### Requirements
 
 - A Mac with Apple silicon, on macOS 14.2 or later.
 - An admin account, to install Sunshine in /Applications.

@@ -4524,6 +4524,7 @@ constexpr const char *kPadKey = "frametop.gamepad";  // ft-dashpatch's GAMEPAD_K
 
 bool PadMine() { return SteamVRGamepad() && g_steamvr.mine; }
 int PadPanel() { return PadMine() ? g_pill.pad : -1; }
+int TypingPanel() { return g_pill.target; }
 
 // Once SteamVR's up, and again every 10 s while it fails.
 void EnsurePadOverlay() {
@@ -7512,6 +7513,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateAim();
     UpdateLasers();
     UpdatePill();
+    UpdateVoice();
     UpdateBarMenu();
     UpdatePad();
     UpdateControls();

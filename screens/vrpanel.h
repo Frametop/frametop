@@ -439,6 +439,8 @@ bool BarMenuOn(int i);   // its menu is open (its controls stay)
 // closed it until that tip has come back out (so the same poke doesn't go on into the panel's content).
 bool BarMenuHasHands(int i);
 void UpdateBarMenu();    // each tick: it follows its panel; a fingertip through a row presses it
+int TypingPanel();       // the panel typing goes to (compositor.c's keys_update), -1 Steam
+void UpdateVoice();      // each tick: dictation's notice (vrvoice.cpp)
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data);
 
 // ---------------------------------------------------------------- vrgsapps.cpp's

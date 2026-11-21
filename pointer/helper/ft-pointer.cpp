@@ -88,7 +88,11 @@
 // under floating windows (valve.steam.gamepadui.floatingfooter, undock and friends) have
 // no texture (0x0) and a placeholder width, so ComputeOverlayIntersection never hits
 // them. For those the ray is tested against the overlay's plane, within
-// POINTER_SCENE_RADIUS (0.5 m) of its origin; the laser-catching dot sits 5 cm behind the
+// POINTER_SCENE_RADIUS (0.5 m) of its origin, and within its own rectangle, 2 cm round, where
+// it has one: its width at its transform's scale, by its mouse scale's shape, as ft-screens
+// sizes Steam's bar (user, 2026-11-21: the bar's "hitbox [is] larger than the actual area of the
+// bar making it hard to click on things on the bottom of the center display": at 3 m, 0.5 m
+// round the bar reached 9 degrees over it, onto the panels behind). The laser-catching dot sits 5 cm behind the
 // plane, so the laser reaches the buttons and still lands on the dot between them.
 // Only absolutely placed 0x0 overlays count as scene-graph: gamescope's app panels (the
 // desktops) also report 0x0, but they're placed as dashboard tabs, stay up when the
@@ -970,6 +974,7 @@ Vec3 LimitPitch(Vec3 d, double maxDeg) {
 // drawn this far out, and the laser-catching dot sits this far out (metres).
 constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 8.0;
 constexpr float kGoneWidthM = 1e-3f;   // a panel narrower: hidden (see "Scene-graph overlays" at the top)
+constexpr double kSceneMarginM = 0.02;   // a scene-graph overlay's rectangle takes hits this far round it
 // A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
 // laser), and after a release the laser holds still this long (see "Touch" at the top).
 constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
@@ -1247,6 +1252,8 @@ struct Pointer {
     std::map<std::string, overlayregion::Region> hitRegions;
     std::map<std::string, bool> sceneGraph;  // no texture: plane test instead of ComputeOverlayIntersection
     std::map<std::string, bool> sceneExact;  // one of those that ComputeOverlayIntersection hits after all
+    struct SceneSize { double w = 0, aspect = 0; };   // its width (m, before its transform's scale) and height / width
+    std::map<std::string, SceneSize> sceneSize;  // a scene-graph overlay's own rectangle, where it has one (0: none)
     std::map<std::string, bool> visible;  // refreshed every 50 ms
     // SteamVR's own word, before a shrunk panel counts as hidden: what the Settings page check
     // (OnVrSettingsPage) goes by, refreshed with `visible`.
@@ -4085,6 +4092,15 @@ void Pointer::RefreshOverlays() {
                 std::printf("scene-graph overlay %s: exact hits, no plane test\n", key.c_str());
             }
             sceneGraph[key] = scene && !sceneExact[key];
+            if (sceneGraph[key]) {
+                float w = 0;
+                vr::HmdVector2_t px{};
+                SceneSize sz;
+                if (overlay->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w > 0 &&
+                    overlay->GetOverlayMouseScale(h, &px) == vr::VROverlayError_None && px.v[0] > 0 && px.v[1] > 0)
+                    sz.w = w, sz.aspect = double(px.v[1]) / px.v[0];
+                sceneSize[key] = sz;
+            }
         }
         if (handles != before) ++visibleGen;
         // Our device keeps its index; it's looked for again when a device is activated or
@@ -4244,8 +4260,18 @@ Hit Pointer::nearest(Vec3 from, Vec3 d) {
             if (std::fabs(denom) < 1e-4) continue;
             const double along = Dot(center - from, normal) / denom;
             const Vec3 at = from + d * along;
-            if (along > 0.05 && along < h.along && std::sqrt(Dot(at - center, at - center)) <= sceneRadius)
-                h.along = along, h.key = key, h.scene = true, h.point = at, h.normal = normal;
+            if (!(along > 0.05 && along < h.along && std::sqrt(Dot(at - center, at - center)) <= sceneRadius)) continue;
+            // ...and within its own rectangle, where it has one (see "Scene-graph overlays" at the top)
+            const SceneSize &sz = sceneSize[key];
+            const Vec3 right{t.m[0][0], t.m[1][0], t.m[2][0]}, up{t.m[0][1], t.m[1][1], t.m[2][1]};
+            const double scale = Length(right), hw = sz.w * scale / 2, hh = hw * sz.aspect;
+            if (sz.w > 0 && hw > 0.02 && hh > 0.005 && hw < sceneRadius && scale > 1e-4) {
+                const Vec3 off = at - center;
+                if (std::fabs(Dot(off, right)) / scale > hw + kSceneMarginM ||
+                    std::fabs(Dot(off, up)) / std::max(Length(up), 1e-4) > hh + kSceneMarginM)
+                    continue;
+            }
+            h.along = along, h.key = key, h.scene = true, h.point = at, h.normal = normal;
             continue;
         }
         vr::VROverlayIntersectionParams_t params{};

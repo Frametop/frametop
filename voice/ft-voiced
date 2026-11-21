@@ -54,6 +54,7 @@ sys.path[:0] = [str(ROOT), str(ROOT.parent / "input"),  # its modules, vrws (Ste
                 str(ROOT.parent / "conf")]  # and the Steam PIN gate (docs/steam-pin-lock.md)
 import ft_commands
 import ft_pinlock
+import notice
 import voice_commands
 import voice_settings
 import vrws
@@ -343,6 +344,7 @@ class Voice:
         self.stream = None  # streaming state of the current dictation, see start_dictation
         self.whisper_lock = asyncio.Lock()  # one request at a time, in order
         self.command = None  # dict while capturing a post-wake command
+        self.notice = notice.Notice()  # the pill in the headset while it listens (notice.py)
         self.voice_commands = []  # from "commands" in the settings, see voice_commands.py
         self.wake_enabled = voice_settings.DEFAULT["wake_word"]  # apply_options() sets the saved value
         self.whisper_wanted = None  # whisper-server asked to run (True) or stop (False)
@@ -556,6 +558,8 @@ class Voice:
                 await asyncio.sleep(1)
 
     def on_audio(self, chunk):
+        if self.recording is not None or self.command is not None:
+            self.notice.level(float(np.sqrt(np.mean(chunk ** 2))))
         if self.recording is not None:
             self.recording.append(chunk)
             if self.start_chime:
@@ -662,7 +666,8 @@ class Voice:
 
     # --- dictation
 
-    def start_dictation(self, source):
+    def start_dictation(self, source, mode="hold"):
+        """mode: hold (to talk: a press starts it, the release stops it) or toggle, for the notice's hint."""
         if self.recording is not None:
             return
         if self.command is not None:
@@ -681,6 +686,7 @@ class Voice:
                            "words": [], "text": "", "held": None, "typed": 0}
             self.stream["worker"] = asyncio.create_task(self._stream_worker(self.stream))
         self.update_mic()
+        self.notice.listening(mode)
         if "start" in self.sounds:
             self.start_chime = self.loop.call_later(0.6, self.chime_start)
         self.broadcast("dictation_start", source=source)
@@ -703,6 +709,7 @@ class Voice:
         if chime:
             self.chime("cancel")
         self.update_mic()
+        self.notice.off()
         self.broadcast("dictation_cancel")
         log.info("dictation cancelled")
 
@@ -716,6 +723,17 @@ class Voice:
         too_short = seconds < self.dcfg["min_seconds"]
         self.chime("cancel" if too_short else "stop")  # before the mic closes: it waits for the tone
         self.update_mic()
+        if too_short:
+            self.notice.off()
+        else:
+            self.notice.typing()
+        try:
+            await self._finish_dictation(chunks, stream, seconds, too_short)
+        finally:
+            if self.recording is None:  # (not a new dictation that started meanwhile)
+                self.notice.off()
+
+    async def _finish_dictation(self, chunks, stream, seconds, too_short):
         if too_short:
             if stream:
                 stream["worker"].cancel()
@@ -999,7 +1017,7 @@ class Voice:
 
     async def toggle_dictation(self, source):
         if self.recording is None:
-            self.start_dictation(source)
+            self.start_dictation(source, "toggle")
         else:
             await self.stop_dictation()
 
@@ -1020,6 +1038,7 @@ class Voice:
                         "again": again}
         self.cmd_vad.reset()
         self.update_mic()
+        self.notice.listening("command")
 
     def _command_audio(self, chunk):
         cmd = self.command
@@ -1041,6 +1060,8 @@ class Voice:
         if self.command is None:
             self.reset_kws()
             self.update_mic()
+            if self.recording is None:
+                self.notice.off()
 
     async def finish_command(self, samples, wake_unix, again=False):
         self.chime("stop")

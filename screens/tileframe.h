@@ -68,8 +68,9 @@ constexpr double kWallMinM = 0.8, kWallMaxM = 6, kDeskMinDeg = -40, kDeskMaxDeg 
 // The desk line's lift over the bar's top edge (the `gapDeg` callers pass): the bar draws over the
 // tiles whatever their depth, and at the tiles' gap (0.8 degrees) the front tile's bottom edge stood
 // under it (user, 2026-11-18: "it is just slightly above the dashboard bar and somewhat gets covered.
-// So we just want to rise that up just a little bit").
-constexpr double kOverBarDeg = 4;
+// So we just want to rise that up just a little bit"); 4 degrees still did, 6 now (user, 2026-11-21: "the
+// dashboard bar still occludes").
+constexpr double kOverBarDeg = 6;
 inline bool AtBar(const double head[3], const double bar[3], const double barUp[3], double barHeightM, double gapDeg,
                   double g[3][4], double *radius, double *deskDeg) {
     const double d[3] = {bar[0] - head[0], bar[1] - head[1], bar[2] - head[2]};

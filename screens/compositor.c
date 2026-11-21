@@ -1325,6 +1325,7 @@ static void keys_state(struct server *s, char *reply, int size) {
 // SteamVR's Gamepad mode is for), "vrkeyboard show|hide|toggle|close" (Full Keyboard,
 // from the input relay), "fullkb 0|1" (the relay: Full Keyboard runs, up or not), "kwinei 1"
 // (the relay: a KWin screen's wheel goes to it, as "kwinscroll", for KWin's EIS),
+// "voice ..." (dictation's notice, from ft-voiced: vrvoice.cpp),
 // "frunner on|off" (frunner's search has the typing; see spot_open), "keys" (what's held:
 // keys_state), "keys release" (every key up: release_all_keys), and "click <overlay key>"
 // (from the pointer helper: a mouse click landed on that panel, "-" for none); the rest is in
@@ -1400,6 +1401,11 @@ static int control_readable(int fd, uint32_t mask, void *data) {
                 }
                 snprintf(reply, sizeof reply, "ok");
             }
+        } else if (strncmp(buf, "voice ", 6) == 0) {
+            // Dictation's notice, from ft-voiced (no reply): vrvoice.cpp.
+            if (s->vr) ft_vr_voice(buf + 6);
+            len = sizeof from;
+            continue;
         } else if (strncmp(buf, "pad ", 4) == 0) {
             // Gamepad mode's pad, from the input relay (no reply): the remote screen SteamVR's
             // Gamepad mode is for gets it (vr.cpp, "the gamepad pill"). ft-stream drops a blurred pad.

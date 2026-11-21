@@ -118,6 +118,8 @@ int ft_vr_mouse_panel(void);
 // torn-off window or a KWin move (keys_update): what SteamVR's scroll would do there (push or pull a
 // carried window, tear one off, or scroll under the held button). False if that isn't why it's -1.
 bool ft_vr_held_wheel(int notches, void (*handle)(const struct ft_event *, void *), void *data);
+// Dictation's notice (vrvoice.cpp): "listen hold|toggle|command LEVEL", "typing" or "off", from ft-voiced.
+void ft_vr_voice(const char *words);
 // A command from the control socket (@ft_screens); writes the reply (see vr.cpp).
 void ft_vr_command(const char *command, char *reply, int reply_size);
 

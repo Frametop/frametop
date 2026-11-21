@@ -1350,6 +1350,162 @@ void TestSleepWakeAndIdleLivenessTimeout() {
 
 // A media blob whose trailer points the offset table far past the end must be
 // refused, not read: off_tbl + num_objs * off_sz used to wrap around.
+// A screensharingd stand-in for the sign-in rules, one scripted answer per connection:
+// "short" answers SRP's first packet with a short length and hangs up (a Mac without SRP),
+// "reject" sends a real RFC 5054 challenge and then SecurityResult 1 (a wrong password),
+// "nonsrp-ok" takes a non-SRP login.
+struct ScriptedAuthRun {
+    bool ok = false;
+    bool srp_not_offered = false;
+    bool extra_connection = false;  // the client connected again after the script ran out
+    std::string auth_used;
+    std::vector<std::string> kinds;  // each connection's first auth packet: srp or nonsrp
+    std::string kinds_said() const {
+        std::string out;
+        for (const std::string &k : kinds) out += (out.empty() ? "" : " ") + k;
+        return out;
+    }
+};
+
+bool RecvFramed(int fd, std::vector<uint8_t> *body) {
+    uint8_t len_b[4];
+    if (!RecvExact(fd, len_b, 4, 5000)) return false;
+    const uint32_t len = ReadBe32(len_b);
+    if (len > 65536) return false;
+    body->resize(len);
+    return len == 0 || RecvExact(fd, body->data(), len, 5000);
+}
+
+std::vector<uint8_t> BuildRfcChallenge() {
+    BIGNUM *raw_N = nullptr;
+    CHECK(BN_hex2bn(&raw_N, kRfc5054Prime4096Hex) > 0);
+    UniqueBn bn_N(raw_N), bn_g(BN_new()), bn_b(BN_new()), bn_B(BN_new());
+    UniqueBnCtx ctx(BN_CTX_new());
+    BN_set_word(bn_g.get(), 5);
+    BN_set_word(bn_b.get(), 987654321u);
+    CHECK(BN_mod_exp(bn_B.get(), bn_g.get(), bn_b.get(), bn_N.get(), ctx.get()) == 1);
+    std::array<uint8_t, kSrpModulusLen> N_bytes{}, B_pad{};
+    BN_bn2binpad(bn_N.get(), N_bytes.data(), kSrpModulusLen);
+    BN_bn2binpad(bn_B.get(), B_pad.data(), kSrpModulusLen);
+    const std::string cap = "mda=SHA-512,replay_detection,conf+int=ChaCha20-Poly1305,kdf=SALTED-SHA512-PBKDF2";
+    std::vector<uint8_t> c(13, 0);
+    c.insert(c.end(), N_bytes.begin(), N_bytes.end());
+    AppendBe16(c, 1);
+    c.push_back(5);
+    c.push_back(32);
+    c.insert(c.end(), 32, 0x42);
+    AppendBe16(c, kSrpModulusLen);
+    c.insert(c.end(), B_pad.begin(), B_pad.end());
+    AppendBe64(c, 1000);
+    AppendBe16(c, uint16_t(cap.size()));
+    c.insert(c.end(), cap.begin(), cap.end());
+    return c;
+}
+
+bool ServeScriptedAuth(int cfd, const std::string &what, const std::vector<uint8_t> &key_wire,
+                       const std::vector<uint8_t> &challenge, std::string *kind) {
+    const uint8_t ver[12] = {'R', 'F', 'B', ' ', '0', '0', '3', '.', '8', '8', '9', '\n'};
+    const uint8_t types[2] = {1, 33};
+    uint8_t cver[12], rsa_init[15];
+    std::vector<uint8_t> body;
+    if (!SendAll(cfd, ver, 12) || !RecvExact(cfd, cver, 12, 5000) || !SendAll(cfd, types, 2) ||
+        !RecvExact(cfd, rsa_init, 15, 5000) || !SendAll(cfd, key_wire) || !RecvFramed(cfd, &body) ||
+        body.size() < 8)
+        return false;
+    *kind = body[7] == 0x02 ? "srp" : "nonsrp";
+    std::vector<uint8_t> reply;
+    if (what == "short") {
+        AppendBe32(reply, 8);
+        return SendAll(cfd, reply);
+    }
+    if (what == "nonsrp-ok") {
+        reply.assign(8, 0);
+        return SendAll(cfd, reply);
+    }
+    AppendBe32(reply, uint32_t(challenge.size()));
+    reply.insert(reply.end(), challenge.begin(), challenge.end());
+    if (!SendAll(cfd, reply) || !RecvFramed(cfd, &body)) return false;
+    std::vector<uint8_t> result;
+    AppendBe32(result, 0);  // no server proof
+    AppendBe32(result, 1);  // SecurityResult: failed
+    return SendAll(cfd, result);
+}
+
+ScriptedAuthRun RunScriptedAuth(AuthMode mode, const std::vector<std::string> &script, EVP_PKEY *srv_rsa,
+                                const std::vector<uint8_t> &challenge) {
+    const int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(lfd >= 0);
+    sockaddr_in sin{};
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    CHECK(bind(lfd, reinterpret_cast<const sockaddr *>(&sin), sizeof sin) == 0);
+    socklen_t slen = sizeof sin;
+    CHECK(getsockname(lfd, reinterpret_cast<sockaddr *>(&sin), &slen) == 0);
+    CHECK(listen(lfd, 4) == 0);
+
+    const auto spki = EncodeDerSpki(srv_rsa);
+    std::vector<uint8_t> key_pkt = {0x00, 0x00};
+    AppendBe32(key_pkt, uint32_t(spki.size()));
+    key_pkt.insert(key_pkt.end(), spki.begin(), spki.end());
+    std::vector<uint8_t> key_wire;
+    AppendBe32(key_wire, uint32_t(key_pkt.size()));
+    key_wire.insert(key_wire.end(), key_pkt.begin(), key_pkt.end());
+
+    ScriptedAuthRun run;
+    std::thread server([&]() {
+        for (const std::string &what : script) {
+            pollfd pfd{lfd, POLLIN, 0};
+            if (poll(&pfd, 1, 5000) <= 0) return;
+            const int cfd = accept(lfd, nullptr, nullptr);
+            if (cfd < 0) return;
+            std::string kind;
+            if (ServeScriptedAuth(cfd, what, key_wire, challenge, &kind)) run.kinds.push_back(kind);
+            close(cfd);
+        }
+    });
+    SessionOptions opt;
+    opt.host = "127.0.0.1";
+    opt.port = ntohs(sin.sin_port);
+    opt.username = "alice";
+    opt.password = "correct-horse-battery-staple";
+    opt.auth_mode = mode;
+    SessionClient client;
+    std::string err;
+    run.ok = client.VerifyCredentials(opt, &err);
+    server.join();
+    pollfd pfd{lfd, POLLIN, 0};
+    run.extra_connection = poll(&pfd, 1, 0) > 0;
+    close(lfd);
+    run.srp_not_offered = client.srp_not_offered();
+    run.auth_used = client.auth_used();
+    return run;
+}
+
+void TestAuthFallbackRules() {
+    UniquePkey srv_rsa(EVP_RSA_gen(2048));
+    CHECK(srv_rsa != nullptr);
+    const auto challenge = BuildRfcChallenge();
+
+    // First sign-in, a Mac without SRP: SRP's first packet gets a short reply, then RSA.
+    auto run = RunScriptedAuth(AuthMode::kAuto, {"short", "nonsrp-ok"}, srv_rsa.get(), challenge);
+    CHECK(run.ok && run.auth_used == "nonsrp" && run.srp_not_offered);
+    CHECK(run.kinds_said() == "srp nonsrp" && !run.extra_connection);
+
+    // A wrong password over SRP is never sent again over RSA.
+    run = RunScriptedAuth(AuthMode::kAuto, {"reject"}, srv_rsa.get(), challenge);
+    CHECK(!run.ok && !run.srp_not_offered && run.auth_used.empty());
+    CHECK(run.kinds_said() == "srp" && !run.extra_connection);
+
+    // A stored SRP login never falls back, even when the server claims to have no SRP.
+    run = RunScriptedAuth(AuthMode::kSrp, {"short"}, srv_rsa.get(), challenge);
+    CHECK(!run.ok && run.srp_not_offered && run.auth_used.empty());
+    CHECK(run.kinds_said() == "srp" && !run.extra_connection);
+
+    // A stored non-SRP login goes straight to RSA.
+    run = RunScriptedAuth(AuthMode::kNonSrp, {"nonsrp-ok"}, srv_rsa.get(), challenge);
+    CHECK(run.ok && run.auth_used == "nonsrp" && run.kinds_said() == "nonsrp" && !run.extra_connection);
+}
+
 void TestBplistBounds() {
     std::vector<uint8_t> blob(48, 0);
     std::memcpy(blob.data(), "bplist00", 8);
@@ -1370,6 +1526,7 @@ int main() {
     TestBplistBounds();
     TestBplistAndNegotiatorOffers();
     TestSrpAndNonSrpAuth();
+    TestAuthFallbackRules();
     TestEnc1103StreamCipher();
     TestDisplayConfig0x1dAnd0x451();
     TestSrtpAndSrtcp();

@@ -7,6 +7,7 @@ import ctypes
 import os
 import struct
 import sys
+import threading
 import time
 import types
 
@@ -144,6 +145,28 @@ def test_silent_gamescope_goes_stale_and_reconnects():
     assert fake.connects == 1  # waits RETRY_S before trying again
     settle(focus, now + 9.0)
     assert fake.connects == 2
+
+
+def test_connect_that_raises_is_retried():
+    fake = FakeXcb()
+
+    def broken(display, screen):
+        fake.connects += 1
+        raise RuntimeError("libxcb blew up")
+
+    fake.xcb_connect = broken
+    focus, _ = make(fake)
+    hook, threading.excepthook = threading.excepthook, lambda args: None  # the thread's traceback
+    try:
+        for _ in range(200):
+            focus.native(100.0)
+            if focus.connecting is None:
+                break
+            time.sleep(0.005)
+    finally:
+        threading.excepthook = hook
+    assert focus.connecting is None and focus.conn is None  # taken, not waited on forever
+    assert focus.retry_at == 100.0 + gf.RETRY_S and fake.connects == 1
 
 
 def test_no_libxcb():

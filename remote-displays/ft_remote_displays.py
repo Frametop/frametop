@@ -506,7 +506,13 @@ class Backend(QObject):
         try:
             with socket.create_connection((address, ft_layout.APPLE_PORT), timeout=2) as s:
                 s.settimeout(2)
-                return s.recv(12) == b"RFB 003.889\n"
+                banner = b""
+                while len(banner) < 12:
+                    part = s.recv(12 - len(banner))
+                    if not part:
+                        break
+                    banner += part
+                return banner == b"RFB 003.889\n"
         except OSError:
             return False
 

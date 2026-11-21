@@ -76,7 +76,7 @@ class Base(unittest.TestCase):
         self.rfb = {ADDRESS, "198.51.100.10"}   # addresses that answer with Apple's RFB banner
         old_signin = rd.ft_hostsignin.sign_in
         old_appless = rd.ft_layout.run_appless
-        old_rfb = rd.Backend._is_apple_rfb
+        old_rfb = rd.Backend.__dict__["_is_apple_rfb"]  # the staticmethod itself
         rd.ft_hostsignin.sign_in = no_webui
         rd.ft_layout.run_appless = fake_appless
         rd.Backend._is_apple_rfb = staticmethod(lambda address: address in self.rfb)

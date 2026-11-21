@@ -311,6 +311,8 @@ public:
     uint16_t server_init_w() const { return server_w_; }
     uint16_t server_init_h() const { return server_h_; }
     const std::string &auth_used() const { return auth_used_; }
+    // The last sign-in failed because the server answered SRP's first packet with a non-SRP reply.
+    bool srp_not_offered() const { return srp_not_offered_; }
     H264RtpAssembler &assembler() { return assembler_; }
     uint64_t video_rtp_packets() const { return video_rtp_pkts_; }
     uint64_t video_rtp_bytes() const { return video_rtp_bytes_; }

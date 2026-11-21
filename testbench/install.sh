@@ -44,9 +44,11 @@ steamvr() { systemctl --user show -p "$1" --value steamvr.service; }
 # Failed sessions the health check has counted, less the boot race's (steamvr-forgive). A
 # session that ends well clears them.
 forgive=$root/testbench/steamvr-forgive
+forgiven=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/frame-testbench-forgiven
+# (the helper gets this script's tracker and file, so a test's stand-ins reach it too)
 frogs() {
-  [ -e "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/frame-testbench-forgiven" ] || "$forgive" scan
-  "$forgive" count
+  [ -e "$forgiven" ] || FRAME_TESTBENCH_TRACKER=$tracker FRAME_TESTBENCH_FORGIVEN=$forgiven "$forgive" scan
+  FRAME_TESTBENCH_TRACKER=$tracker FRAME_TESTBENCH_FORGIVEN=$forgiven "$forgive" count
 }
 
 # restart_steamvr install|uninstall

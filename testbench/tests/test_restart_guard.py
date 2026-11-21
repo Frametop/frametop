@@ -10,9 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # Each sleep advances the fake clock by one tick. The health check's tracker is a real file.
 HARNESS = r'''
 . "$INSTALL_SH"
-tracker=$T/tracker dropin=$T/dropin log=$T/log
+tracker=$T/tracker dropin=$T/dropin log=$T/log forgiven=$T/forgiven
 n=0 base=$(command date +%s)
-: >"$dropin"
+: >"$dropin" ; : >"$T/journal"
 case $SCEN in notracker) ;; frog) printf frog:glasses: >"$tracker" ;; *) : >"$tracker" ;; esac
 [ "$SCEN" = fresh ] || [ ! -f "$tracker" ] || touch -d '1 hour ago' "$tracker"
 date() { echo $((base + n)); }
@@ -66,7 +66,8 @@ class RestartGuardTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix="rg-")
         self.addCleanup(temp.cleanup)
         env = dict(os.environ, INSTALL_SH=str(ROOT / "install.sh"), T=temp.name,
-                   SCEN=scenario, MODE=mode, FRAME_LOCAL="1")
+                   SCEN=scenario, MODE=mode, FRAME_LOCAL="1",
+                   FRAME_TESTBENCH_JOURNAL=str(Path(temp.name, "journal")))
         r = subprocess.run(["bash", "-c", HARNESS], env=env, text=True, capture_output=True, timeout=30)
         log = Path(temp.name, "log")
         return r, log.read_text().split("\n")[:-1] if log.exists() else []

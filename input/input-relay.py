@@ -137,8 +137,12 @@ from this user, and goes out key by key, TYPE_STEP apart, where typing goes: to 
 desktop, else on the virtual keyboard, which SteamVR passes on to Steam and games. On the
 desktop each character is the keys that type it on the desktop's keyboard layout (Plasma's
 kxkbrc in Frametop's desktop config, worked out with libxkbcommon), Shift and AltGr included, so a
-German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. A character the
-desktop's layout has no key for (ą on a US layout, a dead key's accent, another script) goes as
+German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. An accented
+letter the layout types with a dead key (ê on a French one: ^, then e) is those two keys. Native
+Desktop (SteamOS's own desktop, which runs in gamescope and reads keys with its own layout, not
+gamescope's) gets the same, with its layout (Plasma's kxkbrc in ~/.config), while it's
+gamescope's focused window (GamescopeFocus); its keys go on the virtual keyboard. A character the
+desktop's layout has no key for (ą on a US layout, another script) goes as
 "commit CHARACTER" to the desktop's input method (input/ft-textinput), which commits it to the
 focused text field, while one is focused: that's the address its "textfield 1" came from (this
 user's only), until "textfield 0", or TEXT_INPUT_LAPSE after its last "textfield 1 renew" (sent
@@ -162,7 +166,8 @@ open when the text field loses focus, until its close button, keyboard_toggle, o
 Full Keyboard (TaiKeid's release, hosted by keyboard/host/ft-kbhost; keyboard/FRAMETOP.md) is
 that keyboard. While it isn't running, nothing opens (ft-screens' old panel was removed in the
 2026-10-31 cleanup). ft-kbhost says "kbhello OPEN" on the control socket every second, only taken
-from this user, and gets "kb DESKTOP SURFACE STEAM" back: whether typing goes to the desktop,
+from this user, and gets "kb DESKTOP SURFACE STEAM" back: whether its typing goes through the
+relay (to the Frametop desktop, or to Native Desktop while that has gamescope's focus),
 whether the screens show with Frametop not paused (it may show over them with the dashboard
 closed), and whether Steam's own text fields may open it (steam_takes_keyboard: the same
 "vr_keyboard" rule, unless "steam_fields_keyboard" is "steam": Steam's own keyboard there, for a
@@ -175,7 +180,7 @@ to it as "kb poke SIDE VERB [x y z]", so its keys take hands as our screens do, 
 Its typing for the desktop comes as "kbkey CODE 0|1" and "kbtext TEXT", only from
 the address that said hello: they go in order with dictation's typing, keys as they are (a held
 modifier doesn't hold them back), text through the desktop's layout like dictation's, and
-unlogged. Its keys come up where they went down, and when it stops (no hello for 3 seconds),
+unlogged. For Native Desktop, both go on the virtual keyboard. Its keys come up where they went down, and when it stops (no hello for 3 seconds),
 the ones it holds come up.
 
 Volume keys, from every device that has them (the headset's own buttons included),
@@ -288,6 +293,7 @@ import struct
 import subprocess
 import sys
 import time
+import unicodedata
 
 import game_pause
 import pc_game
@@ -381,9 +387,27 @@ KEY_F24 = 194  # sent to the desktop with a Meta combination (see the top)
 MODIFIERS = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
 KEY_LEFTSHIFT = 42
 KEY_RIGHTALT = 100  # AltGr: the third level of most layouts
+
+
+class Keys(dict):
+    """The keys that type each character on a layout: character -> (code, modifiers held while
+    it's pressed). dead: the characters it types with a dead key, then a letter (ê on a French
+    layout), character -> ((the dead key's code, modifiers), (the letter's code, modifiers))."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.dead = {}
+
+    def strokes(self, ch):
+        """The (code, modifiers) presses that type ch, in order, or None if the layout can't."""
+        if ch in self:
+            return [self[ch]]
+        return list(self.dead[ch]) if ch in self.dead else None
+
+
 # Dictation's text on a US layout (see the top), for Steam and games, and the desktop without a
-# layout of its own: character -> (code, modifiers held while it's pressed).
-US_KEYS = {" ": (57, ())}
+# layout of its own.
+US_KEYS = Keys({" ": (57, ())})
 for _row, _shifted, _first in (("1234567890-=", "!@#$%^&*()_+", 2), ("qwertyuiop[]", "QWERTYUIOP{}", 16),
                                ("asdfghjkl;'`", 'ASDFGHJKL:"~', 30), ("\\zxcvbnm,./", "|ZXCVBNM<>?", 43)):
     for _i, (_plain, _shift) in enumerate(zip(_row, _shifted)):
@@ -391,11 +415,22 @@ for _row, _shifted, _first in (("1234567890-=", "!@#$%^&*()_+", 2), ("qwertyuiop
 # The desktop's keyboard layout: Plasma's kxkbrc in the Frametop desktop's config folder (its
 # XDG_CONFIG_HOME, session/frametop-session.sh), where its System Settings saves it.
 KXKBRC = os.path.expanduser("~/.config/frametop/kxkbrc")
+# Native Desktop's (steamos-nested-desktop: SteamOS's own Plasma, in gamescope), in the usual place.
+NATIVE_KXKBRC = os.path.expanduser("~/.config/kxkbrc")
 # The keys tried for each character on it, with these held (the first that types it wins): the
 # main block and the key left of Z on ISO keyboards (KEY_102ND: "<" on a German one), not the
 # keypad, which some apps read as keys of their own.
 LAYOUT_CODES = (*range(2, 54), 57, 86)
 LAYOUT_MODS = ((), (KEY_LEFTSHIFT,), (KEY_RIGHTALT,), (KEY_LEFTSHIFT, KEY_RIGHTALT))
+# Dead keys (xkbcommon-keysyms.h) and the combining accent each puts on the next letter.
+DEAD_ACCENTS = {0xfe50: "̀", 0xfe51: "́", 0xfe52: "̂", 0xfe53: "̃", 0xfe54: "̄",
+                0xfe55: "̆", 0xfe56: "̇", 0xfe57: "̈", 0xfe58: "̊", 0xfe59: "̋",
+                0xfe5a: "̌", 0xfe5b: "̧", 0xfe5c: "̨"}
+# Native Desktop's focus: gamescope's first Xwayland, asked this often while typing may go there,
+# and an answer older than FOCUS_STALE counts as not focused.
+GAMESCOPE_DISPLAY = ":0"
+FOCUS_POLL = 0.5
+FOCUS_STALE = 3.0
 TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
 # Between a character typed as keys and one committed through the input method (or back): they
 # reach the app by different ways, so the first gets this long to arrive before the next goes.
@@ -617,9 +652,10 @@ class XkbNames(ctypes.Structure):
 
 
 def layout_keys(layout, variant="", options="", model="pc105"):
-    """{character: (code, modifiers)} for a keyboard layout, through libxkbcommon: every key in
-    LAYOUT_CODES with each of LAYOUT_MODS held, and what it types. Dead keys type nothing, so
-    their accents aren't in it. Raises OSError without libxkbcommon or a keymap for the layout."""
+    """Keys for a keyboard layout, through libxkbcommon: every key in LAYOUT_CODES with each of
+    LAYOUT_MODS held, and what it types. A dead key types nothing, but with a letter after it, the
+    letter with its accent (DEAD_ACCENTS): those go in Keys.dead, where the layout has no key of
+    their own. Raises OSError without libxkbcommon or a keymap for the layout."""
     lib = ctypes.CDLL(ctypes.util.find_library("xkbcommon") or "libxkbcommon.so.0")
     lib.xkb_context_new.restype = ctypes.c_void_p
     lib.xkb_context_new.argtypes = [ctypes.c_int]
@@ -632,6 +668,8 @@ def layout_keys(layout, variant="", options="", model="pc105"):
     lib.xkb_state_unref.argtypes = [ctypes.c_void_p]
     lib.xkb_state_update_key.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
     lib.xkb_state_key_get_utf8.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t]
+    lib.xkb_state_key_get_one_sym.restype = ctypes.c_uint32
+    lib.xkb_state_key_get_one_sym.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
     ctx = lib.xkb_context_new(0)
     if not ctx:
         raise OSError("libxkbcommon: no context")
@@ -641,7 +679,7 @@ def layout_keys(layout, variant="", options="", model="pc105"):
     if not keymap:
         lib.xkb_context_unref(ctx)
         raise OSError(f"no keymap for layout {layout}{f'({variant})' if variant else ''}")
-    keys = {}
+    keys, dead = Keys(), []
     buf = ctypes.create_string_buffer(16)
     try:
         for mods in LAYOUT_MODS:
@@ -653,22 +691,32 @@ def layout_keys(layout, variant="", options="", model="pc105"):
                 ch = buf.raw[:n].decode(errors="ignore") if 0 < n < len(buf) else ""
                 if len(ch) == 1 and ch.isprintable() and ch not in keys:
                     keys[ch] = (code, mods)
+                elif not ch and lib.xkb_state_key_get_one_sym(state, code + 8) in DEAD_ACCENTS:
+                    dead.append((DEAD_ACCENTS[lib.xkb_state_key_get_one_sym(state, code + 8)], (code, mods)))
             lib.xkb_state_unref(state)
     finally:
         lib.xkb_keymap_unref(keymap)
         lib.xkb_context_unref(ctx)
+    letters = [ch for ch in keys if ch.isalpha()]
+    for accent, stroke in dead:
+        for letter in letters:
+            ch = unicodedata.normalize("NFC", letter + accent)
+            if len(ch) == 1 and ch not in keys and ch not in keys.dead:
+                keys.dead[ch] = (stroke, keys[letter])
     return keys
 
 
 class DesktopLayout:
     """The keys that type dictation's characters on the desktop (layout_keys), made again when
-    kxkbrc changes; US_KEYS without a layout or libxkbcommon."""
+    kxkbrc changes; US_KEYS without a layout or libxkbcommon. native: Native Desktop's
+    (NATIVE_KXKBRC), not the Frametop desktop's (KXKBRC)."""
 
-    def __init__(self, path=None):
+    def __init__(self, path=None, native=False):
         self.path, self.stamp, self.keys, self.name = path, False, US_KEYS, "us"  # path None: KXKBRC
+        self.native, self.where = native, "Native Desktop" if native else "the desktop"
 
     def refresh(self):
-        path = self.path or KXKBRC
+        path = self.path or (NATIVE_KXKBRC if self.native else KXKBRC)
         try:
             st = os.stat(path)
             stamp = (st.st_mtime_ns, st.st_size)
@@ -684,11 +732,161 @@ class DesktopLayout:
             try:
                 keys = layout_keys(*found)
             except OSError as e:
-                log(f"typing on the desktop: {e}; a US layout instead")
+                log(f"typing on {self.where}: {e}; a US layout instead")
                 name = "us"
         if name != self.name or keys is not self.keys:
-            log(f"typing on the desktop: layout {name}")
+            log(f"typing on {self.where}: layout {name}")
         self.name, self.keys = name, keys
+
+
+class XcbCookie(ctypes.Structure):
+    _fields_ = [("sequence", ctypes.c_uint)]
+
+
+class XcbScreenIterator(ctypes.Structure):
+    _fields_ = [("data", ctypes.POINTER(ctypes.c_uint32)), ("rem", ctypes.c_int), ("index", ctypes.c_int)]
+
+
+class GamescopeFocus:
+    """Whether Native Desktop has gamescope's focus: the window GAMESCOPE_FOCUSED_WINDOW names on
+    gamescope's first Xwayland is one GAMESCOPE_FOCUSABLE_WINDOWS (window, app id, pid each) gives
+    a kwin_wayland's pid. Native Desktop's KWin is the only one there: the Frametop desktop's runs
+    in ft-screens. Asked through libxcb without waiting for gamescope: native() sends the question
+    at most every FOCUS_POLL seconds and reads the answer on a later call, so a stuck gamescope
+    can't hold up the relay. No answer for FOCUS_STALE seconds counts as not focused."""
+
+    def __init__(self):
+        self.lib = None  # libxcb, once loaded; False: there's none
+        self.conn, self.root, self.atoms = None, 0, None
+        self.asked = []  # (what, sequence) of the questions out
+        self.retry_at, self.ask_at, self.asked_at, self.answered = 0.0, 0.0, 0.0, -1e9
+        self.focused = False
+
+    def load(self):
+        if self.lib is None:
+            try:
+                lib = ctypes.CDLL(ctypes.util.find_library("xcb") or "libxcb.so.1")
+                libc = ctypes.CDLL(None)
+            except OSError as e:
+                log(f"Native Desktop's focus: no libxcb ({e}); its typing goes as Steam's")
+                self.lib = False
+                return False
+            lib.xcb_connect.restype = ctypes.c_void_p
+            lib.xcb_connect.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+            lib.xcb_connection_has_error.argtypes = [ctypes.c_void_p]
+            lib.xcb_disconnect.argtypes = [ctypes.c_void_p]
+            lib.xcb_flush.argtypes = [ctypes.c_void_p]
+            lib.xcb_get_setup.restype = ctypes.c_void_p
+            lib.xcb_get_setup.argtypes = [ctypes.c_void_p]
+            lib.xcb_setup_roots_iterator.restype = XcbScreenIterator
+            lib.xcb_setup_roots_iterator.argtypes = [ctypes.c_void_p]
+            lib.xcb_intern_atom.restype = XcbCookie
+            lib.xcb_intern_atom.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint16, ctypes.c_char_p]
+            lib.xcb_get_property.restype = XcbCookie
+            lib.xcb_get_property.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint32, ctypes.c_uint32,
+                                             ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
+            lib.xcb_poll_for_reply.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p),
+                                               ctypes.POINTER(ctypes.c_void_p)]
+            lib.xcb_get_property_value.restype = ctypes.c_void_p
+            lib.xcb_get_property_value.argtypes = [ctypes.c_void_p]
+            lib.xcb_get_property_value_length.argtypes = [ctypes.c_void_p]
+            libc.free.argtypes = [ctypes.c_void_p]
+            self.lib, self.free = lib, libc.free
+        return bool(self.lib)
+
+    def drop(self, now):
+        if self.conn:
+            self.lib.xcb_disconnect(self.conn)
+        self.conn, self.atoms, self.asked = None, None, []
+        self.retry_at = now + 5.0
+
+    def connect(self, now):
+        conn = self.lib.xcb_connect(GAMESCOPE_DISPLAY.encode(), None)
+        if not conn or self.lib.xcb_connection_has_error(conn):
+            if conn:
+                self.lib.xcb_disconnect(conn)
+            self.retry_at = now + 5.0
+            return
+        self.conn = conn
+        self.root = self.lib.xcb_setup_roots_iterator(self.lib.xcb_get_setup(conn)).data[0]  # xcb_screen_t.root
+        for name in (b"GAMESCOPE_FOCUSED_WINDOW", b"GAMESCOPE_FOCUSABLE_WINDOWS"):
+            self.asked.append((name, self.lib.xcb_intern_atom(conn, 1, len(name), name).sequence))
+        self.lib.xcb_flush(conn)
+        self.asked_at = now
+
+    def answers(self, now):
+        """The replies that came, {what: bytes (an atom's id, or a property's value)}, once all
+        have; None while some haven't. Drops the connection when it broke."""
+        got = {}
+        for what, sequence in self.asked:
+            reply, error = ctypes.c_void_p(), ctypes.c_void_p()
+            if not self.lib.xcb_poll_for_reply(self.conn, sequence, ctypes.byref(reply), ctypes.byref(error)):
+                return None
+            if error.value:
+                self.free(error)
+            if not reply.value:
+                if self.lib.xcb_connection_has_error(self.conn):
+                    self.drop(now)
+                    return None
+                got[what] = b""
+                continue
+            if what.startswith(b"GAMESCOPE_"):  # xcb_intern_atom_reply_t: its atom after 8 bytes
+                got[what] = ctypes.string_at(reply.value + 8, 4)
+            else:
+                n = self.lib.xcb_get_property_value_length(reply)
+                got[what] = ctypes.string_at(self.lib.xcb_get_property_value(reply), n) if n > 0 else b""
+            self.free(reply)
+        self.asked = []
+        return got
+
+    def understand(self, got, now):
+        if self.atoms is None:
+            self.atoms = [struct.unpack("=I", got[name])[0] if len(got[name]) == 4 else 0
+                          for name in (b"GAMESCOPE_FOCUSED_WINDOW", b"GAMESCOPE_FOCUSABLE_WINDOWS")]
+            if not all(self.atoms):
+                self.drop(now)  # not gamescope's Xwayland (yet)
+            return
+        focused = got.get(b"focused", b"")
+        focusable = got.get(b"focusable", b"")
+        window = struct.unpack("=I", focused[:4])[0] if len(focused) >= 4 else 0
+        triples = struct.unpack(f"={len(focusable) // 4}I", focusable[:len(focusable) // 4 * 4])
+        pid = next((triples[i + 2] for i in range(0, len(triples) - 2, 3) if window and triples[i] == window), 0)
+        name = ""
+        if pid:
+            try:
+                with open(f"/proc/{pid}/comm") as f:
+                    name = f.read().strip()
+            except OSError:
+                pass
+        focused_now = name == "kwin_wayland"
+        if focused_now != self.focused:
+            log("Native Desktop has gamescope's focus" if focused_now else "Native Desktop lost gamescope's focus")
+        self.focused, self.answered = focused_now, now
+
+    def native(self, now):
+        """Native Desktop had gamescope's focus at the last answer, under FOCUS_STALE ago."""
+        if not self.load():
+            return False
+        if self.conn is None and now >= self.retry_at:
+            self.connect(now)
+        if self.conn is not None:
+            if self.asked:
+                got = self.answers(now)
+                if got is not None:
+                    self.understand(got, now)
+            if self.conn is not None and not self.asked and self.atoms and now >= self.ask_at:
+                for what, atom, length in ((b"focused", self.atoms[0], 1), (b"focusable", self.atoms[1], 3 * 64)):
+                    cookie = self.lib.xcb_get_property(self.conn, 0, self.root, atom, 0, 0, length)
+                    self.asked.append((what, cookie.sequence))
+                self.lib.xcb_flush(self.conn)
+                self.asked_at, self.ask_at = now, now + FOCUS_POLL
+        if now - self.answered > FOCUS_STALE:
+            if self.focused:
+                log("Native Desktop's focus: gamescope stopped answering")
+            self.focused = False
+            if self.asked and self.conn is not None and now - self.asked_at > FOCUS_STALE:
+                self.drop(now)  # asked long ago and never heard: start over
+        return self.focused
 
 
 def default_key_bindings():
@@ -1291,7 +1489,8 @@ class Typing:
 
     def __init__(self):
         # In order: a character (str) from dictation, ("quiet", character) from Full Keyboard
-        # (its text isn't logged), or ("key", code, value), a key Full Keyboard pressed or released.
+        # (its text isn't logged), ("key", code, value), a key Full Keyboard pressed or released, or
+        # ("stroke", code, modifiers, to the desktop), the letter after a dead key it typed.
         self.queue = collections.deque()
         self.down = []  # the character pressed last, (code, modifiers, to the desktop): its release is next
         self.at = 0.0  # the next press or release goes then
@@ -1316,7 +1515,7 @@ class FullKeyboardLink:
     def __init__(self):
         self.addr = None  # its address
         self.until = 0.0  # it counts as running until then (its hello renews it)
-        self.said = None  # the "kb DESKTOP SURFACE" it was told last
+        self.said = None  # the "kb DESKTOP SURFACE [LAYOUT]" it was told last
 
 
 CREDS = struct.Struct("3i")  # struct ucred: pid, uid, gid, as the kernel adds it to each datagram
@@ -1375,6 +1574,8 @@ class Relay:
         # FT_KWIN_EI=0 (the tests): no sender, so nothing reaches a running desktop's KWin.
         self.kwin_ei = kwin_ei.KwinEi(log, lambda: desktop_layout.desktop_env().get("DBUS_SESSION_BUS_ADDRESS"),
                                       lib=None if os.environ.get("FT_KWIN_EI") == "0" else kwin_ei.load_libei)
+        self.native_layout = DesktopLayout(native=True)
+        self.focus = GamescopeFocus()
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
         self.pc_game = pc_game.PcGame(log)
@@ -1822,6 +2023,7 @@ class Relay:
         """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
         it is worked out as it goes, where typing goes then."""
         self.desktop_layout.refresh()
+        self.native_layout.refresh()
         chars = [c for c in text if c.isprintable()]
         room = max(0, TYPE_MAX - len(self.typing.queue))
         self.typing.queue.extend((("quiet", c) for c in chars[:room]) if quiet else chars[:room])
@@ -1843,10 +2045,24 @@ class Relay:
                 self.text_input = None
             return False
 
-    def report_untyped(self, desktop):
+    def typing_target(self, now):
+        """Where typing goes now: "desktop" (the Frametop desktop, through ft-screens), "native"
+        (Native Desktop, with gamescope's focus: the virtual keyboard, its layout's keys), or
+        "steam" (the virtual keyboard, a US layout's keys)."""
+        if now < self.desktop_until:
+            return "desktop"
+        return "native" if self.focus.native(now) else "steam"
+
+    def target_layout(self, target):
+        """The DesktopLayout typing to target goes through, None for Steam's US one."""
+        return {"desktop": self.desktop_layout, "native": self.native_layout}.get(target)
+
+    def report_untyped(self, target):
         if self.typing.untyped and not self.typing.queue:
             where = (f"the desktop's layout ({self.desktop_layout.name}), with no text field taking text from "
-                     "the input method," if desktop else "a US layout (Steam)")
+                     "the input method," if target == "desktop" else
+                     f"Native Desktop's layout ({self.native_layout.name})" if target == "native" else
+                     "a US layout (Steam)")
             said = "".join(dict.fromkeys(c for c in self.typing.untyped if c is not None))
             log(f"typing: {len(self.typing.untyped)} characters {where} has no key for" + (f": {said}" if said else ""))
             self.typing.untyped.clear()
@@ -1893,14 +2109,22 @@ class Relay:
             else:
                 return  # not down
             self.type_key(code, value, desktop)
+        elif self.typing.queue and self.typing.queue[0][0] == "stroke" and not self.typing_blocked(now):
+            # The letter after a dead key (typing a character with an accent the layout has no
+            # key for), where its dead key went.
+            _, code, mods, desktop = self.typing.queue.popleft()
+            self.press_stroke(code, mods, desktop)
         elif self.typing.queue and not self.typing_blocked(now):
-            desktop = now < self.desktop_until
-            keys = self.desktop_layout.keys if desktop else US_KEYS
+            target = self.typing_target(now)
+            desktop = target == "desktop"
+            layout = self.target_layout(target)
+            keys = layout.keys if layout else US_KEYS
             item = self.typing.queue[0]
             ch = item if isinstance(item, str) else item[1]
+            strokes = keys.strokes(ch)
             # A character the desktop's layout has no key for goes to the focused text field
             # through the input method (ft-textinput), if there is one.
-            commit = ch not in keys and desktop and self.text_input is not None and now < self.text_input_until
+            commit = strokes is None and desktop and self.text_input is not None and now < self.text_input_until
             if commit != self.typing.committing:
                 self.typing.committing = commit
                 self.typing.at = now + TYPE_SWITCH
@@ -1909,19 +2133,24 @@ class Relay:
             if commit and self.commit_text(ch):
                 self.typing.at = now + TYPE_STEP
                 return
-            if ch not in keys:
+            if strokes is None:
                 self.typing.untyped.append(ch if isinstance(item, str) else None)
-                self.report_untyped(desktop)
+                self.report_untyped(target)
                 return  # the next one right away
-            code, mods = keys[ch]
-            for m in mods:
-                self.type_key(m, 1, desktop)
-            self.type_key(code, 1, desktop)
-            self.typing.down.append((code, mods, desktop))
-            self.report_untyped(desktop)
+            for code, mods in reversed(strokes[1:]):
+                self.typing.queue.appendleft(("stroke", code, mods, desktop))
+            self.press_stroke(*strokes[0], desktop)
+            self.report_untyped(target)
         else:
             return
         self.typing.at = now + TYPE_STEP
+
+    def press_stroke(self, code, mods, desktop):
+        """Press a typed character's key, its modifiers first: its release is next (typing.down)."""
+        for m in mods:
+            self.type_key(m, 1, desktop)
+        self.type_key(code, 1, desktop)
+        self.typing.down.append((code, mods, desktop))
 
     def typing_timeout(self, now, default):
         if self.typing.down or (self.typing.queue and (self.typing.queue[0][0] == "key" or not self.typing_blocked(now))):
@@ -2146,14 +2375,16 @@ class Relay:
 
     def kb_tell(self, now, message=None):
         """Tell Full Keyboard message, or with none, "kb DESKTOP SURFACE STEAM" if that changed:
-        typing goes to the desktop 0|1, the screens show with Frametop not paused 0|1 (what it
-        opened over them closes when they hide), and Steam's text fields may open it 0|1
+        its typing goes through the relay 0|1 (to the Frametop desktop, or Native Desktop while
+        that has gamescope's focus), the screens show with Frametop not paused 0|1 (what it opened
+        over them closes when they hide), and Steam's text fields may open it 0|1
         (steam_takes_keyboard). From the control socket: it takes word from @frametop_relay only."""
         addr = self.kb.addr
         if addr is None:
             return
         if message is None:
-            message = (f"kb {int(now < self.desktop_until)}"
+            through = self.target_layout(self.typing_target(now)) is not None
+            message = (f"kb {int(through)}"
                        f" {int(now < self.shown_until and not self.pause.paused)}"
                        f" {int(self.steam_takes_keyboard())}")
             if message == self.kb.said:

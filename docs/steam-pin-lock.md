@@ -26,8 +26,10 @@ feature avoids.
 
 - Steam's existing PIN remains the only unlock authority. No second password.
 - Unknown, locked, stale, disconnected or reset state denies access. An observer
-  restarting in an unlocked session stays denied until it observes Steam's next
-  real, non-cancellable lock and subsequent dismissal. **It never requests a PIN
+  starting in an unlocked session stays denied until it observes Steam's next
+  real, non-cancellable lock and subsequent dismissal. One that restarts, or
+  loses Steam for a moment, resumes an unlock it saw that way (below,
+  "Resuming a seen unlock"). **It never requests a PIN
   screen, locks or unlocks Steam, or submits credentials. Steam alone owns those
   actions.** An absent prompt is not treated as proof of authentication.
 - Screens, floating windows, popups, controls and compositor-owned guides hide;
@@ -155,14 +157,43 @@ user, privileged access, other unrestricted Steam applications or disk access.
 The existing local DevTools endpoint itself permits same-user UI access. Steam's
 PIN is not disk encryption or a Linux login boundary.
 
+## Resuming a seen unlock
+
+Without this, a guard restart (an update, a crash, a SteamVR restart) or a short
+loss of Steam's DevTools kept Frametop hidden until Steam locked again. Firtina
+Ozbalikchi found that and wrote the first recovery (PR 95); the version here
+keeps their goal with a narrower proof, since loaded settings and an inactive lock
+alone let Frametop show before Steam's PIN screen on a cold boot (below).
+
+While the guard holds an unlock that followed a lock it saw, it keeps a record in
+`$XDG_RUNTIME_DIR/frametop-pin-carry` (`steam/pin_carry.py`): Steam's UI context
+(`performance.timeOrigin`), the boot's id, and the boottime and monotonic clocks,
+refreshed with every lease. It's written like the lease: private, atomic, read
+without following links. A guard that has lost its proof (a fresh start, a failed
+or slow query, a scheduling gap) resumes the unlock only when all of these hold:
+
+- Steam's snapshot is well formed, PIN set, and shows no lock, prompt or reset;
+- it's the record's UI context on the record's boot;
+- boottime hasn't run ahead of monotonic since the record (no suspend);
+- the record is under 60 s old (a SteamVR restart takes the guard down with it).
+
+A lock Steam shows (mandatory or with inconsistent flags), a PIN reset or a PIN
+turned off ends the record, so an unlock the guard didn't see after one isn't
+resumed. A Steam client restart is a new UI context and a cold boot starts with
+an empty `/run/user`, so both still need a lock seen first. A suspend ends the
+record for good, so Steam's PIN-on-wake keeps the same race cover as a cold boot.
+Same-user code could write the record, but it could write the lease too (see
+above); the record adds no new boundary. The log says
+`unlocked-after-observed-lock (unlock-carried-over)` when it's used.
+
 ## Required before general use
 
 1. Validate actual lock/unlock, cancellation, incorrect PIN (entered only in
    Steam), reset, UI restarts, suspend/resume and boot. Confirm no initial false
-   state can authorize content. Determine how an observer restarting in an
-   unlocked session can safely recover; absent reliable proof, require another
-   Steam lock/unlock rather than guessing.
-   One recovery was tried and is not in this tree (PR 95, commit 8200793,
+   state can authorize content. An observer restarting in an unlocked session
+   resumes only an unlock it proved ("Resuming a seen unlock"); a guard restart
+   while unlocked, and one right after a sleep/wake, still need a wearer test.
+   One earlier recovery was tried and is not in this tree (PR 95, commit 8200793,
    2026-11-09): accepting an inactive lock from a fresh, well-formed snapshot
    with loaded PIN settings, with no lock seen first. On a cold boot the
    wearer then saw Frametop before Steam's PIN screen: the guard logged
@@ -194,7 +225,7 @@ PIN is not disk encryption or a Linux login boundary.
 python3 -m unittest discover -s steam/test -p "test_pin_*.py" -v
 ```
 
-Thirty-five tests cover initial false, mandatory vs cancellable prompts, relocking,
+The tests cover initial false, mandatory vs cancellable prompts, relocking,
 context reload, disconnect, invalid snapshots and booleans, reset/configuration
 changes, inconsistent props and avoiding credential fields in the expression.
 They also exercise the guard loop using fake Steam, atomic/private lease writing,
@@ -207,8 +238,11 @@ The guard-loop tests use deterministic clocks to check scheduling gaps, a suspen
 within the lease interval, slow authentication responses and slow no-PIN responses.
 None may reuse stale evidence to permit access.
 They also reject every guard-side Steam expression except the read-only snapshot,
-check that repeated unknown states never request prompts, and verify passive
-recovery after a failed observation or UI restart requires a real Steam lock cycle.
+check that repeated unknown states never request prompts, and verify that a UI
+restart needs a real Steam lock cycle. A restarted guard or a failed observation
+resumes a seen unlock only in the same UI context, within 60 s and with no
+suspend, and never past a lock, a PIN reset or a PIN turned off. The carry record
+is checked for privacy, exact contents, symlinks, FIFOs and other boots' records.
 
 Integration tripwires check overlay show-call coverage, that the lock path cannot
 stop applications, release-before-focus-clear ordering and the independent export

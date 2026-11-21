@@ -3,6 +3,7 @@
 Steam's UI starts with no active lock props before initialization. A false
 IsLockScreenActive() alone is NOT proof of unlock. Require a non-cancellable
 lock in the same live UI context before accepting its subsequent dismissal.
+A restarted guard may resume an unlock it proved that way (pin_carry).
 Never fetch the settings object over CDP: it can contain the user's PIN.
 Steam alone controls locking and authentication; this module never requests either.
 """
@@ -17,6 +18,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import pin_carry
 import steamui
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
@@ -58,6 +60,12 @@ def publish(permit, stamp):
             os.unlink(temporary)
 
 
+def idle(snapshot):
+    """A well-formed snapshot with no lock, prompt or PIN reset showing."""
+    return (valid_snapshot(snapshot) and snapshot["active"] is False and
+            snapshot["mandatory"] is False and snapshot["resetting"] is False)
+
+
 def valid_snapshot(snapshot):
     fields = {"generation", "active", "mandatory", "resetting", "configured"}
     return (isinstance(snapshot, dict) and set(snapshot) == fields and
@@ -95,17 +103,28 @@ def watch():
             try:
                 snap = steamui.evaluate(SNAPSHOT)
                 state = observer.sample(snap)
+                # Unproven but quiet: an unlock this guard, or the one before it, saw
+                # Steam's lock lead to, in this UI context with no suspend since.
+                if (state == "unknown" and idle(snap) and snap["configured"] is True and
+                        pin_carry.matches(pin_carry.load(), snap["generation"], stamp)):
+                    state = observer.resume(snap["generation"])
                 if not ft_pinlock.fresh(*stamp, *ft_pinlock.clocks()):
                     observer.invalidate("stale-steam-response")
                     state = "unknown"
                 # Initialized, explicitly disabled Steam PIN is not an unlock inferred
                 # from UI absence. Protect active/reset prompts even in that case.
-                no_pin = (valid_snapshot(snap) and
-                          snap["configured"] is False and snap["active"] is False and
-                          snap["mandatory"] is False and snap["resetting"] is False and
+                no_pin = (idle(snap) and snap["configured"] is False and
                           ft_pinlock.fresh(*stamp, *ft_pinlock.clocks()))
                 permit = state == "unlocked-after-observed-lock" or no_pin
                 publish(permit, stamp)
+                if state == "unlocked-after-observed-lock":
+                    try:
+                        pin_carry.save(observer.generation, stamp)
+                    except OSError:
+                        pass  # costs only the resume after a restart, not this unlock
+                elif valid_snapshot(snap) and (snap["mandatory"] or snap["resetting"] or
+                                               not snap["configured"]):
+                    pin_carry.clear()  # Steam locked, or its PIN changed: the proof is spent
                 reason = "steam-pin-disabled" if no_pin else observer.reason
             except (steamui.SteamUnreachable, OSError, ValueError, KeyError, TypeError):
                 observer.invalidate("steam-query-failed")
@@ -132,7 +151,15 @@ class Observer:
     def invalidate(self, reason="awaiting-observed-lock"):
         self.generation = None
         self.saw_mandatory_lock = False
+        self.unlocked_by = "observed-lock-dismissed"
         self.reason = reason
+
+    def resume(self, generation):
+        """Take up an unlock proven before this observer's last invalidation (pin_carry)."""
+        self.generation = generation
+        self.saw_mandatory_lock = True
+        self.unlocked_by = self.reason = "unlock-carried-over"
+        return "unlocked-after-observed-lock"
 
     def sample(self, snapshot):
         if not valid_snapshot(snapshot):
@@ -150,11 +177,13 @@ class Observer:
             self.invalidate("inconsistent-lock-flags")
             return "unknown"
         if snapshot["active"]:
-            self.saw_mandatory_lock |= snapshot["mandatory"]
+            if snapshot["mandatory"]:
+                self.saw_mandatory_lock = True
+                self.unlocked_by = "observed-lock-dismissed"
             self.reason = "steam-locked" if self.saw_mandatory_lock else "cancellable-steam-prompt"
             return "locked"
         if self.saw_mandatory_lock:
-            self.reason = "observed-lock-dismissed"
+            self.reason = self.unlocked_by
             return "unlocked-after-observed-lock"
         return "unknown"
 

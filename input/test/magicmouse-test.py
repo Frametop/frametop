@@ -81,6 +81,24 @@ emu.feed(report([(ident, x, y, size, mm.TOUCH_STATE_START)]))
 check("the same finger 300 units later: a wheel notch",
       emu.feed(report([(ident, x, y + 300, size, mm.TOUCH_STATE_DRAG)])), [(mm.REL_WHEEL, -1)])
 
+emu = mm.ScrollEmulator()
+check("a finger first seen mid-drag starts where it is: no jump",
+      (emu.feed(report([(5, 100, -900, 10, mm.TOUCH_STATE_DRAG)])),
+       emu.feed(report([(5, 100, -900 + 300, 10, mm.TOUCH_STATE_DRAG)]))), ([], [(mm.REL_WHEEL, -1)]))
+
+# Which hidraw nodes are the mouse comes from sysfs: nothing else is opened.
+import tempfile  # noqa: E402
+sysfs = tempfile.mkdtemp(prefix="ft-mm-sysfs-")
+for name, hid_id, uniq in (("hidraw0", "0003:0000046D:0000C52B", "aa:bb"),   # another mouse, same uniq
+                           ("hidraw1", "0005:0000004C:00000269", "AA:BB"),
+                           ("hidraw2", "0005:0000004C:00000269", "cc:dd"),
+                           ("hidraw3", "garbage", "aa:bb")):
+    os.makedirs(f"{sysfs}/{name}/device")
+    with open(f"{sysfs}/{name}/device/uevent", "w") as f:
+        f.write(f"DRIVER=hid-generic\nHID_ID={hid_id}\nHID_NAME=x\nHID_UNIQ={uniq}\n")
+check("sysfs names only the Magic Mouse 2 with that uniq", mm._hidraw_names("aa:bb", sysfs), ["hidraw1"])
+check("...and nothing when there's no sysfs", mm._hidraw_names("aa:bb", sysfs + "/none"), [])
+
 # MagicMice.sync: a mouse whose surface reports won't turn on isn't tried again each second.
 import types  # noqa: E402
 tries, logged = [], []

@@ -144,8 +144,8 @@ German QWERTZ desktop gets "z" from the Z key; Steam and games get a US layout. 
 letter the layout types with a dead key (ê on a French one: ^, then e) is those two keys. Native
 Desktop (SteamOS's own desktop, which runs in gamescope and reads keys with its own layout, not
 gamescope's) gets the same, with its layout (Plasma's kxkbrc in ~/.config), while it's
-gamescope's focused window (GamescopeFocus); its keys go on the virtual keyboard. A character the
-desktop's layout has no key for (ą on a US layout, another script) goes as
+gamescope's focused window (input/gamescope_focus.py); its keys go on the virtual keyboard. A
+character the desktop's layout has no key for (ą on a US layout, another script) goes as
 "commit CHARACTER" to the desktop's input method (input/ft-textinput), which commits it to the
 focused text field, while one is focused: that's the address its "textfield 1" came from (this
 user's only), until "textfield 0", or TEXT_INPUT_LAPSE after its last "textfield 1 renew" (sent
@@ -301,6 +301,7 @@ import unicodedata
 import game_pause
 import pc_game
 import magicmouse
+from gamescope_focus import GamescopeFocus  # Native Desktop's focus, for its typing
 from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
     EV_KEY,
     EV_REL,
@@ -430,11 +431,6 @@ LAYOUT_MODS = ((), (KEY_LEFTSHIFT,), (KEY_RIGHTALT,), (KEY_LEFTSHIFT, KEY_RIGHTA
 DEAD_ACCENTS = {0xfe50: "̀", 0xfe51: "́", 0xfe52: "̂", 0xfe53: "̃", 0xfe54: "̄",
                 0xfe55: "̆", 0xfe56: "̇", 0xfe57: "̈", 0xfe58: "̊", 0xfe59: "̋",
                 0xfe5a: "̌", 0xfe5b: "̧", 0xfe5c: "̨"}
-# Native Desktop's focus: gamescope's first Xwayland, asked this often while typing may go there,
-# and an answer older than FOCUS_STALE counts as not focused.
-GAMESCOPE_DISPLAY = ":0"
-FOCUS_POLL = 0.5
-FOCUS_STALE = 3.0
 TYPE_STEP = 0.004  # seconds from a typed key's press to its release, and on to the next key
 # Between a character typed as keys and one committed through the input method (or back): they
 # reach the app by different ways, so the first gets this long to arrive before the next goes.
@@ -743,156 +739,6 @@ class DesktopLayout:
         self.name, self.keys = name, keys
 
 
-class XcbCookie(ctypes.Structure):
-    _fields_ = [("sequence", ctypes.c_uint)]
-
-
-class XcbScreenIterator(ctypes.Structure):
-    _fields_ = [("data", ctypes.POINTER(ctypes.c_uint32)), ("rem", ctypes.c_int), ("index", ctypes.c_int)]
-
-
-class GamescopeFocus:
-    """Whether Native Desktop has gamescope's focus: the window GAMESCOPE_FOCUSED_WINDOW names on
-    gamescope's first Xwayland is one GAMESCOPE_FOCUSABLE_WINDOWS (window, app id, pid each) gives
-    a kwin_wayland's pid. Native Desktop's KWin is the only one there: the Frametop desktop's runs
-    in ft-screens. Asked through libxcb without waiting for gamescope: native() sends the question
-    at most every FOCUS_POLL seconds and reads the answer on a later call, so a stuck gamescope
-    can't hold up the relay. No answer for FOCUS_STALE seconds counts as not focused."""
-
-    def __init__(self):
-        self.lib = None  # libxcb, once loaded; False: there's none
-        self.conn, self.root, self.atoms = None, 0, None
-        self.asked = []  # (what, sequence) of the questions out
-        self.retry_at, self.ask_at, self.asked_at, self.answered = 0.0, 0.0, 0.0, -1e9
-        self.focused = False
-
-    def load(self):
-        if self.lib is None:
-            try:
-                lib = ctypes.CDLL(ctypes.util.find_library("xcb") or "libxcb.so.1")
-                libc = ctypes.CDLL(None)
-            except OSError as e:
-                log(f"Native Desktop's focus: no libxcb ({e}); its typing goes as Steam's")
-                self.lib = False
-                return False
-            lib.xcb_connect.restype = ctypes.c_void_p
-            lib.xcb_connect.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
-            lib.xcb_connection_has_error.argtypes = [ctypes.c_void_p]
-            lib.xcb_disconnect.argtypes = [ctypes.c_void_p]
-            lib.xcb_flush.argtypes = [ctypes.c_void_p]
-            lib.xcb_get_setup.restype = ctypes.c_void_p
-            lib.xcb_get_setup.argtypes = [ctypes.c_void_p]
-            lib.xcb_setup_roots_iterator.restype = XcbScreenIterator
-            lib.xcb_setup_roots_iterator.argtypes = [ctypes.c_void_p]
-            lib.xcb_intern_atom.restype = XcbCookie
-            lib.xcb_intern_atom.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint16, ctypes.c_char_p]
-            lib.xcb_get_property.restype = XcbCookie
-            lib.xcb_get_property.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint32, ctypes.c_uint32,
-                                             ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
-            lib.xcb_poll_for_reply.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p),
-                                               ctypes.POINTER(ctypes.c_void_p)]
-            lib.xcb_get_property_value.restype = ctypes.c_void_p
-            lib.xcb_get_property_value.argtypes = [ctypes.c_void_p]
-            lib.xcb_get_property_value_length.argtypes = [ctypes.c_void_p]
-            libc.free.argtypes = [ctypes.c_void_p]
-            self.lib, self.free = lib, libc.free
-        return bool(self.lib)
-
-    def drop(self, now):
-        if self.conn:
-            self.lib.xcb_disconnect(self.conn)
-        self.conn, self.atoms, self.asked = None, None, []
-        self.retry_at = now + 5.0
-
-    def connect(self, now):
-        conn = self.lib.xcb_connect(GAMESCOPE_DISPLAY.encode(), None)
-        if not conn or self.lib.xcb_connection_has_error(conn):
-            if conn:
-                self.lib.xcb_disconnect(conn)
-            self.retry_at = now + 5.0
-            return
-        self.conn = conn
-        self.root = self.lib.xcb_setup_roots_iterator(self.lib.xcb_get_setup(conn)).data[0]  # xcb_screen_t.root
-        for name in (b"GAMESCOPE_FOCUSED_WINDOW", b"GAMESCOPE_FOCUSABLE_WINDOWS"):
-            self.asked.append((name, self.lib.xcb_intern_atom(conn, 1, len(name), name).sequence))
-        self.lib.xcb_flush(conn)
-        self.asked_at = now
-
-    def answers(self, now):
-        """The replies that came, {what: bytes (an atom's id, or a property's value)}, once all
-        have; None while some haven't. Drops the connection when it broke."""
-        got = {}
-        for what, sequence in self.asked:
-            reply, error = ctypes.c_void_p(), ctypes.c_void_p()
-            if not self.lib.xcb_poll_for_reply(self.conn, sequence, ctypes.byref(reply), ctypes.byref(error)):
-                return None
-            if error.value:
-                self.free(error)
-            if not reply.value:
-                if self.lib.xcb_connection_has_error(self.conn):
-                    self.drop(now)
-                    return None
-                got[what] = b""
-                continue
-            if what.startswith(b"GAMESCOPE_"):  # xcb_intern_atom_reply_t: its atom after 8 bytes
-                got[what] = ctypes.string_at(reply.value + 8, 4)
-            else:
-                n = self.lib.xcb_get_property_value_length(reply)
-                got[what] = ctypes.string_at(self.lib.xcb_get_property_value(reply), n) if n > 0 else b""
-            self.free(reply)
-        self.asked = []
-        return got
-
-    def understand(self, got, now):
-        if self.atoms is None:
-            self.atoms = [struct.unpack("=I", got[name])[0] if len(got[name]) == 4 else 0
-                          for name in (b"GAMESCOPE_FOCUSED_WINDOW", b"GAMESCOPE_FOCUSABLE_WINDOWS")]
-            if not all(self.atoms):
-                self.drop(now)  # not gamescope's Xwayland (yet)
-            return
-        focused = got.get(b"focused", b"")
-        focusable = got.get(b"focusable", b"")
-        window = struct.unpack("=I", focused[:4])[0] if len(focused) >= 4 else 0
-        triples = struct.unpack(f"={len(focusable) // 4}I", focusable[:len(focusable) // 4 * 4])
-        pid = next((triples[i + 2] for i in range(0, len(triples) - 2, 3) if window and triples[i] == window), 0)
-        name = ""
-        if pid:
-            try:
-                with open(f"/proc/{pid}/comm") as f:
-                    name = f.read().strip()
-            except OSError:
-                pass
-        focused_now = name == "kwin_wayland"
-        if focused_now != self.focused:
-            log("Native Desktop has gamescope's focus" if focused_now else "Native Desktop lost gamescope's focus")
-        self.focused, self.answered = focused_now, now
-
-    def native(self, now):
-        """Native Desktop had gamescope's focus at the last answer, under FOCUS_STALE ago."""
-        if not self.load():
-            return False
-        if self.conn is None and now >= self.retry_at:
-            self.connect(now)
-        if self.conn is not None:
-            if self.asked:
-                got = self.answers(now)
-                if got is not None:
-                    self.understand(got, now)
-            if self.conn is not None and not self.asked and self.atoms and now >= self.ask_at:
-                for what, atom, length in ((b"focused", self.atoms[0], 1), (b"focusable", self.atoms[1], 3 * 64)):
-                    cookie = self.lib.xcb_get_property(self.conn, 0, self.root, atom, 0, 0, length)
-                    self.asked.append((what, cookie.sequence))
-                self.lib.xcb_flush(self.conn)
-                self.asked_at, self.ask_at = now, now + FOCUS_POLL
-        if now - self.answered > FOCUS_STALE:
-            if self.focused:
-                log("Native Desktop's focus: gamescope stopped answering")
-            self.focused = False
-            if self.asked and self.conn is not None and now - self.asked_at > FOCUS_STALE:
-                self.drop(now)  # asked long ago and never heard: start over
-        return self.focused
-
-
 def default_key_bindings():
     """The key combinations a rules file without its own gets."""
     return {**DEFAULT_KEY_BINDINGS, **(VOICE_KEY_BINDINGS if os.path.exists(VOICE_UNIT) else {})}
@@ -1035,8 +881,10 @@ class Pointer:
         self.move_at = 0.0  # motion last went to the helper then
         self.scroll_until = None  # the joystick push ends then
         self.scroll_sx = self.scroll_sy = 0  # stick deflection while a push is under way (-1, 0, 1)
-        # Scrolls notches on the panel the laser is on and says True, or says False: the joystick
-        # then. PointerLease sets it (ft-screens' "keyboard", its fifth word). DY then DX.
+        self.scroll_y_from_x = False  # the push's Y is its X's (a horizontal-only push)
+        # Scrolls notches (vertical, then horizontal) on the panel the laser is on and says True,
+        # or says False: the joystick then. PointerLease sets it (ft-screens' "keyboard", its
+        # fifth word).
         self.wheel_to = lambda notches, hwheel=0: False
         self.claim_at = None  # when to press the claim button
         self.claim_release = None
@@ -1215,18 +1063,19 @@ class Pointer:
             return
         sx = 1 if dx > 0 else -1 if dx < 0 else 0
         sy = 1 if dy > 0 else -1 if dy < 0 else 0
-        if self.scroll_until is not None:
-            if not sx:
-                sx = self.scroll_sx
-            if not sy:
-                sy = self.scroll_sy
-        elif sy == 0 and sx:
-            # SteamVR's overlay mouse is mousewheel-style (Y). A horizontal-only swipe
-            # would otherwise sit on X and leave the home shelf still; right is wheel down.
+        # SteamVR's overlay mouse is mousewheel-style (Y). A horizontal-only swipe would otherwise
+        # sit on X and leave the home shelf still; right is wheel down. Y keeps following X while
+        # the push stays horizontal-only, so swiping back turns both.
+        y_from_x = not sy and bool(sx) and (self.scroll_until is None or self.scroll_y_from_x)
+        if y_from_x:
             sy = -sx
+        elif self.scroll_until is not None:
+            sx = sx or self.scroll_sx
+            sy = sy or self.scroll_sy
         if self.scroll_until is None or sx != self.scroll_sx or sy != self.scroll_sy:
             self.send(f"scroll {sx} {sy}", droppable=True)
             self.scroll_sx, self.scroll_sy, self.scroll_until = sx, sy, now
+            self.scroll_y_from_x = y_from_x
         self.scroll_until = min(max(self.scroll_until, now) + (abs(dx) + abs(dy)) * self.SCROLL_STEP,
                                 now + self.SCROLL_BACKLOG)
 
@@ -1533,7 +1382,7 @@ class FullKeyboardLink:
     def __init__(self):
         self.addr = None  # its address
         self.until = 0.0  # it counts as running until then (its hello renews it)
-        self.said = None  # the "kb DESKTOP SURFACE [LAYOUT]" it was told last
+        self.said = None  # the "kb DESKTOP SURFACE STEAM" it was told last
 
 
 CREDS = struct.Struct("3i")  # struct ucred: pid, uid, gid, as the kernel adds it to each datagram
@@ -1594,7 +1443,7 @@ class Relay:
         self.kwin_ei = kwin_ei.KwinEi(log, lambda: desktop_layout.desktop_env().get("DBUS_SESSION_BUS_ADDRESS"),
                                       lib=None if os.environ.get("FT_KWIN_EI") == "0" else kwin_ei.load_libei)
         self.native_layout = DesktopLayout(native=True)
-        self.focus = GamescopeFocus()
+        self.focus = GamescopeFocus(log)
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
         self.pc_game = pc_game.PcGame(log)

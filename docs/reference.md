@@ -143,6 +143,7 @@ input/test/keys-test.py          # key combinations, modifier taps, dictation's 
 input/test/roles-test.py         # each node's role, Keyboard + 3D pointer included, offline
 input/test/scroll-test.py        # the wheel through the virtual joystick: a step per notch, fast notches added up and capped, offline
 input/test/magicmouse-test.py    # Magic Mouse 2 surface-to-wheel decode, offline
+input/test/gamescope-focus-test.py # Native Desktop's gamescope focus, against a fake libxcb
 input/rules-migrate.py           # one-time changes to a key_bindings list of your own (install and update run it)
 input/test/rules-migrate-test.py # those changes, on files in a temporary folder
 steam/ft-steam menu              # what Open Steam menu does; ft-steam check: Steam's UI still has the calls

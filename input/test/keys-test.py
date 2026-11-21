@@ -85,6 +85,9 @@ FOCUS = {"native": False}
 
 
 class FakeFocus:
+    def __init__(self, log):
+        pass
+
     def native(self, now):
         return FOCUS["native"]
 

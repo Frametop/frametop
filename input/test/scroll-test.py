@@ -147,6 +147,10 @@ p.motion(relay.REL_WHEEL, 1, 10.01)
 check("a vertical notch during it sets Y", scrolls(p)[-1], "scroll 1 1")
 p.motion(relay.REL_HWHEEL, -1, 10.02)
 check("the other way on X turns that axis", scrolls(p)[-1], "scroll -1 1")
+p = pointer()
+p.motion(relay.REL_HWHEEL, 1, 10.0)
+p.motion(relay.REL_HWHEEL, -1, 10.01)
+check("swiping back on a horizontal-only push turns Y with X", scrolls(p), ["scroll 1 -1", "scroll -1 1"])
 
 # ---------------------------------------------------------------- the relay's word to ft-screens
 sent = []

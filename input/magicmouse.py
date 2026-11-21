@@ -100,8 +100,8 @@ class ScrollEmulator:
 
     def _touch(self, ident, x, y, state, now):
         t = self.touches.get(ident)
-        if t is None:
-            t = self.touches[ident] = {"x": 0, "y": 0, "scroll_x": 0, "scroll_y": 0}
+        if t is None:  # a finger first seen mid-drag starts where it is, not at 0
+            t = self.touches[ident] = {"x": x, "y": y, "scroll_x": x, "scroll_y": y}
         t["x"], t["y"] = x, y
         if state == TOUCH_STATE_START:
             t["scroll_x"], t["scroll_y"] = x, y
@@ -213,33 +213,42 @@ def _enable_multitouch(fd):
         return False
 
 
+def _hidraw_names(uniq, sysfs="/sys/class/hidraw"):
+    """The hidraw nodes whose HID device (its uevent's HID_ID and HID_UNIQ) is the Magic Mouse 2
+    with this uniq: read from sysfs, so no other device gets opened."""
+    try:
+        names = sorted(os.listdir(sysfs))
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        try:
+            with open(f"{sysfs}/{name}/device/uevent") as f:
+                fields = dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
+            _bus, vendor, product = (int(v, 16) for v in fields.get("HID_ID", "").split(":"))
+        except (OSError, ValueError):
+            continue
+        if is_magic_mouse2(vendor, product) and fields.get("HID_UNIQ", "").lower() == uniq:
+            found.append(name)
+    return found
+
+
 def _find_hidraw(uniq):
     want = uniq.lower()
-    try:
-        names = os.listdir("/dev")
-    except OSError:
-        return None
-    for name in names:
-        if not name.startswith("hidraw"):
-            continue
+    for name in _hidraw_names(want):
         path = f"/dev/{name}"
-        if not os.access(path, os.R_OK | os.W_OK):
-            continue
         try:
             fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
         except OSError:
             continue
-        try:
+        try:  # the node is still the one sysfs named
             info = bytearray(DEVINFO.size)
             fcntl.ioctl(fd, HIDIOCGRAWINFO, info)
             _bustype, vendor, product = DEVINFO.unpack(info)
-            if not is_magic_mouse2(vendor, product):
-                os.close(fd)
-                continue
             raw = bytearray(256)
             fcntl.ioctl(fd, HIDIOCGRAWUNIQ, raw)
             got = bytes(raw).split(b"\0", 1)[0].decode(errors="replace").lower()
-            if got == want:
+            if is_magic_mouse2(vendor, product) and got == want:
                 return path, fd
         except OSError:
             pass

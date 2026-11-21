@@ -6,6 +6,7 @@
 #include "nets.h"
 #include "skeleton.h"
 
+#include <algorithm>
 #include <condition_variable>
 #include <functional>
 #include <map>
@@ -85,8 +86,11 @@ public:
     Tracker(const std::map<std::string, Camera> &cams, const Nets &nets, Pool &pool, int max_views = 2);
     // images: calibration name -> frame. Returns the hands seen in this set.
     std::vector<const Hand *> step(const std::map<std::string, Image> &images, int64_t t_ns);
-    // Seconds until the next frame set is worth processing (30 Hz fast hands, 15 Hz slow, 5 Hz none).
+    // Seconds until the next frame set is worth processing (max_hz for fast hands, half that slow, 5 Hz none).
     double interval() const;
+    // The fastest rate interval() asks for (30 by default; XRService's 60 and 120 Hz SLAM modes allow more).
+    void set_max_hz(double hz) { max_hz_ = std::clamp(hz, 10.0, 120.0); }
+    double max_hz() const { return max_hz_; }
     Stats stats;
     size_t views() const { return views_.size(); }
     std::vector<Seen> views_now() const;   // the views this step updated
@@ -187,6 +191,7 @@ private:
     V3 blind_at_{};
     double near_frac_ = 0.5;
     double hold_s_ = 0.3;
+    double max_hz_ = 30;
     double reacquire_s_ = 0, reacquire_clear_ = 0.12;   // a lost hand this near a tracked one isn't aimed at
     int reacquire_tiles_ = 2;
     bool reacquire_fast_ = false;

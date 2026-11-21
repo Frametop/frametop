@@ -313,6 +313,10 @@ int main(int argc, char **argv) {
     num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
     num("HANDS_PINCH_DRAG_OPEN_S", pinch_params.drag_open_s, 0.0, 1.0);
     num("HANDS_GRIP_TAKEOVER_S", pinch_params.grip_takeover_s, 0.0, 1.0);
+    // The fastest tracking rate (HANDS_MAX_HZ, --max-hz): 30 unless XRService runs the SLAM
+    // cameras at 60 or 120 Hz with no controller frames (captureSessionSettings.trackingCameras).
+    double max_hz = 30;
+    num("HANDS_MAX_HZ", max_hz, 10, 120);
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
@@ -349,6 +353,7 @@ int main(int argc, char **argv) {
         else if (a == "--ring" && more) ring_path = argv[++i];
         else if (a == "--record" && more) record = argv[++i];
         else if (a == "--record-for" && more) record_for = std::atof(argv[++i]);
+        else if (a == "--max-hz" && more) max_hz = std::clamp(std::atof(argv[++i]), 10.0, 120.0);
         else if (a == "--record-hz" && more) record_hz = std::max(0.0, std::atof(argv[++i]));
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard" && more) misread_guard = std::string(argv[++i]) == "1";
@@ -379,6 +384,7 @@ int main(int argc, char **argv) {
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
+                        "          [--max-hz N] (30: fast hands; half that slow, 5 idle; HANDS_MAX_HZ)\n"
                         "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
                         "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
@@ -619,6 +625,7 @@ int main(int argc, char **argv) {
     Pool pool(threads, cpus);
     Tracker tracker(used, nets, pool);
     tracker.set_keep_presence(keep_presence);
+    tracker.set_max_hz(max_hz);
     tracker.set_misread_guard(misread_guard);
     tracker.set_reacquire(reacquire, 2, true);
     tracker.set_pair_sides(pair_sides);
@@ -986,7 +993,7 @@ int main(int argc, char **argv) {
                 (rt.tv_sec - st.st_mtim.tv_sec) * 1e9 + (rt.tv_nsec - st.st_mtim.tv_nsec) < 1e9)
                 if (FILE *f = std::fopen(want_hz_file.c_str(), "r")) {
                     if (std::fscanf(f, "%lf", &want_hz) != 1 || !(want_hz > 0)) want_hz = 0;
-                    want_hz = std::min(want_hz, 30.0);
+                    want_hz = std::min(want_hz, max_hz);
                     std::fclose(f);
                 }
         }
@@ -1157,7 +1164,7 @@ int main(int argc, char **argv) {
         // a gesture down or closing gets the full rate, even while the palm holds still
         // and so does a reader that asks for it (want-hz)
         next_ns = tmin + uint64_t((std::min({tracker.interval(),
-                                             pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / 30.0 : 1.0,
+                                             pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / max_hz : 1.0,
                                              want_hz > 0 ? 1 / want_hz : 1.0}) -
                                    0.005) * 1e9);
         if (publish) pub.write(hands, capture);

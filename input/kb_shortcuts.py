@@ -8,6 +8,11 @@ codes ("kbkey"). Pressed as they are, a French desktop would read Ctrl+KeyA as C
 letter goes as the key that types it on the layout typing goes through (the relay's
 DesktopLayout keys). A letter that layout has no plain key for (a Cyrillic or Greek one) keeps
 its place, where the desktop's Latin fallback finds it.
+
+Full Keyboard also sends the Latin letter of the place for a key that shows punctuation there
+(AZERTY's "," on KeyM, Dvorak's "'" on KeyQ), so Ctrl with one of those reaches the desktop as
+Ctrl with that letter. The two can't be told apart here; letters, the shortcuts that matter,
+win.
 """
 
 # Full Keyboard's modifiers that make a key a shortcut: Ctrl, Alt and Super (left and right).
@@ -22,9 +27,9 @@ US_LETTERS = {first + i: letter for row, first in (("qwertyuiop", 16), ("asdfghj
 def shortcut_code(code, held, keys):
     """The key to press for Full Keyboard's code, with the codes in held down: the key that
     types its letter on keys (character -> (code, modifiers)) when held has a shortcut
-    modifier, else code. keys None (Steam's US layout) keeps code."""
+    modifier, else code."""
     letter = US_LETTERS.get(code)
-    if letter is None or keys is None or not SHORTCUT_MODIFIERS.intersection(held):
+    if letter is None or not SHORTCUT_MODIFIERS.intersection(held):
         return code
     stroke = keys.get(letter)
     return stroke[0] if stroke and not stroke[1] else code

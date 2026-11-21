@@ -36,7 +36,6 @@ def test_place_kept():
     assert shortcut_code(KEY_A, set(), AZERTY) == KEY_A          # no shortcut modifier
     assert shortcut_code(KEY_A, {SHIFT}, AZERTY) == KEY_A
     assert shortcut_code(KEY_A, {ALTGR}, AZERTY) == KEY_A
-    assert shortcut_code(KEY_A, {CTRL}, None) == KEY_A           # Steam's US layout
     assert shortcut_code(KEY_A, {CTRL}, RUSSIAN) == KEY_A        # no Latin a: the desktop's fallback
     assert shortcut_code(DIGIT1, {CTRL}, AZERTY) == DIGIT1       # not a letter
     assert shortcut_code(ENTER, {CTRL}, AZERTY) == ENTER

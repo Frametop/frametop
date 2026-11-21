@@ -1405,6 +1405,24 @@ def tests():
         check("...a key held from before comes up on the virtual keyboard", emitted(),
               [("keyboard", SHIFT, 1), ("keyboard", SHIFT, 0)])
         typed()
+        # The Frametop desktop, its layout just made French and no text typed since: Ctrl+A goes
+        # as AZERTY's A key, and one still held when typing moves to Steam comes up there.
+        relay.KXKBRC = os.path.join(OUT, "kxkbrc-fr")
+        with open(relay.KXKBRC, "w") as f:
+            f.write("[Layout]\nLayoutList=fr\nUse=true\n")
+        to_relay("keyboard desktop 1")
+        from_kb("kbhello 1")
+        heard(), typed()
+        for text in ("kbkey 29 1", "kbkey 30 1", "kbkey 30 0", "kbkey 29 0", "kbkey 29 1", "kbkey 30 1"):
+            from_kb(text)
+        to_relay("keyboard steam 1")
+        time.sleep(0.1)
+        from_kb("kbkey 30 0")
+        from_kb("kbkey 29 0")
+        check("Frametop desktop, French, no text since: Ctrl+A as AZERTY's A key, let go there after a move to Steam",
+              ([m for m in typed() if m.startswith("key")], emitted()),
+              ([f"key {c} {v}" for c, v in ((29, 1), (16, 1), (16, 0), (29, 0), (29, 1), (16, 1), (16, 0), (29, 0))], []))
+        relay.KXKBRC = os.path.join(OUT, "no-kxkbrc")
     to_relay("keyboard desktop 1")
     from_kb("kbhello 1")
     heard()

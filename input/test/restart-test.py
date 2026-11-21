@@ -297,6 +297,9 @@ check("held keys: what no device holds is forgotten",
 
 typing = relay.Typing()
 typing.queue.extend(["a", ("quiet", "b"), ("key", 30, 1), "c", ("key", 30, 0)])
+check("kb_shortcuts' US letters are the relay's US layout's",
+      {code: ch for ch, (code, mods) in relay.US_KEYS.items() if ch.islower() and not mods},
+      sys.modules["kb_shortcuts"].US_LETTERS)  # the relay imported it
 typing.kb_held = {31: (31, True), 30: (16, False)}  # KeyA went as AZERTY's Ctrl+A key (kb_shortcuts.py)
 check("typing: Full Keyboard goes: its keys to come are dropped, the keys it sent come back to let go",
       (typing.drop_full_keyboard(), list(typing.queue), typing.kb_held), ([(16, False), (31, True)], ["a", ("quiet", "b"), "c"], {}))

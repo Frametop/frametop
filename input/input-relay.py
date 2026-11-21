@@ -1978,8 +1978,10 @@ class Relay:
                     return  # down already
                 target = self.typing_target(now)
                 layout = self.target_layout(target)
+                if layout:
+                    layout.refresh()  # a shortcut may come before any text since kxkbrc changed
                 # A shortcut's letter as the key that types it there (kb_shortcuts.py).
-                sent = shortcut_code(code, self.typing.kb_held, layout.keys if layout else None)
+                sent = shortcut_code(code, self.typing.kb_held, layout.keys if layout else US_KEYS)
                 desktop = target == "desktop"
                 self.typing.kb_held[code] = (sent, desktop)
             elif code in self.typing.kb_held:
@@ -2278,8 +2280,8 @@ class Relay:
         """Full Keyboard stopped or restarted: its keys still to come are dropped, and the keys
         it holds come up where they went down."""
         self.kb.addr, self.kb.said = None, None
-        for code, desktop in self.typing.drop_full_keyboard():
-            self.type_key(code, 0, desktop)
+        for sent, desktop in self.typing.drop_full_keyboard():
+            self.type_key(sent, 0, desktop)
         log(f"Full Keyboard {why}")
 
     def handle_control(self, now):

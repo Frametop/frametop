@@ -35,6 +35,15 @@ using HoverBuzz = hoverhaptics::Gate;
 
 // Original behavior is intentionally independent of all new appearance/target settings.
 inline double LegacySize(double grip) { return grip * 1.8; }
+// The glow style's hit tab: centred on the corner, taking only the three quarters outside the panel
+// (LegacyTarget), so the panel's own corner stays the panel's (user, 2026-11-21: "the drag hitbox for
+// corners overlaps onto the display itself so it's impossible to press display corners, while it isn't
+// large enough in the glow area just outside the corner"). It reaches 1.5 grips out from the corner.
+inline double LegacyTabSize(double grip) { return grip * 3.0; }
+inline overlayregion::Region LegacyTarget(int sx, int sy) {
+    const double outX = sx > 0 ? 0.5 : 0, inX = sx > 0 ? 0 : 0.5, outY = sy > 0 ? 0.5 : 0;
+    return {{false, outX, 0, 0.5, 1}, {false, inX, outY, 0.5, 0.5}};   // (v up: sy +1 is the top)
+}
 inline double LegacyZone(double width, double height) { return std::clamp(0.2 * std::min(width, height), 0.05, 0.2); }
 inline double LegacyCloseness(double distance, double grip, double width, double height) {
     const double size = LegacySize(grip), zone = LegacyZone(width, height);

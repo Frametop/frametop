@@ -110,6 +110,13 @@ int main() {
     assert(defaults.widthMm == 5.1 && defaults.lengthCm == 4.7 && defaults.opacity == 0.27);
     assert(defaults.gapCm == 3.1 && defaults.paddingCm == 2.4);
     assert(std::fabs(resizecorner::LegacySize(0.04) - 0.072) < 1e-12);
+    for (int sx : {-1, 1}) for (int sy : {-1, 1}) {
+        // The glow tab's hits: everything outside the panel's corner, nothing over the panel.
+        const auto region = resizecorner::LegacyTarget(sx, sy);
+        const auto at = [&](double x, double y) { return overlayregion::Contains(region, 0.5 + sx * x, 0.5 + sy * y); };
+        assert(!at(-0.25, -0.25) && !at(-0.01, -0.45) && !at(-0.45, -0.01));   // over the panel
+        assert(at(0.25, 0.25) && at(0.25, -0.25) && at(-0.25, 0.25) && at(0.01, -0.45) && at(-0.45, 0.01));
+    }
     assert(resizecorner::LegacyZone(2, 1) == 0.2);
     assert(resizecorner::LegacyZone(0.01, 0.02) == 0.05);
     assert(resizecorner::LegacyCloseness(0.072, 0.04, 2, 1) == 1);

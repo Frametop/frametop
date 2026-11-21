@@ -800,14 +800,20 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 // A canvas centered at the screen corner. Only its padded corner-stroke mask is
 // interactive; the window and its safety margin are excluded from every primitive.
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
-double HandleSize(const Screen &s) { return g_resizeCorner.sharp ? resizecorner::Canvas(g_resizeCorner) : resizecorner::LegacySize(s.grip); }
+// The resize tab's side. A tiled panel's glow tab reaches no further than half the gap, so it never lies
+// over a neighbour's corner (at least 1 cm out, for a gap set very narrow).
+double HandleSize(const Screen &s) {
+    if (g_resizeCorner.sharp) return resizecorner::Canvas(g_resizeCorner);
+    const double size = resizecorner::LegacyTabSize(s.grip);
+    return TileTiled(ScreenIndexOf(s)) ? std::min(size, std::max(TileGapM(), 0.02)) : size;
+}
 const overlayregion::Region &ResizeRegion(int sx, int sy) {
     static std::array<overlayregion::Region, 4> regions;
     static uint64_t version = 0;
     if (version != g_resizeVersion) {
         for (int c = 0; c < 4; ++c)
             regions[c] = g_resizeCorner.sharp ? resizecorner::Target(g_resizeCorner, c % 2 ? 1 : -1, c < 2 ? 1 : -1)
-                                            : overlayregion::Region{{false, 0, 0, 1, 1}};
+                                            : resizecorner::LegacyTarget(c % 2 ? 1 : -1, c < 2 ? 1 : -1);
         version = g_resizeVersion;
     }
     return regions[(sy < 0 ? 2 : 0) + (sx > 0 ? 1 : 0)];
@@ -865,15 +871,11 @@ Mat BarOffset(const Screen &s) {
 void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
     const barside::UV c = BarSpot(s, 0);
     u[kBarPart] = c.u, v[kBarPart] = c.v;
-    // Visual, preview and hit-mask canvases share the screen's actual corner. The glow tab sits on the
-    // corner, half over the panel, so aiming at the corner you see takes it (user, 2026-11-19: "make
-    // it easier to grab and resize ... the grab-resize doesn't seem to have high enough priority";
-    // it sat wholly outside, so the corner itself was the panel's); a tiled one's comes no further
-    // out than half the gap, so it never lies over a neighbour's corner.
-    const int index = ScreenIndexOf(s);
-    const double out = g_resizeCorner.sharp ? 0 : TileTiled(index) ? std::min(0.0, TileGapM() / 2 - HandleSize(s) / 2) : 0;
-    u[kResizePart] = s.cornerX * (s.metres / 2 + out);
-    v[kResizePart] = s.cornerY * (s.heightMetres() / 2 + out);
+    // Visual, preview and hit-mask canvases share the screen's actual corner. The glow tab is centred
+    // on it, but its hit mask is only the part outside the panel (resizecorner::LegacyTarget), so the
+    // panel's corner pixels stay pressable (user, 2026-11-21); a tiled one's is smaller (HandleSize).
+    u[kResizePart] = s.cornerX * s.metres / 2;
+    v[kResizePart] = s.cornerY * s.heightMetres() / 2;
 }
 Mat RollZ(double rad);
 std::array<Mat, kControls> ControlOffsets(const Screen &s) {

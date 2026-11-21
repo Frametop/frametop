@@ -321,7 +321,10 @@
 // the first ray to show; its owner keeps it through POINTER_RAY_GRACE (0.5 s) of its ray being down
 // (the pointer holds that ray's last pose; closing the fingers can drop a ray for a moment), and
 // the other hand takes it by pinching, by raising its ray while the owner's is down, or once the
-// grace runs out. Changes go to the log ("hand ray: right -> left (left pinched)"), and so do the
+// grace runs out. A ray showing takes it only while the pointer's asleep and the hands were used
+// last (a ray pinch after the mouse's last use); otherwise only a pinch takes it, and an owner whose
+// grace ran out leaves the pointer where it was (last used wins: a hand resting at the desk looked
+// raised and pulled the laser down to it). Changes go to the log ("hand ray: right -> left (left pinched)"), and so do the
 // owner's ray going down and coming back.
 //   A ray appearing wakes the pointer (role, show) and claims the laser, unless a controller that
 // pressed a button within 2 s has it. A controller's trigger then takes the laser natively: our dot
@@ -1252,7 +1255,7 @@ struct Pointer {
     unsigned visibleGen = 0;
     Pass pass;
     PoseSent posed;  // the last plain "pose" (devpose.h)
-    Clock::time_point lastMouse{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
+    Clock::time_point lastMouse{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
     // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
     // panel then (ft-screens' near claim); the gaze last took it back then.
     Clock::time_point controllerTookAt{}, nearBusyAt{}, gazeWokeAt{};
@@ -2183,6 +2186,7 @@ struct Pointer {
             pinchLog(side, kind, "ignored (a press is already held)");
             return;
         }
+        lastRayPinch = fr.tnow;  // the hands used last: a raised hand may take the laser again (PickRayOwner)
         const bool took = rayOwner.Pinched(rs, true) == rayown::Owner::Pinch::Take;
         rays[rs].ShowForPinch();  // a ray that dropped as the fingers closed comes back
         rays[rs].event.clear();
@@ -3421,7 +3425,13 @@ void Pointer::PickRayOwner(const bool typingSide[2]) {
     // typing: the owner lets the pointer go to the mouse or the gaze, not to the controllers (an "off")
     if (rayOwner.Side() >= 0 && typingSide[rayOwner.Side()]) rayOwner.Drop("typing");
     const bool shown[2] = {rays[0].Shown(), rays[1].Shown()}, may[2] = {mayPoint(0, typingSide), mayPoint(1, typingSide)};
-    rayOwner.Update(secsOf(fr.tnow), shown, may, rayHid);
+    // Last used wins (rayowner.h): a hand resting by the keyboard or the mouse can look raised, and
+    // took the laser down to the desk a second after the mouse stopped, or from the other hand once
+    // that one rested (user, 2026-11-20). While the laser's up, or the mouse (or another device) was
+    // used after the last ray pinch, only a pinch takes it. With the hands used last and the pointer
+    // asleep, raising a hand still wakes it.
+    const bool otherLast = lastMouse > lastRayPinch;
+    rayOwner.Update(secsOf(fr.tnow), shown, may, rayHid, !active && !otherLast);
     ownerChanges(true);
     if (raySide >= 0 && !active && !headsetOff) {  // a wake that was held off (just released): again
         wake(fr.tnow);

@@ -33,13 +33,13 @@ constexpr double kFrame = 1 / 30.0;
 struct World {
     Owner o;
     double t = 0;
-    bool shown[2] = {false, false}, may[2] = {true, true};
+    bool shown[2] = {false, false}, may[2] = {true, true}, take = true;
     std::string why[2] = {"palm", "palm"};
     std::vector<Change> changes;
     std::vector<std::string> log;
     explicit World(Params p = {}) : o(p) {}
     void Step() {
-        o.Update(t, shown, may, why);
+        o.Update(t, shown, may, why, take);
         for (const Change &c : o.changes) changes.push_back(c);
         for (const std::string &l : o.log) log.push_back(l);
         o.changes.clear(), o.log.clear();
@@ -53,6 +53,39 @@ struct World {
         }
     }
 };
+
+// Last used wins: with takeOnShow off, a resting hand's ray takes nothing; a pinch still does.
+void TestRestingHandTakesNothing() {
+    World w;
+    w.take = false;
+    w.shown[0] = true;  // the left hand by the keyboard, passing the raised test
+    w.Run(2);
+    CHECK(w.o.Side() == -1 && w.changes.empty(), "no owner: a ray showing takes nothing (%d)", w.o.Side());
+    CHECK(w.o.Pinched(0, true) == Owner::Pinch::Take && w.o.Side() == 0, "a pinch takes it");
+    w.Step();
+    w.changes.clear();
+    // the owner rests: the other hand, up all along or raised meanwhile, doesn't take it
+    w.shown[1] = true;
+    w.Run(0.2);
+    w.shown[0] = false;
+    w.Run(0.1);
+    w.shown[1] = false;
+    w.Step();
+    w.shown[1] = true;  // raised while the owner's is down
+    w.Run(1.0);
+    CHECK(w.o.Side() == -1, "the owner goes after the grace, to nobody: %d", w.o.Side());
+    CHECK(w.changes.size() == 1 && w.changes[0].to == -1 && w.changes[0].why.find("up:") == std::string::npos,
+          "one change, to none: %zu %s", w.changes.size(), w.changes.empty() ? "" : w.changes[0].why.c_str());
+    // with it on, as before: the raised other hand takes it
+    World on;
+    on.shown[0] = true;
+    on.Step();
+    on.shown[0] = false;
+    on.Step();
+    on.shown[1] = true;
+    on.Run(0.1);
+    CHECK(on.o.Side() == 1, "takeOnShow on: raised while down takes it: %d", on.o.Side());
+}
 
 void TestFirstRaised() {
     World w;
@@ -365,6 +398,7 @@ void TestShowForPinch() {
 }  // namespace
 
 int main() {
+    TestRestingHandTakesNothing();
     TestFirstRaised();
     TestBriefDropKeepsTheOwner();
     TestGraceRunsOut();

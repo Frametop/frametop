@@ -5,12 +5,12 @@
 # needs to run them: raise it when a model needs a newer ft-hands, and older installs keep theirs.
 # Made by frame-hands' model-repo/pin.py.
 format 1
-rev 03d7695fecb80f6cf8f3aa9321de130b5efd08b3
-model v20a
-file NOTICE 4d99bb37c00664a1b0ea07170bab1916460bc0a44ff817e3ccd32babbcfbaf11
-file hand.ncnn.bin b7c3d1be232725a5a143e2648858ec5aec9596c7b83c6a3c508479b04057e00c
+rev 03d201864749c667e79f86c15668e9398d393657
+model v30a
+file NOTICE bc48228986dd0b125c6002320bd1b468c75bb9d81a0198b34dd7ea1ef9ebb2f5
+file hand.ncnn.bin f26bb92f5640fb6da4c33a37d4f6e15be4a40a5856288fe993a2343a341dcd76
 file hand.ncnn.param 54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd
-file palm.ncnn.bin 9865f5fa3c6bc885cb0b50f201c4ac1bd83b2c1ad64af4e122efa3fc56d61909
+file palm.ncnn.bin 4d6742c7291dd0ab16849ea587e123be146421cbb6dd339df671cff709e30eb0
 file palm.ncnn.param c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e
 file LICENSE 41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0
 file README.md 3393752d047bc3dd4e23fca47e3c29e4ae37c13be8dae1dae3412be55f4085f0

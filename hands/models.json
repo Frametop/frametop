@@ -1,7 +1,7 @@
 {
  "catalog": 1,
  "kind": "hands",
- "latest": "v20a",
+ "latest": "v30a",
  "default": "latest",
  "baseline": "stock",
  "metrics": [
@@ -20,15 +20,38 @@
  ],
  "models": [
   {
+   "name": "v30a",
+   "title": "Frametop v30a",
+   "kind": "custom",
+   "status": "recommended",
+   "date": "2026-11-21",
+   "summary": "Four more people and a new palm detector: finds hands and reads pinches better, most of all for new users.",
+   "notes": "v20a's training data plus Frametop Hands contributions #27 to #40 except #38: five people, four of them new (close-up, three-finger, near-miss, fist and sideways-hand rounds, and two full sessions). Its weights are the average of two training runs. The palm detector is retrained too (palm-4), on the same new people. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v20a: on two people left out of training entirely (#38, #41), the palm detector finds #38's hand in 68% of views (v20a 58%) with about half the false detections, and finger points are about 8% closer. On the new rounds' held-back acts, pinches read closed up to 91% of the time where v20a reached 51%, and #38's resting hand reads as touching 15% of the time (v20a 38%). The replays track the same hands.\n\nKnown weak spots: on some older rounds a resting hand reads as touching more often (#22 32% to 64%, #19 46% to 55%), and on the near-miss round almost-touches read as touching 50% of the time (v20a 38%); these sets are small. A hand held edge-on with the thumb and index tips 4 to 6 cm apart reads as pinched a little more often. For #41 the palm detector still misses about half the hands.",
+   "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
+   "bench": {"replay_bright": 967, "replay_dim": 1231, "replay_lit": 1437, "found": 99.0, "landmark_px": 3.7,
+             "within5": 95.7, "shape_mm": 7.5, "side_ok": 96.7, "pinch_closed": 85.4},
+   "format": 1,
+   "rev": "03d201864749c667e79f86c15668e9398d393657",
+   "files": {
+    "NOTICE": "bc48228986dd0b125c6002320bd1b468c75bb9d81a0198b34dd7ea1ef9ebb2f5",
+    "hand.ncnn.bin": "f26bb92f5640fb6da4c33a37d4f6e15be4a40a5856288fe993a2343a341dcd76",
+    "hand.ncnn.param": "54e08f284ff6f121ff00f4a9c65afc38c0dbb22a32f4af44fc4e0fde6c4a1bbd",
+    "palm.ncnn.bin": "4d6742c7291dd0ab16849ea587e123be146421cbb6dd339df671cff709e30eb0",
+    "palm.ncnn.param": "c61df2dde5b221a55c35c9693e530845a95ce2732949a9b3d3c583e3b2bae92e",
+    "LICENSE": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.md": "3393752d047bc3dd4e23fca47e3c29e4ae37c13be8dae1dae3412be55f4085f0"
+   }
+  },
+  {
    "name": "v20a",
    "title": "Frametop v20a",
    "kind": "custom",
-   "status": "recommended",
+   "status": "older",
    "date": "2026-10-22",
    "summary": "Eight more bounty rounds: pinches close fully and middle-finger taps reach the thumb far more often.",
    "notes": "v19b's training data without Frametop Hands contribution #17, plus contributions #19 to #26 (bounty rounds: taps, card grabs, pinches, hand gestures, middle-finger taps, pokes and a full session), taught from their prompts the same way as v19b. The palm detector is v13b-p1's, unchanged. Same networks as stock, so the same CPU cost.\n\nWhat to expect against v19b: on prompted acts held back from training, a held thumb-index pinch reads closed 91% of the time (v19b 50%) and a thumb-middle tap reaches the thumb 81% (v19b 14%). The few millimetres v19b added between the thumb and index tips are gone, so a light pinch no longer needs a firmer squeeze. Pokes and resting hands on the poke round read as touching less often. Finger points, hand shape and the replays are as before or slightly better.\n\nKnown weak spots: on some of the new rounds a resting hand reads as touching more often than with v19b (up to about 40 points on small sets; a control model moves those rows by up to 25 points, so part of it is noise). The new rounds are one person's.",
    "cost": "Same as stock: two networks, fp16, on the cores hand tracking already uses.",
-   "bench": {"replay_bright": 962, "replay_dim": 1229, "replay_lit": 1433, "found": 98.7, "landmark_px": 3.7,
+   "bench": {"replay_bright": 968, "replay_dim": 1227, "replay_lit": 1434, "found": 98.7, "landmark_px": 3.7,
              "within5": 95.0, "shape_mm": 7.9, "side_ok": 96.7, "pinch_closed": 72.2},
    "format": 1,
    "rev": "03d7695fecb80f6cf8f3aa9321de130b5efd08b3",

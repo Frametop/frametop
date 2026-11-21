@@ -97,9 +97,11 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout screen-args              ft-screens' --screen arguments for the session script
   ft-layout remote-view              the primary screen's place in the workspace, for the VNC bridge
   ft-layout toggle                   hide or show all screens (ft-screens)
-  ft-layout desktopless on|off|toggle|status
+  ft-layout desktopless on|off|toggle|status|sources
                                      desktopless mode (docs/desktopless.md): the screens and the
-                                     Linux PCs' displays hide, each app window is a panel of its own
+                                     displays of the PCs in it hide, each app window is a panel of its own
+  ft-layout desktopless frame on|off      the Frame's own desktop in the mode (in by default)
+  ft-layout desktopless host NAME on|off  a PC in the mode (out by default)
   ft-layout hide N|all               hide a screen on its own (it stays hidden whatever the
   ft-layout show N|all               visibility mode or the hotkey say), or show it again
   ft-layout hidden                   the screens hidden on their own

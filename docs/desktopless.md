@@ -1,8 +1,17 @@
 # Desktopless mode
 
-Desktopless mode puts every app on a panel of its own and hides the desktops they came from. The Frame's screens hide, and so do the displays of your Linux PCs. Every app window on them comes out as a panel: the Frame's windows float ([floating-windows.md](floating-windows.md)), and each PC window streams on its own ([remote-displays.md](remote-displays.md), window panels). Turn it off and every window goes back where it was. The Frame's go back onto their screens, and the PCs' go back onto their desktops, at the place and size they had.
+Desktopless mode puts every app on a panel of its own and hides the desktops they came from. The Frame's screens hide, and so do the displays of the PCs you put in the mode. Every app window on them comes out as a panel: the Frame's windows float ([floating-windows.md](floating-windows.md)), and each PC window streams on its own ([remote-displays.md](remote-displays.md), window panels). Turn it off and every window goes back where it was. The Frame's go back onto their screens, and the PCs' go back onto their desktops, at the place and size they had.
 
-Turn it on or off with the switch at the top of Frametop Settings' Screens page, with Meta+Shift+D, or with "Desktopless mode on or off" in frunner. The command line is `ft-layout desktopless on|off|toggle|status`.
+Turn it on or off on Frametop Settings' Desktopless mode page (also a switch at the top of the Screens page), with Meta+Shift+D, or with "Desktopless mode on or off" in frunner. The command line is `ft-layout desktopless on|off|toggle|status`.
+
+## Which sources are in it
+
+Each source has its own switch, on the Desktopless mode page under "What's in it" (user choice, 2026-11-20):
+
+- **This Frame** is in by default. Out, its screens and their windows stay as they are while the mode is on. The switch is `desktopless.frame` (absent means in), and it lasts across on and off. `ft-layout desktopless frame on|off`.
+- **Each PC** is out by default: its display panels stay, and its windows stay on it. A PC with many windows open would otherwise make a panel of each, more than the Frame's decoder and SteamVR's overlays keep up with. In, its displays hide and every window comes out. Only a PC with a Frametop windows instance can be in (the "Show its apps and windows in the launcher" switch on its Remote Displays card). The switch is `"desktopless": true` on its host entry. `ft-layout desktopless host NAME on|off`.
+- While the mode is on, a switch applies right away. A PC put out has its window panels closed (their places kept) and its displays shown again. The Frame put out shows its screens and docks its windows; put back in, its screens hide and its windows float again.
+- `ft-layout desktopless sources` prints the mode and every switch as JSON.
 
 ## What comes out
 
@@ -19,7 +28,7 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 
 ## How it works
 
-- `ft-layout desktopless on` keeps which screens and PC displays were hidden already (`desktopless.before`). It then hides every screen and each Linux PC's display panels. It asks ft-floatd to `float all` and opens each PC window with `ft-layout window`'s window panels. Last, it fans out the new panels and starts the watcher.
+- `ft-layout desktopless on` keeps which screens and PC displays were hidden already (`desktopless.before`). It then hides every screen (with the Frame in) and the display panels of each PC in the mode. It asks ft-floatd to `float all` (with the Frame in) and opens each PC window with `ft-layout window`'s window panels. Last, it fans out the new panels and starts the watcher.
 - A hidden display panel stays connected. Its stream holds the PC's keyboard and mouse for the Frame, since window streams don't take the input lock.
 - `off` keeps where each PC window panel is, closes them all (each PC puts its windows back), shows what wasn't hidden before, and docks the floating windows (`dock desktopless`). Windows that floated before the mode came on stay floating (ft-floatd's `float keep` remembers them). Windows whose screen is still hidden dock onto the first screen that shows.
 - The PC side is the Frametop windows instance (oma7's fork, `hyprland_windows.cpp`). Its window list says which workspace shows, the focus order, whether a window floats, where it sits, and its desktop app. A window that comes back without being dropped on a monitor goes to its old place. A floating one gets its old position and size. A tiled one splits in where its middle was, when its workspace shows.
@@ -41,6 +50,7 @@ Turn it on or off with the switch at the top of Frametop Settings' Screens page,
 - Frame windows float only while ft-floatd has spare outputs. Past that, or with ft-floatd not answering, the rest stay on their hidden screens until the mode goes off (the log says so).
 - ft-floatd keeps which windows floated before the mode only while it runs. After a desktop restart in the mode, off docks every floating window.
 
-- Only PCs with a Frametop windows instance (`windows=PORT`, [remote-displays.md](remote-displays.md)) give their windows up: a Linux PC's second instance, or a Windows PC with the Windows build (`windows=47989`, DEE-348). Another PC's displays stay as they are.
+- Only PCs with a Frametop windows instance (`windows=PORT`, [remote-displays.md](remote-displays.md)) can be in the mode: a Linux PC's second instance, or a Windows PC with the Windows build (`windows=47989`, DEE-348). Another PC's displays stay as they are.
+- The switches are the same for every profile: a profile keeps whether the mode is on, not which sources are in it.
 - A PC app's place is kept at `off` and when a profile is saved. A panel moved and then closed while the mode is on goes back to the place it had before next time.
 - Each window panel is a video stream of its own, and a hidden display panel still decodes every frame its PC sends (ft-stream shows 10 a second of them). Many at once may be more than the Frame's decoder keeps up with.

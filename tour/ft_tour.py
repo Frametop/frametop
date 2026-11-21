@@ -405,6 +405,8 @@ def pages(f, keys):
                  ["Layout & profiles", "The arrangement, saved profiles, and how the desktop starts", "settings:layout"],
                  ["Visibility & pins", "When screens show, pins, hidden screens, notifications, and dashboard apps",
                   "settings:visibility"],
+                 ["Desktopless mode", "Every app window its own panel, without the screens, and which sources "
+                                      "are in it: this Frame, each PC", "settings:desktopless"],
                  ["Remote displays", "Another computer's monitors as Frametop screens", "settings:remote-displays"],
                  "Input",
                  ["Devices", "Every mouse and keyboard, and its role: 3D pointer (it moves the dot), Keyboard + 3D "
@@ -436,6 +438,8 @@ def pages(f, keys):
                  "System",
                  ["Game optimization", "Pausing for VR games: on or off, the controller gesture, what the desktop "
                                        "does while paused", "settings:games"],
+                 ["Quick Settings", "The palm menu: which toggles it shows, and the CPU, GPU, memory and "
+                                    "temperature readouts", "settings:quick-settings"],
                  ["Power", "Turning the displays off when the headset is unused, and staying awake on the charger",
                   "settings:power"],
                  ["Remote access", "See and use the Frametop desktop from another computer on your tailnet, over VNC",

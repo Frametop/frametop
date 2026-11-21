@@ -95,6 +95,7 @@ class Desktopless(unittest.TestCase):
         self.d.stop_watch = lambda: None
         self.m.save_layout({"mode": "custom", "screens": [{}, {"hidden": True}, {}],
                             "hosts": [{"name": "oma7", "address": "192.0.2.30", "windows": {"port": 48989},
+                                       "desktopless": True,
                                        "displays": [{"id": "oma7-dp-2", "client": "frametop-oma7-dp-2",
                                                      "app": "display:DP-2", "size": [5120, 1440]}]},
                                       {"name": "dody", "address": "192.0.2.40",
@@ -357,6 +358,79 @@ class Desktopless(unittest.TestCase):
         self.floats.clear()
         self.d.resume(wait=0)
         self.assertEqual(self.floats, [])   # off, and no profile: nothing to do
+
+    def test_a_pc_stays_out_by_default_and_the_frame_is_in(self):
+        layout = self.m.load_layout()
+        layout["hosts"][0].pop("desktopless")
+        self.m.save_layout(layout)
+        self.d.command(["on"])
+        layout = self.m.load_layout()
+        self.assertTrue(all(s.get("hidden") for s in layout["screens"]))   # the Frame: in
+        self.assertFalse(layout["hosts"][0]["displays"][0].get("hidden"))  # the PC's display stays
+        self.assertEqual(self.panels(layout), [])                          # and its windows stay on it
+        self.assertNotIn("conceal 101", self.screens.asked)
+        self.assertEqual(self.floats, ["float keep", "float all"])
+        self.assertFalse(any(p == "/api/frametop/windows" for _, p, _ in self.api))
+
+    def test_the_frame_can_stay_out(self):
+        self.d.command(["frame", "off"])
+        self.d.command(["on"])
+        layout = self.m.load_layout()
+        self.assertEqual([bool(s.get("hidden")) for s in layout["screens"]], [False, True, False])
+        self.assertEqual(self.floats, [])                                  # its windows stay on the screens
+        self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))   # the PC in the mode: out as panels
+        self.assertEqual(len(self.panels(layout)), 3)
+        self.d.command(["off"])
+        layout = self.m.load_layout()
+        self.assertEqual(self.floats, [])                                  # nothing to dock
+        self.assertIs(layout["desktopless"]["frame"], False)               # the switch outlasts the mode
+        self.assertEqual(self.d.sources(layout)["frame"], False)
+
+    def test_a_pc_switched_in_and_out_while_on(self):
+        layout = self.m.load_layout()
+        layout["hosts"][0].pop("desktopless")
+        self.m.save_layout(layout)
+        self.d.command(["on"])
+        self.d.command(["host", "oma7", "on"])
+        layout = self.m.load_layout()
+        self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))
+        self.assertIn("conceal 101", self.screens.asked)
+        self.assertEqual(len(self.panels(layout)), 3)
+        self.screens.asked.clear()
+        self.d.command(["host", "oma7", "off"])
+        layout = self.m.load_layout()
+        self.assertEqual(self.panels(layout), [])
+        self.assertFalse(layout["hosts"][0]["displays"][0].get("hidden"))
+        self.assertIn("reveal 101", self.screens.asked)
+        self.assertNotIn("desktopless", layout["hosts"][0])
+        self.assertIn("oma7|foot", layout["desktopless"]["places"])        # where its panels were, kept
+        self.assertTrue(all(s.get("hidden") for s in layout["screens"]))   # the Frame: still in
+        self.assertNotIn("oma7", self.d.read_seen())
+
+    def test_a_pc_without_a_windows_instance_cannot_be_in(self):
+        with self.assertRaises(RuntimeError):
+            self.d.command(["host", "dody", "on"])
+        self.assertEqual(self.d.sources(self.m.load_layout())["hosts"],
+                         [{"name": "oma7", "on": True, "windows": True}, {"name": "dody", "on": False, "windows": False}])
+
+    def test_the_frame_switched_out_and_in_while_on(self):
+        self.d.command(["on"])
+        self.floats.clear()
+        self.screens.asked.clear()
+        self.d.command(["frame", "off"])
+        layout = self.m.load_layout()
+        self.assertEqual([bool(s.get("hidden")) for s in layout["screens"]], [False, True, False])
+        self.assertEqual(self.floats, ["dock desktopless"])
+        self.assertIn("reveal 1", self.screens.asked)
+        self.assertNotIn("reveal 2", self.screens.asked)
+        self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))   # the PC: still in
+        self.floats.clear()
+        self.d.command(["frame", "on"])
+        layout = self.m.load_layout()
+        self.assertTrue(all(s.get("hidden") for s in layout["screens"]))
+        self.assertEqual(self.floats, ["float keep", "float all"])
+        self.assertEqual(layout["desktopless"]["before"]["screens"], [1])
+        self.assertTrue(any(a.startswith("place 21 ") for a in self.screens.asked))
 
     def test_toggle_and_status(self):
         self.d.command(["toggle"])

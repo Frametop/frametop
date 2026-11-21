@@ -45,6 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LAYOUT_DIR = os.path.join(HERE, "..", "layout")
 sys.path.insert(0, LAYOUT_DIR)
 import ft_layout  # noqa: E402  (pure Python: the same geometry ft-layout uses)
+import ft_desktopless  # noqa: E402  (what's in desktopless mode: docs/desktopless.md)
 import ftipc  # noqa: E402  (questions to the datagram sockets; conf/, on the path from ft_layout)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from ft_layout import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
@@ -497,6 +498,22 @@ class Backend(QObject):
     @Slot(bool)
     def setDesktopless(self, on):
         self._run("Desktopless mode " + ("on" if on else "off"), "desktopless", "on" if on else "off")
+
+    # What's in the mode: the Frame's own desktop (in by default) and each PC (out by default).
+    @Property("QVariantList", notify=changed)
+    def desktoplessSources(self):
+        s = ft_desktopless.sources(ft_layout.load_layout())
+        return [{"name": "", "title": "This Frame", "on": s["frame"], "windows": True}] + [
+            dict(h, title=h["name"]) for h in s["hosts"]]
+
+    @Slot(str, bool)
+    def setDesktoplessSource(self, name, on):
+        """name "": the Frame; else a PC by its host name."""
+        switch = "on" if on else "off"
+        if name:
+            self._run(f"Desktopless: {name} {switch}", "desktopless", "host", name, switch)
+        else:
+            self._run(f"Desktopless: this Frame {switch}", "desktopless", "frame", switch)
 
     # --- the desktop's notifications in the Steam session (session/ft-notifyfwd) ---
     @Property(str, notify=changed)

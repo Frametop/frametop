@@ -4,11 +4,18 @@ windows float (ft-floatd's "float all"), and each PC window streams as a window 
 window). Off again, the windows go back where they were: the Frame's onto their screens, the PCs'
 onto their desktops (the host puts each one back at its old place).
 
-Only PCs with a Frametop windows instance ("windows=PORT") give their windows up; a
-PC's display panels hide only then. A hidden display panel stays connected: its stream holds the
-PC's keyboard and mouse for the Frame (window streams don't take the input lock).
+Each source has its own switch. The Frame's own desktop is in by default ("frame" in the
+mode's state, false to leave its screens and windows alone). A PC is out by default: its display
+panels stay and its windows stay on it, so a PC with many windows doesn't flood the Frame with
+panels. A PC opts in with "desktopless": true on its host entry, and only a PC with a Frametop
+windows instance ("windows=PORT") can. A hidden display panel stays connected: its stream holds
+the PC's keyboard and mouse for the Frame (window streams don't take the input lock).
 
   ft-layout desktopless on|off|toggle|status
+  ft-layout desktopless sources              (JSON: the mode and each source's switch)
+  ft-layout desktopless frame on|off         (the Frame's own desktop in the mode or not)
+  ft-layout desktopless host NAME on|off     (a PC in the mode or not)
+                                             (while it's on, a switch applies right away)
   ft-layout desktopless watch    (the frametop-desktopless user unit while it's on: a PC's new
                                   windows become panels, closed ones go, a PC that connects later
                                   gives its windows up)
@@ -60,6 +67,25 @@ def window_hosts(layout):
         port = h.get("windows", {}).get("port") if isinstance(h.get("windows"), dict) else None
         if isinstance(port, int):
             out.append((h, port))
+    return out
+
+
+def frame_on(layout):
+    """Whether the mode takes the Frame's own desktop: its screens hide, its windows float (default)."""
+    return state(layout).get("frame") is not False
+
+
+def pulled_hosts(layout):
+    """[(host, port)]: the PCs in the mode (window_hosts that opted in): their displays hide and
+    their windows open as panels. None by default."""
+    return [(h, port) for h, port in window_hosts(layout) if h.get("desktopless") is True]
+
+
+def kept(s, on):
+    """The mode's state for on or off, keeping what outlasts it: the places and the Frame's switch."""
+    out = {"on": on, "places": s.get("places", {})}
+    if s.get("frame") is False:
+        out["frame"] = False
     return out
 
 
@@ -147,13 +173,13 @@ def open_windows(sock, eye, heading, seen, extra=()):
     on the layout as it is then (one the user changed meanwhile stays changed). Returns how many
     opened."""
     answers = []
-    for host, port in window_hosts(L.load_layout()):
+    for host, port in pulled_hosts(L.load_layout()):
         try:
             answers.append((host_name(host), W.window_api(host, port, "GET", "/api/frametop/windows")))
         except RuntimeError:
             continue  # not on (or not reachable): it gives its windows up once it answers
     layout = L.load_layout()
-    hosts = {host_name(h): (h, port) for h, port in window_hosts(layout)}
+    hosts = {host_name(h): (h, port) for h, port in pulled_hosts(layout)}
     places = {k: list(v) for k, v in state(layout).get("places", {}).items()}
     for _, _, d in L.remote_displays(layout):
         if d.get("window") and places.get(d.get("key")):
@@ -264,7 +290,7 @@ def room_anchor(sock, layout):
 def remember_places(layout, sock, eye, heading):
     """Where each PC window panel is now, by app, for next time."""
     places = {}
-    for host, _ in window_hosts(layout):
+    for host, _ in pulled_hosts(layout):
         for n, h, d in L.remote_displays(layout):
             if h is not host or not d.get("window"):
                 continue
@@ -280,28 +306,62 @@ def remember_places(layout, sock, eye, heading):
 
 def hide_desktops(layout):
     """Desktopless mode's hidden state into the layout (not saved): on (keeping what was hidden
-    before, to put back at off), and every screen and each Linux PC's display panels hidden.
-    Returns the panel numbers to conceal, and whether it was off."""
+    before, to put back at off), and the screens (the Frame in the mode) and the display panels of
+    the PCs in it hidden. Returns the panel numbers to conceal, and whether it was off."""
     s = state(layout)
-    n = L.screen_count(layout)
-    displays = displays_of(layout, window_hosts(layout))
+    displays = displays_of(layout, pulled_hosts(layout))
     if not s.get("on"):
-        s = {"on": True, "places": s.get("places", {}),
-             "before": {"screens": [i for i in range(n) if L.screen_entry(layout, i).get("hidden")],
-                        "remotes": [d["id"] for _, d in displays if d.get("hidden")]}}
+        s = dict(kept(s, True), before={"screens": hidden_screens(layout),
+                                         "remotes": [d["id"] for _, d in displays if d.get("hidden")]})
         layout["desktopless"] = s
         write_seen({})
         fresh = True
     else:
         fresh = False
+    numbers = hide_screens(layout) if frame_on(layout) else []
+    for _, d in displays:
+        d["hidden"] = True
+    return numbers + [k for k, _ in displays], fresh
+
+
+def hidden_screens(layout):
+    return [i for i in range(L.screen_count(layout)) if L.screen_entry(layout, i).get("hidden")]
+
+
+def screen_list(layout):
+    n = L.screen_count(layout)
     screens = layout.setdefault("screens", [])
     while len(screens) < n:
         screens.append({})
-    for i in range(n):
-        screens[i]["hidden"] = True
-    for _, d in displays:
-        d["hidden"] = True
-    return list(range(1, n + 1)) + [k for k, _ in displays], fresh
+    return screens[:n]
+
+
+def hide_screens(layout):
+    """Every screen hidden (not saved); returns their numbers."""
+    screens = screen_list(layout)
+    for e in screens:
+        e["hidden"] = True
+    return list(range(1, len(screens) + 1))
+
+
+def show_screens(layout, before):
+    """The screens not hidden before the mode shown (not saved); returns their numbers."""
+    shown = []
+    for i, e in enumerate(screen_list(layout)):
+        if i not in before.get("screens", []):
+            e.pop("hidden", None)
+            shown.append(i + 1)
+    return shown
+
+
+def show_displays(layout, hosts, before):
+    """These PCs' display panels not hidden before the mode shown (not saved); returns their numbers."""
+    shown = []
+    for k, d in displays_of(layout, hosts):
+        if d["id"] not in before.get("remotes", []):
+            d.pop("hidden", None)
+            shown.append(k)
+    return shown
 
 
 def turn_on(layout):
@@ -310,8 +370,19 @@ def turn_on(layout):
     numbers, fresh = hide_desktops(layout)
     L.save_layout(layout)
     conceal(sock, numbers, True)
+    extra = float_frame(sock, fresh) if frame_on(layout) else []
+    seen = read_seen()
+    opened = open_windows(sock, eye, heading, seen, extra)
+    write_seen(seen)
+    start_watch()
+    L.log(f"desktopless on: {len(extra)} Frame window(s) fanned out, {opened} PC window(s) opened")
+
+
+def float_frame(sock, fresh):
+    """The Frame's windows float ("float keep" first when fresh: the ones floating now stay
+    floating at off). Returns [(screen number, (w, h))] of the new floating panels, to fan."""
     if fresh:
-        L.ask_float("float keep")  # (the windows floating now stay floating at off)
+        L.ask_float("float keep")
     extra = []
     reply = L.ask_float("float all", timeout=30.0)
     if reply and reply.startswith("ok"):
@@ -323,11 +394,7 @@ def turn_on(layout):
                 L.log(f"desktopless: floating panel {w}: {e}")
     else:
         L.log(f"desktopless: ft-floatd: {reply or 'not running'}: the Frame's windows didn't float")
-    seen = read_seen()
-    opened = open_windows(sock, eye, heading, seen, extra)
-    write_seen(seen)
-    start_watch()
-    L.log(f"desktopless on: {len(extra)} Frame window(s) fanned out, {opened} PC window(s) opened")
+    return extra
 
 
 def turn_off(layout):
@@ -338,7 +405,7 @@ def turn_off(layout):
         L.log("desktopless is off")
         return
     sock = L.screens_socket()
-    hosts = window_hosts(layout)
+    hosts = pulled_hosts(layout)
     try:
         eye, heading = room_anchor(sock, layout) or L.remote_anchor(sock, layout)
         s["places"] = dict(s.get("places", {}), **remember_places(layout, sock, eye, heading))
@@ -346,25 +413,14 @@ def turn_off(layout):
         L.log(f"desktopless: places not kept: {e}")
     close_panels(layout)
     before = s.get("before", {})
-    n = L.screen_count(layout)
-    screens = layout.setdefault("screens", [])
-    while len(screens) < n:
-        screens.append({})
-    shown = []
-    for i in range(n):
-        if i in before.get("screens", []):
-            continue
-        screens[i].pop("hidden", None)
-        shown.append(i + 1)
-    for k, d in displays_of(layout, hosts):
-        if d["id"] not in before.get("remotes", []):
-            d.pop("hidden", None)
-            shown.append(k)
-    layout["desktopless"] = {"on": False, "places": s.get("places", {})}
+    frame = frame_on(layout)
+    shown = (show_screens(layout, before) if frame else []) + show_displays(layout, hosts, before)
+    layout["desktopless"] = kept(s, False)
     L.save_layout(layout)
     conceal(sock, shown, False)
-    # (after the screens show: a window whose screen is still hidden docks onto the first that shows)
-    dock()
+    if frame:
+        # (after the screens show: a window whose screen is still hidden docks onto the first that shows)
+        dock()
     write_seen({})
     L.log("desktopless off: the windows are back on their desktops")
 
@@ -377,9 +433,9 @@ def dock():
         L.log(f"desktopless: ft-floatd: {reply}")
 
 
-def close_panels(layout):
-    """Every PC window panel goes, and its window back onto its PC."""
-    for host, _ in window_hosts(layout):
+def close_panels(layout, hosts=None):
+    """Every window panel of the PCs in the mode (or these) goes, and its window back onto its PC."""
+    for host, _ in pulled_hosts(layout) if hosts is None else hosts:
         for d in [d for d in host.get("displays", []) if d.get("window")]:
             W.window_close(layout, host, d)
 
@@ -398,7 +454,7 @@ def capture(layout, profile):
     before = s.get("before", {})
     profile["hidden"] = [i + 1 for i in before.get("screens", [])]
     remote = profile.get("remote", {})
-    for _, d in displays_of(layout, window_hosts(layout)):
+    for _, d in displays_of(layout, pulled_hosts(layout)):
         if d["id"] in remote:
             remote[d["id"]]["hidden"] = d["id"] in before.get("remotes", [])
     places = {}
@@ -424,16 +480,15 @@ def profile_before(layout, name):
     s = state(layout)
     old = s.get("before", {})
     known = layout.get("profiles", {}).get(name, {}).get("remote", {})
-    n = L.screen_count(layout)
     remotes = []
-    for _, d in displays_of(layout, window_hosts(layout)):
+    for _, d in displays_of(layout, pulled_hosts(layout)):
         if "hidden" in known.get(d["id"], {}):
             hidden = known[d["id"]]["hidden"]
         else:
             hidden = d["id"] in old.get("remotes", []) if s.get("on") else bool(d.get("hidden"))
         if hidden:
             remotes.append(d["id"])
-    return {"screens": [i for i in range(n) if L.screen_entry(layout, i).get("hidden")], "remotes": remotes}
+    return {"screens": hidden_screens(layout), "remotes": remotes}
 
 
 def use_profile(layout, name):
@@ -456,12 +511,12 @@ def use_profile(layout, name):
             return "on"
         stop_watch()
         close_panels(layout)
-        for _, d in displays_of(layout, window_hosts(layout)):
+        for _, d in displays_of(layout, pulled_hosts(layout)):
             if d["id"] in before["remotes"]:
                 d["hidden"] = True
             else:
                 d.pop("hidden", None)
-        layout["desktopless"] = {"on": False, "places": state(layout).get("places", {})}
+        layout["desktopless"] = kept(state(layout), False)
         write_seen({})
         return "off"
 
@@ -519,7 +574,7 @@ def launch_missing(name):
 
 
 def start_apps(layout, sock, room, name, places, want, seen):
-    for host, port in window_hosts(layout):
+    for host, port in pulled_hosts(layout):
         try:
             windows = W.window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
         except RuntimeError:
@@ -593,9 +648,127 @@ def watch():
         time.sleep(POLL_SECONDS)
 
 
+def sources(layout):
+    """The mode and each source's switch, for Display Settings and Remote Displays."""
+    return {"on": bool(state(layout).get("on")), "frame": frame_on(layout),
+            "hosts": [{"name": host_name(h), "on": h.get("desktopless") is True,
+                       "windows": any(h is w for w, _ in window_hosts(layout))}
+                      for h in layout.get("hosts", [])]}
+
+
+def set_frame(layout, on):
+    """The Frame's own desktop in the mode or not; while the mode is on, its screens hide and its
+    windows float now, or the screens show and the windows dock now."""
+    s = state(layout)
+    if frame_on(layout) == on:
+        return
+    if not s.get("on"):
+        s = dict(s)
+        if on:
+            s.pop("frame", None)
+        else:
+            s["frame"] = False
+        layout["desktopless"] = s
+        L.save_layout(layout)
+        return
+    sock = L.screens_socket()
+    if on:
+        s.pop("frame", None)
+        s.setdefault("before", {})["screens"] = hidden_screens(layout)
+        numbers = hide_screens(layout)
+        L.save_layout(layout)
+        conceal(sock, numbers, True)
+        eye, heading = L.remote_anchor(sock, layout)
+        extra = float_frame(sock, True)
+        poses = arc([size for _, size in extra])
+        for (n, _), t in zip(extra, poses):
+            try:
+                place(sock, n, t, eye, heading)
+            except RuntimeError as e:
+                L.log(f"desktopless: floating panel {n}: {e}")
+        L.log(f"desktopless: the Frame's desktop is in: {len(extra)} window(s) fanned out")
+    else:
+        s["frame"] = False
+        shown = show_screens(layout, s.get("before", {}))
+        L.save_layout(layout)
+        conceal(sock, shown, False)
+        dock()
+        L.log("desktopless: the Frame's desktop is out: its windows are back on the screens")
+
+
+def set_host(layout, name, on):
+    """A PC in the mode or not; while the mode is on, its displays hide and its windows open as
+    panels now, or its window panels close (their places kept) and its displays show now."""
+    host = next((h for h in layout.get("hosts", []) if host_name(h) == name), None)
+    if host is None:
+        raise RuntimeError(f"no remote host {name!r}")
+    if on and not any(h is host for h, _ in window_hosts(layout)):
+        raise RuntimeError(f"{name} has no Frametop windows instance (windows=PORT): its windows can't be panels")
+    if (host.get("desktopless") is True) == on:
+        return
+    s = state(layout)
+    mine = [(host, port) for h, port in window_hosts(layout) if h is host]
+    if not s.get("on"):
+        if on:
+            host["desktopless"] = True
+        else:
+            host.pop("desktopless", None)
+        L.save_layout(layout)
+        return
+    sock = L.screens_socket()
+    before = s.setdefault("before", {})
+    ids = {d["id"] for _, d in displays_of(layout, mine)}
+    if on:
+        host["desktopless"] = True
+        before["remotes"] = ([i for i in before.get("remotes", []) if i not in ids] +
+                             [d["id"] for _, d in displays_of(layout, mine) if d.get("hidden")])
+        numbers = []
+        for k, d in displays_of(layout, mine):
+            d["hidden"] = True
+            numbers.append(k)
+        L.save_layout(layout)
+        conceal(sock, numbers, True)
+        eye, heading = L.remote_anchor(sock, layout)
+        seen = read_seen()
+        opened = open_windows(sock, eye, heading, seen)
+        write_seen(seen)
+        L.log(f"desktopless: {name} is in: {opened} window(s) opened")
+    else:
+        try:
+            eye, heading = room_anchor(sock, layout) or L.remote_anchor(sock, layout)
+            places = remember_places(layout, sock, eye, heading)
+            s["places"] = dict(s.get("places", {}), **places)
+        except RuntimeError as e:
+            L.log(f"desktopless: {name}'s places not kept: {e}")
+        close_panels(layout, mine)
+        host.pop("desktopless", None)
+        shown = show_displays(layout, mine, before)
+        before["remotes"] = [i for i in before.get("remotes", []) if i not in ids]
+        L.save_layout(layout)
+        conceal(sock, shown, False)
+        seen = read_seen()
+        seen.pop(name, None)
+        write_seen(seen)
+        L.log(f"desktopless: {name} is out: its windows are back on it")
+
+
 def command(args):
-    what = args[0] if len(args) == 1 else ""
-    if what == "status":
+    what = args[0] if args else ""
+    if what in ("frame", "host"):
+        switch = args[-1] if len(args) == (2 if what == "frame" else 3) else ""
+        if switch not in ("on", "off"):
+            raise RuntimeError("desktopless frame on|off, or desktopless host NAME on|off")
+        with locked():
+            layout = L.load_layout()
+            if what == "frame":
+                set_frame(layout, switch == "on")
+            else:
+                set_host(layout, args[1], switch == "on")
+        return
+    what = what if len(args) == 1 else ""
+    if what == "sources":
+        print(json.dumps(sources(L.load_layout())))
+    elif what == "status":
         print("on" if state(L.load_layout()).get("on") else "off")
     elif what == "watch":
         watch()
@@ -607,4 +780,4 @@ def command(args):
             else:
                 turn_off(layout)
     else:
-        raise RuntimeError("desktopless on|off|toggle|status|watch")
+        raise RuntimeError("desktopless on|off|toggle|status|sources|watch, frame on|off, host NAME on|off")

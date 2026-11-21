@@ -1,4 +1,4 @@
-// Frametop Settings' display pages: Screens, Layout, Visibility & pins and Power (settings/main.qml
+// Frametop Settings' display pages: Screens, Desktopless mode, Layout, Visibility & pins and Power (settings/main.qml
 // loads this file the first time one of them opens). Backend: ft_display_settings.py ("backend",
 // made then: settings/ft_settings.py).
 import QtQuick
@@ -19,7 +19,8 @@ Item {
     // Visibility & pins is ft-screens' (the gamescope backend has none).
     function page(name) {
         if (name === "visibility" && backend.backend !== "screens") return screensPage
-        return ({ screens: screensPage, layout: layoutPage, visibility: visibilityPage, power: powerPage })[name] || null
+        return ({ screens: screensPage, desktopless: desktoplessPage, layout: layoutPage, visibility: visibilityPage,
+                  power: powerPage })[name] || null
     }
 
     // "1 hour", "15 minutes", "30 seconds".
@@ -207,10 +208,15 @@ Item {
                             Kirigami.Heading { level: 3; text: "Desktopless mode" }
                             Controls.Label {
                                 Layout.fillWidth: true
-                                text: "Hides the screens and your Linux PCs' displays, and makes every app window on them a panel of its own: this desktop's and the PCs'. Turned off, each window goes back where it was. Meta+Shift+D does the same."
+                                text: "Every app window its own panel, without the screens. Meta+Shift+D does the same."
                                 opacity: 0.7
                                 wrapMode: Text.Wrap
                             }
+                        }
+                        Controls.Button {
+                            text: "Choose what's in it…"
+                            icon.name: "preferences-system-windows"
+                            onClicked: root.show("desktopless")
                         }
                         Controls.Switch {
                             id: desktoplessSwitch
@@ -941,6 +947,111 @@ Item {
                           + "(grab bar under each screen); to put them back: Meta+Shift+R in the desktop, the Reset "
                           + "Screen Layout menu entry, Arrange now here, or a mouse button mapped to \"Reset desktop "
                           + "screen layout\" in Frametop Settings → Buttons."
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Desktopless mode
+    // docs/desktopless.md: the master switch, then each source's: this Frame (in by default) and
+    // each PC (out by default: its displays stay, so a PC with many windows doesn't flood the Frame).
+    Component {
+        id: desktoplessPage
+        Kirigami.ScrollablePage {
+            id: dpage
+            title: "Desktopless mode"
+            property bool md: backend.backend === "screens"
+
+            ColumnLayout {
+                spacing: Kirigami.Units.largeSpacing
+
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    visible: !dpage.md
+                    type: Kirigami.MessageType.Information
+                    text: "Desktopless mode needs the screens backend (ft-screens)."
+                }
+
+                Kirigami.AbstractCard {
+                    Layout.fillWidth: true
+                    enabled: dpage.md
+                    contentItem: RowLayout {
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Kirigami.Heading { level: 2; text: "Desktopless mode" }
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                text: "The desktops go, their apps stay: every app window from the sources below becomes a panel of its own, and their screens or displays hide. Turned off, each window goes back where it was. Meta+Shift+D or the launcher does the same."
+                                opacity: 0.7
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                        Controls.Switch {
+                            checked: backend.desktopless
+                            enabled: backend.desktopRunning && !backend.busy
+                            onToggled: {
+                                backend.setDesktopless(checked)
+                                checked = Qt.binding(() => backend.desktopless)
+                            }
+                        }
+                    }
+                }
+
+                Kirigami.Heading { level: 3; text: "What's in it"; enabled: dpage.md }
+                Controls.Label {
+                    Layout.fillWidth: true
+                    enabled: dpage.md
+                    text: "A source that's out keeps its desktop: the Frame its screens, a PC its display panels. PCs are out by default, since one with many windows open would make too many panels. While the mode is on, a switch applies right away."
+                    opacity: 0.7
+                    wrapMode: Text.Wrap
+                }
+
+                Repeater {
+                    model: backend.desktoplessSources
+                    delegate: Kirigami.AbstractCard {
+                        id: source
+                        required property var modelData
+                        Layout.fillWidth: true
+                        enabled: dpage.md
+                        contentItem: RowLayout {
+                            Kirigami.Icon {
+                                source: source.modelData.name ? "network-workgroup" : "video-display"
+                                implicitWidth: Kirigami.Units.iconSizes.medium
+                                implicitHeight: implicitWidth
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Controls.Label { text: source.modelData.title; font.bold: true }
+                                Controls.Label {
+                                    Layout.fillWidth: true
+                                    text: !source.modelData.name
+                                          ? (source.modelData.on ? "In: its screens hide and its windows float as panels."
+                                                                 : "Out: its screens and windows stay as they are.")
+                                          : !source.modelData.windows
+                                          ? "Out: first turn on \"Show its apps and windows in the launcher\" on its card in Remote displays."
+                                          : (source.modelData.on ? "In: its displays hide and each of its windows is a panel."
+                                                                 : "Out: its displays stay as display panels.")
+                                    opacity: 0.7
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                            Controls.Switch {
+                                checked: source.modelData.on
+                                enabled: source.modelData.windows && !backend.busy
+                                onToggled: {
+                                    backend.setDesktoplessSource(source.modelData.name, checked)
+                                    checked = Qt.binding(() => source.modelData.on)
+                                }
+                            }
+                        }
+                    }
+                }
+                Controls.Label {
+                    visible: backend.desktoplessSources.length === 1
+                    Layout.fillWidth: true
+                    text: "No PCs yet: add one in Remote displays."
+                    opacity: 0.7
+                    wrapMode: Text.Wrap
                 }
             }
         }

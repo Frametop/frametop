@@ -26,6 +26,8 @@ SECTIONS = [
      "arrange curved flat rows distance gap height preset profile save"),
     ("visibility", "display", "Screens", "Visibility & pins", "view-visible",
      "show hide dashboard look controller wrist pin head notifications launch program floating"),
+    ("desktopless", "display", "Screens", "Desktopless mode", "preferences-system-windows",
+     "desktopless desktop windows apps panels float every window own panel pc frame meta shift d"),
     ("remote-displays", "remote", "Screens", "Remote displays", "network-workgroup",
      "pc mac computer monitor stream moonlight vibepollo sunshine dongle"),
     ("devices", "input", "Input", "Devices", "input-mouse",

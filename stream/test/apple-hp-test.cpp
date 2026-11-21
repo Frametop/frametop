@@ -21,25 +21,6 @@ int g_checks = 0;
         ++g_checks;                                                                             \
     } while (0)
 
-// RFC 3526 / RFC 5054 4096-bit MODP safe prime (hex).
-constexpr const char *kRfc5054Prime4096Hex =
-    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
-    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
-    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
-    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
-    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D"
-    "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F"
-    "83655D23DCA3AD961C62F356208552BB9ED529077096966D"
-    "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
-    "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9"
-    "DE2BCBF6955817183995497CEA956AE515D2261898FA0510"
-    "15728E5A8AAAC42DAD33170D04507A33A85521ABDF1CBA64"
-    "ECFB850458DBEF0A8AEA71575D060C7DB3970F85A6E1E4C7"
-    "ABF5AE8CDB0933D71E8C94E04A25619DCEE3D2261AD2EE6B"
-    "F12FFA06D98A0864D87602733EC86A64521F2B18177B200C"
-    "BBE117577A615D6C770988C0BAD946E208E24FA074E5AB31"
-    "43DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF";
-
 bool RsaPkcs1Decrypt(EVP_PKEY *priv, const uint8_t *cipher, size_t cipher_len, std::vector<uint8_t> *out) {
     UniquePkeyCtx ctx(EVP_PKEY_CTX_new(priv, nullptr));
     if (!ctx || EVP_PKEY_decrypt_init(ctx.get()) <= 0) return false;
@@ -258,6 +239,17 @@ void TestSrpAndNonSrpAuth() {
     SrpClientProof proof{}, bad_proof{};
     CHECK(SolveSrp(parsed, pw, &proof));
     CHECK(SolveSrp(parsed, "wrong-password", &bad_proof));
+    {
+        // Only the RFC 5054 4096-bit group with g = 5: a spoofed server picking a
+        // weak N or another g gets no proof.
+        SrpChallenge weak = parsed;
+        weak.N[kSrpModulusLen - 1] ^= 0x02;
+        SrpClientProof unused{};
+        CHECK(!SolveSrp(weak, pw, &unused));
+        SrpChallenge other_g = parsed;
+        other_g.g = {2};
+        CHECK(!SolveSrp(other_g, pw, &unused));
+    }
 
     // Server computes S = (A * v^u)^b mod N and checks K & M1.
     UniqueBn bn_A(BN_bin2bn(proof.A.data(), kSrpModulusLen, nullptr));
@@ -1135,11 +1127,21 @@ void TestRfc3640AudioAndCredsStore() {
     char tmp_dir[] = "/tmp/ft-apple-creds-XXXXXX";
     CHECK(mkdtemp(tmp_dir) != nullptr);
     const std::string cpath = AppleCredsPath("Studio-Mac.local", tmp_dir);
-    CHECK(SaveAppleCreds(cpath, "alice", "s3cr3t-test-value"));
+    CHECK(SaveAppleCreds(cpath, "alice", "s3cr3t-test-value", AuthMode::kNonSrp));
     struct stat st{};
     CHECK(stat(cpath.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
     std::string u, p;
-    CHECK(LoadAppleCreds(cpath, &u, &p) && u == "alice" && p == "s3cr3t-test-value");
+    AuthMode mode = AuthMode::kAuto;
+    CHECK(LoadAppleCreds(cpath, &u, &p, &mode) && u == "alice" && p == "s3cr3t-test-value");
+    CHECK(mode == AuthMode::kNonSrp);
+    CHECK(!SaveAppleCreds(cpath, "alice", "x", AuthMode::kAuto));
+    // A file from before the mode line counts as SRP, so nothing falls back to RSA.
+    {
+        const int wfd = open(cpath.c_str(), O_WRONLY | O_TRUNC);
+        CHECK(wfd >= 0 && write(wfd, "bob\npw\n", 7) == 7);
+        close(wfd);
+    }
+    CHECK(LoadAppleCreds(cpath, &u, &p, &mode) && u == "bob" && p == "pw" && mode == AuthMode::kSrp);
     // World-readable file must be rejected by LoadAppleCreds
     chmod(cpath.c_str(), 0644);
     CHECK(!LoadAppleCreds(cpath, &u, &p));
@@ -1346,7 +1348,26 @@ void TestSleepWakeAndIdleLivenessTimeout() {
 
 }  // namespace
 
+// A media blob whose trailer points the offset table far past the end must be
+// refused, not read: off_tbl + num_objs * off_sz used to wrap around.
+void TestBplistBounds() {
+    std::vector<uint8_t> blob(48, 0);
+    std::memcpy(blob.data(), "bplist00", 8);
+    uint8_t *tr = blob.data() + blob.size() - 32;
+    tr[6] = 8;  // offset size
+    tr[7] = 1;  // ref size
+    WriteBe64(tr + 8, 1);                      // num_objs
+    WriteBe64(tr + 16, 0);                     // top object
+    WriteBe64(tr + 24, 0xFFFFFFFFFFFFFFF8ull); // offset table
+    std::vector<uint8_t> out;
+    CHECK(!ParseBplistMediaBlob(blob.data(), blob.size(), &out));
+    WriteBe64(tr + 24, 9);
+    WriteBe64(tr + 8, 4096);  // more offsets than fit before the trailer
+    CHECK(!ParseBplistMediaBlob(blob.data(), blob.size(), &out));
+}
+
 int main() {
+    TestBplistBounds();
     TestBplistAndNegotiatorOffers();
     TestSrpAndNonSrpAuth();
     TestEnc1103StreamCipher();

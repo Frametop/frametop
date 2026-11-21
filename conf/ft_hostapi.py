@@ -52,7 +52,7 @@ def pin_path(address, port=0):
 
 
 def apple_path(address):
-    """Where ft-appless keeps a Mac's Screen Sharing login (stream/apple_hp.h)."""
+    """Where ft-appless keeps a Mac's Screen Sharing login (stream/apple_hp_creds.h)."""
     clean = re.sub(r"[^A-Za-z0-9._-]", "", address) or "host"
     return os.path.join(TOKEN_DIR, f"{clean}.apple")
 

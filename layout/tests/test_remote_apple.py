@@ -144,5 +144,32 @@ class RemoteAppleTest(unittest.TestCase):
             self.m.remote_command(["set", "studio-mac-virtual", "keymap=capslock:notakey"])
 
 
+    def test_pin_is_refused_for_a_mac(self):
+        with self.assertRaisesRegex(RuntimeError, "--pin is for a Moonlight host"):
+            self.m.remote_command(["add", "Mac", "192.0.2.10", "apple:virtual", "--pin"])
+        self.assertEqual(self.hosts(), [])
+
+    def test_at_sign_only_in_apple_apps(self):
+        self.assertTrue(self.m.app_ok("apple:virtual@2"))
+        self.assertFalse(self.m.app_ok("monitor@2"))
+        with self.assertRaisesRegex(RuntimeError, "other characters"):
+            self.m.remote_command(["add", "PC", "192.0.2.20", "monitor@2"])
+        self.assertEqual(self.hosts(), [])
+
+    def test_mac_and_moonlight_displays_never_share_a_host(self):
+        self.m.save_layout({"hosts": [{"name": "Desk", "address": "192.0.2.20", "kind": "pin", "displays": []}]})
+        with self.assertRaisesRegex(RuntimeError, "same kind of app"):
+            self.m.remote_command(["add", "Desk", "192.0.2.20", "apple:virtual"])
+        self.assertEqual(self.hosts()[0]["kind"], "pin")
+        self.assertEqual(self.appless_calls, [])
+
+    def test_failed_mac_check_saves_nothing(self):
+        self.m.run_appless = lambda *args, timeout=30, stdin=None: (1, "", "no credentials in x.apple\n")
+        with redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            self.m.remote_command(["add", "Mac", "192.0.2.10", "apple:virtual"])
+        self.assertEqual(self.hosts(), [])
+        self.assertEqual(self.stream_calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

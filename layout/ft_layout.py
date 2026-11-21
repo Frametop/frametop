@@ -1291,8 +1291,6 @@ def remote_add_save(layout, host_name, address, port, d, kind=None):
             host["kind"] = kind
         layout["hosts"].append(host)
     host["address"] = address
-    if kind:
-        host["kind"] = kind
     if port:
         d["port"] = port
     host["displays"].append(d)
@@ -1449,6 +1447,10 @@ def remote_command(args):
             raise RuntimeError("remote add: the address or app has other characters")
         if pin and is_apple_app(app):
             raise RuntimeError("remote add: --pin is for a Moonlight host; a Mac signs in with --login")
+        known = next((h for h in load_layout().get("hosts", []) if h.get("name") == host_name), None)
+        if known and (known.get("kind") == "apple") != is_apple_app(app):
+            raise RuntimeError(f"remote add: {host_name} is {'a Mac' if known.get('kind') == 'apple' else 'a Moonlight host'}; "
+                               "its displays all use the same kind of app")
         port = opts.get("--port", "")
         if port and not (port.isdigit() and 1024 < int(port) < 65535):
             raise RuntimeError("remote add: --port is a port number")

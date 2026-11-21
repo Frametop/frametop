@@ -309,39 +309,38 @@ class Backend(QObject):
         problem = self._host_problem(name, address, dongle)
         if problem:
             return self.signedIn.emit(name, False, problem)
-        existing_kind = next((h.get("kind") for h in ft_layout.load_layout().get("hosts", [])
-                              if h.get("address") == address), None)
+        existing = next((h for h in ft_layout.load_layout().get("hosts", []) if h.get("address") == address), None)
+        existing_kind = existing.get("kind") if existing else None
+        targets = ([dongle] if dongle else []) + [address]
 
         def work():
             web_err = ""
             if existing_kind != "apple":
                 try:
-                    token, pin, kind = ft_hostsignin.sign_in(([dongle] if dongle else []) + [address], user, password,
+                    token, pin, kind = ft_hostsignin.sign_in(targets, user, password,
                                                              known=ft_hostapi.first_word(ft_hostapi.pin_path(address)))
                     if kind == "sunshine":
                         self._logins[address] = f"{user}\n{password}\n"
                     return self._signInDone.emit(name, address, dongle, token, pin, kind, "")
                 except ft_hostsignin.SignInError as e:
                     web_err = str(e)
-                    if existing_kind in ("vibepollo", "sunshine") or web_err.startswith("Its certificate"):
-                        return self._signInDone.emit(name, address, dongle, "", "", "", web_err)
 
             # macOS High Performance Screen Sharing (screensharingd on TCP 5900, RFB 003.889):
-            # verifies credentials over SRP-6a / RSA and writes ADDRESS.apple (0600).
+            # verifies credentials over SRP-6a / RSA and writes ADDRESS.apple (0600). Only for a
+            # Mac: a host already added as another kind (a Vibepollo host has no kind) never sends
+            # its Web UI password to port 5900, and a new address must answer with Apple's banner.
+            is_mac = existing_kind == "apple" or (existing is None and any(map(self._is_apple_rfb, targets)))
+            if not is_mac:
+                return self._signInDone.emit(name, address, dongle, "", "", "", web_err or "Couldn't reach it")
             try:
                 args = ["auth", address, "--login", *(["--via", dongle] if dongle else [])]
                 code, out, err = ft_layout.run_appless(*args, timeout=20, stdin=f"{user}\n{password}\n")
                 if code == 0:
                     return self._signInDone.emit(name, address, dongle, "", "", "apple", "")
                 apple_err = (err or out).strip().splitlines()[-1] if (err or out).strip() else ""
-                if existing_kind == "apple" or (apple_err and ("rejected" in apple_err or "SRP" in apple_err)):
-                    return self._signInDone.emit(name, address, dongle, "", "", "", apple_err or "Authentication failed")
-                if apple_err and not web_err:
-                    web_err = f"Couldn't reach it: {apple_err}"
+                self._signInDone.emit(name, address, dongle, "", "", "", apple_err or "Authentication failed")
             except (OSError, subprocess.SubprocessError) as e:
-                if not web_err:
-                    web_err = f"Couldn't reach it: {str(e) or type(e).__name__}"
-            self._signInDone.emit(name, address, dongle, "", "", "", web_err or "Couldn't reach it")
+                self._signInDone.emit(name, address, dongle, "", "", "", f"Couldn't reach it: {str(e) or type(e).__name__}")
         threading.Thread(target=work, daemon=True).start()
 
     @staticmethod

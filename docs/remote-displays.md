@@ -115,10 +115,11 @@ Spike S3 checks the stock-host version: whether Sunshine honours an IDR request 
 
 ## Proposed architecture
 
-Frametop maintains only the headset side. The hosts run existing, separately maintained streamers that speak the Moonlight protocol: Vibepollo on Windows and Linux, Sunshine on macOS (see "Host side").
+Frametop maintains only the headset side. The hosts run existing, separately maintained streamers that speak the Moonlight protocol: Vibepollo on Windows and Linux, Sunshine on macOS (see "Host side"). A Mac can instead use Apple's own Screen Sharing server, with `ft-appless` in place of `ft-stream` on the Frame (see "macOS: High Performance Screen Sharing").
 
 ```
 host machine: Vibepollo (Windows, Linux) / Sunshine (macOS), one stream per display
+              (or a Mac's Screen Sharing on 5900, through ft-appless instead of ft-stream)
    │ RTSP + RTP over UDP, ENet control
    ▼
 ft-stream (one process per remote display, on the Frame, GPLv3)
@@ -228,6 +229,8 @@ Apple Silicon Macs (macOS 14+) also include Apple's High Performance Screen Shar
 - **Zero-delay H.264 decode and audio (UDP 5900/5901).** Decrypts RFC 3711 `AES_CM_256_HMAC_SHA1_80` SRTP video and audio, extracts `0x92` `avcC` parameter sets, and rewrites Apple VideoToolbox's `pic_order_cnt_type=0` SPS + CABAC slice headers into `pic_order_cnt_type=2` with VUI `max_num_reorder_frames=0` so Qualcomm Iris (`V4L2_PIX_FMT_QC08C`) emits every frame immediately with zero reorder hold (~0.45 ms GLES conversion at 4K60, ~14% of one Frame core). Stereo 48 kHz AAC-ELD audio (RFC 3640) is decoded dynamically through `dlopen("libfdk-aac.so.2")` into PipeWire/PulseAudio under the shared per-host audio lock.
 - **Virtual vs main display (`apple:virtual`, `apple:virtual@1`, `apple:virtual@2`, `apple:physical`).** `apple:virtual` sends `0x1d` (`SLVirtualDisplay`) for an isolated 3840x2160@60 (1920x1080@2x Retina) or 4096x1152@60 (32:9 ultrawide 1x) virtual monitor; Apple's `screensharingd` runs `VirtualDisplayHIDFilter` while `0x1d` is active, which blocks the Mac's local keyboard and trackpad. `apple:physical` omits `0x1d` and mirrors `CGMainDisplayID()` with the cursor composited, keeping the Mac's attached keyboard, mouse and Magic Trackpad native; `host/macos/ft-apple-vdisplay.swift` optionally mounts a local `CGVirtualDisplay` on the Mac and mirrors the physical display onto any custom resolution (such as `3456x972@60`) for `apple:physical`.
 - **Input and custom keymaps.** Pointer coordinates scale into `0x451` backing pixels (`CGMouseButton` bit order: left `0x01`, right `0x02`, middle `0x04`, pure scroll ticks `0x08`/`0x10`), Frametop's `KEY_F24` shortcut-cancel suppresses held Command keys cleanly, and `kb_layout` / `keymap` support `qwerty`, `dvorak`, `dvorak-qwerty-cmd`, `colemak`, non-transitive key remaps, and macOS's **Globe / Fn** key via Apple's `0x10` AES-128-ECB `kVK_Function` (`0x3f`) packet.
+- **Sign-in and the stored login.** The Remote Displays page tries a host's Vibepollo Web UI first. It sends the login to port 5900 only for a host added as a Mac, or for a new address that answers with Apple's `RFB 003.889` banner, so a Vibepollo host's password never goes there. `ft-appless auth` keeps the auth mode that worked (`srp`, or `nonsrp` for a Mac that offers no SRP) as the file's third line, and every later connection uses only that mode. It falls back to the RSA path only when the Mac answers SRP's first packet with a non-SRP reply, never after a rejected password. SRP is accepted only with the RFC 5054 4096-bit group and g = 5. The login is a full macOS account password kept in plain text (`0600`): a Secret Service entry (KWallet on the Plasma desktop) would be better, and is open.
+- Tested: `stream/test/apple-hp-test.cpp` (offline: SRP and RSA packets, the group check, bplist bounds, the credential file and its mode, SRTP, the H.264 rewrite, a loopback session), `layout/tests/test_remote_apple.py`, `remote-displays/test/test_apple_hosts.py` and `screens/tests/remote-test.c` ("apple backend"). Not tested here against a real Mac.
 
 ### PC app windows (split compute, DEE-345)
 

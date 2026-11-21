@@ -505,6 +505,9 @@ static bool apple_backend(void) {
     EXPECT(g_nprocs == 2);
     EXPECT(!strcmp(g_procs[0].app, "apple:virtual@2") && !strcmp(g_procs[1].app, "apple:physical"));
     EXPECT(g_procs[1].start >= g_procs[0].gone);
+    char reply[256];
+    EXPECT(ft_remote_command("remote 101 start frame 192.0.2.7 monitor@2 1920x1080 60 0 1.0 test", reply, sizeof reply));
+    EXPECT(!strcmp(reply, "error client, host or app has other characters"));  // '@' is only a Mac's
     return true;
 }
 

@@ -1,5 +1,5 @@
 """A Mac display's keyboard settings, kb_layout and keymap (ft-layout remote set and remote host),
-which ft-appless reads from the layout and turns into the Mac's key codes (stream/apple_hp.h).
+which ft-appless reads from the layout and turns into the Mac's key codes (stream/apple_hp_input.h).
 
 kb_layout is the layout the keys are read with: qwerty (the default), dvorak, dvorak-qwerty-cmd
 (Command combinations as on QWERTY) or colemak; the Mac gets the characters they type in it. keymap swaps keys before they go: FROM:TO pairs
@@ -65,7 +65,7 @@ KEY_ALIASES = {
 
 
 def canonical_key_name(raw, allow_none=False):
-    """Canonical physical key name for ft-appless keymap entries (stream/apple_hp.h)."""
+    """Canonical physical key name for ft-appless keymap entries (stream/apple_hp_input.h)."""
     low = raw.strip().lower()
     if not low:
         raise ValueError("empty key name")

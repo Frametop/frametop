@@ -73,12 +73,16 @@ class Base(unittest.TestCase):
             Path(rd.ft_hostapi.apple_path(ADDRESS)).write_text("alice\nsecret\n")
             return 0, "signed in to 192.0.2.10 as alice\n", ""
 
+        self.rfb = {ADDRESS, "198.51.100.10"}   # addresses that answer with Apple's RFB banner
         old_signin = rd.ft_hostsignin.sign_in
         old_appless = rd.ft_layout.run_appless
+        old_rfb = rd.Backend._is_apple_rfb
         rd.ft_hostsignin.sign_in = no_webui
         rd.ft_layout.run_appless = fake_appless
+        rd.Backend._is_apple_rfb = staticmethod(lambda address: address in self.rfb)
         self.addCleanup(setattr, rd.ft_hostsignin, "sign_in", old_signin)
         self.addCleanup(setattr, rd.ft_layout, "run_appless", old_appless)
+        self.addCleanup(setattr, rd.Backend, "_is_apple_rfb", old_rfb)
 
 
 class BackendTest(Base):
@@ -113,6 +117,36 @@ class BackendTest(Base):
         self.b.removeHost("Studio Mac")
         self.assertFalse(Path(rd.ft_hostapi.apple_path(ADDRESS)).exists())
         self.assertEqual(self.b.hosts, [])
+
+    def test_vibepollo_password_never_goes_to_port_5900(self):
+        # A Vibepollo host has no kind in the layout: its Web UI password stays off 5900 even
+        # when the Web UI doesn't answer and something on 5900 looks like a Mac.
+        set_hosts({"name": "Desk PC", "address": ADDRESS, "displays": []})
+        self.b.signIn("Desk PC", ADDRESS, "", "alice", "secret")
+        self.assertTrue(spin(self.app, lambda: self.signed))
+        self.assertEqual(self.signed[-1], ("Desk PC", False, "Couldn't reach it: Connection refused"))
+        self.assertEqual(self.appless, [])
+
+    def test_new_address_without_apple_banner_gets_no_mac_sign_in(self):
+        self.rfb = set()
+        self.b.signIn("Box", ADDRESS, "", "alice", "secret")
+        self.assertTrue(spin(self.app, lambda: self.signed))
+        self.assertFalse(self.signed[-1][1])
+        self.assertEqual(self.appless, [])
+
+    def test_mac_rejection_is_shown_and_saves_nothing(self):
+        def rejected(*args, timeout=20, stdin=None):
+            self.appless.append((args, stdin))
+            return 1, "", "SRP authentication rejected (bad username or password)\n"
+        rd.ft_layout.run_appless = rejected
+        self.b.signIn("Studio Mac", ADDRESS, "", "alice", "wrong")
+        self.assertTrue(spin(self.app, lambda: self.signed))
+        self.assertEqual(self.signed[-1], ("Studio Mac", False, "SRP authentication rejected (bad username or password)"))
+        self.assertEqual(self.b.hosts, [])
+
+    def test_apple_host_without_login_file_has_no_token(self):
+        set_hosts({"name": "Studio Mac", "address": ADDRESS, "kind": "apple", "displays": []})
+        self.assertFalse(self.b.hosts[0]["hasToken"])
 
 
 class PageTest(Base):

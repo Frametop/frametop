@@ -11,7 +11,7 @@
 # (libpulse-simple), and sends the Frame's microphone back the same way. moonlight-mic.patch adds
 # that to moonlight-common-c (LiSendMicrophoneOpusData), and moonlight-hostin.patch the host's
 # keyboard and mouse (docs/host-input.md); the checkout is made again when either changes.
-# Also stream/build/ft-appless (ft-appless.cpp and apple_hp.h, MIT), the built-in macOS High
+# Also stream/build/ft-appless (ft-appless.cpp and apple_hp*.h, MIT), the built-in macOS High
 # Performance Screen Sharing helper, and stream/build/ft-clip (ft-clip.c, on wlr-data-control:
 # protocols/), the desktop's side of the shared clipboard, which ft-stream runs from its own folder.
 set -euo pipefail

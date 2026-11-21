@@ -413,7 +413,8 @@ int RunStream(const std::string &host, const std::string &route, int port, const
     ft_apple_hp::ResolveAppleDisplayMode(app, width, height, &opt);
 
     const std::string creds_path = ft_apple_hp::AppleCredsPath(host);
-    if (!ft_apple_hp::LoadAppleCreds(creds_path, &opt.username, &opt.password)) {
+    // Reconnects use the mode that worked at sign-in, never the auto fallback.
+    if (!ft_apple_hp::LoadAppleCreds(creds_path, &opt.username, &opt.password, &opt.auth_mode)) {
         viewer.Send("state lost not signed in");
         std::fprintf(stderr, "no credentials in %s: sign in with Frametop Settings or ft-appless auth %s\n",
                      creds_path.c_str(), host.c_str());
@@ -736,6 +737,8 @@ int main(int argc, char **argv) {
             OPENSSL_cleanse(password.data(), password.size());
             return std::fprintf(stderr, "username and password must not be empty\n"), 2;
         }
+        // --no-verify saves SRP: the mode is only RSA when a Mac showed it has no SRP.
+        ft_apple_hp::AuthMode mode = ft_apple_hp::AuthMode::kSrp;
         if (!no_verify) {
             std::string target;
             if (!via_addr.empty() && Answers(via_addr, port, 1000)) target = via_addr;
@@ -752,8 +755,9 @@ int main(int argc, char **argv) {
                 OPENSSL_cleanse(password.data(), password.size());
                 return std::fprintf(stderr, "%s\n", err.c_str()), 1;
             }
+            if (client.auth_used() == "nonsrp") mode = ft_apple_hp::AuthMode::kNonSrp;
         }
-        const bool saved = ft_apple_hp::SaveAppleCreds(creds_path, user, password);
+        const bool saved = ft_apple_hp::SaveAppleCreds(creds_path, user, password, mode);
         OPENSSL_cleanse(password.data(), password.size());
         if (!saved) return std::fprintf(stderr, "failed to write %s\n", creds_path.c_str()), 1;
         std::printf("signed in to %s as %s\n", host.c_str(), user.c_str());

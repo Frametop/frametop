@@ -13,6 +13,7 @@
 //   ft-stream grant HOST --id NAME [--token FILE]    (permissions for a client paired by PIN)
 //   ft-stream unpair HOST --id NAME
 //   ft-stream monitors HOST [--token FILE]           (the host's monitors, as Vibepollo lists them)
+//   ft-stream kwin-windows HOST --id NAME            (a KDE PC's windows, from KWin Window Stream: kwin-window.h)
 //   ft-stream release HOST --id NAME                 (Vibepollo's "Disconnect Monitor" for this client)
 //   ft-stream stream HOST --id NAME --fd N --app display:DEVICE|monitor|primary|ID|NAME
 //                    [--size 2560x1440] [--fps 60] [--bitrate kbps]
@@ -21,6 +22,8 @@
 // is on 48089). Keys live in ~/.local/share/frametop-stream/NAME, the host's token in
 // ~/.local/share/frametop-stream/hosts/HOST.token (see host.h), named without the port, or
 // HOST-PORT.token for an instance with a token of its own (a host's Frametop windows).
+//
+// --app kwin:{UUID} streams one window of a KDE PC through its KWin Window Stream (kwin-window.h).
 //
 // --app window:ADDRESS streams one app window of a host's Frametop windows instance (a
 // Vibepollo in the host's desktop session): it asks the host to put that window on an output of
@@ -77,6 +80,9 @@
 #include "sharedclip.h"
 
 #include <netdb.h>
+#include <netinet/tcp.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
 #include <poll.h>
 #include <spawn.h>
 #include <opus/opus.h>
@@ -95,6 +101,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdarg>
+#include <deque>
 #include <fstream>
 #include <mutex>
 #include <set>
@@ -180,7 +187,7 @@ void AudioCleanup() {
 
 // On moonlight-common-c's audio thread; a lost packet comes as nullptr (Opus fills it in).
 void AudioPlay(char *data, int length) {
-    if (!g_audio.on || !g_audio.dec) return;
+    if (!g_audio.on || !g_audio.dec || g_audio.paFailed) return;
     if (!g_audio.pa) {
         if (g_audio.paFailed) return;
         const pa_sample_spec spec = {PA_SAMPLE_S16LE, uint32_t(g_audio.rate), uint8_t(g_audio.channels)};
@@ -199,7 +206,11 @@ void AudioPlay(char *data, int length) {
     const int n = opus_multistream_decode(g_audio.dec, reinterpret_cast<unsigned char *>(data), length, g_audio.pcm.data(),
                                           g_audio.samples, 0);
     int err = 0;
-    if (n > 0) pa_simple_write(g_audio.pa, g_audio.pcm.data(), size_t(n * g_audio.channels) * sizeof(int16_t), &err);
+    // A write that fails (PipeWire restarted) stops the playing; a KWin window's sound starts it over (kwin-window.h).
+    if (n > 0 && pa_simple_write(g_audio.pa, g_audio.pcm.data(), size_t(n * g_audio.channels) * sizeof(int16_t), &err) < 0) {
+        g_audio.paFailed = true;
+        std::fprintf(stderr, "audio: playback failed: %s\n", pa_strerror(err));
+    }
 }
 
 // The Frame's microphone, to the host's virtual microphone: Steam Streaming Microphone on
@@ -652,6 +663,8 @@ struct Viewer {
         return n < 0 && (errno == EAGAIN || errno == EINTR);
     }
 };
+
+#include "kwin-window.h"  // a KDE PC's windows from KWin Window Stream (issue 81)
 
 // Typing: Moonlight wants Windows virtual-key codes and the modifiers held.
 struct Keys {
@@ -1108,7 +1121,7 @@ int Stream(Client &client, const std::string &app, int fd, int width, int height
 int main(int argc, char **argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     if (argc < 3) {
-        std::fprintf(stderr, "usage: ft-stream pair|grant|unpair|monitors|release|stream HOST[:PORT] --id NAME [options]\n");
+        std::fprintf(stderr, "usage: ft-stream pair|grant|unpair|monitors|kwin-windows|release|stream HOST[:PORT] --id NAME [options]\n");
         return 2;
     }
     const std::string cmd = argv[1];
@@ -1179,6 +1192,7 @@ int main(int argc, char **argv) {
         return client.GrantByName(api) ? 0 : 1;
     }
     if (cmd == "unpair") return client.Unpair() ? 0 : 1;
+    if (cmd == "kwin-windows") return KwinWindows(client);
     if (cmd == "release") {
         STREAM_CONFIGURATION cfg;
         LiInitializeStreamConfiguration(&cfg);
@@ -1190,6 +1204,7 @@ int main(int argc, char **argv) {
     }
     if (cmd == "stream") {
         if (fd < 0) return std::fprintf(stderr, "stream needs --fd: ft-screens starts it\n"), 2;
+        if (app.rfind("kwin:", 0) == 0) return StreamKwinWindow(client, app.substr(5), fd, width, height, fps, bitrate);
         if (app.rfind("window:", 0) == 0) {
             if (!haveToken || login) return std::fprintf(stderr, "no token in %s\n", tokenFile.c_str()), 1;
             // The host's Web UI where the stream goes too (the dongle's address on route dongle).

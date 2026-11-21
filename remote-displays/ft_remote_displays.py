@@ -25,6 +25,10 @@ the dev container:
     (ft-layout remote add pairs a client for it). Each one connects and disconnects on its
     own, or all of a host's at once; a disconnected one keeps its place and settings.
     Its stream's resolution, frame rate and bitrate, its width in VR, and whether it shows.
+  - Windows, per KDE Plasma host running utrack's KWin Window Stream (issue 81): Add windows
+    lists its open windows, and each one picked is a panel of its own that the window sizes,
+    connecting with one of the host's displays' pairings (kwin_windows.py; ft-layout remote
+    kwin-add). It's listed with the displays, without their stream size.
   - Connection, per host with a Steam Link dongle on the Frame's hotspot (found with it on
     the network, or with Find): auto (the dongle when it answers, else the network), network
     only, or dongle only. Find looks for the host among the hotspot's clients (the same
@@ -56,6 +60,7 @@ import ft_hostapi  # noqa: E402  (where a host's token is kept; conf/)
 import ft_hostsignin  # noqa: E402  (the sign-ins that get one)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
+from kwin_windows import KwinWindows  # noqa: E402  (a KDE PC's windows: Add windows)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 FT_SCREENS = "\0ft_screens"
@@ -129,6 +134,7 @@ class Backend(QObject):
         self._reached.connect(self._host_reached, Qt.QueuedConnection)
         self._signInDone.connect(self._sign_in_done, Qt.QueuedConnection)
         self._appWindowsDone.connect(self._app_windows_done, Qt.QueuedConnection)
+        self._kwin = KwinWindows(lambda *args: self._run(*args), self)  # in this queue, as it is then
         self.poll = QTimer(interval=2000, timeout=self._check)
         self.poll.start()
         self.ping = QTimer(interval=15000, timeout=self._ping_hosts)
@@ -204,6 +210,11 @@ class Backend(QObject):
     def stopStreams(self):
         self._run("Stopping the streams", "streams", "stop")
 
+    @Property(QObject, constant=True)
+    def kwinWindows(self):
+        """A KDE PC's open windows, and adding one as a panel (kwin_windows.py)."""
+        return self._kwin
+
     @Property(str, notify=busyChanged)
     def busy(self):
         return self._busy
@@ -239,6 +250,8 @@ class Backend(QObject):
                 else:
                     state = self._states.get(n, "not running")
                 displays.append({"id": d["id"], "number": n, "label": d.get("label") or d["id"], "app": d["app"],
+                                 # A KDE PC's window (issue 81): the window sets its size.
+                                 "kwin": str(d["app"]).startswith("kwin:"),
                                  "key": f"{d['app']}@{d['port']}" if d.get("port") else d["app"],
                                  "virtual": d["app"] == "monitor", "width": int(w), "height": int(hh),
                                  "fps": int(d.get("fps", 60)), "bitrate": int(d.get("bitrate", 0)),
@@ -255,6 +268,7 @@ class Backend(QObject):
                         "inputKeyboard": "keyboard" in host_input.lent(h),
                         "inputMouse": "mouse" in host_input.lent(h), "clipboard": bool(h.get("clipboard")),
                         "appWindows": isinstance(h.get("windows"), dict),
+                        "kwinWindows": KwinWindows.available(h),
                         "displays": displays})
         return out
 

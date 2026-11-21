@@ -27,7 +27,8 @@ Item {
         const words = { live: "streaming", connecting: "connecting", starting: "starting", queued: "waiting its turn",
                         lost: "lost, trying again", disconnected: "disconnected",
                         "desktop off": "connects when the Frametop desktop starts, or Stream without the desktop",
-                        "not running": "not running" }
+                        "not running": "not running", "connecting kwin window": "connecting to the window",
+                        "live kwin window": "streaming the window" }
         if (state in words) return words[state]
         if (state.startsWith("live via ")) return "streaming over the " + state.slice(9)
         if (state.startsWith("lost ")) return "lost (" + state.slice(5) + "), trying again"
@@ -36,7 +37,7 @@ Item {
     function stateColor(state) {
         if (state.startsWith("live")) return Kirigami.Theme.positiveTextColor
         if (state.startsWith("lost")) return Kirigami.Theme.negativeTextColor
-        if (state === "connecting" || state === "starting" || state === "queued") return Kirigami.Theme.neutralTextColor
+        if (state.startsWith("connecting") || state === "starting" || state === "queued") return Kirigami.Theme.neutralTextColor
         return Kirigami.Theme.disabledTextColor
     }
 
@@ -406,6 +407,9 @@ Item {
         ]
     }
 
+    // A KDE PC's open windows to add as panels (issue 81; its own file).
+    KwinWindowsDialog { id: kwinDialog; windows: root.backend.kwinWindows }
+
     // A PIN pairing (a host added with "Pair with a PIN"): the PIN to type in on the host, shown
     // while ft-layout waits for it (3 minutes at most). It closes once the pairing ends either way;
     // the page's message says how it went.
@@ -540,6 +544,17 @@ Item {
                                     icon.name: "list-add"
                                     onClicked: hostCard.sunshine && !hostCard.modelData.hasToken
                                                ? hostDialog.openFor(hostCard.modelData) : displayDialog.openFor(hostCard.modelData)
+                                }
+                                Controls.Button {
+                                    // A KDE PC with KWin Window Stream: its windows, each a panel.
+                                    visible: hostCard.modelData.kwinWindows
+                                    text: "Add windows"
+                                    icon.name: "window-new"
+                                    onClicked: kwinDialog.openFor(hostCard.modelData)
+                                    Controls.ToolTip.text: "Open windows on this PC, each as a panel of its own. Needs KDE "
+                                                           + "Plasma with KWin Window Stream (github.com/utrack/kwin-window-stream); "
+                                                           + "they connect with this computer's displays' pairing."
+                                    Controls.ToolTip.visible: hovered
                                 }
                                 Controls.Button {
                                     visible: !hostCard.modelData.hasToken && !hostCard.sunshine
@@ -724,7 +739,7 @@ Item {
                                             spacing: 0
                                             Kirigami.Heading { level: 4; text: disp.modelData.label }
                                             Controls.Label {
-                                                text: (disp.modelData.virtual ? "virtual display" : "monitor") + ", "
+                                                text: (disp.modelData.kwin ? "window" : disp.modelData.virtual ? "virtual display" : "monitor") + ", "
                                                       + disp.modelData.width + " × " + disp.modelData.height + " at " + disp.modelData.fps
                                                       + " fps, screen " + disp.modelData.number
                                                 opacity: 0.7
@@ -769,6 +784,7 @@ Item {
                                         Layout.fillWidth: true
                                         visible: disp.expanded
                                         RowLayout {
+                                            visible: !disp.modelData.kwin  // the window sets its size
                                             Kirigami.FormData.label: "Stream:"
                                             Controls.SpinBox {
                                                 id: sw
@@ -802,7 +818,7 @@ Item {
                                             }
                                         }
                                         Controls.Label {
-                                            visible: !disp.modelData.virtual
+                                            visible: !disp.modelData.virtual && !disp.modelData.kwin
                                             Layout.fillWidth: true
                                             wrapMode: Text.Wrap
                                             opacity: 0.7

@@ -169,6 +169,7 @@ def items(root, env=os.environ):
     out += [
         single("stream/test/hostinput-test.cpp", CXX, cflags="-Istream"),
         single("stream/test/clipboard-test.cpp", CXX, cflags="-Istream"),
+        single("stream/test/audio-clock-test.cpp", CXX),
         # ft-clip, the shared clipboard's desktop side, against a wlroots data-control seat of the test's own
         Generate("build/tests/wlr-data-control-unstable-v1-client-protocol.h",
                  ("wayland-scanner", "client-header", WLR_PROTO, "{out}"), watch=(WLR_PROTO,)),

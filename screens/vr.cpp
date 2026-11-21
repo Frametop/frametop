@@ -1756,6 +1756,13 @@ bool IsWindowPanel(const Screen &s) {
     return app && !std::strncmp(app, "window:", 7);
 }
 
+// A KDE PC's window from KWin Window Stream (issue 81): the PC's window sets its size, not the
+// panel's corner, so it isn't resized from here.
+bool IsKwinWindow(const Screen &s) {
+    const char *app = s.remote ? ft_remote_app(ScreenIndexOf(s)) : nullptr;
+    return app && !std::strncmp(app, "kwin:", 5);
+}
+
 // A floating panel (or a PC window's) the size of w x h pixels at its density, its picture stretched to
 // fit, while a resize goes on (no new pixels until it ends: SendStretch). 0, 0: back to its own size.
 void Stretch(Screen &s, int w, int h) {
@@ -6955,6 +6962,17 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
                 } else {
                     ApplyTexelAspect(s);
                 }
+            } else if (IsKwinWindow(s) && oldPx > 0) {
+                // Resized on the PC: the panel keeps its density and its corner, and the layout
+                // keeps both, so its next stream starts at this size and width.
+                s.metres = std::clamp(oldW * s.width / oldPx, kMinWidth, 12.0);
+                vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));
+                ApplyCurve(s);
+                KeepCorner(s, oldW, oldH);
+                char m[16];
+                std::snprintf(m, sizeof m, "%.4f", s.metres);
+                RunLayout({"remote", "kwin-size", std::to_string(index + 1),
+                           std::to_string(s.width) + "x" + std::to_string(s.height), m});
             } else {
                 ApplyTexelAspect(s);
             }

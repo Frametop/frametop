@@ -124,7 +124,15 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      windows: its Frametop windows instance (ft-layout window)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
-  ft-layout remote remove ID         stops it and unpairs its client (the host stays)
+  ft-layout remote remove ID         stops it and unpairs its client (the host stays), unless
+                                     another panel of the host uses that client
+  ft-layout remote kwin-windows HOST a KDE PC's open windows, from its KWin Window Stream
+                                     (ft_kwinwindows), as {"client", "windows"} JSON
+  ft-layout remote kwin-add HOST WINDOW [--label TEXT] [--size WxH] [--client NAME]
+                                     that window (KWin's id) as a panel in front of you, with the
+                                     pairing of one of the host's displays -> its id
+  ft-layout remote kwin-size N WxH METRES
+                                     (ft-screens) the PC resized panel N's window: keep its size
   ft-layout window list HOST         a PC's app windows (its Frametop windows instance: the host's
                                      "windows" port, docs/remote-displays.md)
   ft-layout window apps HOST         the desktop apps it can start
@@ -1050,8 +1058,13 @@ def start_remote(sock, n, host, d):
     reply: "ok restored" when its panel is back where it was before a disconnect."""
     w, h = stream_size(*d.get("size", [2560, 1440]))
     label = f"{host.get('name') or host['address']}: {d.get('label') or d['id']}"
-    return sock.ask(f"remote {n} start {d['client']} {display_target(host, d)} {d['app']} {int(w)}x{int(h)} "
-                    f"{int(d.get('fps', 60))} {int(d.get('bitrate', 0))} {remote_size(d)[0]:.3f} {tile_key(d)}{label}")
+    reply = sock.ask(f"remote {n} start {d['client']} {display_target(host, d)} {d['app']} {int(w)}x{int(h)} "
+                     f"{int(d.get('fps', 60))} {int(d.get('bitrate', 0))} {remote_size(d)[0]:.3f} {tile_key(d)}{label}")
+    if reply == "ok restored":
+        # Back as it was, hidden or not as it was then: one shown or hidden while disconnected
+        # (only saved, with no panel to tell) gets that now. utrack's fix (issue 81's branch).
+        sock.ask(f"{'conceal' if d.get('hidden') else 'reveal'} {n}")
+    return reply
 
 
 def tile_key(d):
@@ -1385,6 +1398,9 @@ def remote_command(args):
         except RuntimeError as e:
             log(f"saved; not stopped now: {e}")
         return
+    if what in ("kwin-windows", "kwin-add", "kwin-size"):
+        import ft_kwinwindows   # (its own module: a KDE PC's windows, KWin Window Stream)
+        return ft_kwinwindows.command(what, args[1:])
     if what == "monitors" and len(args) == 2:
         code, out, err = run_stream("monitors", args[1])
         if code:
@@ -1506,12 +1522,18 @@ def remote_command(args):
         for profile in layout.get("profiles", {}).values():
             profile.get("remote", {}).pop(d["id"], None)
         save_layout(layout)
+        # A KDE PC's window panels use one of its displays' clients (ft_kwinwindows): the pairing
+        # stays while another panel of the host uses it.
+        if any(other.get("client") == d["client"] for other in host.get("displays", [])):
+            log(f"removed {d['id']}; kept {d['client']}'s pairing, which another panel uses")
+            return
         code, out, err = run_stream("unpair", display_target(host, d), "--id", d["client"], timeout=30)
         said = (out or err).strip().splitlines()
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return
     raise RuntimeError("remote list | monitors ADDRESS | add HOST ADDRESS APP [options] | set ID KEY=VALUE... | "
-                       "host NAME route=...|direct=...|mic=...|input=...|clipboard=... | connect ID... | disconnect ID... | remove ID")
+                       "host NAME route=...|direct=...|mic=...|input=...|clipboard=... | connect ID... | disconnect ID... | remove ID"
+                       " | kwin-windows HOST | kwin-add HOST WINDOW [options] | kwin-size N WxH METRES")
 
 
 def apply(wait=0):

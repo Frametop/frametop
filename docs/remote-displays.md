@@ -253,6 +253,20 @@ Encoding on oma7 uses VAAPI on the Intel GPU (`encoder = vaapi`, `adapter_name =
 
 While the host's session is locked, Hyprland draws only the lock screen, so window outputs stream black. The list answer says so (`"locked": true`), and `ft-layout window list` prints it. A window whose workspace emptied when it left comes back to that workspace on the monitor it came from: Hyprland makes the recreated workspace on the window output, and removing that output would hand it to the desktop's own rules (omarchy renumbers it into another monitor's block). omarchy also gives each FT-W output a block of ten workspaces of its own (FT-W1 gets 31-40 on oma7) and keeps it in its state file.
 
+### A KDE PC's windows (KWin Window Stream, issue 81, 2026-11-20, local experimental)
+
+A KDE Plasma PC can give single windows too, without a second Vibepollo: utrack's KWin Window Stream ([github.com/utrack/kwin-window-stream](https://github.com/utrack/kwin-window-stream), MIT) runs next to its Sunshine or Vibepollo and streams one KWin window by itself. This port is based on utrack's `custom-window-streamer` branch of Frametop. The service has its own protocol on TCP 14501: TLS, then framed messages (J for JSON, V for HEVC, C for commands, A for audio). It knows clients by the certificates paired with the PC's Sunshine, and it shows Sunshine's certificate.
+
+So a window panel has no pairing of its own. `ft-layout remote kwin-windows HOST` asks for the list with each of the host's displays' clients in turn until the PC takes one, and `kwin-add` uses that one (`layout/ft_kwinwindows.py`). A host needs at least one display first, and a pinned Web UI key (`ADDRESS.pin`, from signing in): ft-stream checks the service's certificate against that pin during the handshake, so the client's certificate is never sent to another. A host paired by PIN has no pin, so it can't list windows. Removing a window panel keeps the pairing while another panel of that host uses the client.
+
+A window panel is a remote display with `app` `kwin:{UUID}`, KWin's id for the window, which lasts as long as the window does. The prefix keeps it apart from Vibepollo's `window:` panels. The PC's window sets the stream's size. When that size changes, ft-screens keeps the panel's density, so the panel grows or shrinks in VR, and saves the new size and width with `ft-layout remote kwin-size N WxH METRES` (`IsKwinWindow` in `screens/vr.cpp`). ft-stream's side is `stream/kwin-window.h`, adapted from utrack's `window-stream.h`. The window's audio plays through the panel's audio lock, timed by utrack's `WindowAudioClock` (`stream/audio-clock.h`, tested by `stream/test/audio-clock-test.cpp`). A window that closes ends its stream (`lost the window's stream ended`), and the panel keeps trying until it's removed.
+
+On the Remote Displays page, a host with a pinned key and a display has "Add windows". It lists the PC's open windows (`remote-displays/kwin_windows.py`, `KwinWindowsDialog.qml`), and each one ticked becomes a panel in front of you. A window panel is listed with the host's displays, without the stream size controls.
+
+utrack's branch also brings back a panel's saved shown or hidden state when ft-screens restores a parked panel (`start_remote`). That fix applies to every remote display.
+
+Not tested yet: a live stream from a KDE PC, since no PC here runs KDE Plasma with the service. The protocol code is utrack's, and the layout and page are covered by `layout/tests/test_kwin_windows.py` and `remote-displays/test/test_kwin_windows.py`.
+
 ### What stock hosts cost us
 
 | Limit | Effect | What can be done |

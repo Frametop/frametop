@@ -93,6 +93,8 @@
 // Only absolutely placed 0x0 overlays count as scene-graph: gamescope's app panels (the
 // desktops) also report 0x0, but they're placed as dashboard tabs, stay up when the
 // dashboard closes, and ComputeOverlayIntersection hits them normally.
+// A scene-graph overlay that ComputeOverlayIntersection does hit (a ray at its origin lands on it,
+// checked once it shows: Steam's bar on SteamVR 2.19) gets exact hits instead (HitsAtOrigin).
 // A panel under a millimetre wide (kGoneWidthM) counts as hidden: ft-screens shrinks Steam's own
 // panels to nothing while it shows their windows itself (screens/steamshrink.h), and the plane test
 // takes no width into account, so Steam's shrunk menu still caught the cursor 0.5 m round it.
@@ -1239,6 +1241,7 @@ struct Pointer {
     std::map<std::string, vr::VROverlayHandle_t> handles;
     std::map<std::string, overlayregion::Region> hitRegions;
     std::map<std::string, bool> sceneGraph;  // no texture: plane test instead of ComputeOverlayIntersection
+    std::map<std::string, bool> sceneExact;  // one of those that ComputeOverlayIntersection hits after all
     std::map<std::string, bool> visible;  // refreshed every 50 ms
     // SteamVR's own word, before a shrunk panel counts as hidden: what the Settings page check
     // (OnVrSettingsPage) goes by, refreshed with `visible`.
@@ -2434,6 +2437,7 @@ struct Pointer {
         PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
     Hit nearest(Vec3 from, Vec3 d);
     bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
+    bool HitsAtOrigin(vr::VROverlayHandle_t h);
 };
 
 // Setup, once: the settings, SteamVR, the overlays and sockets.
@@ -4068,8 +4072,13 @@ void Pointer::RefreshOverlays() {
             // ft-screens' panels (frametop.screen.N, floating windows with their popups,
             // frametop.float.N..., the keyboard) are 0x0 and absolute too (a shared
             // texture), but they're real panels of any size.
-            sceneGraph[key] = (tw == 0 || th == 0) && tt == vr::VROverlayTransform_Absolute &&
-                              key.rfind("frametop.", 0) != 0;
+            const bool scene = (tw == 0 || th == 0) && tt == vr::VROverlayTransform_Absolute &&
+                               key.rfind("frametop.", 0) != 0;
+            if (scene && !sceneExact[key] && shown.count(key) && shown.at(key) && HitsAtOrigin(h)) {
+                sceneExact[key] = true;
+                std::printf("scene-graph overlay %s: exact hits, no plane test\n", key.c_str());
+            }
+            sceneGraph[key] = scene && !sceneExact[key];
         }
         if (handles != before) ++visibleGen;
         // Our device keeps its index; it's looked for again when a device is activated or
@@ -4191,6 +4200,27 @@ void Pointer::AimAndPose() {
         posed = {true, fr.tnow, eyeRaw, ayaw, apitch};
     }
     if (hold.src == Src::Ray) hold.aimSent = true;  // its press can go out next frame (see above)
+}
+
+// A scene-graph overlay that ComputeOverlayIntersection hits after all (see "Scene-graph overlays"
+// at the top): a ray from the eye to its origin lands on it. Steam's bar does on SteamVR 2.19; its
+// plane test reached 0.5 m round a bar 6.5 cm tall, tilted back, and caught the mouse's cursor
+// 20 deg above it, in front of the panels behind (user, 2026-11-20: the 3D mouse "colliding with
+// the Steam dashboard menu ... desynced from where ... the laser actually hits").
+bool Pointer::HitsAtOrigin(vr::VROverlayHandle_t h) {
+    vr::ETrackingUniverseOrigin uo;
+    vr::HmdMatrix34_t t{};
+    if (!fr.all[0].bPoseIsValid || overlay->GetOverlayTransformAbsolute(h, &uo, &t) != vr::VROverlayError_None)
+        return false;
+    const Vec3 to = Position(t) - fr.eye;
+    if (Length(to) < 0.1) return false;
+    const Vec3 d = Normalize(to);
+    vr::VROverlayIntersectionParams_t params{};
+    params.vSource = {float(fr.eye.x), float(fr.eye.y), float(fr.eye.z)};
+    params.vDirection = {float(d.x), float(d.y), float(d.z)};
+    params.eOrigin = vr::TrackingUniverseStanding;
+    vr::VROverlayIntersectionResults_t r{};
+    return overlay->ComputeOverlayIntersection(h, &params, &r) && std::fabs(r.fDistance - Length(to)) < 0.05;
 }
 
 // Nearest visible overlay along a ray (frozen while dragging).

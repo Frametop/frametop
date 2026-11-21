@@ -1473,7 +1473,15 @@ def remote_command(args):
                 "bitrate": bitrate, "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)},
                 kind="pin" if pin else None)
         except BaseException:
-            # Nothing saved: the client just paired would be left on the host with no display.
+            # Nothing saved: the client just paired would be left on the host with no display,
+            # unless a display saved during the wait uses that client name too.
+            try:
+                shared = any(d.get("client") == client for _, _, d in remote_displays(load_layout()))
+            except Exception:
+                shared = False
+            if shared:
+                log(f"kept {client}'s pairing, which another display uses")
+                raise
             code, out, err = run_stream("unpair", target, "--id", client, timeout=30)
             if code:
                 log(f"unpairing {client} from {address} failed too: {(err or out).strip()}")

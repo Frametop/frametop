@@ -49,7 +49,8 @@ def run_live(program, args, box, timeout=PIN_PAIR_S):
     finally:
         _unmark(said)
     code = proc.returncode
-    # timeout's TERM, its KILL and ours; a TERM from cancel() (timeout passes its signal on)
+    # timeout's TERM, its KILL and ours; cancel()'s TERM ends ft-stream itself, and timeout then
+    # exits as it did (143)
     code = TIMED_OUT if code in (124, 137, -9) else CANCELLED if code in (143, -15) else code
     return code, "".join(out), "".join(err)
 

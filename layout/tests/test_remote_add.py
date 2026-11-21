@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest import mock
 from contextlib import redirect_stdout
@@ -157,6 +158,19 @@ class RemoteAdd(unittest.TestCase):
         self.assertIn("oma7-desktop-2\n", self.add("--pin"))
         self.assertEqual([d["id"] for d in self.hosts()[0]["displays"]], ["oma7-desktop", "oma7-desktop-2"])
 
+    def test_a_client_another_display_took_meanwhile_is_kept(self):
+        def same_client():
+            self.m.remote_add_save(self.m.load_layout(), "oma7", "192.0.2.30", 0, {
+                "id": "oma7-desktop", "client": "frametop-oma7-desktop", "app": "Desktop", "label": "Desktop",
+                "size": [1920, 1080], "fps": 60, "bitrate": 0, "metres": 1.0})
+            for n in range(self.m.REMOTE_MAX - 1):
+                self.other_display("dody", n)
+
+        self.during_the_pin(same_client)
+        with self.assertRaisesRegex(RuntimeError, f"at most {self.m.REMOTE_MAX}"):
+            self.add("--pin")
+        self.assertNotIn("unpair", [c[0] for c in self.calls], "the other display's pairing stays")
+
     def test_full_while_the_pin_waited_unpairs(self):
         self.during_the_pin(lambda: [self.other_display("dody", n) for n in range(self.m.REMOTE_MAX)])
         with self.assertRaisesRegex(RuntimeError, f"at most {self.m.REMOTE_MAX}"):
@@ -206,16 +220,17 @@ class LivePin(unittest.TestCase):
                 pass
             start = cancel = __init__
 
-        no_kill = mock.patch.object(pinpair.threading, "Timer", NoKill)
+        # only ft_pinpair's Timer: threading itself stays as it is
+        no_kill = mock.patch.object(pinpair, "threading", types.SimpleNamespace(Timer=NoKill, Thread=threading.Thread))
         no_kill.start()
         self.addCleanup(no_kill.stop)
 
     def run_live(self, timeout):
-        out = io.StringIO()
-        with redirect_stdout(out):
+        self.printed = io.StringIO()
+        with redirect_stdout(self.printed):
             result = pinpair.run_live(str(self.stub), ("pair", "192.0.2.30", "--id", "frametop-x", "--pin"),
                                       lambda cmd: cmd, timeout=timeout)
-        return result, out.getvalue()
+        return result, self.printed.getvalue()
 
     def wait_for_pid(self):
         for _ in range(200):
@@ -229,7 +244,7 @@ class LivePin(unittest.TestCase):
             os.kill(int(self.pid_file.read_text()), 0)
         self.assertFalse(os.path.exists(pinpair.WAITING), "something still says a pairing waits")
 
-    def test_the_pin_comes_at_once_and_the_time_ends_ft_stream(self):
+    def test_the_time_ends_ft_stream(self):
         start = time.monotonic()
         (code, said, _), printed = self.run_live(timeout=1)
         self.assertLess(time.monotonic() - start, 10)
@@ -244,11 +259,14 @@ class LivePin(unittest.TestCase):
         waiter = threading.Thread(target=lambda: result.append(self.run_live(timeout=30)))
         waiter.start()
         self.wait_for_pid()
-        time.sleep(0.2)  # past the exec
+        self.assertIn("PIN 0421", self.printed.getvalue(), "the PIN is out while ft-stream still waits")
         with open(pinpair.WAITING) as f:
             self.assertEqual(f.read().strip(), f"{self.stub} pair 192.0.2.30 --id frametop-x --pin")
         self.assertEqual(os.stat(pinpair.WAITING).st_mode & 0o777, 0o600)
-        self.assertTrue(pinpair.cancel())
+        deadline = time.monotonic() + 10  # cancel() finds it once the stand-in's exec is done
+        while not pinpair.cancel():
+            self.assertLess(time.monotonic(), deadline, "cancel never found the waiting ft-stream")
+            time.sleep(0.05)
         waiter.join(10)
         self.assertFalse(waiter.is_alive())
         self.assertEqual(result[0][0][0], pinpair.CANCELLED)

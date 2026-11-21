@@ -9,6 +9,7 @@ pointer's socket is a recorder, so nothing reaches the helper, SteamVR, or the r
 import importlib.util
 import os
 import sys
+import types
 os.environ["FT_KWIN_EI"] = "0"  # the relay's wheel sender stays off the live desktop's KWin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -127,26 +128,35 @@ check("and forgets the push", p.scroll_until, None)
 # ---------------------------------------------------------------- on a Frametop panel
 p = pointer()
 taken = []
-p.wheel_to = lambda n: taken.append(n) or True  # ft-screens said the laser is on a panel
+p.wheel_to = lambda n, h=0: taken.append((n, h)) or True  # ft-screens said the laser is on a panel
 for i in range(40):
     p.motion(relay.REL_WHEEL, -1, 10.0 + i * 0.02)
-check("on a panel, every notch goes to ft-screens", (len(taken), sum(taken)), (40, -40))
+check("on a panel, every notch goes to ft-screens", (len(taken), sum(t[0] for t in taken)), (40, -40))
 check("and the joystick stays still", scrolls(p), [])
-p.wheel_to = lambda n: False  # off the panels again
-p.motion(relay.REL_WHEEL, 1, 11.0)
+p.motion(relay.REL_HWHEEL, 1, 11.0)
+check("on a panel, a horizontal notch is DX", taken[-1], (0, 1))
+p.wheel_to = lambda n, h=0: False  # off the panels again
+p.motion(relay.REL_WHEEL, 1, 12.0)
 check("off the panels, the joystick again", scrolls(p), ["scroll 0 1"])
 
-# ---------------------------------------------------------------- the horizontal wheel
+# ---------------------------------------------------------------- horizontal joystick
 p = pointer()
-taken = []
-p.wheel_to = lambda n, horizontal=False: taken.append((n, horizontal)) or True
-for v in (1, 1, -1):
-    p.motion(relay.REL_HWHEEL, v, 10.0)
-check("on a panel, the horizontal wheel goes to ft-screens as such", taken, [(1, True), (1, True), (-1, True)])
-check("and never moves the joystick", scrolls(p), [])
-p.wheel_to = lambda n, horizontal=False: False  # off the panels
-p.motion(relay.REL_HWHEEL, 1, 11.0)
-check("off the panels, the horizontal wheel does nothing", scrolls(p), [])
+p.motion(relay.REL_HWHEEL, 1, 10.0)
+check("a notch right also deflects the joystick down (mousewheel-style)", scrolls(p), ["scroll 1 -1"])
+p.motion(relay.REL_WHEEL, 1, 10.01)
+check("a vertical notch during it sets Y", scrolls(p)[-1], "scroll 1 1")
+p.motion(relay.REL_HWHEEL, -1, 10.02)
+check("the other way on X turns that axis", scrolls(p)[-1], "scroll -1 1")
+
+# ---------------------------------------------------------------- the relay's word to ft-screens
+sent = []
+fake = types.SimpleNamespace(wheel_until=float("inf"),
+                             screens_sock=types.SimpleNamespace(sendto=lambda data, addr: sent.append(data)))
+check("on a panel, both axes go to ft-screens as its own words",
+      (relay.Relay.wheel_to(fake, 2, -1), relay.Relay.wheel_to(fake, 0, 3), sent),
+      (True, True, [b"wheel 2", b"hwheel -1", b"hwheel 3"]))
+fake.wheel_until = 0.0
+check("...and nothing once the laser is off the panels", (relay.Relay.wheel_to(fake, 1, 1), len(sent)), (False, 3))
 
 print("FAILED: " + ", ".join(failures) if failures else "all passed")
 sys.exit(1 if failures else 0)

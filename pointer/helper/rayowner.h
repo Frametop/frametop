@@ -19,10 +19,12 @@
 //   Last used wins (user, 2026-11-20: "the laser and tracker jumps down to the bottom left ... without
 // my input"): a hand resting at the desk, by the keyboard or on the mouse, can pass fh_ray's raised
 // test, and its ray took the laser from a still mouse, or from the other hand once that one rested.
-// So with takeOnShow off (the caller's: the laser is in use, or the mouse was used after the last ray
-// pinch) a ray showing takes nothing: not with no owner, not raised while the owner's is down, not at
-// the end of the grace (the owner then goes, and the pointer holds where it was). Only a pinch takes
-// it, as the mouse takes it by moving.
+// So with take off for a side (the caller's, per side: the mouse was used after the last ray pinch, or
+// the laser is in use and it isn't the hand that pinched last) that side's ray showing takes nothing:
+// not with no owner, not raised while the owner's is down, not at the end of the grace (the owner then
+// goes, and the pointer holds where it was). Only a pinch takes it, as the mouse takes it by moving.
+// The hand that pinched last raised again takes it back, also while the laser's up (a gaze, or the
+// pointer not yet asleep).
 //
 // Pinch: a pinch on the owner's hand is a ray pinch (its ray brought back if it dropped within the
 // grace). A pinch on the other hand is a ray pinch when that hand's ray is up or can come up: it
@@ -85,17 +87,20 @@ public:
 
     // Each tick. shown: each side's ray is up; may: each side may point at all (fh_ray's sideIsHand);
     // why: why each ray is down, for the log (fh_ray's hide reason).
-    // takeOnShow: a ray showing may take the pointer (see "Last used wins" at the top).
+    // take: each side's ray showing may take the pointer (see "Last used wins" at the top).
     void Update(double t, const bool shown[2], const bool may[2], const std::string why[2], bool takeOnShow = true) {
+        const bool take[2] = {takeOnShow, takeOnShow};
+        Update(t, shown, may, why, take);
+    }
+    void Update(double t, const bool shown[2], const bool may[2], const std::string why[2], const bool take[2]) {
         for (int s = 0; s < 2; ++s) {
             if (shown[s] && !was_[s]) shownAt_[s] = t;
             was_[s] = shown[s];
         }
         if (side_ < 0) {
-            if (!takeOnShow) return;
             int pick = -1;
             for (int s = 0; s < 2; ++s)
-                if (shown[s] && (pick < 0 || shownAt_[s] < shownAt_[pick])) pick = s;
+                if (shown[s] && take[s] && (pick < 0 || shownAt_[s] < shownAt_[pick])) pick = s;
             if (pick >= 0) Set(pick, "raised", false);
             return;
         }
@@ -121,11 +126,11 @@ public:
             downSince_ = t, downWhy_ = why[o].empty() ? "pose" : why[o];
             log.push_back(std::string("hand ray ") + SideName(o) + ": down (" + downWhy_ + ")");
         }
-        if (takeOnShow && shown[other] && shownAt_[other] > downSince_) {
+        if (take[other] && shown[other] && shownAt_[other] > downSince_) {
             Set(other, std::string(SideName(other)) + " raised while " + SideName(o) + "'s was down", false);
         } else if (t - downSince_ >= p_.grace - 1e-9) {
             char b[128];
-            const bool up = takeOnShow && shown[other];
+            const bool up = take[other] && shown[other];
             std::snprintf(b, sizeof b, "%s's down %.1f s (%s)%s%s", SideName(o), p_.grace, downWhy_.c_str(),
                           up ? ", up: " : "", up ? SideName(other) : "");
             Set(up ? other : -1, b, false);

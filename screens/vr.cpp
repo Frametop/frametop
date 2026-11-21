@@ -1404,8 +1404,9 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
                     const double du = u - x * W / 2, dv = v - y * H / 2;
                     const double dist = std::hypot(du, dv), canvas = HandleSize(s);
                     const bool on = overlayregion::Contains(ResizeRegion(x, y), 0.5 + du / canvas, 0.5 + dv / canvas);
-                    const double close = g_resizeCorner.sharp ? (on ? 1 : 0.8 * (1 - std::clamp(dist / zone, 0.0, 1.0)))
-                                                             : resizecorner::LegacyCloseness(dist, s.grip, W, H);
+                    // (on its tab: as close as it gets, the glow tab's outer part too, past LegacyZone)
+                    const double close = on ? 1 : g_resizeCorner.sharp ? 0.8 * (1 - std::clamp(dist / zone, 0.0, 1.0))
+                                                                    : resizecorner::LegacyCloseness(dist, s.grip, W, H);
                     // (the corner it's at keeps it on a tie, so it doesn't flip between two)
                     if (close > best + (x == s.cornerX && y == s.cornerY ? -1e-3 : 1e-3)) best = close, cx = x, cy = y;
                 }
@@ -3365,7 +3366,9 @@ handinput::Panel InputPanel(const Screen &s, int index, const Mat &p) {
     for (const auto &[k, kind] : kHandControls) {
         if (s.glueTo >= 0) break;   // (a glued one has no controls; any other gets a set once a hand is near, StepChromePool)
         if (k == kResizePart && g_resizeCorner.sharp) continue;  // legacy retains its original near-hand tab
-        const double c = k == kResizePart ? HandleSize(s) : s.grip;
+        // (that tab: LegacySize, centred on the corner. Not the laser's bigger glow tab, HandleSize: a full
+        // square of that would take a poke 8 cm inside the panel's corner, and its mask isn't a hand's)
+        const double c = k == kResizePart ? resizecorner::LegacySize(s.grip) : s.grip;
         const bool upright = k == kBarPart && barside::Vertical(s.barSide);   // (the bar standing down a side)
         const double along = k == kBarPart ? s.chrome / 2 : c / 2, across = k == kBarPart ? s.chrome * 12 / 256 : c / 2;
         const double hw = upright ? across : along, hh = upright ? along : across;
@@ -5676,7 +5679,7 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
                 if (g_handInput.grabPanel(1 - e.side) == e.panel) {   // two hands to one
                     s.dragDevice = kHandHolder[1 - e.side];
                     if (s.drag == Drag::Resize) {
-                        if (s.floating) SendStretch(s);
+                        if (s.floating || IsWindowPanel(s)) SendStretch(s);
                         s.drag = Drag::Move;
                     }
                     ApplyAlpha(s);
@@ -5700,6 +5703,8 @@ void UpdateHandInput(void (*handle)(const struct ft_event *, void *), void *data
         if (c.kind == handinput::Carry::Resize) {
             if (s.floating) {
                 ResizeFloat(s, c.hx, c.hy, c.grabX, c.grabY, c.sx, c.sy);
+            } else if (IsWindowPanel(s)) {   // (new pixels, as the laser's resize: a tile keeps its scale, TileResized)
+                ResizeWindowPanel(s, c.hx, c.hy, c.grabX, c.grabY, c.sx, c.sy);
             } else if (c.width > 0) {   // the width, and the centre so the opposite corner stays put
                 s.metres = std::clamp(c.width, kMinWidth, 12.0);
                 vr::VROverlay()->SetOverlayWidthInMeters(s.overlay, float(s.metres));

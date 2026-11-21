@@ -461,9 +461,11 @@ def capture(layout, profile):
     if not s.get("on"):
         profile["desktopless"] = {"on": False}
         return
-    # Hidden in the profile: what was hidden before the mode, not the desktops it hides.
+    # Hidden in the profile: what was hidden before the mode, not the desktops it hides (the Frame's
+    # screens only when it took them; with the Frame out they're as you left them).
     before = s.get("before", {})
-    profile["hidden"] = [i + 1 for i in before.get("screens", [])]
+    if frame_on(layout):
+        profile["hidden"] = [i + 1 for i in before.get("screens", [])]
     remote = profile.get("remote", {})
     for _, d in displays_of(layout, held_hosts(layout)):
         if d["id"] in remote:
@@ -491,18 +493,18 @@ def profile_before(layout, name):
     s = state(layout)
     old = s.get("before", {})
     known = layout.get("profiles", {}).get(name, {}).get("remote", {})
+    hosts = pulled_hosts(layout)
+    if s.get("on"):  # (and the PCs it holds now, an older version's too: off puts their displays back)
+        hosts += [hp for hp in held_hosts(layout) if host_name(hp[0]) not in {host_name(h) for h, _ in hosts}]
     remotes = []
-    for _, d in displays_of(layout, pulled_hosts(layout)):
+    for _, d in displays_of(layout, hosts):
         if "hidden" in known.get(d["id"], {}):
             hidden = known[d["id"]]["hidden"]
         else:
             hidden = d["id"] in old.get("remotes", []) if s.get("on") else bool(d.get("hidden"))
         if hidden:
             remotes.append(d["id"])
-    hosts = {host_name(h) for h, _ in pulled_hosts(layout)}
-    if s.get("on"):
-        hosts |= {host_name(h) for h, _ in held_hosts(layout)}  # (still out: off puts them back)
-    return {"screens": hidden_screens(layout), "remotes": remotes, "hosts": sorted(hosts)}
+    return {"screens": hidden_screens(layout), "remotes": remotes, "hosts": sorted(host_name(h) for h, _ in hosts)}
 
 
 def use_profile(layout, name):

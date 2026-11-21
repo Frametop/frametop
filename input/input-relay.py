@@ -1817,8 +1817,10 @@ class Relay:
     def pc_keys(self, now):
         """Whether Meta and its combinations are a PC's now: typing goes to a remote display's
         desktop, and the 3D mouse is on it ("1"), or was last and sleeps ("2"). Super+Space there
-        opens the PC's launcher, not frunner; the 3D mouse moved off it gives Meta back."""
-        return now < self.desktop_until and (self.pc_word == "1" or (self.pc_word == "2" and not self.lease.current))
+        opens the PC's launcher, not frunner; the 3D mouse moved off it gives Meta back. (Asleep:
+        not active; the lease's Pointer stays while pointer mode is on.)"""
+        asleep = not (self.lease.current and self.lease.current.active)
+        return now < self.desktop_until and (self.pc_word == "1" or (self.pc_word == "2" and asleep))
 
     def combo_for(self, code):
         """The key combination a key's press completes with the modifiers held, and its action:
@@ -1833,8 +1835,8 @@ class Relay:
             return combo, None
         if action in TILE_FOCUS_ACTIONS and time.monotonic() >= self.tile_focus_until:
             return combo, None  # no anchored tile has the focus: the desktop's key (KWin's, or a PC's)
-        if MODIFIERS[KEY_LEFTMETA] in self.held.modifiers and self.pc_keys(time.monotonic()):
-            return combo, None  # a PC's desktop has the keys: its Meta combination
+        if action != "release_keys" and MODIFIERS[KEY_LEFTMETA] in self.held.modifiers and self.pc_keys(time.monotonic()):
+            return combo, None  # a PC's desktop has the keys: its Meta combination (not the way out of stuck keys: hazards.md)
         return combo, action
 
     def release_combo(self, code):

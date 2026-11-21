@@ -75,7 +75,8 @@ bool Place() {
         return true;
     }
     vr::VROverlay()->SetOverlayWidthInMeters(g_voice.overlay, float(g_voice.px * kMpp));
-    const Mat rel = PanelPose(0, -0.3, -1.0, 0, std::atan2(0.3, 1.0) * 180 / M_PI, 0);
+    // (pitch: the direction it's seen from, down to it; PanelPose)
+    const Mat rel = PanelPose(0, -0.3, -1.0, 0, -std::atan2(0.3, 1.0) * 180 / M_PI, 0);
     vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(g_voice.overlay, vr::k_unTrackedDeviceIndex_Hmd, &rel);
     return true;
 }

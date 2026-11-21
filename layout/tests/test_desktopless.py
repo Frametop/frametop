@@ -450,6 +450,30 @@ class Desktopless(unittest.TestCase):
         self.d.command(["off"])
         self.assertFalse(self.m.load_layout()["hosts"][0]["displays"][0].get("hidden"))
 
+    def test_a_profile_keeps_an_older_versions_held_pc_display_hidden(self):
+        # on, from before the switches (oma7 in, no "desktopless" on it): a profile that hides its display
+        layout = {"screens": [{}, {}, {}],
+                  "hosts": [{"name": "oma7", "address": "10.0.0.2", "windows": {"port": 9999},
+                             "displays": [{"id": "oma7-1", "hidden": True}]}],
+                  "desktopless": {"on": True, "places": {}, "before": {"screens": [], "remotes": ["oma7-1"]}},
+                  "profiles": {"Normal": {"desktopless": {"on": False}, "remote": {"oma7-1": {"hidden": True}}}}}
+        self.assertEqual(self.d.profile_before(layout, "Normal")["remotes"], ["oma7-1"])
+        self.d.stop_watch = self.d.write_seen = lambda *a: None
+        self.d.close_panels = lambda *a, **kw: None
+        self.assertEqual(self.d.use_profile(layout, "Normal"), "off")
+        self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))
+
+    def test_a_profile_saved_with_the_frame_out_keeps_its_hidden_screens(self):
+        layout = {"screens": [{}, {"hidden": True}, {"hidden": True}],
+                  "hosts": [{"name": "oma7", "address": "10.0.0.2", "windows": {"port": 9999}, "desktopless": True,
+                             "displays": []}],
+                  "desktopless": {"on": True, "frame": False, "places": {},
+                                  "before": {"screens": [1], "remotes": [], "hosts": ["oma7"]}}}
+        self.m.screens_socket = lambda: (_ for _ in ()).throw(RuntimeError("no screens"))
+        profile = {"hidden": [2, 3], "remote": {}}
+        self.d.capture(layout, profile)
+        self.assertEqual(profile["hidden"], [2, 3])
+
     def test_on_records_the_pcs_it_holds(self):
         self.d.command(["on"])
         self.assertEqual(self.m.load_layout()["desktopless"]["before"]["hosts"], ["oma7"])

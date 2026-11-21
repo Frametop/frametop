@@ -273,5 +273,61 @@ class Clips(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
 
 
+
+class NoticePill(unittest.IsolatedAsyncioTestCase):
+    """The pill in the headset (notice.py) when dictations and a wake command overlap: the one
+    listening keeps it, and "Typing…" comes back while words are still decoded."""
+
+    def daemon(self, sent):
+        import numpy as np
+        v = bare_daemon(recording=None, recording_source=None, stream=None, command=None, start_chime=None,
+                        dcfg={"min_seconds": 0.1})
+        v.chime = v.broadcast = lambda *a, **kw: None
+        v.update_mic = v.drop_start_chime = lambda: None
+        v.cmd_vad = type("V", (), {"reset": lambda self: None})()
+        v.notice = fv.notice.Notice(send=sent.append, clock=lambda: 100.0)
+        v.chunks = lambda: [np.zeros(fv.CHUNK, np.float32)] * 20
+        return v
+
+    async def test_wake_command_while_typing(self):
+        sent = []
+        v = self.daemon(sent)
+        gate = asyncio.Event()
+
+        async def slow(*a):
+            await gate.wait()
+        v._finish_dictation = slow
+        v.recording = v.chunks()
+        done = asyncio.create_task(v.stop_dictation())
+        await asyncio.sleep(0)
+        v.listen_for_command(100.0)
+        gate.set()
+        await done
+        self.assertEqual(sent, ["voice typing", "voice listen command 0"])  # the command keeps its pill
+        self.assertEqual(v.notice.mode, "command")
+
+    async def test_second_dictation_typing(self):
+        sent = []
+        v = self.daemon(sent)
+        gates = [asyncio.Event(), asyncio.Event()]
+
+        async def slow(*a):
+            await gates.pop(0).wait()
+        v._finish_dictation = slow
+        g1, g2 = gates
+        v.recording = v.chunks()
+        first = asyncio.create_task(v.stop_dictation())
+        await asyncio.sleep(0)
+        v.recording = v.chunks()
+        v.notice.listening("hold")
+        second = asyncio.create_task(v.stop_dictation())
+        await asyncio.sleep(0)
+        g1.set()
+        await first
+        self.assertEqual(sent[-1], "voice typing")  # the second's words are still on their way
+        g2.set()
+        await second
+        self.assertEqual(sent[-1], "voice off")
+
 if __name__ == "__main__":
     unittest.main()

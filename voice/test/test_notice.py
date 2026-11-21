@@ -35,9 +35,14 @@ class Notice(unittest.TestCase):
 
     def test_no_screens(self):
         n = notice.Notice()
-        notice.SCREENS = "\0ft_notice_test_nobody"
-        n.listening("toggle")  # nobody listening: no error
-        n.off()
+        screens, notice.SCREENS = notice.SCREENS, "\0ft_notice_test_nobody"
+        try:
+            n.listening("toggle")  # nobody listening: no error
+            n.off()
+        finally:
+            notice.SCREENS = screens
+            if n.sock:
+                n.sock.close()
 
 
 if __name__ == "__main__":

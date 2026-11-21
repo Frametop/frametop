@@ -758,6 +758,28 @@ def tests():
               (frunner_got(), got), ([], ["key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
         check(f"PC has the keys ({word}): a Meta tap is the PC's, no F24, no Steam menu",
               (meta(), len(lines(steam_log))), (["key 125 1", "key 125 0"], menus))
+    # Pointer mode on (the Frame's usual): "2" goes by the 3D mouse being asleep, not by pointer mode.
+    conf["POINTER"] = "1"
+    use(None)
+    to_relay("keyboard desktop 1 0 1 2")
+    time.sleep(0.05)
+    got = meta(SPACE)
+    check("pointer mode, the 3D mouse asleep (2): Meta+Space is the PC's",
+          (frunner_got(), got), ([], ["key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
+    RELAYS[0].lease.current.active, RELAYS[0].lease.current.last_used = True, time.monotonic()
+    meta(SPACE)
+    check("pointer mode, the 3D mouse awake off the PC (2): Meta+Space is frunner's", frunner_got(), ["toggle keyboard"])
+    RELAYS[0].lease.current.active = False
+    conf["POINTER"] = "0"
+    use(None)
+    # The way out of stuck keys still works with Meta held while the PC has them (hazards.md).
+    to_relay("keyboard desktop 1 0 1 1")
+    time.sleep(0.05)
+    typed()
+    key(META, 1); key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(1, 1); key(1, 0)
+    key(SHIFT, 0); key(ALT, 0); key(CTRL, 0); key(META, 0)
+    check("PC has the keys: Ctrl+Alt+Shift+Esc with Meta held still lets every key go",
+          [m for m in typed() if m == "keys release"], ["keys release"])
     to_relay("keyboard desktop 1 0 1 0")
     time.sleep(0.05)
     meta(SPACE)
@@ -1567,6 +1589,16 @@ def tests():
     os._exit(1 if failures else 0)
 
 
+RELAYS = []  # the relay main() makes, for the tests that set its state
+_relay_init = relay.Relay.__init__
+
+
+def _keep_relay(self, *a, **kw):
+    RELAYS.append(self)
+    _relay_init(self, *a, **kw)
+
+
+relay.Relay.__init__ = _keep_relay
 threading.Thread(target=tests, daemon=True).start()
 sys.argv = [relay_path, "--no-grab"]
 relay.KXKBRC = os.path.join(OUT, "no-kxkbrc")  # a US desktop until the layout tests

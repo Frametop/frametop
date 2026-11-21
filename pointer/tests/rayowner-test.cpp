@@ -87,6 +87,31 @@ void TestRestingHandTakesNothing() {
     CHECK(on.o.Side() == 1, "takeOnShow on: raised while down takes it: %d", on.o.Side());
 }
 
+// Per side: the hand that pinched last takes the laser back by raising, also while the pointer is up
+// (a gaze); the other hand, resting, still takes nothing.
+void TestPinchedHandTakesBack() {
+    Owner o;
+    double t = 0;
+    bool shown[2] = {false, false};
+    const bool may[2] = {true, true}, take[2] = {true, false};   // the left pinched last
+    const std::string why[2] = {"palm", "palm"};
+    auto run = [&](double secs) {
+        for (const double end = t + secs - 1e-9; t < end; t += kDt) o.Update(t, shown, may, why, take);
+    };
+    shown[1] = true;  // the right by the mouse, passing the raised test
+    run(1.0);
+    CHECK(o.Side() == -1, "the right hand showing takes nothing: %d", o.Side());
+    shown[0] = true;
+    run(0.1);
+    CHECK(o.Side() == 0, "the left (pinched last) raised takes it: %d", o.Side());
+    shown[0] = false;
+    run(1.0);
+    CHECK(o.Side() == -1, "the left down past the grace: to nobody, not the right: %d", o.Side());
+    shown[0] = true;
+    run(0.1);
+    CHECK(o.Side() == 0, "the left raised again takes it back: %d", o.Side());
+}
+
 void TestFirstRaised() {
     World w;
     w.Run(0.2);
@@ -399,6 +424,7 @@ void TestShowForPinch() {
 
 int main() {
     TestRestingHandTakesNothing();
+    TestPinchedHandTakesBack();
     TestFirstRaised();
     TestBriefDropKeepsTheOwner();
     TestGraceRunsOut();

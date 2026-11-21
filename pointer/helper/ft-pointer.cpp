@@ -88,11 +88,7 @@
 // under floating windows (valve.steam.gamepadui.floatingfooter, undock and friends) have
 // no texture (0x0) and a placeholder width, so ComputeOverlayIntersection never hits
 // them. For those the ray is tested against the overlay's plane, within
-// POINTER_SCENE_RADIUS (0.5 m) of its origin, and within its own rectangle, 2 cm round, where
-// it has one: its width at its transform's scale, by its mouse scale's shape, as ft-screens
-// sizes Steam's bar (user, 2026-11-21: the bar's "hitbox [is] larger than the actual area of the
-// bar making it hard to click on things on the bottom of the center display": at 3 m, 0.5 m
-// round the bar reached 9 degrees over it, onto the panels behind). The laser-catching dot sits 5 cm behind the
+// POINTER_SCENE_RADIUS (0.5 m) of its origin; the laser-catching dot sits 5 cm behind the
 // plane, so the laser reaches the buttons and still lands on the dot between them.
 // Only absolutely placed 0x0 overlays count as scene-graph: gamescope's app panels (the
 // desktops) also report 0x0, but they're placed as dashboard tabs, stay up when the
@@ -332,8 +328,9 @@
 // the first ray to show; its owner keeps it through POINTER_RAY_GRACE (0.5 s) of its ray being down
 // (the pointer holds that ray's last pose; closing the fingers can drop a ray for a moment), and
 // the other hand takes it by pinching, by raising its ray while the owner's is down, or once the
-// grace runs out. A ray showing takes it only while the pointer's asleep and the hands were used
-// last (a ray pinch after the mouse's last use); otherwise only a pinch takes it, and an owner whose
+// grace runs out. A ray showing takes it only when the hands were used last (a ray pinch after the
+// mouse's last use), and while the pointer's up only the hand that pinched last; otherwise only a
+// pinch takes it, and an owner whose
 // grace ran out leaves the pointer where it was (last used wins: a hand resting at the desk looked
 // raised and pulled the laser down to it). Changes go to the log ("hand ray: right -> left (left pinched)"), and so do the
 // owner's ray going down and coming back.
@@ -974,7 +971,6 @@ Vec3 LimitPitch(Vec3 d, double maxDeg) {
 // drawn this far out, and the laser-catching dot sits this far out (metres).
 constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 8.0;
 constexpr float kGoneWidthM = 1e-3f;   // a panel narrower: hidden (see "Scene-graph overlays" at the top)
-constexpr double kSceneMarginM = 0.02;   // a scene-graph overlay's rectangle takes hits this far round it
 // A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
 // laser), and after a release the laser holds still this long (see "Touch" at the top).
 constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
@@ -1252,8 +1248,6 @@ struct Pointer {
     std::map<std::string, overlayregion::Region> hitRegions;
     std::map<std::string, bool> sceneGraph;  // no texture: plane test instead of ComputeOverlayIntersection
     std::map<std::string, bool> sceneExact;  // one of those that ComputeOverlayIntersection hits after all
-    struct SceneSize { double w = 0, aspect = 0; };   // its width (m, before its transform's scale) and height / width
-    std::map<std::string, SceneSize> sceneSize;  // a scene-graph overlay's own rectangle, where it has one (0: none)
     std::map<std::string, bool> visible;  // refreshed every 50 ms
     // SteamVR's own word, before a shrunk panel counts as hidden: what the Settings page check
     // (OnVrSettingsPage) goes by, refreshed with `visible`.
@@ -1270,7 +1264,9 @@ struct Pointer {
     unsigned visibleGen = 0;
     Pass pass;
     PoseSent posed;  // the last plain "pose" (devpose.h)
-    Clock::time_point lastMouse{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
+    // lastMouse: any mouse word from the relay (a release, its own pulses too: mayPoint's idle second);
+    // lastUsed: a real use (a move, a press, a scroll step, a key at the gaze): last used wins (PickRayOwner).
+    Clock::time_point lastMouse{}, lastUsed{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
     // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
     // panel then (ft-screens' near claim); the gaze last took it back then.
     Clock::time_point controllerTookAt{}, nearBusyAt{}, gazeWokeAt{};
@@ -1370,6 +1366,7 @@ struct Pointer {
     // Hand interaction (see "Handoff" at the top): the hands in the room, the arbiter, and what
     // it last told ft-screens.
     int raySide = -1;  // the bare hand whose ray drives the pointer (see "Hand ray"), -1: none
+    int lastPinchSide = -1;  // the side whose ray pinched last (PickRayOwner: it may take the laser back by raising)
     hin::HandsInRoom handsRoom;
     bool handsLiveSeen = false;  // Live() at the last pass: its changes go to the log
     handoff::Handoff arbiter;
@@ -1950,7 +1947,7 @@ struct Pointer {
     }
     // The mouse used (a move, a press, a scroll step): the pointer's last-used-wins, and typing's desk.
     auto noteMouse() {
-        lastMouse = Clock::now();
+        lastMouse = lastUsed = Clock::now();
         typist.Mouse(secsOf(lastMouse));
     }
     // "move <dyaw> <dpitch>" from the relay.
@@ -2202,7 +2199,7 @@ struct Pointer {
             pinchLog(side, kind, "ignored (a press is already held)");
             return;
         }
-        lastRayPinch = fr.tnow;  // the hands used last: a raised hand may take the laser again (PickRayOwner)
+        lastRayPinch = fr.tnow, lastPinchSide = rs;  // the hands used last: a raised hand may take the laser again (PickRayOwner)
         const bool took = rayOwner.Pinched(rs, true) == rayown::Owner::Pinch::Take;
         rays[rs].ShowForPinch();  // a ray that dropped as the fingers closed comes back
         rays[rs].event.clear();
@@ -2666,6 +2663,7 @@ bool Pointer::PointerInput(const char *buf) {
         (!std::strcmp(kind, "precision") || !std::strcmp(kind, "gazedrag"))) {
         if (!std::strcmp(source, "mouse") && v) noteMouse();
         else lastMouse = Clock::now();
+        if (v) lastUsed = lastMouse;
         if (!active) wake(Clock::now());
         devicePresses.push_back({source, !std::strcmp(kind, "gazedrag"), v != 0});
         return true;
@@ -2673,6 +2671,7 @@ bool Pointer::PointerInput(const char *buf) {
     if (std::sscanf(buf, "gazekey %15s %d", source, &v) == 2 &&
         (!std::strcmp(source, "left") || !std::strcmp(source, "right"))) {
         lastMouse = Clock::now();
+        if (v) lastUsed = lastMouse;
         if (!active) wake(Clock::now());
         keyPresses.push_back({!std::strcmp(source, "right"), v != 0});
         return true;
@@ -3445,10 +3444,12 @@ void Pointer::PickRayOwner(const bool typingSide[2]) {
     // Last used wins (rayowner.h): a hand resting by the keyboard or the mouse can look raised, and
     // took the laser down to the desk a second after the mouse stopped, or from the other hand once
     // that one rested (user, 2026-11-20). While the laser's up, or the mouse (or another device) was
-    // used after the last ray pinch, only a pinch takes it. With the hands used last and the pointer
-    // asleep, raising a hand still wakes it.
-    const bool otherLast = lastMouse > lastRayPinch;
-    rayOwner.Update(secsOf(fr.tnow), shown, may, rayHid, !active && !otherLast);
+    // used after the last ray pinch (lastUsed: not the relay's releases or pulses), only a pinch takes
+    // it. With the hands used last, raising a hand takes it while the pointer's asleep, and the hand
+    // that pinched last takes it back any time (a gaze keeps the pointer up).
+    const bool otherLast = lastUsed > lastRayPinch;
+    const bool take[2] = {!otherLast && (!active || lastPinchSide == 0), !otherLast && (!active || lastPinchSide == 1)};
+    rayOwner.Update(secsOf(fr.tnow), shown, may, rayHid, take);
     ownerChanges(true);
     if (raySide >= 0 && !active && !headsetOff) {  // a wake that was held off (just released): again
         wake(fr.tnow);
@@ -4092,15 +4093,6 @@ void Pointer::RefreshOverlays() {
                 std::printf("scene-graph overlay %s: exact hits, no plane test\n", key.c_str());
             }
             sceneGraph[key] = scene && !sceneExact[key];
-            if (sceneGraph[key]) {
-                float w = 0;
-                vr::HmdVector2_t px{};
-                SceneSize sz;
-                if (overlay->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w > 0 &&
-                    overlay->GetOverlayMouseScale(h, &px) == vr::VROverlayError_None && px.v[0] > 0 && px.v[1] > 0)
-                    sz.w = w, sz.aspect = double(px.v[1]) / px.v[0];
-                sceneSize[key] = sz;
-            }
         }
         if (handles != before) ++visibleGen;
         // Our device keeps its index; it's looked for again when a device is activated or
@@ -4260,18 +4252,8 @@ Hit Pointer::nearest(Vec3 from, Vec3 d) {
             if (std::fabs(denom) < 1e-4) continue;
             const double along = Dot(center - from, normal) / denom;
             const Vec3 at = from + d * along;
-            if (!(along > 0.05 && along < h.along && std::sqrt(Dot(at - center, at - center)) <= sceneRadius)) continue;
-            // ...and within its own rectangle, where it has one (see "Scene-graph overlays" at the top)
-            const SceneSize &sz = sceneSize[key];
-            const Vec3 right{t.m[0][0], t.m[1][0], t.m[2][0]}, up{t.m[0][1], t.m[1][1], t.m[2][1]};
-            const double scale = Length(right), hw = sz.w * scale / 2, hh = hw * sz.aspect;
-            if (sz.w > 0 && hw > 0.02 && hh > 0.005 && hw < sceneRadius && scale > 1e-4) {
-                const Vec3 off = at - center;
-                if (std::fabs(Dot(off, right)) / scale > hw + kSceneMarginM ||
-                    std::fabs(Dot(off, up)) / std::max(Length(up), 1e-4) > hh + kSceneMarginM)
-                    continue;
-            }
-            h.along = along, h.key = key, h.scene = true, h.point = at, h.normal = normal;
+            if (along > 0.05 && along < h.along && std::sqrt(Dot(at - center, at - center)) <= sceneRadius)
+                h.along = along, h.key = key, h.scene = true, h.point = at, h.normal = normal;
             continue;
         }
         vr::VROverlayIntersectionParams_t params{};

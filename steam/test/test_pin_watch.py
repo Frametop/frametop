@@ -38,9 +38,11 @@ class Watch(unittest.TestCase):
                 raise value
             return value
         def sleep(_seconds):
-            boot, mono = next(pauses, (150, 150))
+            boot, mono, *stopped = next(pauses, (150, 150))
             clock[0] += boot
             clock[1] += mono
+            if stopped:
+                raise SystemExit  # SIGTERM handled as it thawed
         with (patch.object(pin_lock.ft_pinlock, "STATE", Path(self.tmp.name) / "state"),
               patch.object(pin_lock.ft_pinlock, "enabled", return_value=True),
               patch.object(pin_lock.ft_pinlock, "clocks", side_effect=lambda: tuple(clock)),
@@ -48,7 +50,7 @@ class Watch(unittest.TestCase):
               patch.object(pin_lock, "publish", side_effect=lambda permit, stamp: publications.append(permit)),
               patch.object(pin_lock.steamui, "evaluate", side_effect=evaluate),
               patch.object(pin_lock.signal, "signal"), patch.object(pin_lock.time, "sleep", sleep)):
-            with self.assertRaises(StopIteration):
+            with self.assertRaises((StopIteration, SystemExit)):
                 pin_lock.watch()
         return publications
 
@@ -87,11 +89,10 @@ class Watch(unittest.TestCase):
         self.assertFalse(any(self.run_watch([snapshot()])))  # the gap spent the record too
 
     def test_failed_save_costs_only_the_resume(self):
-        for failure in (OSError("full"), ValueError("bad suspend_stats")):
-            with patch.object(pin_lock.pin_carry, "save", side_effect=failure):
-                self.unlocked_guard()
-            self.restart(2000, 2000)
-            self.assertFalse(any(self.run_watch([snapshot()])))
+        with patch.object(pin_lock.pin_carry, "save", side_effect=OSError("full")):
+            self.unlocked_guard()
+        self.restart(2000, 2000)
+        self.assertFalse(any(self.run_watch([snapshot()])))
 
     def test_failed_clear_stays_spent_until_it_works(self):
         real = pin_lock.pin_carry.clear
@@ -158,6 +159,18 @@ class Watch(unittest.TestCase):
             self.suspends[counter] += 1
             self.restart(2000, 2000)
             self.assertFalse(any(self.run_watch([snapshot()])), counter)
+
+    def test_stopped_as_it_thawed_spends_the_record(self):
+        self.run_watch([snapshot(active=True, mandatory=True), snapshot(), snapshot()],
+                       pauses=[(150, 150), (3000, 3000, "stopped")])
+        self.restart(2000, 2000)
+        self.assertFalse(any(self.run_watch([snapshot()])))
+
+    def test_stopped_normally_keeps_the_record(self):
+        self.run_watch([snapshot(active=True, mandatory=True), snapshot(), snapshot()],
+                       pauses=[(150, 150), (150, 150, "stopped")])
+        self.restart(2000, 2000)
+        self.assertEqual(self.run_watch([snapshot()]), [False, True, False])
 
     def test_freeze_while_running_spends_the_record(self):
         self.run_watch([snapshot(active=True, mandatory=True), snapshot(), snapshot()],

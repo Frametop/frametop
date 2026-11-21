@@ -28,10 +28,11 @@ feature avoids.
 - Unknown, locked, stale, disconnected or reset state denies access. An observer
   starting in an unlocked session stays denied until it observes Steam's next
   real, non-cancellable lock and subsequent dismissal. One that restarts, or
-  whose query to Steam fails, resumes an unlock it saw that way (below,
-  "Resuming a seen unlock"). A stall or suspend while it runs still needs a new lock. **It never requests a PIN
-  screen, locks or unlocks Steam, or submits credentials. Steam alone owns those
-  actions.** An absent prompt is not treated as proof of authentication.
+  whose query to Steam fails quickly, resumes an unlock it saw that way (below,
+  "Resuming a seen unlock"). A stall, a slow reply or a suspend while it runs
+  still needs a new lock. **It never requests a PIN screen, locks or unlocks
+  Steam, or submits credentials. Steam alone owns those actions.** An absent
+  prompt is not treated as proof of authentication.
 - Screens, floating windows, popups, controls and compositor-owned guides hide;
   desktop input is rejected. Full Keyboard hides and cancels input, leaving
   Steam's own keyboard available. Frunner and the hand/gaze panel views also hide.
@@ -171,8 +172,9 @@ While the guard holds an unlock that followed a lock it saw, it keeps a record i
 (`performance.timeOrigin`), the boot's id, the boottime and monotonic clocks, and
 the kernel's suspend counts (`/sys/power/suspend_stats/success` and `fail`),
 refreshed with every lease. It's written like the lease: private, atomic, read
-without following links. A new guard, or one whose query failed or came back
-slow, resumes the unlock only when all of these hold:
+without following links. A new guard, or one whose query failed quickly (a reply
+over the 750 ms lease counts as a stall), resumes the unlock only when all of
+these hold:
 
 - Steam's snapshot is well formed, PIN set, and shows no lock, prompt or reset;
 - it's the record's UI context on the record's boot;
@@ -184,9 +186,11 @@ slow, resumes the unlock only when all of these hold:
 
 A lock the guard sees (mandatory or with inconsistent flags), a PIN reset or a PIN
 turned off ends the record, so an unlock the guard didn't see after one isn't
-resumed. So does a stall or suspend while the guard runs: SteamOS freezes the
-user slice, the guard with it, before it suspends, so a guard that wakes to a gap
-may be ahead of Steam's PIN-on-wake screen. A Steam client restart is a new UI
+resumed. So does a stall or suspend while the guard runs, or one it's stopped
+across: SteamOS freezes the user slice, the guard with it, before it suspends, so
+a guard that wakes to a gap may be ahead of Steam's PIN-on-wake screen. The counts
+are read before each lease's clocks, so a record never claims a suspend didn't
+happen after it was dated. Without readable counts there is no record. A Steam client restart is a new UI
 context and a cold boot starts with an empty `/run/user`, so both still need a
 lock seen first. A lock Steam shows and the wearer dismisses with the PIN while
 the guard is down is resumed: the PIN was entered. If clearing the record fails,

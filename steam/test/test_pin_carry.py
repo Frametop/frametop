@@ -32,17 +32,19 @@ class Carry(unittest.TestCase):
         self.file.chmod(mode)
 
     def test_round_trip_is_private_and_exact(self):
-        pin_carry.save(1763700000123.456, (5000, 4000))  # a real timeOrigin's size
+        pin_carry.save(1763700000123.456, (5000, 4000), (3, 1))  # a real timeOrigin's size
         self.assertEqual(pin_carry.path(), self.file)
         self.assertEqual(self.file.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.file.read_text(), f"FTCARRY1 1763700000123.456 5000 4000 {BOOT} 3 1\n")
         self.assertEqual(pin_carry.load(), (1763700000123.456, 5000, 4000, BOOT, (3, 1)))
         self.assertEqual(list(Path(self.tmp.name).iterdir()), [self.file])
-        pin_carry.save(1000, (5100, 4100))  # a JSON integer
+        pin_carry.save(1000, (5100, 4100), (3, 1))  # a JSON integer
         self.assertEqual(pin_carry.load(), (1000.0, 5100, 4100, BOOT, (3, 1)))
         pin_carry.clear()
         pin_carry.clear()  # nothing there: no error
         self.assertIsNone(pin_carry.load())
+        pin_carry.save(1000, (5100, 4100), None)  # the kernel's counts unknown: no record
+        self.assertFalse(self.file.exists())
 
     def test_matches_same_ui_boot_and_no_suspend(self):
         self.assertTrue(pin_carry.matches(RECORD, 1000, (7000, 6000)))
@@ -59,10 +61,10 @@ class Carry(unittest.TestCase):
             self.assertFalse(pin_carry.matches(RECORD, 1000, (7000, 6000)), tried)
 
     def test_unreadable_boot_or_suspends_do_not_match(self):
-        for target, failure in (("boot_id", OSError("no proc")), ("suspends", OSError("no sysfs")),
-                                ("suspends", ValueError("not a number"))):
-            with patch.object(pin_carry, target, side_effect=failure):
-                self.assertFalse(pin_carry.matches(RECORD, 1000, (7000, 6000)), target)
+        with patch.object(pin_carry, "boot_id", side_effect=OSError("no proc")):
+            self.assertFalse(pin_carry.matches(RECORD, 1000, (7000, 6000)))
+        self.suspends = None
+        self.assertFalse(pin_carry.matches(RECORD, 1000, (7000, 6000)))
 
     def test_suspend_counts_come_from_sysfs(self):
         stats = Path(self.tmp.name) / "suspend_stats"
@@ -71,6 +73,10 @@ class Carry(unittest.TestCase):
         (stats / "fail").write_text("0\n")
         with patch.object(pin_carry, "SUSPEND_STATS", stats):
             self.assertEqual(SUSPENDS(), (12, 0))
+            (stats / "fail").write_text("x\n")
+            self.assertIsNone(SUSPENDS())
+        with patch.object(pin_carry, "SUSPEND_STATS", stats / "missing"):
+            self.assertIsNone(SUSPENDS())
 
     def test_bad_records_are_ignored(self):
         self.write(GOOD)

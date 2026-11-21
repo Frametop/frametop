@@ -36,15 +36,20 @@ def boot_id():
 
 
 def suspends():
-    """(succeeded, failed): how many suspends the kernel has tried this boot."""
-    return tuple(int((SUSPEND_STATS / name).read_text()) for name in ("success", "fail"))
+    """(succeeded, failed): how many suspends the kernel has tried this boot, or None."""
+    try:
+        return tuple(int((SUSPEND_STATS / name).read_text()) for name in ("success", "fail"))
+    except (OSError, ValueError):
+        return None
 
 
-def save(generation, stamp):
-    """Atomic and private like the lease: the unlock held in generation at stamp."""
-    ok, failed = suspends()
+def save(generation, stamp, tried):
+    """Atomic and private like the lease: the unlock held in generation at stamp, with
+    tried the suspend counts read before stamp (none: no record, nothing to resume)."""
+    if tried is None:
+        return
     ft_pinlock.write_private(path(), f"FTCARRY1 {float(generation)!r} {stamp[0]} {stamp[1]} "
-                                     f"{boot_id()} {ok} {failed}\n")
+                                     f"{boot_id()} {tried[0]} {tried[1]}\n")
 
 
 def clear():
@@ -69,7 +74,7 @@ def matches(record, generation, now):
     proved, boot, mono, booted, slept = record
     try:
         awake = booted == boot_id() and slept == suspends()
-    except (OSError, ValueError):
+    except OSError:
         return False
     b, m = now[0] - boot, now[1] - mono
     # 0 <= b too: the skew test alone lets boottime run slightly backwards.

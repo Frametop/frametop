@@ -86,6 +86,7 @@ def watch():
     signal.signal(signal.SIGINT, stop)
     try:
         while True:
+            tried = pin_carry.suspends()  # before the stamp: a record never post-dates its counts
             stamp = ft_pinlock.clocks()
             # Any scheduling gap or suspend discards proof before querying Steam, the
             # carried one too: the user slice freezes before a suspend, even one that fails.
@@ -111,17 +112,17 @@ def watch():
                           ft_pinlock.fresh(*stamp, *ft_pinlock.clocks()))
                 permit = state == "unlocked-after-observed-lock" or no_pin
                 publish(permit, stamp)
-                if state == "unlocked-after-observed-lock":
-                    try:
-                        pin_carry.save(observer.generation, stamp)
-                    except (OSError, ValueError):
-                        pass  # costs only the resume after a restart, not this unlock
-                elif valid_snapshot(snap) and (snap["mandatory"] or snap["resetting"] or
-                                               not snap["configured"]):
+                if valid_snapshot(snap) and (snap["mandatory"] or snap["resetting"] or
+                                             not snap["configured"]):
                     spent = True  # Steam locked, or its PIN changed
                 if spent:
                     pin_carry.clear()  # on failure, kept spent and tried again
                     spent = False
+                if state == "unlocked-after-observed-lock":
+                    try:
+                        pin_carry.save(observer.generation, stamp, tried)
+                    except OSError:
+                        pass  # costs only the resume after a restart, not this unlock
                 reason = "steam-pin-disabled" if no_pin else observer.reason
             except (steamui.SteamUnreachable, OSError, ValueError, KeyError, TypeError):
                 observer.invalidate("steam-query-failed")
@@ -135,10 +136,17 @@ def watch():
                 previous = status
             time.sleep(0.15)
     finally:
-        publish(False, ft_pinlock.clocks())
-        if spent:
-            pin_carry.clear()
-        os.close(fd)
+        try:
+            publish(False, ft_pinlock.clocks())
+        finally:
+            try:
+                # Stopped as it thawed (SIGTERM while frozen): the gap is unseen yet.
+                if spent or not ft_pinlock.fresh(*last, *ft_pinlock.clocks()):
+                    pin_carry.clear()
+            except OSError:
+                pass
+            finally:
+                os.close(fd)
 
 
 class Observer:

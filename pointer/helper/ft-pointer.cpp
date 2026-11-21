@@ -329,9 +329,9 @@
 // (the pointer holds that ray's last pose; closing the fingers can drop a ray for a moment), and
 // the other hand takes it by pinching, by raising its ray while the owner's is down, or once the
 // grace runs out. A ray showing takes it only when the hands were used last (a ray pinch after the
-// mouse's last use), and while the pointer's up only the hand that pinched last; otherwise only a
-// pinch takes it, and an owner whose
-// grace ran out leaves the pointer where it was (last used wins: a hand resting at the desk looked
+// mouse's last use), and after a ray pinch only the hand that pinched last, awake or asleep
+// (rayown::MayTake); otherwise only a pinch takes it, and an owner whose grace ran out leaves the
+// pointer where it was (last used wins: a hand resting at the desk looked
 // raised and pulled the laser down to it). Changes go to the log ("hand ray: right -> left (left pinched)"), and so do the
 // owner's ray going down and coming back.
 //   A ray appearing wakes the pointer (role, show) and claims the laser, unless a controller that
@@ -1959,8 +1959,8 @@ struct Pointer {
         // Any mouse input wakes the pointer (after a controller took over, or a helper restart).
         if (!active) wake(Clock::now());
         if (heldBack) return;
-        // The mouse takes the pointer from a hand's ray (last used wins); the ray comes back once the mouse
-        // has been idle a second and the hand points again (see "Hand ray" at the top).
+        // The mouse takes the pointer from a hand's ray (last used wins); a hand takes it back by a ray
+        // pinch once the mouse has been idle a second (see "Hand ray" at the top).
         if (raySide >= 0 || rays[0].Shown() || rays[1].Shown()) {
             rays[0].Reset(), rays[1].Reset();
             rays[0].event.clear(), rays[1].event.clear();

@@ -77,6 +77,24 @@ class Text(unittest.TestCase):
         self.assertTrue(v.relay_said)
 
 
+class Windows(unittest.TestCase):
+    def test_spellings_line_up(self):
+        self.assertEqual(fv.norm("Dishonoured,"), fv.norm("dishonored"))
+        self.assertEqual(fv.norm("organisation"), fv.norm("organization"))
+        self.assertNotEqual(fv.norm("our"), fv.norm("or"))
+        self.assertNotEqual(fv.norm("four"), fv.norm("for"))
+
+    def test_full_window_closes_at_its_longest_pause(self):
+        # 96 ms chunks: speech, a 0.38 s pause, speech, a 0.58 s pause, speech.
+        per = fv.CHUNK / fv.RATE
+        speech = [True] * 40 + [False] * 4 + [True] * 20 + [False] * 6 + [True] * 10
+        v = bare_daemon(dcfg={"min_pause_seconds": 0.3})
+        cut = v._pause_cut({"win": 0, "speech": speech}, len(speech))
+        self.assertEqual(cut, 64 + int(0.15 / per))
+        # No pause that long in the second half: None (the window is cut mid-speech).
+        self.assertIsNone(v._pause_cut({"win": 0, "speech": [True] * 60 + [False] * 2 + [True] * 20}, 82))
+
+
 class FromRelay(unittest.IsolatedAsyncioTestCase):
     async def test_push_to_talk(self):
         fv.VOICE = f"\0{TAG}_voice"

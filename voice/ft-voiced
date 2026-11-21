@@ -112,7 +112,12 @@ DEFAULTS = {
         "moonshine_model": "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",  # in MODELS
         "moonshine_threads": 2,
         "step_seconds": 0.8,
-        "pause_seconds": 0.8,  # shorter pauses inside a sentence ended it with "?"/"." in testing
+        # A pause this long ends the window (its last word is typed then). Shorter ones stay inside
+        # it, as in Faceclaw's dictation, so the model hears the sentence go on: at 0.8 s, pauses
+        # inside a sentence ended it with "." and a capital ("light up. Here and there").
+        "pause_seconds": 1.5,
+        # A full window (max_window_seconds) closes at its longest pause at least this long.
+        "min_pause_seconds": 0.3,
         "max_window_seconds": 8.0,  # audio per decode, context included
         # Each window is decoded after this much of the previous one's end, so a sentence that
         # goes on after a pause isn't heard as a new one (no stray "." and capital at the seam).
@@ -204,6 +209,9 @@ SAME_WORD = {"okay": "ok"}  # spellings Moonshine switches between from one deco
 
 def norm(word):
     word = re.sub(r"[^\w']", "", word.lower())
+    if len(word) > 5:  # British and US spellings, which Moonshine also switches between
+        word = re.sub(r"our(ed|ing|s|able)?$", r"or\1", word)  # dishonoured, colours
+        word = re.sub(r"is(e|ed|es|ing|ation)$", r"iz\1", word)  # realised, organisation
     return SAME_WORD.get(word, word)
 
 
@@ -855,7 +863,7 @@ class Voice:
                 if last is None and not self._short_speech(stream, end):
                     return
                 if full:  # Moonshine returns nothing for more than ~9 s of audio
-                    await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
+                    await self._close_full(stream, end)
                     stream["wake"].set()
                     continue
                 await self._close_window(stream, end)
@@ -868,7 +876,7 @@ class Voice:
             if silence * per >= self.dcfg["pause_seconds"]:
                 await self._close_window(stream, end - silence + int(0.15 / per))
             elif full:
-                await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
+                await self._close_full(stream, end)
             elif end - stream["decoded_at"] >= step:
                 stream["decoded_at"] = end
                 hyp = (await self._decode(self._window_audio(stream, end), self._context(stream))).split()
@@ -949,6 +957,37 @@ class Voice:
         if loud is not None:
             start = min(start, loud - round(0.2 / per))
         return max(win, start)
+
+    async def _close_full(self, stream, end):
+        """Close a window that reached max_window_seconds. Like Faceclaw's segments, a pause
+        shorter than pause_seconds doesn't end a window, so a full one usually holds one: close
+        it there as at a pause (every word committed, the punctuation held). Only a window with
+        no pause in its second half is cut mid-speech (forced)."""
+        cut = self._pause_cut(stream, end)
+        if cut is not None:
+            await self._close_window(stream, cut)
+        else:
+            await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
+
+    def _pause_cut(self, stream, end):
+        """Where the longest pause of at least min_pause_seconds in the window's second half
+        starts (0.15 s in, as a pause close cuts), or None when there isn't one."""
+        per = CHUNK / RATE
+        speech = stream["speech"]
+        runs, start = [], None
+        for i in range(stream["win"] + (end - stream["win"]) // 2, end):
+            if not speech[i]:
+                start = i if start is None else start
+            elif start is not None:
+                runs.append((start, i - start))
+                start = None
+        if start is not None:
+            runs.append((start, end - start))
+        runs = [r for r in runs if r[1] * per >= self.dcfg["min_pause_seconds"]]
+        if not runs:
+            return None
+        start, length = max(runs, key=lambda r: (r[1], r[0]))
+        return start + min(length - 1, int(0.15 / per))
 
     def _quiet_cut(self, stream, end):
         """Where to close a window with no pause: after the quietest chunk of its second half,

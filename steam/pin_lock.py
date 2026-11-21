@@ -14,7 +14,6 @@ import fcntl
 import os
 import signal
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -49,15 +48,7 @@ SNAPSHOT = """(() => {
 
 def publish(permit, stamp):
     """Atomic, private, boot-local state; request time, not response time, dates proof."""
-    path = ft_pinlock.STATE
-    fd, temporary = tempfile.mkstemp(prefix=".frametop-pin-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as output:
-            output.write(f"FTPIN1 {int(permit)} {stamp[0]} {stamp[1]} {os.getpid()}\n")
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    ft_pinlock.write_private(ft_pinlock.STATE, f"FTPIN1 {int(permit)} {stamp[0]} {stamp[1]} {os.getpid()}\n")
 
 
 def idle(snapshot):
@@ -86,6 +77,7 @@ def watch():
         return
     observer = Observer()
     previous = None
+    spent = False  # the carry record must go before anything may resume from it
     last = ft_pinlock.clocks()
     publish(False, last)
     def stop(_sig, _frame):
@@ -95,9 +87,11 @@ def watch():
     try:
         while True:
             stamp = ft_pinlock.clocks()
-            # Any scheduling gap or suspend discards proof before querying Steam.
+            # Any scheduling gap or suspend discards proof before querying Steam, the
+            # carried one too: the user slice freezes before a suspend, even one that fails.
             if not ft_pinlock.fresh(*last, *stamp):
                 observer.invalidate("observation-gap-or-suspend")
+                spent = True
                 publish(False, stamp)
             last = stamp
             try:
@@ -105,7 +99,7 @@ def watch():
                 state = observer.sample(snap)
                 # Unproven but quiet: an unlock this guard, or the one before it, saw
                 # Steam's lock lead to, in this UI context with no suspend since.
-                if (state == "unknown" and idle(snap) and snap["configured"] is True and
+                if (state == "unknown" and not spent and idle(snap) and snap["configured"] is True and
                         pin_carry.matches(pin_carry.load(), snap["generation"], stamp)):
                     state = observer.resume(snap["generation"])
                 if not ft_pinlock.fresh(*stamp, *ft_pinlock.clocks()):
@@ -120,11 +114,14 @@ def watch():
                 if state == "unlocked-after-observed-lock":
                     try:
                         pin_carry.save(observer.generation, stamp)
-                    except OSError:
+                    except (OSError, ValueError):
                         pass  # costs only the resume after a restart, not this unlock
                 elif valid_snapshot(snap) and (snap["mandatory"] or snap["resetting"] or
                                                not snap["configured"]):
-                    pin_carry.clear()  # Steam locked, or its PIN changed: the proof is spent
+                    spent = True  # Steam locked, or its PIN changed
+                if spent:
+                    pin_carry.clear()  # on failure, kept spent and tried again
+                    spent = False
                 reason = "steam-pin-disabled" if no_pin else observer.reason
             except (steamui.SteamUnreachable, OSError, ValueError, KeyError, TypeError):
                 observer.invalidate("steam-query-failed")
@@ -139,6 +136,8 @@ def watch():
             time.sleep(0.15)
     finally:
         publish(False, ft_pinlock.clocks())
+        if spent:
+            pin_carry.clear()
         os.close(fd)
 
 

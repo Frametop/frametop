@@ -28,8 +28,8 @@ feature avoids.
 - Unknown, locked, stale, disconnected or reset state denies access. An observer
   starting in an unlocked session stays denied until it observes Steam's next
   real, non-cancellable lock and subsequent dismissal. One that restarts, or
-  loses Steam for a moment, resumes an unlock it saw that way (below,
-  "Resuming a seen unlock"). **It never requests a PIN
+  whose query to Steam fails, resumes an unlock it saw that way (below,
+  "Resuming a seen unlock"). A stall or suspend while it runs still needs a new lock. **It never requests a PIN
   screen, locks or unlocks Steam, or submits credentials. Steam alone owns those
   actions.** An absent prompt is not treated as proof of authentication.
 - Screens, floating windows, popups, controls and compositor-owned guides hide;
@@ -130,7 +130,8 @@ now strictly passive. Fixed diagnostic reason codes identify invalid snapshots,
 inconsistent flags, UI-generation changes, observation gaps/suspend, stale replies
 and failed queries without logging raw Steam data or credentials.
 
-After an approved guard-only restart, the passive observer stayed denied without
+Before the guard resumed a seen unlock (2026-11-20), an approved guard-only
+restart left the passive observer denied without
 creating a PIN prompt. The wearer used Steam's configured PIN-on-wake flow via
 the headset power button and confirmed Frametop returned normally. Logs showed
 unknown (including an observation-gap/suspend invalidation), then a real locked
@@ -167,24 +168,32 @@ alone let Frametop show before Steam's PIN screen on a cold boot (below).
 
 While the guard holds an unlock that followed a lock it saw, it keeps a record in
 `$XDG_RUNTIME_DIR/frametop-pin-carry` (`steam/pin_carry.py`): Steam's UI context
-(`performance.timeOrigin`), the boot's id, and the boottime and monotonic clocks,
+(`performance.timeOrigin`), the boot's id, the boottime and monotonic clocks, and
+the kernel's suspend counts (`/sys/power/suspend_stats/success` and `fail`),
 refreshed with every lease. It's written like the lease: private, atomic, read
-without following links. A guard that has lost its proof (a fresh start, a failed
-or slow query, a scheduling gap) resumes the unlock only when all of these hold:
+without following links. A new guard, or one whose query failed or came back
+slow, resumes the unlock only when all of these hold:
 
 - Steam's snapshot is well formed, PIN set, and shows no lock, prompt or reset;
 - it's the record's UI context on the record's boot;
-- boottime hasn't run ahead of monotonic since the record (no suspend);
+- no suspend since the record: boottime hasn't run ahead of monotonic, and the
+  kernel hasn't tried one (a failed suspend counts);
 - the record is under 60 s old (a SteamVR restart takes the guard down with it).
+  A resumed unlock refreshes the record, so restarts each under 60 s apart keep
+  carrying it.
 
-A lock Steam shows (mandatory or with inconsistent flags), a PIN reset or a PIN
+A lock the guard sees (mandatory or with inconsistent flags), a PIN reset or a PIN
 turned off ends the record, so an unlock the guard didn't see after one isn't
-resumed. A Steam client restart is a new UI context and a cold boot starts with
-an empty `/run/user`, so both still need a lock seen first. A suspend ends the
-record for good, so Steam's PIN-on-wake keeps the same race cover as a cold boot.
-Same-user code could write the record, but it could write the lease too (see
-above); the record adds no new boundary. The log says
-`unlocked-after-observed-lock (unlock-carried-over)` when it's used.
+resumed. So does a stall or suspend while the guard runs: SteamOS freezes the
+user slice, the guard with it, before it suspends, so a guard that wakes to a gap
+may be ahead of Steam's PIN-on-wake screen. A Steam client restart is a new UI
+context and a cold boot starts with an empty `/run/user`, so both still need a
+lock seen first. A lock Steam shows and the wearer dismisses with the PIN while
+the guard is down is resumed: the PIN was entered. If clearing the record fails,
+the guard resumes nothing until it succeeds. Same-user code could write the
+record, but it could write the lease too (see above); the record adds no new
+boundary. The log says `unlocked-after-observed-lock (unlock-carried-over)` when
+it's used.
 
 ## Required before general use
 
@@ -239,10 +248,11 @@ within the lease interval, slow authentication responses and slow no-PIN respons
 None may reuse stale evidence to permit access.
 They also reject every guard-side Steam expression except the read-only snapshot,
 check that repeated unknown states never request prompts, and verify that a UI
-restart needs a real Steam lock cycle. A restarted guard or a failed observation
-resumes a seen unlock only in the same UI context, within 60 s and with no
-suspend, and never past a lock, a PIN reset or a PIN turned off. The carry record
-is checked for privacy, exact contents, symlinks, FIFOs and other boots' records.
+restart, a stall or a suspend needs a real Steam lock cycle. A restarted guard or
+a failed observation resumes a seen unlock only in the same UI context, within
+60 s and with no suspend tried (clocks or counts), and never past a seen lock, a
+PIN reset, a PIN turned off or a record it couldn't clear. The carry record is
+checked for privacy, exact contents, symlinks, FIFOs and other boots' records.
 
 Integration tripwires check overlay show-call coverage, that the lock path cannot
 stop applications, release-before-focus-clear ordering and the independent export

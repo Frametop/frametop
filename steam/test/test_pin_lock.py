@@ -75,6 +75,26 @@ class PinState(unittest.TestCase):
         self.assertNotIn("SetActiveLockScreenProps", source)
         self.assertNotIn("REQUEST_LOCK", source)
 
+    def test_resumed_unlock_says_so_until_a_lock_is_seen(self):
+        self.assertEqual(self.observer.resume(1000), "unlocked-after-observed-lock")
+        self.assertEqual(self.observer.reason, "unlock-carried-over")
+        self.assertEqual(self.state(), "unlocked-after-observed-lock")
+        self.assertEqual(self.observer.reason, "unlock-carried-over")
+        self.assertEqual(self.state(active=True), "locked")  # a cancellable prompt keeps it
+        self.assertEqual(self.state(), "unlocked-after-observed-lock")
+        self.assertEqual(self.observer.reason, "unlock-carried-over")
+        self.unlock()
+        self.assertEqual(self.observer.reason, "observed-lock-dismissed")
+        self.observer.resume(1000)
+        self.observer.invalidate()
+        self.assertEqual(self.state(), "unknown")
+        self.assertEqual(self.state(generation=2000), "unknown")
+
+    def test_resume_is_only_for_its_ui_context(self):
+        self.observer.resume(1000)
+        self.assertEqual(self.state(generation=2000), "unknown")
+        self.assertEqual(self.observer.reason, "steam-ui-generation-changed")
+
     def test_diagnostic_reason_identifies_lost_proof(self):
         self.assertEqual(self.state(), "unknown")
         self.assertEqual(self.observer.reason, "awaiting-observed-lock")

@@ -21,6 +21,7 @@ class Watch(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="ft-pin-watch-")
         self.addCleanup(self.tmp.cleanup)
         self.clock = [1000, 1000]  # one boot: kept across guard runs
+        self.suspends = [0, 0]      # the kernel's suspends tried: succeeded, failed
 
     def run_watch(self, samples, *, pauses=None, query_ms=0):
         samples = iter(samples)
@@ -43,6 +44,7 @@ class Watch(unittest.TestCase):
         with (patch.object(pin_lock.ft_pinlock, "STATE", Path(self.tmp.name) / "state"),
               patch.object(pin_lock.ft_pinlock, "enabled", return_value=True),
               patch.object(pin_lock.ft_pinlock, "clocks", side_effect=lambda: tuple(clock)),
+              patch.object(pin_lock.pin_carry, "suspends", side_effect=lambda: tuple(self.suspends)),
               patch.object(pin_lock, "publish", side_effect=lambda permit, stamp: publications.append(permit)),
               patch.object(pin_lock.steamui, "evaluate", side_effect=evaluate),
               patch.object(pin_lock.signal, "signal"), patch.object(pin_lock.time, "sleep", sleep)):
@@ -76,18 +78,37 @@ class Watch(unittest.TestCase):
                                           snapshot(configured=False, mandatory=True)])
         self.assertEqual(states, [False, False, True, False, False, False])
 
-    def test_scheduling_gap_resumes_the_same_unlock(self):
+    def test_scheduling_gap_requires_new_authentication(self):
         states = self.run_watch(
             [snapshot(active=True, mandatory=True), snapshot(), snapshot()],
             pauses=[(150, 150), (800, 800)])
-        self.assertEqual(states, [False, False, True, False, True, False])
-
-    def test_scheduling_gap_without_a_record_requires_new_authentication(self):
-        with patch.object(pin_lock.pin_carry, "save", side_effect=OSError("full")):
-            states = self.run_watch(
-                [snapshot(active=True, mandatory=True), snapshot(), snapshot()],
-                pauses=[(150, 150), (800, 800)])
         self.assertEqual(states, [False, False, True, False, False, False])
+        self.restart(2000, 2000)
+        self.assertFalse(any(self.run_watch([snapshot()])))  # the gap spent the record too
+
+    def test_failed_save_costs_only_the_resume(self):
+        for failure in (OSError("full"), ValueError("bad suspend_stats")):
+            with patch.object(pin_lock.pin_carry, "save", side_effect=failure):
+                self.unlocked_guard()
+            self.restart(2000, 2000)
+            self.assertFalse(any(self.run_watch([snapshot()])))
+
+    def test_failed_clear_stays_spent_until_it_works(self):
+        real = pin_lock.pin_carry.clear
+        tries = []
+        def clear():
+            tries.append(1)
+            if len(tries) == 2:  # the first was the lock's
+                raise PermissionError("test")
+            real()
+        with patch.object(pin_lock.pin_carry, "clear", side_effect=clear):
+            states = self.run_watch([snapshot(active=True, mandatory=True), snapshot(),
+                                     snapshot(resetting=True), snapshot(), snapshot()])
+        self.assertEqual(states[:3], [False, False, True])
+        self.assertFalse(any(states[3:]))  # never resumed from the record it couldn't clear
+        self.assertEqual(len(tries), 3)
+        self.restart(2000, 2000)
+        self.assertFalse(any(self.run_watch([snapshot()])))
 
     def test_suspend_discards_unexpired_unlock(self):
         states = self.run_watch(
@@ -130,6 +151,19 @@ class Watch(unittest.TestCase):
         self.restart(5000, 2000)  # 3 s asleep: Steam's PIN-on-wake may not show yet
         self.assertEqual(self.run_watch([snapshot(), snapshot(active=True, mandatory=True), snapshot()]),
                          [False, False, False, True, False])
+
+    def test_tried_suspend_ends_the_record(self):
+        for counter in (0, 1):  # one that worked, one that failed: neither moves the clocks apart here
+            self.unlocked_guard()
+            self.suspends[counter] += 1
+            self.restart(2000, 2000)
+            self.assertFalse(any(self.run_watch([snapshot()])), counter)
+
+    def test_freeze_while_running_spends_the_record(self):
+        self.run_watch([snapshot(active=True, mandatory=True), snapshot(), snapshot()],
+                       pauses=[(150, 150), (3000, 3000)])
+        self.restart(2000, 2000)
+        self.assertFalse(any(self.run_watch([snapshot()])))
 
     def test_suspend_while_running_ends_the_record(self):
         self.run_watch([snapshot(active=True, mandatory=True), snapshot(), snapshot(), snapshot()],

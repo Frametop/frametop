@@ -112,6 +112,8 @@ int ft_vr_gamepad_screen(void);
 // relay's "wheel", not SteamVR's joystick scrolling): it shows, nothing's paused, and nothing
 // drags it. -1 when not.
 int ft_vr_mouse_screen(void);
+// The panel the 3D mouse's laser is on, held press or not (keys_update: Meta to a PC); -1 none.
+int ft_vr_mouse_panel(void);
 // The relay's wheel in the ~100 ms before it hears ft_vr_mouse_screen() went -1 for a held press, a
 // torn-off window or a KWin move (keys_update): what SteamVR's scroll would do there (push or pull a
 // carried window, tear one off, or scroll under the held button). False if that isn't why it's -1.

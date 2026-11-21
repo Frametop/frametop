@@ -744,6 +744,31 @@ def tests():
     check("Meta+/ (default): frunner lists the key combinations", frunner_got(), ["toggle keyboard keys"])
     check("the tiling actions and keys_list work without pointer mode",
           [a for a in (*relay.TILE_ACTIONS, "keys_list") if not relay.known_action(a) or relay.needs_pointer(a)], [])
+
+    # A PC's desktop has the keys (ft-screens' sixth "keyboard" word: 1 the 3D mouse on it, 2 on
+    # no panel since and asleep): Meta+Space and a Meta tap are the PC's, typed through, not
+    # frunner's or Steam's menu. 0 (the 3D mouse moved off it) gives them back.
+    SPACE = 57
+    menus = len(lines(steam_log))
+    for word in ("1", "2"):
+        to_relay(f"keyboard desktop 1 0 1 {word}")
+        time.sleep(0.05)
+        got = meta(SPACE)
+        check(f"PC has the keys ({word}): Meta+Space is typed there, frunner hears nothing",
+              (frunner_got(), got), ([], ["key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
+        check(f"PC has the keys ({word}): a Meta tap is the PC's, no F24, no Steam menu",
+              (meta(), len(lines(steam_log))), (["key 125 1", "key 125 0"], menus))
+    to_relay("keyboard desktop 1 0 1 0")
+    time.sleep(0.05)
+    meta(SPACE)
+    check("the 3D mouse off the PC: Meta+Space opens frunner again", frunner_got(), ["toggle keyboard"])
+    to_relay("keyboard steam 1 0 1 1")
+    time.sleep(0.05)
+    meta(SPACE)
+    check("typing to Steam: the word means nothing, Meta+Space is frunner's", frunner_got(), ["toggle keyboard"])
+    to_relay("keyboard desktop")
+    time.sleep(0.05)
+    typed()
     to_relay("keyboard steam")
     time.sleep(0.05)
     typed()

@@ -175,7 +175,9 @@ struct server {
     bool keys_shown;      // the relay was told the screens show (see keys_update)
     bool keys_paused;     // ...and that we're paused ("pause on" from it)
     bool keys_wheel;      // ...and that the 3D mouse's wheel comes here (see keys_update)
+    int keys_pc;          // ...and whether a PC's desktop has the keys, Meta's too (see keys_update)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
+    int mouse_last;       // the panel the 3D mouse was on last, or the one clicked since; -1 none
     // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
     uint32_t spot_until;  // ms; 0 closed
@@ -621,7 +623,7 @@ static void new_decoration(struct wl_listener *l, void *data) {
 static void set_key_remote(struct server *s, int index) {
     if (s->key_remote >= 0 && s->key_remote != index) ft_remote_blur(s->key_remote);
     s->key_remote = index;
-    if (index >= 0) ft_remote_focus(index);
+    if (index >= 0) ft_remote_focus(index), s->mouse_last = index;
 }
 
 // A pointer event on one of the desktop's screens or floating windows, to the seat: the
@@ -799,18 +801,29 @@ static void keys_update(struct server *s) {
     const uint32_t t = now_ms();
     // The fifth word: the 3D mouse's laser is on a panel, so its wheel comes here ("wheel").
     const bool wheel = ft_vr_mouse_screen() >= 0;
+    // The sixth: a remote screen has the typing, with the 3D mouse on it (1), or on no panel since
+    // it was (2: the relay takes that for the PC's while the 3D mouse sleeps). Then Meta and its
+    // combinations are the PC's (Super+Space opens its launcher, not frunner): input-relay.py's
+    // pc_keys. The 3D mouse on another panel, or awake off every panel, gives them back.
+    const int mouse = ft_vr_mouse_panel();
+    if (mouse >= 0) s->mouse_last = mouse;
+    const bool remote = desktop && !spot_open(s) && !ft_vr_app_typing() && s->key_remote >= 0 &&
+                        ft_remote_is(s->key_remote);
+    const int pc = !remote ? 0 : mouse == s->key_remote ? 1 : mouse < 0 && s->mouse_last == s->key_remote ? 2 : 0;
     if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused && wheel == s->keys_wheel &&
-        t - s->relay_sent < 1000)
+        pc == s->keys_pc && t - s->relay_sent < 1000)
         return;
     if (desktop != s->keys_desktop) wlr_log(WLR_INFO, "typing goes to %s", desktop ? "the desktop" : "Steam");
     s->keys_desktop = desktop;
     s->keys_shown = shown;
     s->keys_paused = paused;
     s->keys_wheel = wheel;
+    if (pc != s->keys_pc) wlr_log(WLR_INFO, "Meta goes to %s", pc ? "the PC" : "Frametop");
+    s->keys_pc = pc;
     s->relay_sent = t;
     char msg[40];
-    snprintf(msg, sizeof msg, "keyboard %s %d %d %d", desktop ? "desktop" : "steam", shown ? 1 : 0, paused ? 1 : 0,
-             wheel ? 1 : 0);
+    snprintf(msg, sizeof msg, "keyboard %s %d %d %d %d", desktop ? "desktop" : "steam", shown ? 1 : 0, paused ? 1 : 0,
+             wheel ? 1 : 0, pc);
     relay_send(s, msg);
 }
 
@@ -1638,6 +1651,7 @@ int main(int argc, char **argv) {
     s.controller_click.threshold = 32;
     for (int i = 0; i < MAX_SCREENS; ++i) s.scale[i] = 1;
     s.key_remote = -1;
+    s.mouse_last = -1;
     ft_peer_init(&s.peer);
     s.rate[FT_FOCUSED] = 0, s.rate[FT_IN_VIEW] = 15, s.rate[FT_HIDDEN] = 1;
     s.period_ns = 1000000000LL / 90;

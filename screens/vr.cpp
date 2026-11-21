@@ -6558,6 +6558,12 @@ bool ft_vr_carry_wheel(int notches) {
     return g_mouseDevice != kNone && OurPointer(g_mouseDevice) > 0 && CarryWheel(g_mouseDevice, notches);
 }
 
+int ft_vr_mouse_panel(void) {
+    if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
+    const auto it = g_screens.find(g_mouseScreen);
+    return it != g_screens.end() && it->second.visible ? g_mouseScreen : -1;
+}
+
 int ft_vr_mouse_screen(void) {
     if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
     const auto it = g_screens.find(g_mouseScreen);

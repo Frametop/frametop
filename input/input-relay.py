@@ -1419,6 +1419,7 @@ class Relay:
         self.desktop_until, self.typing_applied = 0.0, None
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
+        self.pc_word = "0"  # ft-screens' "keyboard" sixth word: a PC's desktop has the keys (pc_keys)
         self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1": the tiling keys are its until then
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
         # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
@@ -1746,7 +1747,8 @@ class Relay:
                     self.cancel_talk()  # another modifier with it: a shortcut (Ctrl+Shift+T)
                 self.held.tap = mod if not self.held.modifiers and not self.held.combos else None
                 self.held.tap_code = code
-                if self.held.tap is not None and self.held.talk_code is None and self.tap_action(mod, code)[1] == "dictate_hold":
+                if (self.held.tap is not None and self.held.talk_code is None and self.tap_action(mod, code)[1] == "dictate_hold"
+                        and not (mod == MODIFIERS[KEY_LEFTMETA] and self.pc_keys(now))):
                     # Hold to talk: dictation starts on the press, not the release. The desktop
                     # doesn't get the press (cancel_talk sends it after all for a shortcut), so
                     # live text is typed there while it's held. Steam and games read the keyboard
@@ -1812,6 +1814,12 @@ class Relay:
         log(f"key combination {combo}: {action}")
         return True
 
+    def pc_keys(self, now):
+        """Whether Meta and its combinations are a PC's now: typing goes to a remote display's
+        desktop, and the 3D mouse is on it ("1"), or was last and sleeps ("2"). Super+Space there
+        opens the PC's launcher, not frunner; the 3D mouse moved off it gives Meta back."""
+        return now < self.desktop_until and (self.pc_word == "1" or (self.pc_word == "2" and not self.lease.current))
+
     def combo_for(self, code):
         """The key combination a key's press completes with the modifiers held, and its action:
         (combo, action), the action None when it does nothing now."""
@@ -1825,6 +1833,8 @@ class Relay:
             return combo, None
         if action in TILE_FOCUS_ACTIONS and time.monotonic() >= self.tile_focus_until:
             return combo, None  # no anchored tile has the focus: the desktop's key (KWin's, or a PC's)
+        if MODIFIERS[KEY_LEFTMETA] in self.held.modifiers and self.pc_keys(time.monotonic()):
+            return combo, None  # a PC's desktop has the keys: its Meta combination
         return combo, action
 
     def release_combo(self, code):
@@ -1869,6 +1879,9 @@ class Relay:
         combo, action = self.tap_action(mod, code)
         if action is None or action == "dictate_hold":
             return  # nothing, or hold to talk (key_binding), which started on the press
+        if mod == MODIFIERS[KEY_LEFTMETA] and self.pc_keys(now):
+            log(f"key combination {combo}: the PC's (its desktop has the keys)")
+            return  # the PC's own Meta tap (Windows' Start menu), with no F24 in between
         # The desktop gets a key in between before the release goes there, so the tap isn't one
         # there too: a Meta tap would open Plasma's launcher.
         self.to_screens(KEY_F24, 1)
@@ -2307,13 +2320,15 @@ class Relay:
         the sender's address (empty for an unbound one); pid and uid, the sender's, from the kernel."""
         if cmd == "keyboard":
             # From ft-screens (unbound, no reply): where typing goes, repeated every second.
-            # "keyboard desktop|steam 1|0 1|0 1|0": the third word, whether the screens show;
+            # "keyboard desktop|steam 1|0 1|0 1|0 0|1|2": the third word, whether the screens show;
             # the fourth, whether it's paused, the fifth whether the 3D mouse's laser is on a panel
-            # so ft-screens takes its wheel (an older ft-screens leaves them out).
+            # so ft-screens takes its wheel, the sixth whether a PC's desktop has the keys (pc_keys)
+            # (an older ft-screens leaves them out).
             desktop = len(words) > 1 and words[1] == "desktop" and not self.pause.paused
             self.desktop_until = now + 3.0 if desktop else 0.0
             self.shown_until = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
             self.wheel_until = now + 3.0 if len(words) > 4 and words[4] == "1" else 0.0
+            self.pc_word = words[5] if len(words) > 5 and words[5] in ("1", "2") else "0"
             if uid == os.getuid():
                 self.pause.screens_seen(pid)  # a desktop started while paused hides too
                 if len(words) > 3 and words[3] in ("0", "1"):

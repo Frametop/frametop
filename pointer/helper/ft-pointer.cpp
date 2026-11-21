@@ -3443,12 +3443,12 @@ void Pointer::PickRayOwner(const bool typingSide[2]) {
     const bool shown[2] = {rays[0].Shown(), rays[1].Shown()}, may[2] = {mayPoint(0, typingSide), mayPoint(1, typingSide)};
     // Last used wins (rayowner.h): a hand resting by the keyboard or the mouse can look raised, and
     // took the laser down to the desk a second after the mouse stopped, or from the other hand once
-    // that one rested (user, 2026-11-20). While the laser's up, or the mouse (or another device) was
-    // used after the last ray pinch (lastUsed: not the relay's releases or pulses), only a pinch takes
-    // it. With the hands used last, raising a hand takes it while the pointer's asleep, and the hand
-    // that pinched last takes it back any time (a gaze keeps the pointer up).
+    // that one rested (user, 2026-11-20). With the mouse (or another device) used after the last ray
+    // pinch (lastUsed: not the relay's releases or pulses), only a pinch takes it; with the hands used
+    // last, only the hand that pinched last takes it back by raising (rayown::MayTake).
     const bool otherLast = lastUsed > lastRayPinch;
-    const bool take[2] = {!otherLast && (!active || lastPinchSide == 0), !otherLast && (!active || lastPinchSide == 1)};
+    const bool take[2] = {rayown::MayTake(0, otherLast, active, lastPinchSide),
+                          rayown::MayTake(1, otherLast, active, lastPinchSide)};
     rayOwner.Update(secsOf(fr.tnow), shown, may, rayHid, take);
     ownerChanges(true);
     if (raySide >= 0 && !active && !headsetOff) {  // a wake that was held off (just released): again

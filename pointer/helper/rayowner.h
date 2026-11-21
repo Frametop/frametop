@@ -19,12 +19,10 @@
 //   Last used wins (user, 2026-11-20: "the laser and tracker jumps down to the bottom left ... without
 // my input"): a hand resting at the desk, by the keyboard or on the mouse, can pass fh_ray's raised
 // test, and its ray took the laser from a still mouse, or from the other hand once that one rested.
-// So with take off for a side (the caller's, per side: the mouse was used after the last ray pinch, or
-// the laser is in use and it isn't the hand that pinched last) that side's ray showing takes nothing:
-// not with no owner, not raised while the owner's is down, not at the end of the grace (the owner then
-// goes, and the pointer holds where it was). Only a pinch takes it, as the mouse takes it by moving.
-// The hand that pinched last raised again takes it back, also while the laser's up (a gaze, or the
-// pointer not yet asleep).
+// So with take off for a side (MayTake) that side's ray showing takes nothing: not with no owner, not
+// raised while the owner's is down, not at the end of the grace (the owner then goes, and the pointer
+// holds where it was). Only a pinch takes it, as the mouse takes it by moving. The hand that pinched
+// last raised again takes it back, also while the laser's up (a gaze, or the pointer not yet asleep).
 //
 // Pinch: a pinch on the owner's hand is a ray pinch (its ray brought back if it dropped within the
 // grace). A pinch on the other hand is a ray pinch when that hand's ray is up or can come up: it
@@ -68,6 +66,16 @@ struct Params {
     double lockLead = 0.10;  // aim lock: the frame this long before the begin, without a distance
     double lockOpen = 0.01;  // aim lock: the tips this much further apart than end_m: still open
 };
+
+// Last used wins: may side s's ray, showing, take the pointer (Owner::Update's take)? otherUsedLast:
+// the mouse or another device was used after the last ray pinch; awake: the pointer's up; pinchedLast:
+// the side whose ray pinched last (-1: none yet). After a ray pinch only that hand takes it by raising,
+// awake or asleep: the pointer falling asleep (or a poke letting it go) mustn't hand it to the other
+// hand resting with its ray up (council, 2026-11-21). Before any, raising takes it while it's asleep.
+inline bool MayTake(int s, bool otherUsedLast, bool awake, int pinchedLast) {
+    if (otherUsedLast) return false;
+    return pinchedLast < 0 ? !awake : pinchedLast == s;
+}
 
 // A change of owner: from, to (-1 none), why, and off (the old owner's side may not point: the
 // pointer goes back at once, see rayLeave in ft-pointer.cpp).

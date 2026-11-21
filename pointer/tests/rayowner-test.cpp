@@ -112,6 +112,39 @@ void TestPinchedHandTakesBack() {
     CHECK(o.Side() == 0, "the left raised again takes it back: %d", o.Side());
 }
 
+// The pointer falling asleep (or a poke letting it go) after the left's ray pinch: the right, resting
+// with its ray up all along, takes nothing; the left raised takes it (council, 2026-11-21).
+void TestSleepGivesTheOtherHandNothing() {
+    CHECK(rayown::MayTake(0, false, true, -1) == false && rayown::MayTake(0, false, false, -1),
+          "no pinch yet: raising takes it only while asleep");
+    CHECK(!rayown::MayTake(0, true, false, 0), "the mouse used last: no raise takes it");
+    Owner o;
+    double t = 0;
+    bool shown[2] = {false, true}, awake = true;  // the right by the mouse, passing the raised test
+    const bool may[2] = {true, true};
+    const std::string why[2] = {"palm", "palm"};
+    const int pinchedLast = 0;
+    auto run = [&](double secs) {
+        for (const double end = t + secs - 1e-9; t < end; t += kDt) {
+            const bool take[2] = {rayown::MayTake(0, false, awake, pinchedLast),
+                                  rayown::MayTake(1, false, awake, pinchedLast)};
+            o.Update(t, shown, may, why, take);
+        }
+    };
+    shown[0] = true;
+    run(0.1);
+    CHECK(o.Side() == 0, "the left (pinched last) raised takes it: %d", o.Side());
+    shown[0] = false;
+    run(1.0);
+    CHECK(o.Side() == -1, "the left down past the grace: to nobody: %d", o.Side());
+    awake = false;  // the helper's releasePointer: "hand ray gone", or a hand touching a panel
+    run(1.0);
+    CHECK(o.Side() == -1, "asleep: the right's ray, up all along, takes nothing: %d", o.Side());
+    shown[0] = true;
+    run(0.1);
+    CHECK(o.Side() == 0, "the left raised takes it back: %d", o.Side());
+}
+
 void TestFirstRaised() {
     World w;
     w.Run(0.2);
@@ -425,6 +458,7 @@ void TestShowForPinch() {
 int main() {
     TestRestingHandTakesNothing();
     TestPinchedHandTakesBack();
+    TestSleepGivesTheOtherHandNothing();
     TestFirstRaised();
     TestBriefDropKeepsTheOwner();
     TestGraceRunsOut();

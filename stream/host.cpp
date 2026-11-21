@@ -276,7 +276,7 @@ bool Client::Pair(WebApi *api) {
     char pin[5];
     std::snprintf(pin, sizeof pin, "%04u", rd() % 10000);
     if (!api) {
-        std::printf("PIN %s: enter it in the host's Web UI (PIN pairing), with the device name %s\n", pin, id.c_str());
+        std::printf("PIN %s: enter it on the host (its Web UI's PIN pairing), with the device name %s\n", pin, id.c_str());
         std::fflush(stdout);
         if (gs_pair(&server, pin) != GS_OK) return std::fprintf(stderr, "pairing failed: %s\n", gs_error ? gs_error : "?"), false;
         std::printf("paired. Now allow it to launch apps and use the mouse and keyboard in the Web UI (Clients).\n");
@@ -289,13 +289,7 @@ bool Client::Pair(WebApi *api) {
     std::atomic<int> result{GS_FAILED};
     std::atomic<bool> done{false};
     std::thread pairing([&] { result = gs_pair(&server, pin), done = true; });
-    bool given = false;
-    for (int i = 0; i < 40 && !given && !done; ++i) {
-        usleep(250'000);
-        const nlohmann::json body = {{"pin", pin}, {"name", id}};
-        nlohmann::json r;
-        given = api->Call("POST", "/api/pin", &body, &r) == 200 && r.is_object() && r.value("status", false);
-    }
+    const bool given = GivePin(*api, pin, id, done);
     if (!given) {
         std::fprintf(stderr, "the host took no PIN for this pairing (token scopes?)\n");
         std::fflush(stderr);
@@ -314,18 +308,50 @@ bool Client::Pair(WebApi *api) {
     return true;
 }
 
-// Sunshine: gs_pair's request waits on the host until it's approved with its PIN. The host
-// lists waiting requests with an id (GET /api/pin); this one is libgamestream's device name
-// from this end's address.
+// The PIN for the pairing gs_pair is waiting on, through the Web UI API (POST /api/pin with the
+// PIN and the client's name), tried every 250 ms for 10 s: the host takes it only once gs_pair's
+// request has reached it. True once it did; false if it never did, or gs_pair ended first.
+bool Client::GivePin(WebApi &api, const char *pin, const std::string &name, const std::atomic<bool> &done) {
+    for (int i = 0; i < 40 && !done; ++i) {
+        usleep(250'000);
+        const nlohmann::json body = {{"pin", pin}, {"name", name}};
+        nlohmann::json r;
+        if (api.Call("POST", "/api/pin", &body, &r) == 200 && r.is_object() && r.value("status", false)) return true;
+    }
+    return false;
+}
+
+// Sunshine: gs_pair's request waits on the host until it's approved with its PIN. Sunshine's
+// pre-releases list waiting requests with an id (GET /api/pin); this one is libgamestream's
+// device name from this end's address. Its releases (2025.924 and before) have no such list:
+// they take the PIN and a name as Vibepollo does (issue 107: an unmodified Sunshine).
 bool Client::PairByLogin(WebApi &api, char *pin) {
     // The login first: a request left waiting by a failed try blocks this client's next one
     // until the host drops it.
     nlohmann::json r;
     const long first = api.Call("GET", "/api/pin", nullptr, &r);
     if (first == 401) return std::fprintf(stderr, "wrong user name or password\n"), false;
-    if (first != 200) return std::fprintf(stderr, "the host's Web UI answered %ld\n", first), false;
     std::atomic<int> result{GS_FAILED};
     std::atomic<bool> done{false};
+    if (first == 400 || first == 404 || first == 405) {  // a release: no list of requests
+        // Its answer to a path it doesn't have comes before any login check, so check it here.
+        const long login = api.Call("GET", "/api/clients/list", nullptr, &r);
+        if (login == 401) return std::fprintf(stderr, "wrong user name or password\n"), false;
+        if (login != 200) return std::fprintf(stderr, "the host's Web UI answered %ld\n", login), false;
+        std::thread pairing([&] { result = gs_pair(&server, pin), done = true; });
+        const bool given = GivePin(api, pin, id, done);
+        if (!given && !done) {
+            std::fprintf(stderr, "the host took no PIN for this pairing\n");
+            std::fflush(stderr);
+            std::_Exit(1);  // gs_pair is still waiting
+        }
+        pairing.join();
+        DropConnection();
+        if (result != GS_OK) return std::fprintf(stderr, "pairing failed: %s\n", gs_error ? gs_error : "?"), false;
+        std::printf("paired as %s\n", id.c_str());
+        return true;
+    }
+    if (first != 200) return std::fprintf(stderr, "the host's Web UI answered %ld\n", first), false;
     std::thread pairing([&] { result = gs_pair(&server, pin), done = true; });
     const std::string me = LocalAddress(host, port ? port : kGameStreamPort);
     bool given = false;

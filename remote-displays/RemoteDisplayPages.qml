@@ -43,8 +43,10 @@ Item {
     // ---------------------------------------------------------------- dialogs
     // A host: picked from the computers found on the network (or typed in), then a sign-in
     // with its Web UI login: Vibepollo gives Frametop its own API token; Sunshine (a Mac) has
-    // none, so the login pairs the displays picked next and is then forgotten. Also signs in
-    // again to one already added (openFor).
+    // none, so the login pairs the displays picked next and is then forgotten. A host with no
+    // Web UI login to give (any Moonlight host: an unmodified Sunshine, a USB KVM) is added with
+    // "Pair with a PIN": each display then pairs with a PIN shown here, typed in on the host
+    // (pinDialog). Also signs in again to one already added (openFor).
     Kirigami.PromptDialog {
         id: hostDialog
         objectName: "hostDialog"
@@ -58,6 +60,7 @@ Item {
         property bool searching: false
         property bool working: false
         property string error: ""
+        property bool byPin: false  // no sign-in: its displays pair with a PIN (issue 107)
         property int picked: -1  // index in found; found.length: typed in
         readonly property bool typed: picked === found.length
         readonly property string pickedName: existing ? fixedName
@@ -65,27 +68,29 @@ Item {
         readonly property string pickedAddress: existing ? fixedAddress
             : typed ? otherAddress.text.trim() : picked >= 0 ? found[picked].address : ""
         readonly property string pickedDongle: existing ? fixedDongle : !typed && picked >= 0 ? found[picked].dongle : ""
-        readonly property bool ok: pickedName !== "" && pickedAddress !== "" && user.text !== "" && password.text !== "" && !working
+        readonly property bool ok: pickedName !== "" && pickedAddress !== "" && !working
+                                   && (byPin || (user.text !== "" && password.text !== ""))
         function look() {
             searching = true
             backend.discoverHosts()
         }
         function openNew() {
-            existing = false; found = []; picked = -1; error = ""; working = false
+            existing = false; found = []; picked = -1; error = ""; working = false; byPin = false
             otherName.text = ""; otherAddress.text = ""; password.text = ""
             open()
             look()
         }
         function openFor(h) {
             existing = true; fixedName = h.name; fixedAddress = h.address; fixedDongle = h.direct.split(",")[0].trim()
-            error = ""; working = false; password.text = ""
+            error = ""; working = false; password.text = ""; byPin = false
             open()
             user.forceActiveFocus()
         }
         function accept() {
             if (!ok) return
             working = true; error = ""
-            backend.signIn(pickedName, pickedAddress, pickedDongle, user.text, password.text)
+            if (byPin) backend.addPinHost(pickedName, pickedAddress, pickedDongle)
+            else backend.signIn(pickedName, pickedAddress, pickedDongle, user.text, password.text)
         }
         Connections {
             target: backend
@@ -106,7 +111,7 @@ Item {
                 }
                 password.text = ""
                 hostDialog.close()
-                root.showPassiveNotification("Signed in to " + name)
+                root.showPassiveNotification((hostDialog.byPin ? "Added " : "Signed in to ") + name)
                 const h = backend.hosts.find(x => x.name === name)
                 if (h && (!hostDialog.existing || h.kind === "sunshine")) displayDialog.openFor(h)
             }
@@ -150,14 +155,24 @@ Item {
                 Controls.TextField { id: otherAddress; Kirigami.FormData.label: "Address:"; placeholderText: "192.168.1.20" }
                 Controls.TextField { id: otherName; Kirigami.FormData.label: "Name:"; placeholderText: "My PC"; maximumLength: 40 }
             }
+            Controls.CheckBox {
+                objectName: "pinPairing"
+                visible: !hostDialog.existing
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                text: "Pair with a PIN instead (no sign-in)"
+                checked: hostDialog.byPin
+                onToggled: hostDialog.byPin = checked
+            }
             Controls.Label {
                 Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.largeSpacing
                 wrapMode: Text.Wrap
-                text: "Sign in with its Vibepollo or Sunshine Web UI user name and password. From Vibepollo, Frametop keeps a token that can only pair its displays, set their permissions and list the monitors. Sunshine has no tokens: the login pairs the displays you pick next. The password isn't kept."
+                text: hostDialog.byPin
+                      ? "For any host that pairs Moonlight clients by PIN, such as an unmodified Sunshine. Each display you add shows a PIN to type in on the host: its Web UI's PIN page, or its own pairing page. Frametop can't list its monitors or set its permissions."
+                      : "Sign in with its Vibepollo or Sunshine Web UI user name and password. From Vibepollo, Frametop keeps a token that can only pair its displays, set their permissions and list the monitors. Sunshine has no tokens: the login pairs the displays you pick next. The password isn't kept."
             }
             Kirigami.FormLayout {
                 Layout.fillWidth: true
+                visible: !hostDialog.byPin
                 Controls.TextField { id: user; Kirigami.FormData.label: "User name:" }
                 Controls.TextField {
                     id: password
@@ -176,7 +191,7 @@ Item {
             }
         }
         customFooterActions: [
-            Kirigami.Action { text: "Sign in"; icon.name: "go-next"; enabled: hostDialog.ok; onTriggered: hostDialog.accept() },
+            Kirigami.Action { text: hostDialog.byPin ? "Add" : "Sign in"; icon.name: "go-next"; enabled: hostDialog.ok; onTriggered: hostDialog.accept() },
             Kirigami.Action { text: "Cancel"; icon.name: "dialog-cancel"; onTriggered: { password.text = ""; hostDialog.close() } }
         ]
     }
@@ -283,12 +298,17 @@ Item {
             pairing = true
             close()
             const fps = displayRate.currentValue, kbps = Math.round(displayBitrate.value * 1000)
-            for (const m of monitors)
-                if (chosen[m.key]) backend.addDisplay(host, m.app, m.name, m.width, m.height, fps, kbps, m.port)
-            if (virtualChosen) {
-                const r = backend.resolutions[displayRes.currentIndex]
-                backend.addDisplay(host, "monitor", "Virtual", r.width, r.height, fps, kbps, 0)
+            const r = backend.resolutions[displayRes.currentIndex]
+            for (const m of monitors) {
+                if (!chosen[m.key]) continue
+                if (kind === "pin") {  // its app by the name typed, at the size picked
+                    const app = pinApp.text.trim() || m.app
+                    backend.addDisplay(host, app, app, r.width, r.height, fps, kbps, 0)
+                } else {
+                    backend.addDisplay(host, m.app, m.name, m.width, m.height, fps, kbps, m.port)
+                }
             }
+            if (virtualChosen) backend.addDisplay(host, "monitor", "Virtual", r.width, r.height, fps, kbps, 0)
             if (kind === "sunshine") backend.forgetLogin(address)  // queued with each display
         }
         function later() {
@@ -330,8 +350,21 @@ Item {
                     onToggled: displayDialog.tick(modelData.key, checked)
                 }
             }
+            Kirigami.FormLayout {
+                Layout.fillWidth: true
+                visible: displayDialog.kind === "pin" && displayDialog.count > 0
+                Controls.TextField {
+                    id: pinApp
+                    objectName: "pinApp"
+                    Kirigami.FormData.label: "Its app:"
+                    text: "Desktop"
+                    // ft-layout's rule for an app's name (no spaces).
+                    validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._:-]{1,40}/ }
+                }
+            }
             Controls.CheckBox {
-                visible: !displayDialog.loading && displayDialog.kind !== "sunshine"  // Sunshine can't make them on a Mac
+                // Sunshine can't make them on a Mac, nor a host paired by PIN without its API.
+                visible: !displayDialog.loading && displayDialog.kind !== "sunshine" && displayDialog.kind !== "pin"
                 text: "A virtual display (the host makes a new monitor at the size you pick)"
                 checked: displayDialog.virtualChosen
                 onToggled: displayDialog.virtualChosen = checked
@@ -341,8 +374,8 @@ Item {
                 visible: displayDialog.count > 0
                 Controls.ComboBox {
                     id: displayRes
-                    Kirigami.FormData.label: "Virtual display:"
-                    visible: displayDialog.virtualChosen
+                    Kirigami.FormData.label: displayDialog.kind === "pin" ? "Stream size:" : "Virtual display:"
+                    visible: displayDialog.virtualChosen || displayDialog.kind === "pin"
                     model: backend.resolutions
                     textRole: "text"
                     Component.onCompleted: currentIndex = Math.max(0, backend.resolutions.findIndex(r => r.width === 2560 && r.height === 1440))
@@ -370,6 +403,45 @@ Item {
                 onTriggered: displayDialog.accept()
             },
             Kirigami.Action { text: "Later"; icon.name: "dialog-cancel"; onTriggered: displayDialog.later() }
+        ]
+    }
+
+    // A PIN pairing (a host added with "Pair with a PIN"): the PIN to type in on the host, shown
+    // while ft-layout waits for it (3 minutes at most). It closes once the pairing ends either way;
+    // the page's message says how it went.
+    Kirigami.PromptDialog {
+        id: pinDialog
+        objectName: "pinDialog"
+        title: what
+        standardButtons: Kirigami.Dialog.NoButton
+        property string what: ""
+        property string pin: ""
+        Connections {
+            target: backend
+            function onPairingPin(label, pin) {
+                pinDialog.what = label; pinDialog.pin = pin
+                pinDialog.open()
+            }
+            function onBusyChanged() {
+                if (pinDialog.opened && backend.busy !== pinDialog.what) pinDialog.close()
+            }
+        }
+        ColumnLayout {
+            Controls.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Type this PIN in on the host: its Web UI's PIN page (Sunshine: PIN), or its own pairing page."
+            }
+            Kirigami.Heading {
+                objectName: "pinText"
+                level: 1
+                text: pinDialog.pin
+                Layout.alignment: Qt.AlignHCenter
+            }
+            Controls.BusyIndicator { running: pinDialog.opened; Layout.alignment: Qt.AlignHCenter }
+        }
+        customFooterActions: [
+            Kirigami.Action { text: "Cancel"; icon.name: "dialog-cancel"; onTriggered: backend.cancelPairing() }
         ]
     }
 
@@ -476,7 +548,7 @@ Item {
                                     onClicked: hostDialog.openFor(hostCard.modelData)
                                 }
                                 Controls.ToolButton {
-                                    visible: hostCard.modelData.hasToken && !hostCard.sunshine
+                                    visible: hostCard.modelData.hasToken && !hostCard.sunshine && hostCard.modelData.kind !== "pin"
                                     icon.name: "unlock"
                                     display: Controls.AbstractButton.IconOnly
                                     text: "Sign in again"

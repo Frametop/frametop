@@ -65,9 +65,10 @@ struct Client {
     // Pairs this client: with the token, by sending its own PIN through the API and then
     // granting it launch, mouse, keyboard and clipboard; with the login, by approving its own pairing
     // request with its PIN (Sunshine has no permissions to grant); with neither, by printing
-    // the PIN to type in.
+    // the PIN to type in (ft-stream pair --pin: a host with no Web UI login to give).
     bool Pair(WebApi *api);
     bool PairByLogin(WebApi &api, char *pin);  // gs_pair takes a char *
+    bool GivePin(WebApi &api, const char *pin, const std::string &name, const std::atomic<bool> &done);
     bool GrantByName(WebApi &api);
     bool Unpair();
     // The host's clipboard text, or PNG image (Vibepollo's /actions/clipboard): set to *data, or

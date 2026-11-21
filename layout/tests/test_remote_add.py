@@ -1,11 +1,13 @@
-"""ft-layout remote add, without a headset or a host: a bad option fails before any pairing, and a
-client paired for a display that then isn't saved is unpaired. ft-stream is a fake that records."""
+"""ft-layout remote add, without a headset or a host: a bad option fails before any pairing, a
+client paired for a display that then isn't saved is unpaired, and --pin pairs with a PIN typed in
+on the host (issue 107). ft-stream is a fake that records."""
 import importlib.util
 import io
 import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 
 
@@ -35,7 +37,15 @@ class RemoteAdd(unittest.TestCase):
         def no_screens():
             raise self.m.NoAnswer("ft-screens isn't running")
 
+        self.live_code = 0
+
+        def fake_live(*args, timeout=60):  # --pin: what ft-stream prints goes on as it comes
+            self.calls.append(args)
+            print("PIN 0421: enter it on the host (its Web UI's PIN pairing), with the device name x", flush=True)
+            return self.live_code, "PIN 0421: ...\npaired.\n", ""
+
         self.m.run_stream = fake_stream
+        self.m.run_stream_live = fake_live
         self.m.screens_socket = no_screens
         self.m.save_layout({"hosts": []})
 
@@ -90,6 +100,37 @@ class RemoteAdd(unittest.TestCase):
             self.m.remote_command(["add", "oma7", "192.0.2.30", "Desktop", "--port", "48000"])
         self.assertEqual(self.calls[1][:2], ("unpair", "192.0.2.30:48000"))
         self.assertIn("unpairing frametop-oma7-desktop from 192.0.2.30 failed too: no host", out.getvalue())
+
+    def test_pin_pairing_says_the_pin_and_saves_a_pin_host(self):
+        out = self.add("--pin", "--size", "1920x1080")
+        self.assertEqual(self.calls, [("pair", "192.0.2.30", "--id", "frametop-oma7-desktop", "--pin")])
+        self.assertIn("PIN 0421", out)
+        host = self.hosts()[0]
+        self.assertEqual((host["kind"], host["displays"][0]["app"]), ("pin", "Desktop"))
+
+    def test_pin_and_login_together_never_pair(self):
+        with self.assertRaisesRegex(RuntimeError, "--login or --pin"):
+            self.add("--pin", "--login")
+        self.assertEqual(self.calls, [])
+
+    def test_a_pin_never_typed_in_is_said(self):
+        self.live_code = -9
+        with self.assertRaisesRegex(RuntimeError, "no PIN typed in on the host within 3 minutes"):
+            self.add("--pin")
+        self.assertEqual(self.hosts(), [])
+
+    def test_a_pin_host_answers_on_its_gamestream_port(self):
+        tried = []
+
+        class Refused:
+            def __init__(self, address, timeout):
+                tried.append(address)
+                raise OSError("refused")
+
+        with mock.patch.object(self.m.socket, "create_connection", Refused):  # the real module's: put back
+            self.m.host_answers({"address": "192.0.2.30", "kind": "pin", "displays": [{}]})
+            self.m.host_answers({"address": "192.0.2.31", "displays": [{}]})
+        self.assertEqual(tried, [("192.0.2.30", 47989), ("192.0.2.31", self.m.WEB_UI_PORT)])
 
 
 if __name__ == "__main__":

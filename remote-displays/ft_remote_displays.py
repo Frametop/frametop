@@ -14,7 +14,9 @@ the dev container:
     Plain Sunshine (a Mac: host/macos runs one instance per display, each on its own port) has
     no tokens: the login is kept in memory only until the displays picked right after signing
     in are paired with it (ft-layout remote add --login), then forgotten. Adding more later
-    signs in again.
+    signs in again. A host added with "Pair with a PIN" (issue 107: any other Moonlight host)
+    has no sign-in at all: each display pairs with a PIN shown here and typed in on the host
+    (ft-layout remote add --pin; pairingPin), and streams the host's app by name.
   - App windows, per host: the switch signs in to the Vibepollo on it that shares its apps'
     windows (a Windows PC's own, a Linux PC's second one in its Hyprland session), keeps that
     one's token (ADDRESS-PORT.token) and sets the host's "windows" port in the layout, which is
@@ -60,6 +62,10 @@ FT_SCREENS = "\0ft_screens"
 # A Mac's Sunshine instances, one per display (host/macos): HTTP ports 47989 + 100*N.
 SUNSHINE_PORTS = [47989 + 100 * k for k in range(8)]
 STREAM_RATES = [30, 60, 72, 90, 120]
+# A host paired by PIN: its "Desktop" app (Sunshine's and Moonlight hosts' usual name for the
+# whole desktop), at 1920x1080 to start with; the app's name can be changed before adding it.
+PIN_DESKTOP = {"app": "Desktop", "port": 0, "key": "Desktop", "name": "Desktop", "width": 1920, "height": 1080,
+               "primary": True, "active": True, "virtual": False}
 # A host's name: a Mac's is often "Name's MacBook" (straight or curly apostrophe). It goes to
 # ft-layout as an argument and into the layout and panel labels, never through a shell.
 NAME_RE = r"[A-Za-z0-9][A-Za-z0-9 ._'’-]{0,39}"
@@ -97,6 +103,7 @@ class Backend(QObject):
     dongleFound = Signal(str, str, str)  # a host's name, its dongle's address ("" none), what happened
     hostsFound = Signal("QVariantList")  # computers on the network: [{name, address, dongle, added}]
     signedIn = Signal(str, bool, str)  # a host's name, whether it worked, what went wrong
+    pairingPin = Signal(str, str)  # what's being paired (ft-layout's run label), the PIN to type in on the host
     _signInDone = Signal(str, str, str, str, str, str, str)  # name, address, dongle, token, pin, kind, error
     appWindowsSet = Signal(str, bool, str)  # a host's name, whether it worked, what went wrong
     _appWindowsDone = Signal(str, str, int, str, str, str)  # name, address, port, token, pin, error
@@ -115,6 +122,8 @@ class Backend(QObject):
         self._online = {}   # host address -> True/False (None: not checked yet)
         self._queue = []    # ft-layout runs waiting their turn: (label, args, stdin)
         self._proc = None
+        self._out = []      # what the running ft-layout said so far (a PIN to show comes early)
+        self._pin_said = False
         self._busy = ""
         self._logins = {}   # Sunshine host address -> "USER\nPASSWORD\n", until its displays are paired
         self._reached.connect(self._host_reached, Qt.QueuedConnection)
@@ -238,7 +247,8 @@ class Backend(QObject):
             address = h.get("address", "")
             sunshine = h.get("kind") == "sunshine"
             out.append({"name": h.get("name", ""), "address": address, "kind": h.get("kind", "vibepollo"),
-                        "hasToken": address in self._logins if sunshine
+                        # A host paired by PIN needs no sign-in: it's always ready for another display.
+                        "hasToken": True if h.get("kind") == "pin" else address in self._logins if sunshine
                         else os.path.exists(ft_hostapi.token_path(address)),
                         "online": self._online.get(address), "route": h.get("route", "auto"),
                         "direct": ", ".join(h.get("direct", [])), "mic": bool(h.get("mic")),
@@ -272,13 +282,9 @@ class Backend(QObject):
         without tokens is plain Sunshine: the login is checked, and kept in memory for pairing
         the displays picked next."""
         name, address, dongle = " ".join(name.split()), address.strip(), dongle.strip()
-        if not re.fullmatch(NAME_RE, name):
-            return self.signedIn.emit(name, False, "A host's name needs 1 to 40 letters, digits, spaces, dots, dashes or apostrophes")
-        if not re.fullmatch(r"[A-Za-z0-9.:-]{1,64}", address) or (dongle and not re.fullmatch(r"[0-9.]{7,15}", dongle)):
-            return self.signedIn.emit(name, False, "The address is a host name or an IP address")
-        layout = ft_layout.load_layout()
-        if any(h.get("name") == name and h.get("address") != address for h in layout.get("hosts", [])):
-            return self.signedIn.emit(name, False, f"There's already a host called {name}")
+        problem = self._host_problem(name, address, dongle)
+        if problem:
+            return self.signedIn.emit(name, False, problem)
 
         def work():
             try:
@@ -291,17 +297,40 @@ class Backend(QObject):
             self._signInDone.emit(name, address, dongle, token, pin, kind, "")
         threading.Thread(target=work, daemon=True).start()
 
+    @staticmethod
+    def _host_problem(name, address, dongle):
+        """Why a new host can't be added under that name and address, or ""."""
+        if not re.fullmatch(NAME_RE, name):
+            return "A host's name needs 1 to 40 letters, digits, spaces, dots, dashes or apostrophes"
+        if not re.fullmatch(r"[A-Za-z0-9.:-]{1,64}", address) or (dongle and not re.fullmatch(r"[0-9.]{7,15}", dongle)):
+            return "The address is a host name or an IP address"
+        if any(h.get("name") == name and h.get("address") != address for h in ft_layout.load_layout().get("hosts", [])):
+            return f"There's already a host called {name}"
+        return ""
+
+    @Slot(str, str, str)
+    def addPinHost(self, name, address, dongle):
+        """A host paired by PIN, with no Web UI sign-in (issue 107: an unmodified Sunshine, or
+        another Moonlight host such as a USB KVM): each display's client is paired with a PIN
+        Frametop shows (pairingPin) and you type in on the host. Answer: signedIn."""
+        name, address, dongle = " ".join(name.split()), address.strip(), dongle.strip()
+        problem = self._host_problem(name, address, dongle)
+        if problem:
+            return self.signedIn.emit(name, False, problem)
+        self._sign_in_done(name, address, dongle, "", "", "pin", "")
+
     def _sign_in_done(self, name, address, dongle, token, pin, kind, error):
         if error:
             return self.signedIn.emit(name, False, error)
-        ft_hostsignin.keep(address, token, pin)
+        if kind != "pin":
+            ft_hostsignin.keep(address, token, pin)
         layout = ft_layout.load_layout()
         host = next((h for h in layout.setdefault("hosts", []) if h.get("address") == address), None)
         if host is None:
             host = {"name": name, "address": address, "displays": []}
             layout["hosts"].append(host)
-        if kind == "sunshine":
-            host["kind"] = "sunshine"
+        if kind in ("sunshine", "pin"):
+            host["kind"] = kind
         else:
             host.pop("kind", None)
         if dongle and dongle not in host.get("direct", []):
@@ -482,6 +511,8 @@ class Backend(QObject):
 
         def work():
             monitors, error = [], ""
+            if host.get("kind") == "pin":  # no API to list them: the host's desktop, by its app's name
+                return self.monitorsReady.emit(address, [dict(PIN_DESKTOP)], "")
             if host.get("kind") == "sunshine":
                 monitors = self._sunshine_monitors(address)
                 return self.monitorsReady.emit(address, monitors, "" if monitors else "no Sunshine instance answers")
@@ -518,6 +549,9 @@ class Backend(QObject):
         args = ["remote", "add", host, h["address"], app, "--label", label, "--size", f"{width}x{height}",
                 "--fps", str(fps), "--bitrate", str(bitrate)]
         login = None
+        if h.get("kind") == "pin":
+            args.append("--pin")
+            return self._run(f"Pairing {label} with {host}", *args)
         if port:
             login = self._logins.get(h["address"])
             if login is None:
@@ -570,6 +604,12 @@ class Backend(QObject):
     def removeDisplay(self, display_id):
         self._run("Removing the display", "remote", "remove", display_id)
 
+    @Slot()
+    def cancelPairing(self):
+        """Stops a PIN pairing that's waiting for its PIN (ft-layout remote add --pin)."""
+        if self._proc is not None and self._busy.startswith("Pairing "):
+            self._proc.kill()
+
     # --- ft-layout on the host, one at a time ---
     def _run(self, label, *args, stdin=None):
         self._queue.append((label, args, stdin))
@@ -586,14 +626,25 @@ class Backend(QObject):
         proc.setProcessChannelMode(QProcess.MergedChannels)
         argv = host_command(os.path.abspath(FT_LAYOUT), *args)
         proc.finished.connect(lambda code, _status: self._done(proc, label, code))
+        proc.readyReadStandardOutput.connect(lambda: self._said(proc, label))
         self._proc = proc
+        self._out, self._pin_said = [], False
         proc.start(argv[0], argv[1:])
         if stdin is not None:  # a Sunshine login for ft-layout remote add --login
             proc.write(stdin.encode())
         proc.closeWriteChannel()
 
+    def _said(self, proc, label):
+        """ft-layout's output as it comes: a PIN to type in on the host shows at once."""
+        self._out.append(bytes(proc.readAllStandardOutput()).decode(errors="replace"))
+        m = None if self._pin_said else re.search(r"^PIN (\d{4}):", "".join(self._out), re.M)
+        if m:
+            self._pin_said = True
+            self.pairingPin.emit(label, m.group(1))
+
     def _done(self, proc, label, code):
-        out = bytes(proc.readAllStandardOutput()).decode(errors="replace").strip()
+        self._said(proc, label)
+        out = "".join(self._out).strip()
         self._proc = None
         self._busy = ""
         self.busyChanged.emit()

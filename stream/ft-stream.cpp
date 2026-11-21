@@ -6,9 +6,10 @@
 // display is its own client with its own certificate (--id), because Vibepollo ties a Remote
 // Monitor to the client that opened it, one stream per client.
 //
-//   ft-stream pair HOST --id NAME [--token FILE | --login]
+//   ft-stream pair HOST --id NAME [--token FILE | --login | --pin]
 //                    (pairs with the host's API token, with its Web UI login read from stdin as
-//                    two lines, user name and password (Sunshine), or with a PIN typed in there)
+//                    two lines, user name and password (Sunshine), or with a PIN typed in there:
+//                    --pin, or with no token, prints "PIN NNNN: ..." and waits for it)
 //   ft-stream grant HOST --id NAME [--token FILE]    (permissions for a client paired by PIN)
 //   ft-stream unpair HOST --id NAME
 //   ft-stream monitors HOST [--token FILE]           (the host's monitors, as Vibepollo lists them)
@@ -1116,13 +1117,14 @@ int main(int argc, char **argv) {
     if (!SplitPort(&host, &port)) return std::fprintf(stderr, "bad port in %s\n", argv[2]), 2;
     std::string id, app = "primary", tokenFile;
     int width = 2560, height = 1440, fps = 60, bitrate = 0, fd = -1;
-    bool login = false;
+    bool login = false, pinOnly = false;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : "";
         if (a == "--id") id = v, ++i;
         else if (a == "--token") tokenFile = v, ++i;
         else if (a == "--login") login = true;
+        else if (a == "--pin") pinOnly = true;
         else if (a == "--app") app = v, ++i;
         else if (a == "--size") std::sscanf(v, "%dx%d", &width, &height), ++i;
         else if (a == "--fps") fps = std::atoi(v), ++i;
@@ -1135,8 +1137,10 @@ int main(int argc, char **argv) {
     const std::string shared = TokenFile(host);
     if (tokenFile.empty()) tokenFile = TokenFile(host, port);
     WebApi api;
-    const bool haveToken =
-        login ? api.LoadLogin(host, port, stdin) : api.Load(host, tokenFile, tokenFile == shared ? 0 : port);
+    if (pinOnly && (login || cmd != "pair")) return std::fprintf(stderr, "--pin: pair only, without --login\n"), 2;
+    // --pin: a PIN the user types in on the host, whatever token is kept (issue 107).
+    const bool haveToken = !pinOnly &&
+        (login ? api.LoadLogin(host, port, stdin) : api.Load(host, tokenFile, tokenFile == shared ? 0 : port));
     if (login && !haveToken) return std::fprintf(stderr, "--login: no user name and password on stdin\n"), 2;
     g_pin = api.pin;
     if (cmd == "monitors") {

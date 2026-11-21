@@ -108,10 +108,12 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout remote list              the remote displays, their numbers and their streams' state
   ft-layout remote monitors ADDRESS  the host's displays (Vibepollo's /api/display-devices, JSON)
   ft-layout remote add HOST ADDRESS APP [--size WxH] [--fps F] [--bitrate KBPS] [--label TEXT]
-                     [--port PORT] [--login]
+                     [--port PORT] [--login | --pin]
                                      a display of a host (pairs its client with the host's token
                                      first, or with --login, with the Web UI login read from stdin
-                                     as two lines: a Sunshine instance on PORT) -> its id
+                                     as two lines: a Sunshine instance on PORT, or with --pin, a
+                                     PIN printed as "PIN NNNN: ..." to type in on the host, which
+                                     it waits up to 3 minutes for: any Moonlight host) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M ...
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
                              input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off
@@ -158,6 +160,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 LAYOUT_PATH = os.path.expanduser("~/.config/frametop-layout.json")
@@ -1076,11 +1079,14 @@ def place_remote(sock, n, d, t, eye, heading):
 
 def host_answers(host, timeout=1.5):
     """Whether a host answers, at its address or its Steam Link dongle's (as its route allows):
-    Vibepollo on its Web UI port, Sunshine instances on any of their displays' ports."""
+    Vibepollo on its Web UI port, Sunshine instances on any of their displays' ports, a host
+    paired by PIN on its GameStream port."""
     route = host.get("route", "auto")
     addresses = ([] if route == "dongle" else [host.get("address")]) + \
         ([] if route == "network" else list(host.get("direct", [])))
-    ports = sorted({int(d["port"]) for d in host.get("displays", []) if d.get("port")}) or [WEB_UI_PORT]
+    # A host paired by PIN may have no Web UI (issue 107): its GameStream port, then.
+    ports = sorted({int(d["port"]) for d in host.get("displays", []) if d.get("port")}) or \
+        [GAMESTREAM_PORT if host.get("kind") == "pin" else WEB_UI_PORT]
     for address in filter(None, addresses):
         for port in ports:
             try:
@@ -1190,6 +1196,34 @@ def run_stream(*args, timeout=60, stdin=None):
     return r.returncode, r.stdout, r.stderr
 
 
+PIN_PAIR_S = 180  # remote add --pin: how long the PIN waits to be typed in on the host
+
+
+def run_stream_live(*args, timeout=PIN_PAIR_S):
+    """run_stream, but each line ft-stream prints goes on to our stdout as it comes: a PIN to
+    type in on the host ("PIN NNNN: ...") is seen while ft-stream waits for it. Killed after
+    `timeout` (exit -9)."""
+    cmd = [STREAM, *args]
+    if not in_container():
+        cmd = [os.path.join(REPO, "scripts", "in-box"), *cmd]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True)
+    timer = threading.Timer(timeout, proc.kill)
+    timer.start()
+    err = []
+    reader = threading.Thread(target=lambda: err.append(proc.stderr.read()), daemon=True)
+    reader.start()
+    out = []
+    try:
+        for line in proc.stdout:
+            out.append(line)
+            print(line, end="", flush=True)
+        proc.wait()
+    finally:
+        timer.cancel()
+    reader.join(2)
+    return proc.returncode, "".join(out), "".join(err)
+
+
 def slug(text):
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "display"
 
@@ -1227,11 +1261,13 @@ def start_remotes_now(layout, only):
         log(f"not placed now: {e}")
 
 
-def remote_add_save(layout, host_name, address, port, d):
-    """remote add's new display d, saved under its host (added when it's new)."""
+def remote_add_save(layout, host_name, address, port, d, kind=None):
+    """remote add's new display d, saved under its host (added when it's new, as `kind`)."""
     host = next((h for h in layout.setdefault("hosts", []) if h.get("name") == host_name), None)
     if host is None:
         host = {"name": host_name, "address": address, "displays": []}
+        if kind:
+            host["kind"] = kind
         layout["hosts"].append(host)
     host["address"] = address
     if port:
@@ -1359,12 +1395,13 @@ def remote_command(args):
         host_name, address, app = args[1], args[2], args[3]
         rest = args[4:]
         login = "--login" in rest  # the Web UI login on stdin: a Sunshine instance's pairing
-        rest = [a for a in rest if a != "--login"]
+        pin = "--pin" in rest  # a PIN typed in on the host: any Moonlight host (issue 107)
+        rest = [a for a in rest if a not in ("--login", "--pin")]
         opts = dict(zip(rest[0::2], rest[1::2]))
         unknown = set(opts) - {"--size", "--fps", "--bitrate", "--label", "--client", "--port"}
-        if unknown or len(rest) % 2:
+        if unknown or len(rest) % 2 or (login and pin):
             raise RuntimeError("remote add: options are --size WxH --fps F --bitrate KBPS --label TEXT --client NAME "
-                               "--port PORT --login")
+                               "--port PORT, and --login or --pin")
         if not re.fullmatch(r"[A-Za-z0-9.:-]+", address) or not re.fullmatch(r"[A-Za-z0-9{}._:-]+", app):
             raise RuntimeError("remote add: the address or app has other characters")
         port = opts.get("--port", "")
@@ -1407,6 +1444,10 @@ def remote_command(args):
         target = f"{address}:{port}" if port else address
         if login:
             code, out, err = run_stream("pair", target, "--id", client, "--login", timeout=30, stdin=sys.stdin.read())
+        elif pin:
+            code, out, err = run_stream_live("pair", target, "--id", client, "--pin")
+            if code == -9:
+                err = f"no PIN typed in on the host within {PIN_PAIR_S // 60} minutes"
         else:
             code, out, err = run_stream("pair", target, "--id", client, timeout=30)
         if code:
@@ -1415,7 +1456,8 @@ def remote_command(args):
         try:
             remote_add_save(layout, host_name, address, port, {
                 "id": display_id, "client": client, "app": app, "label": label, "size": size, "fps": fps,
-                "bitrate": bitrate, "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)})
+                "bitrate": bitrate, "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)},
+                kind="pin" if pin else None)
         except BaseException:
             # Nothing saved: the client just paired would be left on the host with no display.
             code, out, err = run_stream("unpair", target, "--id", client, timeout=30)

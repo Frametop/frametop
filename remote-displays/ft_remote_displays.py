@@ -620,9 +620,14 @@ class Backend(QObject):
 
     @Slot()
     def cancelPairing(self):
-        """Stops a PIN pairing that's waiting for its PIN (ft-layout remote add --pin)."""
+        """Ends a PIN pairing that's waiting for its PIN (ft-layout remote add --pin). Killing our
+        ft-layout wouldn't reach the ft-stream waiting in its container, so ft-layout remote
+        cancel-pin ends that one, and the pairing then ends as cancelled."""
         if self._proc is not None and self._busy.startswith("Pairing "):
-            self._proc.kill()
+            self._start_detached(host_command(os.path.abspath(FT_LAYOUT), "remote", "cancel-pin"))
+
+    def _start_detached(self, argv):  # tests replace it
+        QProcess.startDetached(argv[0], argv[1:])
 
     # --- ft-layout on the host, one at a time ---
     def _run(self, label, *args, stdin=None):

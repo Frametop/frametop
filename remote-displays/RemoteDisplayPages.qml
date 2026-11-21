@@ -27,8 +27,7 @@ Item {
         const words = { live: "streaming", connecting: "connecting", starting: "starting", queued: "waiting its turn",
                         lost: "lost, trying again", disconnected: "disconnected",
                         "desktop off": "connects when the Frametop desktop starts, or Stream without the desktop",
-                        "not running": "not running", "connecting kwin window": "connecting to the window",
-                        "live kwin window": "streaming the window" }
+                        "not running": "not running" }
         if (state in words) return words[state]
         if (state.startsWith("live via ")) return "streaming over the " + state.slice(9)
         if (state.startsWith("lost ")) return "lost (" + state.slice(5) + "), trying again"
@@ -37,7 +36,7 @@ Item {
     function stateColor(state) {
         if (state.startsWith("live")) return Kirigami.Theme.positiveTextColor
         if (state.startsWith("lost")) return Kirigami.Theme.negativeTextColor
-        if (state.startsWith("connecting") || state === "starting" || state === "queued") return Kirigami.Theme.neutralTextColor
+        if (state === "connecting" || state === "starting" || state === "queued") return Kirigami.Theme.neutralTextColor
         return Kirigami.Theme.disabledTextColor
     }
 

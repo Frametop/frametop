@@ -15,7 +15,8 @@ from test_app_windows import ADDRESS, HOSTS, Base, set_hosts, spin  # noqa: E402
 import ft_settings  # noqa: E402
 import kwin_windows  # noqa: E402
 from PySide6.QtCore import QObject  # noqa: E402
-from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+from PySide6.QtQml import QQmlApplicationEngine, QQmlEngine, QQmlExpression  # noqa: E402
+from PySide6.QtQuick import QQuickItem  # noqa: E402
 
 UUID = "{8d3e0c52-5b1f-4c3e-9a57-1f2e3d4c5b6a}"
 OTHER = "{0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d}"
@@ -121,6 +122,26 @@ class KwinPage(Base):
         dialog.addTicked()
         self.assertEqual([a[:4] for a in self.ran], [("remote", "kwin-add", "KDE", UUID)])
         self.assertEqual([w for w in self.warnings if "not placed in the graphics scene" not in w], [])
+
+    def test_titles_from_the_pc_are_plain_text(self):
+        dialog = self.root.findChild(QObject, "kwinDialog")
+        dialog.setProperty("host", "KDE")
+        listed = [{"id": UUID, "title": "<b>Konsole</b><img src=x>", "app": "", "width": 1282, "height": 802}]
+        self.b.kwinWindows.windowsReady.emit("KDE", kwin_windows.offered(KDE, listed), "c", "<i>refused</i>")
+        self.assertTrue(spin(self.app, lambda: dialog.property("listed")))
+        spin(self.app, seconds=0.1)
+        items, stack = set(), list(dialog.findChildren(QQuickItem))  # a Repeater's rows: visual children only
+        while stack:
+            item = stack.pop()
+            if item not in items:
+                items.add(item)
+                stack.extend(item.childItems())
+        shown = [o for o in items if "<b>Konsole" in str(o.property("text") or "")
+                 or "<i>refused" in str(o.property("text") or "")]
+        self.assertEqual(len(shown), 2, "the title and the error are shown")
+        for o in shown:
+            plain = QQmlExpression(QQmlEngine.contextForObject(o), o, "textFormat === Text.PlainText").evaluate()
+            self.assertEqual(plain, (True, False), f"{o.property('text')!r} isn't plain text")
 
 
 if __name__ == "__main__":

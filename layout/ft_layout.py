@@ -126,6 +126,7 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays), unless
                                      another panel of the host uses that client
+  ft-layout remote cancel-pin        ends a remote add --pin that waits for its PIN (ft_pinpair)
   ft-layout remote kwin-windows HOST a KDE PC's open windows, from its KWin Window Stream
                                      (ft_kwinwindows), as {"client", "windows"} JSON
   ft-layout remote kwin-add HOST WINDOW [--label TEXT] [--size WxH] [--client NAME]
@@ -168,7 +169,6 @@ import re
 import socket
 import subprocess
 import sys
-import threading
 import time
 
 LAYOUT_PATH = os.path.expanduser("~/.config/frametop-layout.json")
@@ -1202,39 +1202,20 @@ def run_stream(*args, timeout=60, stdin=None):
     """ft-stream, in the container ft-screens runs in: "dev" for a clone, the release's own for a
     release (scripts/in-box). A missing "dev" made distrobox ask whether to create it, and the
     question hung until the timeout. `stdin`: text for it to read (a --login)."""
-    cmd = [STREAM, *args]
-    if not in_container():
-        cmd = [os.path.join(REPO, "scripts", "in-box"), *cmd]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=stdin)
+    r = subprocess.run(in_box([STREAM, *args]), capture_output=True, text=True, timeout=timeout, input=stdin)
     return r.returncode, r.stdout, r.stderr
 
 
-PIN_PAIR_S = 180  # remote add --pin: how long the PIN waits to be typed in on the host
+def in_box(cmd):
+    """cmd as it runs in ft-stream's container (scripts/in-box), from here."""
+    return cmd if in_container() else [os.path.join(REPO, "scripts", "in-box"), *cmd]
 
 
-def run_stream_live(*args, timeout=PIN_PAIR_S):
-    """run_stream, but each line ft-stream prints goes on to our stdout as it comes: a PIN to
-    type in on the host ("PIN NNNN: ...") is seen while ft-stream waits for it. Killed after
-    `timeout` (exit -9)."""
-    cmd = [STREAM, *args]
-    if not in_container():
-        cmd = [os.path.join(REPO, "scripts", "in-box"), *cmd]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True)
-    timer = threading.Timer(timeout, proc.kill)
-    timer.start()
-    err = []
-    reader = threading.Thread(target=lambda: err.append(proc.stderr.read()), daemon=True)
-    reader.start()
-    out = []
-    try:
-        for line in proc.stdout:
-            out.append(line)
-            print(line, end="", flush=True)
-        proc.wait()
-    finally:
-        timer.cancel()
-    reader.join(2)
-    return proc.returncode, "".join(out), "".join(err)
+def run_stream_live(*args, timeout=None):
+    """run_stream for remote add --pin: what ft-stream prints goes on as it comes, and the wait
+    ends with the time or remote cancel-pin (ft_pinpair)."""
+    import ft_pinpair   # (its own module: the PIN's wait)
+    return ft_pinpair.run_live(STREAM, args, in_box, timeout or ft_pinpair.PIN_PAIR_S)
 
 
 def slug(text):
@@ -1401,6 +1382,9 @@ def remote_command(args):
     if what in ("kwin-windows", "kwin-add", "kwin-size"):
         import ft_kwinwindows   # (its own module: a KDE PC's windows, KWin Window Stream)
         return ft_kwinwindows.command(what, args[1:])
+    if what == "cancel-pin" and len(args) == 1:
+        import ft_pinpair   # ends a remote add --pin that waits for its PIN
+        return print("cancelled" if ft_pinpair.cancel() else "no pairing waits for a PIN")
     if what == "monitors" and len(args) == 2:
         code, out, err = run_stream("monitors", args[1])
         if code:
@@ -1461,15 +1445,29 @@ def remote_command(args):
         if login:
             code, out, err = run_stream("pair", target, "--id", client, "--login", timeout=30, stdin=sys.stdin.read())
         elif pin:
+            import ft_pinpair
             code, out, err = run_stream_live("pair", target, "--id", client, "--pin")
-            if code == -9:
-                err = f"no PIN typed in on the host within {PIN_PAIR_S // 60} minutes"
+            if code == ft_pinpair.TIMED_OUT:
+                err = f"no PIN typed in on the host within {ft_pinpair.PIN_PAIR_S // 60} minutes"
+            elif code == ft_pinpair.CANCELLED:
+                err = "cancelled"
         else:
             code, out, err = run_stream("pair", target, "--id", client, timeout=30)
         if code:
             raise RuntimeError(f"pairing {client} with {address} failed: {(err or out).strip()}")
         log(out.strip().splitlines()[-1] if out.strip() else f"paired {client}")
         try:
+            # The layout as it is now: a pairing can take minutes (a PIN), and what changed
+            # meanwhile (another host added, a panel moved) stays.
+            layout = load_layout()
+            displays = remote_displays(layout)
+            if len(displays) >= REMOTE_MAX:
+                raise RuntimeError(f"at most {REMOTE_MAX} remote displays")
+            ids = {d["id"] for _, _, d in displays}
+            for k in range(2, 100):
+                if display_id not in ids:
+                    break
+                display_id = f"{base}-{k}"
             remote_add_save(layout, host_name, address, port, {
                 "id": display_id, "client": client, "app": app, "label": label, "size": size, "fps": fps,
                 "bitrate": bitrate, "metres": round(max(1.0, size[0] / REMOTE_PIXELS_PER_METRE), 3)},

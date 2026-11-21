@@ -82,14 +82,19 @@ class PinBackend(Base):
         self.assertEqual(pins, [("Pairing Desktop with KVM", "0421")])
         self.assertIn("paired.", "".join(self.b._out))
 
-    def test_cancel_stops_only_a_pairing(self):
+    def test_cancel_ends_only_a_pairing(self):
+        # by ft-layout remote cancel-pin: our own kill wouldn't reach ft-stream in its container
+        started = []
+        self.b._start_detached = started.append
         proc = FakeProc()
         self.b._proc, self.b._busy = proc, "Connecting"
         self.b.cancelPairing()
-        self.assertFalse(proc.killed)
+        self.assertEqual(started, [])
         self.b._busy = "Pairing Desktop with KVM"
         self.b.cancelPairing()
-        self.assertTrue(proc.killed)
+        self.assertEqual(len(started), 1)
+        self.assertEqual((Path(started[0][-3]).name, started[0][-2:]), ("ft-layout", ["remote", "cancel-pin"]))
+        self.assertFalse(proc.killed, "it ends as cancelled, by itself")
         self.b._proc, self.b._busy = None, ""
 
 

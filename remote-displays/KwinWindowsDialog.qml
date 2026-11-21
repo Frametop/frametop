@@ -61,6 +61,7 @@ Kirigami.PromptDialog {
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
             wrapMode: Text.Wrap
+            textFormat: Text.PlainText  // the error can carry what the PC said
             text: "Couldn't list its windows: " + dialog.error
                   + ". It needs KWin Window Stream running on the PC (github.com/utrack/kwin-window-stream)."
         }
@@ -71,14 +72,34 @@ Kirigami.PromptDialog {
         }
         Repeater {
             model: dialog.listed
-            Controls.CheckBox {
+            // A window's title and app are the PC's: shown as plain text (a CheckBox's own text
+            // would show markup in them as rich text).
+            RowLayout {
+                id: row
                 required property var modelData
-                enabled: !modelData.added
-                text: modelData.title + " (" + (modelData.app ? modelData.app + ", " : "")
-                      + modelData.width + " × " + modelData.height + (modelData.minimized ? ", minimized" : "") + ")"
-                      + (modelData.added ? ": added" : "")
-                checked: dialog.chosen[modelData.id] === true
-                onToggled: dialog.tick(modelData.id, checked)
+                Layout.fillWidth: true
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+                Controls.CheckBox {
+                    id: box
+                    enabled: !row.modelData.added
+                    checked: dialog.chosen[row.modelData.id] === true
+                    onToggled: dialog.tick(row.modelData.id, checked)
+                    Accessible.name: label.text
+                }
+                Controls.Label {
+                    id: label
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    enabled: box.enabled
+                    text: row.modelData.title + " (" + (row.modelData.app ? row.modelData.app + ", " : "")
+                          + row.modelData.width + " × " + row.modelData.height
+                          + (row.modelData.minimized ? ", minimized" : "") + ")" + (row.modelData.added ? ": added" : "")
+                    TapHandler {
+                        enabled: box.enabled
+                        onTapped: dialog.tick(row.modelData.id, !box.checked)
+                    }
+                }
             }
         }
     }

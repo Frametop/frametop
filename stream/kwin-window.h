@@ -18,22 +18,9 @@
 // size comes as new J metadata and a new HEVC sequence, and ft-screens keeps the panel's density.
 
 #include "audio-clock.h"
+#include "kwin-frame.h"
 
-constexpr size_t kKwinMaxFrame = 4u << 20;
 constexpr int kKwinPort = 14501;
-
-// "sha256//BASE64" of a certificate's public key: curl's pin, as kept in hosts/ADDRESS.pin.
-std::string KwinKeyPin(X509 *certificate) {
-    unsigned char *encoded = nullptr;
-    const int size = i2d_X509_PUBKEY(X509_get_X509_PUBKEY(certificate), &encoded);
-    unsigned char digest[EVP_MAX_MD_SIZE], base64[EVP_MAX_MD_SIZE * 2];
-    unsigned digestSize = 0;
-    const bool hashed = size > 0 && EVP_Digest(encoded, size_t(size), digest, &digestSize, EVP_sha256(), nullptr);
-    OPENSSL_free(encoded);
-    if (!hashed) return "";
-    const int count = EVP_EncodeBlock(base64, digest, int(digestSize));
-    return "sha256//" + std::string(reinterpret_cast<char *>(base64), size_t(count));
-}
 
 // The PC's certificate is self-signed, so its chain never checks out: its key's pin decides.
 int KwinVerify(int, X509_STORE_CTX *store) {
@@ -44,21 +31,15 @@ int KwinVerify(int, X509_STORE_CTX *store) {
     return pin && certificate && KwinKeyPin(certificate) == *pin;
 }
 
-struct KwinPacket {
-    char type;
-    std::vector<uint8_t> data;
-};
-
 struct KwinPeer {
     int fd = -1;
     SSL_CTX *context = nullptr;
     SSL *tls = nullptr;
     std::string pin;
-    std::vector<uint8_t> incoming;
+    KwinFramer frames;
     std::deque<std::string> outgoing;
     size_t written = 0, queued = 0;
     bool readNeedsWrite = false;
-    char mediaType = 'V';
 
     ~KwinPeer() {
         if (tls) SSL_free(tls);
@@ -114,11 +95,8 @@ struct KwinPeer {
     }
 
     void Send(char type, const std::string &payload) {
-        if (payload.size() > 4096 || queued + payload.size() + 5 > 65536) throw std::runtime_error("the send queue is full");
-        const uint32_t size = htonl(uint32_t(payload.size()));
-        std::string message(1, type);
-        message.append(reinterpret_cast<const char *>(&size), sizeof size);
-        message += payload;
+        std::string message = KwinFrame(type, payload);
+        if (queued + message.size() > 65536) throw std::runtime_error("the send queue is full");
         queued += message.size();
         outgoing.push_back(std::move(message));
     }
@@ -141,26 +119,11 @@ struct KwinPeer {
         }
     }
 
-    bool Parse(std::deque<KwinPacket> &packets) {
-        if (incoming.size() < 5 || packets.size() >= 4) return false;
-        uint32_t size;
-        std::memcpy(&size, incoming.data() + 1, sizeof size);
-        size = ntohl(size);
-        const char type = char(incoming[0]);
-        if ((type != 'J' && type != mediaType) || size == 0 || size > kKwinMaxFrame ||
-            (type == 'J' && size > (1u << 20)) || (type == 'A' && (size <= 8 || size > 4096)))
-            throw std::runtime_error("the host sent a malformed frame");
-        if (incoming.size() < size_t(size) + 5) return false;
-        packets.push_back({type, {incoming.begin() + 5, incoming.begin() + 5 + size}});
-        incoming.erase(incoming.begin(), incoming.begin() + 5 + size);
-        return true;
-    }
-
     bool Read(std::deque<KwinPacket> &packets) {
         bool progressed = false;
-        while (Parse(packets)) progressed = true;
-        if (packets.size() >= 4) return progressed;
-        uint8_t bytes[32768];
+        while (frames.Parse(packets)) progressed = true;
+        if (packets.size() >= kKwinQueued) return progressed;
+        uint8_t bytes[kKwinReadChunk];
         const int n = SSL_read(tls, bytes, sizeof bytes);
         readNeedsWrite = false;
         if (n <= 0) {
@@ -169,10 +132,8 @@ struct KwinPeer {
             if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) return progressed;
             throw std::runtime_error("the host hung up");
         }
-        if (incoming.size() + size_t(n) > kKwinMaxFrame + sizeof bytes + 5)
-            throw std::runtime_error("the host sent more than a frame's worth");
-        incoming.insert(incoming.end(), bytes, bytes + n);
-        while (Parse(packets)) {}
+        frames.Append(bytes, size_t(n));
+        while (frames.Parse(packets)) {}
         return true;
     }
 };
@@ -234,7 +195,7 @@ struct KwinAudio {
 
     void Listen(const Client &client) {
         KwinPeer peer;
-        peer.mediaType = 'A';
+        peer.frames.mediaType = 'A';
         peer.Connect(client);
         peer.Send('J', R"({"version":1,"op":"audio"})");
         std::deque<KwinPacket> packets;
@@ -348,7 +309,7 @@ int StreamKwinWindow(Client &client, const std::string &window, int fd, int widt
                                         {"fps", fps}, {"bitrate", bitrate}, {"follow_window", true}};
         peer.Send('J', request.dump());
         if (!conv.Init()) throw std::runtime_error("no converter");
-        bool owned[3] = {}, live = false, hidden = false;
+        bool owned[3] = {}, live = false, hidden = false, described = false;  // described: a J said the stream's size
         std::deque<KwinPacket> packets;
         uint64_t sequence = 0, bytes = 0;
         int shown = 0, received = 0;
@@ -356,14 +317,14 @@ int StreamKwinWindow(Client &client, const std::string &window, int fd, int widt
         while (!g_stop) {
             peer.Flush();
             pollfd events[3] = {
-                {peer.fd, short((packets.size() < 4 ? POLLIN : 0) |
+                {peer.fd, short((packets.size() < kKwinQueued ? POLLIN : 0) |
                                 ((!peer.outgoing.empty() || peer.readNeedsWrite) ? POLLOUT : 0)), 0},
                 {dec.fd, short(POLLIN | POLLPRI | (!packets.empty() ? POLLOUT : 0)), 0},
                 {viewer.fd, POLLIN, 0},
             };
             poll(events, 3, SSL_pending(peer.tls) ? 0 : 20);
             if (events[0].revents & (POLLERR | POLLHUP | POLLNVAL)) throw std::runtime_error("the host hung up");
-            if (packets.size() < 4) peer.Read(packets);
+            if (packets.size() < kKwinQueued) peer.Read(packets);
             std::string message;
             bool open = true;
             while ((open = viewer.Read(&message, false)) && !message.empty()) {
@@ -411,9 +372,11 @@ int StreamKwinWindow(Client &client, const std::string &window, int fd, int widt
                     dec.toSteamVR = false;
                     if (!dec.Open("/dev/video-dec0", 6)) throw std::runtime_error("can't open the decoder again");
                     for (bool &slot : owned) slot = false;
-                    live = false;
+                    live = false, described = true;
                     std::printf("kwin window %s: HEVC %dx%d\n", window.c_str(), width, height);
                 } else {
+                    // With no decoder open yet, the picture would wait there for good and reading with it.
+                    if (!described) throw std::runtime_error("the host sent a picture before saying its size");
                     if (!dec.Feed(p.data.data(), p.data.size(), sequence)) break;
                     ++sequence, ++received;
                     bytes += p.data.size();

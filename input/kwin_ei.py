@@ -23,6 +23,7 @@ select(); `dispatch()` when it's readable, `poll(now)` once a second.
 
 import ctypes
 import ctypes.util
+import os
 import time
 
 RETRY_S = 10.0  # between attempts while there's no desktop or no EIS
@@ -112,6 +113,7 @@ class KwinEi:
             return self.fail(f"KWin's EIS isn't reachable ({e.__class__.__name__}: {e})")
         ei = self.lib.ei_new_sender(None)
         if not ei:
+            os.close(fd)  # libei never took it
             bus.close()
             return self.fail("libei couldn't make a sender")
         self.lib.ei_configure_name(ei, NAME)

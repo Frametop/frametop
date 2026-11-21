@@ -129,8 +129,12 @@ class KwinWindows(unittest.TestCase):
         self.assertEqual((d["size"], d["metres"]), ([1600, 900], 1.1429))
         with self.assertRaisesRegex(RuntimeError, "isn't a KWin window's panel"):
             self.run_layout("kwin-size", str(n - 1), "1600x900", "1.0")
-        with self.assertRaisesRegex(RuntimeError, "0.15 to 12 metres"):
-            self.run_layout("kwin-size", str(n), "1600x900", "nan")
+        for bad in ("nan", "inf", "0.1", "13", "wide"):
+            with self.subTest(metres=bad), self.assertRaisesRegex(RuntimeError, "0.15 to 12 metres"):
+                self.run_layout("kwin-size", str(n), "1600x900", bad)
+        for edge in ("0.15", "12"):
+            self.run_layout("kwin-size", str(n), "1600x900", edge)
+        self.assertEqual(next(d for d in self.host()["displays"] if d["app"].startswith("kwin:"))["metres"], 12.0)
 
     def test_removing_a_window_keeps_the_pairing_its_display_uses(self):
         window = self.run_layout("kwin-add", "KDE", UUID).strip().splitlines()[-1]

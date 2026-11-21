@@ -172,5 +172,20 @@ ei2 = kwin_ei.KwinEi(logs.append, lambda: "unix:path=/tmp/dbus-test", lib=lib2, 
 ei2.poll(0.0)
 check("backend refused: nothing kept, bus closed", (ei2.fileno(), buses[-1].closed), (-1, True))
 
+# libei making no sender: KWin's socket, never given to it, is closed with the bus.
+lib3 = Lib()
+lib3.ei_new_sender = lambda _ctx: None
+socket_r, socket_w = os.pipe()
+os.close(socket_w)
+ei3 = kwin_ei.KwinEi(logs.append, lambda: "unix:path=/tmp/dbus-test",
+                     lib=lib3, connect=lambda address: (socket_r, 1, Bus()))
+ei3.poll(0.0)
+try:
+    os.fstat(socket_r)
+    closed = False
+except OSError:
+    closed = True
+check("no sender: KWin's socket closed", (ei3.fileno(), closed), (-1, True))
+
 print(f"{len(failures)} failed" if failures else "all passed")
 sys.exit(1 if failures else 0)

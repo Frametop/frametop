@@ -207,5 +207,40 @@ class PageTest(Base):
                                     "--label", "Virtual", "--size", "3840x2160"))
 
 
+class BannerProbeTest(unittest.TestCase):
+    """The real _is_apple_rfb against a loopback listener standing in for port 5900."""
+
+    def probe(self, *parts):
+        import socket
+        import threading
+        lsock = socket.socket()
+        lsock.bind(("127.0.0.1", 0))
+        lsock.listen(1)
+        old_port = rd.ft_layout.APPLE_PORT
+        rd.ft_layout.APPLE_PORT = lsock.getsockname()[1]
+
+        def serve():
+            conn, _ = lsock.accept()
+            with conn:
+                for part in parts:
+                    conn.sendall(part)
+                    time.sleep(0.05)
+
+        server = threading.Thread(target=serve, daemon=True)
+        server.start()
+        try:
+            return rd.Backend.__dict__["_is_apple_rfb"].__func__("127.0.0.1")
+        finally:
+            rd.ft_layout.APPLE_PORT = old_port
+            server.join(timeout=5)
+            lsock.close()
+
+    def test_banner_split_across_reads_is_a_mac(self):
+        self.assertTrue(self.probe(b"RFB 00", b"3.889\n"))
+
+    def test_other_rfb_server_is_not_a_mac(self):
+        self.assertFalse(self.probe(b"RFB 003.008\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

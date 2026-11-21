@@ -737,16 +737,9 @@ int main(int argc, char **argv) {
             OPENSSL_cleanse(password.data(), password.size());
             return std::fprintf(stderr, "username and password must not be empty\n"), 2;
         }
-        // --no-verify saves SRP: the mode is only RSA when a Mac showed it has no SRP. A Mac
-        // that signed in with SRP before stays SRP: signing in again never falls back to RSA,
-        // which a spoofed server could otherwise ask for (unauth first to allow it).
-        ft_apple_hp::AuthMode mode = ft_apple_hp::AuthMode::kSrp, known = ft_apple_hp::AuthMode::kAuto;
-        {
-            std::string old_user, old_password;
-            if (!ft_apple_hp::LoadAppleCreds(creds_path, &old_user, &old_password, &known))
-                known = ft_apple_hp::AuthMode::kAuto;
-            OPENSSL_cleanse(old_password.data(), old_password.size());
-        }
+        // The rules for which mode is tried and saved: apple_hp_creds.h (SignInMode, ModeToSave).
+        const ft_apple_hp::AuthMode stored = ft_apple_hp::StoredAuthMode(creds_path);
+        std::string used;
         if (!no_verify) {
             std::string target;
             if (!via_addr.empty() && Answers(via_addr, port, 1000)) target = via_addr;
@@ -757,20 +750,22 @@ int main(int argc, char **argv) {
             opt.port = uint16_t(port ? port : kDefaultApplePort);
             opt.username = user;
             opt.password = password;
-            if (known == ft_apple_hp::AuthMode::kSrp) opt.auth_mode = ft_apple_hp::AuthMode::kSrp;
+            opt.auth_mode = ft_apple_hp::SignInMode(stored);
             ft_apple_hp::SessionClient client;
             std::string err;
             if (!client.VerifyCredentials(opt, &err)) {
                 OPENSSL_cleanse(password.data(), password.size());
                 OPENSSL_cleanse(opt.password.data(), opt.password.size());
-                if (known == ft_apple_hp::AuthMode::kSrp && client.srp_not_offered())
-                    err += " (it signed in with SRP before; ft-appless unauth " + host + " first to sign in without it)";
+                if (opt.auth_mode == ft_apple_hp::AuthMode::kSrp && client.srp_not_offered())
+                    err += " (it signed in with SRP before: remove the host, or run ft-appless unauth " + host +
+                           ", to sign in without it)";
                 return std::fprintf(stderr, "%s\n", err.c_str()), 1;
             }
             OPENSSL_cleanse(opt.password.data(), opt.password.size());
-            if (client.auth_used() == "nonsrp") mode = ft_apple_hp::AuthMode::kNonSrp;
+            used = client.auth_used();
         }
-        const bool saved = ft_apple_hp::SaveAppleCreds(creds_path, user, password, mode);
+        const bool saved = ft_apple_hp::SaveAppleCreds(creds_path, user, password,
+                                                       ft_apple_hp::ModeToSave(stored, !no_verify, used));
         OPENSSL_cleanse(password.data(), password.size());
         if (!saved) return std::fprintf(stderr, "failed to write %s\n", creds_path.c_str()), 1;
         std::printf("signed in to %s as %s\n", host.c_str(), user.c_str());

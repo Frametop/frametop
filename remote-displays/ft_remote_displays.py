@@ -50,6 +50,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import uuid
 
@@ -505,9 +506,9 @@ class Backend(QObject):
         """Whether `address` speaks Apple Screen Sharing's RFB 003.889 banner on TCP 5900."""
         try:
             with socket.create_connection((address, ft_layout.APPLE_PORT), timeout=2) as s:
-                s.settimeout(2)
-                banner = b""
-                while len(banner) < 12:
+                deadline, banner = time.monotonic() + 2, b""
+                while len(banner) < 12 and (left := deadline - time.monotonic()) > 0:
+                    s.settimeout(left)
                     part = s.recv(12 - len(banner))
                     if not part:
                         break

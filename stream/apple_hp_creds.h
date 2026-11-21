@@ -130,4 +130,31 @@ inline bool LoadAppleCreds(const std::string &path, std::string *username_out, s
     return true;
 }
 
+// What a host's stored login says about its mode: kAuto when there is no file, kNonSrp
+// when it says nonsrp, and kSrp otherwise, also for a file that is there but can't be read
+// (wrong mode bits, a symlink): fail closed.
+inline AuthMode StoredAuthMode(const std::string &path) {
+    struct stat st{};
+    if (lstat(path.c_str(), &st) != 0) return AuthMode::kAuto;
+    std::string user, password;
+    AuthMode stored = AuthMode::kSrp;
+    const bool ok = LoadAppleCreds(path, &user, &password, &stored);
+    OPENSSL_cleanse(password.data(), password.size());
+    return ok ? stored : AuthMode::kSrp;
+}
+
+// The mode signing in (ft-appless auth) uses. A Mac stored as srp stays SRP, so a spoofed
+// server can't ask for the RSA path (unauth first to allow it). A new host, or one stored as
+// nonsrp, tries SRP first and falls back only when the Mac offers none.
+inline AuthMode SignInMode(AuthMode stored) {
+    return stored == AuthMode::kSrp ? AuthMode::kSrp : AuthMode::kAuto;
+}
+
+// The mode a sign-in saves: the one that worked, or, when nothing was checked (--no-verify),
+// the stored one (SRP for a new host).
+inline AuthMode ModeToSave(AuthMode stored, bool verified, const std::string &auth_used) {
+    if (verified) return auth_used == "nonsrp" ? AuthMode::kNonSrp : AuthMode::kSrp;
+    return stored == AuthMode::kNonSrp ? AuthMode::kNonSrp : AuthMode::kSrp;
+}
+
 }  // namespace ft_apple_hp

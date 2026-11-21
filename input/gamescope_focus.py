@@ -105,14 +105,14 @@ class GamescopeFocus:
     def connect_in_thread(self):
         """xcb_connect blocks while the X server doesn't answer its setup: on a thread, so the
         relay doesn't. native() takes what it made."""
-        made = (None, 0)  # also when a call below raises: native() must never wait on it
+        conn, made = None, (None, 0)  # also when a call below raises: native() must never wait on it
         try:
             conn = self.lib.xcb_connect(GAMESCOPE_DISPLAY.encode(), None)
             if conn and not self.lib.xcb_connection_has_error(conn):
                 made = (conn, self.lib.xcb_setup_roots_iterator(self.lib.xcb_get_setup(conn)).data[0])  # .root
-            elif conn:
-                self.lib.xcb_disconnect(conn)
         finally:
+            if conn and made[0] is None:
+                self.lib.xcb_disconnect(conn)
             self.made = made
 
     def connected(self, now):

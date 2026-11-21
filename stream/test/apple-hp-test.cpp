@@ -1142,10 +1142,26 @@ void TestRfc3640AudioAndCredsStore() {
         close(wfd);
     }
     CHECK(LoadAppleCreds(cpath, &u, &p, &mode) && u == "bob" && p == "pw" && mode == AuthMode::kSrp);
+    CHECK(StoredAuthMode(cpath) == AuthMode::kSrp);
     // World-readable file must be rejected by LoadAppleCreds
     chmod(cpath.c_str(), 0644);
     CHECK(!LoadAppleCreds(cpath, &u, &p));
+    CHECK(StoredAuthMode(cpath) == AuthMode::kSrp);  // there but unreadable: fail closed
     unlink(cpath.c_str());
+    CHECK(StoredAuthMode(cpath) == AuthMode::kAuto);  // a new host
+    CHECK(SaveAppleCreds(cpath, "alice", "pw", AuthMode::kNonSrp) && StoredAuthMode(cpath) == AuthMode::kNonSrp);
+    unlink(cpath.c_str());
+
+    // Signing in again: a Mac stored as srp uses SRP only; a new or nonsrp one may fall back.
+    CHECK(SignInMode(AuthMode::kSrp) == AuthMode::kSrp);
+    CHECK(SignInMode(AuthMode::kAuto) == AuthMode::kAuto);
+    CHECK(SignInMode(AuthMode::kNonSrp) == AuthMode::kAuto);
+    // What's saved: the mode that worked; with --no-verify the stored one, SRP for a new host.
+    CHECK(ModeToSave(AuthMode::kAuto, true, "nonsrp") == AuthMode::kNonSrp);
+    CHECK(ModeToSave(AuthMode::kNonSrp, true, "srp") == AuthMode::kSrp);
+    CHECK(ModeToSave(AuthMode::kAuto, false, "") == AuthMode::kSrp);
+    CHECK(ModeToSave(AuthMode::kSrp, false, "") == AuthMode::kSrp);
+    CHECK(ModeToSave(AuthMode::kNonSrp, false, "") == AuthMode::kNonSrp);
     rmdir(tmp_dir);
 }
 
@@ -1348,8 +1364,6 @@ void TestSleepWakeAndIdleLivenessTimeout() {
 
 }  // namespace
 
-// A media blob whose trailer points the offset table far past the end must be
-// refused, not read: off_tbl + num_objs * off_sz used to wrap around.
 // A screensharingd stand-in for the sign-in rules, one scripted answer per connection:
 // "short" answers SRP's first packet with a short length and hangs up (a Mac without SRP),
 // "reject" sends a real RFC 5054 challenge and then SecurityResult 1 (a wrong password),
@@ -1360,6 +1374,7 @@ struct ScriptedAuthRun {
     bool extra_connection = false;  // the client connected again after the script ran out
     std::string auth_used;
     std::vector<std::string> kinds;  // each connection's first auth packet: srp or nonsrp
+    // Joined, to compare with a string literal: CHECK can't take a braced list's commas.
     std::string kinds_said() const {
         std::string out;
         for (const std::string &k : kinds) out += (out.empty() ? "" : " ") + k;
@@ -1506,6 +1521,8 @@ void TestAuthFallbackRules() {
     CHECK(run.ok && run.auth_used == "nonsrp" && run.kinds_said() == "nonsrp" && !run.extra_connection);
 }
 
+// A media blob whose trailer points the offset table far past the end must be
+// refused, not read: off_tbl + num_objs * off_sz used to wrap around.
 void TestBplistBounds() {
     std::vector<uint8_t> blob(48, 0);
     std::memcpy(blob.data(), "bplist00", 8);

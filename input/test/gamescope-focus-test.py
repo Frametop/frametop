@@ -158,15 +158,33 @@ def test_connect_that_raises_is_retried():
     focus, _ = make(fake)
     hook, threading.excepthook = threading.excepthook, lambda args: None  # the thread's traceback
     try:
-        for _ in range(200):
+        focus.native(100.0)
+        if focus.connecting is not None:  # still running: wait for it, then take it
+            focus.connecting.join(timeout=10)
             focus.native(100.0)
-            if focus.connecting is None:
-                break
-            time.sleep(0.005)
     finally:
         threading.excepthook = hook
     assert focus.connecting is None and focus.conn is None  # taken, not waited on forever
     assert focus.retry_at == 100.0 + gf.RETRY_S and fake.connects == 1
+
+
+def test_connection_without_a_screen_is_closed():
+    fake = FakeXcb()
+
+    def no_screen(setup):
+        raise ValueError("NULL pointer access")
+
+    fake.xcb_setup_roots_iterator = no_screen
+    focus, _ = make(fake)
+    hook, threading.excepthook = threading.excepthook, lambda args: None
+    try:
+        focus.native(100.0)
+        if focus.connecting is not None:  # still running: wait for it, then take it
+            focus.connecting.join(timeout=10)
+            focus.native(100.0)
+    finally:
+        threading.excepthook = hook
+    assert focus.conn is None and fake.connects == 1 and fake.disconnects == 1
 
 
 def test_no_libxcb():

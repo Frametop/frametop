@@ -6,6 +6,22 @@ desktop is unchanged until the new components are installed, restarted and
 internal Steam API integration is experimental. Use the screens backend; the
 gamescope backend is refused in protected mode rather than silently unprotected.
 
+**Turning it on (issue 66, 2026-11-20).** Frametop Settings, Visibility & pins,
+"Steam's lock screen": "Hide Frametop while Steam is locked (experimental)" sets
+`STEAM_PIN_LOCK` in `~/.config/frametop.conf` and applies when the desktop starts
+again (its Restart desktop button). It needs the guard installed
+(`desktops.sh install` puts in `frametop-pin-lock.service`) and a PIN set in
+Steam's own Security settings. With the gamescope backend the switch refuses to
+turn on, since the session would refuse to start. Turned on in an unlocked
+session, Frametop stays hidden until Steam locks and unlocks once (below).
+
+Why not KWin's own lock screen: the nested KWin starts with `--no-lockscreen`
+(`session/frametop-session.sh`). Its lock screen would ask for the Linux
+account's password, not Steam's PIN (a SteamOS user may have none set), and
+nothing would start it when Steam locks: Steam's PIN screen isn't a logind lock
+(see below). It would be a second password next to Steam's PIN, which this
+feature avoids.
+
 ## Behavior
 
 - Steam's existing PIN remains the only unlock authority. No second password.

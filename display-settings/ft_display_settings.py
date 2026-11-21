@@ -12,9 +12,10 @@ the dev container:
     dashboard open, while you look at a controller, or only when toggled), the wrist
     angle within which a pinned screen shows, pinning each screen to a wrist or your
     head, whether the desktop's notifications go to the Steam session
-    (NOTIFY_FORWARD, session/ft-notifyfwd; its state from its log), and whether apps from
-    the SteamVR dashboard's Launch a program list open as floating windows (DASHBOARD_APPS,
-    float/ft-dashroute).
+    (NOTIFY_FORWARD, session/ft-notifyfwd; its state from its log), whether Frametop hides
+    while Steam's PIN screen is up (STEAM_PIN_LOCK, docs/steam-pin-lock.md; screens backend
+    only), and whether apps from the SteamVR dashboard's Launch a program list open as
+    floating windows (DASHBOARD_APPS, float/ft-dashroute).
   - Layout: a preset (curved or flat, rows, distance, gap, height) or a named layout
     saved from where the screens are, with a preview; arrange now; save the current
     arrangement under a name; rename and delete; arrange automatically when the
@@ -135,6 +136,7 @@ class Backend(QObject):
                 "screens": num("SCREENS", 2, int), "width": num("WIDTH", 1920, int),
                 "height": num("HEIGHT", 1080, int), "physWidth": num("PHYS_WIDTH", 1.6),
                 "notifyForward": notify if notify in NOTIFY_FORWARD else "off",
+                "steamPinLock": conf.get("STEAM_PIN_LOCK", "0") != "0",
                 "autostart": conf.get("AUTOSTART", "0") == "1"}
 
     def _check_running(self):
@@ -515,6 +517,25 @@ class Backend(QObject):
         if mode in NOTIFY_FORWARD:
             write_conf_value("NOTIFY_FORWARD", mode)
             self.changed.emit()
+
+    # --- Steam PIN protection (STEAM_PIN_LOCK; docs/steam-pin-lock.md, issue 66) ---
+    @Property(bool, notify=changed)
+    def steamPinLock(self):
+        """Frametop hides and takes no input while Steam's PIN screen is up (experimental)."""
+        return self._conf()["steamPinLock"]
+
+    @Property(bool, notify=changed)
+    def steamPinLockRestartNeeded(self):
+        """The session starts the guard and turns off what it can't protect when it starts."""
+        return self._running and bool(self._started) and self._started["steamPinLock"] != self._conf()["steamPinLock"]
+
+    @Slot(bool)
+    def setSteamPinLock(self, on):
+        if on and ft_layout.backend() != "screens":  # the session would refuse to start
+            self.message.emit("Steam PIN protection needs the screens backend", True)
+            return self.changed.emit()
+        write_conf_value("STEAM_PIN_LOCK", "1" if on else "0")
+        self.changed.emit()
 
     # --- Start with SteamVR (session/autostart.sh, frametop-autostart.service) ---
     @Property(bool, notify=changed)

@@ -1689,6 +1689,45 @@ Item {
                         }
                     }
 
+                    // Steam's PIN lock (issue 66): Frametop hides with it. Experimental and opt-in;
+                    // what it turns off and what's still untested: docs/steam-pin-lock.md.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Steam's lock screen" }
+
+                    ColumnLayout {
+                        spacing: 0
+                        Controls.Switch {
+                            objectName: "steamPinLock"
+                            text: "Hide Frametop while Steam is locked (experimental)"
+                            enabled: backend.backend === "screens" || backend.steamPinLock
+                            checked: backend.steamPinLock
+                            onToggled: backend.setSteamPinLock(checked)
+                        }
+                        Controls.Label {
+                            text: "While Steam asks for its PIN (a PIN set in Steam's Security settings), every Frametop "
+                                  + "screen, window and keyboard hides and takes no input; apps keep running and keep "
+                                  + "your work. Remote access to this desktop and sending its notifications to the Steam "
+                                  + "session stay off while this is on. Turned on in an unlocked session, Frametop stays "
+                                  + "hidden until Steam locks and unlocks once. Needs the screens backend."
+                            opacity: 0.7
+                            font: Kirigami.Theme.smallFont
+                            leftPadding: Kirigami.Units.gridUnit * 1.6
+                            wrapMode: Text.Wrap
+                            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                        }
+                    }
+                    RowLayout {
+                        visible: backend.steamPinLockRestartNeeded
+                        Controls.Label {
+                            text: "Applies when the desktop starts again."
+                            wrapMode: Text.Wrap
+                        }
+                        Controls.Button {
+                            text: "Restart desktop"
+                            icon.name: "system-reboot"
+                            onClicked: restartDialog.open()
+                        }
+                    }
+
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Apps from the SteamVR dashboard" }
 
                     Repeater {

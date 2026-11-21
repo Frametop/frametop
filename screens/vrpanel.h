@@ -311,6 +311,7 @@ vr::EVROverlayError PinHide(vr::VROverlayHandle_t overlay);
 void SetWidth(Screen &s, double metres);
 int PictureW(const Screen &s);
 int PictureH(const Screen &s);
+bool IsWindowPanel(const Screen &s);   // a PC app window's panel (DEE-345)
 void Stretch(Screen &s, int w, int h);
 void SendStretch(Screen &s);
 const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dashboard pins ride on it)

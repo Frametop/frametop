@@ -130,11 +130,15 @@ void RememberTiles() {
 namespace {
 // Its natural size on the wall: its pixels at the wall's density (a floating window's, an app's: as
 // many as it has now; the wall doesn't resize them), with what's glued left of it (GluedPx).
+// A panel's pixels as a tile: those a resize by its corner stretched it to while the window's new
+// ones are on their way (SendStretch), so the strip makes room for the size let go at, not the old one.
+int TilePxW(const Screen &s) { return s.stretchW > 0 ? s.stretchW : PictureW(s); }
+int TilePxH(const Screen &s) { return s.stretchW > 0 ? s.stretchH : PictureH(s); }
 dashtiles::Info TileInfo(int id) {
     dashtiles::Info info;
     const auto it = g_screens.find(id);
     if (it == g_screens.end()) return info;
-    const int pw = PictureW(it->second) + GluedPx(id), ph = PictureH(it->second);
+    const int pw = TilePxW(it->second) + GluedPx(id), ph = TilePxH(it->second);
     tiling::Params at = g_tiles.params;
     at.radius = g_tileEyes.radius;   // (as big as it was with the wall round your eyes: the arc's centre is further)
     const double mpp = tiling::MetresPerPx(at);
@@ -155,7 +159,7 @@ bool TileSized(int id) {
 }
 // The part of a tile's width that's the panel's own (the rest is glued left of it), 0..1.
 double OwnShare(int id, const Screen &s) {
-    const int own = PictureW(s), glued = GluedPx(id);
+    const int own = TilePxW(s), glued = GluedPx(id);
     return own > 0 && glued > 0 ? double(own) / (own + glued) : 1;
 }
 }  // namespace
@@ -193,7 +197,7 @@ void RetileDash() {
         Screen &s = it->second;
         if (s.drag != Drag::None) continue;
         // (a floating window or an app with a stretch on its way: its width once its pixels are there)
-        const bool waits = (s.floating || s.gsapp) && !s.steamDash && s.stretchW > 0;
+        const bool waits = (s.floating || s.gsapp || IsWindowPanel(s)) && !s.steamDash && s.stretchW > 0;
         const double share = OwnShare(p.id, s), width = p.widthM * share;
         if (!waits && std::fabs(s.metres - width) > 0.002) {
             if (s.floating && PictureW(s) > 0) s.mpp = width / PictureW(s);
@@ -458,10 +462,17 @@ void TileDrop(Screen &s, int i) {
     RememberTiles();
 }
 // Resized by its corner on the grid: that size from now on (the wall puts it back to its shape).
+// A floating window or a PC window's panel gets new pixels instead (SendStretch), and a tile is as
+// big as its pixels (TileInfo): its cell keeps its scale, or the size let go at counts twice (user,
+// 2026-11-20: "it will resize either too large or too small and then not properly fit into the tiled
+// scheme until you move the display"). The others make room for the stretch now, and the tile takes
+// the new pixels' size when they come (the "float" answer, or the stream at that size).
 void TileResized(Screen &s, int i) {
     const tiling::Placed *p = g_tiles.PlacedOf(i);
     if (!p || p->widthM <= 0 || p->heightM <= 0) return;
-    g_tiles.Resized(i, std::sqrt(s.metres / p->widthM * s.heightMetres() / p->heightM));
+    if (s.floating || IsWindowPanel(s))
+        std::printf("%s: resized to %dx%d px on the grid, its scale kept\n", TileLabel(i).c_str(), TilePxW(s), TilePxH(s));
+    else g_tiles.Resized(i, std::sqrt(s.metres / p->widthM * s.heightMetres() / p->heightM));
     RetileDash();
     RememberTiles();
 }

@@ -7448,6 +7448,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         else if (s.stretchW > 0 && g_far.panel != index && g_tick > s.stretchUntil) {
             s.keepUntil = std::max(s.keepUntil, g_tick + 1);   // no answer to its resize: its own size again, the same corner kept
             Stretch(s, 0, 0);
+            if (TileAnchored(index)) RetileDash();   // (the strip made room for the stretch: TileInfo)
         }
         if (s.heldFloat && NowMs() >= s.holdUntilMs) ReleaseHold(s);   // (no new buffer came)
     }

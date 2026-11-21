@@ -1388,6 +1388,14 @@ def tests():
         to_relay("type ça")
         time.sleep(0.3)
         check("...dictation too", emitted(), [("keyboard", c, v) for c in (10, 16) for v in (1, 0)])
+        # Its shortcuts name their letter (Ctrl+KeyA is Ctrl+A): AZERTY's A and Z keys. Z let go
+        # after Ctrl comes up where it went down; a key with no shortcut modifier keeps its place.
+        for text in ("kbkey 29 1", "kbkey 30 1", "kbkey 30 0", "kbkey 44 1", "kbkey 29 0", "kbkey 44 0",
+                     "kbkey 30 1", "kbkey 30 0"):
+            from_kb(text)
+        time.sleep(0.2)
+        check("...Ctrl+A and Ctrl+Z as AZERTY's A and Z keys", emitted(),
+              [("keyboard", c, v) for c, v in ((29, 1), (16, 1), (16, 0), (17, 1), (29, 0), (17, 0), (30, 1), (30, 0))])
         from_kb(f"kbkey {SHIFT} 1")
         FOCUS["native"] = False
         from_kb("kbhello 1")

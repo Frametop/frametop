@@ -297,9 +297,9 @@ check("held keys: what no device holds is forgotten",
 
 typing = relay.Typing()
 typing.queue.extend(["a", ("quiet", "b"), ("key", 30, 1), "c", ("key", 30, 0)])
-typing.kb_held = {31: True, 30: False}
-check("typing: Full Keyboard goes: its keys to come are dropped, the ones it held come back to let go",
-      (typing.drop_full_keyboard(), list(typing.queue), typing.kb_held), ([(30, False), (31, True)], ["a", ("quiet", "b"), "c"], {}))
+typing.kb_held = {31: (31, True), 30: (16, False)}  # KeyA went as AZERTY's Ctrl+A key (kb_shortcuts.py)
+check("typing: Full Keyboard goes: its keys to come are dropped, the keys it sent come back to let go",
+      (typing.drop_full_keyboard(), list(typing.queue), typing.kb_held), ([(16, False), (31, True)], ["a", ("quiet", "b"), "c"], {}))
 
 # ---------------------------------------------------------------- reload: all or nothing
 r = start(None, {"POINTER": "1", "POINTER_SENSITIVITY": "0.05"},

@@ -182,8 +182,9 @@ it ("vrkeyboard show steam"), or opens it in place ("kb show") while ft-screens 
 to it as "kb poke SIDE VERB [x y z]", so its keys take hands as our screens do, with no laser.
 Its typing for the desktop comes as "kbkey CODE 0|1" and "kbtext TEXT", only from
 the address that said hello: they go in order with dictation's typing, keys as they are (a held
-modifier doesn't hold them back), text through the desktop's layout like dictation's, and
-unlogged. For Native Desktop, both go on the virtual keyboard. Its keys come up where they went down, and when it stops (no hello for 3 seconds),
+modifier doesn't hold them back) except a shortcut's letter, which goes as the key that types it
+on the desktop's layout (kb_shortcuts.py: Ctrl+A is Ctrl+A on AZERTY too), text through the
+desktop's layout like dictation's, and unlogged. For Native Desktop, both go on the virtual keyboard. Its keys come up where they went down, and when it stops (no hello for 3 seconds),
 the ones it holds come up.
 
 Volume keys, from every device that has them (the headset's own buttons included),
@@ -302,6 +303,7 @@ import game_pause
 import pc_game
 import magicmouse
 from gamescope_focus import GamescopeFocus  # Native Desktop's focus, for its typing
+from kb_shortcuts import shortcut_code  # Full Keyboard's Ctrl+letter on the desktop's layout
 from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
     EV_KEY,
     EV_REL,
@@ -1363,15 +1365,15 @@ class Typing:
         self.at = 0.0  # the next press or release goes then
         self.untyped = []  # characters with no key where typing went, logged when the queue is empty (None: quiet)
         self.committing = False  # the last character went through the input method, not as keys
-        self.kb_held = {}  # keys Full Keyboard holds down: code -> to the desktop
+        self.kb_held = {}  # keys Full Keyboard holds down: its code -> (the code sent, to the desktop)
 
     def drop_full_keyboard(self):
         """Full Keyboard went: its keys still to come are dropped. Returns the keys it held, as
-        (code, to the desktop), for the caller to let go of."""
+        (the code sent, to the desktop), for the caller to let go of."""
         kept = [item for item in self.queue if isinstance(item, str) or item[0] != "key"]
         self.queue.clear()
         self.queue.extend(kept)
-        held = sorted(self.kb_held.items())
+        held = sorted(self.kb_held.values())
         self.kb_held.clear()
         return held
 
@@ -1974,12 +1976,17 @@ class Relay:
             if value:
                 if code in self.typing.kb_held:
                     return  # down already
-                desktop = self.typing.kb_held[code] = now < self.desktop_until
+                target = self.typing_target(now)
+                layout = self.target_layout(target)
+                # A shortcut's letter as the key that types it there (kb_shortcuts.py).
+                sent = shortcut_code(code, self.typing.kb_held, layout.keys if layout else None)
+                desktop = target == "desktop"
+                self.typing.kb_held[code] = (sent, desktop)
             elif code in self.typing.kb_held:
-                desktop = self.typing.kb_held.pop(code)
+                sent, desktop = self.typing.kb_held.pop(code)
             else:
                 return  # not down
-            self.type_key(code, value, desktop)
+            self.type_key(sent, value, desktop)
         elif self.typing.queue and self.typing.queue[0][0] == "stroke" and not self.typing_blocked(now):
             # The letter after a dead key (typing a character with an accent the layout has no
             # key for), where its dead key went.
@@ -2102,7 +2109,7 @@ class Relay:
             return
         down = self.physically_down()
         typed = {k for code, mods, desktop in self.typing.down if desktop for k in (code, *mods)}  # dictation's, coming up next
-        typed |= {code for code, desktop in self.typing.kb_held.items() if desktop}  # Full Keyboard's
+        typed |= {sent for sent, desktop in self.typing.kb_held.values() if desktop}  # Full Keyboard's
         for code in sorted(self.held.desktop - down - typed):
             self.to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")

@@ -38,8 +38,10 @@ inline double LegacySize(double grip) { return grip * 1.8; }
 // The glow style's hit tab: centred on the corner, taking only the three quarters outside the panel
 // (LegacyTarget), so the panel's own corner stays the panel's (user, 2026-11-21: "the drag hitbox for
 // corners overlaps onto the display itself so it's impossible to press display corners, while it isn't
-// large enough in the glow area just outside the corner"). It reaches 1.5 grips out from the corner.
-inline double LegacyTabSize(double grip) { return grip * 3.0; }
+// large enough in the glow area just outside the corner"). It reaches 2.25 grips out from the corner,
+// past the glow (LegacyGlowSize: user, 2026-11-21, "the glow size is fine the hitbox needs to be larger").
+inline double LegacyTabSize(double grip) { return grip * 4.5; }
+inline double LegacyGlowSize(double grip) { return grip * 3.0; }
 inline overlayregion::Region LegacyTarget(int sx, int sy) {
     const double outX = sx > 0 ? 0.5 : 0, inX = sx > 0 ? 0 : 0.5, outY = sy > 0 ? 0.5 : 0;
     return {{false, outX, 0, 0.5, 1}, {false, inX, outY, 0.5, 0.5}};   // (v up: sy +1 is the top)

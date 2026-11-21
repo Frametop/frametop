@@ -802,10 +802,15 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
 // The resize tab's side. A tiled panel's glow tab reaches no further than half the gap, so it never lies
 // over a neighbour's corner (at least 1 cm out, for a gap set very narrow).
-double HandleSize(const Screen &s) {
-    if (g_resizeCorner.sharp) return resizecorner::Canvas(g_resizeCorner);
-    const double size = resizecorner::LegacyTabSize(s.grip);
+double LegacyCorner(const Screen &s, double size) {
     return TileTiled(ScreenIndexOf(s)) ? std::min(size, std::max(TileGapM(), 0.02)) : size;
+}
+double HandleSize(const Screen &s) {
+    return g_resizeCorner.sharp ? resizecorner::Canvas(g_resizeCorner) : LegacyCorner(s, resizecorner::LegacyTabSize(s.grip));
+}
+// The laser's glow at a corner: the hit tab's size, but the glow style's stays smaller than its tab.
+double CornerGlowSize(const Screen &s) {
+    return g_resizeCorner.sharp ? HandleSize(s) : LegacyCorner(s, resizecorner::LegacyGlowSize(s.grip));
 }
 const overlayregion::Region &ResizeRegion(int sx, int sy) {
     static std::array<overlayregion::Region, 4> regions;
@@ -5428,7 +5433,7 @@ void UpdateHandGuides() {
         bool curved = false;
         switch (hg.g.kind) {
             case handinput::Guide::Corner:
-                if (k == 2 && s) halo = std::max(halo, HandleSize(*s));   // (the laser's: as wide as the handle it presses)
+                if (k == 2 && s) halo = std::max(halo, CornerGlowSize(*s));   // (the laser's: as wide as the handle it presses)
                 arm = std::clamp(0.25 * std::min(W, H), 0.03, 0.10);
                 u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
                 break;

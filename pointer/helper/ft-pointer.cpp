@@ -116,10 +116,15 @@
 //
 // Panel edges: off a panel, the cursor stays on that panel's plane while it's within
 // POINTER_EDGE_REACH (0.3 m) of the last point it touched, instead of jumping to
-// POINTER_DISTANCE. A floating panel's resize margins and the window controls under it
+// the free sphere. A floating panel's resize margins and the window controls under it
 // sit just outside the panel, and the laser has to start in front of that plane to reach
 // them (a controller's laser always does: it starts at the hand). Like on scene-graph
 // planes, the laser-catching dot sits 5 cm behind the plane.
+//
+// Free sphere: off every panel, the cursor sits at the depth of the last panel it was on, but
+// never closer than POINTER_DISTANCE and never past 10 m. A big, far display then keeps the
+// cursor (and the laser) out at its depth past its edges, instead of snapping back to 1.5 m
+// (user, 2026-11-21: "the laser doesn't actually travel to the edge of the display").
 //
 // Drag lock: while the left button is held, the cursor keeps the distance it had at the
 // press and collision is frozen, so dragging past a panel's edge (resizing, moving)
@@ -1278,6 +1283,7 @@ struct Pointer {
     double keyTiltYaw = 0, keyTiltPitch = 0;
     double tiltYaw = 0, tiltPitch = 0;
     double dragDistance = 0, lastDistance = 1.5;  // drag lock: distance from the anchor at the press
+    double panelDepth = 0;  // the last panel hit's distance: the free sphere's radius (see the top)
     bool onVrSettings = false;  // the cursor is on the SteamVR Settings page (kept while dragging)
     bool catcherHidesHit = false;  // the laser-catching dot hides SteamVR's hit dot (Settings page)
     Clock::time_point dropHoldUntil{};  // after a left release: keep the drag pose this long
@@ -4277,6 +4283,7 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
         edgeKey.compare(edgeKey.size() - 7, 7, ".resize") == 0 &&
         (edgeRegion == hitRegions.end() || !overlayregion::FullRectangle(edgeRegion->second));
     if (!dragging && t.best < 1e8 && !t.scene) {
+        panelDepth = t.best;
         edgeKey = t.key, edgePoint = bestPoint, edgeNormal = Normalize(bestNormal), edgeLast = bestPoint;
     } else if (!dragging && t.best >= 1e8 && !edgeKey.empty() &&
                !shapedResizeEdge && visible.count(edgeKey) &&
@@ -4324,7 +4331,7 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
     }
     // While dragging: keep the press-time distance and show the non-interactive marker.
     // On a scene-graph plane or a panel's edge: the laser-catching dot goes 5 cm behind it.
-    t.distance = dragging ? dragDistance : (t.best < 1e8 ? t.best : freeDistance);
+    t.distance = dragging ? dragDistance : (t.best < 1e8 ? t.best : std::clamp(panelDepth, freeDistance, 10.0));
     t.point = anchor + dir * t.distance;
     t.occluded = false;
     if (!dragging) {

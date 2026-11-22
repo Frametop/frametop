@@ -1987,6 +1987,30 @@
   "no_pointer": true,
   "raised": null
  },
+ "remoteclick": {
+  "calls": [
+   [
+    "text_field",
+    [
+     true,
+     "click on a remote display"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "remoteclick",
+  "log": [],
+  "raised": null
+ },
+ "remoteclick, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "remoteclick",
+  "log": [],
+  "raised": null,
+  "uid": "OTHER"
+ },
  "textfield 0": {
   "calls": [
    [

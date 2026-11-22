@@ -316,6 +316,7 @@ void Stretch(Screen &s, int w, int h);
 void SendStretch(Screen &s);
 const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dashboard pins ride on it)
 Mat DashFrame();
+bool GuessDash(const Mat &head);   // before the bar's first read: its frame guessed from the head (the tiles ride on it)
 Mat OnSurface(const Screen &s, double u, double v, double dz);   // a point on its surface (along the arc when curved)
 double DashWidth();   // the bar's width in the room, metres (0: not known)
 double DashHeight();   // ...its height

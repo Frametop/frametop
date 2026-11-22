@@ -189,7 +189,7 @@ Mat ToMat(const double m[3][4]) {
 void RetileDash() {
     ApplyWall();
     FlattenTiles();
-    if (!g_tileGroupSet || !Dash().ever) return;
+    if (!g_tileGroupSet || !Dash().Framed()) return;
     const auto &l = g_tiles.Arrange(TileInfo);
     for (const tiling::Placed &p : l.tiles) {
         auto it = g_screens.find(p.id);
@@ -224,7 +224,8 @@ namespace {
 // atHead: round where you face, not at Steam's bar (a reset: the bar is where the dashboard last opened).
 bool Regroup(bool atHead = false) {
     Mat head;
-    if (!Dash().ever || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
+    if (!Dash().Framed() || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return false;
+    atHead = atHead || Dash().guessed;   // (a guessed bar: round you, the wall as set, no slot for its menu)
     const Mat bar = DashFrame();
     const double h[3] = {head.m[0][3], head.m[1][3], head.m[2][3]}, b[3] = {bar.m[0][3], bar.m[1][3], bar.m[2][3]},
                  fwd[3] = {-head.m[0][2], -head.m[1][2], -head.m[2][2]}, up[3] = {head.m[0][1], head.m[1][1], head.m[2][1]};
@@ -241,7 +242,7 @@ bool Regroup(bool atHead = false) {
     // (at the bar, Steam's page over it, just in front of the tiles: the slot as wide as the page, or they'd show behind it)
     const double slotW = g_tileWallAtBar ? std::max(barW, SteamPageWidth()) : barW;
     double barAz = 0, slot = 0;
-    if (!dashtiles::SteamSlot(g, b, slotW, &barAz, &slot)) slot = 0;
+    if (Dash().guessed || !dashtiles::SteamSlot(g, b, slotW, &barAz, &slot)) slot = 0;
     const int steam = SteamDashIndex();
     // Steam's window a tile itself (STEAM_DASH_PANEL), its menu glued to it: no slot kept (it isn't
     // tiled yet when the dashboard opens, so not Tiled(steam): that kept a slot's gap in the strip)
@@ -568,6 +569,26 @@ void PlaceTileBorder() {
     b.on = f;
 }
 
+namespace {
+// ft-screens started with the dashboard closed (a restart): no read of Steam's bar yet, so nothing
+// placed the tiles until it opened (user, 2026-11-22: "Tiling doesn't activate properly after a
+// restart of Frame Top until you open the Steam menu and then close it"). Till the first read, the
+// bar is guessed in front of you and the tiles grouped round you on it, again when the headset goes
+// back on (put on after a restart with it off: they'd be round where it lay). The first opening
+// groups them at the bar as always (g_tileRegroup is still set).
+constexpr long kGuessAgainTicks = 90;   // the head's pose lost this long (about 1 s): off and on again
+long g_guessHeadLost = -1;              // ticks the head's pose has been lost (-1: it's valid)
+void GuessTiles(bool up) {
+    Mat head;
+    const bool valid = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
+    const bool back = valid && g_guessHeadLost >= kGuessAgainTicks;
+    g_guessHeadLost = valid ? -1 : g_guessHeadLost + 1;
+    if (!valid || up || Dash().ever || g_tiles.Ids().empty() || TileDragging()) return;
+    if (Dash().guessed && !back) return;
+    if (GuessDash(head)) Regroup(true);
+}
+}  // namespace
+
 // Each tick, after the dashboard pins have moved.
 void UpdateDashTiles() {
     FlattenTiles();   // (a curve given a tiled panel since: its curve button, a layout put back)
@@ -591,11 +612,12 @@ void UpdateDashTiles() {
     const bool fresh = !Dash().why || (!g_tileGroupSet && !std::strcmp(Dash().why, "hidden"));
     // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
     if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
+    GuessTiles(up);
     if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
     // (a reset: now, the dashboard open or not, round where you face: SteamVR doesn't move its bar while
     // the dashboard is open, so at the bar a reset after turning did nothing; ft-layout leaves the tiled
     // panels to this. The next opening puts them at the bar again, which SteamVR opens in front of you.)
-    if (g_tileReset && (g_tiles.Ids().empty() || (Dash().ever && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
+    if (g_tileReset && (g_tiles.Ids().empty() || (Dash().Framed() && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
     const bool settling = !g_tilesStopping && !TileDragging();
     if (settling && g_tiles.FillGap(NowMs())) {
         RetileDash();

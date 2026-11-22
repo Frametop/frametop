@@ -36,6 +36,11 @@ for var in $(compgen -e); do
       XMODIFIERS | AT_SPI_BUS_ADDRESS) unset "$var" ;;
   esac
 done
+# The gamescope login is an X11 session (XDG_SESSION_TYPE=x11), and startplasma-wayland runs
+# Plasma's env scripts before KWin says wayland: SteamOS's /etc/xdg/plasma-workspace/env/ibus.sh
+# then put QT_IM_MODULE, GTK_IM_MODULE and XMODIFIERS back as ibus, past the loop above, and no
+# desktop app's text field opened the keyboard (user, 2026-11-21). This desktop is Wayland.
+export XDG_SESSION_TYPE=wayland
 
 conf=$HOME/.config/frametop.conf
 BACKEND=screens SCREENS=2 WIDTH=1920 HEIGHT=1080 PHYS_WIDTH=1.6 REMOTE=0 FLOAT_SLOTS=16 FLOAT_MARGIN=300

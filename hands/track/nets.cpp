@@ -247,9 +247,9 @@ std::vector<Palm> Nets::palms(const Image &img, V2 center, double size, double r
     return out;
 }
 
-void Nets::hand_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6]) const {
-    crop_matrix(roi.center, roi.size, roi.rotation, kHandSize, tm);
-    gray_crop(img, tm, kHandSize, hand_contrast_, out);
+void Nets::hand_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6], int size) const {
+    crop_matrix(roi.center, roi.size, roi.rotation, size, tm);
+    gray_crop(img, tm, size, hand_contrast_, out);
 }
 
 void Nets::palm_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6]) const {

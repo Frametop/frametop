@@ -11,6 +11,7 @@
 struct NpuHeads {
     uint32_t graph_id = 0;
     int K = 0, H = 0, W = 0, kpd = 0, g = 0, hidden = 0, pool_h = 0, pool_w = 0;
+    int crop = 224;   // the crop side in pixels the graph reads (header word 11; 0 in older files: 224)
     float s_heat = 0, s_kp = 0, s_pool = 0;
     std::vector<float> grid, pres_w, right_w, w0, b0, w1, b1;
     float pres_b = 0, right_b = 0;

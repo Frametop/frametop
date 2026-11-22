@@ -33,7 +33,7 @@ void NpuSession::fail(const std::string &why) {
 std::string NpuTimes::summary() const {
     const double n = std::max(requests, 1);
     char b[160];
-    std::snprintf(b, sizeof b, "%.2f ms DSP, %.2f in ft-npud, %.2f waited, %.2f crops a request", dsp / n,
+    std::snprintf(b, sizeof b, "%.2f ms DSP, %.2f in ft-npud, %.2f waited, %.2f cropping", dsp / n,
                   daemon / n, wait / n, crop / n);
     return b;
 }

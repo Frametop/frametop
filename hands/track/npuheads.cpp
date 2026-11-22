@@ -70,9 +70,11 @@ bool NpuHeads::parse(const uint8_t *data, size_t size, std::string &err) {
     if (h[0] != kMagic || h[1] != kVersion) return err = "not a version 1 heads file", false;
     graph_id = h[2], K = int(h[3]), H = int(h[4]), W = int(h[5]), kpd = int(h[6]), g = int(h[7]);
     hidden = int(h[8]), pool_h = int(h[9]), pool_w = int(h[10]);
+    crop = h[11] == 0 ? 224 : int(h[11]);
     // the tracker's Landmarks hold 21 points; the rest bounds the sizes so a bad file cannot overflow them
     if (K != 21 || H < 1 || W < 1 || H > 64 || W > 64 || kpd < 1 || kpd > 256 || g < 1 || g > 1024 ||
-        hidden < 1 || hidden > 4096 || pool_h < 1 || pool_w < 1 || pool_h > 64 || pool_w > 64)
+        hidden < 1 || hidden > 4096 || pool_h < 1 || pool_w < 1 || pool_h > 64 || pool_w > 64 ||
+        crop < 64 || crop > 224 || crop % 32 != 0)   // ft-npud's crop slots are 224 x 224
         return err = "heads file shapes out of range", false;
     float s[3];
     std::memcpy(s, data + sizeof h, sizeof s);

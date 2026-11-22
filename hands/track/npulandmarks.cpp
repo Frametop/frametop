@@ -13,7 +13,8 @@ bool NpuLandmarks::run(const std::vector<const Image *> &images, const std::vect
     for (size_t at = 0; at < images.size(); at += NpuClient::kMaxCrops) {
         const int n = int(std::min<size_t>(NpuClient::kMaxCrops, images.size() - at));
         const auto t0 = std::chrono::steady_clock::now();
-        for (int i = 0; i < n; ++i) nets_.hand_crop(*images[at + i], rois[at + i], cl.crop(i), tm[i]);
+        const int side = s_.heads().crop;
+        for (int i = 0; i < n; ++i) nets_.hand_crop(*images[at + i], rois[at + i], cl.crop(i), tm[i], side);
         const auto t1 = std::chrono::steady_clock::now();
         std::string e;
         if (!cl.run(n, NpuSession::kTimeoutMs, e)) return s_.fail(e), false;

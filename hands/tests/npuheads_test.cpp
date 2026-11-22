@@ -54,6 +54,14 @@ static void peaked() {
     auto bad = tiny_file(4, 4, 1, 1, 1);
     bad[12] = 20;   // K = 20
     CHECK(!h.parse(bad.data(), bad.size(), err));
+    CHECK(h.crop == 224);   // word 11 = 0: a file from before the crop word
+    auto c192 = tiny_file(4, 4, 1, 1, 1);
+    c192[44] = 192;
+    CHECK(h.parse(c192.data(), c192.size(), err) && h.crop == 192);
+    c192[44] = 200;   // not a multiple of 32
+    CHECK(!h.parse(c192.data(), c192.size(), err));
+    c192[44] = 0, c192[45] = 1;   // 256: bigger than ft-npud's slots
+    CHECK(!h.parse(c192.data(), c192.size(), err));
 }
 
 static void fixture(const char *path) {

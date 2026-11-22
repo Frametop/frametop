@@ -259,10 +259,11 @@ class Shift:
     so the headset may be anywhere now.
 
     Whether a jump counts can depend on the other eye (JUMP_RULES): `current` and `in_force`
-    take the other eye's Shift (None when that eye isn't mapped) and the rule. Once both eyes'
-    jumps were in force at a click (`teach`), one the click didn't teach stays `vouched`: the
-    other's lesson cleared its jump, but the headset did move, so this eye's jump still counts
-    until its own lesson."""
+    take the other eye's Shift (None when that eye isn't mapped) and the rule. When a click
+    teaches the other eye but not this one while this one's jump is in force (`teach`), this
+    one is `vouched`: the other's lesson cleared its jump, but the headset did move, so this
+    jump still counts until this eye's own lesson. A new jump (its glints moved again) needs
+    the other eye's again."""
 
     def __init__(self, base=(0.0, 0.0), ref=None):
         self.meas = []
@@ -287,7 +288,7 @@ class Shift:
             self.jump, self.held, self.vouched = np.zeros(2), None, False
             return
         if self.held is None or np.hypot(*(d - self.held[0])) > SHIFT_JUMP:
-            self.held = (d, t)
+            self.held, self.vouched = (d, t), False   # moved again: the vouch was for the last move
         elif t - self.held[1] >= JUMP_HOLD:
             self.jump = d
 
@@ -321,27 +322,33 @@ class Shift:
 
     def to_json(self):
         return {"base": self.base.tolist(), "ref": None if self.ref is None else self.ref.tolist(),
-                "meas": [m.tolist() for m in self.meas]}
+                "meas": [m.tolist() for m in self.meas], "vouched": self.vouched}
 
     @classmethod
     def from_json(cls, d):
         s = cls(d.get("base", (0, 0)), d.get("ref"))
         s.meas = [np.asarray(m, float) for m in d.get("meas", [])]
+        s.vouched = bool(d.get("vouched", False))   # its jump is found again from ref after a restart
         return s
 
 
+def partner(shifts, eye, mapped):
+    """The other eye's Shift from {eye: Shift}, or None when the calibration doesn't map it
+    (`mapped`: the eyes it maps), so its jump can't be asked."""
+    return shifts[1 - eye] if (1 - eye) in mapped else None
+
+
 def teach(shifts, lessons, rule, mapped):
-    """One click's lessons for the eyes: `shifts` {eye: Shift}, `lessons` {eye: (measured shift,
-    glint estimate or None)} for the eyes it teaches (seen, and within their dots), `mapped` the
-    eyes the calibration maps. Whether each eye's jump was in force is read before any lesson,
-    since a lesson clears that eye's jump, which the other's rule asks about. An eye whose jump
-    was in force but which the click didn't teach keeps it (vouched) until its own lesson."""
-    partner = {e: shifts[1 - e] if (1 - e) in mapped and (1 - e) in shifts else None for e in shifts}
-    jumped = {e: sh.in_force(partner[e], rule) for e, sh in shifts.items()}
+    """One click's lessons for both eyes: `shifts` {0: Shift, 1: Shift}, `lessons` {eye:
+    (measured shift, glint estimate or None)} for the eyes it teaches (seen, and within their
+    dots), `mapped` the eyes the calibration maps. Whether each eye's jump was in force is read
+    before any lesson, since a lesson clears that eye's jump, which the other's rule asks about.
+    An eye whose jump was in force, left untaught while the other was taught, is vouched."""
+    jumped = {e: sh.in_force(partner(shifts, e, mapped), rule) for e, sh in shifts.items()}
     for e, (d, g) in lessons.items():
         shifts[e].click(d, g, jumped[e])
     for e, sh in shifts.items():
-        if jumped[e] and e not in lessons:
+        if jumped[e] and e not in lessons and (1 - e) in lessons:
             sh.vouched = True
 
 

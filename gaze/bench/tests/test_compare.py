@@ -200,6 +200,19 @@ class CompareTest(unittest.TestCase):
         rp()
         self.assertEqual((rp.taught, rp.skipped), (1, 0))
 
+    def test_held_jump_seed(self):
+        """A run recorded since EYES_JUMP starts each eye with the jump it held (jump_held_px), in force
+        or not, and its vouch; one before it with jump_px while a jump was applied."""
+        cal = eyes_model.Calibration.load(self.dir / "start" / "eyes-calibration.json")
+        status = {"eyes": {"right": {"jump": False, "jump_px": [0, 0], "jump_held_px": [5, 0], "jump_vouched": True},
+                           "left": {"jump": False, "jump_px": [0, 0], "jump_held_px": [0, 0]}}}
+        rp = compare.Replay(self.bench_run, [], cal, {}, status, [], jump="both")
+        self.assertEqual((rp.shift[0].jump.tolist(), rp.shift[0].vouched), ([5.0, 0.0], True))
+        self.assertEqual((rp.shift[1].jump.tolist(), rp.shift[1].vouched), ([0.0, 0.0], False))
+        old = {"eyes": {"right": {"jump": True, "jump_px": [4, 1]}}}
+        rp = compare.Replay(self.bench_run, [], cal, {}, old, [])
+        self.assertEqual(rp.shift[0].jump.tolist(), [4.0, 1.0])
+
     def test_live_options(self):
         """own-replay follows the run's ft-eyes: before EYES_JUMP each and no guard; since, its rule and the per-eye guard."""
         own = compare.REPLAYS["own-replay"]

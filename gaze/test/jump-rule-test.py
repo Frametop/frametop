@@ -107,6 +107,23 @@ check("...its own lesson later drops its older clicks and ends the vouch", (len(
 b.jump, b.vouched = np.array([6.0, 0.0]), True
 b.glint(np.zeros(2), 0.0)   # ref is None: this glint estimate becomes it, then reads no jump
 check("...a glint estimate back where it was ends it too", (b.vouched, bool(np.any(b.jump))), (False, False))
+a, b = em.Shift(ref=(0.0, 0.0)), em.Shift(ref=(0.0, 0.0))
+for t in (0.0, em.JUMP_HOLD):
+    b.glint((6.0, 0.0), t)
+b.vouched = True
+check("...a vouched jump counts alone", b.in_force(a, "both"), True)
+b.glint((20.0, 0.0), 2.0)   # its glints moved again (a misread, say): a new jump needs the other eye
+b.glint((20.0, 0.0), 2.0 + em.JUMP_HOLD)
+check("...a new jump after it doesn't, until the other eye sees one", (b.vouched, b.jump.tolist(), b.in_force(a, "both")),
+      (False, [20.0, 0.0], False))
+a, b = em.Shift(), em.Shift()
+for sh in (a, b):
+    sh.jump = np.array([6.0, 0.0])
+em.teach({0: a, 1: b}, {}, "both", [0, 1])
+check("...a click that taught neither eye vouches for neither", (a.vouched, b.vouched), (False, False))
+b.jump, b.vouched = np.array([6.0, 0.0]), True
+check("...the vouch is saved with the shift", em.Shift.from_json(b.to_json()).vouched, True)
+check("...and an old state file has none", em.Shift.from_json({"base": [0, 0], "ref": None}).vouched, False)
 
 # --- Calibration.inside ---
 cal = em.Calibration(box={0: [-30.0, 30.0, -18.0, 18.0]})
@@ -186,6 +203,11 @@ right, left = tracker.eyes
 check("only the left eye mapped", (right.cal is None, left.cal is not None), (True, True))
 left.shift.jump = np.array([3.0, 0.0])
 check("...its own jump is in force", left.jump_on(), True)
+left.shift.meas = [np.zeros(2)] * 3
+t0, t1 = hold(tracker, 0.0, 0.0, seen=(1,))
+r = tracker.command(f"click {t1:.6f} 0.0 0.0")
+check("...a click then drops its older clicks (the unmapped eye doesn't hold it back)",
+      (r.split()[1:3], len(left.shift.meas)), (["nan", "nan"], 1))
 
 # --- a calibration saved before boxes: refilled from its dots on load ---
 tracker = calibrate()
@@ -194,6 +216,9 @@ d.pop("box")
 fe.CALIBRATION.write_text(json.dumps(d))
 check("an old calibration file has no extents", em.Calibration.load(fe.CALIBRATION).box, {})
 check("...the tracker refills them from its dots", sorted(fe.Tracker().cal.box), [0, 1])
+with open(fe.CALIBRATION.with_name("calibration-dots.jsonl"), "a") as f:
+    f.write('{"made": "' + d["info"]["made"] + '", "truth": [1')   # cut short, as by a crash mid-write
+check("...a line cut short is skipped, not fatal at start", sorted(fe.Tracker().cal.box), [0, 1])
 
 shutil.rmtree(HOME, ignore_errors=True)
 if failures:

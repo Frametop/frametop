@@ -319,6 +319,7 @@ class Replay:
             sh.reseated = bool(st.get("reseat", e not in shifts))
             if jump is not None and "jump_held_px" in st:   # ft-eyes since EYES_JUMP: held, in force or not
                 sh.jump = np.asarray(st["jump_held_px"], float)
+                sh.vouched = bool(st.get("jump_vouched", False))
             elif jump is not None and st.get("jump"):
                 sh.jump = np.asarray(st.get("jump_px", (0, 0)), float)
             self.shift[e] = sh
@@ -332,8 +333,7 @@ class Replay:
 
     def value(self, e):
         """The eye's shift now, as ft-eyes' Eye.shift_now (the other eye's counts while it's mapped)."""
-        other = self.shift[1 - e] if self.cal.has("pupil", 1 - e) else None
-        return self.shift[e].current(other, self.jump or "each")
+        return self.shift[e].current(eyes_model.partner(self.shift, e, self.cal.eyes()), self.jump or "each")
 
     def click(self, t, truth):
         # guard "eye": each eye by its own dots, as ft-eyes (no dots known: every click teaches).

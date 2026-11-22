@@ -18,6 +18,7 @@
 // --keep-presence P: landmark presence a tracked view needs to stay (default 0.5, as new ones).
 // --reacquire S, --reacquire-tiles N, --reacquire-fast: aim the palm search at hands lost within S s
 //             (Tracker::set_reacquire; default off, tiles 2).
+// --views N: a hand's landmark views a step at most (2). --hand-budget N: Tracker::set_hand_budget (4).
 // --near F: Tracker::set_near (0.5). --hold S: Tracker::set_hold (0.3). --search-budget N: palm tiles per round with one hand tracked (2).
 // --drop-every S: the re-acquire test. Every S s, while two hands are tracked, one of them (left and
 //             right in turn) is made invisible for 0.35 s (Tracker::blind: just past the 0.3 s the tracker
@@ -168,7 +169,7 @@ int main(int argc, char **argv) {
     double drop_every = 0;   // seconds; 0: off
     double reacquire_clear = 0.12;
     double near_frac = 0.5, hold = 0.3;
-    int search_budget1 = 2;
+    int search_budget1 = 2, max_views = 2, hand_budget = 4;
     bool skeleton = true, pinch_fitted = false;
     skel::Params skel_params;
     std::string labels, hmd_poses, skeleton_dump, publish_dump;
@@ -220,6 +221,8 @@ int main(int argc, char **argv) {
         else if (a == "--near" && more) near_frac = std::atof(argv[++i]);
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
         else if (a == "--search-budget" && more) search_budget1 = std::atoi(argv[++i]);
+        else if (a == "--views" && more) max_views = std::max(1, std::atoi(argv[++i]));
+        else if (a == "--hand-budget" && more) hand_budget = std::atoi(argv[++i]);
         else if (a == "--no-skeleton") skeleton = false;
         else if (a == "--pinch-fitted") pinch_fitted = true;
         else if (a == "--labels" && more) labels = argv[++i];
@@ -323,7 +326,8 @@ int main(int argc, char **argv) {
         if (calib.count(c.name) && (use == "all" || color == (use == "color"))) used[c.name] = calib[c.name];
     }
     Pool pool(threads, {2, 3, 4});
-    Tracker tracker(used, nets, pool);
+    Tracker tracker(used, nets, pool, max_views);
+    tracker.set_hand_budget(hand_budget);
     std::unique_ptr<NpuSession> npu_session;
     std::unique_ptr<NpuLandmarks> npu;
     std::unique_ptr<NpuDetector> npu_detector;

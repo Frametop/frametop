@@ -89,6 +89,7 @@ struct Seen {
 
 class Tracker {
 public:
+    // max_views: the cameras a hand's landmarks run in a step at most
     Tracker(const std::map<std::string, Camera> &cams, const Nets &nets, Pool &pool, int max_views = 2);
     // images: calibration name -> frame. Returns the hands seen in this set.
     std::vector<const Hand *> step(const std::map<std::string, Image> &images, int64_t t_ns);
@@ -151,6 +152,9 @@ public:
     // round runs its tiles in parallel, one per model thread, so up to --threads tiles cost one
     // tile's wall time (but each tile's CPU).
     void set_search_budget(int none, int one) { search_budget_ = std::max(1, none), search_budget1_ = std::max(1, one); }
+    // Landmark crops a step at most (4): the hands' best views past it wait for a later step. With 2 an NPU
+    // request stays a 2-crop DSP job.
+    void set_hand_budget(int n) { hand_budget_ = std::max(1, n); }
     // Testing re-acquisition (ft-handreplay --drop-every): until until_ns, the landmark model "misses"
     // this hand: its views read presence 0, and new views within 15 cm of where it was are dropped.
     // Returns false if there's no such hand with 3D.

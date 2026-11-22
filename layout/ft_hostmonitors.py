@@ -2,8 +2,8 @@
 
 With a host's "monitors" switch on (ft-layout remote host NAME monitors=on, Frametop Settings),
 Frametop's build of Vibepollo on that PC gets a plan made from the host's display panels: each
-monitor with a connected panel stays on, in the mode picked for its panel (`mode`, else its
-own), and every other monitor (no panel here, or its panel disconnected) goes off. The PC
+monitor with a connected panel stays on, in the mode and scale picked for its panel (`mode`,
+`scale`, else its own), and every other monitor (no panel here, or its panel disconnected) goes off. The PC
 applies it only while one of those panels streams, and puts every monitor back two minutes
 after the last one ends (/api/frametop/monitors).
 
@@ -40,9 +40,20 @@ def mode_of(d):
     return {"width": w, "height": h, "refresh_mhz": r} if w > 0 and h > 0 and r > 0 else None
 
 
+SCALES = (0.5, 4.0)  # the scales the PC takes in a plan
+
+
+def scale_of(d):
+    """The scale picked for a display panel's monitor (1.25: 125%), or None (its own)."""
+    scale = d.get("scale")
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)):
+        return None
+    return float(scale) if SCALES[0] <= scale <= SCALES[1] else None
+
+
 def wishes(host):
-    """{monitor id: {on, mode?}} from the host's display panels. A monitor with two panels is on
-    when either is connected."""
+    """{monitor id: {on, mode?, scale?}} from the host's display panels. A monitor with two
+    panels is on when either is connected."""
     out = {}
     for d in host.get("displays", []):
         monitor = monitor_of(d)
@@ -54,6 +65,8 @@ def wishes(host):
         wish = {"on": on}
         if on and mode_of(d):
             wish["mode"] = mode_of(d)
+        if on and scale_of(d):
+            wish["scale"] = scale_of(d)
         out[monitor] = wish
     return out
 
@@ -61,8 +74,9 @@ def wishes(host):
 def plan_body(host, listed):
     """The POST body for the host, or None when there is nothing to send: no display panel is
     connected (the PC's grace then runs as it would). listed: the PC's monitors as it answered
-    ({id: monitor}); a panel of a monitor it doesn't have (unplugged) or a mode it doesn't list
-    is left out, so the rest of the plan still takes."""
+    ({id: monitor}); a panel of a monitor it doesn't have (unplugged), a mode it doesn't list or
+    a scale it can't set (Windows, an older build) is left out, so the rest of the plan still
+    takes."""
     want = wishes(host)
     if not any(w["on"] for w in want.values()):
         return None
@@ -74,7 +88,9 @@ def plan_body(host, listed):
         mode = wish.get("mode")
         modes = m.get("modes") or []
         if mode and modes and not any(_same_mode(mode, x) for x in modes):
-            wish = {"on": wish["on"]}
+            wish = {k: v for k, v in wish.items() if k != "mode"}
+        if "scale" in wish and m.get("on") and not m.get("scales"):
+            wish = {k: v for k, v in wish.items() if k != "scale"}
         monitors[monitor] = wish
     if not any(w["on"] for w in monitors.values()):
         return None  # only unplugged monitors have connected panels: leave the PC as it is

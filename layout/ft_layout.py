@@ -122,9 +122,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      apple:physical is a Mac's built-in Screen Sharing, with --login
                                      its macOS login) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M|
-                          mode=WxH@MHZ|own|kb_layout=...|keymap=... ...
+                          mode=WxH@MHZ|own|scale=0.5..4|own|kb_layout=...|keymap=... ...
                                      mode: the resolution and refresh (mHz) its monitor is put in,
-                                     on a host with monitors=on
+                                     on a host with monitors=on; scale: its monitor's scale there
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
                              input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off
                              monitors=on|off kb_layout=...|keymap=...
@@ -1632,17 +1632,27 @@ def remote_command(args):
                     w, h, mhz = (int(x) for x in re.split(r"[x@]", v))
                     d["mode"] = {"width": w, "height": h, "refresh_mhz": mhz}
                     d["size"] = list(stream_size(w, h))
+            elif k == "scale" and (v == "own" or (re.fullmatch(r"\d+(\.\d+)?", v) and 0.5 <= float(v) <= 4)):
+                # Its monitor's scale on the PC (a host whose monitors follow its panels): the
+                # PC's desktop size, not the stream's.
+                if v == "own":
+                    d.pop("scale", None)
+                else:
+                    d["scale"] = float(v)
             elif ft_remotekeys.apply_keyboard_kv(d, k, v):
                 pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
                 raise RuntimeError(f"remote set: {kv!r}? (size=WxH fps=F bitrate=KBPS label=TEXT app=APP metres=M "
-                                   "mode=WxH@MHZ|own "
+                                   "mode=WxH@MHZ|own scale=0.5..4|own "
                                    "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
-        if any(kv.partition("=")[0] in ("mode", "app") for kv in args[2:]):
-            sync_monitors([host])  # another mode, or another monitor
-        if d.get("off"):
-            return  # disconnected: the new settings are for its next connection
+        keys = {kv.partition("=")[0] for kv in args[2:]}
+        if keys & {"mode", "scale", "app"}:
+            sync_monitors([host])  # another mode or scale, or another monitor
+        # Disconnected: the new settings are for its next connection. A scale changes the PC's
+        # desktop, not the stream, so the stream goes on.
+        if d.get("off") or keys == {"scale"}:
+            return
         try:
             start_remote(screens_socket(), n, host, d)  # starts over with the new settings
         except RuntimeError as e:

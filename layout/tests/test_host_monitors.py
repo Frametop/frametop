@@ -1,5 +1,6 @@
 """A host's monitors following its display panels (ft_hostmonitors, and ft-layout's hooks): the
-plan made from the panels, what is sent when, and remote host monitors= / remote set mode=. The
+plan made from the panels, what is sent when, and remote host monitors= / remote set mode= and
+scale=. The
 PC is a stand-in for ft_hostapi.request; no headset, no ft-screens.
 
   python3 layout/tests/test_host_monitors.py
@@ -32,7 +33,7 @@ def pc(**over):
 
 
 def listed(*ids):
-    known = {"eDP-2": {"id": "eDP-2", "on": True, "mode": HZ240, "modes": [HZ240, HZ60]},
+    known = {"eDP-2": {"id": "eDP-2", "on": True, "mode": HZ240, "modes": [HZ240, HZ60], "scales": [1, 1.25, 2]},
              "DP-1": {"id": "DP-1", "on": True, "mode": UHD, "modes": [UHD]},
              "HDMI-A-1": {"id": "HDMI-A-1", "on": True, "mode": UHD, "modes": [UHD]}}
     return {i: known[i] for i in ids or known}
@@ -79,6 +80,23 @@ class Plan(unittest.TestCase):
             d["off"] = True
         self.assertIsNone(hm.plan_body(host, listed()), "the PC's grace runs as it would")
         self.assertIsNone(hm.plan_body(pc(), listed("HDMI-A-1")), "only unplugged monitors have panels on")
+
+    def test_a_picked_scale_goes_in_the_plan_where_the_pc_can_set_it(self):
+        host = pc()
+        host["displays"][0]["scale"] = 1.25
+        host["displays"][1]["scale"] = 2
+        self.assertEqual(hm.wishes(host)["eDP-2"], {"on": True, "mode": HZ60, "scale": 1.25})
+        body = hm.plan_body(host, listed())
+        self.assertEqual(body["monitors"]["eDP-2"], {"on": True, "mode": HZ60, "scale": 1.25})
+        self.assertEqual(body["monitors"]["DP-1"], {"on": True},
+                         "DP-1 lists no scales (Windows, an older build): the rest still takes")
+        host["displays"][0]["off"] = True
+        self.assertEqual(hm.wishes(host)["eDP-2"], {"on": False}, "off: no scale")
+
+    def test_a_bad_picked_scale_is_its_own(self):
+        for bad in ("1.5", True, 0, 0.2, 5, None):
+            self.assertIsNone(hm.scale_of({"scale": bad}), bad)
+        self.assertEqual(hm.scale_of({"scale": 2}), 2.0)
 
     def test_a_bad_picked_mode_is_its_own(self):
         self.assertIsNone(hm.mode_of({"mode": {"width": "x"}}))
@@ -268,6 +286,19 @@ class Layout(unittest.TestCase):
         self.assertEqual(len(self.synced), 4, "the plan doesn't change with the frame rate")
         with self.assertRaises(RuntimeError):
             self.m.remote_command(["set", "pc-dp", "mode=1920x1080"])
+
+    def test_a_scale_is_saved_and_sent_without_restarting_the_stream(self):
+        self.m.remote_command(["host", "PC", "monitors=on"])
+        self.with_screens()
+        self.synced.clear()
+        self.m.remote_command(["set", "pc-edp", "scale=1.25"])
+        self.assertEqual(self.host()["displays"][0]["scale"], 1.25)
+        self.assertEqual(self.synced, ["PC"], "the plan is sent; no start: the stream goes on")
+        self.m.remote_command(["set", "pc-edp", "scale=own"])
+        self.assertNotIn("scale", self.host()["displays"][0])
+        for bad in ("scale=5", "scale=0.1", "scale=big"):
+            with self.assertRaises(RuntimeError):
+                self.m.remote_command(["set", "pc-edp", bad])
 
     def with_screens(self):
         """ft-screens as a stand-in: what's started and stopped goes in self.synced, in order with

@@ -272,6 +272,7 @@ class Backend(QObject):
                                  "host": h.get("name", ""),
                                  "followsMonitor": ft_hostmonitors.controls(h) and ft_hostmonitors.monitor_of(d) is not None,
                                  "mode": ft_hostmonitors.mode_of(d) or {},
+                                 "scale": ft_hostmonitors.scale_of(d) or 0,
                                  # A KDE PC's window (issue 81): the window sets its size.
                                  "kwin": str(d["app"]).startswith("kwin:"),
                                  "key": f"{d['app']}@{d['port']}" if d.get("port") else d["app"],

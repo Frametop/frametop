@@ -914,6 +914,15 @@ Item {
                                             picked: disp.modelData.mode
                                             onPick: (mode) => backend.hostMonitors.pickMode(disp.modelData.host, disp.modelData.id, mode)
                                         }
+                                        MonitorScalePicker {
+                                            // A PC that can set it (Hyprland, KDE; not Windows), or one picked before
+                                            visible: disp.followsMonitor && disp.monitor !== null
+                                                     && ((disp.monitor.scales || []).length > 0 || disp.modelData.scale > 0)
+                                            Kirigami.FormData.label: "Its scale:"
+                                            monitor: disp.monitor
+                                            picked: disp.modelData.scale
+                                            onPick: (scale) => backend.hostMonitors.pickScale(disp.modelData.host, disp.modelData.id, scale)
+                                        }
                                         Controls.Label {
                                             visible: !disp.modelData.virtual && !disp.modelData.kwin
                                             Layout.fillWidth: true

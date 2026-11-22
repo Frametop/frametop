@@ -207,7 +207,8 @@
 // transparent (still there for the laser to land on), since you know where you're looking.
 //   When the mouse took the pointer and you then click, the nudge was probably onto what
 // you were looking at: from the raw gaze when the mouse took over to where you clicked is
-// the tracker's error there. The helper sends it to ft-gazed as a lesson ("lesson <raw yaw>
+// the tracker's error there (a glance with the free mouse, below). The helper sends it to
+// ft-gazed as a lesson ("lesson <raw yaw>
 // <raw pitch> <true yaw> <true pitch>", the true direction relative to the head as it was
 // when the mouse took over) if the mouse moved at least 0.2 deg, the click came within 10 s,
 // and the correction (raw gaze to click) is within POINTER_GAZE_NUDGE_MAX (55 deg, half what
@@ -218,6 +219,15 @@
 // 25 for the next 10, so the check gets back under it (2026-10-01). A held press dragged onto
 // the target is the same: from the raw gaze at the press to the release. With no
 // fresh gaze (a blink, the service stopped, the headset off), the pointer stays put.
+//   Glance (POINTER_GAZE_MOUSE_MOVE=free): the mouse took the pointer whenever it moved, so the
+// gaze when it took over may be seconds and a long trip before the click, and the click is no
+// deliberate correction. You are most likely looking at what you click, though (user,
+// 2026-11-22), so the click teaches from where you looked then instead: the raw gaze 75 ms
+// before it (as a pinch's lock), held still over the 300 ms before it (within 1.5 deg), to the
+// click, only when that's within POINTER_GAZE_GLANCE_MAX (8 deg; 0: off), as a weaker kind of
+// lesson ("lesson ... glance": ft-gazed counts it for less, and our tracker never takes it as the
+// headset moved). Past that, or with the eyes moving, you were looking elsewhere: nothing is
+// learned and no quick check runs ("mouse click: no glance lesson (...)").
 //
 // Gaze precision (the relay's gaze_precision and gaze_drag actions, bound to a mouse button or
 // a key combination; "precision|gazedrag mouse|keyboard 1|0" here): gaze mode aims, the button
@@ -549,7 +559,7 @@
 // panel, and a laser that starts behind them can't hit them. POINTER_FOLLOW (0) and
 // POINTER_LEASH_DEG (10), POINTER_LEASH_DELAY (0.2 s), POINTER_LEASH_RETURN (0.2 s),
 // POINTER_FOLLOW_REACH (70 deg): head follow, above. POINTER_GAZE (0), POINTER_GAZE_RETAKE
-// (5 deg), POINTER_GAZE_NUDGE_MAX (55 deg), POINTER_GAZE_HOLD (0.5 s), POINTER_GAZE_DOT
+// (5 deg), POINTER_GAZE_NUDGE_MAX (55 deg), POINTER_GAZE_GLANCE_MAX (8 deg), POINTER_GAZE_HOLD (0.5 s), POINTER_GAZE_DOT
 // (always), POINTER_GAZE_SHOW (1 s): gaze mode, above. POINTER_CONTROLLER_PICKUP (1, 0.5 to 5): how hard a controller must
 // move to take the laser back, above. POINTER_IGNORE (empty): ignored panels, above.
 // POINTER_HANDS (0), POINTER_PINCH_GAIN (0.5), POINTER_PINCH_DEADZONE (1.5 deg),
@@ -1162,6 +1172,7 @@ struct Pointer {
     bool carryTurn = false;    // "carry turn on": the mouse turns the carried panel (Alt held), the cursor stays
     // Gaze mode (see the top); gazeConf is POINTER_GAZE as last read, like followConf.
     bool gazeOn = false, gazeConf = false;
+    double gazeGlanceMax = 8;  // POINTER_GAZE_GLANCE_MAX: a free mouse's click teaches the gaze within this (0: off)
     double gazeRetake = 5, gazeNudgeMax = 55, gazeHold = 0.5, gazeShow = 1, gazeControlHold = 0.12;
     bool gazeDotAlways = true;  // POINTER_GAZE_DOT (see the top)
     double headDeadzone = 0.5, keyTap = 0.25;  // POINTER_HEAD_DEADZONE, POINTER_KEY_TAP (keyboard clicks, see the top)
@@ -1356,6 +1367,7 @@ struct Pointer {
     Gaze gz;
     bool gazeOwns = true;  // the pointer follows the gaze; false: the mouse has it
     bool nudging = false;  // the mouse took it from the gaze: the next click may be a lesson
+    bool nudgeGlance = false;  // ...the free mouse took it: the click's lesson is a glance (see the top)
     double nudgeRawHy = 0, nudgeRawHp = 0, nudgeMoved = 0;
     vr::HmdMatrix34_t nudgeHead{}, lastHead{};
     bool haveHead = false, havePoint = false;
@@ -1483,6 +1495,7 @@ struct Pointer {
         if (wantFollow != followConf) follow = followConf = wantFollow, followReset = true;
         gazeRetake = std::clamp(ConfDouble(conf, "POINTER_GAZE_RETAKE", 5), 1.0, 45.0);
         gazeNudgeMax = std::clamp(ConfDouble(conf, "POINTER_GAZE_NUDGE_MAX", 55), 1.0, 110.0);
+        gazeGlanceMax = std::clamp(ConfDouble(conf, "POINTER_GAZE_GLANCE_MAX", 8), 0.0, 20.0);
         gazeHold = std::clamp(ConfDouble(conf, "POINTER_GAZE_HOLD", 0.5), 0.1, 5.0);
         gazeControlHold = std::clamp(ConfDouble(conf, "POINTER_GAZE_CONTROL_HOLD", 0.12), 0.05, 5.0);
         gazeShow = std::clamp(ConfDouble(conf, "POINTER_GAZE_SHOW", 1), 0.0, 30.0);
@@ -1669,6 +1682,35 @@ struct Pointer {
         }
         rayOwner.log.clear(), rayOwner.changes.clear();
     }
+    // A free mouse's click (see "Glance" at the top): from where you looked just before it.
+    auto glanceLesson() {
+        const double now = secsOf(Clock::now());
+        gazehand::Params gp;
+        gazehand::GazeSample gs;
+        double age = 0;
+        vr::HmdMatrix34_t head;
+        const double spread = gazeHist.Spread(now - 0.3, now - gp.lead);
+        const char *why = nullptr;
+        double off = -1;
+        if (!gazeHist.Lock(now, gp, gs, age) || !poses.At(uint64_t(gs.t * 1e9), head)) why = "no fresh gaze";
+        else if (spread < 0 || spread > 1.5) why = "the eyes were moving";
+        else {
+            const Vec3 d = RotateInverse(head, Normalize(lastPoint - Position(head)));
+            const double ty = std::atan2(-d.x, -d.z) * 180 / M_PI, tp = std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI;
+            off = std::hypot(std::remainder(ty - gs.rhy, 360.0), tp - gs.rhp);
+            if (off > gazeGlanceMax) why = "looking elsewhere";
+            else {
+                char msg[160];
+                std::snprintf(msg, sizeof msg, "lesson %.3f %.3f %.3f %.3f glance", gs.rhy, gs.rhp, ty, tp);
+                SendTo(out, FT_SOCK_GAZED, msg);
+                lessonSaid = "a glance lesson";
+            }
+        }
+        if (why && off >= 0) std::printf("mouse click: no glance lesson (%s: %.1f deg off)\n", why, off);
+        else if (why) std::printf("mouse click: no glance lesson (%s)\n", why);
+        else std::printf("mouse click: a glance lesson (%.1f deg off, gaze %.0f ms before, still within %.1f deg)\n", off,
+                         age * 1000, spread);
+    }
     auto pressLeft() {
         // ft-screens sends the keyboard to the panel clicked last; it sees clicks on
         // its own screens, but only we know when one lands on another panel. SteamVR's Settings
@@ -1676,8 +1718,10 @@ struct Pointer {
         SendTo(out, FT_SOCK_SCREENS, "click " + (lastHit.empty() || onVrSettings ? std::string("-") : lastHit));
         lessonSaid.clear();
         // A click after nudging the gaze-placed pointer: the nudge is a lesson, or past
-        // POINTER_GAZE_NUDGE_MAX, a quick check (see the top).
-        if (gazeOn && nudging && !gazeOwns && havePoint && Clock::now() - nudgeAt < std::chrono::seconds(10) &&
+        // POINTER_GAZE_NUDGE_MAX, a quick check (see the top). The free mouse's: a glance.
+        if (gazeOn && nudging && nudgeGlance && !gazeOwns && havePoint && !confirmLesson) {
+            if (gazeGlanceMax > 0) glanceLesson();
+        } else if (gazeOn && nudging && !gazeOwns && havePoint && Clock::now() - nudgeAt < std::chrono::seconds(10) &&
             (confirmLesson || nudgeMoved >= 0.2)) {
             const Vec3 d = RotateInverse(nudgeHead, Normalize(lastPoint - Position(nudgeHead)));
             const double ty = std::atan2(-d.x, -d.z) * 180 / M_PI, tp = std::asin(std::clamp(d.y, -1.0, 1.0)) * 180 / M_PI;
@@ -1691,7 +1735,7 @@ struct Pointer {
             lessonSaid = off <= gazeNudgeMax ? "a lesson" : "the quick check";
             if (debug) std::printf("gaze %s (nudged %.2f deg, off %.2f)\n", msg, nudgeMoved, off);
         }
-        nudging = confirmLesson = false;
+        nudging = confirmLesson = nudgeGlance = false;
         // A click on nothing: maybe on an overlay that came up since the list was read.
         if (lastHit.empty()) overlays.Kick();
         leftHeld = true;
@@ -1741,7 +1785,7 @@ struct Pointer {
         gazeOwns = false;
         nudging = haveHead && Clock::now() - gz.at < std::chrono::milliseconds(200);
         nudgeRawHy = gz.rhy, nudgeRawHp = gz.rhp, nudgeHead = lastHead;
-        nudgeAt = aimSince = Clock::now(), nudgeMoved = 0;
+        nudgeAt = aimSince = Clock::now(), nudgeMoved = 0, nudgeGlance = false;
         aimHeld = true, aimRight = right;
     }
     // A drag the right button began (chordDrag): it lasts while either button is held.
@@ -2037,7 +2081,7 @@ struct Pointer {
             gazeOwns = false;
             nudging = haveHead && Clock::now() - gz.at < std::chrono::milliseconds(200);
             nudgeRawHy = gz.rhy, nudgeRawHp = gz.rhp, nudgeHead = lastHead;
-            nudgeAt = Clock::now(), nudgeMoved = 0;
+            nudgeAt = Clock::now(), nudgeMoved = 0, nudgeGlance = true;
         }
         if (nudging || aimHeld) nudgeMoved += std::hypot(a, b);
         if (!anchored) recenter = true;
@@ -2120,7 +2164,7 @@ struct Pointer {
             gazeOwns = false;
             nudging = gazeOn && haveHead && fr.tnow - gz.at < std::chrono::milliseconds(200);
             nudgeRawHy = gz.rhy, nudgeRawHp = gz.rhp, nudgeHead = lastHead;
-            nudgeAt = aimSince = fr.tnow, nudgeMoved = 0;
+            nudgeAt = aimSince = fr.tnow, nudgeMoved = 0, nudgeGlance = false;
             aimHeld = aimHand = true;
             pulseAt = fr.tnow;
         }
@@ -2429,7 +2473,7 @@ struct Pointer {
         hold = h;
         startHold(false);
         // the lesson's look is the locked one (ft-gazed finds it in what it sent)
-        if (locked) nudging = true, nudgeRawHy = gs.rhy, nudgeRawHp = gs.rhp, nudgeHead = gazeHead;
+        if (locked) nudging = true, nudgeGlance = false, nudgeRawHy = gs.rhy, nudgeRawHp = gs.rhp, nudgeHead = gazeHead;
         hold.gaze.Begin(gp, secsOf(fr.tnow), yaw, pitch, h.refYaw, h.refPitch, kind == 2, locked ? lockAge : -1);
         if (gazeScroll != 0 && sideGap[side][0] >= 0 && sideGap[side][0] < gazeScrollGap && sideGap[side][1] >= 0 &&
             sideGap[side][1] < gazeScrollGap) {

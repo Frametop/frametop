@@ -137,6 +137,21 @@ public:
         out = *pick, age = tBegin - pick->t;
         return true;
     }
+    // How far the raw gaze strayed (degrees, the largest from its mean) over [t0, t1], or < 0
+    // with fewer than n samples there: a mouse click's glance lesson wants the eyes held still on
+    // what it clicked (ft-pointer.cpp, "Glance").
+    double Spread(double t0, double t1, int n = 3) const {
+        double sy = 0, sp = 0;
+        int k = 0;
+        for (const GazeSample &s : h_)
+            if (s.t >= t0 - 1e-9 && s.t <= t1 + 1e-9) sy += s.rhy, sp += s.rhp, ++k;
+        if (k < n) return -1;
+        sy /= k, sp /= k;
+        double worst = 0;
+        for (const GazeSample &s : h_)
+            if (s.t >= t0 - 1e-9 && s.t <= t1 + 1e-9) worst = std::max(worst, std::hypot(s.rhy - sy, s.rhp - sp));
+        return worst;
+    }
     void Clear() { h_.clear(); }
 
 private:

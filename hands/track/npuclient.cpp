@@ -20,6 +20,7 @@ std::string sys_err(const char *what) { return std::string(what) + ": " + std::s
 
 bool NpuClient::open(const std::string &dir, size_t out_bytes, uint32_t graph_id, std::string &err) {
     close();
+    if (out_bytes > kOutSlot) return err = "the heads' outputs are larger than ft-npud's output slots", false;
     out_bytes_ = out_bytes;
     const size_t need = kOuts + size_t(kMaxCrops) * out_bytes;
     const std::string shm_path = dir + "/ft-npud.shm", sock_path = dir + "/ft-npud.sock";

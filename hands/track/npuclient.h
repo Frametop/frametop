@@ -49,7 +49,10 @@ private:
     static constexpr size_t kHeader = 64, kCrops = 4096, kOuts = kCrops + size_t(kMaxCrops) * kCrop * kCrop;
     static constexpr uint8_t kDet = 0x10;
     static constexpr uint32_t kFeatDet = 1;
-    size_t det_outs() const { return kOuts + size_t(kMaxCrops) * out_bytes_; }
+    // ft-npud's output slots hold the largest graph (224 crops: heat 21 and kp_feat 32 at 28 x 28, pool 128 at
+    // 7 x 7); a smaller graph's outputs sit dense in them, but the detector's slots stay after all four.
+    static constexpr size_t kOutSlot = size_t(21 + 32) * 28 * 28 + size_t(128) * 7 * 7;
+    size_t det_outs() const { return kOuts + size_t(kMaxCrops) * kOutSlot; }
     bool request(uint8_t req, int timeout_ms, std::string &err);
     bool post(uint8_t req, std::string &err);
     float header_float(int word) const;

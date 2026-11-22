@@ -1363,8 +1363,18 @@ void UpdateAttention() {
 // once, and the game lose the pad. The grips (SteamVR's own switch) bring the laser back.
 bool SteamVRGamepad() { return g_steamvr.gamepad && NowMs() - g_steamvr.atMs < kSteamVRWordMs; }
 bool TheaterGame() { return g_steamvr.theater && NowMs() - g_steamvr.atMs < kSteamVRWordMs; }
+// Gamepad mode with a hand controller connected: a pad to leave alone. With none (hands only), there's no
+// pad and no grips to switch back with, so the hand rays and the 3D mouse keep the laser (user, 2026-11-21:
+// "The laser pointer doesn't appear to be working at all now": SteamVR went to Gamepad mode as ft-screens
+// restarted, and stayed there through a hands-only session).
+bool PadToLeave() {
+    if (!SteamVRGamepad()) return false;
+    for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i)
+        if (vr::VRSystem()->IsTrackedDeviceConnected(i) && IsHandController(i)) return true;
+    return false;
+}
 bool LasersByMode() {
-    if (SteamVRGamepad()) return false;
+    if (PadToLeave()) return false;
     return g_lasers == Lasers::Always || (g_lasers == Lasers::OutsideGames && !g_gameRunning && !TheaterGame());
 }
 
@@ -3200,7 +3210,7 @@ void UpdateRemoteDrag(void (*handle)(const struct ft_event *, void *), void *dat
 // windows. Leaving takes a wider margin than arriving, and a drag or a held button keeps it
 // on.
 void UpdateAim() {
-    if (SteamVRGamepad()) {  // pointing at a panel leaves the pad in the game (see LasersByMode)
+    if (PadToLeave()) {  // pointing at a panel leaves the pad in the game (see LasersByMode)
         for (auto &[i, s] : g_screens) s.aimUntil = 0;
         return;
     }

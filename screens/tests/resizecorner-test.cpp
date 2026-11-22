@@ -214,6 +214,10 @@ int main() {
         // past a corner further than an edge's band reaches: still the corner's
         assert(resizecorner::GlowHit(W, H, arm, out, W / 2 + 1.2 * out, -H / 2 - 1.2 * out, &sx, &sy) && sx == 1 && sy == -1);
         assert(!resizecorner::GlowHit(W, H, arm, out, W / 2 + 1.2 * out, 0, &sx, &sy));
+        // a corner's own depth (a tile's, capped like its edges'): no deeper
+        assert(!resizecorner::GlowHit(W, H, arm, out, W / 2 + 1.2 * out, -H / 2 - 1.2 * out, &sx, &sy, out));
+        assert(resizecorner::GlowHit(W, H, arm, out, W / 2 + 0.9 * out, -H / 2 - 0.9 * out, &sx, &sy, out) && sx == 1 && sy == -1);
+        assert(resizecorner::GlowCanvas(1, 1, W, H, 0.001, out, out) == 2 * out);
         assert(resizecorner::EdgeNear(W, H, out, W / 2 - 0.005, 0, &sx, &sy) > 0.29 && sx == 1 && sy == 0);
         assert(resizecorner::EdgeNear(W, H, out, 0, 0, &sx, &sy) == 0);
     }

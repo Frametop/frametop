@@ -800,30 +800,30 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 // A canvas centered at the screen corner. Only its padded corner-stroke mask is
 // interactive; the window and its safety margin are excluded from every primitive.
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
-// The glow's depth past the panel. A tiled panel's reaches no further than half the gap, its corner's
-// (CornerOut, deeper) too, so it never lies over a neighbour's own (at least 1 cm out, for a gap set very
-// narrow).
-double LegacyCorner(const Screen &s, double size) {
-    if (!TileTiled(ScreenIndexOf(s))) return size;
-    return std::min(size, std::max(TileGapM() / 2, 0.01) / resizecorner::kCornerGrow);
-}
+// The glow's depth past the panel, an edge's or a corner's (CornerOut, deeper). A tiled panel's reaches no
+// further than half the gap, so it never lies over a neighbour's own (at least 1 cm out, for a gap set very
+// narrow): the hit areas and the glow drawn.
+double TiledCap(const Screen &s) { return TileTiled(ScreenIndexOf(s)) ? std::max(TileGapM() / 2, 0.01) : 1e9; }
+double LegacyCorner(const Screen &s, double size) { return std::min(size, TiledCap(s)); }
 // The glow style's band past the panel's edge: the laser's glow's depth, and its hit area's
 // (resizecorner::GlowRegion); along each edge from a corner, GlowArm.
 double GlowOut(const Screen &s) { return LegacyCorner(s, resizecorner::LegacyGlowSize(s.grip)); }
+double CornerGlowOut(const Screen &s) { return LegacyCorner(s, resizecorner::CornerOut(resizecorner::LegacyGlowSize(s.grip))); }
 double GlowArm(const Screen &s) { return resizecorner::GlowArm(s.metres, s.heightMetres()); }
 // The handle's canvas for the corner or edge it's at (cornerX or cornerY 0: an edge's middle).
 double HandleSize(const Screen &s) {
     return g_resizeCorner.sharp ? resizecorner::Canvas(g_resizeCorner)
-                                : resizecorner::GlowCanvas(s.cornerX, s.cornerY, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s));
+                                : resizecorner::GlowCanvas(s.cornerX, s.cornerY, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s),
+                                                            CornerGlowOut(s));
 }
 // A corner's, wherever the handle is (an edge's is as long as the panel).
 double CornerHandleSize(const Screen &s) {
-    return g_resizeCorner.sharp ? HandleSize(s) : resizecorner::GlowCanvas(1, 1, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s));
+    return g_resizeCorner.sharp ? HandleSize(s) : resizecorner::GlowCanvas(1, 1, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s), CornerGlowOut(s));
 }
 // The laser's glow past an edge, and past a corner (larger: resizecorner::kCornerGrow): as deep as the
 // hit area it shows.
 double EdgeGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : GlowOut(s); }
-double CornerGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : resizecorner::CornerOut(GlowOut(s)); }
+double CornerGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : CornerGlowOut(s); }
 // An edge's handle bends with a curved panel (an overlay bends along its width: a side's band is only
 // its depth across); the sharp style's outline too.
 float HandleCurve(const Screen &s) {
@@ -857,7 +857,7 @@ void PaintResizeMask(Screen &s) {
         if (same && (s.drag != Drag::None || (near(arm, s.resizePaintedArm) && near(out, s.resizePaintedOut) &&
                                               near(along, s.resizePaintedAlong))))
             return;
-        region = resizecorner::GlowRegion(s.cornerX, s.cornerY, s.metres, s.heightMetres(), arm, out);
+        region = resizecorner::GlowRegion(s.cornerX, s.cornerY, s.metres, s.heightMetres(), arm, out, CornerGlowOut(s));
         vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(HandleSize(s)));
         vr::VROverlay()->SetOverlayCurvature(s.handle, HandleCurve(s));
     }
@@ -1443,7 +1443,7 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
                     best = close, cx = x, cy = y, onHit = hit, along = x && y ? 0 : x ? v : u;
                 };
                 int hx, hy;
-                if (resizecorner::GlowHit(W, H, GlowArm(s), GlowOut(s), u, v, &hx, &hy) && !(hx < 0 && gluedLeft)) {
+                if (resizecorner::GlowHit(W, H, GlowArm(s), GlowOut(s), u, v, &hx, &hy, CornerGlowOut(s)) && !(hx < 0 && gluedLeft)) {
                     consider(1, hx, hy, true);
                     continue;
                 }
@@ -5505,6 +5505,7 @@ void UpdateHandGuides() {
         }
         const double W = s ? s->metres : sp->fit.width, H = s ? s->heightMetres() : sp->fit.height, curve = s ? s->curve : 0;
         double halo = std::round(softglow::Width(HeadDistance(p)) * 1000) / 1000;   // (by the mm: fewer textures)
+        if (s) halo = std::min(halo, TiledCap(*s));   // (a tile's glow stays off its neighbour: LegacyCorner)
         // its size and place on the panel
         double u = hg.g.u, v = hg.g.v, wm = 0, hm = 0, arm = 0, r = 0, edge = 1e9;
         int tw = 128, th = 128;
@@ -6650,9 +6651,10 @@ bool ft_vr_carry_wheel(int notches) {
 
 int ft_vr_mouse_panel(void) {
     if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
-    if (LaserOnFullKeyboard(g_mouseDevice)) return -1;   // (typing on it: the panel behind keeps none)
     const auto it = g_screens.find(g_mouseScreen);
-    return it != g_screens.end() && it->second.visible ? g_mouseScreen : -1;
+    if (it == g_screens.end() || !it->second.visible) return -1;
+    if (LaserOnFullKeyboard(g_mouseDevice, it->second.overlay)) return -1;   // (typing on it: the panel behind keeps none)
+    return g_mouseScreen;
 }
 
 int ft_vr_mouse_screen(void) {

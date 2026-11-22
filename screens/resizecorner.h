@@ -58,12 +58,16 @@ inline double GlowArm(double width, double height) { return std::clamp(0.25 * st
 constexpr double kCornerGrow = 1.3;
 inline double CornerOut(double out) { return out * kCornerGrow; }
 inline double CornerArm(double arm) { return arm * kCornerGrow; }
+// cornerOut below: a corner's depth, when not CornerOut(out) (a tiled panel's, capped by the gap like its
+// edges': ft-screens' LegacyCorner); negative for CornerOut(out).
+inline double CornerDepth(double out, double cornerOut) { return cornerOut >= 0 ? cornerOut : CornerOut(out); }
 // The hit canvas's side, square, centred on the corner or the edge's middle.
-inline double GlowCanvas(int sx, int sy, double width, double height, double arm, double out) {
-    return sx && sy ? 2 * std::max(CornerArm(arm), CornerOut(out)) : (sx ? height : width) + 2 * out;
+inline double GlowCanvas(int sx, int sy, double width, double height, double arm, double out, double cornerOut = -1) {
+    return sx && sy ? 2 * std::max(CornerArm(arm), CornerDepth(out, cornerOut)) : (sx ? height : width) + 2 * out;
 }
-inline overlayregion::Region GlowRegion(int sx, int sy, double width, double height, double arm, double out) {
-    const double size = GlowCanvas(sx, sy, width, height, arm, out), cx = sx * width / 2, cy = sy * height / 2;
+inline overlayregion::Region GlowRegion(int sx, int sy, double width, double height, double arm, double out,
+                                        double cornerOut = -1) {
+    const double size = GlowCanvas(sx, sy, width, height, arm, out, cornerOut), cx = sx * width / 2, cy = sy * height / 2;
     overlayregion::Region region;
     auto rect = [&](double x0, double x1, double y0, double y1) {   // (panel metres, either order)
         region.push_back({false, 0.5 + (std::min(x0, x1) - cx) / size, 0.5 + (std::min(y0, y1) - cy) / size,
@@ -71,7 +75,7 @@ inline overlayregion::Region GlowRegion(int sx, int sy, double width, double hei
     };
     const double w = width / 2, h = height / 2;
     if (sx && sy) {
-        const double ca = CornerArm(arm), co = CornerOut(out);
+        const double ca = CornerArm(arm), co = CornerDepth(out, cornerOut);
         rect(sx * w, sx * (w + co), sy * (h - ca), sy * (h + co));
         rect(sx * (w - ca), sx * (w + co), sy * h, sy * (h + co));
     } else if (sx) {
@@ -83,8 +87,10 @@ inline overlayregion::Region GlowRegion(int sx, int sy, double width, double hei
 }
 // Whether panel point x, y is on a glow hit area, and which: a corner's first (its L, CornerOut deep, runs
 // CornerArm along each edge), else an edge's (`out` deep). Never on the panel itself.
-inline bool GlowHit(double width, double height, double arm, double out, double x, double y, int *sx, int *sy) {
-    const double ox = std::fabs(x) - width / 2, oy = std::fabs(y) - height / 2, ca = CornerArm(arm), co = CornerOut(out);
+inline bool GlowHit(double width, double height, double arm, double out, double x, double y, int *sx, int *sy,
+                    double cornerOut = -1) {
+    const double ox = std::fabs(x) - width / 2, oy = std::fabs(y) - height / 2, ca = CornerArm(arm),
+                 co = CornerDepth(out, cornerOut);
     const int ux = x < 0 ? -1 : 1, uy = y < 0 ? -1 : 1;
     if ((ox >= 0 && ox <= co && oy >= -ca && oy <= co) || (oy >= 0 && oy <= co && ox >= -ca && ox <= co)) *sx = ux, *sy = uy;
     else if (ox >= 0 && ox <= out && oy < 0) *sx = ux, *sy = 0;

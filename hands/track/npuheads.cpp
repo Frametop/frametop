@@ -12,14 +12,46 @@ constexpr uint32_t kMagic = 0x484E5446, kVersion = 1;   // 'FTNH'
 
 float sigmoid(float v) { return 1.f / (1.f + std::exp(-v)); }
 
-// y = W x + b, W row-major [rows][cols]
-void linear(const float *W, const float *b, const float *x, int rows, int cols, float *y) {
-    for (int r = 0; r < rows; ++r) {
-        const float *w = W + size_t(r) * cols;
-        float acc = 0;
-        for (int c = 0; c < cols; ++c) acc += w[c] * x[c];
-        y[r] = acc + b[r];
+// y = W x + b, W row-major [rows][cols] (one output: a dot product)
+float dot(const float *w, const float *x, int n) {
+    float acc = 0;
+    for (int c = 0; c < n; ++c) acc += w[c] * x[c];
+    return acc;
+}
+
+// y += a * x, four lanes at a time (GCC/Clang vector extensions: -O2's cost model leaves the plain loop scalar);
+// n is a multiple of 4 (the strides below are padded)
+typedef float v4 __attribute__((vector_size(16)));
+void axpy(const float *x, float a, float *y, int n) {
+    for (int i = 0; i < n; i += 4) {
+        v4 xv, yv;
+        std::memcpy(&xv, x + i, 16), std::memcpy(&yv, y + i, 16);
+        yv += a * xv;
+        std::memcpy(y + i, &yv, 16);
     }
+}
+
+int pad4(int n) { return (n + 3) & ~3; }
+
+// y = W x + b with Wt = W transposed, [cols][pad4(rows)]: the inner loop runs over independent outputs.
+// y has room for pad4(rows).
+void linear_t(const float *Wt, const float *b, const float *x, int rows, int cols, float *y) {
+    const int rp = pad4(rows);
+    std::fill(y, y + rp, 0.f);
+    std::copy(b, b + rows, y);
+    for (int c = 0; c < cols; ++c) {
+        const float v = x[c];
+        if (v == 0.f) continue;   // after a ReLU about half the inputs are 0
+        axpy(Wt + size_t(c) * rp, v, y, rp);
+    }
+}
+
+std::vector<float> transpose(const std::vector<float> &m, int rows, int cols) {
+    const int rp = pad4(rows);
+    std::vector<float> t(size_t(cols) * rp, 0.f);
+    for (int r = 0; r < rows; ++r)
+        for (int c = 0; c < cols; ++c) t[size_t(c) * rp + r] = m[size_t(r) * cols + c];
+    return t;
 }
 
 }  // namespace
@@ -64,6 +96,9 @@ bool NpuHeads::parse(const uint8_t *data, size_t size, std::string &err) {
     take(right_w, g), take1(right_b);
     take(w0, hidden * in0), take(b0, hidden);
     take(w1, 3 * K * size_t(hidden)), take(b1, 3 * K);
+    for (int d = 0; d < 256; ++d) exp_lut[d] = std::exp(float(-d) * s_heat);
+    w0t = transpose(w0, hidden, int(in0));
+    w1t = transpose(w1, 3 * K, hidden);
     return true;
 }
 
@@ -73,7 +108,11 @@ void NpuHeads::decode(const uint8_t *out, float *screen, float *world, float &pr
     const int8_t *kp = heat + size_t(K) * N;
     const uint8_t *pool = reinterpret_cast<const uint8_t *>(kp + size_t(kpd) * N);
 
-    std::vector<float> x(size_t(g) + size_t(K) * kpd), h(N), hid(hidden);
+    const int kp4 = pad4(kpd);
+    std::vector<float> x(size_t(g) + size_t(K) * kpd), h(N), hid(pad4(hidden)), kpt(size_t(N) * kp4, 0.f), f(kp4);
+    std::vector<float> wo(pad4(3 * K));
+    for (int c = 0; c < kpd; ++c)   // [kpd][N] -> [N][kp4]: the pooling's inner loop runs over channels
+        for (int i = 0; i < N; ++i) kpt[size_t(i) * kp4 + c] = float(kp[size_t(c) * N + i]);
     const int P = pool_h * pool_w;
     for (int c = 0; c < g; ++c) {
         int acc = 0;
@@ -85,7 +124,7 @@ void NpuHeads::decode(const uint8_t *out, float *screen, float *world, float &pr
         int mx = hk[0];
         for (int i = 1; i < N; ++i) mx = std::max(mx, int(hk[i]));
         float sum = 0;
-        for (int i = 0; i < N; ++i) sum += h[i] = std::exp(float(hk[i] - mx) * s_heat);
+        for (int i = 0; i < N; ++i) sum += h[i] = exp_lut[mx - hk[i]];
         const float inv = 1.f / sum;
         float sx = 0, sy = 0;
         for (int yy = 0; yy < H; ++yy)
@@ -94,19 +133,16 @@ void NpuHeads::decode(const uint8_t *out, float *screen, float *world, float &pr
                 sx += v * grid[xx], sy += v * grid[yy];
             }
         screen[2 * k] = sx, screen[2 * k + 1] = sy;
-        float *f = x.data() + g + size_t(k) * kpd;   // keypoint-major, as the training einsum lays it out
-        for (int c = 0; c < kpd; ++c) {
-            const int8_t *kc = kp + size_t(c) * N;
-            float acc = 0;
-            for (int i = 0; i < N; ++i) acc += h[i] * float(kc[i]);
-            f[c] = acc * s_kp;
-        }
+        std::fill(f.begin(), f.end(), 0.f);
+        for (int i = 0; i < N; ++i)
+            if (h[i] != 0.f) axpy(kpt.data() + size_t(i) * kp4, h[i], f.data(), kp4);
+        float *xk = x.data() + g + size_t(k) * kpd;   // keypoint-major, as the training einsum lays it out
+        for (int c = 0; c < kpd; ++c) xk[c] = f[c] * s_kp;
     }
-    linear(w0.data(), b0.data(), x.data(), hidden, int(x.size()), hid.data());
+    linear_t(w0t.data(), b0.data(), x.data(), hidden, int(x.size()), hid.data());
     for (float &v : hid) v = std::max(v, 0.f);
-    linear(w1.data(), b1.data(), hid.data(), 3 * K, hidden, world);
-    float pv, rv;
-    linear(pres_w.data(), &pres_b, x.data(), 1, g, &pv);
-    linear(right_w.data(), &right_b, x.data(), 1, g, &rv);
-    presence = sigmoid(pv), right = sigmoid(rv);
+    linear_t(w1t.data(), b1.data(), hid.data(), 3 * K, hidden, wo.data());
+    std::copy(wo.begin(), wo.begin() + 3 * K, world);
+    presence = sigmoid(dot(pres_w.data(), x.data(), g) + pres_b);
+    right = sigmoid(dot(right_w.data(), x.data(), g) + right_b);
 }

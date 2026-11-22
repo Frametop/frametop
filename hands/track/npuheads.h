@@ -14,6 +14,10 @@ struct NpuHeads {
     float s_heat = 0, s_kp = 0, s_pool = 0;
     std::vector<float> grid, pres_w, right_w, w0, b0, w1, b1;
     float pres_b = 0, right_b = 0;
+    // Derived at parse, for speed (the maths is unchanged): exp(-d * s_heat) for d = 0..255 (an int8 heatmap's
+    // only distances from its maximum), and w0 / w1 transposed to [in][out] so the layers' inner loops vectorize.
+    float exp_lut[256]{};
+    std::vector<float> w0t, w1t;
 
     // Reads a heads file; false with err on a bad magic, version, shape or size.
     bool load(const std::string &path, std::string &err);

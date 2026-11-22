@@ -31,8 +31,7 @@ public:
         : nets_(nets), s_(session), grid_(grid), frac_(frac), thr_(thr) {}
     bool covers(const std::string &camera) const override { return camera == "slam_left" || camera == "slam_right"; }
     bool run(const std::vector<const Image *> &images, std::vector<std::vector<Palm>> &out) override;
-    int requests = 0;
-    double dsp_ms = 0;
+    NpuTimes times;
 
 private:
     const Nets &nets_;

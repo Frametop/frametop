@@ -94,4 +94,6 @@ float NpuClient::header_float(int word) const {
 
 float NpuClient::wrapper_ms() const { return header_float(8); }
 
+float NpuClient::daemon_ms() const { return header_float(9); }
+
 float NpuClient::det_scale(int which) const { return header_float(10 + which); }

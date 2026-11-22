@@ -27,7 +27,8 @@
 // --misread-guard: the tracker's guards for fine-tuned landmark models (Tracker::set_misread_guard).
 // --npu DIR: landmarks from the NPU student through ft-npud in DIR (/run/ft-npud; track/npulandmarks.h), the
 //             --models hand model where it refuses a call. --npu-det: the side cameras' palm search on the NPU
-//             detector too (track/npudetector.h), the CPU tiles where it refuses a round.
+//             detector too (track/npudetector.h), the CPU tiles where it refuses a round. --npu-cpu-landmarks:
+//             only the detector on the NPU, the landmarks on the CPU (to score the detector alone).
 // --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1,
 //             --pinch-fist-curl R: the pinch detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as
 //             HANDS_PINCH_DIP=1; --pinch-fist-curl: PinchParams::fist_curl, 1.2 as ft-hands, 0 off, as
@@ -179,7 +180,7 @@ int main(int argc, char **argv) {
     double flag_every = 0;
     std::vector<double> flag_at;
     std::string flag_out, npu_dir;
-    bool npu_det = false;
+    bool npu_det = false, npu_cpu_landmarks = false;
     FlagConfig flag_cfg;
     flag_cfg.max_bytes = size_t(400) << 20, flag_cfg.writer_cpus.clear();
     // as ft-hands: the fine-tuned models (models/student) when hands/models.sh fetched them, else the stock ones
@@ -204,6 +205,7 @@ int main(int argc, char **argv) {
         else if (a == "--models" && more) models = argv[++i];
         else if (a == "--npu" && more) npu_dir = argv[++i];
         else if (a == "--npu-det") npu_det = true;
+        else if (a == "--npu-cpu-landmarks") npu_cpu_landmarks = true;
         else if (a == "--cost") cost = true;
         else if (a == "--cost-hand" && more) cost_hand = std::atof(argv[++i]);
         else if (a == "--cost-palm" && more) cost_palm = std::atof(argv[++i]);
@@ -327,7 +329,8 @@ int main(int argc, char **argv) {
     std::unique_ptr<NpuDetector> npu_detector;
     if (!npu_dir.empty()) {
         npu_session = std::make_unique<NpuSession>(npu_dir);
-        tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, *npu_session)).get());
+        if (!npu_cpu_landmarks)
+            tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, *npu_session)).get());
         if (npu_det) tracker.set_palm_detector((npu_detector = std::make_unique<NpuDetector>(nets, *npu_session)).get());
     }
     // The side cameras (see the top): names_swapped exchanges slam_left's and slam_right's names
@@ -844,13 +847,12 @@ int main(int argc, char **argv) {
     std::printf("model calls: palm %d (%.1f/s), hand %d (%.1f/s)\n", s.palm_calls, s.palm_calls / std::max(secs, 1e-9),
                 s.hand_calls, s.hand_calls / std::max(secs, 1e-9));
     if (npu)
-        std::printf("npu: %d landmark calls in %d requests (%.2f ms DSP a request), %d on the CPU, %d failures\n",
-                    s.npu_calls, npu->requests, npu->requests ? npu->dsp_ms / npu->requests : 0.0, s.npu_fallbacks,
-                    npu_session->failures);
+        std::printf("npu: %d landmark calls in %d requests (%s), %d on the CPU, %d failures\n", s.npu_calls,
+                    npu->times.requests, npu->times.summary().c_str(), s.npu_fallbacks, npu_session->failures);
     if (npu_detector)
-        std::printf("npu detector: %d search rounds (%.2f ms each), %d on the CPU tiles, %d requests (%.2f ms DSP a "
-                    "request)\n", s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
-                    npu_detector->requests, npu_detector->requests ? npu_detector->dsp_ms / npu_detector->requests : 0.0);
+        std::printf("npu detector: %d search rounds (%.2f ms each), %d on the CPU tiles, %d requests (%s)\n",
+                    s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
+                    npu_detector->times.requests, npu_detector->times.summary().c_str());
     {
         std::vector<double> r, step;
         std::map<int, double> prev;

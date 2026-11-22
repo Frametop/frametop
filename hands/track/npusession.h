@@ -9,6 +9,18 @@
 #include <chrono>
 #include <string>
 
+// Where an NPU backend's time went, summed over its requests (ms): its CPU crops, the round trip from doorbell
+// to reply, ft-npud's own share of it, and the DSP's.
+struct NpuTimes {
+    int requests = 0;
+    double crop = 0, wall = 0, daemon = 0, dsp = 0;
+    void add(double crop_ms, double wall_ms, const NpuClient &cl) {
+        ++requests, crop += crop_ms, wall += wall_ms, daemon += cl.daemon_ms(), dsp += cl.wrapper_ms();
+    }
+    // "3.07 ms DSP, 5.27 in ft-npud, 5.38 round trip, 2.92 crops a request"
+    std::string summary() const;
+};
+
 class NpuSession {
 public:
     static constexpr double kRetrySeconds = 2.0;

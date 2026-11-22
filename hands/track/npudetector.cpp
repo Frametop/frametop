@@ -1,6 +1,7 @@
 #include "npudetector.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace {
@@ -89,11 +90,14 @@ bool NpuDetector::run(const std::vector<const Image *> &images, std::vector<std:
     const float s_obj = cl.det_scale(0), s_reg = cl.det_scale(1);
     for (size_t at = 0; at < jobs.size(); at += NpuClient::kMaxCrops) {
         const int n = int(std::min<size_t>(NpuClient::kMaxCrops, jobs.size() - at));
+        const auto t0 = std::chrono::steady_clock::now();
         for (int i = 0; i < n; ++i) nets_.palm_crop(*images[jobs[at + i].image], jobs[at + i].roi, cl.crop(i), tm[i]);
+        const auto t1 = std::chrono::steady_clock::now();
         std::string e;
         if (!cl.run_det(n, NpuSession::kTimeoutMs, e)) return s_.fail(e), false;
-        ++requests;
-        dsp_ms += cl.wrapper_ms();
+        const auto t2 = std::chrono::steady_clock::now();
+        times.add(std::chrono::duration<double, std::milli>(t1 - t0).count(),
+                  std::chrono::duration<double, std::milli>(t2 - t1).count(), cl);
         for (int i = 0; i < n; ++i) {
             const int8_t *o = cl.det_output(i);
             for (DetPoint d : decode_det(o, o + G * G, s_obj, s_reg, thr_)) {

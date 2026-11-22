@@ -24,3 +24,11 @@ void NpuSession::fail(const std::string &why) {
     err_ = why;
     std::fprintf(stderr, "npu: %s; the CPU models until ft-npud answers again\n", why.c_str());
 }
+
+std::string NpuTimes::summary() const {
+    const double n = std::max(requests, 1);
+    char b[160];
+    std::snprintf(b, sizeof b, "%.2f ms DSP, %.2f in ft-npud, %.2f round trip, %.2f crops a request", dsp / n,
+                  daemon / n, wall / n, crop / n);
+    return b;
+}

@@ -30,6 +30,7 @@ public:
     bool run(int n, int timeout_ms, std::string &err);
     const uint8_t *output(int i) const { return shm_ + kOuts + size_t(i) * out_bytes_; }
     float wrapper_ms() const;   // the DSP's time for the last request
+    float daemon_ms() const;    // ft-npud's own time for it, request received to outputs published
     // The detector (has_detector()): n whole-image crops in, det_output(i) out (obj then reg; value = q * scale).
     bool has_detector() const;
     bool run_det(int n, int timeout_ms, std::string &err);

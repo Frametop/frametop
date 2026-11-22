@@ -12,8 +12,7 @@ public:
     NpuLandmarks(const Nets &nets, NpuSession &session) : nets_(nets), s_(session) {}
     bool run(const std::vector<const Image *> &images, const std::vector<Roi> &rois,
              std::vector<Landmarks> &out) override;
-    int requests = 0;
-    double dsp_ms = 0;   // summed DSP time of the requests
+    NpuTimes times;
 
 private:
     const Nets &nets_;

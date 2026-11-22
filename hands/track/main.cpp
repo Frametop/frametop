@@ -1223,15 +1223,14 @@ int main(int argc, char **argv) {
                         100 * (cpu1 - cpu0) / dt);
             tracker.skeleton().fits = 0, tracker.skeleton().us_total = 0;
             if (npu)
-                std::printf("        npu %s: %d landmark calls, %d on the CPU, %d requests (%.2f ms DSP each), %d failures%s%s\n",
+                std::printf("        npu %s: %d landmark calls, %d on the CPU, %d requests (%s), %d failures%s%s\n",
                             npu_session->connected() ? "connected" : "not connected", s.npu_calls, s.npu_fallbacks,
-                            npu->requests, npu->requests ? npu->dsp_ms / npu->requests : 0.0, npu_session->failures,
+                            npu->times.requests, npu->times.summary().c_str(), npu_session->failures,
                             npu_session->last_error().empty() ? "" : "; last: ", npu_session->last_error().c_str());
             if (npu_detector)
-                std::printf("        npu detector: %d search rounds (%.2f ms each), %d on the CPU tiles, %d requests "
-                            "(%.2f ms DSP each)\n", s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0,
-                            s.det_fallbacks, npu_detector->requests,
-                            npu_detector->requests ? npu_detector->dsp_ms / npu_detector->requests : 0.0);
+                std::printf("        npu detector: %d search rounds (%.2f ms each), %d on the CPU tiles, %d requests (%s)\n",
+                            s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
+                            npu_detector->times.requests, npu_detector->times.summary().c_str());
             if (!color.empty())
                 std::printf("        cameras %s%s: colour frames at %.1f (bright at %.0f, dim under %.0f), ambient IR %.1f, "
                             "%d steps with colour, colour placed %.1f ms after capture\n",

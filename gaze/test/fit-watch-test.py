@@ -124,7 +124,8 @@ gazecheck.Checks.to_panel = lambda self, command: panel.append(command)
 # The fake ft-eyes: "fit" answers with finds where the shipped reference puts eyes offset by
 # eyes_state["offset"] (yaw, pitch degrees, both eyes alike).
 REF = fitcoach.Reference.load()
-eyes_state = {"offset": (0.0, 0.0), "slip": (0.0, 0.0), "sd": 0.5, "asked": 0, "feature": "pupil", "got": []}
+eyes_state = {"offset": (0.0, 0.0), "slip": (0.0, 0.0), "sd": 0.5, "asked": 0, "feature": "pupil", "got": [],
+              "made": "2026-11-22 09:05:53"}
 eyes = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 eyes.bind(gazed.EYES_SOCKET)
 eyes.settimeout(0.2)
@@ -153,7 +154,8 @@ def eyes_answer():
         if w[0] == "status":
             slip = {name: {"clicks": 1, "reseat": False, "slip_deg": list(eyes_state["slip"]),
                            "slip_sd": eyes_state["sd"]} for name in ("right", "left")}
-            reply = json.dumps({"calibration": {"dots": 27, "made": "2026-11-22 09:05:53"}, "calibrating": False,
+            reply = json.dumps({"calibration": {"dots": 27, "made": eyes_state["made"]} if eyes_state["made"] else None,
+                                "calibrating": False,
                                 "dots": 27, "eyes": slip, "feature": eyes_state["feature"]})
         elif w[0] in ("look", "adjusting"):
             reply = f"{w[0]} ok"
@@ -393,6 +395,15 @@ look(3.0, 1.0)
 check("a steady look sent to ft-eyes", wait(lambda: got("look", g), 3), True)
 w = got("look", g)[-1] if got("look", g) else ["look", "0", "0", "0"]
 check("  as SteamVR's yaw and pitch (no affine yet)", (round(float(w[2]), 1), round(float(w[3]), 1)), (3.0, 1.0))
+eyes_state["made"] = None
+wait(lambda: not (svc.own.get("calibration") or {}).get("made"), 3)
+time.sleep(0.3)
+g = len(eyes_state["got"])
+look(2.0, 1.0)
+time.sleep(1.5)
+check("  none while ft-eyes isn't calibrated", got("look", g), [])
+eyes_state["made"] = "2026-11-22 09:05:53"
+wait(lambda: (svc.own.get("calibration") or {}).get("made"), 3)
 look(0.0, 0.0)
 
 # A check opening closes it, and sends no looks while it runs.

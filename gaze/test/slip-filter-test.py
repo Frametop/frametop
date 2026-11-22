@@ -243,29 +243,57 @@ check("glint: none outside its dots", eyeslip.take_glint(eyes[0], eyes[1], 30.0,
 eyes[0].slip.z = (1.0, 0.0)
 r = eyeslip.take_glint(eyes[0], eyes[1], 30.0, (0, 0))
 check("...a reading for the log", (r["z"], r["moved"], r["kind"]), ([1.0, 0.0], False, "glint"))
+KNOCK = 40.0   # px: 10 degrees
+
+
+def glints(eyes, t, z, gaze=(0, 0)):
+    """Both eyes' glint readings half a second apart: the readings for the log."""
+    out = []
+    for e, dt in ((eyes[0], 0.0), (eyes[1], 0.5)):
+        if z[e.eye] is not None:
+            e.slip.z = z[e.eye]
+            out.append(eyeslip.take_glint(e, eyes[1 - e.eye], t + dt, gaze))
+    return out
+
+
 eyes = settled()
-before = eyes[0].filter.s[0]
-for t, e in ((30.0, 0), (30.5, 1)):   # both eyes' glints 6 degrees off the same way: the headset knocked
-    eyes[e].slip.z = (24.0, 0.0)
-    r = eyeslip.take_glint(eyes[e], eyes[1 - e], t, (0, 0))
-check("both eyes' glints jump the same way: the headset knocked", r["moved"], True)
-for t in (31.0, 31.5):
-    for e in eyes:
-        e.slip.z = (24.0, 0.0)
-        eyeslip.take_glint(e, eyes[1 - e.eye], t, (0, 0))
-check("...taken nearly whole within two readings", [round(float(e.filter.s[0] + e.filter.x[sf.GLINT][0])) > 19
-                                                     for e in eyes], [True, True])
+r = glints(eyes, 30.0, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)})
+check("both eyes' glints jump the same way: not a knock yet (a misread pair snaps back)",
+      [v["moved"] for v in r], [False, False])
+r = glints(eyes, 31.0, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)})
+check("...still there a second later: the headset knocked", r[-1]["moved"], True)
+glints(eyes, 32.0, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)})
+check("...taken nearly whole by the next readings", [float(e.filter.s[0] + e.filter.x[sf.GLINT][0]) > 0.8 * KNOCK
+                                                       for e in eyes], [True, True])
+check("...and as the slip, not the glints' bias", [abs(float(e.filter.x[sf.GLINT][0])) < 0.2 * KNOCK for e in eyes],
+      [True, True])
 eyes = settled()
-for t in (30.0, 31.0, 32.0):   # one eye's glints alone: a misread pair, likelier
-    eyes[0].slip.z, eyes[1].slip.z = (24.0, 0.0), (0.0, 0.0)
-    r0 = eyeslip.take_glint(eyes[0], eyes[1], t, (0, 0))
-    eyeslip.take_glint(eyes[1], eyes[0], t + 0.5, (0, 0))
-check("one eye's glints alone: not a knock", (r0["moved"], eyes[0].filter.s[0] < 8.0), (False, True))
+for t in (30.0, 31.0, 32.0, 33.0):   # one eye's glints alone: a misread pair, likelier
+    r = glints(eyes, t, {0: (KNOCK, 0.0), 1: (0.0, 0.0)})
+check("one eye's glints alone: not a knock", (r[0]["moved"], eyes[0].filter.s[0] < 0.3 * KNOCK), (False, True))
 eyes = settled()
-eyes[0].slip.z = (24.0, 0.0)
-eyeslip.take_glint(eyes[0], eyes[1], 30.0, (0, 0))
-eyes[1].slip.z = (24.0, 0.0)
-check("...nor two eyes' far apart in time", eyeslip.take_glint(eyes[1], eyes[0], 33.0, (0, 0))["moved"], False)
+for t in (30.0, 31.0, 32.0):
+    r = glints(eyes, t, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)}, gaze=(25, 0))
+check("looking far aside (the glint fit's error shared by both eyes): not a knock", r[-1]["moved"], False)
+eyes = settled()
+for t in (30.0, 31.0, 32.0):
+    r = glints(eyes, t, {0: (80.0, 0.0), 1: (80.0, 0.0)})
+check("past KNOCK_MAX_DEG: a bad pair, not a knock", r[-1]["moved"], False)
+eyes = settled()
+eyes[1].filter = None   # a one-eye calibration
+for t in (30.0, 31.0):
+    r = glints(eyes, t, {0: (KNOCK, 0.0), 1: None})
+check("one eye mapped: two readings aren't enough", r[0]["moved"], False)
+r = glints(eyes, 32.0, {0: (KNOCK, 0.0), 1: None})
+check("...three are a knock", r[0]["moved"], True)
+
+rng = np.random.default_rng(7)
+eyes, knocks = settled(), 0
+for i in range(600):   # ten minutes of steady glints at GLINT_SD's noise, half of it shared by the eyes
+    common = rng.normal(0, sf.GLINT_SD * PX, 2)
+    z = {e: tuple(np.sqrt(0.5) * common + np.sqrt(0.5) * rng.normal(0, sf.GLINT_SD * PX, 2)) for e in (0, 1)}
+    knocks += sum(v["moved"] for v in glints(eyes, 30.0 + i, z))
+check("noisy steady glints: no knocks", knocks, 0)
 
 # --- Kept across restarts ---
 f = sf.SlipFilter(JAC)
@@ -356,7 +384,7 @@ right.tick(Clock.t)
 right.tick(Clock.t + fe.GAP + 1.0)   # frames stopped: the headset was off
 check("frames stopping for GAP: reseated", tracker.status()["eyes"]["right"]["reseat"], True)
 check("...not 'taught by a click' in the shared memory's flags", right.filter.taught, False)
-check("...and the glint sightings from before forgotten", len(right.slip.rows), 0)
+check("...and the glint sightings from before forgotten", (len(right.slip.rows), right.glint_innov), (0, None))
 Clock.t += fe.GAP + 2.0
 
 # Glint sightings older than their window give no estimate (they were fed again and again).
@@ -426,6 +454,11 @@ small = sliplog.SlipLog(Path(HOME) / "small.jsonl", max_bytes=200)
 for i in range(10):
     small.write({"t": i, "pad": "x" * 40})
 small.flush()
+sliplog.FLUSH_EVERY = 0.0
+timed = sliplog.SlipLog(Path(HOME) / "timed.jsonl")
+timed.write({"t": 1})
+check("rows reach the file without a flush (ft-eyes is stopped with os._exit)",
+      len((Path(HOME) / "timed.jsonl").read_text().splitlines()), 1)
 check("past its size the log moves to .old", ((Path(HOME) / "small.old.jsonl").exists(),
                                                (Path(HOME) / "small.jsonl").stat().st_size < 200), (True, True))
 

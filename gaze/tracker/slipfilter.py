@@ -29,9 +29,10 @@ A reading far from what the filter expects (its Mahalanobis distance past HUBER)
 (Huber weighting): a misread glint pair or a SteamVR blink pulls little. Clicks are judged
 across both eyes instead (teach_click): both eyes off by MOVE_DEG the same way is the headset
 moved, and that click is taken nearly whole; one eye far off while the other agrees counts for
-less, as a bad find in that eye. Glint readings are judged across the eyes the same way
-(eyeslip.take_glint, with `moved`): both eyes' glints off by MOVE_DEG the same way within a
-second or two is the headset knocked, taken nearly whole too, as the old glint jump did.
+less, as a bad find in that eye. Glint readings are judged across the eyes too
+(eyeslip.take_glint): both eyes' glints far off the filter the same way for two readings in a
+row, looking near straight ahead, is the headset knocked, taken nearly whole too, as the old
+glint jump did.
 
 Noise settings are first guesses (2026-11-22) from the click replay and the calibration dots:
 tune them from slip.jsonl (ft-eyes' log). They're in degrees of gaze; `jac` (the `where` fit's
@@ -164,6 +165,13 @@ class SlipFilter:
         """How far a reading z of `kind` at t is from what the filter expects (feature units)."""
         self.predict(t)
         return np.asarray(z, float) - _H[kind] @ self.x
+
+    def distance(self, kind, y):
+        """How unlikely an innovation y of `kind` is: its Mahalanobis distance (sds)."""
+        H = _H[kind]
+        S_ = H @ self.P @ H.T + _I2 * (_SD[kind] * self.unit) ** 2
+        y = np.asarray(y, float)
+        return float(math.sqrt(max(y @ np.linalg.solve(S_, y), 0.0)))
 
     def inflate(self, y):
         """The headset moved by about y (feature units): s is that much less sure, so the

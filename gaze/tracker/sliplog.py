@@ -49,8 +49,9 @@ class SlipLog:
 
     def flush(self):
         self.flushed = time.monotonic()
-        if self.f is not None:
+        f = self.f   # (ft-eyes' stop flushes from another thread, maybe while write() moves it aside)
+        if f is not None:
             try:
-                self.f.flush()
-            except OSError:
+                f.flush()
+            except (OSError, ValueError):
                 pass

@@ -8,13 +8,29 @@ while unmapped), .window(t0, t1) (its median pupil over that span's frames), its
 readings .find, .gaze and .glint, and for take_glint .cal, .slip (eyes_model.SlipTracker) and
 .glint_innov (its last glint reading's innovation). `cal` is the tracker's calibration. Times are frame times.
 """
+import math
+from collections import namedtuple
+
 import numpy as np
 
 import slipfilter
 
 CLICK_MIN = 5          # frames an eye needs before a click to be taught by it
-GLINT_PAIR = 1.5       # s: two eyes' glint readings this close are of the same moment (each eye
-                       # takes one every GLINT_EVERY, 1 s)
+GLINT_PAIR = 1.5       # s: two glint readings this close are of the same moment (each eye takes
+                       # one every GLINT_EVERY, 1 s), in one eye or across the two
+KNOCK_D = 2.0          # a glint reading this far off what the filter expects (Mahalanobis: at
+                       # GLINT_SD's noise, 1 in 7 readings; about 6 degrees)...
+KNOCK_STREAK = 2       # ...this many in a row the same way, in both eyes (3 with one eye mapped),
+                       # each past MOVE_DEG: a misread pair snaps back. Simulated glints with
+                       # GLINT_SD's noise (half of it shared by the eyes) knocked never in an
+                       # hour; 8-11 degree knocks were followed in 3-4 s (2026-11-22)
+KNOCK_MAX_DEG = 12.0   # bigger is a bad glint pair, not the headset (re-seats moved 5-8 degrees)
+KNOCK_CENTRE = 20.0    # degrees: only looking within this of straight ahead, where the glint fit
+                       # is best (looking far aside, its error is shared by both eyes)
+
+# An eye's last glint reading: when, how far off the filter (degrees, feature units), and how
+# many readings in a row have been far off the same way (0: this one wasn't).
+Innov = namedtuple("Innov", "t deg y streak")
 LOOK_WINDOW = 0.3      # a steady SteamVR look's frames: the 300 ms before it (steamlook.py's window)
 LOOK_MIN = 10          # frames an eye needs in that window
 
@@ -53,24 +69,40 @@ def teach_click(eyes, cal, t, truth, before):
 
 def take_glint(e, other, t, gaze):
     """Eye e's glint estimate for its filter when one is due, while its gaze is within its dots
-    (further out the glint fit guesses, and a misread pair is likelier). With the other eye's
-    last glint reading off the same way by MOVE_DEG within GLINT_PAIR s, the headset was
-    knocked: both filters take it nearly whole (slipfilter.moved). The log's reading, or None."""
+    (further out the glint fit guesses, and a misread pair is likelier). Far off what the filter
+    expects (KNOCK_D) for KNOCK_STREAK readings in a row, the same way, in both eyes (slipfilter
+    .moved), looking near straight ahead: the headset was knocked, and both filters take it
+    nearly whole. The log's reading, or None."""
     z = e.slip.update(t)
-    if z is None or not e.cal.has("glint", e.eye) or not e.cal.inside(e.eye, gaze):
+    if (z is None or not np.all(np.isfinite(z)) or not e.cal.has("glint", e.eye)
+            or not e.cal.inside(e.eye, gaze)):
         return None
     y = e.filter.innovation("glint", z, t)
-    e.glint_innov = (t, e.filter.deg(y), y)
-    knocked = False
-    o = other.glint_innov if other is not None and other.filter else None
-    if o and t - o[0] <= GLINT_PAIR and slipfilter.moved(e.glint_innov[1], o[1]):
-        knocked = True
+    deg = e.filter.deg(y)
+    size = float(np.hypot(*deg))
+    streak = 0
+    if (e.filter.distance("glint", y) > KNOCK_D and size <= KNOCK_MAX_DEG
+            and math.hypot(gaze[0], gaze[1]) <= KNOCK_CENTRE):
+        prev = e.glint_innov
+        same = prev is not None and prev.streak and t - prev.t <= GLINT_PAIR and slipfilter.moved(prev.deg, deg)
+        streak = prev.streak + 1 if same else 1
+    e.glint_innov = Innov(t, deg, y, streak)
+    knocked, o = False, None
+    if streak >= KNOCK_STREAK:
+        o = other.glint_innov if other is not None and other.filter else None
+        if o is not None:
+            knocked = o.streak >= KNOCK_STREAK and t - o.t <= GLINT_PAIR and slipfilter.moved(deg, o.deg)
+        else:
+            knocked = streak >= KNOCK_STREAK + 1 and (other is None or not other.filter)
+    if knocked:
         e.filter.inflate(y)
-        other.filter.inflate(o[2])   # its next reading, within a second, takes it
-        other.glint_innov = e.glint_innov = None
+        if o is not None:
+            other.filter.inflate(o.y)   # its next reading, within a second, takes it
+            other.glint_innov = None
+        e.glint_innov = None
     r = e.filter.update("glint", z, t)
     e.glint = (t, _r(z, 2))
-    return {"z": e.glint[1], "moved": knocked, **r}
+    return {"z": e.glint[1], "moved": knocked, "streak": streak, **r}
 
 
 def teach_look(eyes, cal, t, truth, spread):

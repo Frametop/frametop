@@ -2552,6 +2552,10 @@ void ReleaseHold(Screen &s) {
     if (!s.heldFloat) return;
     s.heldFloat = false;
     SetFloat(s, s.heldMpp, s.heldX, s.heldY, s.heldW, s.heldH, s.heldTitle);
+    // A tile laid out again at its new size, as the "float" answer that wasn't held does: SetFloat
+    // grew it from its kept corner, over its neighbour till a move retiled it (user, 2026-11-21: "when
+    // resizing there is a bit of overlap in the displays until you manually move the display you resized")
+    if (TileAnchored(ScreenIndexOf(s))) RetileDash();
 }
 
 void Unfloat(Screen &s) {

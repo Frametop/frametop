@@ -473,6 +473,10 @@ timed.write({"t": 1})
 sliplog.FLUSH_EVERY = flush_every
 check("rows reach the file without a flush (ft-eyes is stopped with os._exit)",
       len((Path(HOME) / "timed.jsonl").read_text().splitlines()), 1)
+timed.event(2.0, "glint", eye=0, **{"z": [1.0, 0.0], "moved": False, "streak": 0, "kind": "glint"})  # take_glint's reading
+timed.flush()
+check("an event row keeps the reading's kind", json.loads((Path(HOME) / "timed.jsonl").read_text().splitlines()[-1])
+      ["kind"], "glint")
 check("past its size the log moves to .old", ((Path(HOME) / "small.old.jsonl").exists(),
                                                (Path(HOME) / "small.jsonl").stat().st_size < 200), (True, True))
 

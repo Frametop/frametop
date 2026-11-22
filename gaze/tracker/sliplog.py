@@ -44,8 +44,9 @@ class SlipLog:
         except OSError:
             self.f = None   # a full disk mustn't stop the tracker: try again next row
 
-    def event(self, t, kind, **fields):
-        self.write({"t": None if t is None else round(t, 4), "event": kind, **fields})
+    def event(self, t, name, /, **fields):
+        """An event row: `fields` may hold any key (a reading's own "kind" too)."""
+        self.write({"t": None if t is None else round(t, 4), "event": name, **fields})
 
     def flush(self):
         self.flushed = time.monotonic()

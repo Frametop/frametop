@@ -181,7 +181,8 @@ struct server {
     int kb_asked;         // the remote screen a click asked the relay to open the keyboard for (-1 none): remote_clicked
     int mouse_on;         // the panel the 3D mouse is on now (-1 none), and since when (ms): keys_follow_mouse
     uint32_t mouse_on_ms;
-    bool mouse_parked;    // ...and it hasn't gone to another panel since typing last went to a remote screen
+    bool mouse_parked;    // ...and it hasn't gone to another panel since typing last went to a remote screen,
+    int parked_on;        // ...from this one (-1 none) then
     // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
     uint32_t spot_until;  // ms; 0 closed
@@ -629,7 +630,7 @@ static void set_key_remote(struct server *s, int index) {
     if (s->key_remote >= 0 && s->key_remote != index) ft_remote_blur(s->key_remote);
     if (index != s->kb_asked) s->kb_asked = -1;
     s->key_remote = index;
-    if (index >= 0) ft_remote_focus(index), s->mouse_last = index, s->mouse_parked = true;
+    if (index >= 0) ft_remote_focus(index), s->mouse_last = index, s->mouse_parked = true, s->parked_on = ft_vr_mouse_panel();
 }
 
 // A pointer event on one of the desktop's screens or floating windows, to the seat: the
@@ -805,9 +806,10 @@ static void typing_to(struct server *s, int screen) {
 // cursor focus"): typing comes with it, to that panel, another remote screen or one of the
 // desktop's, as Meta does (keys_update's sixth word). A press held (a drag off the PC's screen)
 // moves nothing, and nor does a 3D mouse left where it was while a hand's tap or a controller's
-// click took typing to the remote screen.
+// click took typing to the remote screen (off every panel meanwhile too: Full Keyboard opening over it).
 static void keys_follow_mouse(struct server *s, int mouse, uint32_t t) {
-    if (mouse != s->mouse_on) s->mouse_on = mouse, s->mouse_on_ms = t, s->mouse_parked = false;
+    if (mouse != s->mouse_on) s->mouse_on = mouse, s->mouse_on_ms = t;
+    if (mouse >= 0 && mouse != s->parked_on) s->mouse_parked = false;
     if (s->key_remote < 0 || mouse < 0 || mouse == s->key_remote || s->mouse_parked) return;
     if (t - s->mouse_on_ms < KEYS_FOLLOW_MS || ft_vr_mouse_screen() != mouse) return;
     wlr_log(WLR_INFO, "typing leaves remote %d: the 3D mouse is on panel %d", s->key_remote, mouse);
@@ -859,7 +861,10 @@ static void keys_update(struct server *s) {
     if (mouse >= 0) s->mouse_last = mouse;
     const bool remote = desktop && !spot_open(s) && !ft_vr_app_typing() && s->key_remote >= 0 &&
                         ft_remote_is(s->key_remote);
-    const int pc = !remote ? 0 : mouse == s->key_remote ? 1 : mouse < 0 && s->mouse_last == s->key_remote ? 2 : 0;
+    // (a 3D mouse parked on another panel while a hand's tap took typing there counts as on it: the
+    // letters go to the PC, so Meta does too)
+    const int pc = !remote ? 0 : mouse == s->key_remote || (s->mouse_parked && mouse >= 0) ? 1
+                 : mouse < 0 && (s->mouse_last == s->key_remote || s->mouse_parked) ? 2 : 0;
     if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused && wheel == s->keys_wheel &&
         pc == s->keys_pc && t - s->relay_sent < 1000)
         return;
@@ -1721,6 +1726,7 @@ int main(int argc, char **argv) {
     s.key_remote = -1;
     s.mouse_last = -1;
     s.mouse_on = -1;
+    s.parked_on = -1;
     s.kb_asked = -1;
     ft_peer_init(&s.peer);
     s.rate[FT_FOCUSED] = 0, s.rate[FT_IN_VIEW] = 15, s.rate[FT_HIDDEN] = 1;

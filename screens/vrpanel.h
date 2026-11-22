@@ -505,9 +505,10 @@ int PadPanel();
 
 // ---------------------------------------------------------------- vrkbspot.cpp's
 
-// dev's laser is on Full Keyboard's panel. SteamVR's own laser goes through it (its keys take the
-// pointer helper's pokes, not mouse events), so the panel behind still hears the device.
-bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev);
+// dev's laser is on Full Keyboard's panel, before `behind` (an overlay it may also be on). SteamVR's own
+// laser goes through it (its keys take the pointer helper's pokes, not mouse events), so the panel behind
+// still hears the device.
+bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev, vr::VROverlayHandle_t behind);
 
 }  // namespace ftvr
 

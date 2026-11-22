@@ -52,7 +52,7 @@ extern "C" bool ft_vr_keyboard_spot(char *out, int size) {
 }
 
 namespace ftvr {
-bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev) {
+bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev, vr::VROverlayHandle_t behind) {
     vr::IVROverlay *ov = vr::VROverlay();
     vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
     Mat l;
@@ -63,7 +63,9 @@ bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev) {
     params.vSource = {l.m[0][3], l.m[1][3], l.m[2][3]};
     params.vDirection = {-l.m[0][2], -l.m[1][2], -l.m[2][2]};
     params.eOrigin = vr::TrackingUniverseStanding;
-    vr::VROverlayIntersectionResults_t r{};
-    return ov->ComputeOverlayIntersection(h, &params, &r);
+    vr::VROverlayIntersectionResults_t r{}, b{};
+    if (!ov->ComputeOverlayIntersection(h, &params, &r)) return false;
+    return behind == vr::k_ulOverlayHandleInvalid || !ov->ComputeOverlayIntersection(behind, &params, &b) ||
+           r.fDistance <= b.fDistance;
 }
 }  // namespace ftvr

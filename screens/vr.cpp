@@ -818,8 +818,10 @@ double HandleSize(const Screen &s) {
 double CornerHandleSize(const Screen &s) {
     return g_resizeCorner.sharp ? HandleSize(s) : resizecorner::GlowCanvas(1, 1, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s));
 }
-// The laser's glow past a corner or an edge: as deep as the hit area it shows.
-double CornerGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : GlowOut(s); }
+// The laser's glow past an edge, and past a corner (larger: resizecorner::kCornerGrow): as deep as the
+// hit area it shows.
+double EdgeGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : GlowOut(s); }
+double CornerGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : resizecorner::CornerOut(GlowOut(s)); }
 // An edge's handle bends with a curved panel (an overlay bends along its width: a side's band is only
 // its depth across); the sharp style's outline too.
 float HandleCurve(const Screen &s) {
@@ -5507,15 +5509,14 @@ void UpdateHandGuides() {
         bool curved = false;
         switch (hg.g.kind) {
             case handinput::Guide::Corner: {
-                // (the laser's: as wide as the handle it presses, the glow style's corner larger than its edges)
-                const bool laserGlow = k == 2 && s && !g_resizeCorner.sharp;
-                if (k == 2 && s) halo = std::max(halo, laserGlow ? resizecorner::CornerOut(GlowOut(*s)) : CornerGlowSize(*s));
-                arm = laserGlow ? resizecorner::CornerArm(resizecorner::GlowArm(W, H)) : resizecorner::GlowArm(W, H);
+                if (k == 2 && s) halo = std::max(halo, CornerGlowSize(*s));   // (the laser's: as wide as the handle it presses)
+                arm = resizecorner::GlowArm(W, H);
+                if (k == 2 && s && !g_resizeCorner.sharp) arm = resizecorner::CornerArm(arm);   // (and as long)
                 u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
                 break;
             }
             case handinput::Guide::Edge: {
-                if (k == 2 && s) halo = std::max(halo, CornerGlowSize(*s));   // (the laser's: as deep as its band)
+                if (k == 2 && s) halo = std::max(halo, EdgeGlowSize(*s));   // (the laser's: as deep as its band)
                 const double along = hg.g.sy ? W : H;
                 arm = std::clamp(0.3 * along, 0.05, 0.16);
                 if (hg.g.sy) {

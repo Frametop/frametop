@@ -2545,6 +2545,14 @@ struct Pointer {
     bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
     void AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t);
     bool HitsAtOrigin(vr::VROverlayHandle_t h);
+    // Where the line from `from` along `d` (standing universe) meets overlay h, if it does.
+    bool Cast(vr::VROverlayHandle_t h, const Vec3 &from, const Vec3 &d, vr::VROverlayIntersectionResults_t *r) {
+        vr::VROverlayIntersectionParams_t params{};
+        params.vSource = {float(from.x), float(from.y), float(from.z)};
+        params.vDirection = {float(d.x), float(d.y), float(d.z)};
+        params.eOrigin = vr::TrackingUniverseStanding;
+        return overlay->ComputeOverlayIntersection(h, &params, r);
+    }
 };
 
 // Setup, once: the settings, SteamVR, the overlays and sockets.
@@ -3530,12 +3538,8 @@ bool Pointer::FingerAtOverlay(const hin::RoomHand &hand) {
     const Vec3 tip = hand.pts[8], fd = Normalize(hand.pts[8] - hand.pts[7]), from = tip - fd * 0.2;
     for (const auto &[key, handle] : handles) {
         if (!visible[key] || sceneGraph[key]) continue;
-        vr::VROverlayIntersectionParams_t params{};
-        params.vSource = {float(from.x), float(from.y), float(from.z)};
-        params.vDirection = {float(fd.x), float(fd.y), float(fd.z)};
-        params.eOrigin = vr::TrackingUniverseStanding;
         vr::VROverlayIntersectionResults_t r{};
-        if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance < 0.25f)
+        if (Cast(handle, from, fd, &r) && r.fDistance < 0.25f)
             return true;
     }
     return false;
@@ -4357,12 +4361,8 @@ bool Pointer::HitsAtOrigin(vr::VROverlayHandle_t h) {
     const Vec3 to = Position(t) - fr.eye;
     if (Length(to) < 0.1) return false;
     const Vec3 d = Normalize(to);
-    vr::VROverlayIntersectionParams_t params{};
-    params.vSource = {float(fr.eye.x), float(fr.eye.y), float(fr.eye.z)};
-    params.vDirection = {float(d.x), float(d.y), float(d.z)};
-    params.eOrigin = vr::TrackingUniverseStanding;
     vr::VROverlayIntersectionResults_t r{};
-    return overlay->ComputeOverlayIntersection(h, &params, &r) && std::fabs(r.fDistance - Length(to)) < 0.05;
+    return Cast(h, fr.eye, d, &r) && std::fabs(r.fDistance - Length(to)) < 0.05;
 }
 
 // Nearest visible overlay along a ray (frozen while dragging).
@@ -4384,12 +4384,8 @@ Hit Pointer::nearest(Vec3 from, Vec3 d) {
                 h.along = along, h.key = key, h.scene = true, h.point = at, h.normal = normal;
             continue;
         }
-        vr::VROverlayIntersectionParams_t params{};
-        params.vSource = {float(from.x), float(from.y), float(from.z)};
-        params.vDirection = {float(d.x), float(d.y), float(d.z)};
-        params.eOrigin = vr::TrackingUniverseStanding;
         vr::VROverlayIntersectionResults_t r{};
-        if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance > 0.05f &&
+        if (Cast(handle, from, d, &r) && r.fDistance > 0.05f &&
             r.fDistance < h.along) {
             // ComputeOverlayIntersection ignores the controller intersection mask.
             // Fail closed until ft-screens supplies the identical primitive union.
@@ -4451,12 +4447,8 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
             Hit h;
             for (const auto &[key, handle] : handles) {
                 if (!visible[key] || !FramePanel(key)) continue;
-                vr::VROverlayIntersectionParams_t params{};
-                params.vSource = {float(anchor.x), float(anchor.y), float(anchor.z)};
-                params.vDirection = {float(dir.x), float(dir.y), float(dir.z)};
-                params.eOrigin = vr::TrackingUniverseStanding;
                 vr::VROverlayIntersectionResults_t r{};
-                if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance > 0.05f &&
+                if (Cast(handle, anchor, dir, &r) && r.fDistance > 0.05f &&
                     r.fDistance < h.along)
                     h.along = r.fDistance, h.key = key;
             }
@@ -4501,12 +4493,8 @@ void Pointer::AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pa
     if (kbRay.Pressed()) {
         on = false;
         auto it = handles.find(kbray::kPanel);
-        vr::VROverlayIntersectionParams_t params{};
-        params.vSource = {float(anchor.x), float(anchor.y), float(anchor.z)};
-        params.vDirection = {float(dir.x), float(dir.y), float(dir.z)};
-        params.eOrigin = vr::TrackingUniverseStanding;
         vr::VROverlayIntersectionResults_t r{};
-        if (it != handles.end() && overlay->ComputeOverlayIntersection(it->second, &params, &r))
+        if (it != handles.end() && Cast(it->second, anchor, dir, &r))
             on = true, p = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};
     }
     kbSend(kbRay.Aim(secsOf(fr.tnow), on, {p.x, p.y, p.z}, kbSide()));

@@ -88,11 +88,10 @@ class Touch:
     def turn(self, now, words):
         """The pointer helper's two-hand turn ("kb turn ...", handle.Drag.turn) of a panel being
         dragged by its handle."""
-        for drag in self.drags.values():
-            pose = drag.turn(now, words)
-            if pose:
-                self.send("set_pose", matrix=pose)
-            return
+        drag = next(iter(self.drags.values()), None)   # (one panel: the first press's drag)
+        pose = drag.turn(now, words) if drag else None
+        if pose:
+            self.send("set_pose", matrix=pose)
 
     def tick(self, now):
         if not self.forwarded:

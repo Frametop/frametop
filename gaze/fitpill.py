@@ -12,24 +12,33 @@ Pill.step(now, terms) returns what changed for the panel, or None:
   ("hide",)                close it
 arrow is "up", "down", "left", "right" (the way to nudge it), "good" or "" (no mark).
 
-It opens after the headset has sat past SHOW_DEG for SHOW_HOLD, follows each reading while it's
-open (down to GOOD_DEG, so it guides the whole way back, not just under the trigger), says
-"Looks good" once within GOOD_DEG for GOOD_HOLD, and closes GOOD_SECONDS later. One that never
+It is for a big change of fit only: a small slip is the clicks' to fix (each click, and each
+glance at what a free mouse clicks, pins the slip filter's estimate), so nobody is asked to touch
+the headset for one. It opens after the headset has sat past SHOW_DEG for SHOW_HOLD, follows the
+readings while it's open (down to GOOD_DEG, so it guides the whole way back, not just under the
+trigger), says "Looks good" once within GOOD_DEG for GOOD_HOLD, and closes GOOD_SECONDS later.
+It reads the median of each term over the last SMOOTH seconds: while the headset moves, single
+SteamVR looks swing the filter's estimate by 10-20 degrees each way (2026-11-22), and read raw the
+pill flipped between "up" and "down" every second or two. One that never
 gets there closes after PILL_MAX and waits COOLDOWN before opening again. Thresholds are
 provisional: 1 degree here is about 1.3 px of pupil on the maintainer's headset (fitcoach).
 """
-SHOW_DEG = 5.0       # a term past this, for SHOW_HOLD: the pill opens (fitcoach.MOVED_DEG)
-SHOW_HOLD = 2.0      # seconds
-GOOD_DEG = 2.5       # every term within this, for GOOD_HOLD: "Looks good"
+import statistics
+
+SHOW_DEG = 10.0      # a term past this, for SHOW_HOLD: the pill opens (a big change of fit; under
+                     # it the clicks fix the slip. 5 asked for every small push, 2026-11-22)
+SHOW_HOLD = 4.0      # seconds
+GOOD_DEG = 5.0       # every term within this, for GOOD_HOLD: "Looks good" (the clicks fix the rest)
 GOOD_HOLD = 0.6
 GOOD_SECONDS = 1.5   # "Looks good" stays this long
-BIG_DEG = 10.0       # past this "Nudge right", under it "Nudge slightly right"
-SWITCH_DEG = 2.0     # hysteresis: "Nudge right" until under BIG_DEG - SWITCH_DEG; the other
+BIG_DEG = 20.0       # past this "Nudge right", under it "Nudge slightly right"
+SWITCH_DEG = 4.0     # hysteresis: "Nudge right" until under BIG_DEG - SWITCH_DEG; the other
                      # direction once its term is SWITCH_DEG bigger than the one said
 STALE = 3.0          # seconds without a reading while open: "Look straight ahead"
 PILL_MAX = 30.0      # seconds open without getting good: it closes
 COOLDOWN = 120.0     # and doesn't open again before
 AGAIN = 10.0         # after "Looks good", not again before
+SMOOTH = 1.5         # seconds: the pill reads each term's median over this
 
 GOOD = ("Looks good", "good")
 LOOK = ("Look straight ahead", "")
@@ -74,12 +83,14 @@ class Pill:
         self.until = 0.0          # "Looks good" closes then
         self.next_at = 0.0        # not open again before
         self.said = None
+        self.recent = []          # (time, terms) of the last SMOOTH seconds
 
     @property
     def shown(self):
         return self.state != "hidden"
 
     def step(self, now, terms):
+        terms = self._smooth(now, terms)
         if self.state == "hidden":
             return self._hidden(now, terms)
         if self.state == "good":
@@ -95,6 +106,13 @@ class Pill:
             return self._close(now, AGAIN)
         self.off_since = None
         return None
+
+    def _smooth(self, now, terms):
+        """terms as each one's median over the last SMOOTH seconds of readings (None stays None)."""
+        if terms is None:
+            return None
+        self.recent = [(t, r) for t, r in self.recent if now - t < SMOOTH] + [(now, terms)]
+        return {k: statistics.median(r[k] for _, r in self.recent if k in r) for k in terms}
 
     def _hidden(self, now, terms):
         if terms is None:

@@ -350,7 +350,7 @@ time.sleep(fitpill.SHOW_HOLD + 2)
 check("sits as calibrated: no pill", "show pill" in since(n), False)
 check("ft-gaze sends SteamVR's eyes for the looks", svc.proc_sources, "own,mmap1,left,right")
 g = len(eyes_state["got"])
-eyes_state["slip"] = (0.0, -12.0)   # the pupils sit low: the headset rode up
+eyes_state["slip"] = (0.0, -24.0)   # the pupils sit low: the headset rode up
 start = time.monotonic()
 check("off: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
 check("  not before SHOW_HOLD", time.monotonic() - start >= fitpill.SHOW_HOLD, True)
@@ -360,7 +360,7 @@ check("  no pointer hiding for it", any(c == "calpanel 1" for c in since(n)), Fa
 check("  in the status", svc.checks.status()["fit_pill"], "Nudge down")
 check("  ft-eyes told the headset is being moved", wait(lambda: got("adjusting", g), 2) and got("adjusting", g)[0],
       ["adjusting", str(gazecheck.PILL_ADJUST)])
-eyes_state["slip"], eyes_state["sd"] = (0.0, -4.0), 3.0   # moving it makes the filter less sure
+eyes_state["slip"], eyes_state["sd"] = (0.0, -8.0), 3.0   # moving it makes the filter less sure
 check("nudged partway: slightly (followed though less sure while it shows)",
       wait(lambda: "text Nudge slightly down" in since(n), 3), True)
 eyes_state["slip"] = (0.0, 0.0)
@@ -372,7 +372,7 @@ time.sleep(0.5)
 g = len(eyes_state["got"])
 time.sleep(1.5)
 check("  no lease while it's gone", got("adjusting", g), [])
-eyes_state["slip"] = (-7.0, 0.0)
+eyes_state["slip"] = (-14.0, 0.0)
 n = len(panel)
 check("off to the side: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
 check("  says which way", "text Nudge slightly right" in since(n), True)
@@ -385,7 +385,7 @@ check("gaze mode on again", wait(lambda: svc.checks.gaze_on is True, 4), True)
 
 # Not sure yet (just put on, before a steady look or a click): no pill, however far off.
 n = len(panel)
-eyes_state["slip"], eyes_state["sd"] = (0.0, -12.0), gazecheck.PILL_SD + 1
+eyes_state["slip"], eyes_state["sd"] = (0.0, -24.0), gazecheck.PILL_SD + 1
 time.sleep(fitpill.SHOW_HOLD + 2)
 check("the filter unsure: no pill", "show pill" in since(n), False)
 eyes_state["slip"], eyes_state["sd"] = (0.0, 0.0), 0.5
@@ -408,7 +408,7 @@ wait(lambda: (svc.own.get("calibration") or {}).get("made"), 3)
 look(0.0, 0.0)
 
 # A check opening closes it, and sends no looks while it runs.
-eyes_state["slip"] = (0.0, -12.0)
+eyes_state["slip"] = (0.0, -24.0)
 n = len(panel)
 check("off again: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
 check("a fit check opens", ask("fitcheck").startswith("ok"), True)

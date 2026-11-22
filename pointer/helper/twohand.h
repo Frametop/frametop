@@ -6,9 +6,14 @@
 // you were manipulating the keyboard or window"). The line between the hands turns it: one hand
 // forward, a yaw; one up, a roll. Both wrists twisting about that line (the palms' normals around
 // it) tilts it, a pitch. The midpoint carries it.
+//   Like a playing card held at arm's length, however far off the panel is (user, 2026-11-21: "almost
+// more like you're manipulating it directly in your hands ... even if it's further away ... basically
+// telekinesis"): it turns about its own centre, not about the hands (a far panel swung round you), and
+// the midpoint's movement is scaled by the panel's distance over the hands' (a lever).
 //
-// Turn::Now gives the rigid move since Begin, which the panel's owner applies to its pose at the
-// begin: x' = R x + t, standing-universe coordinates.
+// Turn::Now gives the turn R since Begin and the move t: the panel's owner turns its pose at the
+// begin about its own centre c by R and moves it by t (rotation R * R0, centre c + t), standing-universe
+// coordinates.
 #pragma once
 
 #include <cmath>
@@ -25,7 +30,7 @@ struct Hand {
     Vec3 palm;   // unit, out of the palm
 };
 
-// A rigid move: rows of a rotation, and a translation.
+// A turn and a move: rows of the rotation, and the translation in the last column.
 struct Move {
     double m[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
 };
@@ -44,7 +49,8 @@ inline bool AngleAbout(Vec3 a, Vec3 b, Vec3 axis, double *out) {
 
 class Turn {
 public:
-    void Begin(const Hand &a, const Hand &b) { a0_ = a, b0_ = b; }
+    // gain: how far the panel moves per metre the hands' midpoint does.
+    void Begin(const Hand &a, const Hand &b, double gain = 1) { a0_ = a, b0_ = b, gain_ = gain; }
 
     // The move since Begin for the hands now; false when they're too close together to tell.
     bool Now(const Hand &a, const Hand &b, Move *out) const {
@@ -64,8 +70,7 @@ public:
         if (n) twist /= n;
         auto turn = [&](Vec3 x) { return md::RotateAbout(byArc(x), u, twist); };
         const Vec3 cx = turn({1, 0, 0}), cy = turn({0, 1, 0}), cz = turn({0, 0, 1});
-        const Vec3 m0 = (a0_.at + b0_.at) * 0.5, m = (a.at + b.at) * 0.5, rm0 = turn(m0);
-        const Vec3 t = m - rm0;
+        const Vec3 t = ((a.at + b.at) * 0.5 - (a0_.at + b0_.at) * 0.5) * gain_;
         const double rows[3][4] = {{cx.x, cy.x, cz.x, t.x}, {cx.y, cy.y, cz.y, t.y}, {cx.z, cy.z, cz.z, t.z}};
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c) out->m[r][c] = rows[r][c];
@@ -74,7 +79,15 @@ public:
 
 private:
     Hand a0_, b0_;
+    double gain_ = 1;
 };
+
+// The lever: the panel's distance from the eye over the hands' midpoint's, within [1, kMaxGain].
+constexpr double kMaxGain = 6;
+inline double Gain(double panelDistance, Vec3 eye, const Hand &a, const Hand &b) {
+    const double hands = md::Length((a.at + b.at) * 0.5 - eye);
+    return hands > 0.05 ? std::fmin(std::fmax(panelDistance / hands, 1.0), kMaxGain) : 1.0;
+}
 
 // The move as words for a "turn" line: twelve numbers, row by row.
 template <typename Out>

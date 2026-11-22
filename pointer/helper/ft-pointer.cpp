@@ -2275,7 +2275,7 @@ struct Pointer {
         turnSeen = handsRoom.capture_ns;
         const twohand::Hand ha{a->knuckle, a->palmNormal}, hb{b->knuckle, b->palmNormal};
         if (!turnBegun) {
-            turn.Begin(ha, hb), turnBegun = true;
+            turn.Begin(ha, hb, twohand::Gain(dragDistance, anchor, ha, hb)), turnBegun = true;
             turnSend("begin");
             return;
         }

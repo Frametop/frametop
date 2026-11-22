@@ -11,10 +11,12 @@ using md::Vec3;
 using twohand::Hand;
 using twohand::Move;
 
-static Vec3 Apply(const Move &mv, Vec3 p) {
-    return {mv.m[0][0] * p.x + mv.m[0][1] * p.y + mv.m[0][2] * p.z + mv.m[0][3],
-            mv.m[1][0] * p.x + mv.m[1][1] * p.y + mv.m[1][2] * p.z + mv.m[1][3],
-            mv.m[2][0] * p.x + mv.m[2][1] * p.y + mv.m[2][2] * p.z + mv.m[2][3]};
+// A point p of a panel centred at c, after the turn (about c) and the move.
+static Vec3 Apply(const Move &mv, Vec3 p, Vec3 c = {0, 1.2, -0.5}) {
+    const Vec3 d = p - c;
+    return Vec3{mv.m[0][0] * d.x + mv.m[0][1] * d.y + mv.m[0][2] * d.z + mv.m[0][3],
+                mv.m[1][0] * d.x + mv.m[1][1] * d.y + mv.m[1][2] * d.z + mv.m[1][3],
+                mv.m[2][0] * d.x + mv.m[2][1] * d.y + mv.m[2][2] * d.z + mv.m[2][3]} + c;
 }
 static bool Near(Vec3 a, Vec3 b, double e = 1e-6) { return md::Length(a - b) < e; }
 
@@ -61,6 +63,21 @@ int main() {
         // a palm along the line says nothing: the other hand's twist alone
         assert(p.Now({l.at, {1, 0, 0}}, {r.at, md::RotateAbout({0, 1, 0}, axis, a)}, &mv));
         assert(Near(Apply(mv, {0, 1.3, -0.5}) - Apply(mv, {0, 1.2, -0.5}), md::RotateAbout({0, 0.1, 0}, axis, a)));
+    }
+    // A panel 3 m off: it turns about its own centre (it doesn't swing round the hands), and the
+    // hands' midpoint moves it by the lever.
+    {
+        const Vec3 eye{0, 1.6, 0}, far{0, 1.2, -3};
+        const double g = twohand::Gain(3.0, eye, l, r);
+        assert(g > 4 && g <= twohand::kMaxGain);
+        twohand::Turn f;
+        f.Begin(l, r, g);
+        const double a = 0.5;
+        const Hand l2{l.at + Vec3{0, 0, 0.2 * std::sin(a)} + Vec3{0.1, 0, 0}, md::RotateAbout(l.palm, {0, 1, 0}, a)};
+        const Hand r2{r.at - Vec3{0, 0, 0.2 * std::sin(a)} + Vec3{0.1, 0, 0}, md::RotateAbout(r.palm, {0, 1, 0}, a)};
+        assert(f.Now(l2, r2, &mv));
+        assert(Near(Apply(mv, far, far), far + Vec3{0.1 * g, 0, 0}, 1e-6));   // its centre: only the lever's move
+        assert(twohand::Gain(30.0, eye, l, r) == twohand::kMaxGain && twohand::Gain(0.2, eye, l, r) == 1.0);
     }
     // Hands together: nothing to tell.
     assert(!t.Now({{0, 1.2, -0.5}, {1, 0, 0}}, {{0.02, 1.2, -0.5}, {-1, 0, 0}}, &mv));

@@ -48,8 +48,9 @@ class Drag:
 
     def turn(self, now, words):
         """The pointer helper's two-hand turn (pointer/helper/twohand.h): "begin", "move" and twelve
-        numbers (rows of the rigid move since the begin, x' = R x + t), "end". The pose to set, or
-        None. After it the slide goes on in the turned panel's plane, from the next point."""
+        numbers (rows of the turn R since the begin, the move t in the last column), "end". The panel
+        turns about its own centre by R and moves by t. The pose to set, or None. After it the slide
+        goes on in the turned panel's plane, from the next point."""
         self.last = now
         if words == ["begin"]:
             self.turn_from = self.pose
@@ -62,7 +63,7 @@ class Drag:
             except ValueError:
                 return None
             f = self.turn_from
-            self.pose = [[sum(mv[r][k] * f[k][c] for k in range(3)) + (mv[r][3] if c == 3 else 0.0)
-                          for c in range(4)] for r in range(3)]
+            self.pose = [[sum(mv[r][k] * f[k][c] for k in range(3)) for c in range(3)] + [f[r][3] + mv[r][3]]
+                         for r in range(3)]
             return self.pose
         return None

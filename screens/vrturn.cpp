@@ -1,7 +1,8 @@
 // The two-hand turn of a panel a hand ray carries (the pointer helper's twohand.h): while one hand's ray
 // drags a panel by its bar, the other hand's pinch held as well turns it as if both hands held it (user,
-// 2026-11-21). The helper sends "turn begin", then "turn move" and the rigid move since the begin (twelve
-// numbers, rows of x' = R x + t in the standing universe), then "turn end". Meanwhile the carry doesn't
+// 2026-11-21). The helper sends "turn begin", then "turn move" and twelve numbers (rows of the turn R since
+// the begin, the move t in the last column), then "turn end": the panel turns about its own centre by R and
+// moves by t, like a card in the hand however far off it is. Meanwhile the carry doesn't
 // place the panel; at the end it carries on from where the hands left it, keeping their turn (dragTurn,
 // from facing the head, which a hand ray's carry keeps).
 //   Not a tile (tiled panels sit on the dashboard's grid), a panel glued to another, or the layout's carry.
@@ -60,7 +61,12 @@ void TurnWord(const char *words, char *reply, int size) {
         Mat mv;
         if (!s->turning) return (void)std::snprintf(reply, size, "ok not turning");
         if (!ParseMove(words + 5, &mv)) return (void)std::snprintf(reply, size, "error turn move: twelve numbers");
-        SetAbsolute(*s, Mul(mv, s->turnFrom));
+        Mat p = s->turnFrom;   // turned about its own centre, then moved
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                p.m[r][c] = mv.m[r][0] * s->turnFrom.m[0][c] + mv.m[r][1] * s->turnFrom.m[1][c] + mv.m[r][2] * s->turnFrom.m[2][c];
+        for (int r = 0; r < 3; ++r) p.m[r][3] = s->turnFrom.m[r][3] + mv.m[r][3];
+        SetAbsolute(*s, p);
     } else {
         return (void)std::snprintf(reply, size, "error turn begin|move ...|end");
     }

@@ -186,14 +186,14 @@ class HandleTest(unittest.TestCase):
         self.touch.turn(0.1, ["begin"])
         c, s_ = math.cos(0.3), math.sin(0.3)
         p = [self.PANEL[r][3] for r in range(3)]
-        # a yaw of 0.3 rad about the panel's centre: x' = R x + (p - R p)
+        # a yaw of 0.3 rad (about its own centre) and 5 cm up
         rot = [[c, 0.0, s_], [0.0, 1.0, 0.0], [-s_, 0.0, c]]
-        t = [p[r] - sum(rot[r][k] * p[k] for k in range(3)) for r in range(3)]
+        t = [0.0, 0.05, 0.0]
         move = ["move"] + [f"{v:.5f}" for r in range(3) for v in (*rot[r], t[r])]
         self.touch.turn(0.2, move)
         turned = [f["matrix"] for op, f in self.sent if op == "set_pose"][-1]
         for r in range(3):
-            self.assertAlmostEqual(turned[r][3], p[r], places=4)   # about its centre: it stays put
+            self.assertAlmostEqual(turned[r][3], p[r] + t[r], places=4)   # about its centre, then moved
         self.assertAlmostEqual(turned[0][0], sum(rot[0][k] * self.PANEL[k][0] for k in range(3)), places=4)
         n = len(self.sent)
         self.touch.poke(0.25, self.at("right", "move", 0.2, y), self.GEOMETRY)   # the carry waits meanwhile

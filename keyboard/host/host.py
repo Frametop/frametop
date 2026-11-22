@@ -110,7 +110,7 @@ class Host:
         self.send("show", view="keyboard")
 
     def place(self, kind, pose):
-        _, width, height = self.geometry
+        width, height = self.geometry[1:3]
         self.send("set_pose", matrix=placement.spot(kind, pose, width, height))
 
     def hide(self):
@@ -212,7 +212,11 @@ class Host:
             matrix, width, height = message.get("matrix"), message.get("width"), message.get("height")
             if (isinstance(matrix, list) and len(matrix) == 3 and isinstance(width, (int, float))
                     and isinstance(height, (int, float)) and width > 0 and height > 0):
-                self.geometry = (matrix, float(width), float(height))
+                case = message.get("keys_uv")   # the case, whose bottom edge tops the move handle
+                bottom = None
+                if isinstance(case, dict) and all(isinstance(case.get(k), (int, float)) for k in ("v", "height")):
+                    bottom = float(case["v"]) + float(case["height"])
+                self.geometry = (matrix, float(width), float(height), bottom)
                 if self.pending_spot:
                     self.place(*self.pending_spot)
                     self.pending_spot = None

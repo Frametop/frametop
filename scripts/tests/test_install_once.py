@@ -270,6 +270,20 @@ class InstallOnce(unittest.TestCase):
         self.assertEqual(sorted(set(calls)), ["-A bash -c true"], calls)
         self.assertIn("setup/bluetooth/install.sh", self.steps())
 
+    def test_the_installer_app_leaves_out_gaze_mode(self):
+        """The Frametop Installer's install: --yes with the parts it unticked, sudo through askpass."""
+        self.release()
+        code, out = self.run_install(args=["--yes", "--no-gaze", "--together", "--bluetooth"],
+                                     SUDO_ASKPASS="/bin/false")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(PROMPT.findall(out), [])
+        steps = self.steps()
+        for rel in ("gaze/run.sh", "gaze/tracker/install.sh", "gaze/rec/install.sh"):
+            self.assertNotIn(rel, steps)
+        for rel in ("hands/run.sh", "together/run.sh", "setup/bluetooth/install.sh"):
+            self.assertIn(rel, steps)
+        self.assertIn("gaze mode isn't installed", out)
+
     def test_the_old_tracker_setting_is_asked_up_front(self):
         self.conf.write_text("POINTER=1\nGAZE_TRACKER=steam\n")
         # voice, hands, gaze, tracker, use ours, Together, Bluetooth, restart

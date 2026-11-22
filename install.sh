@@ -9,9 +9,9 @@
 # It asks every question first, then your password once if a part you picked needs it (each
 # question that needs it says so), and then installs without asking anything else.
 #
-# Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
-#                    [--no-eye-recorder] [--no-keyboard] [--no-together | --together]
-#                    [--no-bluetooth | --bluetooth]
+# Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-gaze]
+#                    [--no-eye-tracker] [--no-eye-recorder] [--no-keyboard]
+#                    [--no-together | --together] [--no-bluetooth | --bluetooth]
 #   --yes           don't ask; installs voice dictation, gaze mode and the Eye Recorder, and hand
 #                   tracking, the Hand Recorder and our eye tracker if sudo can run without a
 #                   password prompt; skips the Bluetooth fixes and the SteamVR restart, and
@@ -20,6 +20,7 @@
 #   --no-hands      don't offer hand tracking or the Hand Recorder
 #   --no-hand-recorder  don't offer the Hand Recorder (a release's; a clone builds it with
 #                   hands/rec/install.sh)
+#   --no-gaze       don't offer gaze mode (or our eye tracker and the Eye Recorder, which need it)
 #   --no-eye-tracker  don't offer our own eye tracker (or the Eye Recorder, which needs it)
 #   --no-eye-recorder  don't offer the Eye Recorder (a release's; a clone builds it with
 #                   gaze/rec/install.sh)
@@ -36,12 +37,13 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
 
-assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 hands=1 hand_recorder=1 keyboard=1 together=1 voice=1
+assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 gaze=1 hands=1 hand_recorder=1 keyboard=1 together=1 voice=1
 for arg in "$@"; do
   case $arg in
     --yes) assume_yes=1 ;;
     --no-bluetooth) bluetooth=0 ;;
     --bluetooth) bluetooth=2 ;;
+    --no-gaze) gaze=0 eye_tracker=0 eye_recorder=0 ;;
     --no-eye-tracker) eye_tracker=0 eye_recorder=0 ;;
     --no-eye-recorder) eye_recorder=0 ;;
     --no-voice) voice=0 ;;
@@ -50,7 +52,7 @@ for arg in "$@"; do
     --no-keyboard) keyboard=0 ;;
     --no-together) together=0 ;;
     --together) together=2 ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -266,7 +268,7 @@ if [ "$FRAME_RELEASE" = 1 ]; then
 fi
 
 do_gaze=0
-if ask "Install gaze mode? The pointer goes where you look; you turn it on and calibrate it in Frametop Settings, on the Gaze page." y; then
+if [ "$gaze" = 1 ] && ask "Install gaze mode? The pointer goes where you look; you turn it on and calibrate it in Frametop Settings, on the Gaze page." y; then
   do_gaze=1
 fi
 

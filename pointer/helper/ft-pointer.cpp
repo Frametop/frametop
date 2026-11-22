@@ -976,6 +976,7 @@ constexpr float kGoneWidthM = 1e-3f;   // a panel narrower: hidden (see "Scene-g
 // laser), and after a release the laser holds still this long (see "Touch" at the top).
 constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
 // The headset counts as off after SteamVR has said idle this long (see the main loop).
+constexpr auto kGameLaserHold = std::chrono::milliseconds(300);   // see "Laser mode on while..."
 constexpr auto HEADSET_OFF_AFTER = std::chrono::milliseconds(1500);
 // Gaze owns the pointer (see the top): a gaze this fresh takes it back, the hand this long away
 // from a panel, a controller this long after it let it go (without hand tracking's handoff),
@@ -1237,6 +1238,7 @@ struct Pointer {
     std::vector<uint8_t> clear;
     vr::HmdMatrix34_t below{};
     bool laserModeShown = false;
+    Clock::time_point laserPanelAt{};   // the ray was last on a panel (or dragging one) then
     DotOverlay cursorDot, markerDot;  // the setters for `cursor` and `marker` (see "Unchanged frames" at the top)
     int in = -1;
     int out = -1;
@@ -3077,12 +3079,20 @@ void Pointer::OverlaysAndRole() {
         ++steamListSeq;
     }
 
-    // Laser mode on while the pointer is awake.
-    if (active != laserModeShown) {
-        laserModeShown = active;
-        if (active) overlay->ShowOverlay(laserMode);
+    // Laser mode on while the pointer is awake, except over a VR game's world: SteamVR's laser mouse
+    // takes the game's focus (OpenXR VISIBLE, no input), so there the pointer is the game's right
+    // controller instead (ft_pointer_remapping.json: its trigger and aim). Back on a panel it's
+    // forced on again, and kept for kGameLaserHold after leaving one so a ray along a panel's edge
+    // doesn't flip the game's focus every frame (user, 2026-11-21: "when in VR games the 3d mouse
+    // and hand tracking lasers don't interact at all").
+    if (!lastHit.empty()) laserPanelAt = fr.tnow;
+    const bool toGame = inGame && !dashboardUp && fr.tnow - laserPanelAt > kGameLaserHold;
+    const bool laserOn = active && (leftHeld ? laserModeShown : !toGame);   // (a held press stays whoever's took it)
+    if (laserOn != laserModeShown) {
+        laserModeShown = laserOn;
+        if (laserOn) overlay->ShowOverlay(laserMode);
         else overlay->HideOverlay(laserMode);
-        if (debug) std::printf("laser mode %s\n", active ? "forced on" : "released");
+        if (debug) std::printf("laser mode %s\n", laserOn ? "forced on" : active ? "off: the game's" : "released");
     }
 
     // Didn't get the hand role (a held controller keeps it): release, back off. Not as a treadmill,

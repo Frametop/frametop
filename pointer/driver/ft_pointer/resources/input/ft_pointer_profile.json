@@ -5,10 +5,12 @@
 	"resource_root": "ft_pointer",
 	"driver_name": "ft_pointer",
 	"input_bindingui_mode": "controller_handed",
+	"remapping": "{ft_pointer}/input/ft_pointer_remapping.json",
 	"should_show_binding_errors": true,
 	"input_source": {
 		"/input/trigger": {
-			"type": "button",
+			"type": "trigger",
+			"value": true,
 			"click": true
 		},
 		"/input/b": {

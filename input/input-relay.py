@@ -2447,7 +2447,7 @@ class Relay:
             if words[2:] != ["renew"]:
                 self.text_field(words[1] == "1")
             return
-        if cmd == "remoteclick":
+        if cmd == "remoteclick" and len(words) == 1:
             # From ft-screens: a click on a remote display, whose host never says when a text
             # field takes focus. It opens the keyboard, so only from this user.
             if uid == os.getuid():

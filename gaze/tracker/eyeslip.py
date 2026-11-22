@@ -4,7 +4,7 @@ across both eyes for a knock), the `adjusting` lease, each eye's status, and sli
 (sliplog.py).
 
 `eyes` are ft-eyes' Eye objects: each has .eye (0 right, 1 left), .filter (its SlipFilter, None
-while unmapped), .window(t0, t1) (its median pupil over that span's frames), its newest
+while unmapped; both eyes' are views of one slipfilter.Headset), .window(t0, t1) (its median pupil over that span's frames), its newest
 readings .find, .gaze and .glint, and for take_glint .cal, .slip (eyes_model.SlipTracker) and
 .glint_innov (its last glint reading's innovation). `cal` is the tracker's calibration. Times are frame times.
 """
@@ -100,7 +100,8 @@ def take_glint(e, other, t, gaze):
     if knocked:
         e.filter.inflate(y)
         if o is not None:
-            other.filter.inflate(o.y)   # its next reading, within a second, takes it
+            if other.filter.headset is not e.filter.headset:
+                other.filter.inflate(o.y)   # its next reading, within a second, takes it
             other.glint_innov = None
         e.glint_innov = None
     r = e.filter.update("glint", z, t)
@@ -143,6 +144,17 @@ def eye_status(f, t):
             "steam_bias_deg": _r(f.bias_deg("steam"))}
 
 
+def headset_status(eyes, t):
+    """The headset's slip moved on to t (the fit pill's reading: slipfilter.headset_status), or
+    None while no eye is mapped."""
+    f = next((e.filter for e in eyes if e.filter), None)
+    if not f:
+        return None
+    if t is not None:
+        f.predict(t)
+    return slipfilter.headset_status(f.headset)
+
+
 def log_row(eyes, t):
     """slip.jsonl's row at t (sliplog.py), or None before any frame."""
     if t is None:
@@ -161,6 +173,7 @@ def log_row(eyes, t):
         if e.filter:
             f = e.filter
             f.predict(t)
-            row.update(x=_r(f.x), P=_r(np.diag(f.P)), slip_deg=_r(f.slip_deg()), slip_sd=round(f.slip_sd(), 3))
+            row.update(x=_r(f.x), P=_r(np.diag(f.P)), slip_deg=_r(f.slip_deg()), slip_sd=round(f.slip_sd(), 3),
+                       own_deg=_r(f.own_deg()))
         out[str(e.eye)] = row
-    return {"t": round(t, 4), "eyes": out}
+    return {"t": round(t, 4), "eyes": out, "headset": headset_status(eyes, None)}

@@ -9,6 +9,7 @@ cameras, SteamVR or live gaze service. Needs the tracker's Python (numpy, OpenCV
 
   scripts/in-box /opt/frametop/venv/bin/python gaze/test/slip-filter-test.py
 """
+import copy
 import importlib.machinery
 import importlib.util
 import json
@@ -46,6 +47,7 @@ def check(what, got, want):
 
 JAC = [[-4.0, 0.0], [0.0, -4.0]]   # 4 px of pupil a degree, as pupil() below
 PX = 4.0
+GLINT, STEAM = slice(2, 4), slice(4, 6)   # an eye's x: its slip, glint bias, steam bias (px)
 
 
 def near(v, want, tol):
@@ -55,7 +57,7 @@ def near(v, want, tol):
 # --- The filter on its own ---
 f = sf.SlipFilter(JAC)
 check("fresh: no slip", f.s.tolist(), [0.0, 0.0])
-check("...sure to START_SD", round(f.slip_sd(), 3), sf.START_SD)
+check("...sure to START_SD and OWN_START_SD", round(f.slip_sd(), 3), round(float(np.hypot(sf.START_SD, sf.OWN_START_SD)), 3))
 check("slip_deg: the pupil low in the image (y +) reads as the eyes high", near(sf.SlipFilter(JAC, (0, -8)).slip_deg(), (0, 2), 1e-9),
       True)
 
@@ -104,7 +106,7 @@ for _ in range(120):        # a minute of steady looks at 2 a second, the headse
     f.update("steam", B, t)
     t += 0.5
 check("SteamVR off by 2 degrees right after the calibration: its bias, not a slip", near(f.s, (0, 0), 1.0), True)
-check("...learnt as its bias", near(f.x[sf.STEAM], B, 1.0), True)
+check("...learnt as its bias", near(f.x[STEAM], B, 1.0), True)
 slip = np.zeros(2)
 for _ in range(60):         # the headset slides 6 px over 30 s
     slip += (0.1, 0.0)
@@ -115,8 +117,7 @@ for _ in range(120):
     t += 0.5
 check("...a slow slide after it: followed", near(f.s, slip, 1.5), True)
 s0 = f.s
-plain = sf.SlipFilter(JAC)
-plain.x, plain.P, plain.t = f.x.copy(), f.P.copy(), f.t
+plain = copy.deepcopy(f)
 r = f.update("steam", f.expect("steam") + (80.0, 0.0), t)   # 20 degrees off: a blink, say
 plain.update("steam", plain.expect("steam") + (80.0, 0.0), t, robust=False)
 moved, plain_moved = abs(f.s[0] - s0[0]), abs(plain.s[0] - s0[0])
@@ -134,7 +135,7 @@ f = sf.SlipFilter(JAC)
 G = np.array([-6.0, 3.0])
 for i in range(60):
     f.update("glint", G, float(i))
-check("the glint estimate's offset is its bias", (near(f.s, (0, 0), 1.0), near(f.x[sf.GLINT], G, 1.5)), (True, True))
+check("the glint estimate's offset is its bias", (near(f.s, (0, 0), 1.5), near(f.x[GLINT], G, 1.5)), (True, True))
 
 # --- The headset off and on ---
 f = sf.SlipFilter(JAC)
@@ -199,7 +200,8 @@ f.predict(0.0)
 f.adjusting(0.0, 1.0)
 f.predict(10.0)   # frames stalled past the lease's end: only its second is fast
 check("a lease counts only until it ends", round(float(f.P[0, 0]), 3),
-      round((sf.START_SD ** 2 + sf.ADJUST_RATE ** 2 * 1.0 + sf.SLIP_RATE ** 2 * 9.0) * PX ** 2, 3))
+      round((sf.START_SD ** 2 + sf.OWN_START_SD ** 2 + sf.ADJUST_RATE ** 2 * 1.0 + sf.SLIP_RATE ** 2 * 9.0
+             + sf.OWN_RATE ** 2 * 10.0) * PX ** 2, 3))
 
 # --- Glint readings judged across the eyes (eyeslip.take_glint) ---
 import eyeslip  # noqa: E402
@@ -226,13 +228,15 @@ class FakeSlip:
 
 
 class FakeEye:
-    def __init__(self, eye):
-        self.eye, self.filter, self.cal, self.slip = eye, sf.SlipFilter(JAC), FakeCal(), FakeSlip()
+    def __init__(self, eye, headset):
+        self.eye, self.cal, self.slip = eye, FakeCal(), FakeSlip()
+        self.filter = sf.SlipFilter(JAC, headset=headset, eye=eye)
         self.glint = self.glint_innov = None
 
 
 def settled():
-    eyes = [FakeEye(0), FakeEye(1)]
+    hs = sf.Headset()
+    eyes = [FakeEye(0, hs), FakeEye(1, hs)]
     for i in range(30):
         for e in eyes:
             e.slip.z = (0.0, 0.0)
@@ -266,9 +270,9 @@ check("both eyes' glints jump the same way: not a knock yet (a misread pair snap
 r = glints(eyes, 31.0, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)})
 check("...still there a second later: the headset knocked", r[-1]["moved"], True)
 glints(eyes, 32.0, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)})
-check("...taken nearly whole by the next readings", [float(e.filter.s[0] + e.filter.x[sf.GLINT][0]) > 0.8 * KNOCK
+check("...taken nearly whole by the next readings", [float(e.filter.s[0] + e.filter.x[GLINT][0]) > 0.8 * KNOCK
                                                        for e in eyes], [True, True])
-check("...and as the slip, not the glints' bias", [abs(float(e.filter.x[sf.GLINT][0])) < 0.2 * KNOCK for e in eyes],
+check("...and as the slip, not the glints' bias", [abs(float(e.filter.x[GLINT][0])) < 0.2 * KNOCK for e in eyes],
       [True, True])
 eyes = settled()
 moved = []
@@ -313,14 +317,56 @@ for i in range(600):   # ten minutes of steady glints at GLINT_SD's noise, half 
     knocks += sum(v["moved"] for v in glints(eyes, 30.0 + i, z))
 check("noisy steady glints: no knocks", knocks, 0)
 
+# --- The headset's slip and each eye's own ---
+def pair():
+    fs = sf.load(None, {0: JAC, 1: JAC})
+    return fs[0], fs[1], fs[0].headset
+
+
+r0, l0, hs = pair()
+t = 0.0
+for _ in range(10):   # clicks keep finding the left eye 3 degrees off, the right where it was
+    sf.teach_click({0: r0, 1: l0}, {0: np.zeros(2), 1: np.array([-12.0, 0.0])}, t)
+    t += 2.0
+check("one eye off at every click: the eyes' own parts hold the difference, the headset their mean",
+      (near(l0.own_deg() - r0.own_deg(), (3, 0), 0.5), near(sf.headset_status(hs)["slip_deg"], (1.5, 0), 0.5),
+       near(r0.s, (0, 0), 1.5), near(l0.s, (-12, 0), 1.5)), (True, True, True, True))
+before = (r0.s.copy(), l0.s.copy())
+hs.adjusting(t, 10.0)   # then the headset is pushed 2 degrees: both eyes' glints say so
+for _ in range(10):
+    for e in (r0, l0):
+        e.update("glint", e.x[GLINT] + before[e.eye] + (-8.0, 0.0), t)
+    t += 1.0
+moved0, moved1 = r0.s - before[0], l0.s - before[1]
+check("...both eyes' glints moved the same way: both slips move together, each eye's own kept",
+      (near(moved0, moved1, 0.3), moved0[0] < -4.0, near(l0.own_deg() - r0.own_deg(), (3, 0), 0.5)), (True, True, True))
+check("the pill reads the headset's slip, not one eye's own",
+      gazecheck.pill_terms({"headset": sf.headset_status(hs)})["left"] < l0.slip_deg()[0], True)
+r0, l0, hs = pair()
+for _ in range(10):
+    r0.update("steam", r0.expect("steam") + (8.0, 0.0), float(_))
+check("one eye's readings alone move the other's slip too (it's the same headset)", l0.s[0] > 1.0, True)
+r0, l0, hs = pair()
+r0.reseat()
+sd = r0.slip_sd()
+l0.reseat()
+check("both eyes' reseats count once", (round(l0.slip_sd(), 6) == round(sd, 6), l0.reseated), (True, True))
+
 # --- Kept across restarts ---
-f = sf.SlipFilter(JAC)
-f.click((5.0, 2.0), 1.0)
-g = sf.SlipFilter.from_json(json.loads(json.dumps(f.to_json())), JAC)
-check("to_json and back", (near(g.x, f.x, 1e-3), near(g.P, f.P, 1e-6), g.clicks), (True, True, 1))
-g = sf.SlipFilter.from_json({"base": [3.0, 1.0], "ref": None, "meas": [[3, 1], [3, 1]]}, JAC)
-check("the old shift's JSON: its slip", (g.s.tolist(), g.clicks), ([3.0, 1.0], 2))
-check("a broken one: fresh", sf.SlipFilter.from_json({"x": "no"}, JAC).s.tolist(), [0.0, 0.0])
+r0, l0, hs = pair()
+sf.teach_click({0: r0, 1: l0}, {0: np.array([5.0, 2.0]), 1: np.array([9.0, 2.0])}, 1.0)
+g = sf.load(json.loads(json.dumps(sf.save({0: r0, 1: l0}))), {0: JAC, 1: JAC})
+check("save and load", (near(g[0].x, r0.x, 1e-3), near(g[1].P, l0.P, 1e-6), g[0].clicks, g[1].headset is g[0].headset),
+      (True, True, 1, True))
+g = sf.load({"0": {"base": [3.0, 1.0], "ref": None, "meas": [[3, 1], [3, 1]]}}, {0: JAC, 1: JAC})
+check("the old shift's JSON: its slip", (g[0].s.tolist(), g[0].clicks), ([3.0, 1.0], 2))
+old6 = {"0": {"x": [4.0, 0.0, 1.0, 0.0, 2.0, 0.0], "P": np.eye(6).tolist(), "clicks": 3},
+        "1": {"x": [8.0, 0.0, 0.0, 0.0, 0.0, 0.0], "P": np.eye(6).tolist(), "clicks": 2}}
+g = sf.load(old6, {0: JAC, 1: JAC})
+check("the per-eye filters' JSON (before 2026-11-23): each eye's slip, split into the headset's and its own",
+      (near(g[0].s, (4, 0), 1e-9), near(g[1].s, (8, 0), 1e-9), near(g[0].x[STEAM], (2, 0), 1e-9),
+       near(sf.headset_status(g[0].headset)["slip_deg"], (-1.5, 0), 1e-3), g[1].clicks), (True, True, True, True, 2))
+check("a broken one: fresh", sf.load({"x": "no"}, {0: JAC})[0].s.tolist(), [0.0, 0.0])
 
 # --- ft-eyes ---
 DOTS = [d[:2] for d in gazecheck.check_dots("full", True)]
@@ -365,6 +411,7 @@ right, left = tracker.eyes
 check("each eye's filter reads the fit's 4 px a degree", near(np.abs(right.filter.jac), np.abs(np.array(JAC)), 0.05), True)
 st = tracker.status()
 check("status: the slip filter", st["slip"], "filter")
+check("...the headset's slip", sorted(st["headset"]), ["slip_deg", "slip_sd"])
 check("...each eye's slip and how sure", sorted(st["eyes"]["right"]),
       ["clicks", "glint_bias_deg", "reseat", "shift", "slip_deg", "slip_sd", "steam_bias_deg"])
 check("...none yet", (st["eyes"]["right"]["slip_deg"], st["eyes"]["right"]["reseat"]), ([0.0, 0.0], False))
@@ -377,7 +424,7 @@ for _ in range(20):
 check("look: each eye's shift against SteamVR's look", [round(float(v)) for v in r.split()[2:]], [8, 0, 8, 0])
 f = right.filter
 check("...ten seconds of them: right after a calibration, mostly SteamVR's bias, but the two add up",
-      (0.0 < f.s[0] < 4.0, near(f.s + f.x[sf.STEAM], (8, 0), 1.0)), (True, True))
+      (0.0 < f.s[0] < 4.0, near(f.s + f.x[STEAM], (8, 0), 1.0)), (True, True))
 t0, t1 = hold(tracker, 40.0, 0.0)
 check("look past the dots: nothing", tracker.command(f"look {t1:.6f} 40.0 0.0"), "look ok nan nan nan nan")
 t0, t1 = hold(tracker, 0.0, 0.0, drift=1.0)   # 27 px over the look's window
@@ -447,19 +494,21 @@ except OSError:
 fe.ft_store.write_json = was
 tracker.save_state()
 again = fe.Tracker()
-check("state.json keeps each eye's slip", near(again.eyes[0].filter.s, right.filter.s, 1e-3), True)
+check("state.json keeps each eye's slip", (near(again.eyes[0].filter.s, right.filter.s, 1e-3),
+                                           again.eyes[0].filter.headset is again.eyes[1].filter.headset), (True, True))
 check("...reseated at start (the headset may have been off)", again.eyes[0].filter.reseated, True)
 d = json.loads(fe.STATE.read_text())
 fe.STATE.write_text(json.dumps({"calibration": d["calibration"],
                                 "shift": {"0": {"base": [6.0, -2.0], "ref": None, "meas": [[6, -2]]}}}))
 old = fe.Tracker()
-check("an old state.json's shift: its slip", (old.eyes[0].filter.s.tolist(), old.eyes[1].filter.s.tolist()),
+check("an old state.json's shift: its slip", ([round(float(v), 6) for v in old.eyes[0].filter.s], [round(float(v), 6) for v in old.eyes[1].filter.s]),
       ([6.0, -2.0], [0.0, 0.0]))
 
 # slip.jsonl
 row = tracker.log_row()
-check("slip.jsonl's row: each eye's filter state and variances", {"x", "P", "slip_deg", "slip_sd"} <= set(row["eyes"]["0"]),
-      True)
+check("slip.jsonl's row: each eye's filter state and variances, and the headset's",
+      ({"x", "P", "slip_deg", "slip_sd", "own_deg"} <= set(row["eyes"]["0"]), sorted(row["headset"])),
+      (True, ["slip_deg", "slip_sd"]))
 tracker.log.write(row)
 tracker.log.flush()
 lines = [json.loads(v) for v in fe.SLIP_LOG.read_text().splitlines()]
@@ -486,14 +535,13 @@ check("past its size the log moves to .old", ((Path(HOME) / "small.old.jsonl").e
                                                (Path(HOME) / "small.jsonl").stat().st_size < 200), (True, True))
 
 # --- The pill's reading ---
-own = {"eyes": {"right": {"slip_deg": [-6.0, 1.0], "slip_sd": 1.0}, "left": {"slip_deg": [-4.0, 3.0], "slip_sd": 2.0}}}
-check("pill_terms: both eyes' mean", gazecheck.pill_terms(own), {"up": 2.0, "left": -5.0})
-own["eyes"]["left"]["slip_sd"] = 9.0
-check("...an unsure eye left out", gazecheck.pill_terms(own), {"up": 1.0, "left": -6.0})
-own["eyes"]["right"]["slip_sd"] = 9.0
-check("...neither sure: no reading", gazecheck.pill_terms(own), None)
+own = {"headset": {"slip_deg": [-6.0, 1.0], "slip_sd": 1.0},
+       "eyes": {"right": {"slip_deg": [-9.0, 1.0], "slip_sd": 1.0}}}
+check("pill_terms: the headset's slip", gazecheck.pill_terms(own), {"up": 1.0, "left": -6.0})
+own["headset"]["slip_sd"] = 9.0
+check("...unsure: no reading", gazecheck.pill_terms(own), None)
 check("...nothing from ft-eyes: none", gazecheck.pill_terms({}), None)
-own["eyes"]["right"]["slip_sd"] = 3.5
+own["headset"]["slip_sd"] = 3.5
 check("...while the pill shows, a looser limit", (gazecheck.pill_terms(own), gazecheck.pill_terms(own, gazecheck.PILL_FOLLOW_SD)),
       (None, {"up": 1.0, "left": -6.0}))
 

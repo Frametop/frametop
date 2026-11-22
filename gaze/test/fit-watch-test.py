@@ -8,7 +8,7 @@ a calibration's seating saved as your fit for the put-on check, and kept over a 
 
 fit-coach-check-test.py's harness: ft-gazed's Service with its sockets renamed, HOME in a temp
 folder, a fake pointer helper, a fake ft-gaze, a fake ft-eyes control socket (its finds from
-the shipped reference, offset as the test says, and its status with each eye's slip_deg and
+the shipped reference, offset as the test says, and its status with the headset's slip_deg and
 slip_sd as the test says; the commands it gets recorded), and the
 panel's commands recorded instead of sent. Safe next to the live gaze service.
 
@@ -156,7 +156,8 @@ def eyes_answer():
                            "slip_sd": eyes_state["sd"]} for name in ("right", "left")}
             reply = json.dumps({"calibration": {"dots": 27, "made": eyes_state["made"]} if eyes_state["made"] else None,
                                 "calibrating": False,
-                                "dots": 27, "eyes": slip, "feature": eyes_state["feature"]})
+                                "dots": 27, "eyes": slip, "feature": eyes_state["feature"],
+                                "headset": {"slip_deg": list(eyes_state["slip"]), "slip_sd": eyes_state["sd"]}})
         elif w[0] in ("look", "adjusting"):
             reply = f"{w[0]} ok"
         elif w[0] == "fit":

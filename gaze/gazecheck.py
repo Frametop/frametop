@@ -333,13 +333,13 @@ def show_screens(mode, gen):
 
 def pill_terms(own, sd=PILL_SD):
     """The fit pill's reading from ft-eyes' status: {"up", "left"} degrees (fitcoach.assess's
-    terms), each eye's slip_deg averaged over the eyes whose filter is sure to `sd`; None
-    while neither is (just put on, before a steady look or a click: "Look straight ahead")."""
-    got = [e["slip_deg"] for e in (own.get("eyes") or {}).values()
-           if e.get("slip_deg") and e.get("slip_sd") is not None and e["slip_sd"] <= sd]
-    if not got:
+    terms), the headset's slip (each eye's own part left out: slipfilter.py) once its filter
+    is sure to `sd`; None till then (just put on, before a steady look or a click: "Look
+    straight ahead")."""
+    h = own.get("headset") or {}
+    if not h.get("slip_deg") or h.get("slip_sd") is None or h["slip_sd"] > sd:
         return None
-    return {"up": sum(g[1] for g in got) / len(got), "left": sum(g[0] for g in got) / len(got)}
+    return {"up": h["slip_deg"][1], "left": h["slip_deg"][0]}
 
 
 class Checks:

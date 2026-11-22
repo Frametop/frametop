@@ -38,10 +38,14 @@ The same, fitted here on the other clicks (all runs given), for runs without one
 Replays of our tracker on its finds (own.jsonl), from the calibration and the shift it had when
 the run started (start/), with ft-eyes' own rules (eyes_model.py), and nudges teaching it when
 they did live (lessons.jsonl):
-  own-replay      the live rules: check this against own-live (the "replay vs live" line)
+  own-replay      the live rules: check this against own-live (the "replay vs live" line). The
+                  jump rule and the edge guard are the ones the run's ft-eyes had (its status's
+                  jump_rule and edge_margin; a run before them: each, and no guard)
   no-jump         no glint jump: only clicks move the shift
-  both-jump       a glint jump counts only while both eyes see one
-  edge-guard      nudges past the calibration's dots (by EDGE_MARGIN) teach nothing
+  each-jump       every eye's glint jump counts (EYES_JUMP=each)
+  both-jump       a glint jump counts only while both eyes see one (EYES_JUMP=both)
+  edge-guard      nudges past the calibration's dots (by EDGE_MARGIN) teach nothing: each eye
+                  by its own dots where the calibration keeps them (as ft-eyes), else the click
   every-click     every click teaches it, not only the nudges
   bridge          one eye lost: the other, plus how far it usually reads from the two together
   guard-both      eyes_pupil.SizeGuard "both" over the finds (refused ones count as lost)
@@ -82,7 +86,7 @@ FRESH = 0.03              # ft-eyes: an eye counts toward the output this long a
 GAP = 3.0                 # ft-eyes: frames stopping this long is the headset off (a re-seat)
 HISTORY = 12.0            # ft-eyes: seconds of pupil positions kept per eye
 LESSON_MATCH = 1.5        # s between a click and its nudge's lesson
-EDGE_MARGIN = 2.0         # degrees past the calibration's outermost dots for edge-guard
+EDGE_MARGIN = eyes_model.EDGE_MARGIN   # degrees past the calibration's outermost dots for edge-guard
 BRIDGE_TAU = 2.0          # s: bridge's average of each eye against the two together
 FUSE = 0.7                # fuse: our tracker's share
 SHIFT_KEEP = eyes_model.SHIFT_KEEP
@@ -92,8 +96,9 @@ CROSS = ("steamvr-affine-loo", "fusion-loo", "ours-else-steam-loo",
          "steamvr-affine-xrun", "steamvr-affine-xrun+clicks", "fusion-xrun", "fusion-xrun+clicks")
 FUSE_REPLAYS = ("own-replay", "guard-both", "guard-long")  # fusion-loo:NAME, with that replay's eyes
 REPLAYS = {  # name: Replay options
-    "own-replay": {},
+    "own-replay": {"jump": "live", "guard": "live"},
     "no-jump": {"jump": None},
+    "each-jump": {"jump": "each"},
     "both-jump": {"jump": "both"},
     "edge-guard": {"guard": True},
     "every-click": {"teach": "every"},
@@ -323,34 +328,48 @@ class Replay:
         self.taught = self.skipped = 0
         self.out_e = []   # with each output: the eyes' gazes in it, (left, right)
 
+    def partner(self, e):
+        """The other eye's shift, as ft-eyes' Eye.partner: None when the calibration doesn't map it."""
+        return self.shift[1 - e] if self.cal.has("pupil", 1 - e) else None
+
+    def jump_on(self, e):
+        return self.shift[e].in_force(self.partner(e), self.jump or "each")
+
     def value(self, e):
-        sh = self.shift[e]
-        if self.jump == "both" and not all(np.any(self.shift[o].jump) for o in (0, 1)):
-            return sh.base
-        return sh.value
+        return self.shift[e].current(self.partner(e), self.jump or "each")
 
     def click(self, t, truth):
-        if self.guard and self.box and not (self.box[0] - EDGE_MARGIN <= truth[0] <= self.box[1] + EDGE_MARGIN
-                                            and self.box[2] - EDGE_MARGIN <= truth[1] <= self.box[3] + EDGE_MARGIN):
+        per_eye = self.guard and bool(self.cal.box)   # ft-eyes: each eye by its own dots
+        if self.guard and not per_eye and self.box and not (
+                self.box[0] - EDGE_MARGIN <= truth[0] <= self.box[1] + EDGE_MARGIN
+                and self.box[2] - EDGE_MARGIN <= truth[1] <= self.box[3] + EDGE_MARGIN):
             self.skipped += 1
             return
-        both = all(np.any(self.shift[o].jump) for o in (0, 1))
+        jumped = {e: self.jump_on(e) for e in (0, 1)}   # before either eye's lesson clears its jump
+        taught = outside = False
         for e in (0, 1):
             rows = [h for h in self.history[e] if t - CLICK_BEFORE <= h[0] <= t]
             if len(rows) < CLICK_MIN or not self.cal.has("where", e):
                 continue
+            if per_eye and not self.cal.inside(e, truth, EDGE_MARGIN):
+                outside = True
+                continue
+            taught = True
             pupil = np.median(np.array([h[1:3] for h in rows]), axis=0)
             d = self.cal.click_shift(e, pupil, truth)
             sh = self.shift[e]
             # A jump in force (both-jump: in both eyes) means the headset moved: the older clicks are stale
-            if (both if self.jump == "both" else np.any(sh.jump)) or sh.reseated:
+            if jumped[e] or sh.reseated:
                 sh.meas, sh.reseated = [], False
             sh.meas = (sh.meas + [np.asarray(d, float)])[-SHIFT_KEEP:]
             sh.base = np.median(sh.meas, axis=0)
             sh.jump, sh.held = np.zeros(2), None
             if self.slip[e].value is not None:
                 sh.ref = np.asarray(self.slip[e].value, float)
-        self.taught += 1
+        if outside and not taught:
+            self.skipped += 1
+        else:
+            self.taught += 1
 
     def __call__(self):
         """The output, (times, yaw, pitch) arrays, one per frame that changed it."""
@@ -422,6 +441,7 @@ def replays(run, truths, only):
         run.notes.append("no calibration in start/: no replays")
         return {}
     cal = eyes_model.Calibration.load(calp)
+    cal.fill_from_dots(run.dir / "start" / "eyes-calibration-dots.jsonl")   # as ft-eyes does
     shifts = {}
     try:
         st = json.loads((run.dir / "start" / "eyes-state.json").read_text())
@@ -441,6 +461,10 @@ def replays(run, truths, only):
     out = {}
     for name in want:
         opt = dict(REPLAYS[name])
+        if opt.get("jump") == "live":
+            opt["jump"] = status.get("jump_rule", "each")
+        if opt.get("guard") == "live":
+            opt["guard"] = "edge_margin" in status
         teach = every if opt.pop("teach", None) == "every" else nudges
         size = opt.pop("size", None)
         if size not in frames:

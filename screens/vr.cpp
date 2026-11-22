@@ -1366,11 +1366,13 @@ bool TheaterGame() { return g_steamvr.theater && NowMs() - g_steamvr.atMs < kSte
 // Gamepad mode with a hand controller connected: a pad to leave alone. With none (hands only), there's no
 // pad and no grips to switch back with, so the hand rays and the 3D mouse keep the laser (user, 2026-11-21:
 // "The laser pointer doesn't appear to be working at all now": SteamVR went to Gamepad mode as ft-screens
-// restarted, and stayed there through a hands-only session).
+// restarted, and stayed there through a hands-only session). A controller counts only while it tracks:
+// one switched off, or the testbench's left behind after release, stays a device SteamVR still lists as
+// connected (user, 2026-11-21: "the laser is gone again" right after a testbench run ended).
 bool PadToLeave() {
     if (!SteamVRGamepad()) return false;
     for (vr::TrackedDeviceIndex_t i = 1; i < vr::k_unMaxTrackedDeviceCount; ++i)
-        if (vr::VRSystem()->IsTrackedDeviceConnected(i) && IsHandController(i)) return true;
+        if (g_poses[i].bDeviceIsConnected && g_poses[i].bPoseIsValid && IsHandController(i)) return true;
     return false;
 }
 bool LasersByMode() {

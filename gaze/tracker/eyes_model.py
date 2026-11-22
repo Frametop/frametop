@@ -213,11 +213,14 @@ class Calibration:
             return
         dots = []
         for line in lines:
-            d = json.loads(line)
-            if d.get("made") == self.info.get("made"):
-                dots.append(dict(truth=d["truth"], eye={
-                    int(c): dict(pupil=np.array(v["pupil"]), mid=None if v["mid"] is None else np.array(v["mid"]))
-                    for c, v in d["eye"].items()}))
+            try:   # a line cut short (the file is appended to) is skipped, not fatal at start
+                d = json.loads(line)
+                if d.get("made") == self.info.get("made"):
+                    dots.append(dict(truth=d["truth"], eye={
+                        int(c): dict(pupil=np.array(v["pupil"]), mid=None if v["mid"] is None else np.array(v["mid"]))
+                        for c, v in d["eye"].items()}))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
         if dots:
             refit = Calibration.fit(dots)
             self.spread = self.spread or refit.spread
@@ -256,8 +259,10 @@ class Shift:
     so the headset may be anywhere now.
 
     Whether a jump counts can depend on the other eye (JUMP_RULES): `current` and `in_force`
-    take the other eye's Shift (None when that eye isn't mapped) and the rule. `value` is the
-    shift with this eye's jump whatever the other's ("each")."""
+    take the other eye's Shift (None when that eye isn't mapped) and the rule. Once both eyes'
+    jumps were in force at a click (`teach`), one the click didn't teach stays `vouched`: the
+    other's lesson cleared its jump, but the headset did move, so this eye's jump still counts
+    until its own lesson."""
 
     def __init__(self, base=(0.0, 0.0), ref=None):
         self.meas = []
@@ -266,6 +271,7 @@ class Shift:
         self.jump = np.zeros(2)
         self.held = None  # (change, since when) while a jump waits out JUMP_HOLD
         self.reseated = False
+        self.vouched = False  # its jump counts whatever the other eye's (see teach)
 
     def glint(self, g, t):
         """The latest glint slip estimate (or None), at time t (s)."""
@@ -278,7 +284,7 @@ class Shift:
         if size > JUMP_MAX:
             return
         if size <= SHIFT_JUMP:
-            self.jump, self.held = np.zeros(2), None
+            self.jump, self.held, self.vouched = np.zeros(2), None, False
             return
         if self.held is None or np.hypot(*(d - self.held[0])) > SHIFT_JUMP:
             self.held = (d, t)
@@ -297,24 +303,21 @@ class Shift:
             self.reseated = False
         self.meas = (self.meas + [np.asarray(d, float)])[-SHIFT_KEEP:]
         self.base = np.median(self.meas, axis=0)
-        self.jump, self.held = np.zeros(2), None
+        self.jump, self.held, self.vouched = np.zeros(2), None, False
         if g is not None:
             self.ref = np.asarray(g, float)
 
     def in_force(self, other=None, rule="each"):
         """Whether this eye's glint jump counts now: it has one and, with rule "both", so does
-        `other` (the other eye's Shift), unless there's no other (that eye isn't mapped)."""
+        `other` (the other eye's Shift), unless there's no other (that eye isn't mapped) or a
+        click vouched for it."""
         if not np.any(self.jump):
             return False
-        return rule != "both" or other is None or bool(np.any(other.jump))
+        return rule != "both" or other is None or self.vouched or bool(np.any(other.jump))
 
     def current(self, other=None, rule="each"):
         """The shift to use: the clicks' base, plus the jump while it counts (in_force)."""
         return self.base + self.jump if self.in_force(other, rule) else self.base
-
-    @property
-    def value(self):
-        return self.base + self.jump
 
     def to_json(self):
         return {"base": self.base.tolist(), "ref": None if self.ref is None else self.ref.tolist(),
@@ -325,6 +328,21 @@ class Shift:
         s = cls(d.get("base", (0, 0)), d.get("ref"))
         s.meas = [np.asarray(m, float) for m in d.get("meas", [])]
         return s
+
+
+def teach(shifts, lessons, rule, mapped):
+    """One click's lessons for the eyes: `shifts` {eye: Shift}, `lessons` {eye: (measured shift,
+    glint estimate or None)} for the eyes it teaches (seen, and within their dots), `mapped` the
+    eyes the calibration maps. Whether each eye's jump was in force is read before any lesson,
+    since a lesson clears that eye's jump, which the other's rule asks about. An eye whose jump
+    was in force but which the click didn't teach keeps it (vouched) until its own lesson."""
+    partner = {e: shifts[1 - e] if (1 - e) in mapped and (1 - e) in shifts else None for e in shifts}
+    jumped = {e: sh.in_force(partner[e], rule) for e, sh in shifts.items()}
+    for e, (d, g) in lessons.items():
+        shifts[e].click(d, g, jumped[e])
+    for e, sh in shifts.items():
+        if jumped[e] and e not in lessons:
+            sh.vouched = True
 
 
 class SlipTracker:

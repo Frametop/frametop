@@ -556,8 +556,8 @@ class Tracker:
                 return "fail not calibrated"
             t, yaw, pitch = map(float, w[1:])
             out, rec = [], {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": {}}
-            # Before any eye takes the click: taking it clears that eye's jump, which the other's rule asks about.
-            jumped = {e.eye: e.jump_on() for e in self.eyes}
+            before = {e.eye: e.shift_now().tolist() for e in self.eyes}   # before either eye's lesson
+            lessons = {}
             for e in self.eyes:
                 g = e.window(t - CLICK_BEFORE, t)
                 if g is None or g["n"] < 5 or not e.cal:
@@ -568,11 +568,13 @@ class Tracker:
                     rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "skipped": "outside its calibration dots"}
                     continue
                 d = self.cal.click_shift(e.eye, g["pupil"], (yaw, pitch))
-                before = e.shift_now().tolist()
-                e.shift.click(d, e.slip.value if e.slip else None, jumped[e.eye])
-                rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "measured": d.tolist(), "before": before,
-                                      "after": e.shift_now().tolist()}
+                lessons[e.eye] = (d, e.slip.value if e.slip else None)
+                rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "measured": d.tolist(), "before": before[e.eye]}
                 out += [f"{d[0]:.2f}", f"{d[1]:.2f}"]
+            eyes_model.teach({e.eye: e.shift for e in self.eyes}, lessons, JUMP,
+                             [e.eye for e in self.eyes if e.cal])
+            for e in lessons:
+                rec["eyes"][e]["after"] = self.eyes[e].shift_now().tolist()
             self.save_state()
             with open(CLICKS, "a") as f:
                 f.write(json.dumps(rec) + "\n")

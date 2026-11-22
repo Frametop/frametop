@@ -93,7 +93,20 @@ check("both: in force once the other sees one too", (a.in_force(b, "both"), a.cu
       (True, [4.0, 0.0]))
 check("both, no other eye mapped: its own jump counts", a.in_force(None, "both"), True)
 check("no jump: never in force", em.Shift().in_force(a, "each"), False)
-check("value is still base + jump", a.value.tolist(), [4.0, 0.0])
+
+# --- teach: whether jumps were in force is read before any lesson; an eye left untaught keeps its jump ---
+a, b = em.Shift(), em.Shift()
+for sh in (a, b):
+    sh.meas, sh.jump = [np.zeros(2)] * 3, np.array([6.0, 0.0])
+em.teach({0: a, 1: b}, {0: (np.array([6.0, 0.0]), None)}, "both", [0, 1])
+check("teach: the taught eye's older clicks dropped, its jump cleared", (len(a.meas), a.in_force(b, "both")), (1, False))
+check("...the untaught eye keeps its jump in force (vouched)", (b.vouched, b.in_force(a, "both"), b.current(a, "both").tolist()),
+      (True, True, [6.0, 0.0]))
+em.teach({0: a, 1: b}, {1: (np.array([6.0, 0.0]), None)}, "both", [0, 1])
+check("...its own lesson later drops its older clicks and ends the vouch", (len(b.meas), b.vouched), (1, False))
+b.jump, b.vouched = np.array([6.0, 0.0]), True
+b.glint(np.zeros(2), 0.0)   # ref is None: this glint estimate becomes it, then reads no jump
+check("...a glint estimate back where it was ends it too", (b.vouched, bool(np.any(b.jump))), (False, False))
 
 # --- Calibration.inside ---
 cal = em.Calibration(box={0: [-30.0, 30.0, -18.0, 18.0]})
@@ -144,6 +157,28 @@ check("...no eye taught", [len(e.shift.meas) for e in tracker.eyes], before)
 rec = json.loads(fe.CLICKS.read_text().splitlines()[-1])
 check("...the clicks log says why", {k: v.get("skipped") for k, v in rec["eyes"].items()},
       {"0": "outside its calibration dots", "1": "outside its calibration dots"})
+
+# --- a click past one eye's dots only: the other is taught, and the first keeps the jump both had ---
+def outward_lost(yaw):   # the right eye lost looking 20+ right (yaw -), the left 20+ left
+    return tuple(e for e in (0, 1) if not (e == 0 and yaw <= -20 or e == 1 and yaw >= 20))
+
+
+tracker = calibrate(outward_lost)
+right, left = tracker.eyes
+check("each eye's dots stop where it was lost", (tracker.cal.box[0][0] > -20, tracker.cal.box[1][1] < 20), (True, True))
+for e in tracker.eyes:
+    e.shift.meas, e.shift.jump = [np.zeros(2)] * 3, np.array([5.0, 0.0])
+t0, t1 = hold(tracker, 25.0, 0.0)
+r = tracker.command(f"click {t1:.6f} 25.0 0.0")
+check("click at 25 left, past the left eye's dots: only the right taught", r.split()[3:], ["nan", "nan"])
+check("...the right's older clicks dropped", len(right.shift.meas), 1)
+check("...the left keeps its jump in force", (left.jump_on(), left.shift_now().tolist()),
+      (True, (left.shift.base + left.shift.jump).tolist()))
+rec = json.loads(fe.CLICKS.read_text().splitlines()[-1])
+check("...the log's before is the shift in force", rec["eyes"]["0"]["before"], [5.0, 0.0])
+t0, t1 = hold(tracker, 0.0, 0.0)
+tracker.command(f"click {t1:.6f} 0.0 0.0")
+check("the next click in the middle: the left's older clicks dropped too", len(left.shift.meas), 1)
 
 # --- one eye mapped: its own jump counts, since the other can't vouch ---
 tracker = calibrate(lambda yaw: (1,))

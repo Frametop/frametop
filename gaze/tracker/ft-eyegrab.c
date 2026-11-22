@@ -464,7 +464,7 @@ static int rec(double seconds, const char *dir, int pid) {
 // --- --late: how torn a frame would be if passed on sooner ---
 #define LATE_STEPS 3
 static const double LATE_AFTER[LATE_STEPS] = {0.0, 0.003, 0.006};  // s after the next frame starts
-#define LATE_MAX 100000                                            // frames kept per copy (18 min)
+#define LATE_MAX 100000                                            // frames kept per copy (both cameras: 9 min)
 
 static struct {
     int b;

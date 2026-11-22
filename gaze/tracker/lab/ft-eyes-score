@@ -208,7 +208,8 @@ def score(train, test, track, same):
                 te = k["t"] - back
                 g = mdl.cal.slip(c, tr[(tr[:, 0] < te) & (tr[:, 0] > te - eyes_model.JUMP_WINDOW)]) if len(tr) else None
                 shifts[c].glint(g, te)
-            out[c] = mdl.cal.gaze(c, *e["pupil"], slip=shifts[c].value)
+            # each eye's own jump, as ft-eyes before EYES_JUMP (eyes_model.JUMP_RULES)
+            out[c] = mdl.cal.gaze(c, *e["pupil"], slip=shifts[c].current(None, "each"))
             shifts[c].click(mdl.cal.click_shift(c, e["pupil"], k["truth"]), g)
         errs["clicks"].append(float(np.hypot(*(mdl.cal.combine(out) - k["truth"]))) if out else None)
     return errs

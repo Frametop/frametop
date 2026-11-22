@@ -317,7 +317,9 @@ class Replay:
             sh = eyes_model.Shift.from_json(shifts[e]) if e in shifts else eyes_model.Shift()
             st = ((status or {}).get("eyes") or {}).get(("right", "left")[e]) or {}
             sh.reseated = bool(st.get("reseat", e not in shifts))
-            if st.get("jump") and jump is not None:
+            if jump is not None and "jump_held_px" in st:   # ft-eyes since EYES_JUMP: held, in force or not
+                sh.jump = np.asarray(st["jump_held_px"], float)
+            elif jump is not None and st.get("jump"):
                 sh.jump = np.asarray(st.get("jump_px", (0, 0)), float)
             self.shift[e] = sh
         self.slip = {e: eyes_model.SlipTracker(cal, e, window=eyes_model.JUMP_WINDOW) for e in (0, 1)}
@@ -328,25 +330,22 @@ class Replay:
         self.taught = self.skipped = 0
         self.out_e = []   # with each output: the eyes' gazes in it, (left, right)
 
-    def partner(self, e):
-        """The other eye's shift, as ft-eyes' Eye.partner: None when the calibration doesn't map it."""
-        return self.shift[1 - e] if self.cal.has("pupil", 1 - e) else None
-
-    def jump_on(self, e):
-        return self.shift[e].in_force(self.partner(e), self.jump or "each")
-
     def value(self, e):
-        return self.shift[e].current(self.partner(e), self.jump or "each")
+        """The eye's shift now, as ft-eyes' Eye.shift_now (the other eye's counts while it's mapped)."""
+        other = self.shift[1 - e] if self.cal.has("pupil", 1 - e) else None
+        return self.shift[e].current(other, self.jump or "each")
 
     def click(self, t, truth):
-        per_eye = self.guard and bool(self.cal.box)   # ft-eyes: each eye by its own dots
+        # guard "eye": each eye by its own dots, as ft-eyes (no dots known: every click teaches).
+        # guard True: the same where the calibration keeps its dots' extents, else the click by
+        # the run's whole dots' box (calibrations before them).
+        per_eye = self.guard == "eye" or (self.guard and bool(self.cal.box))
         if self.guard and not per_eye and self.box and not (
                 self.box[0] - EDGE_MARGIN <= truth[0] <= self.box[1] + EDGE_MARGIN
                 and self.box[2] - EDGE_MARGIN <= truth[1] <= self.box[3] + EDGE_MARGIN):
             self.skipped += 1
             return
-        jumped = {e: self.jump_on(e) for e in (0, 1)}   # before either eye's lesson clears its jump
-        taught = outside = False
+        lessons, outside = {}, False
         for e in (0, 1):
             rows = [h for h in self.history[e] if t - CLICK_BEFORE <= h[0] <= t]
             if len(rows) < CLICK_MIN or not self.cal.has("where", e):
@@ -354,19 +353,10 @@ class Replay:
             if per_eye and not self.cal.inside(e, truth, EDGE_MARGIN):
                 outside = True
                 continue
-            taught = True
             pupil = np.median(np.array([h[1:3] for h in rows]), axis=0)
-            d = self.cal.click_shift(e, pupil, truth)
-            sh = self.shift[e]
-            # A jump in force (both-jump: in both eyes) means the headset moved: the older clicks are stale
-            if jumped[e] or sh.reseated:
-                sh.meas, sh.reseated = [], False
-            sh.meas = (sh.meas + [np.asarray(d, float)])[-SHIFT_KEEP:]
-            sh.base = np.median(sh.meas, axis=0)
-            sh.jump, sh.held = np.zeros(2), None
-            if self.slip[e].value is not None:
-                sh.ref = np.asarray(self.slip[e].value, float)
-        if outside and not taught:
+            lessons[e] = (self.cal.click_shift(e, pupil, truth), self.slip[e].value)
+        eyes_model.teach(self.shift, lessons, self.jump or "each", self.cal.eyes())
+        if outside and not lessons:
             self.skipped += 1
         else:
             self.taught += 1
@@ -424,6 +414,17 @@ def calibration_box(run, cal):
     return (min(p[0] for p in pts), max(p[0] for p in pts), min(p[1] for p in pts), max(p[1] for p in pts))
 
 
+def live_options(opt, status):
+    """A REPLAYS entry with "live" put as the run's ft-eyes had it (its start status): the jump
+    rule it names (each before EYES_JUMP), and the per-eye edge guard if it had one."""
+    opt = dict(opt)
+    if opt.get("jump") == "live":
+        opt["jump"] = status.get("jump_rule", "each")
+    if opt.get("guard") == "live":
+        opt["guard"] = "eye" if "edge_margin" in status else False
+    return opt
+
+
 def replays(run, truths, only):
     """{name: function(t0, t1) -> (yaw, pitch) or None} for the replays, or {} with a note."""
     want = [n for n in REPLAYS if not only or n in only]
@@ -460,11 +461,7 @@ def replays(run, truths, only):
     box = calibration_box(run, cal)
     out = {}
     for name in want:
-        opt = dict(REPLAYS[name])
-        if opt.get("jump") == "live":
-            opt["jump"] = status.get("jump_rule", "each")
-        if opt.get("guard") == "live":
-            opt["guard"] = "edge_margin" in status
+        opt = live_options(REPLAYS[name], status)
         teach = every if opt.pop("teach", None) == "every" else nudges
         size = opt.pop("size", None)
         if size not in frames:

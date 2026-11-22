@@ -96,5 +96,18 @@ int main() {
     std::string w;
     twohand::Words(Move{}, w);
     assert(w == " 1.00000 0.00000 0.00000 0.00000 0.00000 1.00000 0.00000 0.00000 0.00000 0.00000 1.00000 0.00000");
+    // A session: "begin" on its first hands frame, "move" on each new one, "end" only after a begin.
+    {
+        twohand::Session session;
+        assert(!session.On() && session.End().empty());
+        session.Begin(1, true);
+        assert(session.On() && session.Side() == 1 && session.Keyboard());
+        assert(session.End().empty() && !session.On());   // a tap: no begin went
+        session.Begin(0, false);
+        assert(session.Step(5, l, r, 1.0, {0, 1.6, 0}) == "begin");
+        assert(session.Step(5, l, r, 1.0, {0, 1.6, 0}).empty());   // the same frame again
+        assert(session.Step(6, l, r, 1.0, {0, 1.6, 0}).rfind("move ", 0) == 0);
+        assert(session.End() == "end" && !session.On() && session.Step(7, l, r, 1.0, {0, 1.6, 0}).empty());
+    }
     std::puts("twohand-test: ok");
 }

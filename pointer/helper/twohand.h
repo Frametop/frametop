@@ -18,6 +18,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
+#include <string>
 
 #include "../common/vec3.h"
 
@@ -87,10 +89,11 @@ private:
     double gain_ = 1;
 };
 
-// The lever: the panel's distance from the eye over the hands' midpoint's, within [1, kMaxGain].
+// The lever: the panel's distance from `from` (the carrying ray's origin) over the hands' midpoint's,
+// within [1, kMaxGain].
 constexpr double kMaxGain = 6;
-inline double Gain(double panelDistance, Vec3 eye, const Hand &a, const Hand &b) {
-    const double hands = md::Length((a.at + b.at) * 0.5 - eye);
+inline double Gain(double panelDistance, Vec3 from, const Hand &a, const Hand &b) {
+    const double hands = md::Length((a.at + b.at) * 0.5 - from);
     return hands > 0.05 ? std::fmin(std::fmax(panelDistance / hands, 1.0), kMaxGain) : 1.0;
 }
 
@@ -104,5 +107,44 @@ inline void Words(const Move &mv, Out &out) {
             out += b;
         }
 }
+
+// One two-hand turn, from the other hand's pinch to either's end: which hand turns, whether it's
+// Full Keyboard's (kbhost hears it, not ft-screens), and the lines to send its owner ("begin",
+// "move" and twelve numbers, "end").
+class Session {
+public:
+    bool On() const { return side_ >= 0; }
+    int Side() const { return side_; }
+    bool Keyboard() const { return keyboard_; }
+    void Begin(int side, bool keyboard) { side_ = side, keyboard_ = keyboard, begun_ = false, seen_ = 0; }
+    // Over: "end" to send if a "begin" went, else "".
+    std::string End() {
+        const bool begun = On() && begun_;
+        side_ = -1, begun_ = false;
+        return begun ? "end" : "";
+    }
+    // A hands frame (its capture time) with the carrying hand and the turning one: "begin" on the first
+    // (the lever from the panel's distance from the ray's origin, Gain), then "move ..."; "" for a frame
+    // already used or hands too close together to tell.
+    std::string Step(uint64_t frame, const Hand &carry, const Hand &turner, double panelDistance, Vec3 from) {
+        if (!On() || frame == seen_) return "";
+        seen_ = frame;
+        if (!begun_) {
+            turn_.Begin(carry, turner, Gain(panelDistance, from, carry, turner)), begun_ = true;
+            return "begin";
+        }
+        Move mv;
+        if (!turn_.Now(carry, turner, &mv)) return "";
+        std::string w = "move";
+        Words(mv, w);
+        return w;
+    }
+
+private:
+    Turn turn_;
+    int side_ = -1;
+    bool begun_ = false, keyboard_ = false;
+    uint64_t seen_ = 0;
+};
 
 }  // namespace twohand

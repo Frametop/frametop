@@ -1,11 +1,12 @@
 """A PC's monitors following its display panels (docs/remote-displays.md, "A PC's monitors").
 
-With a host's "monitors" switch on (ft-layout remote host NAME monitors=on, Frametop Settings),
-Frametop's build of Vibepollo on that PC gets a plan made from the host's display panels: each
-monitor with a connected panel stays on, in the mode and scale picked for its panel (`mode`,
-`scale`, else its own), and every other monitor (no panel here, or its panel disconnected) goes off. The PC
-applies it only while one of those panels streams, and puts every monitor back two minutes
-after the last one ends (/api/frametop/monitors).
+With a host's "monitors" switch on ("Let Frametop control NAME's displays" in Frametop
+Settings; ft-layout remote host NAME monitors=on), Frametop's build of Vibepollo on that PC gets
+a plan made from the host's display panels: each monitor with a connected panel stays on at
+its panel's stream size (the PC picks a mode of that size, or makes one on Hyprland) and the
+scale picked for it (`scale`, else its own), and every other monitor (no panel here, or its
+panel disconnected) goes off. The PC applies it only while one of those panels streams, and
+puts every monitor back two minutes after the last one ends (/api/frametop/monitors).
 
 ft_layout sends the plan whenever the panels change (connect, disconnect, set, remove, and
 before it starts their streams). Nothing here stops a stream: a PC that doesn't answer, or
@@ -29,7 +30,8 @@ def monitor_of(d):
 
 
 def mode_of(d):
-    """The mode picked for a display panel, {width, height, refresh_mhz}, or None (its own)."""
+    """The mode picked for a display panel with ft-layout's mode= (it pins a refresh rate),
+    {width, height, refresh_mhz}, or None: its stream size is its monitor's (size_of)."""
     mode = d.get("mode")
     if not isinstance(mode, dict):
         return None
@@ -38,6 +40,16 @@ def mode_of(d):
     except (KeyError, TypeError, ValueError):
         return None
     return {"width": w, "height": h, "refresh_mhz": r} if w > 0 and h > 0 and r > 0 else None
+
+
+def size_of(d):
+    """A display panel's stream size as the size its monitor is asked to be: a mode with refresh
+    0, which the PC makes a mode (its own one when that's its own size)."""
+    try:
+        w, h = (int(v) for v in d.get("size", []))
+    except (TypeError, ValueError):
+        return None
+    return {"width": w, "height": h, "refresh_mhz": 0} if w > 0 and h > 0 else None
 
 
 SCALES = (0.5, 4.0)  # the scales the PC takes in a plan
@@ -63,8 +75,8 @@ def wishes(host):
         if out.get(monitor, {}).get("on") and not on:
             continue
         wish = {"on": on}
-        if on and mode_of(d):
-            wish["mode"] = mode_of(d)
+        if on and (mode_of(d) or size_of(d)):
+            wish["mode"] = mode_of(d) or size_of(d)
         if on and scale_of(d):
             wish["scale"] = scale_of(d)
         out[monitor] = wish
@@ -74,9 +86,9 @@ def wishes(host):
 def plan_body(host, listed):
     """The POST body for the host, or None when there is nothing to send: no display panel is
     connected (the PC's grace then runs as it would). listed: the PC's monitors as it answered
-    ({id: monitor}); a panel of a monitor it doesn't have (unplugged), a mode it doesn't list or
-    a scale it can't set (Windows, an older build) is left out, so the rest of the plan still
-    takes."""
+    ({id: monitor}); a panel of a monitor it doesn't have (unplugged), a mode or size it can't
+    take, or a scale it can't set (Windows, an older build) is left out, so the rest of the plan
+    still takes: the stream then crops or fits the monitor as it is."""
     want = wishes(host)
     if not any(w["on"] for w in want.values()):
         return None
@@ -86,8 +98,9 @@ def plan_body(host, listed):
         if m is None:
             continue
         mode = wish.get("mode")
-        modes = m.get("modes") or []
-        if mode and modes and not any(_same_mode(mode, x) for x in modes):
+        if mode and not mode["refresh_mhz"] and m.get("sideways"):
+            mode = wish["mode"] = dict(mode, width=mode["height"], height=mode["width"])  # modes list unrotated
+        if mode and not _takes(m, mode):
             wish = {k: v for k, v in wish.items() if k != "mode"}
         if "scale" in wish and m.get("on") and not m.get("scales"):
             wish = {k: v for k, v in wish.items() if k != "scale"}
@@ -95,6 +108,16 @@ def plan_body(host, listed):
     if not any(w["on"] for w in monitors.values()):
         return None  # only unplugged monitors have connected panels: leave the PC as it is
     return {"monitors": monitors, "others_off": True}
+
+
+def _takes(m, mode):
+    """Whether the PC's monitor takes the mode, or (refresh 0) a mode of that size: one it
+    lists, or any on a PC that makes them (Hyprland). An older build takes no size."""
+    modes = m.get("modes") or []
+    if not mode["refresh_mhz"]:
+        return "any_mode" in m and (m["any_mode"] or any(
+            (x.get("width"), x.get("height")) == (mode["width"], mode["height"]) for x in modes))
+    return m.get("any_mode") or not modes or any(_same_mode(mode, x) for x in modes)
 
 
 def _same_mode(a, b):

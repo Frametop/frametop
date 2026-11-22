@@ -1,7 +1,6 @@
 """A host's monitors following its display panels (ft_hostmonitors, and ft-layout's hooks): the
-plan made from the panels, what is sent when, and remote host monitors= / remote set mode= and
-scale=. The
-PC is a stand-in for ft_hostapi.request; no headset, no ft-screens.
+plan made from the panels (their stream sizes and scales), what is sent when, and remote host
+monitors= / remote set size=, mode= and scale=. The PC is a stand-in for ft_hostapi.request; no headset, no ft-screens.
 
   python3 layout/tests/test_host_monitors.py
 """
@@ -22,6 +21,10 @@ HZ60 = {"width": 2560, "height": 1600, "refresh_mhz": 60000}
 UHD = {"width": 3840, "height": 2160, "refresh_mhz": 60000}
 
 
+def size(w, h):
+    return {"width": w, "height": h, "refresh_mhz": 0}
+
+
 def pc(**over):
     host = {"name": "PC", "address": "192.0.2.7", "monitors": True, "displays": [
         {"id": "pc-edp", "client": "c1", "app": "display:eDP-2", "size": [2560, 1600], "mode": HZ60},
@@ -33,16 +36,20 @@ def pc(**over):
 
 
 def listed(*ids):
-    known = {"eDP-2": {"id": "eDP-2", "on": True, "mode": HZ240, "modes": [HZ240, HZ60], "scales": [1, 1.25, 2]},
-             "DP-1": {"id": "DP-1", "on": True, "mode": UHD, "modes": [UHD]},
+    # eDP-2 on Hyprland (any mode), DP-1 on Windows (only its own), HDMI-A-1 an older build (no sizes)
+    known = {"eDP-2": {"id": "eDP-2", "on": True, "mode": HZ240, "modes": [HZ240, HZ60], "scales": [1, 1.25, 2],
+                       "any_mode": True},
+             "DP-1": {"id": "DP-1", "on": True, "mode": UHD, "modes": [UHD], "any_mode": False},
              "HDMI-A-1": {"id": "HDMI-A-1", "on": True, "mode": UHD, "modes": [UHD]}}
     return {i: known[i] for i in ids or known}
 
 
 class Plan(unittest.TestCase):
     def test_each_display_panel_names_its_monitor(self):
-        self.assertEqual(hm.wishes(pc()), {"eDP-2": {"on": True, "mode": HZ60}, "DP-1": {"on": True}},
-                         "the virtual display and the window panel aren't monitors")
+        self.assertEqual(hm.wishes(pc()), {"eDP-2": {"on": True, "mode": HZ60},
+                                           "DP-1": {"on": True, "mode": size(3840, 2160)}},
+                         "the virtual display and the window panel aren't monitors; a panel without a "
+                         "picked mode asks for its stream size")
 
     def test_a_disconnected_panel_turns_its_monitor_off(self):
         host = pc()
@@ -58,14 +65,34 @@ class Plan(unittest.TestCase):
 
     def test_the_body_turns_off_the_others(self):
         self.assertEqual(hm.plan_body(pc(), listed()),
-                         {"monitors": {"eDP-2": {"on": True, "mode": HZ60}, "DP-1": {"on": True}}, "others_off": True},
+                         {"monitors": {"eDP-2": {"on": True, "mode": HZ60}, "DP-1": {"on": True, "mode": size(3840, 2160)}},
+                          "others_off": True},
                          "HDMI-A-1 has no display panel here: others_off turns it off")
 
     def test_an_unplugged_monitor_or_an_unlisted_mode_leaves_the_rest(self):
         host = pc()
-        host["displays"][0]["mode"] = {"width": 1, "height": 1, "refresh_mhz": 1}
-        self.assertEqual(hm.plan_body(host, listed("eDP-2")),
-                         {"monitors": {"eDP-2": {"on": True}}, "others_off": True})
+        host["displays"][1]["mode"] = {"width": 1, "height": 1, "refresh_mhz": 1}
+        self.assertEqual(hm.plan_body(host, listed("DP-1")),
+                         {"monitors": {"DP-1": {"on": True}}, "others_off": True})
+
+    def test_a_stream_size_goes_where_the_pc_takes_it(self):
+        host = pc()
+        del host["displays"][0]["mode"]
+        host["displays"][0]["size"] = [2560, 1200]
+        host["displays"][1]["size"] = [1920, 1080]
+        body = hm.plan_body(host, listed())["monitors"]
+        self.assertEqual(body["eDP-2"]["mode"], size(2560, 1200), "Hyprland makes a mode of any size")
+        self.assertNotIn("mode", body["DP-1"], "a size Windows doesn't list: the stream fits it as it is")
+        host["displays"][1]["app"] = "display:HDMI-A-1"
+        host["displays"][1]["size"] = [3840, 2160]
+        self.assertNotIn("mode", hm.plan_body(host, listed())["monitors"]["HDMI-A-1"], "an older build takes no size")
+
+    def test_a_sideways_monitor_is_asked_for_its_size_unrotated(self):
+        host = pc()
+        host["displays"][1]["size"] = [2160, 3840]
+        known = listed()
+        known["DP-1"]["sideways"] = True
+        self.assertEqual(hm.plan_body(host, known)["monitors"]["DP-1"]["mode"], size(3840, 2160))
 
     def test_a_mode_the_pc_lists_within_ten_millihertz_is_kept(self):
         host = pc()
@@ -88,7 +115,7 @@ class Plan(unittest.TestCase):
         self.assertEqual(hm.wishes(host)["eDP-2"], {"on": True, "mode": HZ60, "scale": 1.25})
         body = hm.plan_body(host, listed())
         self.assertEqual(body["monitors"]["eDP-2"], {"on": True, "mode": HZ60, "scale": 1.25})
-        self.assertEqual(body["monitors"]["DP-1"], {"on": True},
+        self.assertEqual(body["monitors"]["DP-1"], {"on": True, "mode": size(3840, 2160)},
                          "DP-1 lists no scales (Windows, an older build): the rest still takes")
         host["displays"][0]["off"] = True
         self.assertEqual(hm.wishes(host)["eDP-2"], {"on": False}, "off: no scale")
@@ -289,6 +316,8 @@ class Layout(unittest.TestCase):
         self.assertEqual(self.synced, ["PC"] * 4, "each change sends the plan")
         self.m.remote_command(["set", "pc-dp", "fps=30"])
         self.assertEqual(len(self.synced), 4, "the plan doesn't change with the frame rate")
+        self.m.remote_command(["set", "pc-dp", "size=2560x1200"])
+        self.assertEqual(len(self.synced), 5, "a stream size is its monitor's: the plan is sent")
         with self.assertRaises(RuntimeError):
             self.m.remote_command(["set", "pc-dp", "mode=1920x1080"])
 

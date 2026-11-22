@@ -1,12 +1,12 @@
-"""Remote Displays' "Turn off and set its monitors" switch, per Vibepollo host, and the mode
-picker of its display panels (docs/remote-displays.md, "A PC's monitors").
+"""Remote Displays' "Let Frametop control NAME's displays" switch, per Vibepollo host, and the
+scale picker of its display panels (docs/remote-displays.md, "A PC's monitors").
 
 With the switch on, the host's monitors follow its display panels (layout/ft_hostmonitors.py,
 which ft-layout runs whenever the panels change): while one of them streams, the PC turns off
-each monitor that has no connected panel here, and puts the others in the mode picked for
-their panel. Here the PC is asked which monitors it has and their modes (for the pickers), the
-switch and the picks are saved through ft-layout, and the panels of a controlled host stream at
-their monitor's mode, pixel for pixel (ft-layout remote set ... size=).
+each monitor that has no connected panel here, and puts the others at their panel's stream
+size and the scale picked for it. Here the PC is asked which monitors it has (for the page:
+their scales, and whether it answers at all), and the switch and the picks are saved through
+ft-layout.
 
 The backend (ft_remote_displays.py) makes one and shows it to the page as hostMonitors.
 Questions to the PC run on a thread; changes go in the backend's queue of ft-layout runs.
@@ -37,42 +37,10 @@ def why(name, status, answer):
     return error if isinstance(error, str) and error else f"{name} answered {status}"
 
 
-def stream_size(monitor, mode):
-    """[width, height] a stream of the monitor in `mode` has: a monitor turned a quarter lists
-    its modes unrotated (Hyprland, KDE)."""
-    size = [int(mode["width"]), int(mode["height"])]
-    return size[::-1] if monitor.get("sideways") else size
-
-
-def mode_arg(mode):
-    """ft-layout remote set's mode= value."""
-    return "own" if not mode else f"{int(mode['width'])}x{int(mode['height'])}@{int(mode['refresh_mhz'])}"
-
-
 def scale_arg(scale):
     """ft-layout remote set's scale= value."""
     return "own" if not scale else f"{float(scale):g}"
 
-
-def size_changes(host, monitors):
-    """ft-layout runs that make a controlled host's display panels stream at their monitor's
-    mode: the one picked for the panel, else the one the monitor has now. [(label, args)]"""
-    if not ft_hostmonitors.controls(host):
-        return []
-    by_id = {m.get("id"): m for m in monitors if isinstance(m, dict)}
-    runs = []
-    for d in host.get("displays", []):
-        monitor = by_id.get(ft_hostmonitors.monitor_of(d))
-        if monitor is None:
-            continue
-        mode = ft_hostmonitors.mode_of(d) or (monitor.get("mode") if monitor.get("on") else None)
-        if not isinstance(mode, dict) or not mode.get("width") or not mode.get("height"):
-            continue
-        size = list(ft_layout.stream_size(*stream_size(monitor, mode)))  # as ft-layout keeps it
-        if list(d.get("size", [])) != size:
-            runs.append((f"Streaming {d.get('label') or d['id']} at its monitor's mode",
-                         ("remote", "set", d["id"], f"size={size[0]}x{size[1]}")))
-    return runs
 
 
 class HostMonitors(QObject):
@@ -87,7 +55,6 @@ class HostMonitors(QObject):
         self._run = run
         self._supported = {}  # host name -> whether its Vibepollo turns off and sets its monitors
         self._listed = {}     # host name -> {"monitors": [...], "note": str}
-        self._sizing = set()  # ft-layout size runs queued and not run yet: each answer asks for them
         self._answered.connect(self._done, Qt.QueuedConnection)
 
     @Property("QVariantMap", notify=supportedChanged)
@@ -99,7 +66,7 @@ class HostMonitors(QObject):
     @Property("QVariantMap", notify=listedChanged)
     def listed(self):
         """Host name -> {monitors: the PC's monitors as it answered (id, name, on, mode, modes,
-        scale, scales, sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
+        any_mode, scale, scales, sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
         reach them (401, 403)}."""
         return dict(self._listed)
 
@@ -122,13 +89,6 @@ class HostMonitors(QObject):
         # switch off, or nothing would show that the switch is there.
         self._listed[name] = {"monitors": monitors, "note": note, "stale": status in (401, 403)}
         self.listedChanged.emit()
-        if not error:
-            # Answers that come before the first run read the same old sizes: one run each (a
-            # second would restart the stream again).
-            for label, args in size_changes(self._host(name) or {}, monitors):
-                if args not in self._sizing:
-                    self._sizing.add(args)
-                    self._run(label, *args, then=lambda args=args: self._sizing.discard(args))
 
     @Slot(str)
     def refresh(self, name):
@@ -144,22 +104,8 @@ class HostMonitors(QObject):
     @Slot(str, bool)
     def setControl(self, name, on):
         """The host's switch: its monitors follow its display panels, or go back as they were."""
-        self._run(f"{'Turning off and setting' if on else 'Leaving'} {name}'s monitors",
+        self._run(f"{'Letting Frametop control' if on else 'Giving back'} {name}'s displays",
                   "remote", "host", name, f"monitors={'on' if on else 'off'}", then=lambda: self.refresh(name))
-
-    @Slot(str, str, "QVariant")
-    def pickMode(self, name, display_id, mode):
-        """The mode a display panel's monitor is put in ({width, height, refresh_mhz}; null: its
-        own), and the panel's stream size with it."""
-        args = ["remote", "set", display_id, f"mode={mode_arg(mode)}"]
-        monitors = self._listed.get(name, {}).get("monitors", [])
-        host = self._host(name) or {}
-        d = next((d for d in host.get("displays", []) if d.get("id") == display_id), {})
-        monitor = next((m for m in monitors if m.get("id") == ft_hostmonitors.monitor_of(d)), None)
-        if mode and monitor:
-            w, h = stream_size(monitor, mode)
-            args.append(f"size={w}x{h}")
-        self._run("Setting the monitor's mode", *args, then=lambda: self.refresh(name))
 
     @Slot(str, str, "QVariant")
     def pickScale(self, name, display_id, scale):

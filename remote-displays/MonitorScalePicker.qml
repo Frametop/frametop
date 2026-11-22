@@ -1,7 +1,7 @@
 // A display panel's monitor scale, on a host whose monitors follow its panels: its own scale,
 // or one the PC says the monitor takes in its mode now (Hyprland lists the ones that give a
 // whole-pixel desktop; Windows lists none, so this isn't shown there). RemoteDisplayPages.qml
-// puts one under each such display's mode picker; the pick goes to host_monitors.py (pickScale).
+// puts one in each such display's settings; the pick goes to host_monitors.py (pickScale).
 // The stream keeps its size: the scale changes the PC's desktop, not its pixels.
 import QtQuick
 import QtQuick.Controls as Controls

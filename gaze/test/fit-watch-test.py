@@ -67,16 +67,23 @@ def look(yaw, pitch):
 look(0.0, 0.0)
 with open(FAKE, "w") as f:
     f.write(f'''import json, os, select, sys, time
+eyes = False   # "sources" with left: each eye's reading too, the same as mmap1's
 while True:
     if select.select([sys.stdin], [], [], 1 / 90)[0]:
-        if not os.read(0, 4096):
+        got = os.read(0, 4096)
+        if not got:
             break
+        for line in got.decode().splitlines():
+            if line.startswith("sources "):
+                eyes = "left" in line or "all" in line
     try:
         hy, hp = json.load(open({LOOK!r}))
     except (OSError, ValueError):
         continue
-    print(json.dumps({{"t": time.monotonic(), "src": {{"mmap1": {{"hy": hy, "hp": hp, "unc": [0.001, 0.001],
-          "open": [0.8, 0.8]}}}}}}), flush=True)
+    src = {{"mmap1": {{"hy": hy, "hp": hp, "unc": [0.001, 0.001], "open": [0.8, 0.8]}}}}
+    if eyes:
+        src["left"] = src["right"] = {{"hy": hy, "hp": hp}}
+    print(json.dumps({{"t": time.monotonic(), "src": src}}), flush=True)
 ''')
 SLEEPER = [sys.executable, "-c", "import sys; sys.stdin.read()"]  # quits when its stdin closes
 started = {"eyes": 0}
@@ -343,9 +350,9 @@ check("  saying so", any("calibration's seating stays" in m for m in logs[mark:]
 # Against the seating: ft-eyes' pupils, read all the while.
 n = len(panel)
 asked = eyes_state["asked"]
-time.sleep(2)
+check("  read all the while", wait(lambda: eyes_state["asked"] > asked + 2, 4), True)
 check("sits as calibrated: no pill", "show pill" in since(n), False)
-check("  read all the while", eyes_state["asked"] > asked + 2, True)
+check("ft-gaze sends SteamVR's eyes for the looks", svc.proc_sources, "own,mmap1,left,right")
 eyes_state["offset"] = (0.0, -12.0)   # the pupils sit low: the headset rode up
 start = time.monotonic()
 check("off: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
@@ -375,25 +382,40 @@ check("gaze mode on again", wait(lambda: svc.checks.gaze_on is True, 4), True)
 n = len(panel)
 look(12.0, -6.0)
 eyes_state["offset"] = (12.0, -6.0)   # the pupils where the seating puts that look
+asked = eyes_state["asked"]
 time.sleep(fitpill.SHOW_HOLD + 2)
 check("looking aside, seated: no pill", "show pill" in since(n), False)
+check("  read all the while", eyes_state["asked"] > asked + 2, True)
 look(25.0, 0.0)
 eyes_state["offset"] = (25.0, -12.0)   # past PILL_CENTRE: not read, slipped or not
-time.sleep(fitpill.SHOW_HOLD + 2)
-check("looking far aside: not read, no pill", "show pill" in since(n), False)
+time.sleep(1.5)                        # (the window turns over to the new look)
+asked = eyes_state["asked"]
+time.sleep(fitpill.SHOW_HOLD + 1)
+check("looking far aside: not read", eyes_state["asked"], asked)
+check("  no pill", "show pill" in since(n), False)
 
 
 class Fusion:   # SteamVR's affine: raw, it reads looks out from the centre too far
+    def __init__(self, made):
+        self.info = {"how": "calibration", "made": made}
+
     def steam_gaze(self, left, right, clicks=True):
         return (left[0] * 0.6, left[1] * 0.6)
 
 
-svc.fusion = Fusion()
+made = fitcoach.load_baseline()["made"]
+svc.fusion = Fusion(made)
 look(20.0, 0.0)                       # raw past PILL_CENTRE; through the affine 12
 eyes_state["offset"] = (12.0, 0.0)
 svc.checks.pill_reading = None
 check("SteamVR's look goes through its affine, so the reading is the seating's",
       wait(lambda: svc.checks.pill_reading is not None and abs(svc.checks.pill_reading[1]["left"]) < 0.5, 4), True)
+svc.fusion = Fusion("2026-10-01 10:00:00")
+look(10.0, 0.0)                       # an older calibration's affine: raw, 10 off the 12 it reads
+time.sleep(1.5)
+svc.checks.pill_reading = None
+check("  not an older calibration's affine",
+      wait(lambda: svc.checks.pill_reading is not None and abs(svc.checks.pill_reading[1]["left"] - 2.0) < 0.5, 4), True)
 svc.fusion = None
 look(0.0, 0.0)
 eyes_state["offset"] = (0.0, 0.0)

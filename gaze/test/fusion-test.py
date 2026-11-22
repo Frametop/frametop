@@ -119,7 +119,7 @@ def service(fusion_on=True, one=None):
     svc.fusion_on = fusion_on
     svc.fusion = Fusion()
     svc.fusion.fit([(y, p + 1, y, p) for y in (-10, 0, 10) for p in (-10, 0, 10)])   # SteamVR 1 degree high
-    svc.checks = type("Checks", (), {"active": False, "pending": None})()
+    svc.checks = type("Checks", (), {"active": False, "pending": None, "pill_steam": False})()
     svc.sent = []
     svc.send = lambda t, hy, hp, rhy, rhp, eyes: svc.sent.append((round(hy, 3), round(hp, 3), eyes))
     return svc

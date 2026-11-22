@@ -193,6 +193,7 @@ PUTON_READ = 4.0       # seconds the put-on check holds the dot for a straight-a
 PUTON_TIMEOUT = 30.0   # seconds it says what to move before the dot is taken as it sits
 PUTON_GONE = 5.0       # seconds without eyes that close it meanwhile (adjusting loses them)
 PILL_EVERY = 0.4       # seconds between the fit pill's readings (ft-eyes "fit")
+SAME_CALIBRATION = 120.0  # seconds between fusion.json's made and the seating's: the same calibration
 PILL_CENTRE = 15.0     # degrees: the pill reads only while SteamVR's gaze stays this near straight ahead
 PILL_STEADY = 6.0      # and within this of its median over the window
 PILL_FRESH = 1.0       # seconds a reading counts for
@@ -361,7 +362,8 @@ class Checks:
         self.asking = None       # (socket, deadline, done): a command to ft-eyes waiting for its reply
         self.watch = (None, False)  # (frametop.conf's mtime, GAZE_FIT_WATCH on)
         self.pill = fitpill.Pill()
-        self.pill_looks = deque()    # (t, yaw, pitch): SteamVR's gaze while no check runs
+        self.pill_looks = deque()    # (t, yaw, pitch, per_eye): SteamVR's gaze while no check runs
+        self.pill_steam = False      # the pill reads a seating: ft-gazed asks for SteamVR's eyes too
         self.pill_reading = None     # (t, terms) from the last "fit" asked for it
         self.pill_at = 0.0           # last asked
         self.seating = (None, None, None)   # (fit-baseline.json's mtime, the baseline, its reference)
@@ -877,9 +879,11 @@ class Checks:
         if not on:
             self.pill_send(self.pill.close(now))
             self.pill_reading = None
+            self.pill_steam = False
             return
         baseline, ref = self.load_seating()
-        if baseline and own.get("feature", "pupil") == "pupil":
+        self.pill_steam = bool(baseline) and own.get("feature", "pupil") == "pupil"
+        if self.pill_steam:
             self.pill_ask(now, baseline, ref)
             r = self.pill_reading
             terms = r[1] if r and now - r[0] <= PILL_FRESH else None
@@ -913,6 +917,19 @@ class Checks:
             self.seating = (m, baseline if ref else None, ref)
         return self.seating[1], self.seating[2]
 
+    def same_calibration(self, fusion, baseline):
+        """fusion.json was fitted at the calibration the seating is from, both eyes seen: its
+        affine then fixes SteamVR's eyes as they read that day. An older one (a calibration
+        where SteamVR saw too few dots keeps it, a one-eye one fits none, the bench writes its
+        own) is for another day's readings: the look stays raw."""
+        if fusion is None or self.svc.one_eye is not None or fusion.info.get("how") != "calibration":
+            return False
+        try:
+            then = [time.mktime(time.strptime(m, "%Y-%m-%d %H:%M:%S")) for m in (fusion.info["made"], baseline["made"])]
+        except (KeyError, TypeError, ValueError):
+            return False
+        return abs(then[0] - then[1]) <= SAME_CALIBRATION
+
     def pill_ask(self, now, baseline, ref):
         """Asks ft-eyes for the last second of pupils; read against the seating once it answers,
         if SteamVR's gaze held steady near straight ahead over that second. Its median goes
@@ -925,11 +942,11 @@ class Checks:
         if self.asking or len(looks) < 10 or looks[-1][0] - looks[0][0] < 0.8 * fitcoach.WINDOW:
             return
         look = (statistics.median(v[1] for v in looks), statistics.median(v[2] for v in looks))
-        if any(math.hypot(y - look[0], p - look[1]) > PILL_STEADY for _, y, p in looks):
+        if any(math.hypot(y - look[0], p - look[1]) > PILL_STEADY for _, y, p, _ in looks):
             return
         fusion = self.svc.fusion
-        fixed = fusion.steam_gaze(look, look, clicks=False) if fusion is not None else None
-        look = fixed or look
+        if all(v[3] for v in looks) and self.same_calibration(fusion, baseline):
+            look = fusion.steam_gaze(look, look, clicks=False) or look
         if math.hypot(*look) > PILL_CENTRE:
             return
 
@@ -1052,7 +1069,11 @@ class Checks:
         if not c:
             m1 = s["src"].get("mmap1") or {}
             if "hy" in m1 and unc and (min(unc) if one is None else unc[one]) <= EYE_LOST:
-                self.pill_looks.append((self.sample_at, m1["hy"], m1["hp"]))
+                # Each eye's reading (mmap2's) when ft-gaze sends them: the affine is fitted on
+                # their mean (finish). mmap1 otherwise, a filtered gaze the affine isn't for.
+                lr = [s["src"].get(n) or {} for n in ("left", "right")]
+                m = Fusion.mean(*[(e["hy"], e["hp"]) if "hy" in e else None for e in lr])
+                self.pill_looks.append((self.sample_at, *(m or (m1["hy"], m1["hp"])), m is not None))
                 if len(self.pill_looks) > 400:
                     self.pill_looks.popleft()
         if not c or c["done_at"] or self.asking:

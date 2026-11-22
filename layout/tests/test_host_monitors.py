@@ -119,6 +119,11 @@ class Sending(unittest.TestCase):
         hm.sync(pc(kind="sunshine"), self.said.append, self.request)
         self.assertEqual(self.sent, [])
 
+    def test_its_question_outlasts_a_wifi_stall(self):
+        waits = []
+        hm.sync(pc(), self.said.append, lambda *a, timeout=2.0, **kw: (waits.append(timeout), self.request(*a, **kw))[1])
+        self.assertGreaterEqual(min(waits), 10.0, "a 3 s question left a pick unsent on the Frame's Wi-Fi")
+
     def test_it_asks_then_sends_the_plan(self):
         hm.sync(pc(), self.said.append, self.request)
         self.assertEqual([(m, b) for _, m, _, b, _ in self.sent],

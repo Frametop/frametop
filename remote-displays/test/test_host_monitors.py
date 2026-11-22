@@ -118,6 +118,17 @@ class Backend(Base):
         self.assertEqual(self.ran, [("remote", "set", "pc-dp", "size=2160x3840")])
         self.assertEqual(self.b.hostMonitors.supported, {"PC": True})
 
+    def test_answers_before_the_size_runs_ask_for_them_once(self):
+        self.b.hostMonitors.refresh("PC")
+        self.answer()
+        self.b.hostMonitors.refresh("PC")
+        self.answer()
+        self.assertEqual(self.ran, [("remote", "set", "pc-dp", "size=2160x3840")], "one stream restart")
+        self.thens[0]()  # it ran (here the layout stays as it was, so it's asked for again)
+        self.b.hostMonitors.refresh("PC")
+        self.answer()
+        self.assertEqual(len(self.ran), 2)
+
     def test_the_pcs_last_error_is_its_note(self):
         self.reply = (200, state(error="DP-1 refused the mode"))
         self.b.hostMonitors.refresh("PC")

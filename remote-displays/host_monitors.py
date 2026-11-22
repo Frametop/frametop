@@ -87,6 +87,7 @@ class HostMonitors(QObject):
         self._run = run
         self._supported = {}  # host name -> whether its Vibepollo turns off and sets its monitors
         self._listed = {}     # host name -> {"monitors": [...], "note": str}
+        self._sizing = set()  # ft-layout size runs queued and not run yet: each answer asks for them
         self._answered.connect(self._done, Qt.QueuedConnection)
 
     @Property("QVariantMap", notify=supportedChanged)
@@ -122,8 +123,12 @@ class HostMonitors(QObject):
         self._listed[name] = {"monitors": monitors, "note": note, "stale": status in (401, 403)}
         self.listedChanged.emit()
         if not error:
+            # Answers that come before the first run read the same old sizes: one run each (a
+            # second would restart the stream again).
             for label, args in size_changes(self._host(name) or {}, monitors):
-                self._run(label, *args)
+                if args not in self._sizing:
+                    self._sizing.add(args)
+                    self._run(label, *args, then=lambda args=args: self._sizing.discard(args))
 
     @Slot(str)
     def refresh(self, name):

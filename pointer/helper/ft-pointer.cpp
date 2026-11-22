@@ -572,6 +572,7 @@
 #include "../common/overlayregion.h"
 #include "handoff.h"
 #include "handsin.h"
+#include "kbray.h"
 #include "rayowner.h"
 #include "typing.h"
 #include "vrbuttons.h"
@@ -1292,6 +1293,17 @@ struct Pointer {
     Clock::time_point dropHoldUntil{};  // after a left release: keep the drag pose this long
     bool debug = false;
     std::string lastHit;
+    // The ray on Full Keyboard's panel, as fingertips' pokes to the relay (see kbray.h): it takes
+    // no SteamVR laser outside the dashboard.
+    kbray::Forward kbRay;
+    const char *kbSide() const { return fr.rayMode && raySide >= 0 ? rayown::SideName(raySide) : "right"; }
+    void kbSend(const std::string &lines) {
+        for (size_t at = 0; at < lines.size();) {
+            const size_t nl = std::min(lines.find('\n', at), lines.size());
+            if (nl > at) SendTo(out, FT_SOCK_RELAY, lines.substr(at, nl - at));
+            at = nl + 1;
+        }
+    }
     // The ft-screens panel the left button was pressed on, and where it was then (see the top).
     std::string pressKey;
     vr::HmdMatrix34_t pressPose{};
@@ -1668,6 +1680,12 @@ struct Pointer {
         pulseAt = Clock::now();
         heldButton = pressRight ? "b" : "trigger";
         pressRight = false;
+        std::string kb;
+        if (kbRay.Press(secsOf(Clock::now()), lastHit == kbray::kPanel && !onVrSettings && havePoint,
+                        {lastPoint.x, lastPoint.y, lastPoint.z}, kbSide(), &kb)) {
+            kbSend(kb);   // Full Keyboard's press, not SteamVR's laser's
+            return;
+        }
         SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 1");
     }
     auto releaseLeft() {
@@ -1675,7 +1693,9 @@ struct Pointer {
         tilting = false;
         // Hold the drag pose (tilt, frozen distance) while SteamVR finishes the drop.
         dropHoldUntil = Clock::now() + std::chrono::milliseconds(500);
-        SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 0");
+        std::string kb;
+        if (kbRay.Release(secsOf(Clock::now()), &kb)) kbSend(kb);
+        else SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 0");
         // ft-screens releases a button held on its screens in KWin even when SteamVR hands
         // the release to some other overlay (its catcher usually gets it; this is the backstop).
         SendTo(out, FT_SOCK_SCREENS, "up");
@@ -2447,6 +2467,7 @@ struct Pointer {
         PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
     Hit nearest(Vec3 from, Vec3 d);
     bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
+    void AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t);
     bool HitsAtOrigin(vr::VROverlayHandle_t h);
 };
 
@@ -4192,6 +4213,7 @@ void Pointer::AimAndPose() {
     const Vec3 eyeRaw = Position(R) + Rotate(R, RotateInverse(S, originStanding - fr.eye));
     lastPoint = t.point, lastOrigin = originStanding, lastAim = aimStanding;  // tilt starts from here
     havePoint = true;
+    AimKeyboard(dragging, onScene, dir, t);
     if (debug && fr.tnow - lastDebug > std::chrono::milliseconds(500)) {
         lastDebug = fr.tnow;
         if (systemPointer == vr::k_ulOverlayHandleInvalid) overlay->FindOverlay("system.pointer", &systemPointer);
@@ -4363,6 +4385,25 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
         }
         lastDistance = t.distance, lastHit = t.key;
     }
+}
+
+void Pointer::AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t) {
+    // Where the ray is on Full Keyboard's panel, if it is (see kbray.h). While its press is held the
+    // drag's frozen distance isn't the panel's, so the point is where the ray meets the panel itself.
+    Vec3 p = t.point;
+    bool on = !dragging && !onScene && t.key == kbray::kPanel && !onVrSettings;
+    if (kbRay.Pressed()) {
+        on = false;
+        auto it = handles.find(kbray::kPanel);
+        vr::VROverlayIntersectionParams_t params{};
+        params.vSource = {float(anchor.x), float(anchor.y), float(anchor.z)};
+        params.vDirection = {float(dir.x), float(dir.y), float(dir.z)};
+        params.eOrigin = vr::TrackingUniverseStanding;
+        vr::VROverlayIntersectionResults_t r{};
+        if (it != handles.end() && overlay->ComputeOverlayIntersection(it->second, &params, &r))
+            on = true, p = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};
+    }
+    kbSend(kbRay.Aim(secsOf(fr.tnow), on, {p.x, p.y, p.z}, kbSide()));
 }
 
 bool Pointer::OnVrSettingsPage(const Vec3 &from, const Vec3 &d) {

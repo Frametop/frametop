@@ -503,6 +503,12 @@ std::string DeviceLabel(vr::TrackedDeviceIndex_t dev);
 // diminished (SteamVR 2.19), which otherwise hides the dashboard's panels.
 int PadPanel();
 
+// ---------------------------------------------------------------- vrkbspot.cpp's
+
+// dev's laser is on Full Keyboard's panel. SteamVR's own laser goes through it (its keys take the
+// pointer helper's pokes, not mouse events), so the panel behind still hears the device.
+bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev);
+
 }  // namespace ftvr
 
 extern "C" int g_mouseScreen;                       // (vr.cpp's: the panel under the 3D mouse)

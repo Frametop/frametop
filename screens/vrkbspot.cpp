@@ -1,9 +1,11 @@
 // Where Full Keyboard opens (keyboard/host/placement.py turns it into the panel's pose): the
 // bottom centre of Steam's page while SteamVR's dashboard shows it (Frametop's tile of the page,
 // frametop.steamdash, when Steam's window is ours: vrsteamwin.cpp), else the headset's pose. The
-// relay passes it on in "kbpanel show" (compositor.c's keyboard_command).
+// relay passes it on in "kbpanel show" (compositor.c's keyboard_command). Also whether a laser is on
+// the panel (LaserOnFullKeyboard).
 
 #include "vr.h"
+#include "vrpanel.h"
 
 #include <openvr.h>
 
@@ -48,3 +50,20 @@ extern "C" bool ft_vr_keyboard_spot(char *out, int size) {
         }
     return n > 0 && n < size;
 }
+
+namespace ftvr {
+bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev) {
+    vr::IVROverlay *ov = vr::VROverlay();
+    vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid;
+    Mat l;
+    if (!ov || dev == kNone || ov->FindOverlay("org.framekeyboard.panel", &h) != vr::VROverlayError_None ||
+        !ov->IsOverlayVisible(h) || !LaserPose(dev, &l))
+        return false;
+    vr::VROverlayIntersectionParams_t params{};
+    params.vSource = {l.m[0][3], l.m[1][3], l.m[2][3]};
+    params.vDirection = {-l.m[0][2], -l.m[1][2], -l.m[2][2]};
+    params.eOrigin = vr::TrackingUniverseStanding;
+    vr::VROverlayIntersectionResults_t r{};
+    return ov->ComputeOverlayIntersection(h, &params, &r);
+}
+}  // namespace ftvr

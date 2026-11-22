@@ -181,6 +181,7 @@ struct server {
     int kb_asked;         // the remote screen a click asked the relay to open the keyboard for (-1 none): remote_clicked
     int mouse_on;         // the panel the 3D mouse is on now (-1 none), and since when (ms): keys_follow_mouse
     uint32_t mouse_on_ms;
+    bool mouse_parked;    // ...and it hasn't gone to another panel since typing last went to a remote screen
     // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
     uint32_t spot_until;  // ms; 0 closed
@@ -628,7 +629,7 @@ static void set_key_remote(struct server *s, int index) {
     if (s->key_remote >= 0 && s->key_remote != index) ft_remote_blur(s->key_remote);
     if (index != s->kb_asked) s->kb_asked = -1;
     s->key_remote = index;
-    if (index >= 0) ft_remote_focus(index), s->mouse_last = index;
+    if (index >= 0) ft_remote_focus(index), s->mouse_last = index, s->mouse_parked = true;
 }
 
 // A pointer event on one of the desktop's screens or floating windows, to the seat: the
@@ -803,10 +804,11 @@ static void typing_to(struct server *s, int screen) {
 // "it's only typing into the vibepollo display and is not typing into others when I change the
 // cursor focus"): typing comes with it, to that panel, another remote screen or one of the
 // desktop's, as Meta does (keys_update's sixth word). A press held (a drag off the PC's screen)
-// moves nothing.
+// moves nothing, and nor does a 3D mouse left where it was while a hand's tap or a controller's
+// click took typing to the remote screen.
 static void keys_follow_mouse(struct server *s, int mouse, uint32_t t) {
-    if (mouse != s->mouse_on) s->mouse_on = mouse, s->mouse_on_ms = t;
-    if (s->key_remote < 0 || mouse < 0 || mouse == s->key_remote) return;
+    if (mouse != s->mouse_on) s->mouse_on = mouse, s->mouse_on_ms = t, s->mouse_parked = false;
+    if (s->key_remote < 0 || mouse < 0 || mouse == s->key_remote || s->mouse_parked) return;
     if (t - s->mouse_on_ms < KEYS_FOLLOW_MS || ft_vr_mouse_screen() != mouse) return;
     wlr_log(WLR_INFO, "typing leaves remote %d: the 3D mouse is on panel %d", s->key_remote, mouse);
     typing_to(s, mouse);
@@ -1587,6 +1589,7 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             if (strcmp(buf + 6, "-") != 0 && strncmp(buf + 6, "frametop.", 9) != 0 &&
                 strncmp(buf + 6, "org.framekeyboard.", 18) != 0) {
                 s->keys_clicked = false;
+                set_key_remote(s, -1);   // (and a remote screen's keys let go: typing is Steam's, not the PC's)
                 ft_vr_app_blur();
                 spot_dismiss(s, "click");
             }

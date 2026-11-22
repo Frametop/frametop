@@ -6648,6 +6648,7 @@ bool ft_vr_carry_wheel(int notches) {
 
 int ft_vr_mouse_panel(void) {
     if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
+    if (LaserOnFullKeyboard(g_mouseDevice)) return -1;   // (typing on it: the panel behind keeps none)
     const auto it = g_screens.find(g_mouseScreen);
     return it != g_screens.end() && it->second.visible ? g_mouseScreen : -1;
 }

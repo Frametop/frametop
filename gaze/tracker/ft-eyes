@@ -15,8 +15,9 @@ By hand: distrobox enter dev -- python3 gaze/tracker/ft-eyes -v
 
 Calibration: ~/.local/state/frametop/gaze/eyes/calibration.json, made by the gaze probe's
 calibration with the tracker toggle on Own tracker (or lab/ft-eyes-score --save CAPTURE).
-Each eye's shift since the calibration (its slip: slipfilter.py, a Kalman filter that clicks,
-the glint pair and SteamVR's steady looks all teach) is kept in state.json next to it. After a
+Each eye's shift since the calibration (its slip: slipfilter.py, one Kalman filter for both
+eyes, the headset's slip plus each eye's own part, that clicks, the glint pair and SteamVR's
+steady looks all teach) is kept in state.json next to it. After a
 restart, or frames stopping for GAP seconds (the headset off), the slip is nearly unknown again
 (SlipFilter.reseat): the next readings set it. eyeslip.py feeds and reads the filters, and
 slip.jsonl there logs them (sliplog.py).
@@ -27,8 +28,10 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                first), "reseat" (the headset was off and no click came since:
                                the probe asks for a one-dot check then), "slip_deg" (the shift
                                as the gaze error it causes looking ahead, yaw and pitch degrees,
-                               fitcoach.assess's sign: the fit pill reads it), "slip_sd" (how
-                               sure, degrees), and "glint_bias_deg", "steam_bias_deg"
+                               fitcoach.assess's sign), "slip_sd" (how sure, degrees), and
+                               "glint_bias_deg", "steam_bias_deg"; and the "headset"'s
+                               "slip_deg" and "slip_sd", the part both eyes share (the fit
+                               pill reads it)
   calib-start                  a new calibration: collect dots from now on
   calib-point T0 T1 YAW PITCH  a dot you looked at from T0 to T1 (CLOCK_MONOTONIC_RAW) in
                                that direction (head-relative degrees): "ok N0 N1 SD0 SD1"
@@ -304,15 +307,12 @@ class Eye:
         """The shift its gaze is corrected by (the slip filter's), zero while unmapped."""
         return self.filter.s if self.filter else np.zeros(2)
 
-    def use(self, cal, saved=None):
-        """Maps with cal (if it maps this eye), its slip from `saved` (state.json's) or fresh."""
+    def use(self, cal, filt=None):
+        """Maps with cal (if it maps this eye), its slip filter `filt` (Tracker.map_eyes')."""
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
         self.slip = (eyes_model.SlipTracker(cal, self.eye, every=GLINT_EVERY, window=GLINT_WINDOW)
                      if self.cal else None)
-        self.filter = None
-        if self.cal:
-            jac = self.cal.jacobian(self.eye)
-            self.filter = slipfilter.SlipFilter.from_json(saved, jac) if saved else slipfilter.SlipFilter(jac)
+        self.filter = filt if self.cal else None
         self.gaze = self.glint = self.glint_innov = None
 
     def reseat(self, t):
@@ -469,24 +469,32 @@ class Tracker:
         if self.cal:
             # Saved before calibrations kept spreads and dots' extents: from its dots, refitted.
             self.cal.fill_from_dots(CALIBRATION.with_name("calibration-dots.jsonl"))
-        saved = {}
+        saved = None
         try:
             d = json.loads(STATE.read_text())
             if self.cal and d.get("calibration") == self.cal.info.get("made"):
-                # "slip": the filters'; "shift": eyes_model.Shift's, saved before 2026-11-22.
-                saved = {int(k): v for k, v in (d.get("slip") or d.get("shift") or {}).items() if isinstance(v, dict)}
+                # "slip": the filter's; "shift": eyes_model.Shift's, saved before 2026-11-22.
+                saved = d.get("slip") or d.get("shift")
         except (OSError, ValueError, AttributeError):
             pass
+        self.map_eyes(self.cal, saved)
         for e in self.eyes:
-            e.use(self.cal, saved.get(e.eye))
             # Kept from the last run, but the headset may have been off since: the saved slip
             # is used until readings say otherwise, and they soon do.
             e.reseat(None)
         self.saved_at = time.monotonic()
 
+    def map_eyes(self, cal, saved=None):
+        """Maps each eye with cal, their slip filters views of one slipfilter.Headset, from
+        state.json's "slip" `saved` (slipfilter.load) or fresh."""
+        jacs = {c: cal.jacobian(c) for c in (0, 1) if cal is not None and cal.has("pupil", c)}
+        filters = slipfilter.load(saved, jacs)
+        for e in self.eyes:
+            e.use(cal, filters.get(e.eye))
+
     def save_state(self):
         d = {"calibration": self.cal.info.get("made") if self.cal else None,
-             "slip": {e.eye: e.filter.to_json() for e in self.eyes if e.filter}}
+             "slip": slipfilter.save({e.eye: e.filter for e in self.eyes if e.filter})}
         self.saved_at = time.monotonic()
         try:
             ft_store.write_json(STATE, d, indent=None, newline=False)
@@ -594,8 +602,7 @@ class Tracker:
                 eyes_model.prune_backups(CALIBRATION.parent)   # the newest 10 earlier ones stay
             cal.save(CALIBRATION)
             self.cal, self.calibrating = cal, False
-            for e in self.eyes:
-                e.use(cal)
+            self.map_eyes(cal)
             self.save_state()
             self.log.event(self.frame_time(), "calibration", made=cal.info["made"], eyes=cal.eyes())
             with open(CALIBRATION.with_name("calibration-dots.jsonl"), "a") as f:
@@ -649,7 +656,8 @@ class Tracker:
                 "dots": len(self.dots), "size_guard": None if NET else self.guard.rule,
                 "edge_margin": eyes_model.EDGE_MARGIN, "slip": "filter",
                 "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
-                "eyes": {EYES[e.eye]: eyeslip.eye_status(e.filter, self.frame_time()) for e in self.eyes}}
+                "eyes": {EYES[e.eye]: eyeslip.eye_status(e.filter, self.frame_time()) for e in self.eyes},
+                "headset": eyeslip.headset_status(self.eyes, self.frame_time())}
 
 
 class Want:

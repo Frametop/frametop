@@ -78,6 +78,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "tracker"))
 sys.path.insert(0, str(HERE.parent))
 import eyes_model  # noqa: E402
+import slipfilter  # noqa: E402
 from gazecal import EyeWeights, Fusion  # noqa: E402
 
 LOOK = (0.35, 0.05)       # s before a click: as gazebench.py, for runs that don't say
@@ -450,9 +451,10 @@ def replays(run, truths, only):
         st = json.loads((run.dir / "start" / "eyes-state.json").read_text())
         if st.get("calibration") == cal.info.get("made"):
             shifts = {int(k): v for k, v in st.get("shift", {}).items()}
-            # Since 2026-11-22 ft-eyes keeps its slip filters ("slip"): their slip is the start.
-            shifts = shifts or {int(k): {"base": v["x"][:2]} for k, v in (st.get("slip") or {}).items()
-                                if isinstance(v, dict) and len(v.get("x") or []) >= 2}
+            # Since 2026-11-22 ft-eyes keeps its slip filter ("slip"): each eye's slip is the start.
+            if not shifts and st.get("slip"):
+                jacs = {c: cal.jacobian(c) for c in (0, 1) if cal.has("pupil", c)}
+                shifts = {e: {"base": f.s.tolist()} for e, f in slipfilter.load(st["slip"], jacs).items()}
     except (OSError, ValueError):
         pass
     frames = {}

@@ -1,10 +1,11 @@
 """sliplog: ft-eyes' slip log, slip.jsonl in its state folder, for tuning the slip filter
 (slipfilter.py) and seeing what moved it. A JSON line per row:
 
-  {"t", "time", "eyes": {"0"|"1": {...}}}   every LOG_EVERY s while frames come: per eye its
-                                             newest find (pupil, size "a", glint pair "mid"),
-                                             its last glint estimate, the filter's state and
-                                             variances (feature units), slip_deg and its gaze
+  {"t", "time", "eyes": {"0"|"1": {...}},    every LOG_EVERY s while frames come: per eye its
+   "headset": {"slip_deg", "slip_sd"}}       newest find (pupil, size "a", glint pair "mid"),
+                                             its last glint estimate, its view of the filter's
+                                             state and variances (feature units), slip_deg,
+                                             own_deg and its gaze; and the headset's slip
   {"t", "time", "event": ..., ...}           a reading or a change: "click", "look", "glint",
                                              "reseat", "adjusting", "calibration"
 

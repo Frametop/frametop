@@ -3101,7 +3101,9 @@ void Pointer::OverlaysAndRole() {
     // forced on again, and kept for kGameLaserHold after leaving one so a ray along a panel's edge
     // doesn't flip the game's focus every frame (user, 2026-11-21: "when in VR games the 3d mouse
     // and hand tracking lasers don't interact at all").
-    if (!lastHit.empty()) laserPanelAt = fr.tnow;
+    // (A game's own OpenXR layers, its menus, are the game's: SteamVR's laser on them took its focus,
+    // which hid them, which let it go, five times a second.)
+    if (!lastHit.empty() && lastHit.rfind("openxr_", 0) != 0) laserPanelAt = fr.tnow;
     const bool toGame = inGame && !dashboardUp && fr.tnow - laserPanelAt > kGameLaserHold;
     const bool laserOn = active && (leftHeld ? laserModeShown : !toGame);   // (a held press stays whoever's took it)
     if (laserOn != laserModeShown) {

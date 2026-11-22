@@ -11,6 +11,7 @@ Item {
     // settings/main.qml sets these two.
     property QtObject backend
     property var window
+    property var openDisplays: ({})  // display id -> its settings are open (each display's expanded)
     function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
 
     function page(name) { return name === "remote-displays" ? hostsPage : null }
@@ -822,7 +823,10 @@ Item {
                                     readonly property var monitor: followsMonitor
                                         ? ((backend.hostMonitors.listed[modelData.host] || {}).monitors || [])
                                               .find(m => "display:" + m.id === modelData.app) || null : null
-                                    property bool expanded: false
+                                    // Kept by the page: the list is made again when the layout changes
+                                    // (Apply, a scale pick), and its settings stay open through that.
+                                    property bool expanded: root.openDisplays[modelData.id] === true
+                                    onExpandedChanged: root.openDisplays[modelData.id] = expanded
                                     Layout.fillWidth: true
                                     Kirigami.Separator { Layout.fillWidth: true }
                                     RowLayout {

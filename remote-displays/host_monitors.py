@@ -66,7 +66,7 @@ class HostMonitors(QObject):
     @Property("QVariantMap", notify=listedChanged)
     def listed(self):
         """Host name -> {monitors: the PC's monitors as it answered (id, name, on, mode, modes,
-        any_mode, scale, scales, sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
+        any_mode, scale, scales, own_scale, sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
         reach them (401, 403)}."""
         return dict(self._listed)
 

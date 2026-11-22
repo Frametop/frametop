@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_app_windows import ADDRESS, HOSTS, Base, set_hosts, spin  # noqa: E402
+from test_app_windows import ADDRESS, HOSTS, Base, items, set_hosts, spin  # noqa: E402
 import ft_settings  # noqa: E402
 import host_monitors  # noqa: E402
 from PySide6.QtCore import QObject  # noqa: E402
@@ -74,9 +74,30 @@ class Panels(unittest.TestCase):
     def test_same_size_runs_nothing(self):
         self.assertEqual(host_monitors.panel_changes(PC, state({"on": True, "mode": HZ60}), set()), [])
 
+    def test_a_monitor_turned_a_quarter_streams_tall(self):
+        sideways = state()
+        sideways["monitors"][1]["sideways"] = True
+        runs = host_monitors.panel_changes(PC, sideways, set())
+        self.assertEqual([a for _, a in runs], [("remote", "set", "pc-dp", "size=2160x3840")])
+
+    def test_one_the_pc_kept_on_keeps_its_panel(self):
+        kept = state({"on": False, "mode": None})
+        kept["applies"] = True
+        self.assertEqual(host_monitors.panel_changes(PC, kept, set()), [],
+                         "the PC needs a display on: the one it kept on still streams")
+        kept["applies"] = False
+        self.assertEqual([a for _, a in host_monitors.panel_changes(PC, kept, set())],
+                         [("remote", "disconnect", "pc-edp")])
+
+
+def no_parked():
+    """No panels left disconnected by an earlier test (overwritten: HOME is the tests' own)."""
+    host_monitors.ft_store.write_json(host_monitors.PARKED_PATH, {})
+
 
 class Backend(Base):
     def setUp(self):
+        no_parked()
         super().setUp()
         set_hosts(PC)
         self.sent, self.reply = [], (200, state({"on": True, "mode": {**HZ60, "width": 1920, "height": 1200}}))
@@ -122,6 +143,14 @@ class Backend(Base):
         self.assertEqual(self.b.hostMonitors.supported, {"PC": False})
         self.assertEqual(self.ran, [], "no answer: the panels are left as they are")
 
+    def test_panels_disconnected_here_are_still_known_after_a_restart(self):
+        self.reply = (200, state(dp_wish={"on": False, "mode": None}))
+        self.b.hostMonitors.refresh("PC")
+        self.assertEqual(self.answer()[2], "")
+        self.assertIn(("remote", "disconnect", "pc-dp"), self.ran)
+        again = host_monitors.HostMonitors(lambda *a: None)
+        self.assertEqual(again._parked, {"pc-dp"}, "kept in " + host_monitors.PARKED_PATH)
+
     def test_a_sunshine_host_is_not_asked(self):
         set_hosts(dict(PC, kind="sunshine"))
         self.b.hostMonitors.refresh("PC")
@@ -131,6 +160,7 @@ class Backend(Base):
 
 class Page(Base):
     def setUp(self):
+        no_parked()
         super().setUp()
         set_hosts(PC)
         HOSTS.mkdir(parents=True, exist_ok=True)
@@ -158,6 +188,30 @@ class Page(Base):
         spin(self.app, seconds=0.1)
         self.assertEqual(self.asked, [("PC", "GET", None)], "known now: not asked again")
 
+    def found(self, name):
+        return [i for i in items(self.root.contentItem()) if i.property(name) is not None]
+
+    def test_only_a_monitor_of_a_pc_that_can_loses_its_stream_size(self):
+        def own_size():
+            return sorted((i.property("modelData")["id"], i.property("ownSize")) for i in self.found("ownSize"))
+        self.assertEqual(own_size(), [("pc-dp", True), ("pc-edp", True), ("pc-virtual", True)], "not known yet")
+        self.b.hostMonitors._done("PC", 200, state())
+        spin(self.app, seconds=0.1)
+        self.assertEqual(own_size(), [("pc-dp", False), ("pc-edp", False), ("pc-virtual", True)])
+
+    def test_an_old_build_hides_the_button_and_an_old_sign_in_keeps_it(self):
+        def button():
+            found = [i for i in items(self.root.contentItem()) if i.objectName() == "monitorsButton"]
+            self.assertEqual(len(found), 1)
+            return found[0].property("visible")
+        self.assertTrue(button())
+        self.b.hostMonitors._done("PC", 401, None)
+        spin(self.app, seconds=0.1)
+        self.assertTrue(button(), "it says to sign in again")
+        self.b.hostMonitors._done("PC", 404, None)
+        spin(self.app, seconds=0.1)
+        self.assertFalse(button())
+
     def test_the_dialog_sends_what_was_picked(self):
         dialog = self.root.findChild(QObject, "monitorsDialog")
         self.assertIsNotNone(dialog, "the monitors dialog is on the page")
@@ -166,7 +220,8 @@ class Page(Base):
         self.assertTrue(spin(self.app, lambda: dialog.property("listed")))
         wishes = dialog.property("wishes").toVariant()
         self.assertEqual(wishes["eDP-2"], {"on": True, **HZ60}, "its wish, not its mode now")
-        self.assertEqual(wishes["DP-1"], {"on": True, **UHD})
+        self.assertEqual(wishes["DP-1"], {"on": True, "width": 0, "height": 0, "refresh_mhz": 0},
+                         "no mode picked: it stays in the one it has")
         dialog.wish("DP-1", {"on": False})
         self.assertTrue(dialog.property("anyOn"))
         dialog.wish("eDP-2", {"on": False})
@@ -175,6 +230,9 @@ class Page(Base):
         dialog.send()
         self.assertEqual(self.asked[-1][:2], ("PC", "POST"))
         self.assertEqual(self.asked[-1][2]["monitors"]["DP-1"], {"on": False})
+        self.assertEqual(self.asked[-1][2]["monitors"]["eDP-2"], {"on": True, "mode": HZ60})
+        self.assertTrue(dialog.sameMode(HZ240, dict(HZ240, refresh_mhz=239761)), "Hyprland's 239.761 Hz")
+        self.assertFalse(dialog.sameMode(HZ240, HZ60))
         self.assertEqual([w for w in self.warnings if "not placed in the graphics scene" not in w], [])
 
 

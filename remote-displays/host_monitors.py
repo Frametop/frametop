@@ -7,11 +7,13 @@ last stream ends (or at a reboot) every monitor goes back as it was. Here the pl
 the panels of the PC's monitors follow it: a monitor's panel streams at its mode pixel for pixel
 (ft-layout remote set ... size=), the panel of a monitor turned off is disconnected (it has
 nothing to show, and a panel trying again would keep the PC "in use"), and connected again when
-the monitor comes back on.
+the monitor is on again in the plan. Which panels those are is kept in
+~/.config/frametop-host-monitors.json, so a restart of Settings still connects them.
 
 The backend (ft_remote_displays.py) makes one and shows it to the page as hostMonitors. Questions
 to the PC run on a thread; changes to the panels go in the backend's queue of ft-layout runs.
 """
+import os
 import threading
 
 from PySide6.QtCore import Property, QObject, Qt, Signal, Slot
@@ -19,8 +21,10 @@ from PySide6.QtCore import Property, QObject, Qt, Signal, Slot
 # conf/ and layout/, put on the path by the backend
 import ft_hostapi
 import ft_layout
+import ft_store
 
 PATH = "/api/frametop/monitors"
+PARKED_PATH = os.path.expanduser("~/.config/frametop-host-monitors.json")
 NO_BUILD = ("Its Vibepollo can't change its monitors: that needs Frametop's build of Vibepollo, "
             "a newer one than it has.")
 
@@ -52,12 +56,21 @@ def plan_body(wishes):
     return {"monitors": monitors}
 
 
-def _effective(monitor):
-    """(on, mode) the monitor will have while Frametop streams: the wish, or as it is."""
+def _effective(monitor, applies):
+    """(on, mode) the monitor will have while Frametop streams: the wish, or as it is. One the
+    PC kept on while the plan applies (it needs a display on) is on."""
     wish = monitor.get("wish")
     if not isinstance(wish, dict):
         return bool(monitor.get("on")), monitor.get("mode")
-    return bool(wish.get("on")), wish.get("mode") or monitor.get("mode")
+    on = bool(wish.get("on")) or (applies and bool(monitor.get("on")))
+    return on, wish.get("mode") or monitor.get("mode")
+
+
+def _stream_size(monitor, mode):
+    """[width, height] a stream of the monitor in `mode` has: a monitor turned a quarter lists
+    its modes unrotated (Hyprland, KDE)."""
+    size = [int(mode["width"]), int(mode["height"])]
+    return size[::-1] if monitor.get("sideways") else size
 
 
 def panel_changes(host, state, parked):
@@ -65,6 +78,7 @@ def panel_changes(host, state, parked):
     parked: ids of panels disconnected here because their monitor went off; the ones connected
     again are taken out, the ones disconnected now put in."""
     monitors = {m.get("id"): m for m in (state or {}).get("monitors", []) if isinstance(m, dict)}
+    applies = bool((state or {}).get("applies"))
     runs = []
     for d in host.get("displays", []):
         app = str(d.get("app", ""))
@@ -73,19 +87,19 @@ def panel_changes(host, state, parked):
         monitor = monitors.get(app[len("display:"):])
         if monitor is None:
             continue
-        on, mode = _effective(monitor)
+        on, mode = _effective(monitor, applies)
+        name = d.get("label") or d["id"]
         if not on:
             if not d.get("off"):
-                runs.append((f"Disconnecting {d.get('label') or d['id']}", ("remote", "disconnect", d["id"])))
+                runs.append((f"Disconnecting {name}", ("remote", "disconnect", d["id"])))
                 parked.add(d["id"])
             continue
         if isinstance(mode, dict) and mode.get("width") and mode.get("height"):
-            size = [int(mode["width"]), int(mode["height"])]
+            size = _stream_size(monitor, mode)
             if list(d.get("size", [])) != size:
-                runs.append((f"Streaming {d.get('label') or d['id']} at its mode",
-                             ("remote", "set", d["id"], f"size={size[0]}x{size[1]}")))
+                runs.append((f"Streaming {name} at its mode", ("remote", "set", d["id"], f"size={size[0]}x{size[1]}")))
         if d.get("off") and d["id"] in parked:
-            runs.append((f"Connecting {d.get('label') or d['id']}", ("remote", "connect", d["id"])))
+            runs.append((f"Connecting {name}", ("remote", "connect", d["id"])))
             parked.discard(d["id"])
     return runs
 
@@ -102,7 +116,9 @@ class HostMonitors(QObject):
         super().__init__(parent)
         self._run = run
         self._supported = {}  # host name -> whether its Vibepollo changes its monitors
-        self._parked = set()  # panels disconnected here because their monitor went off
+        # panels disconnected here because their monitor went off
+        saved = ft_store.load_json(PARKED_PATH, {}, who="host monitors")
+        self._parked = {str(i) for i in saved.get("parked", [])} if isinstance(saved, dict) else set()
         self._answered.connect(self._done, Qt.QueuedConnection)
 
     @Property("QVariantMap", notify=supportedChanged)
@@ -137,8 +153,14 @@ class HostMonitors(QObject):
             self.supportedChanged.emit()
         state = {} if error else answer
         if state:
+            before = set(self._parked)
             for label, args in panel_changes(self._host(name) or {}, state, self._parked):
                 self._run(label, *args)
+            if self._parked != before:
+                try:
+                    ft_store.write_json(PARKED_PATH, {"parked": sorted(self._parked)})
+                except OSError as e:
+                    error = f"Couldn't keep which panels were disconnected: {e}"
         self.monitorsReady.emit(name, state, error)
 
     @Slot(str)

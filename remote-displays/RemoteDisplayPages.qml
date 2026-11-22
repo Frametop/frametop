@@ -529,12 +529,12 @@ Item {
                         readonly property bool sunshine: modelData.kind === "sunshine"
                         readonly property bool apple: modelData.kind === "apple"
                         readonly property bool vibepollo: !sunshine && !apple
+                        readonly property string kind: modelData.kind
                         // Its Vibepollo changes its own monitors (Frametop's build): asked once.
                         readonly property bool ownsMonitors: backend.hostMonitors.supported[modelData.name] === true
                         Component.onCompleted: if (vibepollo && modelData.hasToken && kind !== "pin"
                                                    && !(modelData.name in backend.hostMonitors.supported))
                                                    backend.hostMonitors.refresh(modelData.name)
-                        readonly property string kind: modelData.kind
                         Layout.fillWidth: true
                         contentItem: ColumnLayout {
                             RowLayout {

@@ -116,7 +116,7 @@ class Hosted:
             self.asked.clear()   # a new process answers only what's asked of it
             self.version = message.get("version")
             self.greeted = True
-            self.send("hello", protocol=PROTOCOL, client="", client_version=self.client_version,
+            self.send("hello", protocol=PROTOCOL, client="Frametop", client_version=self.client_version,
                       lease_ms=LEASE_MS)
             self.send("subscribe", events=EVENTS)
         if "event" in message:

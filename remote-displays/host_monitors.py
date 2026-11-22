@@ -93,7 +93,8 @@ class HostMonitors(QObject):
     @Property("QVariantMap", notify=listedChanged)
     def listed(self):
         """Host name -> {monitors: the PC's monitors as it answered (id, name, on, mode, modes,
-        sideways, changed, wish), note: what went wrong ("" nothing)}."""
+        sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
+        reach them (401, 403)}."""
         return dict(self._listed)
 
     @staticmethod
@@ -111,7 +112,9 @@ class HostMonitors(QObject):
         before = self._listed.get(name, {})
         monitors = answer.get("monitors", []) if not error else before.get("monitors", [])
         note = error or answer.get("error") or ""  # its last change that didn't take
-        self._listed[name] = {"monitors": monitors, "note": note}
+        # A sign-in from before Frametop could: the page says to sign in again even with the
+        # switch off, or nothing would show that the switch is there.
+        self._listed[name] = {"monitors": monitors, "note": note, "stale": status in (401, 403)}
         self.listedChanged.emit()
         if not error:
             for label, args in size_changes(self._host(name) or {}, monitors):

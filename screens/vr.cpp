@@ -167,6 +167,7 @@
 #include <sys/un.h>
 #include <linux/input-event-codes.h>
 #include <limits.h>
+#include <signal.h>
 #include <spawn.h>
 #include <sys/stat.h>
 #include <unistd.h>  // environ (g++ defines _GNU_SOURCE), for posix_spawn
@@ -1920,11 +1921,20 @@ void RunTool(const char *tool, const std::vector<std::string> &args, const char 
     std::vector<char *> argv{path.data()};
     for (auto &w : a) argv.push_back(w.data());
     argv.push_back(nullptr);
+    // None of ft-screens' blocked signals (main blocks SIGTERM, SIGINT and SIGCHLD for the
+    // event loop): with SIGTERM blocked, the tool wouldn't hear kill (child.h).
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    sigset_t none;
+    sigemptyset(&none);
+    posix_spawnattr_setsigmask(&attr, &none);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK);
     pid_t pid;  // reaped by the compositor's SIGCHLD handler
     // A log that can't be opened (a symlink or a directory in its place) fails the spawn too.
-    const int rc = posix_spawn(&pid, path.c_str(), &io, nullptr, argv.data(), environ);
+    const int rc = posix_spawn(&pid, path.c_str(), &io, &attr, argv.data(), environ);
     if (rc != 0)
         std::printf("can't run %s (log %s): %s\n", path.c_str(), logname.c_str(), std::strerror(rc));
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&io);
 }
 

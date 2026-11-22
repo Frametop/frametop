@@ -120,11 +120,15 @@ class Backend(Base):
     def test_an_old_build_is_known_and_an_old_sign_in_is_not(self):
         self.reply = (401, None)
         self.b.hostMonitors.refresh("PC")
-        self.assertIn("Sign in to PC again", self.answer()["note"])
+        got = self.answer()
+        self.assertIn("Sign in to PC again", got["note"])
+        self.assertTrue(got["stale"], "the page says to sign in again")
         self.assertEqual(self.b.hostMonitors.supported, {}, "it may well can, once signed in again")
         self.reply = (404, None)
         self.b.hostMonitors.refresh("PC")
-        self.assertEqual(self.answer()["note"], host_monitors.NO_BUILD)
+        got = self.answer()
+        self.assertEqual(got["note"], host_monitors.NO_BUILD)
+        self.assertFalse(got["stale"])
         self.assertEqual(self.b.hostMonitors.supported, {"PC": False})
         self.assertEqual(self.ran, [], "no answer: the panels are left as they are")
 
@@ -224,6 +228,19 @@ class Page(Base):
         self.b.hostMonitors._done("PC", 404, None)
         spin(self.app, seconds=0.1)
         self.assertFalse(switch().property("visible"), "an older build can't")
+        self.assertEqual(self.bad_warnings(), [])
+
+    def test_a_sign_in_from_before_says_to_sign_in_again(self):
+        hint = lambda: self.found("ownMonitorsSignIn")[0]  # noqa: E731
+        self.assertFalse(hint().property("visible"), "not known yet")
+        self.b.hostMonitors._done("PC", 403, {"status": False, "error": "Forbidden"})
+        spin(self.app, seconds=0.1)
+        self.assertTrue(hint().property("visible"))
+        self.assertFalse(self.found("ownMonitors")[0].property("visible"), "no switch until it can")
+        self.assertIn("sign in again", hint().property("text"))
+        self.answered()
+        self.assertFalse(hint().property("visible"), "signed in again: the switch instead")
+        self.assertTrue(self.found("ownMonitors")[0].property("visible"))
         self.assertEqual(self.bad_warnings(), [])
 
     def test_with_the_switch_on_a_monitor_picks_a_mode_instead_of_a_size(self):

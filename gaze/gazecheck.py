@@ -362,7 +362,7 @@ class Checks:
         self.asking = None       # (socket, deadline, done): a command to ft-eyes waiting for its reply
         self.watch = (None, False)  # (frametop.conf's mtime, GAZE_FIT_WATCH on)
         self.pill = fitpill.Pill()
-        self.pill_looks = deque()    # (t, yaw, pitch, per_eye): SteamVR's gaze while no check runs
+        self.pill_looks = deque()    # (t, yaw, pitch): SteamVR's eyes while no check runs (on_sample)
         self.pill_steam = False      # the pill reads a seating: ft-gazed asks for SteamVR's eyes too
         self.pill_reading = None     # (t, terms) from the last "fit" asked for it
         self.pill_at = 0.0           # last asked
@@ -942,10 +942,10 @@ class Checks:
         if self.asking or len(looks) < 10 or looks[-1][0] - looks[0][0] < 0.8 * fitcoach.WINDOW:
             return
         look = (statistics.median(v[1] for v in looks), statistics.median(v[2] for v in looks))
-        if any(math.hypot(y - look[0], p - look[1]) > PILL_STEADY for _, y, p, _ in looks):
+        if any(math.hypot(y - look[0], p - look[1]) > PILL_STEADY for _, y, p in looks):
             return
         fusion = self.svc.fusion
-        if all(v[3] for v in looks) and self.same_calibration(fusion, baseline):
+        if self.same_calibration(fusion, baseline):
             look = fusion.steam_gaze(look, look, clicks=False) or look
         if math.hypot(*look) > PILL_CENTRE:
             return
@@ -1066,14 +1066,18 @@ class Checks:
             return
         if c and self.puton_holds(c):
             self.coach_feed(s, self.sample_at)
-        if not c:
-            m1 = s["src"].get("mmap1") or {}
-            if "hy" in m1 and unc and (min(unc) if one is None else unc[one]) <= EYE_LOST:
-                # Each eye's reading (mmap2's) when ft-gaze sends them: the affine is fitted on
-                # their mean (finish). mmap1 otherwise, a filtered gaze the affine isn't for.
-                lr = [s["src"].get(n) or {} for n in ("left", "right")]
-                m = Fusion.mean(*[(e["hy"], e["hp"]) if "hy" in e else None for e in lr])
-                self.pill_looks.append((self.sample_at, *(m or (m1["hy"], m1["hp"])), m is not None))
+        if not c and self.pill_steam and unc:
+            # Each eye's reading (mmap2's, which ft-gazed asks for while pill_steam): the affine
+            # is fitted on their mean with both seen (finish), so a look needs both. With one
+            # eye tracked, that eye's alone: the other's reading wasn't measured.
+            lr = [s["src"].get(n) or {} for n in ("left", "right")]
+            if one is None:
+                m = Fusion.mean(*[(e["hy"], e["hp"]) if "hy" in e else None for e in lr]) if max(unc) <= EYE_LOST else None
+            else:
+                e = lr[one]
+                m = (e["hy"], e["hp"]) if "hy" in e and unc[one] <= EYE_LOST else None
+            if m:
+                self.pill_looks.append((self.sample_at, *m))
                 if len(self.pill_looks) > 400:
                     self.pill_looks.popleft()
         if not c or c["done_at"] or self.asking:

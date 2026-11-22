@@ -58,9 +58,10 @@ LOOK = os.path.join(HOME, "look.json")
 FAKE = os.path.join(HOME, "ft-gaze")
 
 
-def look(yaw, pitch):
+def look(yaw, pitch, left=None):
+    """SteamVR's gaze; left: its left eye's reading, when that differs (the right eye's is the gaze)."""
     with open(LOOK + ".new", "w") as f:
-        json.dump([yaw, pitch], f)
+        json.dump([yaw, pitch, *(left or (yaw, pitch))], f)
     os.replace(LOOK + ".new", LOOK)
 
 
@@ -77,12 +78,12 @@ while True:
             if line.startswith("sources "):
                 eyes = "left" in line or "all" in line
     try:
-        hy, hp = json.load(open({LOOK!r}))
+        hy, hp, ly, lp = json.load(open({LOOK!r}))
     except (OSError, ValueError):
         continue
     src = {{"mmap1": {{"hy": hy, "hp": hp, "unc": [0.001, 0.001], "open": [0.8, 0.8]}}}}
     if eyes:
-        src["left"] = src["right"] = {{"hy": hy, "hp": hp}}
+        src["left"], src["right"] = {{"hy": ly, "hp": lp}}, {{"hy": hy, "hp": hp}}
     print(json.dumps({{"t": time.monotonic(), "src": src}}), flush=True)
 ''')
 SLEEPER = [sys.executable, "-c", "import sys; sys.stdin.read()"]  # quits when its stdin closes
@@ -388,7 +389,7 @@ check("looking aside, seated: no pill", "show pill" in since(n), False)
 check("  read all the while", eyes_state["asked"] > asked + 2, True)
 look(25.0, 0.0)
 eyes_state["offset"] = (25.0, -12.0)   # past PILL_CENTRE: not read, slipped or not
-time.sleep(1.5)                        # (the window turns over to the new look)
+time.sleep(1.5)                        # (an ask in flight from the last look answers)
 asked = eyes_state["asked"]
 time.sleep(fitpill.SHOW_HOLD + 1)
 check("looking far aside: not read", eyes_state["asked"], asked)
@@ -417,6 +418,19 @@ svc.checks.pill_reading = None
 check("  not an older calibration's affine",
       wait(lambda: svc.checks.pill_reading is not None and abs(svc.checks.pill_reading[1]["left"] - 2.0) < 0.5, 4), True)
 svc.fusion = None
+tracked, svc.tracked = svc.tracked, lambda: 1   # Track Dominant Eye Only, the right: the left's reading is junk
+look(12.0, 0.0, left=(0.0, 0.0))
+eyes_state["offset"] = (12.0, 0.0)
+time.sleep(1.5)
+svc.checks.pill_reading = None
+check("one eye tracked: its look alone, not the mean with the other",
+      wait(lambda: svc.checks.pill_reading is not None and abs(svc.checks.pill_reading[1]["left"]) < 0.5, 4), True)
+svc.tracked = tracked                 # (SteamVR's setting again: both)
+look(12.0, 0.0, left=(0.0, 0.0))      # both tracked: the mean, 6, so the pupils at 12 read 6 off
+time.sleep(1.5)
+svc.checks.pill_reading = None
+check("  both tracked: their mean",
+      wait(lambda: svc.checks.pill_reading is not None and abs(svc.checks.pill_reading[1]["left"] - 6.0) < 0.5, 4), True)
 look(0.0, 0.0)
 eyes_state["offset"] = (0.0, 0.0)
 

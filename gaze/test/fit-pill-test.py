@@ -77,6 +77,12 @@ check("off for SHOW_HOLD: it opens once", [c for _, c in ch], [("show", "Nudge s
 check("  once the median has been past for SHOW_HOLD", fitpill.SHOW_HOLD <= ch[0][0] < fitpill.SHOW_HOLD + fitpill.SMOOTH / 2 + 0.25,
       True)
 
+big = Pill()
+ch = run(big, [(fitpill.BIG_HOLD + fitpill.SMOOTH + 0.5, {"up": 0.0, "left": -28.0})])
+check("a big push: open within BIG_HOLD plus the median's lag", (len(ch), ch[0][1] if ch else None,
+      ch[0][0] <= fitpill.BIG_HOLD + fitpill.SMOOTH / 2 + 0.25 if ch else None),
+      (1, ("show", "Nudge right", "right"), True))
+
 # --- A gap in the readings starts SHOW_HOLD over ---
 q = Pill()
 check("off, then no readings past STALE, then off again: not yet",

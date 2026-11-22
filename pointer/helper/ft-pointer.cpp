@@ -3108,7 +3108,9 @@ void Pointer::OverlaysAndRole() {
         laserModeShown = laserOn;
         if (laserOn) overlay->ShowOverlay(laserMode);
         else overlay->HideOverlay(laserMode);
-        if (debug) std::printf("laser mode %s\n", laserOn ? "forced on" : active ? "off: the game's" : "released");
+        if (debug)
+            std::printf("laser mode %s (ray on %s)\n", laserOn ? "forced on" : active ? "off: the game's" : "released",
+                        lastHit.empty() ? "-" : lastHit.c_str());
     }
 
     // Didn't get the hand role (a held controller keeps it): release, back off. Not as a treadmill,

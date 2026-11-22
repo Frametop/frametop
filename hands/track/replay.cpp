@@ -30,6 +30,7 @@
 //             --models hand model where it refuses a call. --npu-det: the side cameras' palm search on the NPU
 //             detector too (track/npudetector.h), the CPU tiles where it refuses a round. --npu-cpu-landmarks:
 //             only the detector on the NPU, the landmarks on the CPU (to score the detector alone).
+// --cpus LIST: the cores the replay and its model threads run on (5,6,7: ft-hands' default, off ft-npud's 2-4).
 // --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1,
 //             --pinch-fist-curl R: the pinch detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as
 //             HANDS_PINCH_DIP=1; --pinch-fist-curl: PinchParams::fist_curl, 1.2 as ft-hands, 0 off, as
@@ -104,6 +105,7 @@
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
 //             header has each camera's centre and focal length.
+#include "cpus.h"
 #include "flagbuf.h"
 #include "io.h"
 #include "npudetector.h"
@@ -115,6 +117,7 @@
 #include "tracker.h"
 
 #include <json/json.h>
+#include <sched.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -157,6 +160,7 @@ int main(int argc, char **argv) {
     }
     const std::string dir = argv[1];
     int oracle = 0, threads = 2;
+    std::vector<int> cpus = {5, 6, 7};   // as ft-hands: not ft-npud's cores 2-4
     double slow = 1.0, from = 0, to = 1e9;
     bool cost = false;
     double cost_hand = 10, cost_palm = 18;
@@ -206,6 +210,10 @@ int main(int argc, char **argv) {
         else if (a == "--models" && more) models = argv[++i];
         else if (a == "--npu" && more) npu_dir = argv[++i];
         else if (a == "--npu-det") npu_det = true;
+        else if (a == "--cpus" && more) {
+            cpus = parse_cpus(argv[++i]);
+            if (cpus.empty()) return std::fprintf(stderr, "--cpus: a list such as 5,6,7\n"), 1;
+        }
         else if (a == "--npu-cpu-landmarks") npu_cpu_landmarks = true;
         else if (a == "--cost") cost = true;
         else if (a == "--cost-hand" && more) cost_hand = std::atof(argv[++i]);
@@ -280,6 +288,10 @@ int main(int argc, char **argv) {
         else if (a == "--to" && more) to = std::atof(argv[++i]);
         else return std::fprintf(stderr, "unknown option %s\n", a.c_str()), 1;
     }
+    cpu_set_t set;   // first, so every thread made from here on (the NPU client on this one) runs there, as in ft-hands
+    CPU_ZERO(&set);
+    for (int c : cpus) CPU_SET(c, &set);
+    if (sched_setaffinity(0, sizeof set, &set) < 0) std::perror("sched_setaffinity");
     std::string err;
     std::map<std::string, Camera> calib;
     Nets nets;
@@ -325,7 +337,7 @@ int main(int argc, char **argv) {
         const bool color = std::string(c.name).rfind("color_", 0) == 0;
         if (calib.count(c.name) && (use == "all" || color == (use == "color"))) used[c.name] = calib[c.name];
     }
-    Pool pool(threads, {2, 3, 4});
+    Pool pool(threads, cpus);
     std::unique_ptr<NpuSession> npu_session;
     std::unique_ptr<NpuLandmarks> npu;
     std::unique_ptr<NpuDetector> npu_detector;

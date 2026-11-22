@@ -72,6 +72,7 @@
 // checked 4 times a second and removed when taken; the folder's manifest.json is written last.
 #include "../../conf/ft_conf.h"
 #include "calibfile.h"
+#include "cpus.h"
 #include "flagbuf.h"
 #include "io.h"
 #include "npudetector.h"
@@ -181,18 +182,6 @@ bool setting_number(const std::string &key, double &v) {
     }
     v = x;
     return true;
-}
-
-std::vector<int> parse_cpus(const char *p) {
-    std::vector<int> out;
-    while (*p) {
-        char *end;
-        const long c = std::strtol(p, &end, 10);
-        if (end == p) break;
-        out.push_back(int(c));
-        p = *end == ',' ? end + 1 : end;
-    }
-    return out;
 }
 
 // Where SIGUSR1 puts recordings: $XDG_DATA_HOME/frametop/hands (~/.local/share/...).

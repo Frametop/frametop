@@ -151,6 +151,19 @@ class Calibration:
         """The eyes it maps (0 right, 1 left)."""
         return [c for c in (0, 1) if self.has("pupil", c)]
 
+    def glint_eyes(self):
+        """The eyes with a glint fit: only these can have a glint jump. An eye seen with its pair
+        at under MIN_CLICKS dots has none (2026-11-22's calibration: the left eye at 11 of 26)."""
+        return [c for c in (0, 1) if self.has("glint", c)]
+
+    def jacobian(self, eye, gaze=(0.0, 0.0), step=1.0):
+        """d feature / d gaze of that eye's `where` fit at gaze (yaw, pitch): 2x2, feature units
+        per degree, columns yaw and pitch."""
+        w = self.fits["where", eye]
+        y, p = gaze
+        return np.column_stack([(w.one(y + step, p) - w.one(y - step, p)) / (2 * step),
+                                (w.one(y, p + step) - w.one(y, p - step)) / (2 * step)])
+
     def slip(self, eye, rows):
         """Median slip in pixels from pair sightings `rows` (t, px, py, mx, my), or None."""
         if not self.has("glint", eye) or len(rows) < SLIP_MIN:
@@ -341,15 +354,17 @@ class Shift:
 
 
 def partner(shifts, eye, mapped):
-    """The other eye's Shift from {eye: Shift}, or None when the calibration doesn't map it
-    (`mapped`: the eyes it maps), so its jump can't be asked."""
+    """The other eye's Shift from {eye: Shift}, or None when it can't have a jump (`mapped`: the
+    eyes with a glint fit, Calibration.glint_eyes), so its jump can't be asked. The eyes with a
+    pupil fit were passed until 2026-11-22: an eye mapped without a glint fit never jumps, so
+    with rule "both" the other eye's jumps never counted."""
     return shifts[1 - eye] if (1 - eye) in mapped else None
 
 
 def teach(shifts, lessons, rule, mapped):
     """One click's lessons for both eyes: `shifts` {0: Shift, 1: Shift}, `lessons` {eye:
     (measured shift, glint estimate or None)} for the eyes it teaches (seen, and within their
-    dots), `mapped` the eyes the calibration maps. Whether each eye's jump was in force is read
+    dots), `mapped` the eyes with a glint fit (Calibration.glint_eyes). Whether each eye's jump was in force is read
     before any lesson, since a lesson clears that eye's jump, which the other's rule asks about.
     An eye whose jump was in force, left untaught while the other was taught, is vouched."""
     jumped = {e: sh.in_force(partner(shifts, e, mapped), rule) for e, sh in shifts.items()}
@@ -375,10 +390,16 @@ class SlipTracker:
             self.rows.popleft()
 
     def get(self, now=None):
-        now = time.monotonic() if now is None else now
-        if now - self.at >= self.every:
-            self.at = now
-            s = self.cal.slip(self.eye, list(self.rows))
-            if s is not None:
-                self.value = s
+        self.update(now)
         return self.value
+
+    def update(self, now=None):
+        """A new estimate if one is due (every `every` s) and there are enough sightings, else None."""
+        now = time.monotonic() if now is None else now
+        if now - self.at < self.every:
+            return None
+        self.at = now
+        s = self.cal.slip(self.eye, list(self.rows))
+        if s is not None:
+            self.value = s
+        return s

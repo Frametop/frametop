@@ -119,7 +119,7 @@ def service(fusion_on=True, one=None):
     svc.fusion_on = fusion_on
     svc.fusion = Fusion()
     svc.fusion.fit([(y, p + 1, y, p) for y in (-10, 0, 10) for p in (-10, 0, 10)])   # SteamVR 1 degree high
-    svc.checks = type("Checks", (), {"active": False, "pending": None, "pill_steam": False})()
+    svc.checks = type("Checks", (), {"active": False, "pending": None})()
     svc.sent = []
     svc.send = lambda t, hy, hp, rhy, rhp, eyes: svc.sent.append((round(hy, 3), round(hp, 3), eyes))
     return svc
@@ -161,8 +161,8 @@ svc = service(one=1)
 feed(svc)
 check("SteamVR tracking one eye: no fusion", (svc.sent[-1][:2], svc.counts["fused"]), ((4.0, 2.0), 0))
 svc = service(fusion_on=False)
-check("GAZE_FUSION off: not fusing, SteamVR's eyes not asked for", (svc.fusing, svc.wanted_sources()),
-      (False, "own,mmap1"))
+check("GAZE_FUSION off: not fusing, SteamVR's eyes still asked for (the slip filter's looks)",
+      (svc.fusing, svc.wanted_sources()), (False, "own,mmap1,left,right"))
 feed(svc)
 check("...ours alone", svc.sent[-1][:2], (4.0, 2.0))
 svc = service()

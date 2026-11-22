@@ -3,9 +3,9 @@ headset while it sits off the seating our tracker was calibrated at, then "Looks
 /README.md, "Headset fit"). The gaze service drives it (gazecheck.py, the fit watch); this file
 only decides what it says, from readings of where the headset sits:
 
-  terms   the fit coach's position terms, {"up", "left"} in degrees (fitcoach.assess against the
-          calibration's seating, or ft-eyes' glint jump through fitcoach.slip_terms), or None
-          while there's no fresh reading (eyes moving fast, a blink, nothing asked yet)
+  terms   the fit coach's position terms, {"up", "left"} in degrees, fitcoach.assess's sign:
+          ft-eyes' slip filter's estimate (gazecheck.pill_terms), or None while it isn't sure
+          (just put on, before a steady look or a click)
 
 Pill.step(now, terms) returns what changed for the panel, or None:
   ("show", words, arrow)   open it        ("say", words, arrow)   change what it says

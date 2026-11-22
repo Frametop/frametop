@@ -266,6 +266,20 @@ eyes = settled()
 eyes[0].slip.z = (1.0, 0.0)
 check("glint: none outside its dots", eyeslip.take_glint(eyes[0], eyes[1], 30.0, (40, 0)), None)
 eyes[0].slip.z = (1.0, 0.0)
+
+
+class Ahead:
+    def one(self, x, y):
+        return np.zeros(2)
+
+
+eyes[0].cal.fits = {("glint", 0): Ahead()}
+eyes[0].find = (30.0, 300.0, 200.0, 25.0, (290.0, 195.0))
+check("...but looking within them by its glints (a big push: the slipped gaze reads far out): taken",
+      eyeslip.take_glint(eyes[0], eyes[1], 30.0, (40, 0)) is not None, True)
+del eyes[0].find
+eyes = settled()
+eyes[0].slip.z = (1.0, 0.0)
 r = eyeslip.take_glint(eyes[0], eyes[1], 30.0, (0, 0))
 check("...a reading for the log", (r["z"], r["moved"], r["kind"]), ([1.0, 0.0], False, "glint"))
 KNOCK = 40.0   # px: 10 degrees

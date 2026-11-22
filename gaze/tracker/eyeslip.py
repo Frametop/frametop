@@ -79,15 +79,27 @@ def teach_click(eyes, cal, t, truth, before, glance=False):
     return out, rec
 
 
+def glint_gaze(e, gaze):
+    """Where eye e looks by its newest find's glint pair (the glint fit, which a slip doesn't
+    move), else `gaze`. A big push leaves the slipped gaze reading far out: judged by it, every
+    glint reading was refused as outside the dots until a click (22 s, 2026-11-22)."""
+    f = getattr(e, "find", None)
+    if f is None or f[4] is None:
+        return gaze
+    return e.cal.fits["glint", e.eye].one(f[1] - f[4][0], f[2] - f[4][1])
+
+
 def take_glint(e, other, t, gaze):
-    """Eye e's glint estimate for its filter when one is due, while its gaze is within its dots
-    (further out the glint fit guesses, and a misread pair is likelier). Far off what the filter
+    """Eye e's glint estimate for its filter when one is due, while it looks within its dots by
+    its glints (glint_gaze; further out the glint fit guesses, and a misread pair is likelier). Far off what the filter
     expects (KNOCK_D) for KNOCK_STREAK readings in a row, the same way, in both eyes (slipfilter
     .moved), looking near straight ahead: the headset was knocked, and both filters take it
     nearly whole. The log's reading, or None."""
     z = e.slip.update(t)
-    if (z is None or not np.all(np.isfinite(z)) or not e.cal.has("glint", e.eye)
-            or not e.cal.inside(e.eye, gaze)):
+    if z is None or not np.all(np.isfinite(z)) or not e.cal.has("glint", e.eye):
+        return None
+    gaze = glint_gaze(e, gaze)
+    if not e.cal.inside(e.eye, gaze):
         return None
     y = e.filter.innovation("glint", z, t)
     deg = e.filter.deg(y)

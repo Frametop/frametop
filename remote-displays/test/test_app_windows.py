@@ -57,7 +57,7 @@ class Base(unittest.TestCase):
         set_hosts({"name": "PC", "address": ADDRESS, "kind": "vibepollo", "direct": ["10.0.0.9"]})
         self.b = rd.Backend()
         self.ran, self.answers, self.asked = [], [], []
-        self.b._run = lambda label, *args, stdin=None: self.ran.append(args)
+        self.b._run = lambda label, *args, stdin=None, then=None: self.ran.append(args)
         self.b.appWindowsSet.connect(lambda *a: self.answers.append(a))
         self.sign_in = lambda addresses, user, password, known: (48989, "tok-1", "sha256//own")
         old = rd.ft_hostsignin.app_windows

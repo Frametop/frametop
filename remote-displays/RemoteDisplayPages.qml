@@ -528,6 +528,12 @@ Item {
                         readonly property bool sunshine: modelData.kind === "sunshine"
                         readonly property bool apple: modelData.kind === "apple"
                         readonly property bool vibepollo: !sunshine && !apple
+                        readonly property string kind: modelData.kind
+                        // Its Vibepollo can turn off and set its own monitors (Frametop's build).
+                        readonly property bool canOwnMonitors: vibepollo && modelData.hasToken && kind !== "pin"
+                        readonly property var monitorsListed: backend.hostMonitors.listed[modelData.name] || ({ monitors: [], note: "" })
+                        Component.onCompleted: if (canOwnMonitors && (modelData.monitors || !(modelData.name in backend.hostMonitors.supported)))
+                                                   backend.hostMonitors.refresh(modelData.name)
                         Layout.fillWidth: true
                         contentItem: ColumnLayout {
                             RowLayout {
@@ -655,6 +661,39 @@ Item {
                                     }
                                 }
                             }
+                            // Its own monitors follow its display panels (Frametop's build of
+                            // Vibepollo; host_monitors.py): this changes the PC itself.
+                            ColumnLayout {
+                                visible: hostCard.canOwnMonitors && (backend.hostMonitors.supported[hostCard.modelData.name] === true
+                                                                     || hostCard.modelData.monitors)
+                                spacing: 0
+                                Layout.fillWidth: true
+                                Controls.Switch {
+                                    objectName: "ownMonitors"
+                                    text: "Turn off and set " + hostCard.modelData.name + "'s own monitors"
+                                    checked: hostCard.modelData.monitors
+                                    onToggled: backend.hostMonitors.setControl(hostCard.modelData.name, checked)
+                                }
+                                Controls.Label {
+                                    objectName: "ownMonitorsHelp"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    opacity: 0.7
+                                    text: "On " + hostCard.modelData.name + " itself: while one of its displays streams here, it "
+                                          + "turns off each of its monitors that has no display here or whose display is "
+                                          + "disconnected, and puts each of the others in the mode picked for its display. "
+                                          + "Two minutes after the last one stops, they all go back as they were."
+                                }
+                                Controls.Label {
+                                    objectName: "ownMonitorsNote"
+                                    visible: hostCard.modelData.monitors && hostCard.monitorsListed.note !== ""
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: Kirigami.Theme.negativeTextColor
+                                    text: hostCard.monitorsListed.note
+                                    textFormat: Text.PlainText
+                                }
+                            }
                             // The Frame's microphone rides along with its streams. Only
                             // Frametop's build of Vibepollo receives it.
                             Controls.Switch {
@@ -748,6 +787,16 @@ Item {
                                     id: disp
                                     required property var modelData
                                     readonly property bool appleMain: modelData.app === "apple:physical"
+                                    // A monitor of a PC whose monitors follow its panels: it streams at
+                                    // the mode picked here (or its own), so it has no stream size.
+                                    // (From its own entry: the card's properties aren't there yet
+                                    // while the Repeater makes it.)
+                                    readonly property bool followsMonitor: modelData.followsMonitor
+                                                                           && backend.hostMonitors.supported[modelData.host] !== false
+                                    readonly property bool ownSize: !appleMain && !followsMonitor
+                                    readonly property var monitor: followsMonitor
+                                        ? ((backend.hostMonitors.listed[modelData.host] || {}).monitors || [])
+                                              .find(m => "display:" + m.id === modelData.app) || null : null
                                     property bool expanded: false
                                     Layout.fillWidth: true
                                     Kirigami.Separator { Layout.fillWidth: true }
@@ -810,14 +859,14 @@ Item {
                                             Kirigami.FormData.label: "Stream:"
                                             Controls.SpinBox {
                                                 id: sw
-                                                visible: !disp.appleMain
+                                                visible: disp.ownSize
                                                 from: 640; to: 7680; stepSize: 8; editable: true
                                                 value: disp.modelData.width
                                             }
-                                            Controls.Label { visible: !disp.appleMain; text: "×" }
+                                            Controls.Label { visible: disp.ownSize; text: "×" }
                                             Controls.SpinBox {
                                                 id: sh
-                                                visible: !disp.appleMain
+                                                visible: disp.ownSize
                                                 from: 360; to: 4320; stepSize: 8; editable: true
                                                 value: disp.modelData.height
                                             }
@@ -836,13 +885,20 @@ Item {
                                             Controls.Label { text: sb.value === 0 ? "Mbit/s (auto)" : "Mbit/s" }
                                             Controls.Button {
                                                 text: "Apply"
-                                                enabled: (!disp.appleMain && (sw.value !== disp.modelData.width || sh.value !== disp.modelData.height))
+                                                enabled: (disp.ownSize && (sw.value !== disp.modelData.width || sh.value !== disp.modelData.height))
                                                          || sr.currentValue !== disp.modelData.fps || sb.value * 1000 !== disp.modelData.bitrate
                                                 onClicked: backend.setStream(disp.modelData.id,
-                                                                             disp.appleMain ? disp.modelData.width : sw.value,
-                                                                             disp.appleMain ? disp.modelData.height : sh.value,
+                                                                             disp.ownSize ? sw.value : disp.modelData.width,
+                                                                             disp.ownSize ? sh.value : disp.modelData.height,
                                                                              sr.currentValue, sb.value * 1000)
                                             }
+                                        }
+                                        MonitorModePicker {
+                                            visible: disp.followsMonitor
+                                            Kirigami.FormData.label: "Its monitor:"
+                                            monitor: disp.monitor
+                                            picked: disp.modelData.mode
+                                            onPick: (mode) => backend.hostMonitors.pickMode(disp.modelData.host, disp.modelData.id, mode)
                                         }
                                         Controls.Label {
                                             visible: !disp.modelData.virtual && !disp.modelData.kwin
@@ -851,6 +907,8 @@ Item {
                                             opacity: 0.7
                                             text: disp.appleMain
                                                   ? "Streams the Mac's main display at its own resolution, keeping the Mac's keyboard and trackpad working."
+                                                  : disp.followsMonitor
+                                                  ? "Streams the monitor at the mode picked above, pixel for pixel. Disconnect it to turn the monitor off."
                                                   : "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
                                         }
                                         RowLayout {

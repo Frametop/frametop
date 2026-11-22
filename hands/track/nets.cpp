@@ -23,7 +23,9 @@ V2 to_image(const float tm[6], double x, double y) {
     return {tm[0] * x + tm[1] * y + tm[2], tm[3] * x + tm[4] * y + tm[5]};
 }
 
-// OpenCV's CLAHE (4x4 tiles) on a square crop, in place.
+// OpenCV's CLAHE (4x4 tiles) on a square crop, in place. The interpolation's column terms are tabled once and
+// each row is written back as it's done (a row reads only its own pixels): the same float math pixel for pixel,
+// about twice as fast as computing them per pixel.
 void clahe(uint8_t *img, int n, double clip_limit) {
     constexpr int kTiles = 4;
     const int ts = n / kTiles, area = ts * ts;
@@ -46,22 +48,29 @@ void clahe(uint8_t *img, int n, double clip_limit) {
                 lut[ty][tx][i] = uint8_t(std::min(255, int(sum * scale + 0.5f)));
             }
         }
-    std::vector<uint8_t> out(size_t(n) * n);
+    std::vector<int> cx0(n), cx1(n);
+    std::vector<float> cwx(n);
+    for (int x = 0; x < n; ++x) {
+        const float fx = (x + 0.5f) / ts - 0.5f;
+        cx0[x] = std::clamp(int(std::floor(fx)), 0, kTiles - 1), cx1[x] = std::min(cx0[x] + 1, kTiles - 1);
+        cwx[x] = std::clamp(fx - cx0[x], 0.f, 1.f);
+    }
+    std::vector<uint8_t> row(n);
     for (int y = 0; y < n; ++y) {
         const float fy = (y + 0.5f) / ts - 0.5f;
         const int y0 = std::clamp(int(std::floor(fy)), 0, kTiles - 1), y1 = std::min(y0 + 1, kTiles - 1);
         const float wy = std::clamp(fy - y0, 0.f, 1.f);
+        uint8_t *line = img + size_t(y) * n;
         for (int x = 0; x < n; ++x) {
-            const float fx = (x + 0.5f) / ts - 0.5f;
-            const int x0 = std::clamp(int(std::floor(fx)), 0, kTiles - 1), x1 = std::min(x0 + 1, kTiles - 1);
-            const float wx = std::clamp(fx - x0, 0.f, 1.f);
-            const uint8_t v = img[y * n + x];
+            const int x0 = cx0[x], x1 = cx1[x];
+            const float wx = cwx[x];
+            const uint8_t v = line[x];
             const float top = lut[y0][x0][v] * (1 - wx) + lut[y0][x1][v] * wx;
             const float bot = lut[y1][x0][v] * (1 - wx) + lut[y1][x1][v] * wx;
-            out[size_t(y) * n + x] = uint8_t(top * (1 - wy) + bot * wy + 0.5f);
+            row[x] = uint8_t(top * (1 - wy) + bot * wy + 0.5f);
         }
+        std::copy(row.begin(), row.end(), line);
     }
-    std::copy(out.begin(), out.end(), img);
 }
 
 // Linear stretch of the 1st..99th percentile to 0..255, in place.

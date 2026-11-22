@@ -1,0 +1,5 @@
+#!/bin/sh
+# The Frametop Installer's command in its Flatpak (/app/bin/frametop-installer).
+# --dry-run: a test run that installs nothing.
+export PYTHONPATH=/app/share/frametop-installer${PYTHONPATH:+:$PYTHONPATH}
+exec python3 -m frametop_installer "$@"

@@ -5,7 +5,7 @@
 # Releases). It's about 1.1 GB, under GitHub's 2 GB a file.
 #
 # A v* tag makes a draft GitHub release with the zip, its FrameDrop manifest, its
-# frametop-release.json, and SHA256SUMS (a prerelease when the tag has a "-", like
+# frametop-release.json, the Frametop Installer app (FrametopInstaller.flatpak), and SHA256SUMS (a prerelease when the tag has a "-", like
 # v0.3.0-exp.1). Nothing is public until someone publishes the draft. A manual run keeps the
 # zip as the run's artifact for a week.
 #
@@ -78,6 +78,20 @@ jobs:
             url=("https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Frametop.zip")
           framedrop/build.sh --image "$FT_IMAGE" --version "$VERSION" --commit "$GITHUB_SHA" "${url[@]}"
 
+      # The Frametop Installer app (installer/README.md): a Flatpak bundle of Python on the GNOME
+      # runtime, so nothing compiles and the runtime isn't in it. Installing the bundle fetches
+      # org.gnome.Platform//51 from Flathub; this only needs it to record which one. Its line is
+      # added to SHA256SUMS after the zip's, which get.sh reads by name.
+      - name: FrametopInstaller.flatpak
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.gnome.Platform//51
+          installer/flatpak/build.sh --version "$VERSION"
+          cp installer/build/FrametopInstaller.flatpak framedrop/build/
+          (cd framedrop/build && sha256sum FrametopInstaller.flatpak >>SHA256SUMS)
+
       - name: keep the zip (manual runs)
         if: github.ref_type != 'tag'
         # actions/upload-artifact@v7.0.2
@@ -105,4 +119,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag "${pre[@]}" \
             --title "Frametop $VERSION" --notes-file "$notes" --generate-notes \
             framedrop/build/Frametop.zip framedrop/build/frametop.framedrop.json \
-            framedrop/build/frametop-release.json framedrop/build/SHA256SUMS
+            framedrop/build/frametop-release.json framedrop/build/FrametopInstaller.flatpak \
+            framedrop/build/SHA256SUMS

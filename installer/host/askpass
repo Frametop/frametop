@@ -1,0 +1,29 @@
+#!/usr/bin/python3
+"""SUDO_ASKPASS for the Frametop Installer's install: sudo runs this for your password, and it
+asks the installer's helper (helper.py serve) over its socket. The helper answers only programs
+in the install's own service, and asks you in the window if it doesn't have the password yet.
+The password goes to sudo on stdout and nowhere else.
+
+With the window closed there's nobody to ask: this fails, so sudo does, and install.sh says
+which parts it skipped. Open Frametop Installer again and install again to add them.
+"""
+import os
+import socket
+import sys
+
+path = os.environ.get("FRAMETOP_ASKPASS_SOCKET", f"/run/user/{os.getuid()}/frametop-installer/askpass")
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(600)  # time for you to type it, if the window has to ask
+answer = bytearray()
+try:
+    s.connect(path)  # connecting is the question: the helper answers, then closes
+    while chunk := s.recv(4096):
+        answer += chunk
+except OSError as e:
+    print(f"askpass: the Frametop Installer window isn't answering ({e.strerror or e}): "
+          "open it again, and install again", file=sys.stderr)
+    sys.exit(1)
+if not answer:
+    sys.exit(1)  # you skipped it
+sys.stdout.buffer.write(bytes(answer) + b"\n")
+answer[:] = bytes(len(answer))

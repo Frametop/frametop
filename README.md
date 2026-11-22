@@ -11,7 +11,7 @@ Frametop is a desktop for the Steam Frame that runs on the headset itself, with 
 - **Look and click (experimental).** In gaze mode the pointer goes where you look. Meta+J and Meta+K, or the mouse buttons, click and fine-tune, and each correction teaches the tracker. Calibration runs in the headset.
 - **Made for long sessions.** The displays turn off when the headset isn't used, even on a stand that makes it seem worn. It stays awake on the charger, and you can reach the desktop remotely over VNC.
 
-One settings app comes with it, Frametop Settings: the screens, profiles, remote displays, mice and keyboards, button mappings, gaze, hands, voice, power and remote access, in one window with a search. Optional fixes let Bluetooth LE mice and keyboards like the Swiftpoint Z3 reconnect after they sleep. Install it with one command: see [Install on the headset](#install-on-the-headset).
+One settings app comes with it, Frametop Settings: the screens, profiles, remote displays, mice and keyboards, button mappings, gaze, hands, voice, power and remote access, in one window with a search. Optional fixes let Bluetooth LE mice and keyboards like the Swiftpoint Z3 reconnect after they sleep. Install it with the Frametop Installer app or one command: see [Install on the headset](#install-on-the-headset).
 
 Frametop is an independent project, not made by or affiliated with Valve.
 
@@ -24,6 +24,16 @@ Join the [Frametop Discord](https://discord.gg/W3X9f7z3Bc) for questions, ideas,
 > **SteamOS 0.4:** SteamOS 0.4 moved the eye tracker's data that gaze mode reads. This version of Frametop reads both SteamOS 0.3's and 0.4's, and it's tested on 0.4.5. Run `scripts/doctor.sh` after the update: it says whether the eye tracker's layout is one Frametop knows. It also says whether the update deleted the Bluetooth fixes or our eye tracker's frame grabber, which happens when they were installed by Frametop 0.3.0-exp.3 or older. Reinstall what it names (`setup/bluetooth/install.sh install`, `gaze/tracker/install.sh`). From then on they're kept through updates.
 
 You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or the on-screen one), and about 3 GB of free space.
+
+### With the Frametop Installer (no terminal)
+
+1. In the launcher, choose Launch a program → Desktop.
+2. In a browser on the headset, download [FrametopInstaller.flatpak](https://github.com/Frametop/frametop/releases/latest/download/FrametopInstaller.flatpak) (also on the [releases](https://github.com/Frametop/frametop/releases) page).
+3. Open it from Downloads with a double-click. Discover installs Frametop Installer, plus the GNOME runtime it runs on if the headset doesn't have it yet (about 300 MB, from Flathub). Then open Frametop Installer from the application menu.
+
+It asks which version to install, the latest stable release or the latest experimental one, both built already, and shows whether each is tested on your SteamOS. Then it lists the optional parts as checkboxes, all ticked, and asks for your password once if a part you kept needs it. It shows the install's progress, and the install keeps going if you close the window. If the Frame restarts or crashes during the install, open Frametop Installer again and choose Install again. [installer/README.md](installer/README.md) says how it works and what it's allowed to do.
+
+### From a terminal
 
 1. In the launcher, choose Launch a program → Desktop.
 2. In the application menu, open System → Konsole.

@@ -5518,11 +5518,14 @@ void UpdateHandGuides() {
         int tw = 128, th = 128;
         bool curved = false;
         switch (hg.g.kind) {
-            case handinput::Guide::Corner:
-                if (k == 2 && s) halo = std::max(halo, CornerGlowSize(*s));   // (the laser's: as wide as the handle it presses)
-                arm = resizecorner::GlowArm(W, H);
+            case handinput::Guide::Corner: {
+                // (the laser's: as wide as the handle it presses, the glow style's corner larger than its edges)
+                const bool laserGlow = k == 2 && s && !g_resizeCorner.sharp;
+                if (k == 2 && s) halo = std::max(halo, laserGlow ? resizecorner::CornerOut(GlowOut(*s)) : CornerGlowSize(*s));
+                arm = laserGlow ? resizecorner::CornerArm(resizecorner::GlowArm(W, H)) : resizecorner::GlowArm(W, H);
                 u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
                 break;
+            }
             case handinput::Guide::Edge: {
                 if (k == 2 && s) halo = std::max(halo, CornerGlowSize(*s));   // (the laser's: as deep as its band)
                 const double along = hg.g.sy ? W : H;

@@ -53,9 +53,14 @@ inline overlayregion::Region LegacyTarget(int sx, int sy) {
 // there should be a glow around where the pointer is that allows us to just increase the size on that
 // axis"), a band `out` deep along the whole edge. Panel metres: x right, y up, from its centre.
 inline double GlowArm(double width, double height) { return std::clamp(0.25 * std::min(width, height), 0.03, 0.10); }
+// A corner's glow, and so its hit area, is that much deeper and longer than an edge's band (user, 2026-11-21:
+// "make the grab corner glow a little bit larger so it's easier to grab").
+constexpr double kCornerGrow = 1.3;
+inline double CornerOut(double out) { return out * kCornerGrow; }
+inline double CornerArm(double arm) { return arm * kCornerGrow; }
 // The hit canvas's side, square, centred on the corner or the edge's middle.
 inline double GlowCanvas(int sx, int sy, double width, double height, double arm, double out) {
-    return sx && sy ? 2 * std::max(arm, out) : (sx ? height : width) + 2 * out;
+    return sx && sy ? 2 * std::max(CornerArm(arm), CornerOut(out)) : (sx ? height : width) + 2 * out;
 }
 inline overlayregion::Region GlowRegion(int sx, int sy, double width, double height, double arm, double out) {
     const double size = GlowCanvas(sx, sy, width, height, arm, out), cx = sx * width / 2, cy = sy * height / 2;
@@ -66,8 +71,9 @@ inline overlayregion::Region GlowRegion(int sx, int sy, double width, double hei
     };
     const double w = width / 2, h = height / 2;
     if (sx && sy) {
-        rect(sx * w, sx * (w + out), sy * (h - arm), sy * (h + out));
-        rect(sx * (w - arm), sx * (w + out), sy * h, sy * (h + out));
+        const double ca = CornerArm(arm), co = CornerOut(out);
+        rect(sx * w, sx * (w + co), sy * (h - ca), sy * (h + co));
+        rect(sx * (w - ca), sx * (w + co), sy * h, sy * (h + co));
     } else if (sx) {
         rect(sx * w, sx * (w + out), -h, h);
     } else {
@@ -75,15 +81,15 @@ inline overlayregion::Region GlowRegion(int sx, int sy, double width, double hei
     }
     return region;
 }
-// Whether panel point x, y is on a glow hit area, and which: a corner's first (its L runs `arm` along
-// each edge), else an edge's. Never on the panel itself.
+// Whether panel point x, y is on a glow hit area, and which: a corner's first (its L, CornerOut deep, runs
+// CornerArm along each edge), else an edge's (`out` deep). Never on the panel itself.
 inline bool GlowHit(double width, double height, double arm, double out, double x, double y, int *sx, int *sy) {
-    const double ox = std::fabs(x) - width / 2, oy = std::fabs(y) - height / 2;
-    if (ox > out || oy > out || (ox < 0 && oy < 0)) return false;
+    const double ox = std::fabs(x) - width / 2, oy = std::fabs(y) - height / 2, ca = CornerArm(arm), co = CornerOut(out);
     const int ux = x < 0 ? -1 : 1, uy = y < 0 ? -1 : 1;
-    if ((ox >= 0 && oy >= -arm) || (oy >= 0 && ox >= -arm)) *sx = ux, *sy = uy;
-    else if (ox >= 0) *sx = ux, *sy = 0;
-    else *sx = 0, *sy = uy;
+    if ((ox >= 0 && ox <= co && oy >= -ca && oy <= co) || (oy >= 0 && oy <= co && ox >= -ca && ox <= co)) *sx = ux, *sy = uy;
+    else if (ox >= 0 && ox <= out && oy < 0) *sx = ux, *sy = 0;
+    else if (oy >= 0 && oy <= out && ox < 0) *sx = 0, *sy = uy;
+    else return false;
     return true;
 }
 // Coming up to an edge from inside the panel, within half the band's depth of it: the nearest edge

@@ -194,20 +194,26 @@ int main() {
             for (double y = -H / 2 - 0.1; y <= H / 2 + 0.1; y += 0.0067) {
                 int sx = 9, sy = 9;
                 const bool hit = resizecorner::GlowHit(W, H, arm, out, x, y, &sx, &sy);
-                const bool inside = std::fabs(x) < W / 2 && std::fabs(y) < H / 2;
-                const bool band = std::fabs(x) <= W / 2 + out && std::fabs(y) <= H / 2 + out;
-                assert(hit == (band && !inside));   // the whole band round it, none of the panel
+                // the whole band round it, a corner's L larger (kCornerGrow), none of the panel
+                const double ox = std::fabs(x) - W / 2, oy = std::fabs(y) - H / 2;
+                const double ca = resizecorner::CornerArm(arm), co = resizecorner::CornerOut(out);
+                const bool corner = (ox >= 0 && ox <= co && oy >= -ca && oy <= co) || (oy >= 0 && oy <= co && ox >= -ca && ox <= co);
+                const bool edge = (ox >= 0 && ox <= out && oy < 0) || (oy >= 0 && oy <= out && ox < 0);
+                assert(hit == (corner || edge));
                 if (!hit) continue;
                 const double size = resizecorner::GlowCanvas(sx, sy, W, H, arm, out);
                 const auto region = resizecorner::GlowRegion(sx, sy, W, H, arm, out);
                 assert(overlayregion::Contains(region, 0.5 + (x - sx * W / 2) / size, 0.5 + (y - sy * H / 2) / size));
-                if (sx && sy) assert(std::fabs(x) >= W / 2 - arm - 1e-9 && std::fabs(y) >= H / 2 - arm - 1e-9);
+                if (sx && sy) assert(corner && std::fabs(x) >= W / 2 - ca - 1e-9 && std::fabs(y) >= H / 2 - ca - 1e-9);
                 for (const auto &r : region) assert(r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= 1 + 1e-9 && r.y + r.h <= 1 + 1e-9);
             }
         int sx = 0, sy = 0;   // an edge's middle, just off it: that edge alone
         assert(resizecorner::GlowHit(W, H, arm, out, W / 2 + 0.01, 0, &sx, &sy) && sx == 1 && sy == 0);
         assert(resizecorner::GlowHit(W, H, arm, out, 0, -H / 2 - 0.01, &sx, &sy) && sx == 0 && sy == -1);
         assert(resizecorner::GlowHit(W, H, arm, out, -W / 2 - 0.01, H / 2 + 0.01, &sx, &sy) && sx == -1 && sy == 1);
+        // past a corner further than an edge's band reaches: still the corner's
+        assert(resizecorner::GlowHit(W, H, arm, out, W / 2 + 1.2 * out, -H / 2 - 1.2 * out, &sx, &sy) && sx == 1 && sy == -1);
+        assert(!resizecorner::GlowHit(W, H, arm, out, W / 2 + 1.2 * out, 0, &sx, &sy));
         assert(resizecorner::EdgeNear(W, H, out, W / 2 - 0.005, 0, &sx, &sy) > 0.29 && sx == 1 && sy == 0);
         assert(resizecorner::EdgeNear(W, H, out, 0, 0, &sx, &sy) == 0);
     }

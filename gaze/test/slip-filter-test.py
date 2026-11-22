@@ -369,6 +369,19 @@ r0.reseat()
 sd = r0.slip_sd()
 l0.reseat()
 check("both eyes' reseats count once", (round(l0.slip_sd(), 6) == round(sd, 6), l0.reseated), (True, True))
+r0, l0, hs = pair()
+t = 0.0
+for _ in range(4):   # a day of the headset off and on, steady glints and looks after each
+    r0.reseat()
+    l0.reseat()
+    for _ in range(20):
+        for e in (r0, l0):
+            e.update("glint", e.expect("glint"), t)
+            e.update("steam", e.expect("steam"), t)
+        t += 1.0
+check("after reseats the pill's slip is sure (the eyes' mean) though h alone isn't (2026-11-22: it never opened)",
+      (sf.headset_status(hs)["slip_sd"] <= gazecheck.PILL_SD, sf._largest_sd(hs.P[sf.H, sf.H]) > gazecheck.PILL_SD),
+      (True, True))
 
 # --- Kept across restarts ---
 r0, l0, hs = pair()

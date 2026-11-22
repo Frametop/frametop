@@ -16,7 +16,11 @@
 // rises raise (0.08 m, POINTER_TYPING_RAISE) above where it typed, or turns (its normal's downward
 // part under turned), for leave (0.1 s). Then it's free at once, keys or not: a pinch right after
 // lifting a hand works. It's on the keyboard again once it's back down in the zone while typing. A
-// hand in use out of the zone (its ray up, or holding a gesture: Hand::busy) is free too: pointing
+// freed hand that is still in the zone, or back in it a little above where it typed, while keys come
+// or the posture holds is held back too, though not on the keyboard: reaching for a top-row key
+// raises a palm the 8 cm, and such a hand was free, its typing pinches clicking at the gaze (user,
+// 2026-11-22: "when I type it is clicking when I don't want it to"), unless either hand is in use
+// (Hand::busy: the other holding a gaze pinch makes this one's a chord). A hand in use out of the zone (its ray up, or holding a gesture: Hand::busy) is free too: pointing
 // with one hand and pressing Enter with the other. A hand on the mouse is on the keyboard too (beside
 // it, palm down, at the same height): its pinches are the mouse's buttons.
 //   Out of sight: a hand on the keyboard stays there while the cameras don't see it, up to keep
@@ -154,6 +158,7 @@ public:
             Side &s = side_[k];
             const Hand &h = hands[k];
             if (!h.seen) {
+                s.zone = false;
                 s.deskSince = kNever;  // the model's 0.3 s start over when it's seen again
                 if ((s.parked || s.free) && t - s.seen > (s.parked ? std::max(p_.keep, p_.forget) : p_.forget)) {
                     if (s.parked) log.push_back(std::string("typing: ") + Name(k) + " hand forgotten (unseen)");
@@ -163,6 +168,7 @@ public:
             }
             const double dt = Ever(s.seen) ? std::clamp(t - s.seen, 0.0, 1.0) : 0;
             s.seen = t;
+            s.zone = in[k], s.busy = h.busy;
             if (s.parked) {
                 if (typing && s.desk) {
                     s.desk = false;
@@ -220,14 +226,17 @@ public:
     bool Free(int s) const { return side_[s].free; }
 
     // Why side s may not pinch or grip at t, or nullptr: its hand is on the keyboard (or at the desk
-    // while the mouse is in use), or keys came and it hasn't left the keyboard since.
+    // while the mouse is in use), or keys came and it hasn't left the keyboard since, or it left but
+    // sits in the keyboard zone while typing (and neither hand is in use: its ray up, a gesture held;
+    // the other hand holding a gaze pinch makes this one's a chord, not typing).
     const char *Why(int s, double t) const {
         if (p_.hold <= 0 || s < 0 || s > 1) return nullptr;
         const Side &d = side_[s];
         if (d.parked && !d.desk) return "typing: the hand is on the keyboard";
         if (d.parked && Mousing(t)) return "typing: the hand is at the desk (the mouse in use)";
-        if (d.free) return nullptr;
-        if (Keys(t) || posture_) return "typing";
+        const bool typing = Keys(t) || posture_;
+        if (d.free) return typing && d.zone && !d.busy && !side_[1 - s].busy ? "typing: the hand is over the keyboard" : nullptr;
+        if (typing) return "typing";
         return nullptr;
     }
     // Whether side s may not point (raise a ray) or poke at t: Why, or its hand is at the desk.
@@ -241,6 +250,8 @@ private:
         bool free = false;    // left it since (keys don't hold it back)
         bool known = false;   // restY is where it typed
         bool desk = false;    // parked at the desk (the mouse's use or the desk model), not by typing
+        bool zone = false;    // in the keyboard zone in its last frame (seen)
+        bool busy = false;    // ...and in use (Hand::busy)
         double restY = 0, seen = kNever, leaveSince = kNever, deskSince = kNever;
     };
     static double Dist(const V3 &a, const V3 &b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)); }

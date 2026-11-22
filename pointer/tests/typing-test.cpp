@@ -547,6 +547,44 @@ void TestHeading() {
 
 }  // namespace
 
+// A hand freed while typing by a small lift (reaching for a top-row key: 9 cm, 2026-11-22's log) that
+// settles a little above where it typed, still over the keys: held back while keys come, though not
+// on the keyboard; free again once they stop. Lifted out of the zone it stays free, keys or not.
+void TestFreedButOverTheKeys() {
+    World w;
+    w.hands[0] = Keys(0), w.hands[1] = Keys(1);
+    w.Run(2, 0.2);
+    w.hands[1].palm.y += 0.09;
+    w.Run(0.3, 0.2);
+    CHECK(w.ty.Free(1), "lifted 9 cm: off the keyboard: %s", w.log.c_str());
+    w.hands[1].palm.y -= 0.04;   // settles 5 cm above where it typed: not back down
+    w.hands[0] = Lap(0);         // (the posture off: keys alone hold it)
+    w.Run(1, 0.2);
+    CHECK(!w.ty.Parked(1) && w.ty.Why(1, w.t) != nullptr, "keys coming, the hand over the keys: no pinch");
+    w.Run(2.1);
+    CHECK(w.ty.Why(1, w.t) == nullptr, "keys stopped 2 s ago: free");
+    w.Run(0.5, 0.2);
+    CHECK(w.ty.Why(1, w.t) != nullptr, "keys again: held back again");
+    w.hands[1] = Pointing(1);
+    w.Run(0.5, 0.2);
+    CHECK(w.ty.Why(1, w.t) == nullptr, "lifted out of the zone, keys still coming: free");
+    // in use (holding a gesture) over the keys: not held back
+    w.hands[1] = Keys(1);
+    w.hands[1].palm.y += 0.05;
+    w.hands[1].busy = true;
+    w.Run(0.3, 0.2);
+    CHECK(w.ty.Why(1, w.t) == nullptr, "a gesture held over the keys: free");
+    // over the keys while the other hand holds a gaze pinch: a chord, not typing
+    w.hands[1].busy = false;
+    w.hands[0] = Pointing(0);
+    w.hands[0].busy = true;
+    w.Run(0.3, 0.2);
+    CHECK(w.ty.Why(1, w.t) == nullptr, "the other hand holding a pinch: free (a chord)");
+    w.hands[0].busy = false;
+    w.Run(0.1, 0.05);
+    CHECK(w.ty.Why(1, w.t) != nullptr, "...let go, keys coming: held back");
+}
+
 int main() {
     TestKeysAlone();
     TestPausesKeepTheHandsParked();
@@ -566,6 +604,7 @@ int main() {
     TestOff();
     TestHeading();
     TestNegativeClock();
+    TestFreedButOverTheKeys();
     if (failures) {
         std::printf("%d failures\n", failures);
         return 1;

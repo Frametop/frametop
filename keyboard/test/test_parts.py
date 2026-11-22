@@ -209,6 +209,19 @@ class HandleTest(unittest.TestCase):
         self.touch.turn(0.1, ["move"] + ["0"] * 12)
         self.assertEqual(self.sent, [])
 
+    def test_a_hide_or_a_lost_up_ends_a_handle_drag(self):
+        y = 0.25 * (0.5 - 0.9)
+        self.touch.poke(0.0, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.hidden()
+        self.touch.turn(0.1, ["begin"])
+        self.touch.turn(0.2, ["move"] + ["1", "0", "0", "0", "0", "1", "0", "0", "0", "0", "1", "0.1"])
+        self.assertNotIn("set_pose", [op for op, _ in self.sent])
+        self.touch.poke(1.0, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.tick(1.0 + 3.0)   # its up never came
+        self.touch.turn(4.1, ["begin"])
+        self.touch.turn(4.2, ["move"] + ["1", "0", "0", "0", "0", "1", "0", "0", "0", "0", "1", "0.1"])
+        self.assertNotIn("set_pose", [op for op, _ in self.sent])
+
     def test_a_key_press_sliding_onto_the_strip_stays_the_keys(self):
         self.touch.poke(0.0, self.at("left", "press", 0.0, 0.0), self.GEOMETRY)
         self.touch.poke(0.1, self.at("left", "move", 0.0, 0.25 * (0.5 - 0.9)), self.GEOMETRY)

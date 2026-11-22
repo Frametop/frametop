@@ -88,12 +88,19 @@ class Touch:
     def turn(self, now, words):
         """The pointer helper's two-hand turn ("kb turn ...", handle.Drag.turn) of a panel being
         dragged by its handle."""
+        self.expire(now)
         drag = next(iter(self.drags.values()), None)   # (one panel: the first press's drag)
         pose = drag.turn(now, words) if drag else None
         if pose:
             self.send("set_pose", matrix=pose)
 
+    def expire(self, now):
+        """Handle drags heard nothing of for STUCK seconds (their up or end was lost) are over."""
+        for side in [s for s, d in self.drags.items() if now - d.last >= STUCK]:
+            del self.drags[side]
+
     def tick(self, now):
+        self.expire(now)
         if not self.forwarded:
             return
         for side in sorted(self.pressed):
@@ -109,6 +116,11 @@ class Touch:
         self.forwarded = False
         self.pressed.clear()
         self.last.clear()
+
+    def hidden(self):
+        """The panel hid: nothing holds it, its handle neither."""
+        self.native()
+        self.drags.clear()
 
     def reset(self):
         """The keyboard restarted: it begins with its own pointers."""

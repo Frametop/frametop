@@ -115,7 +115,7 @@ class Host:
 
     def hide(self):
         self.end_steam_field()
-        self.touch.native()
+        self.touch.hidden()
         self.send("hide", end_context=True)
         self.opened_for = None
         self.steam_asked_at = None
@@ -206,7 +206,7 @@ class Host:
                 self.relay.hello(visible)
                 if not visible:  # the user's X, a lease or tracking loss: nothing holds it now
                     self.end_steam_field()
-                    self.touch.native()
+                    self.touch.hidden()
                     self.opened_for = None
                     self.route = self.context = None
                     self.sink = None

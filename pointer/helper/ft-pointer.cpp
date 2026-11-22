@@ -118,9 +118,11 @@
 // OpenVR reports as a floor-sized horizontal plane (2.4 km wide on the Frame): the ray met that
 // "floor" metres past the prompt and the laser started there, so the prompt took no clicks (user,
 // 2026-11-21: "I still can't use the frametop 3d mouse to interact with the setup play space
-// prompt"). It's left out of the hit test (kSystemUi), and while it shows, off our panels, the
-// laser is placed as on the Settings page: it starts near the eye or the hand, and SteamVR's own
-// hit test finds the prompt. A VR game doesn't get the ray then either: the prompt has the input.
+// prompt"). It's left out of the hit test (kSystemUi); it stays shown after the prompt closes, so
+// it says nothing about a prompt being up. Off our panels in a VR game (rayToGame: SteamVR's laser
+// mode off, see "laser mode" in the main loop) the device is placed as on the Settings page: its
+// pose starts near the eye or the hand, as a controller's does, so SteamVR's own laser on a prompt
+// that has taken the input, and the game's on its world, both start in front of what they aim at.
 //
 // Panel edges: off a panel, the cursor stays on that panel's plane while it's within
 // POINTER_EDGE_REACH (0.3 m) of the last point it touched, instead of jumping to
@@ -1309,7 +1311,8 @@ struct Pointer {
     double tiltYaw = 0, tiltPitch = 0;
     double dragDistance = 0, lastDistance = 1.5;  // drag lock: distance from the anchor at the press
     double panelDepth = 0;  // the last panel hit's distance: the free sphere's radius (see the top)
-    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page or a system prompt (kept while dragging)
+    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page, or the ray is a game's (kept while dragging)
+    bool rayToGame = false;     // in a VR game, off our panels: SteamVR's laser mode off (main loop)
     bool catcherHidesHit = false;  // the laser-catching dot hides SteamVR's hit dot (Settings page)
     Clock::time_point dropHoldUntil{};  // after a left release: keep the drag pose this long
     bool debug = false;
@@ -2489,11 +2492,6 @@ struct Pointer {
         PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
     Hit nearest(Vec3 from, Vec3 d);
     bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
-    // A SteamVR system prompt shows (see "SteamVR's system prompts" at the top).
-    bool SystemUiUp() const {
-        const auto it = shown.find(kSystemUi);
-        return it != shown.end() && it->second;
-    }
     void AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t);
     bool HitsAtOrigin(vr::VROverlayHandle_t h);
 };
@@ -3119,7 +3117,8 @@ void Pointer::OverlaysAndRole() {
     // (A game's own OpenXR layers, its menus, are the game's: SteamVR's laser on them took its focus,
     // which hid them, which let it go, five times a second.)
     if (!lastHit.empty() && lastHit.rfind("openxr_", 0) != 0) laserPanelAt = fr.tnow;
-    const bool toGame = inGame && !dashboardUp && !SystemUiUp() && fr.tnow - laserPanelAt > kGameLaserHold;
+    const bool toGame = inGame && !dashboardUp && fr.tnow - laserPanelAt > kGameLaserHold;
+    rayToGame = active && toGame;
     const bool laserOn = active && (leftHeld ? laserModeShown : !toGame);   // (a held press stays whoever's took it)
     if (laserOn != laserModeShown) {
         laserModeShown = laserOn;
@@ -4224,7 +4223,7 @@ void Pointer::AimAndPose() {
     // the eye's line of sight to the cursor, or a hand's ray from the hand
     if (!dragging && !reuse)
         onVrSettings = (fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight)) ||
-                       (SystemUiUp() && !onPanel && !onScene);
+                       (rayToGame && !onPanel && !onScene);
     if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
                         t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {

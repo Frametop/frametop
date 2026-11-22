@@ -128,6 +128,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
+import clickrefit  # noqa: E402  (what clicks teach beyond the shift)
 import eyes_model  # noqa: E402
 import eyeslip  # noqa: E402  (the slip filters fed and read)
 import eyes_pupil  # noqa: E402
@@ -304,14 +305,17 @@ class Eye:
         self.fed = None         # (frame time, CLOCK_MONOTONIC_RAW then) of the newest frame fed
         self.finds = None       # the finds log (Tracker.finds), shared by both eyes
         self.coach = [0.0]      # with the net: until when the fit coach wants pupils (monotonic), shared
+        self.learn = None       # what its clicks taught beyond the shift (clickrefit.Learner) while mapped
 
     def shift_now(self):
         """The shift its gaze is corrected by (the slip filter's), zero while unmapped."""
         return self.filter.s if self.filter else np.zeros(2)
 
-    def use(self, cal, filt=None):
-        """Maps with cal (if it maps this eye), its slip filter `filt` (Tracker.map_eyes')."""
+    def use(self, cal, filt=None, learned=None):
+        """Maps with cal (if it maps this eye), its slip filter `filt` (Tracker.map_eyes') and
+        what its clicks taught (state.json's, or fresh)."""
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
+        self.learn = clickrefit.Learner(self.cal, self.eye, learned) if self.cal else None
         self.slip = (eyes_model.SlipTracker(cal, self.eye, every=GLINT_EVERY, window=GLINT_WINDOW)
                      if self.cal else None)
         self.filter = filt if self.cal else None
@@ -367,7 +371,7 @@ class Eye:
             if self.cal:
                 if pair:
                     self.slip.add(t, (p["x"], p["y"]), mid)
-                g = self.cal.gaze(self.eye, p["x"], p["y"], self.shift_now())
+                g = self.map_gaze(p["x"], p["y"])
                 self.gaze = (t, float(g[0]), float(g[1]), p["x"], p["y"])
                 r = eyeslip.take_glint(self, self.other, t, g)
                 if r and self.log:
@@ -397,11 +401,15 @@ class Eye:
                 self.history.popleft()
             self.find = (t, float(fx), float(fy), None, None)
             if self.cal:
-                g = self.cal.gaze(self.eye, fx, fy, self.shift_now())
+                g = self.map_gaze(fx, fy)
                 self.gaze = (t, float(g[0]), float(g[1]), r["x"], r["y"])
         if self.finds is not None:
             self.finds.write(self, t, p, r)
         self.work += time.perf_counter() - t0
+
+    def map_gaze(self, x, y):
+        """Gaze for a feature at (x, y): the calibration's with the shift, then the click refit."""
+        return self.learn.apply(self.cal.gaze(self.eye, x, y, self.shift_now()))
 
     def window(self, t0, t1):
         """Median pupil and glint midpoint over [t0, t1], the frame count, and the spread."""
@@ -471,32 +479,35 @@ class Tracker:
         if self.cal:
             # Saved before calibrations kept spreads and dots' extents: from its dots, refitted.
             self.cal.fill_from_dots(CALIBRATION.with_name("calibration-dots.jsonl"))
-        saved = None
+        saved = learned = None
         try:
             d = json.loads(STATE.read_text())
             if self.cal and d.get("calibration") == self.cal.info.get("made"):
                 # "slip": the filter's; "shift": eyes_model.Shift's, saved before 2026-11-22.
                 saved = d.get("slip") or d.get("shift")
+                learned = d.get("learn")
         except (OSError, ValueError, AttributeError):
             pass
-        self.map_eyes(self.cal, saved)
+        self.map_eyes(self.cal, saved, learned)
         for e in self.eyes:
             # Kept from the last run, but the headset may have been off since: the saved slip
             # is used until readings say otherwise, and they soon do.
             e.reseat(None)
         self.saved_at = time.monotonic()
 
-    def map_eyes(self, cal, saved=None):
+    def map_eyes(self, cal, saved=None, learned=None):
         """Maps each eye with cal, their slip filters views of one slipfilter.Headset, from
-        state.json's "slip" `saved` (slipfilter.load) or fresh."""
+        state.json's "slip" `saved` (slipfilter.load) or fresh, and what clicks taught each
+        (state.json's "learn" `learned`: {eye: clickrefit.Learner.to_json()}) or nothing."""
         jacs = {c: cal.jacobian(c) for c in (0, 1) if cal is not None and cal.has("pupil", c)}
         filters = slipfilter.load(saved, jacs)
         for e in self.eyes:
-            e.use(cal, filters.get(e.eye))
+            e.use(cal, filters.get(e.eye), (learned or {}).get(str(e.eye)))
 
     def save_state(self):
         d = {"calibration": self.cal.info.get("made") if self.cal else None,
-             "slip": slipfilter.save({e.eye: e.filter for e in self.eyes if e.filter})}
+             "slip": slipfilter.save({e.eye: e.filter for e in self.eyes if e.filter}),
+             "learn": {str(e.eye): e.learn.to_json() for e in self.eyes if e.learn}}
         self.saved_at = time.monotonic()
         try:
             ft_store.write_json(STATE, d, indent=None, newline=False)
@@ -623,12 +634,26 @@ class Tracker:
             glance = len(w) == 5
             t, yaw, pitch = self.command_time(w[1:4])
             out, eyes = eyeslip.teach_click(self.eyes, self.cal, t, (yaw, pitch), CLICK_BEFORE, glance)
+            for c, v in eyes.items():
+                if "raw" in v and self.eyes[c].learn:
+                    for ev in self.eyes[c].learn.add(v["raw"], (yaw, pitch), glance, v["pupil"], v["mid"]):
+                        self.log.event(t, "learned", eye=c, **ev)
+                        print(f"ft-eyes: {EYES[c]} eye learned from clicks: {ev}", flush=True)
             rec = {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": eyes, **({"glance": True} if glance else {})}
             self.save_state()
             with open(CLICKS, "a") as f:
                 f.write(json.dumps(rec) + "\n")
             self.log.event(t, "click", truth=[yaw, pitch], glance=glance, eyes={str(e): v for e, v in rec["eyes"].items()})
             return "ok " + " ".join(out)
+        if w[0] == "clicks-clear":
+            # "Clear click corrections": forget what clicks taught, keep the calibration.
+            for e in self.eyes:
+                if e.learn:
+                    if e.learn.own_glint:
+                        e.cal.fits.pop(("glint", e.eye), None)
+                    e.learn = clickrefit.Learner(e.cal, e.eye)
+            self.save_state()
+            return "ok"
         if w[0] == "look" and len(w) == 4:
             if not self.cal:
                 return "look fail not calibrated"
@@ -660,7 +685,8 @@ class Tracker:
                 "edge_margin": eyes_model.EDGE_MARGIN, "slip": "filter",
                 "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
                 "eyes": {EYES[e.eye]: eyeslip.eye_status(e.filter, self.frame_time()) for e in self.eyes},
-                "headset": eyeslip.headset_status(self.eyes, self.frame_time())}
+                "headset": eyeslip.headset_status(self.eyes, self.frame_time()),
+                "learned": {EYES[e.eye]: e.learn.status() for e in self.eyes if e.learn}}
 
 
 class Want:

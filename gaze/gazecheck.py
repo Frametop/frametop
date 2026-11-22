@@ -58,7 +58,8 @@ again when the file changes) adds two things, with our tracker installed, its re
           calibrated at for fitpill.SHOW_HOLD, follows you as you move it, then says "Looks
           good" and goes. It reads ft-eyes' slip filter (each eye's "slip_deg" in its status,
           gaze/tracker/slipfilter.py), the one estimate the tracker corrects its gaze by, once
-          that's sure to PILL_SD; ft-gazed's steady SteamVR looks keep it current (steamlook.py).
+          that's sure to PILL_SD (PILL_FOLLOW_SD while it shows); ft-gazed's steady SteamVR
+          looks and the glints keep it current (steamlook.py).
           While the pill is open, ft-eyes hears the headset is being moved ("adjusting"), and is
           asked for its status every PILL_EVERY.
 
@@ -193,6 +194,9 @@ PUTON_TIMEOUT = 30.0   # seconds it says what to move before the dot is taken as
 PUTON_GONE = 5.0       # seconds without eyes that close it meanwhile (adjusting loses them)
 PILL_EVERY = 0.4       # seconds between the fit pill's readings (ft-eyes' status)
 PILL_SD = 2.5          # degrees: an eye's slip counts for the pill once its filter is this sure
+PILL_FOLLOW_SD = 4.5   # ...and while it shows: the lease's fast slip keeps slip_sd near 2.5-3, and
+                       # up to 4 on glints alone (no SteamVR looks: the pill sits past RAW_DEG);
+                       # with no readings at all it climbs past this within seconds
 PILL_ADJUST = 2.0      # seconds of "adjusting" told ft-eyes at a time while the pill is open
 
 
@@ -327,12 +331,12 @@ def show_screens(mode, gen):
     return ask(SCREENS, "show", 0.5) or "no reply"
 
 
-def pill_terms(own):
+def pill_terms(own, sd=PILL_SD):
     """The fit pill's reading from ft-eyes' status: {"up", "left"} degrees (fitcoach.assess's
-    terms), each eye's slip_deg averaged over the eyes whose filter is sure to PILL_SD; None
+    terms), each eye's slip_deg averaged over the eyes whose filter is sure to `sd`; None
     while neither is (just put on, before a steady look or a click: "Look straight ahead")."""
     got = [e["slip_deg"] for e in (own.get("eyes") or {}).values()
-           if e.get("slip_deg") and e.get("slip_sd") is not None and e["slip_sd"] <= PILL_SD]
+           if e.get("slip_deg") and e.get("slip_sd") is not None and e["slip_sd"] <= sd]
     if not got:
         return None
     return {"up": sum(g[1] for g in got) / len(got), "left": sum(g[0] for g in got) / len(got)}
@@ -885,7 +889,7 @@ class Checks:
         if self.pill.shown:
             svc.tell_own(f"adjusting {PILL_ADJUST}")   # you're moving it: the slip may change fast
             svc.tell_own("status")                      # (read again next tick: closer than each second)
-        self.pill_send(self.pill.step(now, pill_terms(own)))
+        self.pill_send(self.pill.step(now, pill_terms(own, PILL_FOLLOW_SD if self.pill.shown else PILL_SD)))
 
     def pill_send(self, change):
         if change is None:

@@ -1,16 +1,20 @@
 """eyeslip: ft-eyes' readings for its slip filters (slipfilter.py), and what it says of them: a
-click's and a steady SteamVR look's pupils against the calibration, the `adjusting` lease, each
-eye's status, and slip.jsonl's rows (sliplog.py).
+click's and a steady SteamVR look's pupils against the calibration, the glint estimate (judged
+across both eyes for a knock), the `adjusting` lease, each eye's status, and slip.jsonl's rows
+(sliplog.py).
 
 `eyes` are ft-eyes' Eye objects: each has .eye (0 right, 1 left), .filter (its SlipFilter, None
-while unmapped), .window(t0, t1) (its median pupil over that span's frames), and its newest
-readings .find, .gaze and .glint. `cal` is the tracker's calibration. Times are frame times.
+while unmapped), .window(t0, t1) (its median pupil over that span's frames), its newest
+readings .find, .gaze and .glint, and for take_glint .cal, .slip (eyes_model.SlipTracker) and
+.glint_innov (its last glint reading's innovation). `cal` is the tracker's calibration. Times are frame times.
 """
 import numpy as np
 
 import slipfilter
 
 CLICK_MIN = 5          # frames an eye needs before a click to be taught by it
+GLINT_PAIR = 1.5       # s: two eyes' glint readings this close are of the same moment (each eye
+                       # takes one every GLINT_EVERY, 1 s)
 LOOK_WINDOW = 0.3      # a steady SteamVR look's frames: the 300 ms before it (steamlook.py's window)
 LOOK_MIN = 10          # frames an eye needs in that window
 
@@ -45,6 +49,28 @@ def teach_click(eyes, cal, t, truth, before):
     for c, r in taught.items():
         rec[c].update(after=eyes[c].filter.s.tolist(), **r)
     return out, rec
+
+
+def take_glint(e, other, t, gaze):
+    """Eye e's glint estimate for its filter when one is due, while its gaze is within its dots
+    (further out the glint fit guesses, and a misread pair is likelier). With the other eye's
+    last glint reading off the same way by MOVE_DEG within GLINT_PAIR s, the headset was
+    knocked: both filters take it nearly whole (slipfilter.moved). The log's reading, or None."""
+    z = e.slip.update(t)
+    if z is None or not e.cal.has("glint", e.eye) or not e.cal.inside(e.eye, gaze):
+        return None
+    y = e.filter.innovation("glint", z, t)
+    e.glint_innov = (t, e.filter.deg(y), y)
+    knocked = False
+    o = other.glint_innov if other is not None and other.filter else None
+    if o and t - o[0] <= GLINT_PAIR and slipfilter.moved(e.glint_innov[1], o[1]):
+        knocked = True
+        e.filter.inflate(y)
+        other.filter.inflate(o[2])   # its next reading, within a second, takes it
+        other.glint_innov = e.glint_innov = None
+    r = e.filter.update("glint", z, t)
+    e.glint = (t, _r(z, 2))
+    return {"z": e.glint[1], "moved": knocked, **r}
 
 
 def teach_look(eyes, cal, t, truth, spread):

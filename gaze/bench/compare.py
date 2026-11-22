@@ -450,6 +450,9 @@ def replays(run, truths, only):
         st = json.loads((run.dir / "start" / "eyes-state.json").read_text())
         if st.get("calibration") == cal.info.get("made"):
             shifts = {int(k): v for k, v in st.get("shift", {}).items()}
+            # Since 2026-11-22 ft-eyes keeps its slip filters ("slip"): their slip is the start.
+            shifts = shifts or {int(k): {"base": v["x"][:2]} for k, v in (st.get("slip") or {}).items()
+                                if isinstance(v, dict) and len(v.get("x") or []) >= 2}
     except (OSError, ValueError):
         pass
     frames = {}

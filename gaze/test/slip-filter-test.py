@@ -115,8 +115,19 @@ for _ in range(120):
     t += 0.5
 check("...a slow slide after it: followed", near(f.s, slip, 1.5), True)
 s0 = f.s
-r = f.update("steam", f.expect("steam") + (40.0, 0.0), t)   # 10 degrees off
-check("one wild reading moves it little (Huber)", (near(f.s, s0, 2.0), r["w"] < 1), (True, True))
+plain = sf.SlipFilter(JAC)
+plain.x, plain.P, plain.t = f.x.copy(), f.P.copy(), f.t
+r = f.update("steam", f.expect("steam") + (80.0, 0.0), t)   # 20 degrees off: a blink, say
+plain.update("steam", plain.expect("steam") + (80.0, 0.0), t, robust=False)
+moved, plain_moved = abs(f.s[0] - s0[0]), abs(plain.s[0] - s0[0])
+check("one wild reading counts for less (Huber): under half what it would", (r["w"] < 0.5, moved < 0.5 * plain_moved),
+      (True, True))
+check("...and moves it under a degree", moved < PX, True)
+try:
+    f.update("steam", (float("nan"), 0.0), t)
+    check("a reading that isn't finite: refused", False, True)
+except ValueError:
+    check("a reading that isn't finite: refused", near(f.s, f.s, 0) and bool(np.all(np.isfinite(f.x))), True)
 
 # --- The glint estimate: the same, with its own bias ---
 f = sf.SlipFilter(JAC)
@@ -161,6 +172,100 @@ def move(lease):
 
 
 check("adjusting: a deliberate move followed within two seconds", (move(True) > 9.0, move(False) < 6.0), (True, True))
+
+
+def lease_sd(glint_every):
+    """slip_sd's peak over a minute of the fit pill's lease, with glint readings alone (SteamVR's
+    looks don't count while you look at the pill, past steamlook.RAW_DEG)."""
+    f = sf.SlipFilter(JAC)
+    t, peak, next_glint = 0.0, 0.0, 0.0
+    while t < 60.0:
+        f.adjusting(t, 2.0)
+        if glint_every and t >= next_glint:
+            f.update("glint", f.expect("glint"), t)
+            next_glint = t + glint_every
+        f.predict(t)
+        if t > 10.0:
+            peak = max(peak, f.slip_sd())
+        t += 0.1
+    return peak
+
+
+check("while the pill shows, glints alone keep the slip sure enough for it to follow",
+      lease_sd(1.0) <= gazecheck.PILL_FOLLOW_SD, True)
+check("...but with no readings at all it doesn't", lease_sd(None) > gazecheck.PILL_FOLLOW_SD, True)
+f = sf.SlipFilter(JAC)
+f.predict(0.0)
+f.adjusting(0.0, 1.0)
+f.predict(10.0)   # frames stalled past the lease's end: only its second is fast
+check("a lease counts only until it ends", round(float(f.P[0, 0]), 3),
+      round((sf.START_SD ** 2 + sf.ADJUST_RATE ** 2 * 1.0 + sf.SLIP_RATE ** 2 * 9.0) * PX ** 2, 3))
+
+# --- Glint readings judged across the eyes (eyeslip.take_glint) ---
+import eyeslip  # noqa: E402
+
+
+class FakeCal:
+    def has(self, kind, eye):
+        return True
+
+    def inside(self, eye, gaze):
+        return abs(gaze[0]) < 30
+
+
+class FakeSlip:
+    def __init__(self):
+        self.z = None
+
+    def update(self, t):
+        z, self.z = self.z, None
+        return z
+
+
+class FakeEye:
+    def __init__(self, eye):
+        self.eye, self.filter, self.cal, self.slip = eye, sf.SlipFilter(JAC), FakeCal(), FakeSlip()
+        self.glint = self.glint_innov = None
+
+
+def settled():
+    eyes = [FakeEye(0), FakeEye(1)]
+    for i in range(30):
+        for e in eyes:
+            e.slip.z = (0.0, 0.0)
+            eyeslip.take_glint(e, eyes[1 - e.eye], float(i), (0, 0))
+    return eyes
+
+
+eyes = settled()
+eyes[0].slip.z = (1.0, 0.0)
+check("glint: none outside its dots", eyeslip.take_glint(eyes[0], eyes[1], 30.0, (40, 0)), None)
+eyes[0].slip.z = (1.0, 0.0)
+r = eyeslip.take_glint(eyes[0], eyes[1], 30.0, (0, 0))
+check("...a reading for the log", (r["z"], r["moved"], r["kind"]), ([1.0, 0.0], False, "glint"))
+eyes = settled()
+before = eyes[0].filter.s[0]
+for t, e in ((30.0, 0), (30.5, 1)):   # both eyes' glints 6 degrees off the same way: the headset knocked
+    eyes[e].slip.z = (24.0, 0.0)
+    r = eyeslip.take_glint(eyes[e], eyes[1 - e], t, (0, 0))
+check("both eyes' glints jump the same way: the headset knocked", r["moved"], True)
+for t in (31.0, 31.5):
+    for e in eyes:
+        e.slip.z = (24.0, 0.0)
+        eyeslip.take_glint(e, eyes[1 - e.eye], t, (0, 0))
+check("...taken nearly whole within two readings", [round(float(e.filter.s[0] + e.filter.x[sf.GLINT][0])) > 19
+                                                     for e in eyes], [True, True])
+eyes = settled()
+for t in (30.0, 31.0, 32.0):   # one eye's glints alone: a misread pair, likelier
+    eyes[0].slip.z, eyes[1].slip.z = (24.0, 0.0), (0.0, 0.0)
+    r0 = eyeslip.take_glint(eyes[0], eyes[1], t, (0, 0))
+    eyeslip.take_glint(eyes[1], eyes[0], t + 0.5, (0, 0))
+check("one eye's glints alone: not a knock", (r0["moved"], eyes[0].filter.s[0] < 8.0), (False, True))
+eyes = settled()
+eyes[0].slip.z = (24.0, 0.0)
+eyeslip.take_glint(eyes[0], eyes[1], 30.0, (0, 0))
+eyes[1].slip.z = (24.0, 0.0)
+check("...nor two eyes' far apart in time", eyeslip.take_glint(eyes[1], eyes[0], 33.0, (0, 0))["moved"], False)
 
 # --- Kept across restarts ---
 f = sf.SlipFilter(JAC)
@@ -245,11 +350,55 @@ st = tracker.status()["eyes"]["right"]
 check("the status' slip_deg: 8 px right in the image is 2 degrees of yaw", near(st["slip_deg"], (-2, 0), 0.6), True)
 
 # The headset off: the slip unsure again until readings come.
-right.reseat(Clock.t)
-check("reseat: in the status", tracker.status()["eyes"]["right"]["reseat"], True)
-check("...not 'taught by a click' in the shared memory's flags", bool(right.filter.clicks and not right.filter.reseated), False)
+check("taught by the click (the shared memory's flags bit)", right.filter.taught, True)
+right.slip.add(Clock.t, (300.0, 200.0), (310.0, 210.0))
+right.tick(Clock.t)
+right.tick(Clock.t + fe.GAP + 1.0)   # frames stopped: the headset was off
+check("frames stopping for GAP: reseated", tracker.status()["eyes"]["right"]["reseat"], True)
+check("...not 'taught by a click' in the shared memory's flags", right.filter.taught, False)
+check("...and the glint sightings from before forgotten", len(right.slip.rows), 0)
+Clock.t += fe.GAP + 2.0
+
+# Glint sightings older than their window give no estimate (they were fed again and again).
+import eyes_model  # noqa: E402
+
+class SlipCal:
+    def slip(self, eye, rows):
+        return np.zeros(2) if rows else None
+
+
+stale = eyes_model.SlipTracker(SlipCal(), 0, every=1.0, window=2.0)
+stale.add(10.0, (0, 0), (0, 0))
+check("a glint estimate from fresh sightings", stale.update(11.0) is not None, True)
+check("...none once they're older than the window", stale.update(20.0), None)
+
+# Commands that don't read.
+newest = tracker.frame_time()
+check("look with a number that isn't: refused", tracker.command("look nan 0 0").startswith("look fail"), True)
+check("look from the future: refused", tracker.command(f"look {newest + 100:.3f} 0 0").startswith("look fail"), True)
+check("...the filters' clock where it was", right.filter.t <= newest + 1.0, True)
+check("adjusting nan: refused", tracker.command("adjusting nan"), "adjusting fail not a number")
+try:
+    tracker.command(f"click {newest:.3f} inf 0")
+    check("click with a number that isn't: refused", False, True)
+except ValueError:
+    check("click with a number that isn't: refused", bool(np.all(np.isfinite(right.filter.x))), True)
 
 # state.json: kept, and the old shift's read.
+was = fe.ft_store.write_json
+
+
+def full(*a, **k):
+    raise OSError(28, "No space left on device")
+
+
+fe.ft_store.write_json = full
+try:
+    tracker.save_state()
+    check("a save that fails (a full disk) doesn't stop the tracker", True, True)
+except OSError:
+    check("a save that fails (a full disk) doesn't stop the tracker", False, True)
+fe.ft_store.write_json = was
 tracker.save_state()
 again = fe.Tracker()
 check("state.json keeps each eye's slip", near(again.eyes[0].filter.s, right.filter.s, 1e-3), True)
@@ -288,6 +437,9 @@ check("...an unsure eye left out", gazecheck.pill_terms(own), {"up": 1.0, "left"
 own["eyes"]["right"]["slip_sd"] = 9.0
 check("...neither sure: no reading", gazecheck.pill_terms(own), None)
 check("...nothing from ft-eyes: none", gazecheck.pill_terms({}), None)
+own["eyes"]["right"]["slip_sd"] = 3.5
+check("...while the pill shows, a looser limit", (gazecheck.pill_terms(own), gazecheck.pill_terms(own, gazecheck.PILL_FOLLOW_SD)),
+      (None, {"up": 1.0, "left": -6.0}))
 
 shutil.rmtree(HOME, ignore_errors=True)
 if failures:

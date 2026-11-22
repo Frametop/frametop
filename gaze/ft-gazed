@@ -785,6 +785,9 @@ class Service:
             lr.append((e["hy"], e["hp"]) if "hy" in e and len(unc) == 2 and unc[k] <= EYE_LOST else None)
         own = self.own if time.monotonic() - self.own_at < 5 else {}
         made = (own.get("calibration") or {}).get("made")
+        if not made:   # not calibrated (or its status not heard yet): nothing to read a look against
+            self.steam_looks.reset()
+            return
         look = self.steam_looks.step(s["t"], lr[0], lr[1], self.one_eye, self.fusion, made)
         if look:
             self.tell_own("look {:.6f} {:.4f} {:.4f}".format(*look))

@@ -23,7 +23,9 @@ the headset didn't move. With no headset movement a jump was in force on 42-75% 
 recorder rounds' dot frames and cost up to 6 degrees median (7.07 against 1.91 on the edge dots
 past 35); a jump counted only while both eyes have one kept the re-seat gains and took most of
 that away (frame-eyes findings.md, "The glint jump replayed"). So JUMP_RULES "both", ft-eyes'
-default, applies an eye's jump only while the other eye has one too (or isn't mapped).
+default, applied an eye's jump only while the other eye had one too (or wasn't mapped). Live
+ft-eyes left Shift and JUMP_RULES for its slip filter on 2026-11-22 (slipfilter.py, which judges
+glint moves across the eyes the same way); they stay for bench/compare.py's and lab/'s replays.
 
 A click far outside the calibration's dots measures its shift through the `where` fit's
 extrapolation: a nudge at 42 degrees yaw (the calibration covered +-20) taught a shift that left
@@ -399,6 +401,8 @@ class SlipTracker:
         if now - self.at < self.every:
             return None
         self.at = now
+        while self.rows and self.rows[0][0] < now - self.window:
+            self.rows.popleft()   # only sightings within the window: no pair seen lately, no estimate
         s = self.cal.slip(self.eye, list(self.rows))
         if s is not None:
             self.value = s

@@ -16,6 +16,7 @@ import os
 import time
 
 MAX_BYTES = 20_000_000
+FLUSH_EVERY = 2.0      # s: rows reach the file at least this often (ft-eyes is stopped with os._exit)
 
 
 class SlipLog:
@@ -24,6 +25,7 @@ class SlipLog:
         self.old = path.with_name(path.stem + ".old" + path.suffix)
         self.f = None
         self.size = 0
+        self.flushed = time.monotonic()
 
     def write(self, row):
         try:
@@ -33,6 +35,8 @@ class SlipLog:
             line = json.dumps({"time": round(time.time(), 3), **row}) + "\n"
             self.f.write(line)
             self.size += len(line)
+            if time.monotonic() - self.flushed >= FLUSH_EVERY:
+                self.flush()
             if self.size > self.max_bytes:
                 self.f.close()
                 self.f = None
@@ -44,6 +48,7 @@ class SlipLog:
         self.write({"t": None if t is None else round(t, 4), "event": kind, **fields})
 
     def flush(self):
+        self.flushed = time.monotonic()
         if self.f is not None:
             try:
                 self.f.flush()

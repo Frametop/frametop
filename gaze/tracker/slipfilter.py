@@ -29,7 +29,9 @@ A reading far from what the filter expects (its Mahalanobis distance past HUBER)
 (Huber weighting): a misread glint pair or a SteamVR blink pulls little. Clicks are judged
 across both eyes instead (teach_click): both eyes off by MOVE_DEG the same way is the headset
 moved, and that click is taken nearly whole; one eye far off while the other agrees counts for
-less, as a bad find in that eye.
+less, as a bad find in that eye. Glint readings are judged across the eyes the same way
+(eyeslip.take_glint, with `moved`): both eyes' glints off by MOVE_DEG the same way within a
+second or two is the headset knocked, taken nearly whole too, as the old glint jump did.
 
 Noise settings are first guesses (2026-11-22) from the click replay and the calibration dots:
 tune them from slip.jsonl (ft-eyes' log). They're in degrees of gaze; `jac` (the `where` fit's
@@ -102,6 +104,11 @@ class SlipFilter:
     def s(self):
         return self.x[S].copy()
 
+    @property
+    def taught(self):
+        """A click has said where it sits since the calibration or the last reseat."""
+        return bool(self.clicks) and not self.reseated
+
     def deg(self, v):
         """Feature units as the gaze change they'd be (yaw, pitch degrees)."""
         return np.linalg.solve(self.jac, np.asarray(v, float))
@@ -128,9 +135,9 @@ class SlipFilter:
             self.t = t if self.t is None else self.t
             return
         dt = t - self.t
-        rate = ADJUST_RATE if self.t < self.adjust_until else SLIP_RATE
+        fast = min(max(self.adjust_until - self.t, 0.0), dt)   # the part of dt under the lease
         u2 = self.unit ** 2
-        self.P[S, S] += _I2 * (rate ** 2 * dt * u2)
+        self.P[S, S] += _I2 * ((ADJUST_RATE ** 2 * fast + SLIP_RATE ** 2 * (dt - fast)) * u2)
         for b in (GLINT, STEAM):
             self.P[b, b] += _I2 * (BIAS_RATE ** 2 * dt * u2)
         self.t = t
@@ -153,10 +160,24 @@ class SlipFilter:
     def expect(self, kind):
         return _H[kind] @ self.x
 
+    def innovation(self, kind, z, t):
+        """How far a reading z of `kind` at t is from what the filter expects (feature units)."""
+        self.predict(t)
+        return np.asarray(z, float) - _H[kind] @ self.x
+
+    def inflate(self, y):
+        """The headset moved by about y (feature units): s is that much less sure, so the
+        readings that say so are taken nearly whole."""
+        y = np.asarray(y, float)
+        self.P[S, S] += _I2 * float(y @ y)
+
     def update(self, kind, z, t, sd_scale=1.0, robust=True):
         """Takes a reading z (feature units) of `kind` at time t. sd_scale widens its noise.
         With `robust`, a reading past HUBER counts for less. What happened, for the log:
-        {"kind", "innov_deg", "d", "w"}."""
+        {"kind", "innov_deg", "d", "w"}. A reading or time that isn't finite: ValueError."""
+        z = np.asarray(z, float)
+        if not (np.all(np.isfinite(z)) and math.isfinite(t) and math.isfinite(sd_scale)):
+            raise ValueError("a reading that isn't finite")
         self.predict(t)
         H = _H[kind]
         R = _I2 * (_SD[kind] * sd_scale * self.unit) ** 2
@@ -179,10 +200,8 @@ class SlipFilter:
     def click(self, z, t, sd_scale=1.0, moved=False):
         """A click's reading. `moved`: the headset moved (teach_click), so the slip is taken
         nearly whole: its uncertainty grows by the innovation first."""
-        self.predict(t)
         if moved:
-            y = np.asarray(z, float) - self.x[S]
-            self.P[S, S] += _I2 * float(y @ y)
+            self.inflate(self.innovation("click", z, t))
         r = self.update("click", z, t, sd_scale, robust=False)
         self.clicks = 1 if self.reseated else self.clicks + 1
         self.reseated = False
@@ -213,28 +232,26 @@ class SlipFilter:
         return f
 
 
+def moved(a, b):
+    """Two eyes' innovations (degrees) say the headset moved: both past MOVE_DEG, the same way."""
+    na, nb = float(np.hypot(*a)), float(np.hypot(*b))
+    return min(na, nb) > MOVE_DEG and float(np.asarray(a) @ np.asarray(b)) / max(na * nb, 1e-9) > MOVE_COS
+
+
 def teach_click(filters, lessons, t):
     """One click for both eyes: `filters` {eye: SlipFilter}, `lessons` {eye: z} for the eyes it
     teaches (seen, and within their calibration dots). Judged across the eyes first (see the
     top). Returns {eye: what happened}, each with "gate": "moved", "lone" or "plain"."""
-    innov = {}
-    for e, z in lessons.items():
-        f = filters[e]
-        f.predict(t)
-        innov[e] = f.deg(np.asarray(z, float) - f.x[S])
+    innov = {e: filters[e].deg(filters[e].innovation("click", z, t)) for e, z in lessons.items()}
     size = {e: float(np.hypot(*v)) for e, v in innov.items()}
-    moved = False
-    if len(innov) == 2:
-        a, b = innov[0], innov[1]
-        cos = float(a @ b) / max(size[0] * size[1], 1e-9)
-        moved = min(size.values()) > MOVE_DEG and cos > MOVE_COS
+    both = len(innov) == 2 and moved(innov[0], innov[1])
     out = {}
     for e, z in lessons.items():
-        scale, gate = 1.0, "moved" if moved else "plain"
+        scale, gate = 1.0, "moved" if both else "plain"
         o = 1 - e
-        if not moved and o in size and size[e] > LONE_DEG and size[o] <= AGREE_DEG:
+        if not both and o in size and size[e] > LONE_DEG and size[o] <= AGREE_DEG:
             scale, gate = size[e] / AGREE_DEG, "lone"
-        r = filters[e].click(z, t, scale, moved)
+        r = filters[e].click(z, t, scale, both)
         r["gate"] = gate
         out[e] = r
     return out

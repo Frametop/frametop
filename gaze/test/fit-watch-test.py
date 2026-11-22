@@ -357,10 +357,12 @@ check("  no pointer hiding for it", any(c == "calpanel 1" for c in since(n)), Fa
 check("  in the status", svc.checks.status()["fit_pill"], "Nudge down")
 check("  ft-eyes told the headset is being moved", wait(lambda: got("adjusting", g), 2) and got("adjusting", g)[0],
       ["adjusting", str(gazecheck.PILL_ADJUST)])
-eyes_state["slip"] = (0.0, -4.0)
-check("nudged partway: slightly", wait(lambda: "text Nudge slightly down" in since(n), 3), True)
+eyes_state["slip"], eyes_state["sd"] = (0.0, -4.0), 3.0   # moving it makes the filter less sure
+check("nudged partway: slightly (followed though less sure while it shows)",
+      wait(lambda: "text Nudge slightly down" in since(n), 3), True)
 eyes_state["slip"] = (0.0, 0.0)
 check("back: looks good", wait(lambda: "text Looks good" in since(n), 4), True)
+eyes_state["sd"] = 0.5
 check("  with a tick", "mark good" in since(n), True)
 check("  then it goes", wait(lambda: "hide" in since(n), fitpill.GOOD_SECONDS + 2), True)
 time.sleep(0.5)

@@ -771,19 +771,30 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
 // a sweep across one on the way to another spot of the PC's doesn't take it.
 #define KEYS_FOLLOW_MS 400
 
+// Typing goes to panel `screen`, as after a laser's click there: a remote screen's stream, or the
+// desktop with KWin's keyboard on that screen.
+static void typing_to(struct server *s, int screen) {
+    if (ft_remote_is(screen)) {
+        set_key_remote(s, screen);
+    } else {
+        if (screen >= 0 && screen < MAX_SCREENS && s->screens[screen] && s->screens[screen]->toplevel)
+            keyboard_enter(s, s->screens[screen]->toplevel->base->surface);
+        set_key_remote(s, -1);
+    }
+    s->keys_clicked = true;
+}
+
 // The 3D mouse left the remote screen typing went to and rests on another panel (user, 2026-11-21:
 // "it's only typing into the vibepollo display and is not typing into others when I change the
-// cursor focus"): typing comes back with it, as Meta does (keys_update's sixth word), into that
-// panel when it's one of the desktop's. A press held (a drag off the PC's screen) moves nothing.
+// cursor focus"): typing comes with it, to that panel, another remote screen or one of the
+// desktop's, as Meta does (keys_update's sixth word). A press held (a drag off the PC's screen)
+// moves nothing.
 static void keys_follow_mouse(struct server *s, int mouse, uint32_t t) {
     if (mouse != s->mouse_on) s->mouse_on = mouse, s->mouse_on_ms = t;
-    if (s->key_remote < 0 || mouse < 0 || mouse == s->key_remote || ft_remote_is(mouse)) return;
+    if (s->key_remote < 0 || mouse < 0 || mouse == s->key_remote) return;
     if (t - s->mouse_on_ms < KEYS_FOLLOW_MS || ft_vr_mouse_screen() != mouse) return;
-    if (mouse < MAX_SCREENS && s->screens[mouse] && s->screens[mouse]->toplevel)
-        keyboard_enter(s, s->screens[mouse]->toplevel->base->surface);
     wlr_log(WLR_INFO, "typing leaves remote %d: the 3D mouse is on panel %d", s->key_remote, mouse);
-    set_key_remote(s, -1);
-    s->keys_clicked = true;
+    typing_to(s, mouse);
 }
 
 // Tell the input relay where typing goes, and whether the screens show, on a change and every
@@ -1093,6 +1104,10 @@ static void relay_button(struct server *s, uint32_t code, bool pressed, char *re
             remote = s->relay_remote[b] - 1;
         }
         if (remote >= 0) {
+            if (pressed && code == BTN_LEFT) {
+                spot_dismiss(s, "click");
+                typing_to(s, remote);
+            }
             s->relay_remote[b] = pressed ? remote + 1 : 0;
             struct ft_event e = {.type = FT_BUTTON, .screen = remote, .x = -1, .y = -1, .button = code, .pressed = pressed};
             ft_remote_event(&e);  // a remote that went meanwhile: nothing to release
@@ -1100,6 +1115,12 @@ static void relay_button(struct server *s, uint32_t code, bool pressed, char *re
         }
     }
     if (pressed && relay_can_press(s)) own_hand(s);
+    // The 3D mouse's click takes the typing where it lands, as a laser's does (handle_vr_event):
+    // without this, typing stayed on the remote screen clicked by laser last.
+    if (pressed && code == BTN_LEFT && relay_can_press(s)) {
+        spot_dismiss(s, "click");
+        typing_to(s, s->pointer_focus->index);
+    }
     if (!ft_relay_button(&s->relay_buttons, code, pressed, relay_can_press(s)))
         return (void)snprintf(reply, size, pressed ? "ok no pointer, or held" : "ok not held");
     wlr_seat_pointer_notify_button(s->seat, now_ms(), code,

@@ -1,7 +1,8 @@
-// The NPU palm detector (npu-hands train/student/det.py) as a PalmDetector: each side camera's image as
-// grid x grid tiles (det_tiles) through ft-npud, decoded on the CPU (decode_det, merge_palms: det.py's decode and
-// merge) into Palms whose roi() is ft-hands' usual landmark crop. When the daemon is missing, serves no detector
-// or fails a request, run() returns false and the tracker uses the CPU palm search.
+// The NPU palm detector (npu-hands train/student/det.py) as a PalmDetector: a side camera's image as grid x grid
+// tiles (det_tiles, at most NpuClient::kMaxCrops: one ft-npud request) posted to ft-npud, decoded on the CPU when
+// collected (decode_det, merge_palms: det.py's decode and merge) into Palms whose roi() is ft-hands' usual landmark
+// crop. When the daemon is missing, serves no detector or fails a request, post() or collect() returns false and
+// the tracker uses the CPU palm search.
 #pragma once
 
 #include "npusession.h"
@@ -30,8 +31,9 @@ public:
     NpuDetector(const Nets &nets, NpuSession &session, int grid = kGrid, double frac = kFrac, float thr = kThreshold)
         : nets_(nets), s_(session), grid_(grid), frac_(frac), thr_(thr) {}
     bool covers(const std::string &camera) const override { return camera == "slam_left" || camera == "slam_right"; }
-    bool run(const std::vector<const Image *> &images, std::vector<std::vector<Palm>> &out) override;
-    NpuTimes times;
+    bool post(const Image &image, const std::string &camera) override;
+    bool collect(std::string &camera, std::vector<Palm> &out) override;
+    NpuTimes times;   // wait: the time collect() waited for the reply
 
 private:
     const Nets &nets_;
@@ -39,4 +41,9 @@ private:
     int grid_;
     double frac_;
     float thr_;
+    // the posted request
+    std::string camera_;
+    int n_ = 0, connection_ = 0;
+    float tm_[NpuClient::kMaxCrops][6];
+    double crop_ms_ = 0;
 };

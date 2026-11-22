@@ -2,7 +2,8 @@
 // it serves one, the palm detector: its UID-owned shared memory (a 64-byte header, 4 crop slots, 4 landmark output
 // slots, 4 detector output slots) and its SOCK_SEQPACKET doorbell (send the crop count, kDet | count for the
 // detector, receive one status byte). One request at a time; any failure or timeout closes the connection, so a
-// late reply can never be read as the next one's.
+// late reply can never be read as the next one's. A detector request can also be posted and settled later
+// (post_det, settle): the crop slots then belong to it until settle(), and any other request settles it first.
 #pragma once
 
 #include <cstddef>
@@ -31,13 +32,18 @@ public:
     const uint8_t *output(int i) const { return shm_ + kOuts + size_t(i) * out_bytes_; }
     float wrapper_ms() const;   // the DSP's time for the last request
     float daemon_ms() const;    // ft-npud's own time for it, request received to outputs published
-    // The detector (has_detector()): n whole-image crops in, det_output(i) out (obj then reg; value = q * scale).
+    // The detector (has_detector()): n whole-image crops in (post_det, then settle), det_output(i) out (obj then
+    // reg; value = q * scale).
     bool has_detector() const;
-    bool run_det(int n, int timeout_ms, std::string &err);
     const int8_t *det_output(int i) const {
         return reinterpret_cast<const int8_t *>(shm_ + det_outs() + size_t(i) * kDetBytes);
     }
     float det_scale(int which) const;   // 0: obj's, 1: reg's
+    // post_det rings the doorbell and returns; settle waits for its reply (true at once when nothing is in
+    // flight). Write no crop slot in between.
+    bool post_det(int n, std::string &err);
+    bool settle(int timeout_ms, std::string &err);
+    bool in_flight() const { return in_flight_; }
 
 private:
     static constexpr size_t kHeader = 64, kCrops = 4096, kOuts = kCrops + size_t(kMaxCrops) * kCrop * kCrop;
@@ -45,8 +51,10 @@ private:
     static constexpr uint32_t kFeatDet = 1;
     size_t det_outs() const { return kOuts + size_t(kMaxCrops) * out_bytes_; }
     bool request(uint8_t req, int timeout_ms, std::string &err);
+    bool post(uint8_t req, std::string &err);
     float header_float(int word) const;
     int sock_ = -1;
+    bool in_flight_ = false;
     uint8_t *shm_ = nullptr;
     size_t shm_bytes_ = 0, out_bytes_ = 0;
 };

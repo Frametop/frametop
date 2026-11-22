@@ -53,18 +53,13 @@ bool NpuClient::open(const std::string &dir, size_t out_bytes, uint32_t graph_id
 
 void NpuClient::close() {
     if (sock_ >= 0) ::close(sock_), sock_ = -1;
+    in_flight_ = false;
     if (shm_) munmap(shm_, shm_bytes_), shm_ = nullptr;
 }
 
 bool NpuClient::run(int n, int timeout_ms, std::string &err) {
     if (n < 1 || n > kMaxCrops) return err = "crop count out of range", false;
     return request(uint8_t(n), timeout_ms, err);
-}
-
-bool NpuClient::run_det(int n, int timeout_ms, std::string &err) {
-    if (n < 1 || n > kMaxCrops) return err = "crop count out of range", false;
-    if (!has_detector()) return err = "ft-npud serves no detector", false;
-    return request(uint8_t(kDet | n), timeout_ms, err);
 }
 
 bool NpuClient::has_detector() const {
@@ -74,9 +69,27 @@ bool NpuClient::has_detector() const {
     return features & kFeatDet;
 }
 
+bool NpuClient::post_det(int n, std::string &err) {
+    if (n < 1 || n > kMaxCrops) return err = "crop count out of range", false;
+    if (!has_detector()) return err = "ft-npud serves no detector", false;
+    return post(uint8_t(kDet | n), err);
+}
+
 bool NpuClient::request(uint8_t req, int timeout_ms, std::string &err) {
+    return settle(timeout_ms, err) && post(req, err) && settle(timeout_ms, err);
+}
+
+bool NpuClient::post(uint8_t req, std::string &err) {
     if (sock_ < 0) return err = "not connected", false;
+    if (in_flight_) return err = "a request is still in flight", close(), false;
     if (send(sock_, &req, 1, MSG_NOSIGNAL) != 1) return err = sys_err("ft-npud send"), close(), false;
+    in_flight_ = true;
+    return true;
+}
+
+bool NpuClient::settle(int timeout_ms, std::string &err) {
+    if (!in_flight_) return true;
+    in_flight_ = false;
     pollfd p{sock_, POLLIN, 0};
     const int r = poll(&p, 1, timeout_ms);
     if (r == 0) return err = "ft-npud timed out", close(), false;

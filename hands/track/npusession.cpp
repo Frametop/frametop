@@ -3,7 +3,11 @@
 #include <cstdio>
 
 bool NpuSession::ensure() {
-    if (client_.connected()) return true;
+    if (client_.connected()) {
+        std::string e;
+        if (!client_.settle(kTimeoutMs, e)) return fail(e), false;
+        return true;
+    }
     const auto now = std::chrono::steady_clock::now();
     if (now < retry_at_) return false;
     retry_at_ = now + std::chrono::milliseconds(int(kRetrySeconds * 1000));
@@ -16,6 +20,7 @@ bool NpuSession::ensure() {
     std::fprintf(stderr, "npu: ft-npud connected (graph %08x%s)\n", heads_.graph_id,
                  client_.has_detector() ? ", detector" : "");
     err_.clear();
+    ++connection_;
     return true;
 }
 
@@ -28,7 +33,7 @@ void NpuSession::fail(const std::string &why) {
 std::string NpuTimes::summary() const {
     const double n = std::max(requests, 1);
     char b[160];
-    std::snprintf(b, sizeof b, "%.2f ms DSP, %.2f in ft-npud, %.2f round trip, %.2f crops a request", dsp / n,
-                  daemon / n, wall / n, crop / n);
+    std::snprintf(b, sizeof b, "%.2f ms DSP, %.2f in ft-npud, %.2f waited, %.2f crops a request", dsp / n,
+                  daemon / n, wait / n, crop / n);
     return b;
 }

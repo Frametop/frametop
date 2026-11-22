@@ -75,39 +75,43 @@ std::vector<Palm> merge_palms(std::vector<Palm> palms) {
     return out;
 }
 
-bool NpuDetector::run(const std::vector<const Image *> &images, std::vector<std::vector<Palm>> &out) {
-    if (images.empty() || !s_.ensure() || !s_.client().has_detector()) return false;
+bool NpuDetector::post(const Image &image, const std::string &camera) {
+    if (pending_ || !s_.ensure() || !s_.client().has_detector()) return false;
     NpuClient &cl = s_.client();
-    struct Job {
-        size_t image;
-        Roi roi;
-    };
-    std::vector<Job> jobs;
-    for (size_t i = 0; i < images.size(); ++i)
-        for (const Roi &r : det_tiles(images[i]->width, images[i]->height, grid_, frac_)) jobs.push_back({i, r});
-    std::vector<std::vector<Palm>> found(images.size());
-    float tm[NpuClient::kMaxCrops][6];
+    const std::vector<Roi> tiles = det_tiles(image.width, image.height, grid_, frac_);
+    n_ = int(std::min<size_t>(NpuClient::kMaxCrops, tiles.size()));
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < n_; ++i) nets_.palm_crop(image, tiles[size_t(i)], cl.crop(i), tm_[i]);
+    crop_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    std::string e;
+    if (!cl.post_det(n_, e)) return s_.fail(e), false;
+    camera_ = camera, connection_ = s_.connection(), pending_ = true;
+    return true;
+}
+
+bool NpuDetector::collect(std::string &camera, std::vector<Palm> &out) {
+    if (!pending_) return false;
+    pending_ = false;
+    NpuClient &cl = s_.client();
+    // lost with the connection (a request settled by another backend's ensure() kept its outputs: read on)
+    if (!cl.connected() || s_.connection() != connection_) return false;
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool was_in_flight = cl.in_flight();
+    std::string e;
+    if (!cl.settle(NpuSession::kTimeoutMs, e)) return s_.fail(e), false;
+    if (was_in_flight)   // the header holds this request's times only until the next request
+        times.add(crop_ms_, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), cl);
     const float s_obj = cl.det_scale(0), s_reg = cl.det_scale(1);
-    for (size_t at = 0; at < jobs.size(); at += NpuClient::kMaxCrops) {
-        const int n = int(std::min<size_t>(NpuClient::kMaxCrops, jobs.size() - at));
-        const auto t0 = std::chrono::steady_clock::now();
-        for (int i = 0; i < n; ++i) nets_.palm_crop(*images[jobs[at + i].image], jobs[at + i].roi, cl.crop(i), tm[i]);
-        const auto t1 = std::chrono::steady_clock::now();
-        std::string e;
-        if (!cl.run_det(n, NpuSession::kTimeoutMs, e)) return s_.fail(e), false;
-        const auto t2 = std::chrono::steady_clock::now();
-        times.add(std::chrono::duration<double, std::milli>(t1 - t0).count(),
-                  std::chrono::duration<double, std::milli>(t2 - t1).count(), cl);
-        for (int i = 0; i < n; ++i) {
-            const int8_t *o = cl.det_output(i);
-            for (DetPoint d : decode_det(o, o + G * G, s_obj, s_reg, thr_)) {
-                d.wrist = Nets::crop_to_image(tm[i], d.wrist[0], d.wrist[1]);
-                d.middle = Nets::crop_to_image(tm[i], d.middle[0], d.middle[1]);
-                found[jobs[at + i].image].push_back(palm_from(d));
-            }
+    std::vector<Palm> found;
+    for (int i = 0; i < n_; ++i) {
+        const int8_t *o = cl.det_output(i);
+        for (DetPoint d : decode_det(o, o + G * G, s_obj, s_reg, thr_)) {
+            d.wrist = Nets::crop_to_image(tm_[i], d.wrist[0], d.wrist[1]);
+            d.middle = Nets::crop_to_image(tm_[i], d.middle[0], d.middle[1]);
+            found.push_back(palm_from(d));
         }
     }
-    for (auto &f : found) f = merge_palms(std::move(f));
-    out = std::move(found);
+    out = merge_palms(std::move(found));
+    camera = camera_;
     return true;
 }

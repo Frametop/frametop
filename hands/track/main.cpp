@@ -1228,7 +1228,7 @@ int main(int argc, char **argv) {
                             npu->times.requests, npu->times.summary().c_str(), npu_session->failures,
                             npu_session->last_error().empty() ? "" : "; last: ", npu_session->last_error().c_str());
             if (npu_detector)
-                std::printf("        npu detector: %d search rounds (%.2f ms each), %d on the CPU tiles, %d requests (%s)\n",
+                std::printf("        npu detector: %d cameras searched (%.2f ms of the steps each), %d searches on the CPU tiles, %d requests (%s)\n",
                             s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
                             npu_detector->times.requests, npu_detector->times.summary().c_str());
             if (!color.empty())

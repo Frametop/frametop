@@ -445,6 +445,9 @@ void Tracker::associate() {
 std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &images, int64_t t_ns) {
     const auto t_step = std::chrono::steady_clock::now();
     ++stats.sets;
+    // the detector's palms posted last step, before this step's other NPU requests
+    const double det_blocked = rounds_ ? rounds_->blocked_ms : 0;
+    if (rounds_) rounds_->begin_step();
     // Views in cameras without a frame in this set wait, as they are, for their camera's
     // next one: the colour cameras run on their own clock, so a set can hold the mono
     // cameras, the colour ones, or both (drop_camera ends them when a camera stops being used).
@@ -573,30 +576,30 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         for (int id : tracked) ids += " " + std::to_string(id);
         note("search-blocked tracked%s", ids.c_str());
     }
-    if (tracked.size() < 2 && due) {
+    const bool det_ready = rounds_ && !rounds_->ready().empty();
+    if (tracked.size() < 2 && (due || det_ready)) {
         const bool rotation_due = (t_ns - search_ns_) / 1e9 >= kSearchInterval - 0.01;
         search_ns_ = rotation_due ? t_ns : search_ns_;
         const int budget = tracked.empty() ? search_budget_ : search_budget1_;
-        // the detector's cameras, on the rotation's rounds: its palms, no CPU tiles there
+        // the detector's cameras: the palms it found there last step, and no CPU tiles there while it works; a
+        // search due starts its next round (posted at the end of this step)
         std::vector<std::pair<const Camera *, std::vector<Palm>>> detected;
-        if (detector_ && rotation_due) {
-            std::vector<const Camera *> dc;
-            std::vector<const Image *> di;
-            for (auto &[name, cam] : cams_)
-                if (images.count(name) && detector_->covers(name)) dc.push_back(cam), di.push_back(&images.at(name));
-            std::vector<std::vector<Palm>> got;
-            const auto t0 = std::chrono::steady_clock::now();
-            if (!di.empty() && detector_->run(di, got)) {
-                for (size_t i = 0; i < dc.size(); ++i) detected.push_back({dc[i], std::move(got[i])});
-                ++stats.det_rounds;
-                stats.det_ms += ms_since(t0);
-            } else if (!di.empty()) {
-                ++stats.det_fallbacks;
+        const bool det_on = rounds_ && rounds_->healthy();
+        if (rounds_) {
+            for (const auto &[name, palms] : rounds_->ready()) {
+                const auto c = cams_.find(name);
+                if (c != cams_.end()) detected.push_back({c->second, palms});
+            }
+            stats.det_rounds += int(rounds_->ready().size());
+            stats.det_fallbacks += due && !det_on;
+            if (due) {
+                std::vector<std::string> covered;
+                for (auto &[name, cam] : cams_)
+                    if (images.count(name) && rounds_->covers(name)) covered.push_back(name);
+                rounds_->start(covered);
             }
         }
-        auto by_detector = [&](const Camera *c) {
-            return std::any_of(detected.begin(), detected.end(), [c](const auto &d) { return d.first == c; });
-        };
+        auto by_detector = [&](const Camera *c) { return det_on && rounds_->covers(c->name); };
         std::vector<Tile *> picked;
         // first, tiles on where lost hands should be now
         std::vector<Tile> aimed;
@@ -629,8 +632,8 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         for (Tile &t : aimed) picked.push_back(&t);
         // aimed tiles share the budget, but the rotation keeps at least one tile (unless it's not due:
         // with every_step, aimed tiles go up between the rotation's rounds)
-        // (after a detector round, one tile: the cameras it doesn't cover hold under 1% of hands)
-        const int rotation = !rotation_due ? 0 : !detected.empty() ? 1 : std::max(1, budget - int(aimed.size()));
+        // (with the detector on, one tile: the cameras it doesn't cover hold under 1% of hands)
+        const int rotation = !rotation_due ? 0 : det_on ? 1 : std::max(1, budget - int(aimed.size()));
         if (rotation_due)
             for (Tile &t : tiles_)
                 if (images.count(t.cam->name) && !by_detector(t.cam)) t.credit += t.weight;
@@ -794,6 +797,11 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
             ++stats.created;
             note("new %d %s (split off)", v.hand, v.cam->name.c_str());
         }
+    // the detector's next camera, after this step's other NPU requests
+    if (rounds_) {
+        rounds_->end_step(images);
+        stats.det_ms += rounds_->blocked_ms - det_blocked;
+    }
     last_ns_ = t_ns;
     stats.step_ms += ms_since(t_step);
     return out;

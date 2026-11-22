@@ -850,7 +850,7 @@ int main(int argc, char **argv) {
         std::printf("npu: %d landmark calls in %d requests (%s), %d on the CPU, %d failures\n", s.npu_calls,
                     npu->times.requests, npu->times.summary().c_str(), s.npu_fallbacks, npu_session->failures);
     if (npu_detector)
-        std::printf("npu detector: %d search rounds (%.2f ms each), %d on the CPU tiles, %d requests (%s)\n",
+        std::printf("npu detector: %d cameras searched (%.2f ms of the steps each), %d searches on the CPU tiles, %d requests (%s)\n",
                     s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
                     npu_detector->times.requests, npu_detector->times.summary().c_str());
     {

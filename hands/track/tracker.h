@@ -3,6 +3,7 @@
 #pragma once
 
 #include "calib.h"
+#include "detrounds.h"
 #include "landmarkbatch.h"
 #include "nets.h"
 #include "palmdetector.h"
@@ -64,8 +65,8 @@ struct Stats {
     double palm_ms = 0, hand_ms = 0, step_ms = 0;   // summed batch times
     int palm_batches = 0, hand_batches = 0;
     int npu_calls = 0, npu_fallbacks = 0;   // landmark calls the batch backend (the NPU) ran, and refused
-    int det_rounds = 0, det_fallbacks = 0;  // search rounds the palm detector covered, and refused (tiles ran)
-    double det_ms = 0;
+    int det_rounds = 0, det_fallbacks = 0;  // cameras the palm detector searched, and searches it couldn't (tiles ran)
+    double det_ms = 0;                      // steps' time posting and collecting its requests
     // why views and hands come and go
     int lost = 0;         // a tracked view's landmarks fell below min presence
     int handoff_miss = 0; // a view projected from the hand's 3D (new camera or retry) found no hand
@@ -124,9 +125,10 @@ public:
     // the pool; a call it refuses runs on the pool as before. Null (the default): the pool only.
     void set_landmark_batch(LandmarkBatch *b) { batch_ = b; }
     // Palms from a detector over whole images (the NPU detector, track/npudetector.h) in the cameras it covers,
-    // on the search rotation's rounds, instead of the CPU palm search's tiles there (aimed and rotation tiles);
-    // a round it refuses runs the tiles as before. Null (the default): tiles only.
-    void set_palm_detector(PalmDetector *d) { detector_ = d; }
+    // instead of the CPU palm search's tiles there (aimed and rotation tiles): a search starts a round, one
+    // camera a step (DetectorRounds), and its palms are searched on the step after each. After a request fails,
+    // the tiles as before until one succeeds. Null (the default): tiles only.
+    void set_palm_detector(PalmDetector *d) { rounds_ = d ? std::make_unique<DetectorRounds>(*d) : nullptr; }
     // Re-acquiring lost hands: for window_s after a hand (seen 3+ frames) stops being seen, the palm
     // search puts up to `tiles` of its tiles on where that hand should be, in the cameras that see that
     // spot best, before its usual rotation; with every_step, it searches on every processed set while
@@ -211,7 +213,7 @@ private:
     std::map<std::string, const Camera *> cams_;
     const Nets &nets_;
     LandmarkBatch *batch_ = nullptr;
-    PalmDetector *detector_ = nullptr;
+    std::unique_ptr<DetectorRounds> rounds_;
     Pool &pool_;
     int max_views_, hand_budget_ = 4, search_budget_ = 3, search_budget1_ = 2;
     double min_presence_ = 0.5, keep_presence_ = 0.5;

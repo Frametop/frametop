@@ -292,6 +292,9 @@ int main(int argc, char **argv) {
     CPU_ZERO(&set);
     for (int c : cpus) CPU_SET(c, &set);
     if (sched_setaffinity(0, sizeof set, &set) < 0) return std::perror("--cpus"), 1;   // a replay measures: never unpinned
+    cpu_set_t got;   // the kernel drops CPUs this machine doesn't have and keeps the rest: never measure on fewer
+    if (sched_getaffinity(0, sizeof got, &got) < 0 || !CPU_EQUAL(&got, &set))
+        return std::fprintf(stderr, "--cpus: not every CPU listed is online here\n"), 1;
     std::string err;
     std::map<std::string, Camera> calib;
     Nets nets;

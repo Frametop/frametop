@@ -402,7 +402,8 @@
 // a pinch, curls like a grip, and sits where the hand ray's raised test begins. The relay says
 // "typing" on a key. For POINTER_PINCH_TYPING (2 s) after one, every hand is held back except one
 // that has left the keyboard, and a hand that was on the keys stays held back, through any pause,
-// until it rises POINTER_TYPING_RAISE (0.08 m) above where it typed or turns its palm up. Both
+// until it rises POINTER_TYPING_RAISE (0.08 m) above where it typed or turns its palm up (while
+// typing, a freed hand still over the keys, in the keyboard zone, is held back too). Both
 // hands down on the keys together (the keyboard posture, POINTER_TYPING_POSTURE, 0.3 s) count as
 // typing before the first key, within POINTER_TYPING_RECENT (600 s) of one. A hand held back makes
 // no pinch, middle pinch or grip ("pinch right: ignored (typing: the hand is on the keyboard)"),

@@ -64,7 +64,10 @@ hears the result (`typing <L> <R>` on @ft_screens).
 - On the keyboard: a hand in the keyboard zone (palm at least `POINTER_TYPING_BELOW`, 0.2 m, under
   the eyes, 0.05-0.45 m ahead, palm down) while typing is parked, and stays held back through any
   pause until it rises `POINTER_TYPING_RAISE` (0.08 m) above where it typed, or turns its palm up,
-  for 0.1 s. Freed, it works at once, keys or not. A hand on the mouse beside the keyboard is parked
+  for 0.1 s. Freed, it works at once, keys or not, once out of the keyboard zone. A freed hand still
+  in the zone (or back in it a little above where it typed) while keys come or the posture holds is
+  held back too (2026-11-22: reaching for a top-row key raised a palm 8-9 cm and freed it, and its
+  typing pinches clicked at the gaze and dragged). A hand on the mouse beside the keyboard is parked
   too once a key comes (its pinches are mouse clicks). Out of the cameras' sight it stays parked for
   up to `POINTER_TYPING_KEEP` (300 s); a free hand unseen 3 s is forgotten.
 - The mouse (2026-10-28): for `POINTER_TYPING_MOUSE` (10 s) after the mouse moved, clicked or

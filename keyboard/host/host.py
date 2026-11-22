@@ -153,6 +153,8 @@ class Host:
                 self.hide()
         elif words[:1] == ["poke"] and self.visible:
             self.touch.poke(now, words[1:], self.geometry)
+        elif words[:1] == ["turn"] and self.visible:
+            self.touch.turn(now, words[1:])
 
     # ---- from Steam (steamhook)
     def on_steam(self, now, results):

@@ -113,6 +113,9 @@ struct Screen {
     Mat dragRel = Identity();                 // device -> screen, while moving
     double grabX = 0, grabY = 0;              // resize: the grab point relative to the corner
     bool dragFacing = false;                  // move: kept facing the head (a hand ray carries it: HandRay)
+    Mat dragTurn = Identity();                // ...turned from facing the head by this (a two-hand turn, vrturn.cpp)
+    bool turning = false;                     // a two-hand turn is on (vrturn.cpp): it places the panel, not the carry
+    Mat turnFrom = Identity();                // ...the panel's pose when it began
     // The resize handle (Controls()[kResizePart], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
     // or a hand aims at (UpdateCorner; the bottom right otherwise), brighter the closer the aim, lit
     // while resizing. Any corner resizes, the opposite one staying put.
@@ -479,6 +482,8 @@ void SteamDashShutdown();
 void ToggleCurve(Screen &s);
 void LevelScreen(Screen &s, int index, const char *by);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev);
+bool HandRay(uint32_t d);   // a hand ray drives our pointer device d
+void TurnWord(const char *words, char *reply, int size);   // the pointer helper's "turn ..." (vrturn.cpp)
 bool RollClick(const Screen &s);   // a roll pressed and let go, not turned: a click (levels it)
 void TogglePinView(Screen &s, int index, const char *by);
 void PlaceInRoom(Screen &s, int index, const char *by);   // off the dashboard, the head or a wrist

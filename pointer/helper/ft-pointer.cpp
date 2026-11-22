@@ -583,6 +583,7 @@
 #include "handoff.h"
 #include "handsin.h"
 #include "kbray.h"
+#include "twohand.h"
 #include "rayowner.h"
 #include "typing.h"
 #include "vrbuttons.h"
@@ -1328,6 +1329,13 @@ struct Pointer {
             at = nl + 1;
         }
     }
+    // The two-hand turn (twohand.h): the other hand's pinch while a ray's press carries a panel turns it,
+    // to ft-screens ("turn") or, carrying Full Keyboard, to kbhost through the relay ("kbturn"). Each
+    // owner applies it only to a panel it is carrying by its bar or handle.
+    twohand::Turn turn;
+    int turnSide = -1;           // the turning hand's side (-1: none)
+    bool turnBegun = false, turnKb = false;
+    uint64_t turnSeen = 0;       // the hands frame last used
     // The ft-screens panel the left button was pressed on, and where it was then (see the top).
     std::string pressKey;
     vr::HmdMatrix34_t pressPose{};
@@ -2235,6 +2243,48 @@ struct Pointer {
         const double keep = gazeScrollGap + 0.01;
         return (sideGap[side][0] >= 0 && sideGap[side][0] < keep) || (sideGap[side][1] >= 0 && sideGap[side][1] < keep);
     }
+    // The two-hand turn (twohand.h, the state above): begun by the other hand's pinch, ended by either.
+    auto turnSend(const std::string &what) {
+        if (turnKb) SendTo(out, FT_SOCK_RELAY, "kbturn " + what);
+        else SendTo(out, FT_SOCK_SCREENS, "turn " + what);
+    }
+    auto beginTurn(int side) {
+        handUsed = fr.tnow;
+        turnSide = side, turnBegun = false, turnKb = kbRay.Pressed(), turnSeen = 0;
+        pinchLog(side, 0, std::string("turns what the other hand's ray carries (") + (turnKb ? "Full Keyboard" : "a panel") +
+                              "), while both pinches hold");
+    }
+    auto endTurn(const char *why) {
+        if (turnSide < 0) return;
+        if (turnBegun) turnSend("end");
+        if (debug) std::printf("two-hand turn ended: %s\n", why);
+        turnSide = -1, turnBegun = false;
+    }
+    auto roomHand(int side) -> const hin::RoomHand * {
+        for (const hin::RoomHand &c : handsRoom.hands)
+            if (c.side == side) return &c;
+        return nullptr;
+    }
+    // Each new hands frame while turning: the move since the begin, from both hands' pinch points and palms.
+    auto steerTurn() {
+        if (turnSide < 0) return;
+        if (hold.src != Src::Ray || !hold.pressed || hold.side == turnSide) return endTurn("the carry ended");
+        if (handsRoom.capture_ns == turnSeen) return;
+        const hin::RoomHand *a = roomHand(hold.side), *b = roomHand(turnSide);
+        if (!a || !b) return;
+        turnSeen = handsRoom.capture_ns;
+        const twohand::Hand ha{a->knuckle, a->palmNormal}, hb{b->knuckle, b->palmNormal};
+        if (!turnBegun) {
+            turn.Begin(ha, hb), turnBegun = true;
+            turnSend("begin");
+            return;
+        }
+        twohand::Move mv;
+        if (!turn.Now(ha, hb, &mv)) return;
+        std::string w = "move";
+        twohand::Words(mv, w);
+        turnSend(w);
+    }
     // A ray pinch (see "Hand ray" at the top). side: the gesture's; rs: the ray's (the one that follows
     // the pinching hand). The aim is locked where the ray pointed just before the fingers began to
     // close (rayowner.h), and the dead zone counts from the ray now.
@@ -2303,6 +2353,7 @@ struct Pointer {
     }
     // A ray pinch ended (lost: by losing the hand, a grip, or the ray; why says which).
     auto endRayHold(bool lost, const char *why) {
+        endTurn(why);
         const int side = hold.side, kind = hold.rayKind;
         if (!lost && !hold.pressed && !hold.rayThree && (kind == 0 || !hold.scrolling)) {
             // a tap before its press went out (or a middle tap): it clicks once the press can go
@@ -3764,6 +3815,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             const bool lost = g.flags & FH_PINCH_LOST;
             seenBegins[k][s] = g.begins, seenEnds[k][s] = g.ends;
             if (hold.second == s && hold.secondKind == k && ended) hold.second = -1;   // the two-hand press's other pinch let go
+            if (turnSide == s && k == 0 && ended) endTurn("its pinch let go");          // (the carry goes on)
             if (holdingKind(s, k) && ended) {   // the one held ended (another may have begun)
                 const int other = k == 0 ? 2 : k == 2 ? 0 : -1;
                 if (hold.gazeScroll && other >= 0 && (slots[other][s].flags & FH_PINCH_DOWN)) {
@@ -3795,6 +3847,13 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             }
             if (!allowed) {
                 if (k != 1) pinchLog(s, k, "ignored (hands not allowed: a VR game, or the headset off)");
+                continue;
+            }
+            // The other hand's pinch while a ray's press carries something: a two-hand turn (twohand.h).
+            if (k == 0 && turnSide < 0 && hold.src == Src::Ray && hold.pressed && hold.side != s && hold.rayKind == 0 &&
+                !hold.rayThree) {
+                beginTurn(s);
+                if (!(g.flags & FH_PINCH_DOWN)) endTurn("a tap");
                 continue;
             }
             // Not by a hand typing holds back (see "Typing" at the top).
@@ -3842,6 +3901,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
 }
 
 void Pointer::SteerHolds() {
+    steerTurn();
     // The held gesture's hand moves the pointer: past the dead zone (a tap's jitter,
     // the pinch point shifting as the fingers close), then at the gain, from there.
     if (hold.src == Src::Hand) {

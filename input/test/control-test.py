@@ -202,6 +202,8 @@ CASES += [
     ("textfield 1 renew", "textfield 1 renew", {}), ("textfield 1 unbound", "textfield 1", {"addr": b""}),
     ("textfield 1, other user", "textfield 1", {"uid": OTHER}), ("textfield bad", "textfield 2", {}),
     ("remoteclick", "remoteclick", {}), ("remoteclick, other user", "remoteclick", {"uid": OTHER}),
+    ("kbturn begin", "kbturn begin", {}), ("kbturn move", "kbturn move " + " ".join(["0.5"] * 12), {}),
+    ("kbturn move, short", "kbturn move 1 2 3", {}), ("kbturn, other user", "kbturn begin", {"uid": OTHER}),
     ("tilefocus 1", "tilefocus 1", {}), ("tilefocus 0", "tilefocus 0", {}),
     ("tilefocus 1, other user", "tilefocus 1", {"uid": OTHER}), ("tilefocus bad", "tilefocus 2", {}),
     ("action tile_left (the key list's)", "action tile_left", {}), ("action keys_list (not runnable)", "action keys_list", {}),

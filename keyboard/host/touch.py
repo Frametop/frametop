@@ -45,7 +45,9 @@ class Touch:
         except ValueError:
             return
         if drag:
-            self.send("set_pose", matrix=drag.to(now, point))
+            pose = drag.to(now, point)
+            if pose:
+                self.send("set_pose", matrix=pose)
             if verb == "up":
                 del self.drags[side]
             return
@@ -82,6 +84,15 @@ class Touch:
             # each release hands the panel back; the next poke forwards again.
             if not self.pressed:
                 self.native()
+
+    def turn(self, now, words):
+        """The pointer helper's two-hand turn ("kb turn ...", handle.Drag.turn) of a panel being
+        dragged by its handle."""
+        for drag in self.drags.values():
+            pose = drag.turn(now, words)
+            if pose:
+                self.send("set_pose", matrix=pose)
+            return
 
     def tick(self, now):
         if not self.forwarded:

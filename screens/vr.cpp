@@ -1706,6 +1706,7 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     // centered facing the user since we have no way to tilt displays up and down without grabbing them"):
     // the ray places it, the wrist doesn't turn it. Controllers and the mouse carry it rigidly.
     s.dragFacing = mode == Drag::Move && HandRay(dev);
+    s.dragTurn = Identity(), s.turning = false;
     s.dragRel = Mul(Inverse(d), p);
     // Already in a ring when grabbed: that doesn't count as crossing it.
     s.onWrist = mode == Drag::Move ? WristOnLaser(s, d, p) : kNone;
@@ -1825,7 +1826,7 @@ void EndDrag(Screen &s) {
     s.dragDevice = kNone;
     s.barPressMs = -1;   // (a press still waiting on the bar: a command took over, it never moves)
     s.pushedMs = -1;
-    s.dragFacing = s.toggleCarry = s.layoutHeld = s.barCarry = false;
+    s.dragFacing = s.toggleCarry = s.layoutHeld = s.barCarry = s.turning = false;
     s.carryMode = 0;
     s.dockOn = -1;
     s.pinTarget = s.onWrist = kNone;
@@ -2310,10 +2311,11 @@ void UpdateDrag(Screen &s, int index) {
     if (!DevicePose(s.dragDevice, &d)) return;
     if (s.toggleCarry) return UpdateToggleCarry(s);
     if (s.drag == Drag::Move) {
+        if (s.turning) return;   // the two hands place it (vrturn.cpp)
         Mat p = Mul(d, s.dragRel), head;
         if (s.dragFacing && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
             const double at[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
-            p = FacingPose(at, head);
+            p = Mul(FacingPose(at, head), s.dragTurn);
         }
         SetAbsolute(s, p);
         if (!s.layoutHeld) CheckWristAim(s, d, p);   // (the layout's carry arms no wrist pin)
@@ -8024,6 +8026,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
         std::snprintf(reply, size, "ok");
         return;
     }
+    case vrcmd::Turn: return TurnWord(parsed.rest, reply, size);
     default:
         std::snprintf(reply, size, "error unknown command");
     }

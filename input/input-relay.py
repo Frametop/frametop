@@ -2528,6 +2528,14 @@ class Relay:
                     and words[2] in KB_POKES and all(KB_COORD.fullmatch(w) for w in words[3:])):
                 self.kb_tell(now, "kb poke " + " ".join(words[1:]))
             return
+        if cmd == "kbturn":
+            # From the pointer helper (unbound): a two-hand turn of Full Keyboard while a ray carries it
+            # by its handle, "kbturn begin", "kbturn move" and twelve numbers (the rigid move since the
+            # begin), "kbturn end", passed on as "kb turn ...". Only from this user.
+            if uid == os.getuid() and (words[1:] in (["begin"], ["end"]) or (
+                    len(words) == 14 and words[1] == "move" and all(KB_COORD.fullmatch(w) for w in words[2:]))):
+                self.kb_tell(now, "kb turn " + " ".join(words[1:]))
+            return
         if cmd == "calpanel" and len(words) == 2:
             # From the pointer helper (see the top). Only from this user: it takes Enter.
             if uid == os.getuid():

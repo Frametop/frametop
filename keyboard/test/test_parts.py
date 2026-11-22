@@ -180,6 +180,35 @@ class HandleTest(unittest.TestCase):
         self.touch.poke(0.4, self.at("right", "press", 0.0, 0.0), self.GEOMETRY)   # a key, after
         self.assertEqual(self.sent[-1][1]["phase"], "down")
 
+    def test_a_two_hand_turn_turns_it_and_the_slide_goes_on_from_there(self):
+        y = 0.25 * (0.5 - 0.9)
+        self.touch.poke(0.0, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.turn(0.1, ["begin"])
+        c, s_ = math.cos(0.3), math.sin(0.3)
+        p = [self.PANEL[r][3] for r in range(3)]
+        # a yaw of 0.3 rad about the panel's centre: x' = R x + (p - R p)
+        rot = [[c, 0.0, s_], [0.0, 1.0, 0.0], [-s_, 0.0, c]]
+        t = [p[r] - sum(rot[r][k] * p[k] for k in range(3)) for r in range(3)]
+        move = ["move"] + [f"{v:.5f}" for r in range(3) for v in (*rot[r], t[r])]
+        self.touch.turn(0.2, move)
+        turned = [f["matrix"] for op, f in self.sent if op == "set_pose"][-1]
+        for r in range(3):
+            self.assertAlmostEqual(turned[r][3], p[r], places=4)   # about its centre: it stays put
+        self.assertAlmostEqual(turned[0][0], sum(rot[0][k] * self.PANEL[k][0] for k in range(3)), places=4)
+        n = len(self.sent)
+        self.touch.poke(0.25, self.at("right", "move", 0.2, y), self.GEOMETRY)   # the carry waits meanwhile
+        self.assertEqual(len(self.sent), n)
+        self.touch.turn(0.3, ["end"])
+        self.touch.poke(0.4, self.at("right", "move", 0.3, y), self.GEOMETRY)    # from here: no jump
+        after = [f["matrix"] for op, f in self.sent if op == "set_pose"][-1]
+        for r in range(3):
+            self.assertAlmostEqual(after[r][3], turned[r][3], places=4)
+
+    def test_a_turn_without_a_handle_drag_does_nothing(self):
+        self.touch.turn(0.0, ["begin"])
+        self.touch.turn(0.1, ["move"] + ["0"] * 12)
+        self.assertEqual(self.sent, [])
+
     def test_a_key_press_sliding_onto_the_strip_stays_the_keys(self):
         self.touch.poke(0.0, self.at("left", "press", 0.0, 0.0), self.GEOMETRY)
         self.touch.poke(0.1, self.at("left", "move", 0.0, 0.25 * (0.5 - 0.9)), self.GEOMETRY)

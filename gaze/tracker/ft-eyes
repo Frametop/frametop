@@ -23,8 +23,10 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
   status                       JSON: calibration, and per eye its shift, clicks, whether a
                                glint jump is applied ("jump", and "jump_px": how far, pixels:
                                the headset slipped since the last click; the gaze service's
-                               slip notice reads it), and "reseat" (the next click starts the
-                               shift over: the probe asks for a one-dot check then)
+                               slip notice reads it; zero while EYES_JUMP keeps it out, with
+                               the eye's own in "jump_held_px"; "jump_vouched": a click that
+                               taught only the other eye left it in force), and "reseat" (the next click
+                               starts the shift over: the probe asks for a one-dot check then)
   calib-start                  a new calibration: collect dots from now on
   calib-point T0 T1 YAW PITCH  a dot you looked at from T0 to T1 (CLOCK_MONOTONIC_RAW) in
                                that direction (head-relative degrees): "ok N0 N1 SD0 SD1"
@@ -36,7 +38,10 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                (eyes_model.MIN_CLICKS) is left out, and the other maps the
                                gaze alone ("..., left not used (9 dots, needs 12)")
   click T YAW PITCH            a click: you were looking there just before T; teaches the
-                               shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured)
+                               shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured; nan
+                               for an eye not seen, or when YAW PITCH lies outside that eye's
+                               calibration dots by over eyes_model.EDGE_MARGIN: a shift measured
+                               out there is the fit's extrapolation, so it teaches nothing)
   fit                          JSON: the last second of pupil finds per camera, for the fit
                                coach (gaze/fitcoach.py, Observations.summary); works uncalibrated
   finds start PATH | finds stop
@@ -67,8 +72,13 @@ refused finds, and its usual size's restarts, are in the status ("size_guard_cou
 start), and once a minute that it refused any, a log line says how many ("size guard, the last
 60 s: right refused 40 of 3100 finds; left refused 0 of 3200 finds").
 
+The glint jump (eyes_model.Shift): EYES_JUMP in frametop.conf (or FT_EYES_JUMP): both (the default)
+applies an eye's jump only while the other eye has one too (or isn't mapped), since a misread glint
+pair makes one eye's estimate leap though the headset stayed put; each applies every eye's own. Read
+at start; the status says which ("jump_rule").
+
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
-state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL, FT_EYES_SIZE_GUARD. With
+state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL, FT_EYES_SIZE_GUARD, FT_EYES_JUMP. With
 FT_EYES_CAMS set, the want file isn't touched.
 
 /dev/shm/frametop-eyes-gaze, 128 bytes, little-endian (mirrored in ft-gaze.cpp):
@@ -150,6 +160,19 @@ def size_guard_rule():
 
 
 SIZE_GUARD = size_guard_rule()
+
+
+def jump_rule():
+    """EYES_JUMP in ~/.config/frametop.conf (FT_EYES_JUMP wins): eyes_model.JUMP_RULES, both (the
+    default) or each. Read at start."""
+    v = os.environ.get("FT_EYES_JUMP")
+    if v is None:
+        v = ft_conf.read().get("EYES_JUMP", "")
+    v = v.strip().lower()
+    return v if v in eyes_model.JUMP_RULES else "both"
+
+
+JUMP = jump_rule()
 GUARD_REPORT = 60.0  # s between the size guard's log lines (only when it refused something)
 
 CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")  # overrides for replays
@@ -265,6 +288,19 @@ class Eye:
         self.fed = None         # (frame time, CLOCK_MONOTONIC_RAW then) of the newest frame fed
         self.finds = None       # the finds log (Tracker.finds), shared by both eyes
         self.coach = [0.0]      # with the net: until when the fit coach wants pupils (monotonic), shared
+        self.other = None       # the other Eye (Tracker's): whether a glint jump counts (JUMP)
+
+    def partner(self):
+        """The other eye's Shift while that eye is mapped, else None (its jump can't be asked)."""
+        return self.other.shift if self.other is not None and self.other.cal else None
+
+    def jump_on(self):
+        """Whether this eye's glint jump counts now (eyes_model.Shift.in_force, by JUMP)."""
+        return self.shift.in_force(self.partner(), JUMP)
+
+    def shift_now(self):
+        """The shift its gaze is corrected by: the clicks', plus the glint jump while it counts."""
+        return self.shift.current(self.partner(), JUMP)
 
     def use(self, cal, shift=None):
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
@@ -307,7 +343,7 @@ class Eye:
                 if pair:
                     self.slip.add(t, (p["x"], p["y"]), mid)
                 self.shift.glint(self.slip.get(), t)
-                g = self.cal.gaze(self.eye, p["x"], p["y"], self.shift.value)
+                g = self.cal.gaze(self.eye, p["x"], p["y"], self.shift_now())
                 self.gaze = (t, float(g[0]), float(g[1]), p["x"], p["y"])
         if self.finds is not None:
             self.finds.write(self, t, p, refused=refused)
@@ -333,7 +369,7 @@ class Eye:
             while self.history and self.history[0][0] < t - HISTORY:
                 self.history.popleft()
             if self.cal:
-                g = self.cal.gaze(self.eye, fx, fy, self.shift.value)
+                g = self.cal.gaze(self.eye, fx, fy, self.shift_now())
                 self.gaze = (t, float(g[0]), float(g[1]), r["x"], r["y"])
         if self.finds is not None:
             self.finds.write(self, t, p, r)
@@ -385,6 +421,7 @@ class Finds:
 class Tracker:
     def __init__(self):
         self.eyes = [Eye(0), Eye(1)]
+        self.eyes[0].other, self.eyes[1].other = self.eyes[1], self.eyes[0]
         self.cal = None
         self.dots = []  # calibration dots so far, in ft-eyes-score's click form
         self.calibrating = False
@@ -400,8 +437,8 @@ class Tracker:
                       " calibrate again", file=sys.stderr, flush=True)
                 self.cal = None
         if self.cal:
-            if not self.cal.spread:
-                self.cal.spread = spread_from_dots(self.cal)
+            # Saved before calibrations kept spreads and dots' extents: from its dots, refitted.
+            self.cal.fill_from_dots(CALIBRATION.with_name("calibration-dots.jsonl"))
         shifts = {}
         try:
             d = json.loads(STATE.read_text())
@@ -520,17 +557,25 @@ class Tracker:
                 return "fail not calibrated"
             t, yaw, pitch = map(float, w[1:])
             out, rec = [], {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": {}}
+            before = {e.eye: e.shift_now().tolist() for e in self.eyes}   # before either eye's lesson
+            lessons = {}
             for e in self.eyes:
                 g = e.window(t - CLICK_BEFORE, t)
                 if g is None or g["n"] < 5 or not e.cal:
                     out += ["nan", "nan"]
                     continue
+                if not self.cal.inside(e.eye, (yaw, pitch)):
+                    out += ["nan", "nan"]
+                    rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "skipped": "outside its calibration dots"}
+                    continue
                 d = self.cal.click_shift(e.eye, g["pupil"], (yaw, pitch))
-                before = e.shift.value.tolist()
-                e.shift.click(d, e.slip.value if e.slip else None)
-                rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "measured": d.tolist(), "before": before,
-                                      "after": e.shift.value.tolist()}
+                lessons[e.eye] = (d, e.slip.value if e.slip else None)
+                rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "measured": d.tolist(), "before": before[e.eye]}
                 out += [f"{d[0]:.2f}", f"{d[1]:.2f}"]
+            eyes_model.teach({e.eye: e.shift for e in self.eyes}, lessons, JUMP,
+                             [e.eye for e in self.eyes if e.cal])
+            for e in lessons:
+                rec["eyes"][e]["after"] = self.eyes[e].shift_now().tolist()
             self.save_state()
             with open(CLICKS, "a") as f:
                 f.write(json.dumps(rec) + "\n")
@@ -541,28 +586,13 @@ class Tracker:
         return {"calibration": self.cal.info if self.cal else None, "calibrating": self.calibrating,
                 "mapped": [EYES[c] for c in self.cal.eyes()] if self.cal else None,
                 "feature": FEATURE, "model": NET.folder if NET else None,
-                "dots": len(self.dots), "size_guard": None if NET else self.guard.rule,
+                "dots": len(self.dots), "size_guard": None if NET else self.guard.rule, "jump_rule": JUMP,
+                "edge_margin": eyes_model.EDGE_MARGIN,
                 "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
-                "eyes": {EYES[e.eye]: {"shift": e.shift.value.tolist(), "clicks": len(e.shift.meas),
-                                       "jump": bool(np.any(e.shift.jump)), "jump_px": e.shift.jump.tolist(),
+                "eyes": {EYES[e.eye]: {"shift": e.shift_now().tolist(), "clicks": len(e.shift.meas),
+                                       "jump": e.jump_on(), "jump_px": (e.shift_now() - e.shift.base).tolist(),
+                                       "jump_held_px": e.shift.jump.tolist(), "jump_vouched": e.shift.vouched,
                                        "reseat": e.shift.reseated} for e in self.eyes}}
-
-
-def spread_from_dots(cal):
-    """The eyes' fit spreads for a calibration saved without them, from its dots in
-    calibration-dots.jsonl ({} if they aren't there: the eyes are then weighted alike)."""
-    try:
-        lines = CALIBRATION.with_name("calibration-dots.jsonl").read_text().splitlines()
-    except OSError:
-        return {}
-    dots = []
-    for line in lines:
-        d = json.loads(line)
-        if d.get("made") == cal.info.get("made"):
-            dots.append(dict(truth=d["truth"], eye={
-                int(c): dict(pupil=np.array(v["pupil"]), mid=None if v["mid"] is None else np.array(v["mid"]))
-                for c, v in d["eye"].items()}))
-    return eyes_model.Calibration.fit(dots).spread if dots else {}
 
 
 class Want:
@@ -694,7 +724,7 @@ def main():
                     flags |= (1 << i) if fresh else 0
                     flags |= (4 << i) if e.shift.meas else 0
                     per += [e.gaze[1], e.gaze[2]] if fresh else [math.nan, math.nan]
-                    shifts += [float(v) for v in e.shift.value]
+                    shifts += [float(v) for v in e.shift_now()]
                     pupils += [e.gaze[3], e.gaze[4]] if fresh else [math.nan, math.nan]
                 out.write(latest, (yaw, pitch), flags, per, shifts, pupils)
         now = time.monotonic()
@@ -702,11 +732,11 @@ def main():
             if verbose:
                 parts = []
                 for e in eyes:
-                    s = e.shift.value
+                    s = e.shift_now()
                     parts.append(f"{EYES[e.eye]} {e.frames / 5:.0f} fps, found {e.found / max(e.frames, 1):.0%}"
                                  + (f" ({e.refused} refused by size)" if e.refused else "") + ", "
                                  f"{e.work / max(e.frames, 1) * 1000:.2f} ms/frame, shift ({s[0]:+.1f},{s[1]:+.1f})"
-                                 f" from {len(e.shift.meas)} clicks" + (", jump" if np.any(e.shift.jump) else ""))
+                                 f" from {len(e.shift.meas)} clicks" + (", jump" if e.jump_on() else ""))
                     e.frames = e.found = e.refused = 0
                     e.work = 0.0
                 print("ft-eyes: " + "; ".join(parts), file=sys.stderr, flush=True)

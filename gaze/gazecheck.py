@@ -18,8 +18,10 @@ directions: look at each one.
           wider than quick's, to hold them (PANEL_DEG).
   full    the calibration, as the gaze probe's: three rounds, dark, medium and bright (pupil
           size, and the tracker's error with it, changes with brightness), each the middle and
-          a ring of six (SteamVR's tracker) or eight (ours, whose fit goes wrong past its dots)
-          RING degrees out, half that in the middle round, turned 20 degrees a round. It opens
+          a ring of six (SteamVR's tracker, RING degrees out) or eight (ours, whose fit goes wrong
+          past its dots: OWN_RING, an oval 30 degrees out across and 18 up and down, near where the
+          panel ends, since that's where its clicks miss most), half that in the middle round,
+          turned 20 degrees a round. It opens
           whenever gaze mode is on without a calibration for the tracker in use and someone's
           in the headset, and on "calibrate". One that closes unfinished (ignored, too few
           dots) opens again only once the headset comes off and on, or gaze mode off and on.
@@ -168,6 +170,8 @@ FIVE_LIMIT = 2.0
 FIVE_COUNT = 3
 DONE_PAUSE = 0.35      # seconds the filled dot shows before the next
 RING = 20.0
+OWN_RING = (30.0, 18.0)   # yaw, pitch: our tracker's ring (was 20 x 18 until 2026-11-22: clicks
+                          # past 30 degrees missed by 4.7 median, its fit guessing out there)
 ROUND_BG = (0.03, 0.33, 0.8)
 ROUND_NAMES = ("dark", "medium", "bright")
 RING_SCALE = (1.0, 0.5, 1.0)
@@ -201,10 +205,11 @@ def check_dots(kind, own):
     n = 8 if own else 6
     for rnd in range(3):
         out.append((0.0, 0.0, rnd))
-        r = RING * RING_SCALE[rnd]
+        rx, ry = OWN_RING if own else (RING, RING)
+        rx, ry = rx * RING_SCALE[rnd], ry * RING_SCALE[rnd]
         for i in range(n):
             a = math.radians(-90 + rnd * 20 + i * 360 / n)  # as the probe: x right, y down
-            x, y = r * math.cos(a), r * math.sin(a) * (0.9 if own else 1.0)
+            x, y = rx * math.cos(a), ry * math.sin(a)
             out.append((-x, -y, rnd))
     return out
 

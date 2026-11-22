@@ -48,7 +48,7 @@ def check(what, got, want):
         failures.append(what)
 
 
-DOTS = [d[:2] for d in gazecheck.check_dots("full", True)]   # 27 dots, out to +-20
+DOTS = [d[:2] for d in gazecheck.check_dots("full", True)]   # 27 dots, out to +-30 across
 CENTRE = {0: (300.0, 200.0), 1: (330.0, 205.0)}               # right, left: pupil looking ahead
 
 
@@ -120,21 +120,26 @@ for yaw, pitch in DOTS:
     look(tracker, yaw, pitch, seen=outward_lost(yaw))
 seen = {c: sum(1 for k in tracker.dots if c in k["eye"]) for c in (0, 1)}
 check("all 27 dots taken", len(tracker.dots), 27)
-check("each eye at the dots it was seen at", seen, {0: 22, 1: 22})
+check("each eye at the dots it was seen at", seen, {0: 20, 1: 20})
 r = tracker.command("calib-fit")
 check("fitted", r.startswith("ok 27 dots, fit median 0.0"), True)
-check("...each eye's dots in the reply", r.endswith("(22 dots)") and "(22 dots), left 0.0" in r, True)
+check("...each eye's dots in the reply", r.endswith("(20 dots)") and "(20 dots), left 0.0" in r, True)
 check("both eyes mapped", tracker.status()["mapped"], ["right", "left"])
-check("...the dots per eye saved with it", tracker.cal.info["eye_dots"], {"right": 22, "left": 22})
+check("...the dots per eye saved with it", tracker.cal.info["eye_dots"], {"right": 20, "left": 20})
 right, left = tracker.eyes
 check("each eye calibrated", (right.cal is not None, left.cal is not None), (True, True))
 g = tracker.cal.gaze(1, *pupil(1, -20.0, 0.0))
 check("the left eye at 20 right (only it saw that dot): on it", (round(g[0], 1), round(g[1], 1)), (-20.0, 0.0))
 rows = [json.loads(x) for x in open(fe.CALIBRATION.with_name("calibration-dots.jsonl"))]
 check("calibration-dots.jsonl keeps the one-eye dots", sorted(len(x["eye"]) for x in rows)[:4], [1, 1, 1, 1])
-check("...and its spreads come back from them", sorted(fe.spread_from_dots(tracker.cal)), [0, 1])
 loaded = fe.eyes_model.Calibration.load(fe.CALIBRATION)
 check("the saved calibration maps both", loaded.eyes(), [0, 1])
+check("...with each eye's dots' extent", {c: [round(v) for v in b] for c, b in loaded.box.items()},
+      {c: [round(v) for v in b] for c, b in tracker.cal.box.items()})
+loaded.spread, loaded.box = {}, {}   # as one saved before calibrations kept them
+loaded.fill_from_dots(fe.CALIBRATION.with_name("calibration-dots.jsonl"))
+check("...and its spreads and extents come back from the dots", (sorted(loaded.spread), sorted(loaded.box)),
+      ([0, 1], [0, 1]))
 
 # --- calib-fit with one eye seen at too few dots: the other alone ---
 tracker = fe.Tracker()

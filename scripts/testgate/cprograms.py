@@ -184,6 +184,8 @@ def items(root, env=os.environ):
           args=("build/tests/ft-clip",), needs=("ft-clip",)),
         P("eyegrab-files-test", "gaze/tracker/tests/eyegrab-files-test.c", cc="gcc",
           flags="-std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread"),
+        P("eyegrab-late-test", "gaze/tracker/tests/eyegrab-late-test.c", cc="gcc",
+          flags="-std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread"),
     ]
     for name in ("trackwatch", "levelpin", "dashanchor", "tiling", "dashtiles", "barside", "panelmenu", "menulayout",
                  # palm Quick Access (quickaccess.h): its tiles, where a tip or laser lands, Reset's ask,

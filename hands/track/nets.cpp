@@ -243,6 +243,11 @@ void Nets::hand_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6]
     gray_crop(img, tm, kHandSize, hand_contrast_, out);
 }
 
+void Nets::palm_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6]) const {
+    crop_matrix(roi.center, roi.size, roi.rotation, kHandSize, tm);
+    gray_crop(img, tm, kHandSize, palm_contrast_, out);
+}
+
 V2 Nets::crop_to_image(const float tm[6], double x, double y) { return to_image(tm, x, y); }
 
 Landmarks Nets::landmarks(const Image &img, const Roi &roi) const {

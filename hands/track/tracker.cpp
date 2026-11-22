@@ -577,6 +577,26 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         const bool rotation_due = (t_ns - search_ns_) / 1e9 >= kSearchInterval - 0.01;
         search_ns_ = rotation_due ? t_ns : search_ns_;
         const int budget = tracked.empty() ? search_budget_ : search_budget1_;
+        // the detector's cameras, on the rotation's rounds: its palms, no CPU tiles there
+        std::vector<std::pair<const Camera *, std::vector<Palm>>> detected;
+        if (detector_ && rotation_due) {
+            std::vector<const Camera *> dc;
+            std::vector<const Image *> di;
+            for (auto &[name, cam] : cams_)
+                if (images.count(name) && detector_->covers(name)) dc.push_back(cam), di.push_back(&images.at(name));
+            std::vector<std::vector<Palm>> got;
+            const auto t0 = std::chrono::steady_clock::now();
+            if (!di.empty() && detector_->run(di, got)) {
+                for (size_t i = 0; i < dc.size(); ++i) detected.push_back({dc[i], std::move(got[i])});
+                ++stats.det_rounds;
+                stats.det_ms += ms_since(t0);
+            } else if (!di.empty()) {
+                ++stats.det_fallbacks;
+            }
+        }
+        auto by_detector = [&](const Camera *c) {
+            return std::any_of(detected.begin(), detected.end(), [c](const auto &d) { return d.first == c; });
+        };
         std::vector<Tile *> picked;
         // first, tiles on where lost hands should be now
         std::vector<Tile> aimed;
@@ -586,7 +606,7 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
             const V3 p = l.palm + l.vel * std::min(age, 0.25);
             std::vector<std::pair<double, const Camera *>> cams;
             for (auto &[name, cam] : cams_) {
-                if (!images.count(name)) continue;
+                if (!images.count(name) || by_detector(cam)) continue;
                 double z;
                 const V2 uv = cam->project(p, &z);
                 const double m = 0.03;
@@ -609,49 +629,55 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         for (Tile &t : aimed) picked.push_back(&t);
         // aimed tiles share the budget, but the rotation keeps at least one tile (unless it's not due:
         // with every_step, aimed tiles go up between the rotation's rounds)
-        const int rotation = rotation_due ? std::max(1, budget - int(aimed.size())) : 0;
+        // (after a detector round, one tile: the cameras it doesn't cover hold under 1% of hands)
+        const int rotation = !rotation_due ? 0 : !detected.empty() ? 1 : std::max(1, budget - int(aimed.size()));
         if (rotation_due)
             for (Tile &t : tiles_)
-                if (images.count(t.cam->name)) t.credit += t.weight;
+                if (images.count(t.cam->name) && !by_detector(t.cam)) t.credit += t.weight;
         for (int b = 0; b < rotation; ++b) {
             Tile *best = nullptr;
             for (Tile &t : tiles_)
-                if (images.count(t.cam->name) && std::find(picked.begin(), picked.end(), &t) == picked.end() &&
-                    (!best || t.credit > best->credit))
+                if (images.count(t.cam->name) && !by_detector(t.cam) &&
+                    std::find(picked.begin(), picked.end(), &t) == picked.end() && (!best || t.credit > best->credit))
                     best = &t;
             if (!best) break;
             best->credit = 0;
             picked.push_back(best);
         }
-        if (!picked.empty()) {
-            const auto t0 = std::chrono::steady_clock::now();
-            std::vector<std::vector<Palm>> found(picked.size());
-            std::vector<std::function<void()>> jobs;
-            for (size_t i = 0; i < picked.size(); ++i) {
-                Tile *t = picked[i];
-                const Image &img = images.at(t->cam->name);
-                jobs.push_back([this, t, &img, &found, i] { found[i] = nets_.palms(img, t->center, t->size, t->rotation); });
+        if (!picked.empty() || !detected.empty()) {
+            if (!picked.empty()) {
+                const auto t0 = std::chrono::steady_clock::now();
+                std::vector<std::vector<Palm>> found(picked.size());
+                std::vector<std::function<void()>> jobs;
+                for (size_t i = 0; i < picked.size(); ++i) {
+                    Tile *t = picked[i];
+                    const Image &img = images.at(t->cam->name);
+                    jobs.push_back([this, t, &img, &found, i] { found[i] = nets_.palms(img, t->center, t->size, t->rotation); });
+                }
+                pool_.run(jobs);
+                stats.palm_calls += int(picked.size());
+                stats.palm_ms += ms_since(t0);
+                ++stats.palm_batches;
+                for (size_t i = 0; i < picked.size(); ++i) detected.push_back({picked[i]->cam, std::move(found[i])});
             }
-            pool_.run(jobs);
-            stats.palm_calls += int(picked.size());
-            stats.palm_ms += ms_since(t0);
-            ++stats.palm_batches;
             std::vector<View> fresh;
             std::string tl;
-            if (trace_)
+            if (trace_) {
                 for (Tile *t : picked)
                     tl += " " + t->cam->name + "#" +
                           (t >= tiles_.data() && t < tiles_.data() + tiles_.size() ? std::to_string(t - tiles_.data()) : std::string("aim"));
+                for (size_t i = 0; i + picked.size() < detected.size(); ++i) tl += " " + detected[i].first->name + "#det";
+            }
             int nfound = 0, nnear = 0;
-            for (size_t i = 0; i < picked.size(); ++i)
-                for (const Palm &p : found[i]) {
+            for (const auto &[cam, palms] : detected)
+                for (const Palm &p : palms) {
                     const Roi roi = p.roi();
                     bool near = false;
                     for (auto *list : {&views_, &fresh})
                         for (View &v : *list)
-                            near = near || (v.cam == picked[i]->cam && norm(v.roi.center - roi.center) < near_frac_ * roi.size);
+                            near = near || (v.cam == cam && norm(v.roi.center - roi.center) < near_frac_ * roi.size);
                     ++nfound, nnear += near;
-                    if (!near) fresh.push_back({picked[i]->cam, roi, 0, {}, false, 0});
+                    if (!near) fresh.push_back({cam, roi, 0, {}, false, 0});
                 }
             note("search tracked %zu tiles%s palms %d near-tracked %d", tracked.size(), tl.c_str(), nfound, nnear);
             std::vector<View *> ptrs;

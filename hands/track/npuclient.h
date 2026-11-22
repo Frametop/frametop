@@ -1,7 +1,8 @@
-// The client side of ft-npud (npu-hands npud/ft_npud.py), the root daemon that runs the NPU student: its
-// UID-owned shared memory (a 64-byte header, 4 crop slots, 4 output slots) and its SOCK_SEQPACKET doorbell (send
-// the crop count, receive one status byte). One request at a time; any failure or timeout closes the connection,
-// so a late reply can never be read as the next one's.
+// The client side of ft-npud (npu-hands npud/ft_npud.py), the root daemon that runs the NPU student and, when
+// it serves one, the palm detector: its UID-owned shared memory (a 64-byte header, 4 crop slots, 4 landmark output
+// slots, 4 detector output slots) and its SOCK_SEQPACKET doorbell (send the crop count, kDet | count for the
+// detector, receive one status byte). One request at a time; any failure or timeout closes the connection, so a
+// late reply can never be read as the next one's.
 #pragma once
 
 #include <cstddef>
@@ -11,6 +12,8 @@
 class NpuClient {
 public:
     static constexpr int kCrop = 224, kMaxCrops = 4;
+    static constexpr int kDetGrid = 28;                                  // the detector's outputs: 28 x 28 cells
+    static constexpr size_t kDetBytes = size_t(5) * kDetGrid * kDetGrid; // obj s8 [1][28][28], reg s8 [4][28][28]
     NpuClient() = default;
     NpuClient(const NpuClient &) = delete;
     NpuClient &operator=(const NpuClient &) = delete;
@@ -27,9 +30,21 @@ public:
     bool run(int n, int timeout_ms, std::string &err);
     const uint8_t *output(int i) const { return shm_ + kOuts + size_t(i) * out_bytes_; }
     float wrapper_ms() const;   // the DSP's time for the last request
+    // The detector (has_detector()): n whole-image crops in, det_output(i) out (obj then reg; value = q * scale).
+    bool has_detector() const;
+    bool run_det(int n, int timeout_ms, std::string &err);
+    const int8_t *det_output(int i) const {
+        return reinterpret_cast<const int8_t *>(shm_ + det_outs() + size_t(i) * kDetBytes);
+    }
+    float det_scale(int which) const;   // 0: obj's, 1: reg's
 
 private:
     static constexpr size_t kHeader = 64, kCrops = 4096, kOuts = kCrops + size_t(kMaxCrops) * kCrop * kCrop;
+    static constexpr uint8_t kDet = 0x10;
+    static constexpr uint32_t kFeatDet = 1;
+    size_t det_outs() const { return kOuts + size_t(kMaxCrops) * out_bytes_; }
+    bool request(uint8_t req, int timeout_ms, std::string &err);
+    float header_float(int word) const;
     int sock_ = -1;
     uint8_t *shm_ = nullptr;
     size_t shm_bytes_ = 0, out_bytes_ = 0;

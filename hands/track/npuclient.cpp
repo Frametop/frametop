@@ -57,9 +57,25 @@ void NpuClient::close() {
 }
 
 bool NpuClient::run(int n, int timeout_ms, std::string &err) {
-    if (sock_ < 0) return err = "not connected", false;
     if (n < 1 || n > kMaxCrops) return err = "crop count out of range", false;
-    const uint8_t req = uint8_t(n);
+    return request(uint8_t(n), timeout_ms, err);
+}
+
+bool NpuClient::run_det(int n, int timeout_ms, std::string &err) {
+    if (n < 1 || n > kMaxCrops) return err = "crop count out of range", false;
+    if (!has_detector()) return err = "ft-npud serves no detector", false;
+    return request(uint8_t(kDet | n), timeout_ms, err);
+}
+
+bool NpuClient::has_detector() const {
+    if (!shm_ || shm_bytes_ < det_outs() + size_t(kMaxCrops) * kDetBytes) return false;
+    uint32_t features = 0;
+    std::memcpy(&features, shm_ + 16, 4);
+    return features & kFeatDet;
+}
+
+bool NpuClient::request(uint8_t req, int timeout_ms, std::string &err) {
+    if (sock_ < 0) return err = "not connected", false;
     if (send(sock_, &req, 1, MSG_NOSIGNAL) != 1) return err = sys_err("ft-npud send"), close(), false;
     pollfd p{sock_, POLLIN, 0};
     const int r = poll(&p, 1, timeout_ms);
@@ -70,8 +86,12 @@ bool NpuClient::run(int n, int timeout_ms, std::string &err) {
     return true;
 }
 
-float NpuClient::wrapper_ms() const {
+float NpuClient::header_float(int word) const {
     float f = 0;
-    if (shm_) std::memcpy(&f, shm_ + 32, 4);
+    if (shm_) std::memcpy(&f, shm_ + 4 * word, 4);
     return f;
 }
+
+float NpuClient::wrapper_ms() const { return header_float(8); }
+
+float NpuClient::det_scale(int which) const { return header_float(10 + which); }

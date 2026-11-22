@@ -14,7 +14,7 @@ Kirigami.PromptDialog {
     property QtObject monitors  // backend.hostMonitors
     property string host: ""
     property var listed: []     // the PC's monitors, as it answered
-    property var wishes: ({})   // id -> {on, width, height, refresh_mhz}; width 0: the mode it has
+    property var wishes: ({})   // id -> {on, width, height, refresh_mhz}; width 0: its own mode
     property string error: ""
     property string note: ""    // the PC's own word on its last change
     property int grace: 120
@@ -24,9 +24,24 @@ Kirigami.PromptDialog {
     function modeText(m) {
         return m.width + " × " + m.height + " at " + (m.refresh_mhz / 1000).toFixed(m.refresh_mhz % 1000 ? 2 : 0) + " Hz"
     }
-    // As the PC matches them: Hyprland reports 239.761 Hz for a mode it lists as 239.76.
+    // As the PC matches them: Hyprland reports 239.761 Hz for a mode it lists as 239.76, and
+    // 59.94 and 60 Hz are two modes.
     function sameMode(a, b) {
-        return !!a && !!b && a.width === b.width && a.height === b.height && Math.abs(a.refresh_mhz - b.refresh_mhz) <= 500
+        return !!a && !!b && a.width === b.width && a.height === b.height && Math.abs(a.refresh_mhz - b.refresh_mhz) <= 10
+    }
+    // A monitor's mode choices: first its own (no mode in the plan: the one it has without
+    // Frametop), then each mode it lists.
+    function choices(m) {
+        const own = m.mode && !m.changed ? "Its own mode (" + modeText(m.mode) + ")" : "Its own mode"
+        return [{ text: own, mode: null }].concat(m.modes.map(x => ({ text: modeText(x), mode: x })))
+    }
+    function choiceIndex(m, w) {
+        if (!w || !(w.width > 0)) return 0
+        return Math.max(0, choices(m).findIndex(c => c.mode && sameMode(c.mode, w)))
+    }
+    function pick(id, mode) {
+        wish(id, mode ? { width: mode.width, height: mode.height, refresh_mhz: mode.refresh_mhz }
+                      : { width: 0, height: 0, refresh_mhz: 0 })
     }
     function openFor(h) {
         host = h.name; listed = []; wishes = ({}); error = ""; note = ""
@@ -104,16 +119,11 @@ Kirigami.PromptDialog {
                     objectName: "monitorMode-" + row.modelData.id
                     enabled: row.wish.on && row.modelData.modes.length > 0
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                    model: row.modelData.modes.map(m => ({ text: dialog.modeText(m), mode: m }))
+                    readonly property var entries: dialog.choices(row.modelData)
+                    model: entries
                     textRole: "text"
-                    currentIndex: Math.max(0, row.modelData.modes.findIndex(
-                        m => dialog.sameMode(m, row.wish.width > 0 ? row.wish : row.modelData.mode)))
-                    onActivated: (i) => {
-                        const m = row.modelData.modes[i]
-                        dialog.wish(row.modelData.id, dialog.sameMode(m, row.modelData.mode) && !(row.modelData.wish && row.modelData.wish.mode)
-                                    ? { width: 0, height: 0, refresh_mhz: 0 }
-                                    : { width: m.width, height: m.height, refresh_mhz: m.refresh_mhz })
-                    }
+                    currentIndex: dialog.choiceIndex(row.modelData, row.wish)
+                    onActivated: (i) => dialog.pick(row.modelData.id, entries[i].mode)
                 }
             }
         }

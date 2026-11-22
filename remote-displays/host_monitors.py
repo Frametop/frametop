@@ -14,6 +14,7 @@ The backend (ft_remote_displays.py) makes one and shows it to the page as hostMo
 to the PC run on a thread; changes to the panels go in the backend's queue of ft-layout runs.
 """
 import os
+import sys
 import threading
 
 from PySide6.QtCore import Property, QObject, Qt, Signal, Slot
@@ -159,8 +160,8 @@ class HostMonitors(QObject):
             if self._parked != before:
                 try:
                     ft_store.write_json(PARKED_PATH, {"parked": sorted(self._parked)})
-                except OSError as e:
-                    error = f"Couldn't keep which panels were disconnected: {e}"
+                except OSError as e:  # the PC's change took: only a restart of Settings forgets them
+                    print(f"host monitors: couldn't keep which panels were disconnected: {e}", file=sys.stderr)
         self.monitorsReady.emit(name, state, error)
 
     @Slot(str)

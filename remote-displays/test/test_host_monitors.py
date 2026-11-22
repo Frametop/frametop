@@ -231,8 +231,29 @@ class Page(Base):
         self.assertEqual(self.asked[-1][:2], ("PC", "POST"))
         self.assertEqual(self.asked[-1][2]["monitors"]["DP-1"], {"on": False})
         self.assertEqual(self.asked[-1][2]["monitors"]["eDP-2"], {"on": True, "mode": HZ60})
-        self.assertTrue(dialog.sameMode(HZ240, dict(HZ240, refresh_mhz=239761)), "Hyprland's 239.761 Hz")
-        self.assertFalse(dialog.sameMode(HZ240, HZ60))
+        self.assertTrue(dialog.sameMode(dict(HZ240, refresh_mhz=239760), dict(HZ240, refresh_mhz=239761)),
+                        "Hyprland's 239.761 Hz listed as 239.76")
+        self.assertFalse(dialog.sameMode(dict(HZ60, refresh_mhz=59940), HZ60), "59.94 and 60 Hz are two modes")
+        self.assertEqual([w for w in self.warnings if "not placed in the graphics scene" not in w], [])
+
+    def test_a_mode_is_picked_or_left_its_own(self):
+        dialog = self.root.findChild(QObject, "monitorsDialog")
+        dialog.setProperty("host", "PC")
+        listed = state({"on": True, "mode": HZ60})
+        listed["monitors"][1].update(on=False, mode=None)  # DP-1 off now
+        self.b.hostMonitors.monitorsReady.emit("PC", listed, "")
+        self.assertTrue(spin(self.app, lambda: dialog.property("listed")))
+        edp, dp = dialog.property("listed")
+        self.assertEqual([c["text"] for c in dialog.choices(dp).toVariant()], ["Its own mode", "3840 × 2160 at 60 Hz"],
+                         "off now: no mode to show but its own")
+        self.assertEqual(dialog.choices(edp).toVariant()[0]["text"], "Its own mode (2560 × 1600 at 240 Hz)")
+        self.assertEqual(dialog.choiceIndex(dp, dialog.property("wishes").toVariant()["DP-1"]), 0)
+        self.assertEqual(dialog.choiceIndex(edp, dialog.property("wishes").toVariant()["eDP-2"]), 2, "its wish: 60 Hz")
+        dialog.pick("DP-1", UHD)
+        self.assertEqual(dialog.property("wishes").toVariant()["DP-1"], {"on": False, **UHD})
+        dialog.pick("eDP-2", None)
+        self.assertEqual(dialog.property("wishes").toVariant()["eDP-2"], {"on": True, "width": 0, "height": 0,
+                                                                          "refresh_mhz": 0})
         self.assertEqual([w for w in self.warnings if "not placed in the graphics scene" not in w], [])
 
 

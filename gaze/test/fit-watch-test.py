@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline test of the fit watch (gaze/gazecheck.py, GAZE_FIT_WATCH): the fit check keeping a
-good fit as yours, the put-on check in the quick check that opens when the headset goes on
+good fit as yours, the put-on check in the quick check that opens when the headset goes on (and
+the put-on pill instead of it, with our tracker)
 (holds the dot, says what to move, lets go once it's back or on a click), and the fit pill
 with our tracker (gaze/fitpill.py: which way to nudge the headset, from ft-eyes' slip filter,
 then "Looks good"; the `adjusting` lease while it shows; SteamVR's steady looks sent to ft-eyes;
@@ -420,6 +421,29 @@ check("  no looks sent while it runs", got("look", g), [])
 ask("calquit")
 check("  closed", wait(lambda: svc.checks.check is None, 3), True)
 eyes_state["slip"] = (0.0, 0.0)
+
+# Put on again with our tracker: the put-on pill, not the quick check.
+eyes_state["offset"] = (0.0, 12.0)   # low: push it up
+look(0.0, 0.0)
+n, mark = len(panel), len(logs)
+svc.checks.went_on(time.monotonic())
+check("put on low: the put-on pill", wait(lambda: "show pill" in since(n), 6), True)
+check("  says to nudge it up", wait(lambda: any(c.startswith("text Nudge") and c.endswith(" up") for c in since(n)), 3), True)
+check("  no quick check", svc.checks.check, None)
+check("  in the status", (svc.checks.status()["puton_pill"] or "").endswith(" up"), True)
+eyes_state["offset"] = (0.0, 0.0)
+check("  back: looks good", wait(lambda: "text Looks good" in since(n), 5), True)
+check("  then it goes", wait(lambda: svc.checks.puton is None and "hide" in since(n), fitpill.GOOD_SECONDS + 3), True)
+check("  logged", any("put-on pill: the headset sits as your saved fit" in m for m in logs[mark:]), True)
+with open(gazed.CONF, "w") as f:
+    f.write("GAZE_FIT_WATCH=1\nGAZE_PUTON_QUICK=1\n")
+asked = []
+svc.checks.auto_quick = asked.append   # (the quick check's own conditions are tested above)
+svc.checks.went_on(time.monotonic())
+check("GAZE_PUTON_QUICK=1: the quick check instead", (asked, svc.checks.puton), ([gazecheck.PUTON_REASON], None))
+del svc.checks.auto_quick
+with open(gazed.CONF, "w") as f:
+    f.write("GAZE_FIT_WATCH=1\n")
 
 print("all passed" if not failures else f"{len(failures)} failed: {failures}", flush=True)
 shutil.rmtree(HOME, ignore_errors=True)

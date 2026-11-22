@@ -25,7 +25,7 @@ at BIAS_RATE. So a nudge counts most just after it and fades as the headset may 
 since, while the steady readings follow a slow slip between nudges. Since h moves fastest, a
 reading off in both eyes moves the headset's slip for both, while what the clicks keep finding
 in one eye alone stays that eye's own: one eye's error doesn't pose as the headset moving, and
-the fit pill reads h alone. A click pins the slip, and through the state's covariance it also
+the fit pill reads the eyes' mean slip. A click pins the slip, and through the state's covariance it also
 says how far each sensor read off, so the sensors stay honest without a second calibration.
 
 The headset off and on again (`reseat`: frames stopped, or ft-eyes restarted) makes h nearly
@@ -329,8 +329,16 @@ def _largest_sd(C):
 
 
 def headset_status(headset):
-    """The headset's slip (degrees, as slip_deg) and how sure it is: what the fit pill reads."""
-    return {"slip_deg": [round(float(v), 3) for v in headset.x[H]], "slip_sd": round(_largest_sd(headset.P[H, H]), 3)}
+    """The eyes' mean slip (degrees, as slip_deg) and how sure it is: what the fit pill reads.
+
+    Not h alone: how the slip splits between h and the eyes' own parts isn't observable (every
+    reading sees only their sum), so h's sd grows with each reseat and never comes back. It sat
+    near 5 degrees all day (2026-11-22) and the pill, which needs 2.5, never opened. The mean is
+    what the readings pin, and it is still the headset's slip once the eyes' own parts average out.
+    """
+    m = 0.5 * (_rows(0, "click") + _rows(1, "click"))
+    return {"slip_deg": [round(float(v), 3) for v in m @ headset.x],
+            "slip_sd": round(_largest_sd(m @ headset.P @ m.T), 3)}
 
 
 # --- Kept across restarts (state.json's "slip") ---

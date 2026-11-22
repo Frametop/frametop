@@ -97,7 +97,8 @@
 //   - the palm menu (palmmenu.cpp): a bare hand turned palm up toward your face, while you look
 //     at it, gets a small ring above the palm; a pinch tap by that hand opens the Steam menu
 //     (steam/ft-steam menu), or closes the dashboard. That hand counts as near meanwhile. Not
-//     while a gaze calibration panel is up (the pointer helper's "calpanel 1").
+//     while a gaze calibration panel is up (the pointer helper's "calpanel 1"; every screen and
+//     floating window hides meanwhile, so the panel's dots are in front).
 //   - "grab that" (grabthat.cpp): an open hand held out to a screen or floating window, then a
 //     fist pulled back, brings it to arm's reach (about 45 cm ahead, facing you). Only a panel the
 //     palm faces (its normal's line meets it), farther than 0.8 m, not held (near ones: push,
@@ -1267,8 +1268,11 @@ void SetVisible(Screen &s, bool visible, float alpha) {
     s.controls = 0, s.controlsUp = false;
 }
 
+bool CalPanelUp();   // (below: the gaze calibration panel's lease)
+
 void UpdateVisibility() {
     const bool shared = ModeVisible();
+    const bool calUp = CalPanelUp();
     const bool dashUp = vr::VROverlay()->IsDashboardVisible();
     Mat head;
     const bool haveHead = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
@@ -1276,6 +1280,10 @@ void UpdateVisibility() {
         if (s.glueTo >= 0) continue;   // (with what it's glued to, below)
         bool visible = TileAnchored(i) ? TileShown(s, i, dashUp)
                                        : !g_paused && s.shown && (shared || s.drag != Drag::None || i == PadPanel()) && !s.alone;
+        // A gaze calibration panel's dots sit at 1.5 m (its eyes' vergence is part of the fit), and
+        // the compositor draws a nearer panel over them whatever their sort order: every panel
+        // steps aside while one is up (user, 2026-11-22: "show in front of other content").
+        if (calUp && s.drag == Drag::None) visible = false;
         // A floating window's panel: while a window floats on it, its output is on, and the
         // window isn't minimized (and once it has a crop).
         if (s.floating) visible = visible && s.floatOn && s.outputOn && !s.minimized && s.cropW > 0;
@@ -3402,7 +3410,8 @@ struct TypingWord {
 } g_typingWord;
 // The pointer helper's word on the gaze calibration panel ("calpanel 1|0", passed on from the
 // panel's claims, about every second while it's up): the palm menu waits meanwhile (a palm up
-// between dots isn't a menu). Older than 3 s, it lapses.
+// between dots isn't a menu), and every panel hides (UpdateVisibility). Older than 3 s, it
+// lapses, so a gaze service that dies with its panel up can't leave them hidden.
 int64_t g_calPanelMs = INT64_MIN / 2;
 bool CalPanelUp() { return NowMs() - g_calPanelMs < 3000; }
 // ...and on its hand rays ("ray <L 0|1> <R 0|1>", the same way): our laser (ft_pointer's) is a hand
@@ -8103,9 +8112,12 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
         return;
     }
     case vrcmd::CalPanel: {
-        if ((calOn != 0) != CalPanelUp())
-            std::printf("gaze calibration panel %s: the palm menu %s\n", calOn ? "up" : "gone", calOn ? "waits" : "is back");
+        const bool was = CalPanelUp();
+        if ((calOn != 0) != was)
+            std::printf("gaze calibration panel %s: the palm menu %s, the panels %s\n", calOn ? "up" : "gone",
+                        calOn ? "waits" : "is back", calOn ? "hide" : "are back");
         g_calPanelMs = calOn ? NowMs() : INT64_MIN / 2;
+        if ((calOn != 0) != was) UpdateVisibility();
         std::snprintf(reply, size, "ok");
         return;
     }

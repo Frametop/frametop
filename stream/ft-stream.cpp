@@ -822,13 +822,27 @@ std::string Route(const std::string &host, int port) {
 }
 
 // Whether the host's entry in the layout has `key` true: "mic" (Frametop Remote Displays' Send my
-// microphone) or "clipboard" (Share the clipboard). Read again every few seconds while streaming.
+// microphone) or "clipboard" (Share the clipboard), read again every few seconds while streaming;
+// "monitors" and "monitors_release" once, before a display stream (ReleaseMonitors).
 bool HostFlag(const std::string &host, const char *key) {
     const nlohmann::json layout = Layout();
     if (layout.is_null()) return false;
     for (const auto &h : layout["hosts"])
         if (h.is_object() && h.value("address", "") == host) return h.contains(key) && h[key].is_boolean() && h[key].get<bool>();
     return false;
+}
+
+// A host whose "Turn off and set its own monitors" switch went off while it didn't answer keeps
+// "monitors_release" in the layout (layout/ft_hostmonitors.py) until the release goes through.
+// ft-layout sends it again before the streams it starts; ft-screens restarts a lost stream on
+// its own, so each display stream sends it too: else the PC's old plan would go on turning its
+// monitors off. The flag stays for ft-layout to clear.
+void ReleaseMonitors(WebApi &api, const std::string &host) {
+    if (!HostFlag(host, "monitors_release") || HostFlag(host, "monitors")) return;
+    const nlohmann::json body = {{"monitors", nlohmann::json::object()}};
+    nlohmann::json r;
+    std::printf("%s: its monitors back as they were (the switch went off): %ld\n", host.c_str(),
+                api.Call("POST", "/api/frametop/monitors", &body, &r));
 }
 
 // The port of the display whose client is `id`, from the layout, or 0. A Mac runs a Sunshine
@@ -1222,6 +1236,9 @@ int main(int argc, char **argv) {
             std::printf("window %s is on %s\n", app.c_str() + 7, output.c_str());
             app = "display:" + output;
             g_windowApp = true;
+        } else if (app.rfind("display:", 0) == 0 && haveToken && !login) {
+            if (route != host) api.base = "https://" + route + api.base.substr(api.base.rfind(':'));
+            ReleaseMonitors(api, host);
         }
         return Stream(client, app, fd, width, height, fps, bitrate);
     }

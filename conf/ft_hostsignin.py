@@ -30,9 +30,11 @@ import subprocess
 import ft_hostapi
 
 # What the token for a host's displays may do: pair their clients (submit their PINs), list
-# the clients and set their permissions, and list the host's monitors.
+# the clients and set their permissions, list the host's monitors, and turn them off and set
+# their modes while its displays stream (Frametop's build; layout/ft_hostmonitors.py).
 SCOPES = [{"path": "/api/pin", "methods": ["POST"]}, {"path": "/api/clients/list", "methods": ["GET"]},
-          {"path": "/api/clients/update", "methods": ["POST"]}, {"path": "/api/display-devices", "methods": ["GET"]}]
+          {"path": "/api/clients/update", "methods": ["POST"]}, {"path": "/api/display-devices", "methods": ["GET"]},
+          {"path": "/api/frametop/monitors", "methods": ["GET", "POST"]}]
 # ... and the one for its app windows: the same for each window's client, and the window routes
 # ft-layout and ft-stream ask (list the windows and apps, open or launch, resize, which window
 # is at a point, put one back).

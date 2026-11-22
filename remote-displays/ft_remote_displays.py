@@ -28,6 +28,11 @@ the dev container:
     (ft-layout remote add pairs a client for it). Each one connects and disconnects on its
     own, or all of a host's at once; a disconnected one keeps its place and settings.
     Its stream's resolution, frame rate and bitrate, its width in VR, and whether it shows.
+  - Its monitors, per Vibepollo host (Frametop's build): with "Turn off and set its monitors"
+    on, while one of its display panels streams, the PC turns off each monitor with no
+    connected panel here and puts the others in the mode picked for their panel
+    (host_monitors.py, layout/ft_hostmonitors.py). Those panels then pick a mode instead of a
+    stream size.
   - Windows, per KDE Plasma host running utrack's KWin Window Stream (issue 81): Add windows
     lists its open windows, and each one picked is a panel of its own that the window sizes,
     connecting with one of the host's displays' pairings (kwin_windows.py; ft-layout remote
@@ -62,10 +67,12 @@ sys.path[:0] = [LAYOUT_DIR, os.path.join(HERE, "..", "conf")]
 import ft_layout  # noqa: E402
 import host_input  # noqa: E402  (a host's "input": its keyboard, its mouse or both)
 import ft_hostapi  # noqa: E402  (where a host's token is kept; conf/)
+import ft_hostmonitors  # noqa: E402  (a host's monitors following its panels; layout/)
 import ft_hostsignin  # noqa: E402  (the sign-ins that get one)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from kwin_windows import KwinWindows  # noqa: E402  (a KDE PC's windows: Add windows)
+from host_monitors import HostMonitors  # noqa: E402  (a PC's monitors: the switch, the modes)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 FT_SCREENS = "\0ft_screens"
@@ -130,7 +137,7 @@ class Backend(QObject):
         self._streams_only = False  # ft-screens runs without the desktop (ft-layout streams)
         self._states = {}   # remote screen number -> its stream's state ("lost can't connect")
         self._online = {}   # host address -> True/False (None: not checked yet)
-        self._queue = []    # ft-layout runs waiting their turn: (label, args, stdin)
+        self._queue = []    # ft-layout runs waiting their turn: (label, args, stdin, then)
         self._proc = None
         self._out = []      # what the running ft-layout said so far (a PIN to show comes early)
         self._pin_said = False
@@ -140,6 +147,7 @@ class Backend(QObject):
         self._signInDone.connect(self._sign_in_done, Qt.QueuedConnection)
         self._appWindowsDone.connect(self._app_windows_done, Qt.QueuedConnection)
         self._kwin = KwinWindows(lambda *args: self._run(*args), self)  # in this queue, as it is then
+        self._monitors = HostMonitors(lambda *args, then=None: self._run(*args, then=then), self)
         self.poll = QTimer(interval=2000, timeout=self._check)
         self.poll.start()
         self.ping = QTimer(interval=15000, timeout=self._ping_hosts)
@@ -220,6 +228,11 @@ class Backend(QObject):
         """A KDE PC's open windows, and adding one as a panel (kwin_windows.py)."""
         return self._kwin
 
+    @Property(QObject, constant=True)
+    def hostMonitors(self):
+        """A PC's own monitors: the switch, and its monitors' modes for the pickers (host_monitors.py)."""
+        return self._monitors
+
     @Property(str, notify=busyChanged)
     def busy(self):
         return self._busy
@@ -255,6 +268,10 @@ class Backend(QObject):
                 else:
                     state = self._states.get(n, "not running")
                 displays.append({"id": d["id"], "number": n, "label": d.get("label") or d["id"], "app": d["app"],
+                                 # Its monitor follows it (the host's switch) in the mode picked here.
+                                 "host": h.get("name", ""),
+                                 "followsMonitor": ft_hostmonitors.controls(h) and ft_hostmonitors.monitor_of(d) is not None,
+                                 "mode": ft_hostmonitors.mode_of(d) or {},
                                  # A KDE PC's window (issue 81): the window sets its size.
                                  "kwin": str(d["app"]).startswith("kwin:"),
                                  "key": f"{d['app']}@{d['port']}" if d.get("port") else d["app"],
@@ -276,6 +293,7 @@ class Backend(QObject):
                         "inputKeyboard": "keyboard" in host_input.lent(h),
                         "inputMouse": "mouse" in host_input.lent(h), "clipboard": bool(h.get("clipboard")),
                         "appWindows": isinstance(h.get("windows"), dict),
+                        "monitors": ft_hostmonitors.controls(h),
                         "kwinWindows": KwinWindows.available(h),
                         "displays": displays})
         return out
@@ -694,21 +712,22 @@ class Backend(QObject):
         QProcess.startDetached(argv[0], argv[1:])
 
     # --- ft-layout on the host, one at a time ---
-    def _run(self, label, *args, stdin=None):
-        self._queue.append((label, args, stdin))
+    def _run(self, label, *args, stdin=None, then=None):
+        """Queues ft-layout ARGS; then() once it has run (either way)."""
+        self._queue.append((label, args, stdin, then))
         if self._proc is None:
             self._next()
 
     def _next(self):
         if not self._queue:
             return
-        label, args, stdin = self._queue.pop(0)
+        label, args, stdin, then = self._queue.pop(0)
         self._busy = label
         self.busyChanged.emit()
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         argv = host_command(os.path.abspath(FT_LAYOUT), *args)
-        proc.finished.connect(lambda code, _status: self._done(proc, label, code))
+        proc.finished.connect(lambda code, _status: self._done(proc, label, code, then))
         proc.readyReadStandardOutput.connect(lambda: self._said(proc, label))
         self._proc = proc
         self._out, self._pin_said = [], False
@@ -725,7 +744,7 @@ class Backend(QObject):
             self._pin_said = True
             self.pairingPin.emit(label, m.group(1))
 
-    def _done(self, proc, label, code):
+    def _done(self, proc, label, code, then=None):
         self._said(proc, label)
         out = "".join(self._out).strip()
         self._proc = None
@@ -738,4 +757,6 @@ class Backend(QObject):
             self.message.emit(f"{label}: done" + (f" ({last})" if last and not last.startswith("ok") else ""), False)
         else:
             self.message.emit(f"{label} failed: {last or 'exit code ' + str(code)}", True)
+        if then is not None:
+            then()
         self._next()

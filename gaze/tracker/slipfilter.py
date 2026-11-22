@@ -78,6 +78,9 @@ HUBER = 3.0           # Mahalanobis distance past which a steady reading counts 
 MOVE_DEG = 3.5        # a click off this much in both eyes, the same way: the headset moved
 MOVE_COS = 0.5        # ("the same way": the cosine between the two eyes' innovations)
 LONE_DEG = 5.0        # one eye off this much while the other is within AGREE_DEG: a bad find
+GLANCE_SCALE = 2.0    # a glance (a free mouse's click: you most likely looked at what you
+                      # clicked) reads with this times CLICK_SD's noise, Huber-weighted, and is
+                      # never the headset moved: a click while reading elsewhere pulls little
 AGREE_DEG = 2.0
 
 N = 14
@@ -307,14 +310,17 @@ class SlipFilter:
         y, d, w = self.headset.update(self.eye, kind, self.deg(z), t, sd_scale, robust)
         return {"kind": kind, "innov_deg": [round(float(v), 3) for v in y], "d": round(d, 2), "w": round(w, 3)}
 
-    def click(self, z, t, sd_scale=1.0, moved=False):
+    def click(self, z, t, sd_scale=1.0, moved=False, glance=False):
         """A click's reading. `moved`: the headset moved (teach_click), so the slip is taken
-        nearly whole: its uncertainty grows by the innovation first."""
+        nearly whole: its uncertainty grows by the innovation first. A `glance` (GLANCE_SCALE)
+        is Huber-weighted and isn't counted as a click: after a reseat it leaves the one-dot
+        check to come."""
         if moved:
             self.inflate(self.innovation("click", z, t))
-        r = self.update("click", z, t, sd_scale, robust=False)
-        self.clicks = 1 if self.reseated else self.clicks + 1
-        self.reseated = False
+        r = self.update("click", z, t, sd_scale, robust=glance)
+        if not glance:
+            self.clicks = 1 if self.reseated else self.clicks + 1
+            self.reseated = False
         return r
 
 
@@ -385,22 +391,23 @@ def moved(a, b):
     return min(na, nb) > MOVE_DEG and float(np.asarray(a) @ np.asarray(b)) / max(na * nb, 1e-9) > MOVE_COS
 
 
-def teach_click(filters, lessons, t):
+def teach_click(filters, lessons, t, glance=False):
     """One click for both eyes: `filters` {eye: SlipFilter}, `lessons` {eye: z} for the eyes it
     teaches (seen, and within their calibration dots). Judged across the eyes first (see the
-    top). Returns {eye: what happened}, each with "gate": "moved", "lone" or "plain"."""
+    top); a `glance` is never "moved" and reads at GLANCE_SCALE. Returns {eye: what happened},
+    each with "gate": "moved", "lone", "plain" or "glance"."""
     innov = {e: filters[e].deg(filters[e].innovation("click", z, t)) for e, z in lessons.items()}
     size = {e: float(np.hypot(*v)) for e, v in innov.items()}
-    both = len(innov) == 2 and moved(innov[0], innov[1])
+    both = not glance and len(innov) == 2 and moved(innov[0], innov[1])
     out, inflated = {}, set()
     for e, z in lessons.items():
-        scale, gate = 1.0, "moved" if both else "plain"
+        scale, gate = (GLANCE_SCALE, "glance") if glance else (1.0, "moved" if both else "plain")
         o = 1 - e
         if not both and o in size and size[e] > LONE_DEG and size[o] <= AGREE_DEG:
-            scale, gate = size[e] / AGREE_DEG, "lone"
+            scale, gate = scale * size[e] / AGREE_DEG, "lone"
         first = id(filters[e].headset) not in inflated   # eyes sharing a Headset: its h once
         inflated.add(id(filters[e].headset))
-        r = filters[e].click(z, t, scale, both and first)
+        r = filters[e].click(z, t, scale, both and first, glance)
         r["gate"] = gate
         out[e] = r
     return out

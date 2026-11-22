@@ -1427,8 +1427,8 @@ class Checks:
         return "error unknown command"
 
     def after_lesson(self, rec):
-        if self.after_quick is None or "refused" in rec:
-            return
+        if self.after_quick is None or "refused" in rec or rec.get("how") == "glance":
+            return   # (a glance is within the helper's 8 degrees by its gate: no sign of the check's miss)
         self.after_quick.append(rec.get("lesson_deg", 0.0))
         if len(self.after_quick) < FIVE_COUNT:
             return

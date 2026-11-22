@@ -41,11 +41,11 @@ def _r(v, digits=3):
     return [round(float(x), digits) for x in v]
 
 
-def teach_click(eyes, cal, t, truth, before):
+def teach_click(eyes, cal, t, truth, before, glance=False):
     """A click at t where you looked at `truth` (yaw, pitch): each eye seen over the `before` s
     up to it, and within its calibration dots, teaches its filter (judged across the eyes:
-    slipfilter.teach_click). Returns the reply's words (each eye's measured slip, or nan) and
-    the clicks log's record per eye."""
+    slipfilter.teach_click; a `glance`, a free mouse's click, is a weaker reading). Returns the
+    reply's words (each eye's measured slip, or nan) and the clicks log's record per eye."""
     out, rec, lessons = [], {}, {}
     for e in eyes:
         g = e.window(t - before, t)
@@ -63,7 +63,7 @@ def teach_click(eyes, cal, t, truth, before):
                       "sd_before": round(e.filter.slip_sd(), 3), "glint": e.glint[1] if e.glint else None,
                       "a": round(e.find[3], 2) if e.find and e.find[3] is not None else None}
         out += [f"{d[0]:.2f}", f"{d[1]:.2f}"]
-    taught = slipfilter.teach_click({e.eye: e.filter for e in eyes if e.filter}, lessons, t)
+    taught = slipfilter.teach_click({e.eye: e.filter for e in eyes if e.filter}, lessons, t, glance)
     for c, r in taught.items():
         rec[c].update(after=eyes[c].filter.s.tolist(), **r)
     return out, rec

@@ -271,6 +271,11 @@ check("...taken nearly whole by the next readings", [float(e.filter.s[0] + e.fil
 check("...and as the slip, not the glints' bias", [abs(float(e.filter.x[sf.GLINT][0])) < 0.2 * KNOCK for e in eyes],
       [True, True])
 eyes = settled()
+moved = []
+for t in (30.0, 31.0):   # a push on purpose, as 2026-11-22's: both eyes' glints 18-20 degrees off
+    moved += [v["moved"] for v in glints(eyes, t, {0: (-10.0, 76.0), 1: (3.0, 72.0)})]
+check("a 19 degree push: a knock at the second readings", moved, [False, False, False, True])
+eyes = settled()
 for t in (30.0, 31.0, 32.0, 33.0):   # one eye's glints alone: a misread pair, likelier
     r = glints(eyes, t, {0: (KNOCK, 0.0), 1: (0.0, 0.0)})
 check("one eye's glints alone: not a knock", (r[0]["moved"], eyes[0].filter.s[0] < 0.3 * KNOCK), (False, True))
@@ -282,7 +287,7 @@ check("looking far aside (the glint fit's error shared by both eyes): not a knoc
 eyes = settled()
 moved = []
 for t in (30.0, 31.0, 32.0):
-    moved += [v["moved"] for v in glints(eyes, t, {0: (80.0, 0.0), 1: (80.0, 0.0)})]
+    moved += [v["moved"] for v in glints(eyes, t, {0: (140.0, 0.0), 1: (140.0, 0.0)})]
 check("past KNOCK_MAX_DEG: a bad pair, not a knock", any(moved), False)
 eyes = settled()
 eyes[1].filter = None   # a one-eye calibration

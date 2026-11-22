@@ -114,6 +114,14 @@
 // below) on the page starts within SETTINGS_ORIGIN of the hand, not most of the way to the panel
 // behind, and only SteamVR's hit dot shows. Everywhere else nothing changes.
 //
+// SteamVR's system prompts (Setup Playspace and the like) are drawn by system.systemui, which
+// OpenVR reports as a floor-sized horizontal plane (2.4 km wide on the Frame): the ray met that
+// "floor" metres past the prompt and the laser started there, so the prompt took no clicks (user,
+// 2026-11-21: "I still can't use the frametop 3d mouse to interact with the setup play space
+// prompt"). It's left out of the hit test (kSystemUi), and while it shows, off our panels, the
+// laser is placed as on the Settings page: it starts near the eye or the hand, and SteamVR's own
+// hit test finds the prompt. A VR game doesn't get the ray then either: the prompt has the input.
+//
 // Panel edges: off a panel, the cursor stays on that panel's plane while it's within
 // POINTER_EDGE_REACH (0.3 m) of the last point it touched, instead of jumping to
 // the free sphere. A floating panel's resize margins and the window controls under it
@@ -970,6 +978,8 @@ Vec3 LimitPitch(Vec3 d, double maxDeg) {
 
 // SteamVR Settings page (see the top): the laser starts this far from the eye, the dot is
 // drawn this far out, and the laser-catching dot sits this far out (metres).
+// SteamVR's system prompts' overlay (see "SteamVR's system prompts" at the top).
+constexpr const char *kSystemUi = "system.systemui";
 constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 8.0;
 constexpr float kGoneWidthM = 1e-3f;   // a panel narrower: hidden (see "Scene-graph overlays" at the top)
 // A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
@@ -1299,7 +1309,7 @@ struct Pointer {
     double tiltYaw = 0, tiltPitch = 0;
     double dragDistance = 0, lastDistance = 1.5;  // drag lock: distance from the anchor at the press
     double panelDepth = 0;  // the last panel hit's distance: the free sphere's radius (see the top)
-    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page (kept while dragging)
+    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page or a system prompt (kept while dragging)
     bool catcherHidesHit = false;  // the laser-catching dot hides SteamVR's hit dot (Settings page)
     Clock::time_point dropHoldUntil{};  // after a left release: keep the drag pose this long
     bool debug = false;
@@ -2479,6 +2489,11 @@ struct Pointer {
         PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
     Hit nearest(Vec3 from, Vec3 d);
     bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
+    // A SteamVR system prompt shows (see "SteamVR's system prompts" at the top).
+    bool SystemUiUp() const {
+        const auto it = shown.find(kSystemUi);
+        return it != shown.end() && it->second;
+    }
     void AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t);
     bool HitsAtOrigin(vr::VROverlayHandle_t h);
 };
@@ -3104,7 +3119,7 @@ void Pointer::OverlaysAndRole() {
     // (A game's own OpenXR layers, its menus, are the game's: SteamVR's laser on them took its focus,
     // which hid them, which let it go, five times a second.)
     if (!lastHit.empty() && lastHit.rfind("openxr_", 0) != 0) laserPanelAt = fr.tnow;
-    const bool toGame = inGame && !dashboardUp && fr.tnow - laserPanelAt > kGameLaserHold;
+    const bool toGame = inGame && !dashboardUp && !SystemUiUp() && fr.tnow - laserPanelAt > kGameLaserHold;
     const bool laserOn = active && (leftHeld ? laserModeShown : !toGame);   // (a held press stays whoever's took it)
     if (laserOn != laserModeShown) {
         laserModeShown = laserOn;
@@ -4207,7 +4222,9 @@ void Pointer::AimAndPose() {
     const bool onPanel = dragging || (t.best < 1e8 && !onScene);
     const Vec3 sight = Normalize(t.point - fr.eye);
     // the eye's line of sight to the cursor, or a hand's ray from the hand
-    if (!dragging && !reuse) onVrSettings = fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight);
+    if (!dragging && !reuse)
+        onVrSettings = (fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight)) ||
+                       (SystemUiUp() && !onPanel && !onScene);
     if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
                         t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {
@@ -4293,7 +4310,7 @@ bool Pointer::HitsAtOrigin(vr::VROverlayHandle_t h) {
 Hit Pointer::nearest(Vec3 from, Vec3 d) {
     Hit h;
     for (const auto &[key, handle] : handles) {
-        if (!visible[key]) continue;
+        if (!visible[key] || key == kSystemUi) continue;   // (its plane is a floor: see the top)
         if (sceneGraph[key]) {
             // Plane test: overlay origin and its +Z normal, within sceneRadius of the origin.
             vr::ETrackingUniverseOrigin uo;

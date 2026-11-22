@@ -261,12 +261,33 @@ class Page(Base):
         set_hosts(hosts)
         self.b.changed.emit()
         spin(self.app, seconds=0.1)
+        texts = lambda: [c["text"] for c in js(self.boxes("monitorScale")["eDP-2"].property("entries"))]  # noqa: E731
         self.answered()
-        box = self.boxes("monitorScale")["eDP-2"]
-        entries = [c["text"] for c in js(box.property("entries"))]
-        self.assertEqual(entries[0], "Its own scale", "a scale is picked: its scale now isn't its own")
+        entries = texts()
+        self.assertEqual(entries[0], "Its own scale (125%)", "not applied yet (no stream): its scale is its own")
         self.assertIn("150%", entries)
-        self.assertEqual(entries[box.property("currentIndex")], "150%")
+        self.assertEqual(entries[self.boxes("monitorScale")["eDP-2"].property("currentIndex")], "150%")
+        applied = state()
+        applied["monitors"][0].update(scale=1.5, changed=True, own_scale=1.25)
+        self.answered(applied)
+        self.assertEqual(texts()[0], "Its own scale (125%)", "applied: the one it goes back to, from the PC")
+        del applied["monitors"][0]["own_scale"]  # a PC from before own_scale
+        self.answered(applied)
+        self.assertEqual(texts()[0], "Its own scale", "its scale now isn't its own")
+
+    def test_its_settings_stay_open_when_the_list_is_made_again(self):
+        self.switch_on()
+        self.answered()
+        laptop = lambda: next(d for d in self.found(prop="ownSize") if d.property("modelData")["id"] == "pc-edp")  # noqa: E731
+        laptop().setProperty("expanded", True)
+        hosts = pc()
+        hosts["displays"][0]["scale"] = 1.6  # a scale pick (or Apply) saves the layout
+        set_hosts(hosts)
+        self.b.changed.emit()
+        spin(self.app, seconds=0.1)
+        self.assertTrue(laptop().property("expanded"), "still open")
+        others = [d.property("expanded") for d in self.found(prop="ownSize") if d.property("modelData")["id"] != "pc-edp"]
+        self.assertEqual(others, [False, False])
 
     def test_the_pcs_note_shows_with_the_switch_on(self):
         self.switch_on()

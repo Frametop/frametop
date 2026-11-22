@@ -24,7 +24,9 @@ RowLayout {
     // picked one if it isn't listed (another mode takes another set).
     function choices() {
         const m = monitor
-        const own = m && m.on && m.scale && !(picked > 0) ? "Its own scale (" + percent(m.scale) + ")" : "Its own scale"
+        // While a picked scale applies, the PC says the one it goes back to (own_scale).
+        const ownScale = m && m.on ? (m.changed ? m.own_scale : m.scale) : 0
+        const own = ownScale ? "Its own scale (" + percent(ownScale) + ")" : "Its own scale"
         const scales = m && m.scales ? m.scales.slice() : []
         if (picked > 0 && !scales.some(x => sameScale(x, picked))) scales.push(picked)
         scales.sort((a, b) => a - b)

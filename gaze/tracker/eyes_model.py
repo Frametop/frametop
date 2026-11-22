@@ -23,7 +23,9 @@ the headset didn't move. With no headset movement a jump was in force on 42-75% 
 recorder rounds' dot frames and cost up to 6 degrees median (7.07 against 1.91 on the edge dots
 past 35); a jump counted only while both eyes have one kept the re-seat gains and took most of
 that away (frame-eyes findings.md, "The glint jump replayed"). So JUMP_RULES "both", ft-eyes'
-default, applies an eye's jump only while the other eye has one too (or isn't mapped).
+default, applied an eye's jump only while the other eye had one too (or wasn't mapped). Live
+ft-eyes left Shift and JUMP_RULES for its slip filter on 2026-11-22 (slipfilter.py, which judges
+glint moves across the eyes the same way); they stay for bench/compare.py's and lab/'s replays.
 
 A click far outside the calibration's dots measures its shift through the `where` fit's
 extrapolation: a nudge at 42 degrees yaw (the calibration covered +-20) taught a shift that left
@@ -150,6 +152,19 @@ class Calibration:
     def eyes(self):
         """The eyes it maps (0 right, 1 left)."""
         return [c for c in (0, 1) if self.has("pupil", c)]
+
+    def glint_eyes(self):
+        """The eyes with a glint fit: only these can have a glint jump. An eye seen with its pair
+        at under MIN_CLICKS dots has none (2026-11-22's calibration: the left eye at 11 of 26)."""
+        return [c for c in (0, 1) if self.has("glint", c)]
+
+    def jacobian(self, eye, gaze=(0.0, 0.0), step=1.0):
+        """d feature / d gaze of that eye's `where` fit at gaze (yaw, pitch): 2x2, feature units
+        per degree, columns yaw and pitch."""
+        w = self.fits["where", eye]
+        y, p = gaze
+        return np.column_stack([(w.one(y + step, p) - w.one(y - step, p)) / (2 * step),
+                                (w.one(y, p + step) - w.one(y, p - step)) / (2 * step)])
 
     def slip(self, eye, rows):
         """Median slip in pixels from pair sightings `rows` (t, px, py, mx, my), or None."""
@@ -341,15 +356,17 @@ class Shift:
 
 
 def partner(shifts, eye, mapped):
-    """The other eye's Shift from {eye: Shift}, or None when the calibration doesn't map it
-    (`mapped`: the eyes it maps), so its jump can't be asked."""
+    """The other eye's Shift from {eye: Shift}, or None when it can't have a jump (`mapped`: the
+    eyes with a glint fit, Calibration.glint_eyes), so its jump can't be asked. The eyes with a
+    pupil fit were passed until 2026-11-22: an eye mapped without a glint fit never jumps, so
+    with rule "both" the other eye's jumps never counted."""
     return shifts[1 - eye] if (1 - eye) in mapped else None
 
 
 def teach(shifts, lessons, rule, mapped):
     """One click's lessons for both eyes: `shifts` {0: Shift, 1: Shift}, `lessons` {eye:
     (measured shift, glint estimate or None)} for the eyes it teaches (seen, and within their
-    dots), `mapped` the eyes the calibration maps. Whether each eye's jump was in force is read
+    dots), `mapped` the eyes with a glint fit (Calibration.glint_eyes). Whether each eye's jump was in force is read
     before any lesson, since a lesson clears that eye's jump, which the other's rule asks about.
     An eye whose jump was in force, left untaught while the other was taught, is vouched."""
     jumped = {e: sh.in_force(partner(shifts, e, mapped), rule) for e, sh in shifts.items()}
@@ -375,10 +392,18 @@ class SlipTracker:
             self.rows.popleft()
 
     def get(self, now=None):
-        now = time.monotonic() if now is None else now
-        if now - self.at >= self.every:
-            self.at = now
-            s = self.cal.slip(self.eye, list(self.rows))
-            if s is not None:
-                self.value = s
+        self.update(now)
         return self.value
+
+    def update(self, now=None):
+        """A new estimate if one is due (every `every` s) and there are enough sightings, else None."""
+        now = time.monotonic() if now is None else now
+        if now - self.at < self.every:
+            return None
+        self.at = now
+        while self.rows and self.rows[0][0] < now - self.window:
+            self.rows.popleft()   # only sightings within the window: no pair seen lately, no estimate
+        s = self.cal.slip(self.eye, list(self.rows))
+        if s is not None:
+            self.value = s
+        return s

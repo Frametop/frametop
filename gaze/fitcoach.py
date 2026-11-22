@@ -334,16 +334,13 @@ HINTS = {
 }
 
 
-def assess(summary, ref, ipd=None, baseline=None, previous=None, look=None):
+def assess(summary, ref, ipd=None, baseline=None, previous=None):
     """The reading: {"state": "ok" | "adjust" | "lost" | "waiting", "eyes": {camera: {...}},
     "terms": {"up", "left", "ipd", "tilt"} in degrees, "hints": [{"key", "text", "amount"}],
     "provisional", "against": "baseline" | "reference"}.
 
     Against a baseline (the person's own good fit) when there is one, else the reference.
-    previous (an earlier assess() result) keeps the state between OK_DEG and ADJUST_DEG.
-    look (yaw, pitch degrees: where the eyes looked over the window, from SteamVR's tracker,
-    which our slips don't move) moves each centre by the reference's Jacobian, so a reading
-    needn't wait for the eyes to look straight ahead."""
+    previous (an earlier assess() result) keeps the state between OK_DEG and ADJUST_DEG."""
     eyes, hints, offsets = {}, [], {}
     centres = {}
     if baseline:
@@ -360,9 +357,6 @@ def assess(summary, ref, ipd=None, baseline=None, previous=None, look=None):
             # compare with, and the reference's is another face's.
             centre = centres.get(cam) if centres else (ref.eyes.get(cam) or {}).get("centre") if ref else None
             if centre and ref and cam in ref.eyes:
-                if look:
-                    (ja, jb), (jc, jd) = ref.eyes[cam]["jacobian"]
-                    centre = [centre[0] + ja * look[0] + jb * look[1], centre[1] + jc * look[0] + jd * look[1]]
                 dx, dy = s["x"] - centre[0], s["y"] - centre[1]
                 offsets[cam] = ref.degrees(cam, dx, dy)
                 e["offset_px"] = [round(dx, 1), round(dy, 1)]

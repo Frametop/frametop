@@ -176,12 +176,8 @@ r = fitcoach.assess(summary(0, 0), fitcoach.own_reference(one, REF), baseline=on
 check("a one-eye seating reads only its eye", (r["state"], sorted(e for e in r["eyes"] if "offset_deg" in r["eyes"][e])),
       ("ok", [0]))
 r = fitcoach.assess(summary(12, -6), own, baseline=seat)
-check("looking aside, no look given: reads as off", r["state"], "adjust")
-r = fitcoach.assess(summary(12, -6), own, baseline=seat, look=(12, -6))
-check("  with the look: ok", (r["state"], abs(r["terms"]["up"]) < 0.01, abs(r["terms"]["left"]) < 0.01), ("ok", True, True))
-r = fitcoach.assess(summary(12, -6, slip=(0.0, 7.0)), own, baseline=seat, look=(12, -6))
-check("a slip while looking aside: the slip alone", round(r["terms"]["up"], 2), 7.0)
-check("  and the pill says which way", fitpill.words(r["terms"]), ("Nudge slightly up", "up"))
+check("looking aside: the coach reads it as off (the pill reads the slip filter instead)", r["state"], "adjust")
+check("the pill's words for a slip up", fitpill.words({"up": 7.0, "left": 0.0}), ("Nudge slightly up", "up"))
 
 print("all passed" if not failures else f"{len(failures)} failed: {failures}", flush=True)
 sys.exit(1 if failures else 0)

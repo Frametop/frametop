@@ -37,7 +37,8 @@ The same, fitted here on the other clicks (all runs given), for runs without one
                   live: a guard's worth with SteamVR covering the eyes it refuses
 Replays of our tracker on its finds (own.jsonl), from the calibration and the shift it had when
 the run started (start/), with ft-eyes' own rules (eyes_model.py), and nudges teaching it when
-they did live (lessons.jsonl):
+they did live (lessons.jsonl). These are the rules ft-eyes had before 2026-11-22: since, it
+follows the slip with its slip filter (tracker/slipfilter.py), which no replay here runs yet:
   own-replay      the live rules: check this against own-live (the "replay vs live" line). The
                   jump rule and the edge guard are the ones the run's ft-eyes had (its status's
                   jump_rule and edge_margin; a run before them: each, and no guard)
@@ -334,7 +335,7 @@ class Replay:
 
     def value(self, e):
         """The eye's shift now, as ft-eyes' Eye.shift_now (the other eye's counts while it's mapped)."""
-        return self.shift[e].current(eyes_model.partner(self.shift, e, self.cal.eyes()), self.jump or "each")
+        return self.shift[e].current(eyes_model.partner(self.shift, e, self.cal.glint_eyes()), self.jump or "each")
 
     def click(self, t, truth):
         # guard "eye": each eye by its own dots, as ft-eyes (no dots known: every click teaches).
@@ -356,7 +357,7 @@ class Replay:
                 continue
             pupil = np.median(np.array([h[1:3] for h in rows]), axis=0)
             lessons[e] = (self.cal.click_shift(e, pupil, truth), self.slip[e].value)
-        eyes_model.teach(self.shift, lessons, self.jump or "each", self.cal.eyes())
+        eyes_model.teach(self.shift, lessons, self.jump or "each", self.cal.glint_eyes())
         if outside and not lessons:
             self.skipped += 1
         else:
@@ -449,6 +450,9 @@ def replays(run, truths, only):
         st = json.loads((run.dir / "start" / "eyes-state.json").read_text())
         if st.get("calibration") == cal.info.get("made"):
             shifts = {int(k): v for k, v in st.get("shift", {}).items()}
+            # Since 2026-11-22 ft-eyes keeps its slip filters ("slip"): their slip is the start.
+            shifts = shifts or {int(k): {"base": v["x"][:2]} for k, v in (st.get("slip") or {}).items()
+                                if isinstance(v, dict) and len(v.get("x") or []) >= 2}
     except (OSError, ValueError):
         pass
     frames = {}

@@ -68,6 +68,8 @@ when that look was (the history of what was sent), and so what each eye read the
     a click ("click T YAW PITCH" on @ft_eyes), as the
     probe's clicks do, and it learns how far the headset has moved on your face. That's
     what it gets wrong, and after the headset was off, the first click resets it;
+    between clicks, SteamVR's look once it holds still goes to it too ("look T YAW PITCH",
+    gaze/steamlook.py: SteamVR doesn't move with our tracker's slips), while no check runs;
   - either way, how far off each eye was (before the lesson taught it anything) goes to the
     eye bias, for auto.
 
@@ -151,6 +153,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gazecal import (DEFAULT_MODEL, EYE_FOUND, EYE_LOST, FUSION, MODELS, STATE, Correction, EyeBridge,  # noqa: E402
                      EyeFallback, EyeWeights, Fusion, GazeLock, LiveCorrection, SteamEyeLog, TrackedEye)
 from gazecheck import Checks  # noqa: E402
+from steamlook import SteamLooks  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
 import catalog  # noqa: E402  (which eye net EYES_MODEL means: models/catalog.py)
@@ -289,6 +292,7 @@ class Service:
         self.history = deque()
         self.own = {}        # our tracker's last status reply
         self.own_at = 0.0
+        self.steam_looks = SteamLooks()   # SteamVR's steady looks, for our tracker's slip (steamlook.py)
         self.eyes_proc = None  # ft-eyes, while it runs
         self.eyes_until = 0.0  # the probe's lease (monotonic time)
         self.eyes_restart_at = 0.0
@@ -575,8 +579,8 @@ class Service:
             return "all"
         kind = self.kind
         if kind == "own":
-            # left, right: the fusion's, and the fit pill's looks (gazecheck.pill_ask)
-            return "own,mmap1,left,right" if self.fusing or c.pill_steam else "own,mmap1"
+            # left, right: the fusion's, and SteamVR's steady looks for our tracker (feed_look)
+            return "own,mmap1,left,right"
         if kind == "eyes":
             return "left,right,mmap1"
         return ",".join(dict.fromkeys((self.source, "mmap1", "mmap2")))  # mmap2: each eye, for the fallback
@@ -754,6 +758,7 @@ class Service:
             self.one_eye = one
             self.fix.reset()
         self.checks.on_sample(s)
+        self.feed_look(s)
         kind = self.kind
         if kind != self.last_kind:
             log({"own": "our own tracker", "eyes": "SteamVR's eyes, each calibrated",
@@ -765,6 +770,34 @@ class Service:
             self.on_source_sample(s)
         else:
             self.on_eyes_sample(s, kind == "own")
+
+    def feed_look(self, s):
+        """SteamVR's look, once it holds still, to our tracker (steamlook.py): while it runs and
+        no check does (a check's clicks teach it themselves)."""
+        c = self.checks
+        if self.kind != "own" or self.eyes_proc is None or c.active or c.pending:
+            self.steam_looks.reset()
+            return
+        unc = (s["src"].get("mmap1") or {}).get("unc") or [1.0, 1.0]
+        lr = []
+        for k, name in enumerate(SIDES):
+            e = s["src"].get(name) or {}
+            lr.append((e["hy"], e["hp"]) if "hy" in e and len(unc) == 2 and unc[k] <= EYE_LOST else None)
+        own = self.own if time.monotonic() - self.own_at < 5 else {}
+        made = (own.get("calibration") or {}).get("made")
+        if not made:   # not calibrated (or its status not heard yet): nothing to read a look against
+            self.steam_looks.reset()
+            return
+        look = self.steam_looks.step(s["t"], lr[0], lr[1], self.one_eye, self.fusion, made)
+        if look:
+            self.tell_own("look {:.6f} {:.4f} {:.4f}".format(*look))
+
+    def tell_own(self, command):
+        """A command to our tracker whose reply needn't be waited for (on_own logs or drops it)."""
+        try:
+            self.eyes_sock.sendto(command.encode(), EYES_SOCKET)
+        except OSError:
+            pass   # not up yet
 
     def on_eyes_sample(self, s, own):
         m1 = s["src"].get("mmap1") or {}
@@ -986,7 +1019,7 @@ class Service:
                     pass
                 else:
                     self.note_own_calibration()
-            else:
+            elif not data.startswith(("look ok", "adjusting ok")):   # twice a second: not logged
                 log(f"our tracker: {data}")
 
     def note_own_calibration(self):
@@ -1069,10 +1102,7 @@ class Service:
             log("ft-eyes no longer wanted: stopping it")
             self.stop_eyes()
         if self.eyes_proc:
-            try:
-                self.eyes_sock.sendto(b"status", EYES_SOCKET)
-            except OSError:
-                pass  # not up yet: status() says so once the last answer is old
+            self.tell_own("status")   # (not up yet: status() says so once the last answer is old)
         self.checks.periodic()
         if self.dirty:
             self.save_lessons()

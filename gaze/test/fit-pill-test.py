@@ -31,21 +31,21 @@ def near(a, b, tol=1e-6):
 
 
 # --- The words ---
-check("within GOOD_DEG: looks good", fitpill.words({"up": 1.0, "left": -2.0}), fitpill.GOOD)
-check("eyes high: nudge it up, slightly", fitpill.words({"up": 6.0, "left": 1.0}), ("Nudge slightly up", "up"))
-check("eyes low, far: nudge it down", fitpill.words({"up": -14.0, "left": 3.0}), ("Nudge down", "down"))
-check("eyes left: nudge it left", fitpill.words({"up": 2.0, "left": 7.0}), ("Nudge slightly left", "left"))
-check("eyes right, the bigger term: right", fitpill.words({"up": 4.0, "left": -9.0}), ("Nudge slightly right", "right"))
+check("within GOOD_DEG: looks good", fitpill.words({"up": 2.0, "left": -4.0}), fitpill.GOOD)
+check("eyes high: nudge it up, slightly", fitpill.words({"up": 12.0, "left": 2.0}), ("Nudge slightly up", "up"))
+check("eyes low, far: nudge it down", fitpill.words({"up": -28.0, "left": 6.0}), ("Nudge down", "down"))
+check("eyes left: nudge it left", fitpill.words({"up": 4.0, "left": 14.0}), ("Nudge slightly left", "left"))
+check("eyes right, the bigger term: right", fitpill.words({"up": 8.0, "left": -18.0}), ("Nudge slightly right", "right"))
 check("no terms: looks good", fitpill.words({}), fitpill.GOOD)
 check("two terms nearly the same: the one said stays",
-      fitpill.words({"up": 6.0, "left": -6.5}, ("Nudge slightly up", "up")), ("Nudge slightly up", "up"))
+      fitpill.words({"up": 12.0, "left": -13.0}, ("Nudge slightly up", "up")), ("Nudge slightly up", "up"))
 check("  until the other is SWITCH_DEG bigger",
-      fitpill.words({"up": 6.0, "left": -8.5}, ("Nudge slightly up", "up")), ("Nudge slightly right", "right"))
+      fitpill.words({"up": 12.0, "left": -17.0}, ("Nudge slightly up", "up")), ("Nudge slightly right", "right"))
 check("  not if the one said turned round",
-      fitpill.words({"up": -6.0, "left": -6.5}, ("Nudge slightly up", "up")), ("Nudge slightly right", "right"))
-check("just under BIG_DEG after past it: still big", fitpill.words({"left": -9.0}, ("Nudge right", "right")),
+      fitpill.words({"up": -12.0, "left": -13.0}, ("Nudge slightly up", "up")), ("Nudge slightly right", "right"))
+check("just under BIG_DEG after past it: still big", fitpill.words({"left": -18.0}, ("Nudge right", "right")),
       ("Nudge right", "right"))
-check("  under BIG_DEG - SWITCH_DEG: slightly", fitpill.words({"left": -7.5}, ("Nudge right", "right")),
+check("  under BIG_DEG - SWITCH_DEG: slightly", fitpill.words({"left": -15.0}, ("Nudge right", "right")),
       ("Nudge slightly right", "right"))
 
 
@@ -64,17 +64,18 @@ def run(pill, steps):
 
 
 run.t = 1000.0
-OFF = {"up": 0.0, "left": -7.0}      # sits 7 degrees off: nudge slightly right
-NEAR = {"up": 0.0, "left": -3.5}     # under SHOW_DEG, over GOOD_DEG
-GOOD = {"up": 0.5, "left": -1.0}
+OFF = {"up": 0.0, "left": -14.0}     # sits 14 degrees off: nudge slightly right
+NEAR = {"up": 0.0, "left": -7.0}     # under SHOW_DEG, over GOOD_DEG
+GOOD = {"up": 1.0, "left": -2.0}
 
 # --- Opening ---
 p = Pill()
 check("a brief slip: nothing", run(p, [(fitpill.SHOW_HOLD - 0.5, OFF), (1.0, GOOD)]), [])
 check("under SHOW_DEG: nothing", run(p, [(5.0, NEAR)]), [])
-ch = run(p, [(fitpill.SHOW_HOLD + 0.5, OFF)])
+ch = run(p, [(fitpill.SHOW_HOLD + fitpill.SMOOTH, OFF)])
 check("off for SHOW_HOLD: it opens once", [c for _, c in ch], [("show", "Nudge slightly right", "right")])
-check("  at the first reading past SHOW_HOLD", fitpill.SHOW_HOLD <= ch[0][0] < fitpill.SHOW_HOLD + 0.25, True)
+check("  once the median has been past for SHOW_HOLD", fitpill.SHOW_HOLD <= ch[0][0] < fitpill.SHOW_HOLD + fitpill.SMOOTH / 2 + 0.25,
+      True)
 
 # --- A gap in the readings starts SHOW_HOLD over ---
 q = Pill()
@@ -82,22 +83,31 @@ check("off, then no readings past STALE, then off again: not yet",
       run(q, [(fitpill.SHOW_HOLD - 0.5, OFF), (fitpill.STALE + 1.0, None), (fitpill.SHOW_HOLD - 0.5, OFF)]), [])
 
 # --- Following, then good ---
-ch = run(p, [(1.0, {"up": 0.0, "left": -12.0})])
+ch = run(p, [(1.0, {"up": 0.0, "left": -24.0})])
 check("further off: says nudge right", [c for _, c in ch], [("say", "Nudge right", "right")])
 ch = run(p, [(1.0, NEAR)])
 check("under SHOW_DEG but past GOOD_DEG: still guides", [c for _, c in ch], [("say", "Nudge slightly right", "right")])
-ch = run(p, [(fitpill.GOOD_HOLD + 0.5, GOOD)])
+ch = run(p, [(fitpill.GOOD_HOLD + fitpill.SMOOTH, GOOD)])
 check("within GOOD_DEG for GOOD_HOLD: looks good", [c for _, c in ch], [("say", "Looks good", "good")])
+start = run.t
 ch = run(p, [(fitpill.GOOD_SECONDS + 0.5, OFF)])
 check("  then it closes, whatever comes", [c for _, c in ch], [("hide",)])
-check("not again within AGAIN", run(p, [(fitpill.AGAIN - 1.0, OFF)]), [])
-check("  but after it", [c for _, c in run(p, [(3.0, OFF)])][:1], [("show", "Nudge slightly right", "right")])
+left = start + ch[0][0] + fitpill.AGAIN - run.t   # seconds of AGAIN still to go
+check("not again within AGAIN", run(p, [(left - 0.25, OFF)]), [])
+check("  but after it", [c for _, c in run(p, [(1.0, OFF)])][:1], [("show", "Nudge slightly right", "right")])
 
 # --- No readings while open ---
 ch = run(p, [(fitpill.STALE + 0.5, None)])
 check("no readings for STALE: look straight ahead", [c for _, c in ch], [("say", "Look straight ahead", "")])
 ch = run(p, [(0.5, OFF)])
 check("  a reading: guides again", [c for _, c in ch], [("say", "Nudge slightly right", "right")])
+
+# --- Readings that swing both ways while the headset moves (2026-11-22) ---
+p = Pill()
+run(p, [(fitpill.SHOW_HOLD + fitpill.SMOOTH, {"up": 14.0, "left": 0.0})])
+swing = [(0.5, {"up": 18.0, "left": 0.0}), (0.5, {"up": 12.0, "left": 0.0}), (0.25, {"up": -8.0, "left": 0.0})] * 4
+check("single readings the other way: it keeps saying up", [c for _, c in run(p, swing)], [])
+check("a raw small slip doesn't open it", [c for _, c in run(Pill(), [(10.0, {"up": 7.0, "left": -6.0})])], [])
 
 # --- Giving up ---
 p = Pill()
@@ -177,7 +187,7 @@ check("a one-eye seating reads only its eye", (r["state"], sorted(e for e in r["
       ("ok", [0]))
 r = fitcoach.assess(summary(12, -6), own, baseline=seat)
 check("looking aside: the coach reads it as off (the pill reads the slip filter instead)", r["state"], "adjust")
-check("the pill's words for a slip up", fitpill.words({"up": 7.0, "left": 0.0}), ("Nudge slightly up", "up"))
+check("the pill's words for a slip up", fitpill.words({"up": 14.0, "left": 0.0}), ("Nudge slightly up", "up"))
 
 print("all passed" if not failures else f"{len(failures)} failed: {failures}", flush=True)
 sys.exit(1 if failures else 0)

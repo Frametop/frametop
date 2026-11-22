@@ -1173,16 +1173,28 @@ def sync_monitors(hosts):
     while it didn't answer gets its monitors back first."""
     import ft_hostmonitors   # (its own module: a PC's monitors)
     released = ft_hostmonitors.sync_all(hosts, log)
-    if not released:
-        return
     for h in hosts:  # the caller's layout too, for a save of its own after this
         if h.get("name") in released:
             h.pop("monitors_release", None)
+    if released:
+        _set_release_owed(released, False)
+
+
+def _set_release_owed(names, owed):
+    """Saves (or clears) `monitors_release` on the named hosts, over the layout as it is now: a
+    release can wait 20 s for its PC, and others may have saved meanwhile. A layout that can't be
+    saved now is logged: the release is only sent again, or once more."""
     layout = load_layout()
     for h in layout.get("hosts", []):
-        if h.get("name") in released:
-            h.pop("monitors_release", None)
-    save_layout(layout)
+        if h.get("name") in names:
+            if owed:
+                h["monitors_release"] = True
+            else:
+                h.pop("monitors_release", None)
+    try:
+        save_layout(layout)
+    except LayoutFileError as e:
+        log(f"monitors: {', '.join(sorted(names))} not saved: {e}")
 
 
 def start_remotes(sock, layout, only=None):
@@ -1389,8 +1401,7 @@ def remote_command(args):
             if monitors:
                 ft_hostmonitors.sync(host, log)
             elif not ft_hostmonitors.release(host, log):
-                host["monitors_release"] = True  # asked again before its next display stream
-                save_layout(layout)
+                _set_release_owed({host.get("name")}, True)  # asked again before its next display stream
         if not restart:
             return
         # Its streams start over the new way, their panels where they are (ft-screens keeps

@@ -133,8 +133,9 @@ class Sending(unittest.TestCase):
 
     def test_the_port_is_a_display_panels_not_a_window_panels(self):
         host = pc()
-        host["displays"][3]["port"] = 49990  # its Frametop windows instance
-        host["displays"][1]["port"] = 49989
+        host["displays"].insert(0, host["displays"].pop(3))  # a window panel listed first
+        host["displays"][0]["port"] = 49990  # its Frametop windows instance
+        host["displays"][2]["port"] = 49989
         hm.sync(host, self.said.append, self.request)
         self.assertEqual({p for *_, p in self.sent}, {49989})
 
@@ -180,8 +181,9 @@ class Layout(unittest.TestCase):
         self.m.screens_socket = no_screens
         self.m.save_layout({"hosts": [pc(monitors=False)]})
         self.synced, self.released, self.release_takes = [], [], True
+        self.meanwhile = lambda: None  # what else runs while a release waits for its PC
         for name, fn in (("sync", lambda h, log, request=None: self.synced.append(h["name"])),
-                         ("release", lambda h, log, request=None: self.released.append(h["name"]) or self.release_takes)):
+                         ("release", lambda h, log, request=None: self.released.append(h["name"]) or self.meanwhile() or self.release_takes)):
             old = getattr(hm, name)
             setattr(hm, name, fn)
             self.addCleanup(setattr, hm, name, old)
@@ -225,6 +227,14 @@ class Layout(unittest.TestCase):
         self.m.remote_command(["host", "PC", "monitors=off"])
         self.m.remote_command(["host", "PC", "monitors=on"])
         self.assertNotIn("monitors_release", self.host(), "switched on again: nothing owed")
+
+    def test_a_change_saved_while_a_release_waits_is_kept(self):
+        self.m.remote_command(["host", "PC", "monitors=on"])
+        self.release_takes = False
+        self.meanwhile = lambda: self.m.remote_command(["disconnect", "pc-edp"])
+        self.m.remote_command(["host", "PC", "monitors=off"])
+        self.assertIs(self.host().get("monitors_release"), True)
+        self.assertTrue(self.host()["displays"][0].get("off"), "the disconnect saved meanwhile stays")
 
     def test_a_mode_is_saved_with_its_size(self):
         self.m.remote_command(["host", "PC", "monitors=on"])

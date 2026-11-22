@@ -831,6 +831,19 @@ bool HostFlag(const std::string &host, const char *key) {
     return false;
 }
 
+// A host whose "Turn off and set its own monitors" switch went off while it didn't answer keeps
+// "monitors_release" in the layout (layout/ft_hostmonitors.py) until the release goes through.
+// ft-layout sends it again before the streams it starts; ft-screens restarts a lost stream on
+// its own, so each display stream sends it too: else the PC's old plan would go on turning its
+// monitors off. The flag stays for ft-layout to clear.
+void ReleaseMonitors(WebApi &api, const std::string &host) {
+    if (!HostFlag(host, "monitors_release") || HostFlag(host, "monitors")) return;
+    const nlohmann::json body = {{"monitors", nlohmann::json::object()}};
+    nlohmann::json r;
+    std::printf("%s: its monitors back as they were (the switch went off): %ld\n", host.c_str(),
+                api.Call("POST", "/api/frametop/monitors", &body, &r));
+}
+
 // The port of the display whose client is `id`, from the layout, or 0. A Mac runs a Sunshine
 // instance per display, each on its own port, and a client is paired with one of them only. An
 // ft-layout from before ports (an older release's Reset Screen Layout or profile launchers) asks
@@ -1222,6 +1235,9 @@ int main(int argc, char **argv) {
             std::printf("window %s is on %s\n", app.c_str() + 7, output.c_str());
             app = "display:" + output;
             g_windowApp = true;
+        } else if (app.rfind("display:", 0) == 0 && haveToken && !login) {
+            if (route != host) api.base = "https://" + route + api.base.substr(api.base.rfind(':'));
+            ReleaseMonitors(api, host);
         }
         return Stream(client, app, fd, width, height, fps, bitrate);
     }

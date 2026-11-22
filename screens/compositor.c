@@ -178,6 +178,8 @@ struct server {
     int keys_pc;          // ...and whether a PC's desktop has the keys, Meta's too (see keys_update)
     int key_remote;       // the last click was on this remote screen (index): typing goes to it; -1 not
     int mouse_last;       // the panel the 3D mouse was on last, or the one clicked since; -1 none
+    int mouse_on;         // the panel the 3D mouse is on now (-1 none), and since when (ms): keys_follow_mouse
+    uint32_t mouse_on_ms;
     // Frunner's search (frunner/ft-frunner) has the typing while it's open: "frunner on",
     // renewed every second, lapses SPOT_LEASE_MS after the last one (see spot_open).
     uint32_t spot_until;  // ms; 0 closed
@@ -765,6 +767,25 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
     }
 }
 
+// How long the 3D mouse rests on another panel before typing leaves a remote screen for it (ms):
+// a sweep across one on the way to another spot of the PC's doesn't take it.
+#define KEYS_FOLLOW_MS 400
+
+// The 3D mouse left the remote screen typing went to and rests on another panel (user, 2026-11-21:
+// "it's only typing into the vibepollo display and is not typing into others when I change the
+// cursor focus"): typing comes back with it, as Meta does (keys_update's sixth word), into that
+// panel when it's one of the desktop's. A press held (a drag off the PC's screen) moves nothing.
+static void keys_follow_mouse(struct server *s, int mouse, uint32_t t) {
+    if (mouse != s->mouse_on) s->mouse_on = mouse, s->mouse_on_ms = t;
+    if (s->key_remote < 0 || mouse < 0 || mouse == s->key_remote || ft_remote_is(mouse)) return;
+    if (t - s->mouse_on_ms < KEYS_FOLLOW_MS || ft_vr_mouse_screen() != mouse) return;
+    if (mouse < MAX_SCREENS && s->screens[mouse] && s->screens[mouse]->toplevel)
+        keyboard_enter(s, s->screens[mouse]->toplevel->base->surface);
+    wlr_log(WLR_INFO, "typing leaves remote %d: the 3D mouse is on panel %d", s->key_remote, mouse);
+    set_key_remote(s, -1);
+    s->keys_clicked = true;
+}
+
 // Tell the input relay where typing goes, and whether the screens show, on a change and every
 // second: while it's the desktop, the relay grabs pass-through keyboards so SteamVR (and the
 // Steam app with gamescope's focus) doesn't get the keys too. Without word from us for a few
@@ -777,6 +798,7 @@ static void keys_update(struct server *s) {
         s->spot_until = 0;
         wlr_log(WLR_INFO, "frunner's lease lapsed");
     }
+    keys_follow_mouse(s, ft_vr_mouse_panel(), now_ms());
     // Frunner's search takes typing from wherever it went, Steam too.
     const bool shown = ft_vr_screens_shown();
     // Only while something takes the keys: a remote screen that's still there, or a KWin window
@@ -1658,6 +1680,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < MAX_SCREENS; ++i) s.scale[i] = 1;
     s.key_remote = -1;
     s.mouse_last = -1;
+    s.mouse_on = -1;
     ft_peer_init(&s.peer);
     s.rate[FT_FOCUSED] = 0, s.rate[FT_IN_VIEW] = 15, s.rate[FT_HIDDEN] = 1;
     s.period_ns = 1000000000LL / 90;

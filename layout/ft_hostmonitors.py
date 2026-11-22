@@ -21,6 +21,13 @@ def controls(host):
     return bool(host.get("monitors")) and host.get("kind", "vibepollo") == "vibepollo"
 
 
+def monitor_of(d):
+    """The id of the PC monitor a display panel streams ("display:ID"), or None: a virtual
+    display, a window panel, an app."""
+    app = str(d.get("app", ""))
+    return app[len("display:"):] if app.startswith("display:") and not d.get("window") else None
+
+
 def mode_of(d):
     """The mode picked for a display panel, {width, height, refresh_mhz}, or None (its own)."""
     mode = d.get("mode")
@@ -38,10 +45,9 @@ def wishes(host):
     when either is connected."""
     out = {}
     for d in host.get("displays", []):
-        app = str(d.get("app", ""))
-        if d.get("window") or not app.startswith("display:"):
+        monitor = monitor_of(d)
+        if monitor is None:
             continue
-        monitor = app[len("display:"):]
         on = not d.get("off")
         if out.get(monitor, {}).get("on") and not on:
             continue
@@ -84,9 +90,14 @@ def _same_mode(a, b):
         return False
 
 
-def _port(host):
+def port_of(host):
     """The port of the host's Vibepollo (its displays'), 0 for the default."""
     return next((int(d["port"]) for d in host.get("displays", []) if d.get("port")), 0)
+
+
+def ask(host, timeout=3.0, request=None):
+    """(HTTP status, answer) of the host's GET: its monitors, their modes and its plan."""
+    return (request or ft_hostapi.request)(host["address"], "GET", PATH, timeout=timeout, port=port_of(host))
 
 
 def sync(host, log, request=None):
@@ -97,14 +108,14 @@ def sync(host, log, request=None):
     request = request or ft_hostapi.request
     name = host.get("name") or host.get("address")
     try:
-        status, answer = request(host["address"], "GET", PATH, timeout=3.0, port=_port(host))
+        status, answer = ask(host, request=request)
         if status != 200 or not isinstance(answer, dict):
             return log(f"{name}: monitors not changed (it answered {status})")
         listed = {m.get("id"): m for m in answer.get("monitors", []) if isinstance(m, dict)}
         body = plan_body(host, listed)
         if body is None:
             return
-        status, answer = request(host["address"], "POST", PATH, body=body, timeout=20.0, port=_port(host))
+        status, answer = request(host["address"], "POST", PATH, body=body, timeout=20.0, port=port_of(host))
         if status != 200:
             error = answer.get("error") if isinstance(answer, dict) else None
             log(f"{name}: monitors not changed: {error or f'it answered {status}'}")
@@ -118,7 +129,7 @@ def release(host, log, request=None):
         return
     request = request or ft_hostapi.request
     try:
-        status, _ = request(host["address"], "POST", PATH, body={"monitors": {}}, timeout=20.0, port=_port(host))
+        status, _ = request(host["address"], "POST", PATH, body={"monitors": {}}, timeout=20.0, port=port_of(host))
         if status != 200:
             log(f"{host.get('name')}: its monitors weren't put back (it answered {status}); they go back "
                 "two minutes after its last display stream ends")

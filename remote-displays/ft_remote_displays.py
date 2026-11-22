@@ -270,7 +270,7 @@ class Backend(QObject):
                 displays.append({"id": d["id"], "number": n, "label": d.get("label") or d["id"], "app": d["app"],
                                  # Its monitor follows it (the host's switch) in the mode picked here.
                                  "host": h.get("name", ""),
-                                 "followsMonitor": ft_hostmonitors.controls(h) and str(d["app"]).startswith("display:"),
+                                 "followsMonitor": ft_hostmonitors.controls(h) and ft_hostmonitors.monitor_of(d) is not None,
                                  "mode": ft_hostmonitors.mode_of(d) or {},
                                  # A KDE PC's window (issue 81): the window sets its size.
                                  "kwin": str(d["app"]).startswith("kwin:"),

@@ -198,6 +198,8 @@ class Layout(unittest.TestCase):
         self.m.remote_command(["set", "pc-dp", "mode=own"])
         self.assertNotIn("mode", self.host()["displays"][1])
         self.assertEqual(self.synced, ["PC"] * 4, "each change sends the plan")
+        self.m.remote_command(["set", "pc-dp", "fps=30"])
+        self.assertEqual(len(self.synced), 4, "the plan doesn't change with the frame rate")
         with self.assertRaises(RuntimeError):
             self.m.remote_command(["set", "pc-dp", "mode=1920x1080"])
 

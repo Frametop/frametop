@@ -88,13 +88,13 @@ class Backend(Base):
         super().setUp()
         set_hosts(pc())
         self.sent, self.reply = [], (200, state(dp_sideways=True))
-        old = host_monitors.ft_hostapi.request
+        old = host_monitors.ft_hostmonitors.ft_hostapi.request
 
         def request(address, method, path, body=None, timeout=2.0, **kw):
             self.sent.append((address, method, path, body))
             return self.reply
-        host_monitors.ft_hostapi.request = request
-        self.addCleanup(setattr, host_monitors.ft_hostapi, "request", old)
+        host_monitors.ft_hostmonitors.ft_hostapi.request = request
+        self.addCleanup(setattr, host_monitors.ft_hostmonitors.ft_hostapi, "request", old)
         self.thens = []
         self.b._run = lambda label, *args, stdin=None, then=None: (self.ran.append(args), self.thens.append(then))
         self.listed = []

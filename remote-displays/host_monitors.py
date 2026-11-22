@@ -16,7 +16,6 @@ import threading
 from PySide6.QtCore import Property, QObject, Qt, Signal, Slot
 
 # conf/ and layout/, put on the path by the backend
-import ft_hostapi
 import ft_hostmonitors
 import ft_layout
 
@@ -58,16 +57,13 @@ def size_changes(host, monitors):
     by_id = {m.get("id"): m for m in monitors if isinstance(m, dict)}
     runs = []
     for d in host.get("displays", []):
-        app = str(d.get("app", ""))
-        if d.get("window") or not app.startswith("display:"):
-            continue
-        monitor = by_id.get(app[len("display:"):])
+        monitor = by_id.get(ft_hostmonitors.monitor_of(d))
         if monitor is None:
             continue
         mode = ft_hostmonitors.mode_of(d) or (monitor.get("mode") if monitor.get("on") else None)
         if not isinstance(mode, dict) or not mode.get("width") or not mode.get("height"):
             continue
-        size = [v // 2 * 2 for v in stream_size(monitor, mode)]  # as ft-layout keeps it
+        size = list(ft_layout.stream_size(*stream_size(monitor, mode)))  # as ft-layout keeps it
         if list(d.get("size", [])) != size:
             runs.append((f"Streaming {d.get('label') or d['id']} at its monitor's mode",
                          ("remote", "set", d["id"], f"size={size[0]}x{size[1]}")))
@@ -129,9 +125,7 @@ class HostMonitors(QObject):
             return self._answered.emit(name, -1 if host is None else 404, None)
 
         def work():
-            status, answer = ft_hostapi.request(host["address"], "GET", ft_hostmonitors.PATH, timeout=5.0,
-                                                port=ft_hostmonitors._port(host))
-            self._answered.emit(name, status, answer)
+            self._answered.emit(name, *ft_hostmonitors.ask(host, timeout=5.0))
         threading.Thread(target=work, daemon=True).start()
 
     @Slot(str, bool)
@@ -148,7 +142,7 @@ class HostMonitors(QObject):
         monitors = self._listed.get(name, {}).get("monitors", [])
         host = self._host(name) or {}
         d = next((d for d in host.get("displays", []) if d.get("id") == display_id), {})
-        monitor = next((m for m in monitors if f"display:{m.get('id')}" == d.get("app")), None)
+        monitor = next((m for m in monitors if m.get("id") == ft_hostmonitors.monitor_of(d)), None)
         if mode and monitor:
             w, h = stream_size(monitor, mode)
             args.append(f"size={w}x{h}")

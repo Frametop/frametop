@@ -1343,7 +1343,7 @@ def remote_command(args):
         if host is None:
             raise RuntimeError(f"no host called {args[1]!r}")
         restart = False
-        monitors = None
+        monitors = None  # the switch, when this sets it
         for kv in args[2:]:
             k, _, v = kv.partition("=")
             if k == "route" and v in ("auto", "network", "dongle"):
@@ -1364,8 +1364,7 @@ def remote_command(args):
                 else:
                     host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
             elif k == "monitors" and v in ("on", "off"):
-                monitors = v  # its monitors follow its display panels (ft_hostmonitors)
-                host["monitors"] = v == "on"
+                monitors = host["monitors"] = v == "on"  # its monitors follow its display panels (ft_hostmonitors)
             elif ft_remotekeys.apply_keyboard_kv(host, k, v):
                 pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
@@ -1375,10 +1374,7 @@ def remote_command(args):
         save_layout(layout)
         if monitors is not None:
             import ft_hostmonitors   # (its own module: a PC's monitors)
-            if monitors == "on":
-                ft_hostmonitors.sync(host, log)
-            else:
-                ft_hostmonitors.release(host, log)
+            (ft_hostmonitors.sync if monitors else ft_hostmonitors.release)(host, log)
         if not restart:
             return
         # Its streams start over the new way, their panels where they are (ft-screens keeps
@@ -1616,7 +1612,8 @@ def remote_command(args):
                                    "mode=WxH@MHZ|own "
                                    "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
-        sync_monitors([host])  # a mode, or another monitor (app=)
+        if any(kv.partition("=")[0] in ("mode", "app") for kv in args[2:]):
+            sync_monitors([host])  # another mode, or another monitor
         if d.get("off"):
             return  # disconnected: the new settings are for its next connection
         try:

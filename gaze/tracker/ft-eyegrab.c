@@ -27,6 +27,13 @@
  *                              "<n> <slot> <camera 0|1> <CLOCK_MONOTONIC_RAW time seen>"
  *                              (lab/ft-eyes-record does the same from the shared frames,
  *                              without root)
+ *   ft-eyegrab --late SECONDS  how much of a frame is still landing when its camera starts the
+ *                              next one: copies of each frame then, and LATE_AFTER later, against
+ *                              the frame as --share passes it on (when its camera starts the
+ *                              frame after next). Prints, per copy, how many frames had rows
+ *                              that changed after it and how many rows; writes no images. If
+ *                              the copy at the next frame's start almost never differs, --share
+ *                              can pass frames on a frame (11 ms) sooner
  *
  * The eye frames (found with --scan): in the 16 MiB buffer, eight slots 0x40000 apart from
  * 0x230000, four per camera (slots 0-3, 4-7). Each slot starts with a small block, then a
@@ -348,6 +355,12 @@ static double next_due(const double last[2], double t) {
     return due < 1e300 ? due : t;
 }
 
+// --late's hooks into poll_frames (NULL otherwise): `started(slot, t)` when a camera starts a
+// new frame, with the slot of the frame it just finished, and `tick(t)` on every look, which
+// then never sleeps longer than poll_us.
+static void (*poll_started)(int slot, double t);
+static void (*poll_tick)(double t);
+
 static void poll_frames(int b, double seconds, int pid, void (*done)(const uint8_t *, int, double),
                         int (*keep)(void), unsigned poll_us) {
     static const int order[2][8] = {{3, 0, 1, 2, 3, 0, 1, 2}, {7, 5, 4, 6, 5, 7, 6, 4}};
@@ -373,6 +386,7 @@ static void poll_frames(int b, double seconds, int pid, void (*done)(const uint8
             if (!keep()) return;
             kept = t;
         }
+        if (poll_tick) poll_tick(t);
         for (int cam = 0; cam < 2; cam++) {
             int next = prev[cam] >= 0 ? after[prev[cam]][cur[cam]] : -1;
             int all = next < 0 || t - last[cam] > FRAME_DUE || t < scan_until[cam];
@@ -389,6 +403,7 @@ static void poll_frames(int b, double seconds, int pid, void (*done)(const uint8
                     // Out of use from now on: later changes are a new frame.
                     sig[prev[cam]] = frame_sig(bufs[b].p + slot_start(prev[cam]));
                 }
+                if (poll_started && cur[cam] >= 0) poll_started(cur[cam], t);
                 prev[cam] = cur[cam];
                 cur[cam] = k;
                 first[k] = t;
@@ -399,7 +414,7 @@ static void poll_frames(int b, double seconds, int pid, void (*done)(const uint8
         double wait = poll_us * 1e-6;
         if (t - last[0] > CAMS_IDLE && t - last[1] > CAMS_IDLE) {
             wait *= 4;
-        } else if (next_due(last, t) - t > wait) {
+        } else if (!poll_tick && next_due(last, t) - t > wait) {
             wait = next_due(last, t) - t;
         }
         usleep((useconds_t)(wait * 1e6));
@@ -443,6 +458,88 @@ static int rec(double seconds, const char *dir, int pid) {
     if (ring.dropped) printf(" (%zu dropped: disk too slow)", ring.dropped);
     printf("\n");
     free(ring.frames);
+    return 0;
+}
+
+// --- --late: how torn a frame would be if passed on sooner ---
+#define LATE_STEPS 3
+static const double LATE_AFTER[LATE_STEPS] = {0.0, 0.003, 0.006};  // s after the next frame starts
+#define LATE_MAX 100000                                            // frames kept per copy (18 min)
+
+static struct {
+    int b;
+    uint8_t *copy[EYE_SLOTS][LATE_STEPS];
+    double t0[EYE_SLOTS];
+    int taken[EYE_SLOTS];  // copies taken of that slot's frame so far; -1 while none is wanted
+    unsigned short *rows[LATE_STEPS];
+    size_t n[LATE_STEPS], whole;
+} late;
+
+// How many of the EYE_H rows of two frames differ.
+static int rows_differ(const uint8_t *a, const uint8_t *b) {
+    int n = 0;
+    for (int y = 0; y < EYE_H; y++) n += memcmp(a + (size_t)y * EYE_W, b + (size_t)y * EYE_W, EYE_W) != 0;
+    return n;
+}
+
+static void late_started(int slot, double t) {
+    late.t0[slot] = t;
+    memcpy(late.copy[slot][0], bufs[late.b].p + slot_start(slot), EYE_W * EYE_H);
+    late.taken[slot] = 1;
+}
+
+static void late_tick(double t) {
+    for (int k = 0; k < EYE_SLOTS; k++)
+        while (late.taken[k] > 0 && late.taken[k] < LATE_STEPS && t - late.t0[k] >= LATE_AFTER[late.taken[k]]) {
+            memcpy(late.copy[k][late.taken[k]], bufs[late.b].p + slot_start(k), EYE_W * EYE_H);
+            late.taken[k]++;
+        }
+}
+
+static void late_done(const uint8_t *frame, int slot, double t) {
+    (void)t;
+    if (late.taken[slot] <= 0) return;  // the first frames: started before the copies began
+    late.whole++;
+    for (int i = 0; i < late.taken[slot]; i++)
+        if (late.n[i] < LATE_MAX) late.rows[i][late.n[i]++] = (unsigned short)rows_differ(late.copy[slot][i], frame);
+    late.taken[slot] = -1;
+}
+
+static int cmp_ushort(const void *a, const void *b) {
+    return (int)*(const unsigned short *)a - (int)*(const unsigned short *)b;
+}
+
+static int late_probe(double seconds, int pid) {
+    late.b = eye_buffer();
+    if (late.b < 0) {
+        fprintf(stderr, "no 16 MiB buffer\n");
+        return 1;
+    }
+    for (int k = 0; k < EYE_SLOTS; k++) {
+        late.taken[k] = -1;
+        for (int i = 0; i < LATE_STEPS; i++)
+            if (!(late.copy[k][i] = malloc(EYE_W * EYE_H))) return perror("malloc"), 1;
+    }
+    for (int i = 0; i < LATE_STEPS; i++)
+        if (!(late.rows[i] = malloc(LATE_MAX * sizeof *late.rows[i]))) return perror("malloc"), 1;
+    signal(SIGINT, on_stop);
+    signal(SIGTERM, on_stop);
+    poll_started = late_started, poll_tick = late_tick;
+    poll_frames(late.b, seconds, pid, late_done, NULL, 300);
+    poll_started = NULL, poll_tick = NULL;
+    printf("%zu frames passed on. Rows that changed after each copy (of %d):\n", late.whole, EYE_H);
+    for (int i = 0; i < LATE_STEPS; i++) {
+        size_t n = late.n[i], torn = 0;
+        if (!n) {
+            printf("  %4.1f ms after the next frame starts: no frames\n", LATE_AFTER[i] * 1e3);
+            continue;
+        }
+        qsort(late.rows[i], n, sizeof *late.rows[i], cmp_ushort);
+        for (size_t j = 0; j < n; j++) torn += late.rows[i][j] > 0;
+        printf("  %4.1f ms after the next frame starts: %zu of %zu frames (%.2f%%) changed after it; rows median %u,"
+               " p99 %u, most %u\n", LATE_AFTER[i] * 1e3, torn, n, 100.0 * torn / n, late.rows[i][n / 2],
+               late.rows[i][n * 99 / 100], late.rows[i][n - 1]);
+    }
     return 0;
 }
 
@@ -637,7 +734,7 @@ static int seq(int b, size_t off, size_t len, int frames, const char *dir) {
 
 static void usage(void) {
     fprintf(stderr, "usage: ft-eyegrab [--share PATH [--owner UID:GID] [--want FILE] | --scan [N] | --dump I OFF LEN FILE |\n"
-                    "                   --seq I OFF LEN FRAMES DIR | --rec SECONDS DIR]\n");
+                    "                   --seq I OFF LEN FRAMES DIR | --rec SECONDS DIR | --late SECONDS]\n");
 }
 
 #ifndef FT_EYEGRAB_NO_MAIN
@@ -673,6 +770,8 @@ int main(int argc, char **argv) {
         return dump(atoi(argv[2]), strtoul(argv[3], NULL, 0), strtoul(argv[4], NULL, 0), argv[5]);
     } else if (argc == 4 && strcmp(argv[1], "--rec") == 0) {
         return rec(atof(argv[2]), argv[3], pid);
+    } else if (argc == 3 && strcmp(argv[1], "--late") == 0) {
+        return late_probe(atof(argv[2]), pid);
     } else if (argc == 7 && strcmp(argv[1], "--seq") == 0) {
         return seq(atoi(argv[2]), strtoul(argv[3], NULL, 0), strtoul(argv[4], NULL, 0), atoi(argv[5]), argv[6]);
     } else if (argc == 1) {

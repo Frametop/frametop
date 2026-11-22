@@ -14,7 +14,7 @@ arrow is "up", "down", "left", "right" (the way to nudge it), "good" or "" (no m
 
 It is for a big change of fit only: a small slip is the clicks' to fix (each click, and each
 glance at what a free mouse clicks, pins the slip filter's estimate), so nobody is asked to touch
-the headset for one. It opens after the headset has sat past SHOW_DEG for SHOW_HOLD, follows the
+the headset for one. It opens after the headset has sat past SHOW_DEG for SHOW_HOLD (past BIG_DEG, BIG_HOLD), follows the
 readings while it's open (down to GOOD_DEG, so it guides the whole way back, not just under the
 trigger), says "Looks good" once within GOOD_DEG for GOOD_HOLD, and closes GOOD_SECONDS later.
 It reads the median of each term over the last SMOOTH seconds: while the headset moves, single
@@ -28,6 +28,8 @@ import statistics
 SHOW_DEG = 10.0      # a term past this, for SHOW_HOLD: the pill opens (a big change of fit; under
                      # it the clicks fix the slip. 5 asked for every small push, 2026-11-22)
 SHOW_HOLD = 4.0      # seconds
+BIG_HOLD = 1.0       # ...or past BIG_DEG for this: a big push needs no waiting out (4 s on top of the
+                     # median's lag kept one waiting 6 s after the filter had it, 2026-11-22)
 GOOD_DEG = 5.0       # every term within this, for GOOD_HOLD: "Looks good" (the clicks fix the rest)
 GOOD_HOLD = 0.6
 GOOD_SECONDS = 1.5   # "Looks good" stays this long
@@ -125,7 +127,8 @@ class Pill:
             return None
         if self.off_since is None:
             self.off_since = now
-        if now - self.off_since < SHOW_HOLD or now < self.next_at:
+        hold = BIG_HOLD if abs(biggest(terms)[1]) > BIG_DEG else SHOW_HOLD
+        if now - self.off_since < hold or now < self.next_at:
             return None
         self.state, self.opened, self.read_at, self.good_since = "open", now, now, None
         self.said = words(terms)

@@ -353,7 +353,7 @@ g = len(eyes_state["got"])
 eyes_state["slip"] = (0.0, -24.0)   # the pupils sit low: the headset rode up
 start = time.monotonic()
 check("off: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
-check("  not before SHOW_HOLD", time.monotonic() - start >= fitpill.SHOW_HOLD, True)
+check("  not before BIG_HOLD (it sits past BIG_DEG)", time.monotonic() - start >= fitpill.BIG_HOLD, True)
 check("  says which way", "text Nudge down" in since(n), True)
 check("  with its arrow", "mark down" in since(n), True)
 check("  no pointer hiding for it", any(c == "calpanel 1" for c in since(n)), False)

@@ -38,6 +38,27 @@ class Window(unittest.TestCase):
             missing = sorted(c for c in called if not hasattr(self.ui.Window, c))
             self.assertEqual(missing, [], f"{name} calls self.{missing}, which the window doesn't have")
 
+    def test_work_off_the_main_loop_ends_in_done_or_failed(self):
+        from gi.repository import GLib
+
+        from frametop_installer.widgets import in_thread
+
+        def run(work):
+            got, loop = [], GLib.MainLoop()
+
+            def end(kind):
+                return lambda r: (got.append((kind, str(r))), loop.quit())
+            in_thread(work, end("done"), end("failed"))
+            GLib.timeout_add(3000, loop.quit)
+            loop.run()
+            return got
+
+        self.assertEqual(run(lambda: 7), [("done", "7")])
+
+        def boom():
+            raise OSError("no disk")
+        self.assertEqual(run(boom), [("failed", "no disk")])   # not a spinner forever
+
 
 if __name__ == "__main__":
     unittest.main()

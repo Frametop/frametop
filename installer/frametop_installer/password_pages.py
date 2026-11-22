@@ -78,7 +78,8 @@ class PasswordPages:
                 pw[:] = bytes(len(pw))
                 return self.say(f"passwd didn't take it: {err}")
             self.verified(pw)
-        in_thread(lambda: "" if self.dry_run else host.set_password(pw), done)
+        in_thread(lambda: "" if self.dry_run else host.set_password(pw), done,
+                  lambda e: done(f"{e.__class__.__name__}: {e}"))
 
     def check_password(self):
         text = self.pw_entry.get_text()
@@ -98,7 +99,7 @@ class PasswordPages:
             else:
                 pw[:] = bytes(len(pw))
                 self.say("sudo didn't take that password. Try again, or skip those parts.")
-        in_thread(lambda: self.dry_run or host.check_password(pw), done)
+        in_thread(lambda: self.dry_run or host.check_password(pw), done, lambda _: done(False))
 
     def verified(self, pw):
         self.forget_password()
@@ -126,7 +127,7 @@ class PasswordPages:
                 self.forget_password()
                 self.password = pw
                 self.install_again()
-            in_thread(lambda: self.dry_run or host.check_password(pw), done)
+            in_thread(lambda: self.dry_run or host.check_password(pw), done, lambda _: done(False))
 
         self.pw_entry, field = password_field("Your SteamOS password", go, self.keypads)
         self.page("password", label("Your password", css=("title-1",)),

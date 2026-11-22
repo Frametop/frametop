@@ -100,7 +100,7 @@ class ProgressPage:
                 pw[:] = bytes(len(pw))
                 self.ask_error.set_label("sudo didn't take that password.")
                 self.ask_error.set_visible(True)
-        in_thread(lambda: self.dry_run or host.check_password(pw), done)
+        in_thread(lambda: self.dry_run or host.check_password(pw), done, lambda _: done(False))
 
     def skip_ask(self):
         if self.helper:

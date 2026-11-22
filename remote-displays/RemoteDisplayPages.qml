@@ -531,7 +531,7 @@ Item {
                         readonly property string kind: modelData.kind
                         // Its Vibepollo can turn off and set its own monitors (Frametop's build).
                         readonly property bool canOwnMonitors: vibepollo && modelData.hasToken && kind !== "pin"
-                        readonly property var monitorsListed: backend.hostMonitors.listed[modelData.name] || ({ monitors: [], note: "" })
+                        readonly property var monitorsListed: backend.hostMonitors.listed[modelData.name] || ({ monitors: [], note: "", stale: false })
                         Component.onCompleted: if (canOwnMonitors && (modelData.monitors || !(modelData.name in backend.hostMonitors.supported)))
                                                    backend.hostMonitors.refresh(modelData.name)
                         Layout.fillWidth: true
@@ -693,6 +693,20 @@ Item {
                                     text: hostCard.monitorsListed.note
                                     textFormat: Text.PlainText
                                 }
+                            }
+                            // Its sign-in is from before Frametop could ask for its monitors: the
+                            // switch can't show until it signs in again (with the switch on, the
+                            // note above says so).
+                            Controls.Label {
+                                objectName: "ownMonitorsSignIn"
+                                visible: hostCard.canOwnMonitors && !hostCard.modelData.monitors
+                                         && hostCard.monitorsListed.stale === true
+                                         && backend.hostMonitors.supported[hostCard.modelData.name] !== true
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                opacity: 0.7
+                                text: "To turn off and set " + hostCard.modelData.name + "'s own monitors from here, sign in "
+                                      + "again: its sign-in is from before Frametop could. (It needs Frametop's build of Vibepollo.)"
                             }
                             // The Frame's microphone rides along with its streams. Only
                             // Frametop's build of Vibepollo receives it.

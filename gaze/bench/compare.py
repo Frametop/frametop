@@ -319,7 +319,8 @@ class Replay:
             sh.reseated = bool(st.get("reseat", e not in shifts))
             if jump is not None and "jump_held_px" in st:   # ft-eyes since EYES_JUMP: held, in force or not
                 sh.jump = np.asarray(st["jump_held_px"], float)
-                sh.vouched = bool(st.get("jump_vouched", False))
+                if st.get("jump_vouched"):
+                    sh.hold_vouched(sh.jump)   # its held move, as live, so its next glints keep the vouch
             elif jump is not None and st.get("jump"):
                 sh.jump = np.asarray(st.get("jump_px", (0, 0)), float)
             self.shift[e] = sh

@@ -206,9 +206,13 @@ class CompareTest(unittest.TestCase):
         cal = eyes_model.Calibration.load(self.dir / "start" / "eyes-calibration.json")
         status = {"eyes": {"right": {"jump": False, "jump_px": [0, 0], "jump_held_px": [5, 0], "jump_vouched": True},
                            "left": {"jump": False, "jump_px": [0, 0], "jump_held_px": [0, 0]}}}
-        rp = compare.Replay(self.bench_run, [], cal, {}, status, [], jump="both")
+        blank = {"base": [0, 0], "ref": [0, 0], "meas": []}
+        rp = compare.Replay(self.bench_run, [], cal, {0: blank, 1: blank}, status, [], jump="both")
         self.assertEqual((rp.shift[0].jump.tolist(), rp.shift[0].vouched), ([5.0, 0.0], True))
         self.assertEqual((rp.shift[1].jump.tolist(), rp.shift[1].vouched), ([0.0, 0.0], False))
+        # as live: its next glint at the held move keeps the vouch, and the jump in force alone
+        rp.shift[0].glint((5.3, 0.0), T0)
+        self.assertTrue(rp.shift[0].vouched and rp.shift[0].in_force(rp.shift[1], "both"))
         old = {"eyes": {"right": {"jump": True, "jump_px": [4, 1]}}}
         rp = compare.Replay(self.bench_run, [], cal, {}, old, [])
         self.assertEqual(rp.shift[0].jump.tolist(), [4.0, 1.0])

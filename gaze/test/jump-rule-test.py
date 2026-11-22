@@ -121,8 +121,18 @@ for sh in (a, b):
     sh.jump = np.array([6.0, 0.0])
 em.teach({0: a, 1: b}, {}, "both", [0, 1])
 check("...a click that taught neither eye vouches for neither", (a.vouched, b.vouched), (False, False))
-b.jump, b.vouched = np.array([6.0, 0.0]), True
-check("...the vouch is saved with the shift", em.Shift.from_json(b.to_json()).vouched, True)
+b = em.Shift(ref=(0.0, 0.0))
+for t in (0.0, em.JUMP_HOLD):
+    b.glint((6.0, 0.0), t)
+b.vouched = True
+r = em.Shift.from_json(b.to_json())   # ft-eyes restarted
+check("...the vouch is saved with the shift, and the move it's for", (r.vouched, r.held[0].tolist()), (True, [6.0, 0.0]))
+r.glint((6.4, 0.0), 100.0)
+check("...after a restart, glints still at that move keep it, in force at once",
+      (r.vouched, r.jump.tolist(), r.in_force(em.Shift(), "both")), (True, [6.4, 0.0], True))
+r = em.Shift.from_json(b.to_json())
+r.glint((15.0, 0.0), 100.0)
+check("...another move after a restart ends it", (r.vouched, r.in_force(em.Shift(), "both")), (False, False))
 check("...and an old state file has none", em.Shift.from_json({"base": [0, 0], "ref": None}).vouched, False)
 
 # --- Calibration.inside ---

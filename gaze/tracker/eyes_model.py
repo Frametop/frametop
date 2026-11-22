@@ -322,14 +322,22 @@ class Shift:
 
     def to_json(self):
         return {"base": self.base.tolist(), "ref": None if self.ref is None else self.ref.tolist(),
-                "meas": [m.tolist() for m in self.meas], "vouched": self.vouched}
+                "meas": [m.tolist() for m in self.meas],
+                "vouched": self.jump.tolist() if self.vouched else None}   # the move it vouches for
 
     @classmethod
     def from_json(cls, d):
         s = cls(d.get("base", (0, 0)), d.get("ref"))
         s.meas = [np.asarray(m, float) for m in d.get("meas", [])]
-        s.vouched = bool(d.get("vouched", False))   # its jump is found again from ref after a restart
+        if isinstance(d.get("vouched"), list):
+            s.hold_vouched(d["vouched"])
         return s
+
+    def hold_vouched(self, move):
+        """Take up a vouched jump again (after a restart, or a replay's start): `move` as the change
+        held long since, so glint estimates still at it keep it, in force at once, and any other
+        move ends the vouch as it would have live."""
+        self.held, self.vouched = (np.asarray(move, float), float("-inf")), True
 
 
 def partner(shifts, eye, mapped):

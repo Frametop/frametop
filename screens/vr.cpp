@@ -800,10 +800,12 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 // A canvas centered at the screen corner. Only its padded corner-stroke mask is
 // interactive; the window and its safety margin are excluded from every primitive.
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
-// The resize tab's side. A tiled panel's glow tab reaches no further than half the gap, so it never lies
-// over a neighbour's corner (at least 1 cm out, for a gap set very narrow).
+// The glow's depth past the panel. A tiled panel's reaches no further than half the gap, its corner's
+// (CornerOut, deeper) too, so it never lies over a neighbour's own (at least 1 cm out, for a gap set very
+// narrow).
 double LegacyCorner(const Screen &s, double size) {
-    return TileTiled(ScreenIndexOf(s)) ? std::min(size, std::max(TileGapM(), 0.02)) : size;
+    if (!TileTiled(ScreenIndexOf(s))) return size;
+    return std::min(size, std::max(TileGapM() / 2, 0.01) / resizecorner::kCornerGrow);
 }
 // The glow style's band past the panel's edge: the laser's glow's depth, and its hit area's
 // (resizecorner::GlowRegion); along each edge from a corner, GlowArm.

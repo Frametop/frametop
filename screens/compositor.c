@@ -1651,6 +1651,17 @@ static bool setup_dmabuf(struct server *s) {
 }
 
 int main(int argc, char **argv) {
+    // The event loop takes SIGINT, SIGTERM and SIGCHLD through a signalfd, which sees only a
+    // signal that no thread took first. Blocked here, before any thread starts (OpenVR's, in
+    // ft_vr_init), every thread has them blocked: else a stream's exit could go to another
+    // thread and be lost, its ft-stream never reaped, and its panel's next stream "waiting its
+    // turn" for good (host_busy; 2026-11-22). Children get an empty mask (child.c, RunTool).
+    sigset_t loop_signals;
+    sigemptyset(&loop_signals);
+    sigaddset(&loop_signals, SIGINT);
+    sigaddset(&loop_signals, SIGTERM);
+    sigaddset(&loop_signals, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &loop_signals, NULL);
     struct server s = {0};
     // About 0.9 degrees on a 3.4 m wide 3440-pixel screen 2 m away; 8 (the first default,
     // about 0.2 degrees) needed a very still hand to click (headset test 2026-10-03).

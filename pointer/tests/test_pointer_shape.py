@@ -28,6 +28,7 @@ SETTINGS = [
     ("POINTER_FOLLOW", 0, "on"),
     ("POINTER_GAZE_RETAKE", 5, (1.0, 45.0)),
     ("POINTER_GAZE_NUDGE_MAX", 55, (1.0, 110.0)),
+    ("POINTER_GAZE_GLANCE_MAX", 8, (0.0, 20.0)),
     ("POINTER_GAZE_HOLD", 0.5, (0.1, 5.0)),
     ("POINTER_GAZE_CONTROL_HOLD", 0.12, (0.05, 5.0)),
     ("POINTER_GAZE_SHOW", 1, (0.0, 30.0)),

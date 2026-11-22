@@ -454,8 +454,20 @@ void TestRaySwitch() {
 
 }  // namespace
 
+// A mouse click's glance lesson wants the eyes held still: the raw gaze's spread over a span.
+void TestSpread() {
+    GazeHistory h;
+    Look(h, 0, 0.5, 10, 0);
+    CHECK(std::fabs(h.Spread(0.2, 0.45)) < 1e-9, "held still: no spread (%.3f)", h.Spread(0.2, 0.45));
+    Look(h, 0.5, 0.8, 16, 0);   // a saccade 6 degrees on
+    CHECK(h.Spread(0.3, 0.7) > 2.5, "across a saccade: a spread (%.2f)", h.Spread(0.3, 0.7));
+    CHECK(h.Spread(0.55, 0.75) < 1e-9, "settled on the new one: none");
+    CHECK(h.Spread(2.0, 2.3) < 0, "no gaze then: none to judge");
+}
+
 int main() {
     TestLockTakesTheLookBeforeThePinch();
+    TestSpread();
     TestLockWithoutFreshGaze();
     TestTapClicksAtTheLock();
     TestDriftUnderTheDeadZone();

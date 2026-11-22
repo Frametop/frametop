@@ -70,6 +70,7 @@ POINTER_FOLLOW_REACH=70    # head follow: how far (degrees) from the middle of y
 POINTER_GAZE=0             # 1 = the pointer goes where you look, the mouse does the last bit (needs the gaze service: gaze/run.sh install)
 POINTER_GAZE_RETAKE=5      # gaze mode: how far (degrees) you look away from the pointer before the gaze takes it back from the mouse
 POINTER_GAZE_NUDGE_MAX=55  # gaze mode: a correction up to this far (degrees) before a click is learned as the eye tracker's error; a bigger one runs the quick check (55: half the headset's view)
+POINTER_GAZE_GLANCE_MAX=8  # gaze mode with POINTER_GAZE_MOUSE_MOVE=free: a mouse click teaches the eye tracker from where you looked just before it, when that was held still and within this many degrees of the click; a weaker lesson than a nudge (0: off)
 POINTER_GAZE_HOLD=0.5      # gaze mode: a press held this long (s) without moving becomes a real press (to drag); moved or released sooner, it clicks where you let go
 POINTER_GAZE_CONTROL_HOLD=0.12  # gaze mode, hands: a pinch with the pointer on a panel's resize handle or grab bar is a press after this long (s) held still, to drag it
 POINTER_GAZE_MOUSE_MOVE=held  # gaze mode: the mouse moves the pointer only while a button is held, as a correction (held) | any time (free)

@@ -13,13 +13,15 @@
 // size changes with it, and the tracker's error with it); "fit" is FIT_DEG across (4:3),
 // see-through like quick, for the headset fit check: a card per eye (tracked or lost, the
 // tracker's signal, how much of the last 10 s it was seen) and hints. Every dot a check shows
-// must fit its panel: gazecheck.py's PANEL_DEG mirrors these sizes and checks it. "note" is a
-// strip NOTE_DEG across (4:1), see-through, NOTE_PITCH degrees below straight ahead, for the gaze
-// service's slip notice: its title and text lines only, no dot.
+// must fit its panel: gazecheck.py's PANEL_DEG mirrors these sizes and checks it. "pill" is a
+// capsule PILL_DEG across (5:1), see-through, PILL_PITCH degrees below straight ahead, for the gaze
+// service's fit pill (gaze/fitpill.py): its mark and its text line only, no dot, nearer than the
+// rest (kPillDistance) so no panel covers it. The others get in front because ft-screens hides its
+// panels while the pointer helper's "calpanel 1" lease holds (gaze/gazecheck.py renews it).
 //
 // Control socket: abstract unix datagram "@ft_gazepanel" (--socket NAME); a sender with an
 // address gets "ok" or "error ...":
-//   show quick|five|full|fit|note the panel, empty, in front of you (note: below it)
+//   show quick|five|full|fit|pill the panel, empty, in front of you (pill: below it)
 //   hide
 //   bg <0..1>                    the background's brightness (full)
 //   dot <yaw> <pitch> <state> [<progress 0..1>]
@@ -33,6 +35,9 @@
 //                                fit: an eye's card (0 left): its state in that colour, the
 //                                tracker's signal, the share of the last 10 s it was seen
 //   hints <line>|<line>|...      fit: lines under the cards (empty to clear)
+//   mark up|down|left|right|good|none
+//                                pill: an orange disc with an arrow the way to nudge the
+//                                headset, a green one with a tick, or none
 //   ping
 //
 // The eye recorder's mode (gaze/rec/DESIGN.md, "Panel"): "show rec" is FULL_DEG across with
@@ -127,10 +132,13 @@ constexpr double kQuickDeg = 16;      // QUICK_DEG: the one-dot check's square
 constexpr double kFullDeg = 64;       // FULL_DEG: the full calibration's width (4:3)
 constexpr double kFitDeg = 40;        // FIT_DEG: the headset fit check's width (4:3)
 constexpr double kFiveDeg = 40;       // FIVE_DEG: the five-dot check's width (4:3), past its dots
-constexpr double kNoteDeg = 30;       // NOTE_DEG: the slip notice's strip (4:1)
-constexpr double kNotePitch = -16;    // NOTE_PITCH: the strip's centre, degrees below straight ahead
+constexpr double kPillDeg = 16;       // PILL_DEG: the fit pill's capsule (5:1)
+constexpr double kPillPitch = -12;    // PILL_PITCH: the pill's centre, degrees below straight ahead
+constexpr double kPillDistance = 0.4; // m: the pill is nearer than any panel (a "grab that" one comes to
+                                      // 45 cm): the compositor draws a nearer overlay over it whatever
+                                      // their sort order. Only words, so no vergence to keep
 constexpr int kQuickPx = 320, kFullW = 1024, kFullH = 768, kFitW = 800, kFitH = 600, kFiveW = 800, kFiveH = 600;
-constexpr int kNoteW = 600, kNoteH = 150;
+constexpr int kPillW = 560, kPillH = 112;
 constexpr double kDotDeg = 1.8;       // the rec mode's dot overlay: the ring's 1.5 degrees, and a margin
 constexpr int kDotPx = 96;
 constexpr int64_t kPosePeriodNs = 4'000'000;  // 250 Hz, as the hand panel
@@ -195,7 +203,8 @@ struct EyeCard {
 };
 
 struct Panel {
-    bool full = false, fit = false, rec = false, strip = false;  // strip: "show note"
+    bool full = false, fit = false, rec = false, pill = false;
+    std::string mark;  // pill
     std::string step, big, action, keys;  // rec
     bool recOn = false, paused = false;
     double countdown = -1;
@@ -243,6 +252,18 @@ void Disc(Panel &p, double cx, double cy, double outer, double inner, double r, 
 void Rect(Panel &p, int x0, int y0, int x1, int y1, double r, double g, double b, double a) {
     for (int y = std::max(y0, 0); y < std::min(y1, p.h); ++y)
         for (int x = std::max(x0, 0); x < std::min(x1, p.w); ++x) Blend(p, x, y, r, g, b, a);
+}
+
+// A line from (x0, y0) to (x1, y1), width wide with round ends, anti-aliased.
+void Stroke(Panel &p, double x0, double y0, double x1, double y1, double width, double r, double g, double b) {
+    const double half = width / 2, vx = x1 - x0, vy = y1 - y0, len2 = std::max(vx * vx + vy * vy, 1e-9);
+    for (int y = int(std::min(y0, y1) - half - 1); y <= int(std::max(y0, y1) + half + 1); ++y)
+        for (int x = int(std::min(x0, x1) - half - 1); x <= int(std::max(x0, x1) + half + 1); ++x) {
+            const double px = x + 0.5, py = y + 0.5;
+            const double t = std::clamp(((px - x0) * vx + (py - y0) * vy) / len2, 0.0, 1.0);
+            const double d = std::hypot(px - x0 - t * vx, py - y0 - t * vy);
+            Blend(p, x, y, r, g, b, std::clamp(half - d + 0.5, 0.0, 1.0));
+        }
 }
 
 // Text centred on (x, cy), or starting at x (left).
@@ -340,6 +361,30 @@ void DrawRec(Panel &p, double pxPerDeg) {
     }
 }
 
+// The fit pill: its mark at the left end, the text centred in the rest.
+void DrawPill(Panel &p, double pxPerDeg) {
+    const double cy = p.h / 2.0, cx = p.h / 2.0, rad = p.h * 0.32, s = rad * 0.55, w = rad * 0.2;
+    const bool marked = !p.mark.empty() && p.mark != "none";
+    if (p.mark == "good") {
+        Disc(p, cx, cy, rad, 0, 0.30, 0.78, 0.45, 1);
+        Stroke(p, cx - 0.5 * s, cy + 0.05 * s, cx - 0.12 * s, cy + 0.42 * s, w, 0.06, 0.06, 0.07);
+        Stroke(p, cx - 0.12 * s, cy + 0.42 * s, cx + 0.55 * s, cy - 0.4 * s, w, 0.06, 0.06, 0.07);
+    } else if (marked) {
+        // An arrow drawn pointing right, turned to (dx, dy) (screen y down).
+        const double dx = p.mark == "right" ? 1 : p.mark == "left" ? -1 : 0;
+        const double dy = p.mark == "down" ? 1 : p.mark == "up" ? -1 : 0;
+        auto at = [&](double u, double v, double &x, double &y) { x = cx + s * (u * dx - v * dy), y = cy + s * (u * dy + v * dx); };
+        double ax, ay, bx, by, hx, hy;
+        Disc(p, cx, cy, rad, 0, 1.0, 0.62, 0.30, 1);
+        at(-0.6, 0, ax, ay), at(0.6, 0, bx, by);
+        Stroke(p, ax, ay, bx, by, w, 0.06, 0.06, 0.07);
+        at(0.1, -0.45, hx, hy), Stroke(p, bx, by, hx, hy, w, 0.06, 0.06, 0.07);
+        at(0.1, 0.45, hx, hy), Stroke(p, bx, by, hx, hy, w, 0.06, 0.06, 0.07);
+    }
+    const double left = marked ? cx + rad + p.h * 0.15 : p.h / 2.0, right = p.w - p.h / 2.0;
+    Text(p, p.text, int(pxPerDeg * 1.0), int((left + right) / 2), int(cy), 0.95);
+}
+
 void Draw(Panel &p) {
     p.px.assign(size_t(p.w) * p.h * 4, 0);
     const double pxPerDeg = p.w / p.wDeg;
@@ -354,7 +399,7 @@ void Draw(Panel &p) {
             p.px[i] = p.px[i + 1] = p.px[i + 2] = uint8_t(std::lround(p.bg * 255)), p.px[i + 3] = 255;
     } else {
         // The quick check and the fit check: a dim rounded panel, see-through, so it's clear of what's behind.
-        const double r = std::min(p.w, p.h) * 0.12;
+        const double r = p.pill ? p.h / 2.0 : std::min(p.w, p.h) * 0.12;
         for (int y = 0; y < p.h; ++y)
             for (int x = 0; x < p.w; ++x) {
                 const double dx = std::max({r - x - 0.5, x + 0.5 - (p.w - r), 0.0});
@@ -365,10 +410,8 @@ void Draw(Panel &p) {
     }
     const bool light = p.full && p.bg > 0.5;  // a dark dot on the bright round
     const double ink = light ? 0.0 : 1.0, faint = light ? 0.2 : 0.75;
-    if (p.strip) {
-        // The slip notice: the title and the hint, together in the middle of the strip.
-        Text(p, p.title, int(pxPerDeg * 1.4), p.w / 2, int(p.h * 0.36), ink);
-        Text(p, p.text, int(pxPerDeg * 1.05), p.w / 2, int(p.h * 0.68), faint);
+    if (p.pill) {
+        DrawPill(p, pxPerDeg);
         return;
     }
     const int titleSize = int(pxPerDeg * (p.full ? 1.5 : 1.1)), textSize = int(pxPerDeg * (p.full ? 1.2 : 0.9));
@@ -726,14 +769,15 @@ int main(int argc, char **argv) {
         if (noVr) return;
         const double half = std::tan(p.wDeg * M_PI / 360);
         vr::HmdMatrix34_t m{};
-        // Turned down about x by the strip's pitch (none for the others), facing the eyes.
-        const double tilt = p.strip ? kNotePitch * M_PI / 180 : 0, c = std::cos(tilt), sn = std::sin(tilt);
+        // Turned down about x by the pill's pitch (none for the others), facing the eyes.
+        const double tilt = p.pill ? kPillPitch * M_PI / 180 : 0, c = std::cos(tilt), sn = std::sin(tilt);
+        const double d = p.pill ? std::min(distance, kPillDistance) : distance;
         m.m[0][0] = 1;
         m.m[1][1] = float(c), m.m[1][2] = float(-sn), m.m[2][1] = float(sn), m.m[2][2] = float(c);
-        m.m[1][3] = float(distance * sn), m.m[2][3] = float(-distance * c);
+        m.m[1][3] = float(d * sn), m.m[2][3] = float(-d * c);
         std::lock_guard<std::mutex> lk(g_vr);
         ov->SetOverlayTransformTrackedDeviceRelative(h, vr::k_unTrackedDeviceIndex_Hmd, &m);
-        ov->SetOverlayWidthInMeters(h, float(2 * distance * half));
+        ov->SetOverlayWidthInMeters(h, float(2 * d * half));
     };
     auto hideDot = [&] {
         if (dot.shown && !noVr) {
@@ -871,12 +915,12 @@ int main(int argc, char **argv) {
                 p.rec = !std::strcmp(buf + 5, "rec");
                 p.full = !std::strcmp(buf + 5, "full");
                 p.fit = !std::strcmp(buf + 5, "fit");
-                p.strip = !std::strcmp(buf + 5, "note");
+                p.pill = !std::strcmp(buf + 5, "pill");
                 const bool five = !std::strcmp(buf + 5, "five"), big = p.full || p.rec;
-                p.w = big ? kFullW : p.fit ? kFitW : five ? kFiveW : p.strip ? kNoteW : kQuickPx;
-                p.h = big ? kFullH : p.fit ? kFitH : five ? kFiveH : p.strip ? kNoteH : kQuickPx;
-                p.wDeg = big ? kFullDeg : p.fit ? kFitDeg : five ? kFiveDeg : p.strip ? kNoteDeg : kQuickDeg;
-                p.title.clear(), p.text.clear(), p.note.clear(), p.dotOn = false, p.state = "off";
+                p.w = big ? kFullW : p.fit ? kFitW : five ? kFiveW : p.pill ? kPillW : kQuickPx;
+                p.h = big ? kFullH : p.fit ? kFitH : five ? kFiveH : p.pill ? kPillH : kQuickPx;
+                p.wDeg = big ? kFullDeg : p.fit ? kFitDeg : five ? kFiveDeg : p.pill ? kPillDeg : kQuickDeg;
+                p.title.clear(), p.text.clear(), p.note.clear(), p.mark.clear(), p.dotOn = false, p.state = "off";
                 p.eyes[0] = p.eyes[1] = EyeCard{}, p.hints.clear();
                 p.step.clear(), p.big.clear(), p.action.clear(), p.keys.clear();
                 p.recOn = p.paused = false, p.countdown = -1;
@@ -990,6 +1034,8 @@ int main(int argc, char **argv) {
                 p.text = arg, dirty = true;
             } else if (Is(buf, "note", &arg)) {
                 p.note = arg, dirty = true;
+            } else if (Is(buf, "mark", &arg)) {
+                p.mark = arg, dirty = true;
             } else if (Is(buf, "step", &arg)) {
                 p.step = arg, dirty = true;
             } else if (Is(buf, "big", &arg)) {

@@ -181,6 +181,49 @@ class CompareTest(unittest.TestCase):
         rp()
         self.assertEqual((rp.taught, rp.skipped), (1, 1))
 
+    def test_edge_guard_per_eye(self):
+        """A calibration that keeps each eye's dots: a click past one eye's teaches only the other,
+        and the first eye keeps the jump both had (vouched), though the other's lesson cleared its own."""
+        cal = eyes_model.Calibration.load(self.dir / "start" / "eyes-calibration.json")
+        cal.box = {0: [-20.0, 20.0, -15.0, 15.0], 1: [-30.0, 30.0, -15.0, 15.0]}
+        # After the slip, once both eyes' glints have caught it (test_replays: by SLIP_AT + 8)
+        clicks = [(T0 + SLIP_AT + 9, T0 + SLIP_AT + 8.9, (25.0, 0.0))]
+        rp = compare.Replay(self.bench_run, self.bench_run.frames(), cal, {}, None, clicks, jump="both", guard="eye")
+        rp()
+        self.assertEqual((rp.taught, rp.skipped), (1, 0))
+        self.assertEqual((len(rp.shift[0].meas), len(rp.shift[1].meas)), (0, 1))
+        self.assertTrue(rp.shift[0].vouched)
+        self.assertTrue(rp.shift[0].in_force(rp.shift[1], "both"))
+        # guard "eye" with no extents known (a calibration before them): every click teaches, as ft-eyes
+        cal.box = {}
+        rp = compare.Replay(self.bench_run, self.bench_run.frames(), cal, {}, None, clicks, guard="eye", box=(-20, 20, -15, 15))
+        rp()
+        self.assertEqual((rp.taught, rp.skipped), (1, 0))
+
+    def test_held_jump_seed(self):
+        """A run recorded since EYES_JUMP starts each eye with the jump it held (jump_held_px), in force
+        or not, and its vouch; one before it with jump_px while a jump was applied."""
+        cal = eyes_model.Calibration.load(self.dir / "start" / "eyes-calibration.json")
+        status = {"eyes": {"right": {"jump": False, "jump_px": [0, 0], "jump_held_px": [5, 0], "jump_vouched": True},
+                           "left": {"jump": False, "jump_px": [0, 0], "jump_held_px": [0, 0]}}}
+        blank = {"base": [0, 0], "ref": [0, 0], "meas": []}
+        rp = compare.Replay(self.bench_run, [], cal, {0: blank, 1: blank}, status, [], jump="both")
+        self.assertEqual((rp.shift[0].jump.tolist(), rp.shift[0].vouched), ([5.0, 0.0], True))
+        self.assertEqual((rp.shift[1].jump.tolist(), rp.shift[1].vouched), ([0.0, 0.0], False))
+        # as live: its next glint at the held move keeps the vouch, and the jump in force alone
+        rp.shift[0].glint((5.3, 0.0), T0)
+        self.assertTrue(rp.shift[0].vouched and rp.shift[0].in_force(rp.shift[1], "both"))
+        old = {"eyes": {"right": {"jump": True, "jump_px": [4, 1]}}}
+        rp = compare.Replay(self.bench_run, [], cal, {}, old, [])
+        self.assertEqual(rp.shift[0].jump.tolist(), [4.0, 1.0])
+
+    def test_live_options(self):
+        """own-replay follows the run's ft-eyes: before EYES_JUMP each and no guard; since, its rule and the per-eye guard."""
+        own = compare.REPLAYS["own-replay"]
+        self.assertEqual(compare.live_options(own, {}), {"jump": "each", "guard": False})
+        self.assertEqual(compare.live_options(own, {"jump_rule": "both", "edge_margin": 2.0}), {"jump": "both", "guard": "eye"})
+        self.assertEqual(compare.live_options(compare.REPLAYS["each-jump"], {"jump_rule": "both"}), {"jump": "each"})
+
     def test_screen_scale(self):
         """A window 800 x 640 on the 1000 x 800 screen with Qt's pixel ratio 2 (on the Frame: 2752 wide
         on 3440 pixels): the window's pixels are scaled by the sizes in run.json, not by the ratio."""

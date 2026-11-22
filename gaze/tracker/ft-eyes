@@ -15,16 +15,23 @@ By hand: distrobox enter dev -- python3 gaze/tracker/ft-eyes -v
 
 Calibration: ~/.local/state/frametop/gaze/eyes/calibration.json, made by the gaze probe's
 calibration with the tracker toggle on Own tracker (or lab/ft-eyes-score --save CAPTURE).
-Each eye's shift since the calibration (eyes_model.Shift, taught by clicks) is kept in
-state.json next to it. After a restart, or frames stopping for GAP seconds (the headset
-off), the next click starts that eye's shift over, since the headset may sit differently now.
+Each eye's shift since the calibration (its slip: slipfilter.py, one Kalman filter for both
+eyes, the headset's slip plus each eye's own part, that clicks, the glint pair and SteamVR's
+steady looks all teach) is kept in state.json next to it. After a
+restart, or frames stopping for GAP seconds (the headset off), the slip is nearly unknown again
+(SlipFilter.reseat): the next readings set it. eyeslip.py feeds and reads the filters, and
+slip.jsonl there logs them (sliplog.py).
 
 Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
-  status                       JSON: calibration, and per eye its shift, clicks, whether a
-                               glint jump is applied ("jump", and "jump_px": how far, pixels:
-                               the headset slipped since the last click; the gaze service's
-                               slip notice reads it), and "reseat" (the next click starts the
-                               shift over: the probe asks for a one-dot check then)
+  status                       JSON: calibration, and per eye its "shift" (feature units),
+                               "clicks" (taught since the calibration, or since a reseat's
+                               first), "reseat" (the headset was off and no click came since:
+                               the probe asks for a one-dot check then), "slip_deg" (the shift
+                               as the gaze error it causes looking ahead, yaw and pitch degrees,
+                               fitcoach.assess's sign), "slip_sd" (how sure, degrees), and
+                               "glint_bias_deg", "steam_bias_deg"; and the "headset"'s
+                               "slip_deg" and "slip_sd", the part both eyes share (the fit
+                               pill reads it)
   calib-start                  a new calibration: collect dots from now on
   calib-point T0 T1 YAW PITCH  a dot you looked at from T0 to T1 (CLOCK_MONOTONIC_RAW) in
                                that direction (head-relative degrees): "ok N0 N1 SD0 SD1"
@@ -35,8 +42,20 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                eye is fitted on the dots it was seen at; one seen at too few
                                (eyes_model.MIN_CLICKS) is left out, and the other maps the
                                gaze alone ("..., left not used (9 dots, needs 12)")
-  click T YAW PITCH            a click: you were looking there just before T; teaches the
-                               shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured)
+  click T YAW PITCH [glance]   a click: you were looking there just before T; teaches the
+                               shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured; nan
+                               for an eye not seen, or when YAW PITCH lies outside that eye's
+                               calibration dots by over eyes_model.EDGE_MARGIN: a shift measured
+                               out there is the fit's extrapolation, so it teaches nothing).
+                               Both eyes are judged together (slipfilter.teach_click).
+                               "glance": a free mouse's click, a weaker reading that's never
+                               the headset moved and doesn't end a reseat
+  look T YAW PITCH             SteamVR's look, held still over eyeslip.LOOK_WINDOW before T (the
+                               gaze service's steamlook.py): each eye whose pupil held still
+                               then, within its dots, reads its shift against it, a weaker
+                               reading than a click's: "look ok DX0 DY0 DX1 DY1" (nan as above)
+  adjusting SECONDS            the headset is being moved on purpose for that long (the fit
+                               pill is open): the shift may change fast. "adjusting ok"
   fit                          JSON: the last second of pupil finds per camera, for the fit
                                coach (gaze/fitcoach.py, Observations.summary); works uncalibrated
   finds start PATH | finds stop
@@ -67,6 +86,9 @@ refused finds, and its usual size's restarts, are in the status ("size_guard_cou
 start), and once a minute that it refused any, a log line says how many ("size guard, the last
 60 s: right refused 40 of 3100 finds; left refused 0 of 3200 finds").
 
+The glint jump (eyes_model.Shift, EYES_JUMP) is gone from here since 2026-11-22: the slip filter
+takes the glint estimate as one more reading. The lab tools still replay it.
+
 Environment, for replays (lab/ft-eyes-e2e): FT_EYES_CAMS, FT_EYES_GAZE, FT_EYES_STATE (the
 state folder), FT_EYES_SOCKET (the socket's name), FT_EYES_MODEL, FT_EYES_SIZE_GUARD. With
 FT_EYES_CAMS set, the want file isn't touched.
@@ -76,7 +98,8 @@ FT_EYES_CAMS set, the want file isn't touched.
    4 u32 version  1
    8 f64 t        the newest frame's time, CLOCK_MONOTONIC_RAW seconds
   16 f32 yaw, pitch  the gaze, head-relative degrees (yaw +left, pitch +up), eyes averaged
-  24 u32 flags    bit 0: right eye in it, 1: left eye in it, 2: right shift from clicks, 3: left
+  24 u32 flags    bit 0: right eye in it, 1: left eye in it, 2: right shift taught by a click
+                  since the calibration or the last reseat, 3: left
   28 u32 n        samples published
   32 f32 x4       right yaw, pitch, left yaw, pitch (NaN when that eye isn't seen)
   48 f32 x4       each eye's shift since the calibration, pixels: right x, y, left x, y
@@ -105,11 +128,15 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "conf"))
+import clickrefit  # noqa: E402  (what clicks teach beyond the shift)
 import eyes_model  # noqa: E402
+import eyeslip  # noqa: E402  (the slip filters fed and read)
 import eyes_pupil  # noqa: E402
 import fitcoach  # noqa: E402
 import ft_conf  # noqa: E402
 import ft_store  # noqa: E402  (JSON files written safely)
+import sliplog  # noqa: E402
+import slipfilter  # noqa: E402
 
 def load_net():
     """The eye net EYES_MODEL picks (FT_EYES_MODEL wins), or None (the pupil finder). models/catalog.py
@@ -150,6 +177,8 @@ def size_guard_rule():
 
 
 SIZE_GUARD = size_guard_rule()
+
+
 GUARD_REPORT = 60.0  # s between the size guard's log lines (only when it refused something)
 
 CAMS = os.environ.get("FT_EYES_CAMS", "/dev/shm/frametop-eyes-cams")  # overrides for replays
@@ -165,11 +194,17 @@ LOST_EVERY = 3        # while an eye is lost, search the whole frame only every 
 EYES = ("right", "left")
 STATE = CALIBRATION.parent / "state.json"
 CLICKS = CALIBRATION.parent / "clicks.jsonl"
+SLIP_LOG = CALIBRATION.parent / "slip.jsonl"
 SOCKET = "\0" + os.environ.get("FT_EYES_SOCKET", "ft_eyes")
 HISTORY = 12.0        # seconds of pupil positions kept per eye, for dots and clicks (the pointer's
                       # clicks come from ft-gazed up to 10 s after the look)
 GAP = 3.0             # s without frames: the headset was off, and may sit differently now
 CLICK_BEFORE = 0.3    # a click's frames: the 300 ms before it (like the probe's fixation)
+GLINT_WINDOW = 2.0    # s of glint pair sightings in each glint reading...
+GLINT_EVERY = 1.0     # ...taken this often (readings further apart are less alike)
+LOG_EVERY = 0.2       # s between slip.jsonl's rows while frames come
+LOGS = []              # the slip logs to flush when ft-gazed stops us
+SAVE_EVERY = 30.0     # s between saving the slip (state.json) when only steady readings moved it
 CALIB_MIN = 15        # frames an eye needs in a calibration dot's window
 CALIB_SPREAD = 2.5 if NET else 4.0   # px (the net: degrees): more than this and the eye moved during the dot
 CLASSIC_FOR = 3.0     # s: with the net, the pupil finder runs this long after the fit coach asks
@@ -249,8 +284,13 @@ class Eye:
     def __init__(self, eye):
         self.eye = eye
         self.cal = None
-        self.slip = None
-        self.shift = eyes_model.Shift()
+        self.slip = None        # the glint estimate (eyes_model.SlipTracker) while mapped
+        self.filter = None      # its shift (slipfilter.SlipFilter) while mapped
+        self.log = None         # the slip log (Tracker's sliplog.SlipLog)
+        self.glint = None       # the last glint reading taken: (t, (dx, dy))
+        self.glint_innov = None  # ...and how far off the filter it read: (t, degrees, feature units)
+        self.other = None       # the other Eye (a glint move is judged across both)
+        self.find = None        # the newest find kept: (t, x, y, size, glint mid or None)
         self.history = deque()  # (t, x, y, glint mid x, y)
         self.last = None        # the previous pupil (window hint)
         self.size = eyes_pupil.PupilSize()   # its recent size: much smaller finds are something else
@@ -265,18 +305,42 @@ class Eye:
         self.fed = None         # (frame time, CLOCK_MONOTONIC_RAW then) of the newest frame fed
         self.finds = None       # the finds log (Tracker.finds), shared by both eyes
         self.coach = [0.0]      # with the net: until when the fit coach wants pupils (monotonic), shared
+        self.learn = None       # what its clicks taught beyond the shift (clickrefit.Learner) while mapped
 
-    def use(self, cal, shift=None):
+    def shift_now(self):
+        """The shift its gaze is corrected by (the slip filter's), zero while unmapped."""
+        return self.filter.s if self.filter else np.zeros(2)
+
+    def use(self, cal, filt=None, learned=None):
+        """Maps with cal (if it maps this eye), its slip filter `filt` (Tracker.map_eyes') and
+        what its clicks taught (state.json's, or fresh)."""
         self.cal = cal if cal is not None and cal.has("pupil", self.eye) else None
-        self.slip = eyes_model.SlipTracker(cal, self.eye, window=eyes_model.JUMP_WINDOW) if self.cal else None
-        self.shift = shift or eyes_model.Shift()
-        self.gaze = None
+        self.learn = clickrefit.Learner(self.cal, self.eye, learned) if self.cal else None
+        self.slip = (eyes_model.SlipTracker(cal, self.eye, every=GLINT_EVERY, window=GLINT_WINDOW)
+                     if self.cal else None)
+        self.filter = filt if self.cal else None
+        self.gaze = self.glint = self.glint_innov = None
 
-    def feed(self, t, img):
+    def reseat(self, t):
+        """The headset was off (or ft-eyes restarted): the glint sightings from before say nothing
+        of where it sits now, and the filter's slip is nearly unknown."""
+        if self.slip:
+            self.slip.rows.clear()
+        self.glint_innov = None
+        if self.filter:
+            self.filter.reseat()
+            if self.log:
+                self.log.event(t, "reseat", eye=self.eye)
+
+    def tick(self, t):
+        """A frame at t: frames stopping for GAP s before it was the headset off."""
         self.frames += 1
         if self.last_t is not None and t - self.last_t > GAP:
-            self.shift.reseat()
+            self.reseat(t)
         self.last_t = t
+
+    def feed(self, t, img):
+        self.tick(t)
         if NET:
             return self.feed_net(t, img)
         if self.last is None:
@@ -303,12 +367,15 @@ class Eye:
             self.history.append((t, p["x"], p["y"], mid[0], mid[1]))
             while self.history and self.history[0][0] < t - HISTORY:
                 self.history.popleft()
+            self.find = (t, float(p["x"]), float(p["y"]), float(p["a"]), mid if pair else None)
             if self.cal:
                 if pair:
                     self.slip.add(t, (p["x"], p["y"]), mid)
-                self.shift.glint(self.slip.get(), t)
-                g = self.cal.gaze(self.eye, p["x"], p["y"], self.shift.value)
+                g = self.map_gaze(p["x"], p["y"])
                 self.gaze = (t, float(g[0]), float(g[1]), p["x"], p["y"])
+                r = eyeslip.take_glint(self, self.other, t, g)
+                if r and self.log:
+                    self.log.event(t, "glint", eye=self.eye, **r)
         if self.finds is not None:
             self.finds.write(self, t, p, refused=refused)
         self.work += time.perf_counter() - t0
@@ -332,12 +399,17 @@ class Eye:
             self.history.append((t, fx, fy, math.nan, math.nan))
             while self.history and self.history[0][0] < t - HISTORY:
                 self.history.popleft()
+            self.find = (t, float(fx), float(fy), None, None)
             if self.cal:
-                g = self.cal.gaze(self.eye, fx, fy, self.shift.value)
+                g = self.map_gaze(fx, fy)
                 self.gaze = (t, float(g[0]), float(g[1]), r["x"], r["y"])
         if self.finds is not None:
             self.finds.write(self, t, p, r)
         self.work += time.perf_counter() - t0
+
+    def map_gaze(self, x, y):
+        """Gaze for a feature at (x, y): the calibration's with the shift, then the click refit."""
+        return self.learn.apply(self.cal.gaze(self.eye, x, y, self.shift_now()))
 
     def window(self, t0, t1):
         """Median pupil and glint midpoint over [t0, t1], the frame count, and the spread."""
@@ -385,6 +457,11 @@ class Finds:
 class Tracker:
     def __init__(self):
         self.eyes = [Eye(0), Eye(1)]
+        self.eyes[0].other, self.eyes[1].other = self.eyes[1], self.eyes[0]
+        self.log = sliplog.SlipLog(SLIP_LOG)
+        LOGS.append(self.log)
+        for e in self.eyes:
+            e.log = self.log
         self.cal = None
         self.dots = []  # calibration dots so far, in ft-eyes-score's click form
         self.calibrating = False
@@ -400,25 +477,61 @@ class Tracker:
                       " calibrate again", file=sys.stderr, flush=True)
                 self.cal = None
         if self.cal:
-            if not self.cal.spread:
-                self.cal.spread = spread_from_dots(self.cal)
-        shifts = {}
+            # Saved before calibrations kept spreads and dots' extents: from its dots, refitted.
+            self.cal.fill_from_dots(CALIBRATION.with_name("calibration-dots.jsonl"))
+        saved = learned = None
         try:
             d = json.loads(STATE.read_text())
             if self.cal and d.get("calibration") == self.cal.info.get("made"):
-                shifts = {int(k): eyes_model.Shift.from_json(v) for k, v in d.get("shift", {}).items()}
-        except (OSError, ValueError):
+                # "slip": the filter's; "shift": eyes_model.Shift's, saved before 2026-11-22.
+                saved = d.get("slip") or d.get("shift")
+                learned = d.get("learn")
+        except (OSError, ValueError, AttributeError):
             pass
+        self.map_eyes(self.cal, saved, learned)
         for e in self.eyes:
-            e.use(self.cal, shifts.get(e.eye))
-            # Kept from the last run, but the headset may have been off since: the first
-            # click starts the history over (the saved shift is used until then).
-            e.shift.reseat()
+            # Kept from the last run, but the headset may have been off since: the saved slip
+            # is used until readings say otherwise, and they soon do.
+            e.reseat(None)
+        self.saved_at = time.monotonic()
+
+    def map_eyes(self, cal, saved=None, learned=None):
+        """Maps each eye with cal, their slip filters views of one slipfilter.Headset, from
+        state.json's "slip" `saved` (slipfilter.load) or fresh, and what clicks taught each
+        (state.json's "learn" `learned`: {eye: clickrefit.Learner.to_json()}) or nothing."""
+        jacs = {c: cal.jacobian(c) for c in (0, 1) if cal is not None and cal.has("pupil", c)}
+        filters = slipfilter.load(saved, jacs)
+        for e in self.eyes:
+            e.use(cal, filters.get(e.eye), (learned or {}).get(str(e.eye)))
 
     def save_state(self):
         d = {"calibration": self.cal.info.get("made") if self.cal else None,
-             "shift": {e.eye: e.shift.to_json() for e in self.eyes}}
-        ft_store.write_json(STATE, d, indent=None, newline=False)
+             "slip": slipfilter.save({e.eye: e.filter for e in self.eyes if e.filter}),
+             "learn": {str(e.eye): e.learn.to_json() for e in self.eyes if e.learn}}
+        self.saved_at = time.monotonic()
+        try:
+            ft_store.write_json(STATE, d, indent=None, newline=False)
+        except OSError as err:   # a full disk mustn't stop the tracker: the slip is kept in memory
+            print(f"ft-eyes: couldn't save {STATE}: {err}", file=sys.stderr, flush=True)
+
+    def command_time(self, words):
+        """A command's T and numbers, all finite, T no later than a second past the newest frame
+        (a reading from the future would move the filters' clock past every later one)."""
+        v = [float(x) for x in words]
+        if not all(math.isfinite(x) for x in v):
+            raise ValueError("numbers that aren't finite")
+        newest = self.frame_time()
+        if newest is not None and v[0] > newest + 1.0:
+            raise ValueError(f"T {v[0]:.3f} is past the newest frame ({newest:.3f})")
+        return v
+
+    def frame_time(self):
+        """The newest frame's time (the filters' clock), or None before any."""
+        return max((e.last_t for e in self.eyes if e.last_t is not None), default=None)
+
+    def log_row(self):
+        """slip.jsonl's row now (eyeslip.log_row), or None before any frame."""
+        return eyeslip.log_row(self.eyes, self.frame_time())
 
     def command(self, line):
         w = line.split()
@@ -502,9 +615,9 @@ class Tracker:
                 eyes_model.prune_backups(CALIBRATION.parent)   # the newest 10 earlier ones stay
             cal.save(CALIBRATION)
             self.cal, self.calibrating = cal, False
-            for e in self.eyes:
-                e.use(cal)
+            self.map_eyes(cal)
             self.save_state()
+            self.log.event(self.frame_time(), "calibration", made=cal.info["made"], eyes=cal.eyes())
             with open(CALIBRATION.with_name("calibration-dots.jsonl"), "a") as f:
                 for k in self.dots:
                     f.write(json.dumps({"made": cal.info["made"], "truth": k["truth"],
@@ -515,26 +628,53 @@ class Tracker:
                     + ", ".join(f"{EYES[c]} {cal.spread[c]:.2f} ({seen[c]} dots)" if c in cal.spread
                                 else f"{EYES[c]} not used ({seen[c]} dots, needs {eyes_model.MIN_CLICKS})"
                                 for c in (0, 1)))
-        if w[0] == "click" and len(w) == 4:
+        if w[0] == "click" and (len(w) == 4 or len(w) == 5 and w[4] == "glance"):
             if not self.cal:
                 return "fail not calibrated"
-            t, yaw, pitch = map(float, w[1:])
-            out, rec = [], {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": {}}
-            for e in self.eyes:
-                g = e.window(t - CLICK_BEFORE, t)
-                if g is None or g["n"] < 5 or not e.cal:
-                    out += ["nan", "nan"]
-                    continue
-                d = self.cal.click_shift(e.eye, g["pupil"], (yaw, pitch))
-                before = e.shift.value.tolist()
-                e.shift.click(d, e.slip.value if e.slip else None)
-                rec["eyes"][e.eye] = {"pupil": g["pupil"].tolist(), "measured": d.tolist(), "before": before,
-                                      "after": e.shift.value.tolist()}
-                out += [f"{d[0]:.2f}", f"{d[1]:.2f}"]
+            glance = len(w) == 5
+            t, yaw, pitch = self.command_time(w[1:4])
+            out, eyes = eyeslip.teach_click(self.eyes, self.cal, t, (yaw, pitch), CLICK_BEFORE, glance)
+            for c, v in eyes.items():
+                if "raw" in v and self.eyes[c].learn:
+                    for ev in self.eyes[c].learn.add(v["raw"], (yaw, pitch), glance, v["pupil"], v["mid"]):
+                        self.log.event(t, "learned", eye=c, **ev)
+                        print(f"ft-eyes: {EYES[c]} eye learned from clicks: {ev}", flush=True)
+            rec = {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": eyes, **({"glance": True} if glance else {})}
             self.save_state()
             with open(CLICKS, "a") as f:
                 f.write(json.dumps(rec) + "\n")
+            self.log.event(t, "click", truth=[yaw, pitch], glance=glance, eyes={str(e): v for e, v in rec["eyes"].items()})
             return "ok " + " ".join(out)
+        if w[0] == "clicks-clear":
+            # "Clear click corrections": forget what clicks taught, keep the calibration.
+            for e in self.eyes:
+                if e.learn:
+                    if e.learn.own_glint:
+                        e.cal.fits.pop(("glint", e.eye), None)
+                    e.learn = clickrefit.Learner(e.cal, e.eye)
+            self.save_state()
+            return "ok"
+        if w[0] == "look" and len(w) == 4:
+            if not self.cal:
+                return "look fail not calibrated"
+            try:
+                t, yaw, pitch = self.command_time(w[1:])
+            except ValueError as err:
+                return f"look fail {err}"
+            out, took = eyeslip.teach_look(self.eyes, self.cal, t, (yaw, pitch), CALIB_SPREAD)
+            if took:
+                self.log.event(t, "look", truth=[yaw, pitch], eyes=took)
+            return "look ok " + " ".join(out)
+        if w[0] == "adjusting" and len(w) == 2:
+            seconds = float(w[1])
+            if not math.isfinite(seconds):
+                return "adjusting fail not a number"
+            seconds = min(max(seconds, 0.0), 10.0)
+            t = self.frame_time()
+            if t is not None:
+                eyeslip.adjusting(self.eyes, t, seconds)
+                self.log.event(t, "adjusting", seconds=seconds)
+            return "adjusting ok"
         return f"fail unknown command {w[0]}"
 
     def status(self):
@@ -542,27 +682,11 @@ class Tracker:
                 "mapped": [EYES[c] for c in self.cal.eyes()] if self.cal else None,
                 "feature": FEATURE, "model": NET.folder if NET else None,
                 "dots": len(self.dots), "size_guard": None if NET else self.guard.rule,
+                "edge_margin": eyes_model.EDGE_MARGIN, "slip": "filter",
                 "size_guard_counts": None if NET else {EYES[e]: self.guard.counts(e) for e in (0, 1)},
-                "eyes": {EYES[e.eye]: {"shift": e.shift.value.tolist(), "clicks": len(e.shift.meas),
-                                       "jump": bool(np.any(e.shift.jump)), "jump_px": e.shift.jump.tolist(),
-                                       "reseat": e.shift.reseated} for e in self.eyes}}
-
-
-def spread_from_dots(cal):
-    """The eyes' fit spreads for a calibration saved without them, from its dots in
-    calibration-dots.jsonl ({} if they aren't there: the eyes are then weighted alike)."""
-    try:
-        lines = CALIBRATION.with_name("calibration-dots.jsonl").read_text().splitlines()
-    except OSError:
-        return {}
-    dots = []
-    for line in lines:
-        d = json.loads(line)
-        if d.get("made") == cal.info.get("made"):
-            dots.append(dict(truth=d["truth"], eye={
-                int(c): dict(pupil=np.array(v["pupil"]), mid=None if v["mid"] is None else np.array(v["mid"]))
-                for c, v in d["eye"].items()}))
-    return eyes_model.Calibration.fit(dots).spread if dots else {}
+                "eyes": {EYES[e.eye]: eyeslip.eye_status(e.filter, self.frame_time()) for e in self.eyes},
+                "headset": eyeslip.headset_status(self.eyes, self.frame_time()),
+                "learned": {EYES[e.eye]: e.learn.status() for e in self.eyes if e.learn}}
 
 
 class Want:
@@ -647,7 +771,11 @@ def main():
         def watch():
             while sys.stdin.buffer.read(4096):
                 pass
-            os._exit(0)
+            try:
+                for log in LOGS:
+                    log.flush()
+            finally:
+                os._exit(0)
         threading.Thread(target=watch, daemon=True).start()
     want = Want()
     CALIBRATION.parent.mkdir(parents=True, exist_ok=True)
@@ -667,6 +795,7 @@ def main():
     print("ft-eyes: frames found, tracking", file=sys.stderr, flush=True)
     seen = [cams.count(0), cams.count(1)]
     report = guard_at = time.monotonic()
+    logged = 0.0
     guard_was = {e: tracker.guard.counts(e) for e in (0, 1)}
     arrived = [0.0, 0.0]  # when each camera's newest frame was seen (monotonic)
     while True:
@@ -692,21 +821,29 @@ def main():
                 for i, e in enumerate(eyes):
                     fresh = e in use
                     flags |= (1 << i) if fresh else 0
-                    flags |= (4 << i) if e.shift.meas else 0
+                    flags |= (4 << i) if e.filter and e.filter.taught else 0
                     per += [e.gaze[1], e.gaze[2]] if fresh else [math.nan, math.nan]
-                    shifts += [float(v) for v in e.shift.value]
+                    shifts += [float(v) for v in e.shift_now()]
                     pupils += [e.gaze[3], e.gaze[4]] if fresh else [math.nan, math.nan]
                 out.write(latest, (yaw, pitch), flags, per, shifts, pupils)
         now = time.monotonic()
+        if new and now - logged >= LOG_EVERY:
+            logged = now
+            row = tracker.log_row()
+            if row:
+                tracker.log.write(row)
+        if new and tracker.cal and now - tracker.saved_at >= SAVE_EVERY:
+            tracker.save_state()
         if now - report >= 5:
             if verbose:
                 parts = []
                 for e in eyes:
-                    s = e.shift.value
+                    s = e.shift_now()
+                    sd = f", sd {e.filter.slip_sd():.1f} deg" if e.filter else ""
                     parts.append(f"{EYES[e.eye]} {e.frames / 5:.0f} fps, found {e.found / max(e.frames, 1):.0%}"
                                  + (f" ({e.refused} refused by size)" if e.refused else "") + ", "
                                  f"{e.work / max(e.frames, 1) * 1000:.2f} ms/frame, shift ({s[0]:+.1f},{s[1]:+.1f})"
-                                 f" from {len(e.shift.meas)} clicks" + (", jump" if np.any(e.shift.jump) else ""))
+                                 + sd + (", reseated" if e.filter and e.filter.reseated else ""))
                     e.frames = e.found = e.refused = 0
                     e.work = 0.0
                 print("ft-eyes: " + "; ".join(parts), file=sys.stderr, flush=True)

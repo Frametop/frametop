@@ -68,8 +68,15 @@ when that look was (the history of what was sent), and so what each eye read the
     a click ("click T YAW PITCH" on @ft_eyes), as the
     probe's clicks do, and it learns how far the headset has moved on your face. That's
     what it gets wrong, and after the headset was off, the first click resets it;
+    between clicks, SteamVR's look once it holds still goes to it too ("look T YAW PITCH",
+    gaze/steamlook.py: SteamVR doesn't move with our tracker's slips), while no check runs;
   - either way, how far off each eye was (before the lesson taught it anything) goes to the
     eye bias, for auto.
+A glance ("lesson ... glance") is a free mouse's click: the raw gaze just before it (held still)
+to where it clicked, within POINTER_GAZE_GLANCE_MAX (the helper's limit). You most likely looked
+at what you clicked, but it's no deliberate nudge, so it counts for less: GLANCE_WEIGHT of a
+lesson with SteamVR, and our tracker takes it as a weaker click ("click T YAW PITCH glance"). It
+doesn't count toward the lessons after a quick check (gazecheck.after_lesson).
 
 SteamVR's eye tracking log is followed for the headset going on (its eye model starts over,
 and the error moves): lessons from before count less then, so the first few after it
@@ -107,7 +114,7 @@ Nothing here writes to SteamVR, its eye tracker, or its files: ft-gaze reads the
 tracker's shared memory read-only.
 
 Control socket: abstract unix datagram "@ft_gazed":
-  lesson <rhy> <rhp> <thy> <thp>   from the pointer helper (see above)
+  lesson <rhy> <rhp> <thy> <thp> [glance]   from the pointer helper (see above)
   recheck <deg>                    from the pointer helper: a click's correction was past
                                    POINTER_GAZE_NUDGE_MAX, so the quick check (gazecheck.py)
   status                           reply: one JSON object
@@ -151,6 +158,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gazecal import (DEFAULT_MODEL, EYE_FOUND, EYE_LOST, FUSION, MODELS, STATE, Correction, EyeBridge,  # noqa: E402
                      EyeFallback, EyeWeights, Fusion, GazeLock, LiveCorrection, SteamEyeLog, TrackedEye)
 from gazecheck import Checks  # noqa: E402
+from steamlook import SteamLooks  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "models"))
 import catalog  # noqa: E402  (which eye net EYES_MODEL means: models/catalog.py)
@@ -178,6 +186,7 @@ TRACKERS = ("steam", "own")
 TRACKER_SETTINGS = ("auto",) + TRACKERS
 BIASES = ("auto", "left", "right")
 NUDGE_MAX = 55.0  # degrees: POINTER_GAZE_NUDGE_MAX's default, the largest lesson taken
+GLANCE_WEIGHT = 0.5  # a glance's weight in SteamVR's correction, against a nudge's 1
 HISTORY = 12.0    # seconds of the gaze sent, to find a lesson's look (the helper sends it up to 10 s later)
 LOOK = 0.3        # seconds of samples before that moment make the look (the probe's fixation)
 RETRY = 3.0       # seconds before starting ft-gaze again
@@ -289,6 +298,7 @@ class Service:
         self.history = deque()
         self.own = {}        # our tracker's last status reply
         self.own_at = 0.0
+        self.steam_looks = SteamLooks()   # SteamVR's steady looks, for our tracker's slip (steamlook.py)
         self.eyes_proc = None  # ft-eyes, while it runs
         self.eyes_until = 0.0  # the probe's lease (monotonic time)
         self.eyes_restart_at = 0.0
@@ -463,9 +473,11 @@ class Service:
             eyes.append((statistics.median(e[0] for e in seen), statistics.median(e[1] for e in seen)) if seen else None)
         return t, eyes
 
-    def lesson(self, rhy, rhp, thy, thp):
+    def lesson(self, rhy, rhp, thy, thp, glance=False):
         kind = self.kind
-        rec = {"time": time.time(), "kind": kind, "raw": [rhy, rhp], "true": [thy, thp], "wear": self.steam.worn()}
+        w = GLANCE_WEIGHT if glance else 1.0
+        rec = {"time": time.time(), "kind": kind, "raw": [rhy, rhp], "true": [thy, thp], "wear": self.steam.worn(),
+               "how": "glance" if glance else "nudge"}
         if kind == "source":
             dy, dp = thy - rhy, thp - rhp  # the whole error there
             cy, cp = self.correction(self.source, rhy, rhp)
@@ -475,7 +487,7 @@ class Service:
                 rec["refused"] = f"more than {self.nudge_max:g} deg past the correction"
             else:
                 self.lives[self.source].add({"time": rec["time"], "hy": rhy, "hp": rhp, "dy": dy, "dp": dp,
-                                             "wy": 1.0, "wp": 1.0, "how": "pointer"}, self.models[self.source], self.mode)
+                                             "wy": w, "wp": w, "how": "pointer"}, self.models[self.source], self.mode)
             return self.taken(rec)
         # The raw gaze sent here is the corrected, combined one: its whole error is left.
         left = math.hypot(thy - rhy, thp - rhp)
@@ -493,7 +505,8 @@ class Service:
             # Its eyes come calibrated: how far off each was is its miss. The click goes to it.
             miss = [math.hypot(thy - e[0], thp - e[1]) if e else None for e in eyes]
             try:
-                self.eyes_sock.sendto(f"click {t:.6f} {thy:.4f} {thp:.4f}".encode(), EYES_SOCKET)
+                self.eyes_sock.sendto(f"click {t:.6f} {thy:.4f} {thp:.4f}{' glance' if glance else ''}".encode(),
+                                      EYES_SOCKET)
             except OSError as e:
                 rec["refused"] = f"our tracker isn't running ({e})"
                 return self.taken(rec)
@@ -506,7 +519,7 @@ class Service:
                 cy, cp = self.correction(name, *e)
                 miss.append(math.hypot(thy - e[0] - cy, thp - e[1] - cp))
                 self.lives[name].add({"time": rec["time"], "hy": e[0], "hp": e[1], "dy": thy - e[0], "dp": thp - e[1],
-                                      "wy": 1.0, "wp": 1.0, "how": "pointer"}, self.models[name], self.mode)
+                                      "wy": w, "wp": w, "how": "pointer"}, self.models[name], self.mode)
         rec["miss"] = miss
         weights.add(miss)
         return self.taken(rec)
@@ -575,7 +588,8 @@ class Service:
             return "all"
         kind = self.kind
         if kind == "own":
-            return "own,mmap1,left,right" if self.fusing else "own,mmap1"
+            # left, right: the fusion's, and SteamVR's steady looks for our tracker (feed_look)
+            return "own,mmap1,left,right"
         if kind == "eyes":
             return "left,right,mmap1"
         return ",".join(dict.fromkeys((self.source, "mmap1", "mmap2")))  # mmap2: each eye, for the fallback
@@ -753,6 +767,7 @@ class Service:
             self.one_eye = one
             self.fix.reset()
         self.checks.on_sample(s)
+        self.feed_look(s)
         kind = self.kind
         if kind != self.last_kind:
             log({"own": "our own tracker", "eyes": "SteamVR's eyes, each calibrated",
@@ -764,6 +779,34 @@ class Service:
             self.on_source_sample(s)
         else:
             self.on_eyes_sample(s, kind == "own")
+
+    def feed_look(self, s):
+        """SteamVR's look, once it holds still, to our tracker (steamlook.py): while it runs and
+        no check does (a check's clicks teach it themselves)."""
+        c = self.checks
+        if self.kind != "own" or self.eyes_proc is None or c.active or c.pending:
+            self.steam_looks.reset()
+            return
+        unc = (s["src"].get("mmap1") or {}).get("unc") or [1.0, 1.0]
+        lr = []
+        for k, name in enumerate(SIDES):
+            e = s["src"].get(name) or {}
+            lr.append((e["hy"], e["hp"]) if "hy" in e and len(unc) == 2 and unc[k] <= EYE_LOST else None)
+        own = self.own if time.monotonic() - self.own_at < 5 else {}
+        made = (own.get("calibration") or {}).get("made")
+        if not made:   # not calibrated (or its status not heard yet): nothing to read a look against
+            self.steam_looks.reset()
+            return
+        look = self.steam_looks.step(s["t"], lr[0], lr[1], self.one_eye, self.fusion, made)
+        if look:
+            self.tell_own("look {:.6f} {:.4f} {:.4f}".format(*look))
+
+    def tell_own(self, command):
+        """A command to our tracker whose reply needn't be waited for (on_own logs or drops it)."""
+        try:
+            self.eyes_sock.sendto(command.encode(), EYES_SOCKET)
+        except OSError:
+            pass   # not up yet
 
     def on_eyes_sample(self, s, own):
         m1 = s["src"].get("mmap1") or {}
@@ -923,12 +966,12 @@ class Service:
                 return
             words = data.decode("utf-8", "replace").split()
             reply = None
-            if words[:1] == ["lesson"] and len(words) == 5:
+            if words[:1] == ["lesson"] and (len(words) == 5 or len(words) == 6 and words[5] == "glance"):
                 try:
-                    rec = self.lesson(*map(float, words[1:]))
+                    rec = self.lesson(*map(float, words[1:5]), glance=len(words) == 6)
                     self.checks.after_lesson(rec)
                     reply = "refused" if "refused" in rec else f"ok {rec['lesson_deg']:.2f}"
-                    log(f"lesson {rec['lesson_deg']:.2f} deg at {rec['raw'][0]:+.1f},{rec['raw'][1]:+.1f}"
+                    log(f"{'glance ' if rec['how'] == 'glance' else ''}lesson {rec['lesson_deg']:.2f} deg at {rec['raw'][0]:+.1f},{rec['raw'][1]:+.1f}"
                         + (f", eyes off {', '.join('-' if m is None else f'{m:.2f}' for m in rec['miss'])}"
                            if rec.get("miss") else "")
                         + (f": {rec['refused']}" if "refused" in rec else ""))
@@ -985,7 +1028,7 @@ class Service:
                     pass
                 else:
                     self.note_own_calibration()
-            else:
+            elif not data.startswith(("look ok", "adjusting ok")):   # twice a second: not logged
                 log(f"our tracker: {data}")
 
     def note_own_calibration(self):
@@ -1068,10 +1111,7 @@ class Service:
             log("ft-eyes no longer wanted: stopping it")
             self.stop_eyes()
         if self.eyes_proc:
-            try:
-                self.eyes_sock.sendto(b"status", EYES_SOCKET)
-            except OSError:
-                pass  # not up yet: status() says so once the last answer is old
+            self.tell_own("status")   # (not up yet: status() says so once the last answer is old)
         self.checks.periodic()
         if self.dirty:
             self.save_lessons()

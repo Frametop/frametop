@@ -1481,7 +1481,11 @@ class Probe(Gtk.ApplicationWindow):
         if p.get("t_raw") is None:
             return "no sample time at the press"
         reply = self.own.ask(f"click {p['t_raw']:.6f} {yaw:.4f} {pitch:.4f}")
-        return "taught the Own tracker" if reply.startswith("ok") else reply
+        if not reply.startswith("ok"):
+            return reply
+        if all(w == "nan" for w in reply.split()[1:]):   # no eye seen, or past every eye's calibration dots
+            return "not learned: no eye seen, or past the calibration's dots"
+        return "taught the Own tracker"
 
     def on_motion(self, x, y):
         self.pointer = (x, y)
@@ -2400,6 +2404,7 @@ class Probe(Gtk.ApplicationWindow):
         """Forget what snap and practice clicks taught; the calibration stays."""
         self.live = {s: LiveCorrection() for s in SOURCES}
         self.save_calibration()
+        self.own.ask("clicks-clear")   # the Own tracker's click refit too (a "fail" if it isn't running)
         self.on_status("click corrections cleared")
 
     def reset_calibration(self):

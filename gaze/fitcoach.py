@@ -20,7 +20,11 @@ The IPD reading only becomes a hint once we know the eye cameras move with the l
 (HEADSET-TESTS, 2026-10-14): if they're fixed to the housing, the offset also depends on the IPD
 setting, and that needs a reference per setting. Until then it's reported, not advised.
 
-A baseline is the same reading saved from one person's good fit. Compared with a baseline the
+A baseline is the same reading saved from one person's good fit. A full calibration of our
+tracker saves one too (seating_from_dots): where each pupil sat looking straight ahead while it
+was made, and that eye's own pupil movement per degree. That's the seating the tracker is most
+accurate at, so it replaces a fit check's (which then keeps it), and the fit pill
+(gaze/fitpill.py) guides back to it. Compared with a baseline the
 glint pair's spacing says whether the eye is nearer the camera than then (the eye relief: on
 the maintainer's headset it moved 18 % between two seatings, and 4 % within one), and the put-on
 check says how far the headset moved since. The reference starts as the maintainer's
@@ -259,6 +263,53 @@ def save_baseline(baseline, path=None):
     _write_json(path or BASELINE, baseline)
 
 
+def read_dots(path=DOTS):
+    """calibration-dots.jsonl's rows; a line that doesn't read (cut short) is skipped."""
+    rows = []
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return rows
+
+
+def seating_from_dots(rows, ipd=None):
+    """The newest calibration's seating as a baseline, or None: per eye the pupil looking
+    straight ahead and its own Jacobian (Reference.from_dots on that calibration's dots). The
+    newest is the last written (ft-eyes appends; "made" is local time, which can go back). The
+    glint spacing isn't in the dots, so this baseline has no eye relief. An eye that didn't
+    fit is left out: assess() then reads only the other."""
+    made = next((r["made"] for r in reversed(rows) if r.get("made")), None)
+    if made is None:
+        return None
+    ref = Reference.from_dots([r for r in rows if r.get("made", "") == made])
+    if not ref.eyes:
+        return None
+    eyes = {str(c): {"centre": [round(v, 2) for v in e["centre"]],
+                     "jacobian": [[round(v, 4) for v in row] for row in e["jacobian"]], "spacing": None}
+            for c, e in sorted(ref.eyes.items())}
+    return {"schema": 1, "made": made, "from": "calibration", "ipd": ipd, "eyes": eyes}
+
+
+def from_calibration(baseline):
+    return bool(baseline) and baseline.get("from") == "calibration"
+
+
+def own_reference(baseline, ref):
+    """The reference to read against baseline: its own Jacobians where it has them (a
+    calibration's seating: only its eyes), else ref."""
+    eyes = {int(c): {"centre": e["centre"], "jacobian": e["jacobian"]}
+            for c, e in ((baseline or {}).get("eyes") or {}).items() if e.get("jacobian")}
+    if not eyes:
+        return ref
+    return Reference(eyes, ipd=baseline.get("ipd"), source="your calibration", made=baseline.get("made", ""))
+
+
 def _write_json(path, obj):
     ft_store.write_json(path, obj, indent=1)
 
@@ -302,7 +353,9 @@ def assess(summary, ref, ipd=None, baseline=None, previous=None):
             e["state"] = "lost"
         else:
             e["state"] = "found"
-            centre = centres.get(cam) or (ref.eyes.get(cam) or {}).get("centre") if ref else centres.get(cam)
+            # Against a baseline, only its eyes: one it lacks (a one-eye seating) has no centre to
+            # compare with, and the reference's is another face's.
+            centre = centres.get(cam) if centres else (ref.eyes.get(cam) or {}).get("centre") if ref else None
             if centre and ref and cam in ref.eyes:
                 dx, dy = s["x"] - centre[0], s["y"] - centre[1]
                 offsets[cam] = ref.degrees(cam, dx, dy)

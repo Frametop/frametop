@@ -473,3 +473,24 @@ It can't be the starting point, legally or practically:
 What we can use: its public output (the mmap, read-only), as a baseline and as labels.
 Anything published and openly licensed is also fair game: papers and open-source pupil
 detectors (check each one's license before using its code).
+
+## Both-eyes jumps, the edge guard and a wider ring (2026-11-22)
+
+Replayed on the 2026-10-17 bench runs (45 clicks, `gaze/bench/compare.py`; median, then p90,
+degrees). The replay matched live to 0.02.
+
+| | median | p90 | 30 deg and past |
+|---|---|---|---|
+| ours, live (each eye's own jump) | 1.82 | 6.47 | 4.74 |
+| both-eyes jump | 2.03 | 6.49 | 4.36 |
+| no lessons past the dots (edge guard) | 2.03 | 6.49 | |
+| fusion with SteamVR, fitted on other runs | 1.57 | 4.31 | 2.13 |
+| SteamVR, its eyes' mean | 3.52 | | 1.97 |
+
+On those runs the jump rule and the guard are about even: the runs had no re-seat and no
+second person. On the 2026-10-17 recordings, where they did, both-eyes jumps took a second
+person from 7.42 to 1.25 and a re-seat from 5.51 to 3.56, so ft-eyes now uses both
+(`EYES_JUMP`), and a click teaches only the eyes whose dots it lies within. Clicks past 30
+degrees miss most because the calibration's ring stopped at 20: it now goes 30 out to the
+sides and 18 up and down. Fusion stays off until bench runs with the wider ring, across a
+re-wear, decide it.

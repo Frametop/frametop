@@ -426,7 +426,6 @@ Item {
 
     // A KDE PC's open windows to add as panels (issue 81; its own file).
     KwinWindowsDialog { id: kwinDialog; windows: root.backend.kwinWindows }
-    HostMonitorsDialog { id: monitorsDialog; monitors: root.backend.hostMonitors }
 
     // A PIN pairing (a host added with "Pair with a PIN"): the PIN to type in on the host, shown
     // while ft-layout waits for it (3 minutes at most). It closes once the pairing ends either way;
@@ -530,10 +529,10 @@ Item {
                         readonly property bool apple: modelData.kind === "apple"
                         readonly property bool vibepollo: !sunshine && !apple
                         readonly property string kind: modelData.kind
-                        // Its Vibepollo changes its own monitors (Frametop's build): asked once.
-                        readonly property bool ownsMonitors: backend.hostMonitors.supported[modelData.name] === true
-                        Component.onCompleted: if (vibepollo && modelData.hasToken && kind !== "pin"
-                                                   && !(modelData.name in backend.hostMonitors.supported))
+                        // Its Vibepollo can turn off and set its own monitors (Frametop's build).
+                        readonly property bool canOwnMonitors: vibepollo && modelData.hasToken && kind !== "pin"
+                        readonly property var monitorsListed: backend.hostMonitors.listed[modelData.name] || ({ monitors: [], note: "" })
+                        Component.onCompleted: if (canOwnMonitors && (modelData.monitors || !(modelData.name in backend.hostMonitors.supported)))
                                                    backend.hostMonitors.refresh(modelData.name)
                         Layout.fillWidth: true
                         contentItem: ColumnLayout {
@@ -580,17 +579,6 @@ Item {
                                     Controls.ToolTip.text: "Open windows on this PC, each as a panel of its own. Needs KDE "
                                                            + "Plasma with KWin Window Stream (github.com/utrack/kwin-window-stream); "
                                                            + "they connect with this computer's displays' pairing."
-                                    Controls.ToolTip.visible: hovered
-                                }
-                                Controls.Button {
-                                    objectName: "monitorsButton"
-                                    visible: hostCard.vibepollo && hostCard.modelData.hasToken && hostCard.kind !== "pin"
-                                             && backend.hostMonitors.supported[hostCard.modelData.name] !== false
-                                    text: "Monitors…"
-                                    icon.name: "video-display"
-                                    onClicked: monitorsDialog.openFor(hostCard.modelData)
-                                    Controls.ToolTip.text: "Turn its own monitors on or off and change their modes "
-                                                           + "while Frametop streams from it. Needs Frametop's build of Vibepollo."
                                     Controls.ToolTip.visible: hovered
                                 }
                                 Controls.Button {
@@ -671,6 +659,39 @@ Item {
                                         route.finding = address ? "found " + address : "not found: " + why
                                         if (address && address !== hostCard.modelData.direct) backend.setDirect(name, address)
                                     }
+                                }
+                            }
+                            // Its own monitors follow its display panels (Frametop's build of
+                            // Vibepollo; host_monitors.py): this changes the PC itself.
+                            ColumnLayout {
+                                visible: hostCard.canOwnMonitors && (backend.hostMonitors.supported[hostCard.modelData.name] === true
+                                                                     || hostCard.modelData.monitors)
+                                spacing: 0
+                                Layout.fillWidth: true
+                                Controls.Switch {
+                                    objectName: "ownMonitors"
+                                    text: "Turn off and set " + hostCard.modelData.name + "'s own monitors"
+                                    checked: hostCard.modelData.monitors
+                                    onToggled: backend.hostMonitors.setControl(hostCard.modelData.name, checked)
+                                }
+                                Controls.Label {
+                                    objectName: "ownMonitorsHelp"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    opacity: 0.7
+                                    text: "On " + hostCard.modelData.name + " itself: while one of its displays streams here, it "
+                                          + "turns off each of its monitors that has no display here or whose display is "
+                                          + "disconnected, and puts each of the others in the mode picked for its display. "
+                                          + "Two minutes after the last one stops, they all go back as they were."
+                                }
+                                Controls.Label {
+                                    objectName: "ownMonitorsNote"
+                                    visible: hostCard.modelData.monitors && hostCard.monitorsListed.note !== ""
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: Kirigami.Theme.negativeTextColor
+                                    text: hostCard.monitorsListed.note
+                                    textFormat: Text.PlainText
                                 }
                             }
                             // The Frame's microphone rides along with its streams. Only
@@ -766,10 +787,16 @@ Item {
                                     id: disp
                                     required property var modelData
                                     readonly property bool appleMain: modelData.app === "apple:physical"
-                                    // A monitor of a PC that changes its own: it streams at the
-                                    // monitor's mode (Monitors…), so it has no stream size here.
-                                    readonly property bool followsMonitor: hostCard.ownsMonitors && String(modelData.app).startsWith("display:")
+                                    // A monitor of a PC whose monitors follow its panels: it streams at
+                                    // the mode picked here (or its own), so it has no stream size.
+                                    // (From its own entry: the card's properties aren't there yet
+                                    // while the Repeater makes it.)
+                                    readonly property bool followsMonitor: modelData.followsMonitor
+                                                                           && backend.hostMonitors.supported[modelData.host] !== false
                                     readonly property bool ownSize: !appleMain && !followsMonitor
+                                    readonly property var monitor: followsMonitor
+                                        ? ((backend.hostMonitors.listed[modelData.host] || {}).monitors || [])
+                                              .find(m => "display:" + m.id === modelData.app) || null : null
                                     property bool expanded: false
                                     Layout.fillWidth: true
                                     Kirigami.Separator { Layout.fillWidth: true }
@@ -866,6 +893,13 @@ Item {
                                                                              sr.currentValue, sb.value * 1000)
                                             }
                                         }
+                                        MonitorModePicker {
+                                            visible: disp.followsMonitor
+                                            Kirigami.FormData.label: "Its monitor:"
+                                            monitor: disp.monitor
+                                            picked: disp.modelData.mode
+                                            onPick: (mode) => backend.hostMonitors.pickMode(disp.modelData.host, disp.modelData.id, mode)
+                                        }
                                         Controls.Label {
                                             visible: !disp.modelData.virtual && !disp.modelData.kwin
                                             Layout.fillWidth: true
@@ -874,7 +908,7 @@ Item {
                                             text: disp.appleMain
                                                   ? "Streams the Mac's main display at its own resolution, keeping the Mac's keyboard and trackpad working."
                                                   : disp.followsMonitor
-                                                  ? "Streams the monitor at its own mode, pixel for pixel: change the mode, or turn the monitor off, with Monitors… above."
+                                                  ? "Streams the monitor at the mode picked above, pixel for pixel. Disconnect it to turn the monitor off."
                                                   : "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
                                         }
                                         RowLayout {

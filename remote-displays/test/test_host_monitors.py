@@ -1,7 +1,7 @@
-"""Remote Displays' "Monitors": a PC's own monitors on or off and in another mode, from Frametop's
-build of Vibepollo. What is sent, what is told, how the panels follow, and the page. Same
-stand-ins as test_app_windows.py (HOME a temp folder, ft-layout not run); the PC is a stand-in
-for ft_hostapi.request. Needs PySide6 and Kirigami.
+"""Remote Displays' "Turn off and set its own monitors" switch and the display panels' mode
+pickers (host_monitors.py, MonitorModePicker.qml). What is asked, what is run, how the panels'
+sizes follow, and the page. Same stand-ins as test_app_windows.py (HOME a temp folder, ft-layout
+not run); the PC is a stand-in for ft_hostapi.request. Needs PySide6 and Kirigami.
 
   python3 remote-displays/test/test_host_monitors.py
 """
@@ -13,25 +13,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_app_windows import ADDRESS, HOSTS, Base, items, set_hosts, spin  # noqa: E402
 import ft_settings  # noqa: E402
 import host_monitors  # noqa: E402
-from PySide6.QtCore import QObject  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
-PC = {"name": "PC", "address": ADDRESS, "kind": "vibepollo", "displays": [
-    {"id": "pc-edp", "client": "frametop-pc-edp", "app": "display:eDP-2", "label": "Laptop", "size": [2560, 1600]},
-    {"id": "pc-dp", "client": "frametop-pc-dp", "app": "display:DP-1", "label": "Big", "size": [3840, 2160]},
-    {"id": "pc-virtual", "client": "frametop-pc-virtual", "app": "monitor", "size": [1920, 1080]},
-    {"id": "pc-win", "client": "frametop-pc-win", "app": "display:DP-1", "window": True, "size": [800, 600]}]}
 HZ240, HZ60 = ({"width": 2560, "height": 1600, "refresh_mhz": 240000},
                {"width": 2560, "height": 1600, "refresh_mhz": 60000})
 UHD = {"width": 3840, "height": 2160, "refresh_mhz": 60000}
 
 
-def state(edp_wish=None, dp_wish=None):
-    return {"status": True, "backend": "hyprland", "streams": 0, "applies": False, "grace_seconds": 120, "error": "",
+def pc(monitors=True):
+    return {"name": "PC", "address": ADDRESS, "kind": "vibepollo", "monitors": monitors, "displays": [
+        {"id": "pc-edp", "client": "frametop-pc-edp", "app": "display:eDP-2", "label": "Laptop", "size": [2560, 1600],
+         "mode": HZ60},
+        {"id": "pc-dp", "client": "frametop-pc-dp", "app": "display:DP-1", "label": "Big", "size": [3840, 2160]},
+        {"id": "pc-virtual", "client": "frametop-pc-virtual", "app": "monitor", "size": [1920, 1080]}]}
+
+
+def js(value):
+    """A QML var as Python (a JS object comes as a QJSValue)."""
+    return value.toVariant() if hasattr(value, "toVariant") else value
+
+
+def state(dp_sideways=False, error=""):
+    return {"status": True, "backend": "hyprland", "streams": 0, "applies": False, "grace_seconds": 120,
+            "error": error, "others_off": True,
             "monitors": [{"id": "eDP-2", "name": "<b>Samsung</b>", "on": True, "primary": True, "mode": HZ240,
-                          "modes": [HZ240, HZ60], "wish": edp_wish, "changed": False},
+                          "modes": [HZ240, HZ60], "changed": False, "sideways": False},
                          {"id": "DP-1", "name": "Dell", "on": True, "primary": False, "mode": UHD,
-                          "modes": [UHD], "wish": dp_wish, "changed": False}]}
+                          "modes": [UHD], "changed": False, "sideways": dp_sideways}]}
 
 
 class Words(unittest.TestCase):
@@ -44,64 +52,42 @@ class Words(unittest.TestCase):
                          "that would leave no display on")
         self.assertEqual(host_monitors.why("PC", 500, "<html>"), "PC answered 500")
 
-    def test_the_body_has_a_mode_only_for_a_monitor_that_is_on(self):
-        self.assertEqual(host_monitors.plan_body({"eDP-2": {"on": True, "width": 2560, "height": 1600,
-                                                            "refresh_mhz": 60000},
-                                                  "DP-1": {"on": False, "width": 3840, "height": 2160},
-                                                  "HDMI-A-1": {"on": True, "width": 0}}),
-                         {"monitors": {"eDP-2": {"on": True, "mode": HZ60}, "DP-1": {"on": False},
-                                       "HDMI-A-1": {"on": True}}})
-        self.assertEqual(host_monitors.plan_body({}), {"monitors": {}})
+    def test_mode_arg(self):
+        self.assertEqual(host_monitors.mode_arg(HZ60), "2560x1600@60000")
+        self.assertEqual(host_monitors.mode_arg(None), "own")
 
 
-class Panels(unittest.TestCase):
-    def test_a_mode_sets_the_size_and_off_disconnects(self):
-        parked = set()
-        runs = host_monitors.panel_changes(PC, state({"on": True, "mode": {**HZ60, "width": 1920, "height": 1200}},
-                                                     {"on": False, "mode": None}), parked)
-        self.assertEqual([a for _, a in runs], [("remote", "set", "pc-edp", "size=1920x1200"),
-                                                ("remote", "disconnect", "pc-dp")])
-        self.assertEqual(parked, {"pc-dp"}, "the window panel and the virtual display are left alone")
-
-    def test_back_on_connects_only_what_was_parked_here(self):
-        host = dict(PC, displays=[dict(d, off=True) if d["id"] in ("pc-dp", "pc-edp") else d for d in PC["displays"]])
-        parked = {"pc-dp"}
-        runs = host_monitors.panel_changes(host, state(), parked)
-        self.assertEqual([a for _, a in runs], [("remote", "connect", "pc-dp")],
-                         "the laptop's panel was disconnected by the user: it stays so")
-        self.assertEqual(parked, set())
+class Sizes(unittest.TestCase):
+    def test_a_panel_streams_at_its_picked_mode_or_its_monitors(self):
+        host = pc()
+        host["displays"][0]["size"] = [1920, 1080]
+        host["displays"][1]["size"] = [1920, 1080]
+        self.assertEqual([a for _, a in host_monitors.size_changes(host, state()["monitors"])],
+                         [("remote", "set", "pc-edp", "size=2560x1600"), ("remote", "set", "pc-dp", "size=3840x2160")])
 
     def test_same_size_runs_nothing(self):
-        self.assertEqual(host_monitors.panel_changes(PC, state({"on": True, "mode": HZ60}), set()), [])
+        self.assertEqual(host_monitors.size_changes(pc(), state()["monitors"]), [])
 
     def test_a_monitor_turned_a_quarter_streams_tall(self):
-        sideways = state()
-        sideways["monitors"][1]["sideways"] = True
-        runs = host_monitors.panel_changes(PC, sideways, set())
-        self.assertEqual([a for _, a in runs], [("remote", "set", "pc-dp", "size=2160x3840")])
+        self.assertEqual([a for _, a in host_monitors.size_changes(pc(), state(dp_sideways=True)["monitors"])],
+                         [("remote", "set", "pc-dp", "size=2160x3840")])
 
-    def test_one_the_pc_kept_on_keeps_its_panel(self):
-        kept = state({"on": False, "mode": None})
-        kept["applies"] = True
-        self.assertEqual(host_monitors.panel_changes(PC, kept, set()), [],
-                         "the PC needs a display on: the one it kept on still streams")
-        kept["applies"] = False
-        self.assertEqual([a for _, a in host_monitors.panel_changes(PC, kept, set())],
-                         [("remote", "disconnect", "pc-edp")])
+    def test_without_the_switch_the_panels_keep_their_size(self):
+        self.assertEqual(host_monitors.size_changes(pc(monitors=False), state(dp_sideways=True)["monitors"]), [])
 
-
-def no_parked():
-    """No panels left disconnected by an earlier test (overwritten: HOME is the tests' own)."""
-    host_monitors.ft_store.write_json(host_monitors.PARKED_PATH, {})
+    def test_a_monitor_that_is_off_has_no_mode_to_follow(self):
+        listed = state()["monitors"]
+        listed[1].update(on=False, mode=None)
+        host = pc()
+        host["displays"][1]["size"] = [1920, 1080]
+        self.assertEqual(host_monitors.size_changes(host, listed), [])
 
 
 class Backend(Base):
     def setUp(self):
-        no_parked()
         super().setUp()
-        set_hosts(PC)
-        self.sent, self.reply = [], (200, state({"on": True, "mode": {**HZ60, "width": 1920, "height": 1200}}))
-        self.ready = []
+        set_hosts(pc())
+        self.sent, self.reply = [], (200, state(dp_sideways=True))
         old = host_monitors.ft_hostapi.request
 
         def request(address, method, path, body=None, timeout=2.0, **kw):
@@ -109,78 +95,76 @@ class Backend(Base):
             return self.reply
         host_monitors.ft_hostapi.request = request
         self.addCleanup(setattr, host_monitors.ft_hostapi, "request", old)
-        self.b.hostMonitors.monitorsReady.connect(lambda *a: self.ready.append(a))
+        self.thens = []
+        self.b._run = lambda label, *args, stdin=None, then=None: (self.ran.append(args), self.thens.append(then))
+        self.listed = []
+        self.b.hostMonitors.listedChanged.connect(lambda: self.listed.append(self.b.hostMonitors.listed))
 
     def answer(self):
-        self.assertTrue(spin(self.app, lambda: self.ready), "no answer")
-        return self.ready.pop()
+        self.assertTrue(spin(self.app, lambda: self.listed), "no answer")
+        return self.listed.pop()["PC"]
 
-    def test_refresh_asks_and_the_panels_follow(self):
+    def test_refresh_lists_the_monitors_and_the_panels_follow(self):
         self.b.hostMonitors.refresh("PC")
-        name, got, error = self.answer()
-        self.assertEqual((name, error, len(got["monitors"])), ("PC", "", 2))
-        self.assertEqual(self.sent, [(ADDRESS, "GET", host_monitors.PATH, None)])
-        self.assertEqual(self.ran, [("remote", "set", "pc-edp", "size=1920x1200")])
+        got = self.answer()
+        self.assertEqual((got["note"], len(got["monitors"])), ("", 2))
+        self.assertEqual(self.sent, [(ADDRESS, "GET", host_monitors.ft_hostmonitors.PATH, None)])
+        self.assertEqual(self.ran, [("remote", "set", "pc-dp", "size=2160x3840")])
         self.assertEqual(self.b.hostMonitors.supported, {"PC": True})
 
-    def test_apply_and_put_back_send_the_plan(self):
-        self.b.hostMonitors.apply("PC", {"DP-1": {"on": False}})
-        self.answer()
-        self.b.hostMonitors.putBack("PC")
-        self.answer()
-        self.assertEqual([(m, b) for _, m, _, b in self.sent],
-                         [("POST", {"monitors": {"DP-1": {"on": False}}}), ("POST", {"monitors": {}})])
+    def test_the_pcs_last_error_is_its_note(self):
+        self.reply = (200, state(error="DP-1 refused the mode"))
+        self.b.hostMonitors.refresh("PC")
+        self.assertEqual(self.answer()["note"], "DP-1 refused the mode")
 
     def test_an_old_build_is_known_and_an_old_sign_in_is_not(self):
         self.reply = (401, None)
         self.b.hostMonitors.refresh("PC")
-        self.assertIn("Sign in to PC again", self.answer()[2])
-        self.assertEqual(self.b.hostMonitors.supported, {}, "still worth the button that says to sign in")
+        self.assertIn("Sign in to PC again", self.answer()["note"])
+        self.assertEqual(self.b.hostMonitors.supported, {}, "it may well can, once signed in again")
         self.reply = (404, None)
         self.b.hostMonitors.refresh("PC")
-        _, got, error = self.answer()
-        self.assertEqual((got, error), ({}, host_monitors.NO_BUILD))
+        self.assertEqual(self.answer()["note"], host_monitors.NO_BUILD)
         self.assertEqual(self.b.hostMonitors.supported, {"PC": False})
         self.assertEqual(self.ran, [], "no answer: the panels are left as they are")
 
-    def test_panels_disconnected_here_are_still_known_after_a_restart(self):
-        self.reply = (200, state(dp_wish={"on": False, "mode": None}))
-        self.b.hostMonitors.refresh("PC")
-        self.assertEqual(self.answer()[2], "")
-        self.assertIn(("remote", "disconnect", "pc-dp"), self.ran)
-        again = host_monitors.HostMonitors(lambda *a: None)
-        self.assertEqual(again._parked, {"pc-dp"}, "kept in " + host_monitors.PARKED_PATH)
+    def test_the_switch_runs_ft_layout_then_asks_again(self):
+        self.b.hostMonitors.setControl("PC", True)
+        self.b.hostMonitors.setControl("PC", False)
+        self.assertEqual(self.ran, [("remote", "host", "PC", "monitors=on"), ("remote", "host", "PC", "monitors=off")])
+        self.thens[0]()
+        self.answer()
+        self.assertEqual(self.sent[-1][1], "GET")
 
-    def test_a_panel_list_it_couldnt_keep_isnt_a_failed_change(self):
-        old = host_monitors.ft_store.write_json
-
-        def fail(*a, **kw):
-            raise OSError("read-only")
-        host_monitors.ft_store.write_json = fail
-        self.addCleanup(setattr, host_monitors.ft_store, "write_json", old)
-        self.reply = (200, state(dp_wish={"on": False, "mode": None}))
+    def test_a_pick_saves_the_mode_and_its_stream_size(self):
         self.b.hostMonitors.refresh("PC")
-        self.assertEqual(self.answer()[2], "", "the PC's change took")
-        self.assertIn(("remote", "disconnect", "pc-dp"), self.ran)
+        self.answer()
+        self.ran.clear()
+        self.b.hostMonitors.pickMode("PC", "pc-dp", UHD)
+        self.b.hostMonitors.pickMode("PC", "pc-edp", None)
+        self.assertEqual(self.ran, [("remote", "set", "pc-dp", "mode=3840x2160@60000", "size=2160x3840"),
+                                    ("remote", "set", "pc-edp", "mode=own")])
+        self.assertTrue(all(self.thens[-2:]), "each asks the PC again after")
 
     def test_a_sunshine_host_is_not_asked(self):
-        set_hosts(dict(PC, kind="sunshine"))
+        set_hosts(dict(pc(), kind="sunshine"))
         self.b.hostMonitors.refresh("PC")
-        self.assertEqual(self.answer()[2], host_monitors.NO_BUILD)
+        self.assertEqual(self.answer()["note"], host_monitors.NO_BUILD)
         self.assertEqual(self.sent, [])
 
 
 class Page(Base):
     def setUp(self):
-        no_parked()
         super().setUp()
-        set_hosts(PC)
+        set_hosts(pc(monitors=False))
         HOSTS.mkdir(parents=True, exist_ok=True)
         (HOSTS / f"{ADDRESS}.token").write_text("tok\n")
-        self.asked = []
-        old = host_monitors.HostMonitors._ask
-        host_monitors.HostMonitors._ask = lambda s, name, method, body=None: self.asked.append((name, method, body))
-        self.addCleanup(setattr, host_monitors.HostMonitors, "_ask", old)
+        self.asked, self.picked = [], []
+        olds = (host_monitors.HostMonitors.refresh, host_monitors.HostMonitors.pickMode)
+        host_monitors.HostMonitors.refresh = lambda s, name: self.asked.append(name)
+        host_monitors.HostMonitors.pickMode = lambda s, name, display_id, mode: self.picked.append((name, display_id, mode))
+        self.addCleanup(setattr, host_monitors.HostMonitors, "refresh", olds[0])
+        self.addCleanup(setattr, host_monitors.HostMonitors, "pickMode", olds[1])
         self.settings = ft_settings.Settings(start="remote-displays", backends={"remote": self.b})
         self.engine = QQmlApplicationEngine()
         self.warnings = []
@@ -194,83 +178,95 @@ class Page(Base):
         self.engine.deleteLater()
         spin(self.app, seconds=0.05)
 
-    def test_the_page_asks_each_vibepollo_host_once(self):
-        self.assertEqual(self.asked, [("PC", "GET", None)])
-        self.b.hostMonitors._done("PC", 200, state())
+    def found(self, name=None, prop=None):
+        return [i for i in items(self.root.contentItem())
+                if (name is None or i.objectName() == name) and (prop is None or i.property(prop) is not None)]
+
+    def switch_on(self, on=True):
+        set_hosts(pc(monitors=on))
+        self.b.changed.emit()
         spin(self.app, seconds=0.1)
-        self.assertEqual(self.asked, [("PC", "GET", None)], "known now: not asked again")
 
-    def found(self, name):
-        return [i for i in items(self.root.contentItem()) if i.property(name) is not None]
-
-    def test_only_a_monitor_of_a_pc_that_can_loses_its_stream_size(self):
-        def own_size():
-            return sorted((i.property("modelData")["id"], i.property("ownSize")) for i in self.found("ownSize"))
-        self.assertEqual(own_size(), [("pc-dp", True), ("pc-edp", True), ("pc-virtual", True)], "not known yet")
-        self.b.hostMonitors._done("PC", 200, state())
+    def answered(self, answer=None):
+        self.b.hostMonitors._done("PC", 200, answer or state())
         spin(self.app, seconds=0.1)
-        self.assertEqual(own_size(), [("pc-dp", False), ("pc-edp", False), ("pc-virtual", True)])
 
-    def test_an_old_build_hides_the_button_and_an_old_sign_in_keeps_it(self):
-        def button():
-            found = [i for i in items(self.root.contentItem()) if i.objectName() == "monitorsButton"]
+    def own_size(self):
+        return sorted((i.property("modelData")["id"], i.property("ownSize")) for i in self.found(prop="ownSize"))
+
+    def boxes(self):
+        """Monitor id -> its display's mode picker (the virtual display's has no monitor)."""
+        pickers = [(js(b.parentItem().property("monitor")), b) for b in self.found("monitorMode")]
+        return {m["id"]: b for m, b in pickers if m}
+
+    def bad_warnings(self):
+        return [w for w in self.warnings if "not placed in the graphics scene" not in w]
+
+    def test_the_page_asks_a_vibepollo_host_whether_it_can_once(self):
+        self.assertEqual(self.asked, ["PC"])
+        self.answered()
+        self.b.changed.emit()
+        spin(self.app, seconds=0.1)
+        self.assertEqual(self.asked, ["PC"], "known now, switch off: not asked again")
+        self.switch_on()
+        self.assertEqual(self.asked, ["PC", "PC"], "switch on: asked for the modes each time")
+
+    def test_the_switch_shows_once_it_can_and_says_it_acts_on_the_pc(self):
+        def switch():
+            found = self.found("ownMonitors")
             self.assertEqual(len(found), 1)
-            return found[0].property("visible")
-        self.assertTrue(button())
-        self.b.hostMonitors._done("PC", 401, None)
-        spin(self.app, seconds=0.1)
-        self.assertTrue(button(), "it says to sign in again")
+            return found[0]
+        self.assertFalse(switch().property("visible"), "not known yet")
+        self.answered()
+        self.assertTrue(switch().property("visible"))
+        self.assertEqual(switch().property("text"), "Turn off and set PC's own monitors")
+        self.assertTrue(self.found("ownMonitorsHelp")[0].property("text").startswith("On PC itself:"))
         self.b.hostMonitors._done("PC", 404, None)
         spin(self.app, seconds=0.1)
-        self.assertFalse(button())
+        self.assertFalse(switch().property("visible"), "an older build can't")
+        self.assertEqual(self.bad_warnings(), [])
 
-    def test_the_dialog_sends_what_was_picked(self):
-        dialog = self.root.findChild(QObject, "monitorsDialog")
-        self.assertIsNotNone(dialog, "the monitors dialog is on the page")
-        dialog.setProperty("host", "PC")
-        self.b.hostMonitors.monitorsReady.emit("PC", state({"on": True, "mode": HZ60}), "")
-        self.assertTrue(spin(self.app, lambda: dialog.property("listed")))
-        wishes = dialog.property("wishes").toVariant()
-        self.assertEqual(wishes["eDP-2"], {"on": True, **HZ60}, "its wish, not its mode now")
-        self.assertEqual(wishes["DP-1"], {"on": True, "width": 0, "height": 0, "refresh_mhz": 0},
-                         "no mode picked: it stays in the one it has")
-        dialog.wish("DP-1", {"on": False})
-        self.assertTrue(dialog.property("anyOn"))
-        dialog.wish("eDP-2", {"on": False})
-        self.assertFalse(dialog.property("anyOn"), "Apply is off with every monitor off")
-        dialog.wish("eDP-2", {"on": True})
-        dialog.send()
-        self.assertEqual(self.asked[-1][:2], ("PC", "POST"))
-        self.assertEqual(self.asked[-1][2]["monitors"]["DP-1"], {"on": False})
-        self.assertEqual(self.asked[-1][2]["monitors"]["eDP-2"], {"on": True, "mode": HZ60})
-        self.assertTrue(dialog.sameMode(dict(HZ240, refresh_mhz=239760), dict(HZ240, refresh_mhz=239761)),
-                        "Hyprland's 239.761 Hz listed as 239.76")
-        self.assertFalse(dialog.sameMode(dict(HZ60, refresh_mhz=59940), HZ60), "59.94 and 60 Hz are two modes")
-        self.assertEqual([w for w in self.warnings if "not placed in the graphics scene" not in w], [])
+    def test_with_the_switch_on_a_monitor_picks_a_mode_instead_of_a_size(self):
+        self.answered()
+        self.assertEqual(self.own_size(), [("pc-dp", True), ("pc-edp", True), ("pc-virtual", True)])
+        self.switch_on()
+        self.answered()
+        self.assertEqual(self.own_size(), [("pc-dp", False), ("pc-edp", False), ("pc-virtual", True)])
+        self.assertEqual(self.bad_warnings(), [])
 
-    def test_a_mode_is_picked_or_left_its_own(self):
-        dialog = self.root.findChild(QObject, "monitorsDialog")
-        dialog.setProperty("host", "PC")
-        listed = state({"on": True, "mode": HZ60})
-        listed["monitors"][1].update(on=False, mode=None)  # DP-1 off now
-        self.b.hostMonitors.monitorsReady.emit("PC", listed, "")
-        self.assertTrue(spin(self.app, lambda: dialog.property("listed")))
-        edp, dp = dialog.property("listed")
-        self.assertEqual([c["text"] for c in dialog.choices(dp).toVariant()], ["Its own mode", "3840 × 2160 at 60 Hz"],
-                         "off now: no mode to show but its own")
-        self.assertEqual(dialog.choices(edp).toVariant()[0]["text"], "Its own mode (2560 × 1600 at 240 Hz)")
-        self.assertEqual(dialog.choiceIndex(dp, dialog.property("wishes").toVariant()["DP-1"]), 0)
-        self.assertEqual(dialog.choiceIndex(edp, dialog.property("wishes").toVariant()["eDP-2"]), 2, "its wish: 60 Hz")
-        dialog.pick("DP-1", UHD)
-        self.assertEqual(dialog.property("wishes").toVariant()["DP-1"], {"on": False, **UHD})
-        dp["wish"] = {"on": True, "mode": UHD}
-        dp["modes"] = []
-        self.assertEqual([c["text"] for c in dialog.choices(dp).toVariant()], ["Its own mode", "3840 × 2160 at 60 Hz"],
-                         "a Windows PC lists no modes for it while it's off: the plan's still shows")
-        dialog.pick("eDP-2", None)
-        self.assertEqual(dialog.property("wishes").toVariant()["eDP-2"], {"on": True, "width": 0, "height": 0,
-                                                                          "refresh_mhz": 0})
-        self.assertEqual([w for w in self.warnings if "not placed in the graphics scene" not in w], [])
+    def test_the_picker_lists_its_own_mode_and_the_monitors(self):
+        self.switch_on()
+        self.answered()
+        boxes = self.boxes()
+        self.assertEqual(sorted(boxes), ["DP-1", "eDP-2"])
+        edp, dp = boxes["eDP-2"], boxes["DP-1"]
+        texts = lambda box: [c["text"] for c in js(box.property("entries"))]  # noqa: E731
+        self.assertEqual(texts(dp), ["Its own mode (3840 × 2160 at 60 Hz)", "3840 × 2160 at 60 Hz"])
+        self.assertEqual(texts(edp), ["Its own mode", "2560 × 1600 at 240 Hz", "2560 × 1600 at 60 Hz"],
+                         "a mode is picked: its mode now isn't its own")
+        self.assertEqual(edp.property("currentIndex"), 2, "the picked 60 Hz")
+        self.assertEqual(dp.property("currentIndex"), 0)
+        edp.parentItem().choose(0)
+        dp.parentItem().choose(0)  # already its own: nothing to send
+        self.assertEqual(self.picked, [("PC", "pc-edp", None)])
+        self.assertEqual(self.bad_warnings(), [])
+
+    def test_a_picked_mode_it_doesnt_list_still_shows(self):
+        self.switch_on()
+        listed = state()
+        listed["monitors"][0].update(on=False, mode=None, modes=[])  # a Windows PC, the monitor off
+        self.answered(listed)
+        box = self.boxes()["eDP-2"]
+        self.assertEqual([c["text"] for c in js(box.property("entries"))],
+                         ["Its own mode", "2560 × 1600 at 60 Hz"])
+        self.assertEqual(box.property("currentIndex"), 1)
+
+    def test_the_pcs_note_shows_with_the_switch_on(self):
+        self.switch_on()
+        self.answered(state(error="DP-1 refused the mode"))
+        note = self.found("ownMonitorsNote")[0]
+        self.assertTrue(note.property("visible"))
+        self.assertEqual(note.property("text"), "DP-1 refused the mode")
 
 
 if __name__ == "__main__":

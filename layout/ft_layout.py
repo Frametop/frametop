@@ -122,15 +122,20 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      apple:physical is a Mac's built-in Screen Sharing, with --login
                                      its macOS login) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M|
-                          kb_layout=...|keymap=... ...
+                          mode=WxH@MHZ|own|kb_layout=...|keymap=... ...
+                                     mode: the resolution and refresh (mHz) its monitor is put in,
+                                     on a host with monitors=on
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
                              input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off
-                             kb_layout=...|keymap=...
+                             monitors=on|off kb_layout=...|keymap=...
                                      how a host's streams reach it (they start over), whether
                                      the Frame's microphone goes to it, and whether its keyboard
                                      and mouse come to Frametop, or one of them (both within 3 s,
                                      no restart);
-                                     windows: its Frametop windows instance (ft-layout window)
+                                     windows: its Frametop windows instance (ft-layout window);
+                                     monitors: while one of its display panels streams, the PC
+                                     turns off each monitor with no connected panel here and puts
+                                     the others in their panel's mode (Frametop's Vibepollo)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays), unless
@@ -1162,6 +1167,13 @@ def open_remotes(layout, name):
             log(f"remote display {d['id']}: {h.get('name') or h['address']} isn't answering; skipped")
 
 
+def sync_monitors(hosts):
+    """The hosts' monitors follow their display panels, for the ones whose switch is on
+    (ft_hostmonitors: a PC's monitors), before their streams start."""
+    import ft_hostmonitors   # (its own module: a PC's monitors)
+    ft_hostmonitors.sync_all(hosts, log)
+
+
 def start_remotes(sock, layout, only=None):
     """Start the remote displays' streams (or just the ids in `only`; ft-screens leaves one
     running with the same settings alone), and stop the streams of ones no longer listed or
@@ -1176,6 +1188,7 @@ def start_remotes(sock, layout, only=None):
     if only is None:
         for n in set(running) - {n for n, _, d in displays if not d.get("off")}:
             sock.ask(f"remote {n} stop")
+    sync_monitors([h for _, h, d in displays if not d.get("off") and (only is None or d.get("id") in only)])
     for n, host, d in displays:
         if d.get("off"):
             continue
@@ -1330,6 +1343,7 @@ def remote_command(args):
         if host is None:
             raise RuntimeError(f"no host called {args[1]!r}")
         restart = False
+        monitors = None
         for kv in args[2:]:
             k, _, v = kv.partition("=")
             if k == "route" and v in ("auto", "network", "dongle"):
@@ -1349,13 +1363,22 @@ def remote_command(args):
                     host.pop("windows", None)  # its window panels stay until closed
                 else:
                     host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
+            elif k == "monitors" and v in ("on", "off"):
+                monitors = v  # its monitors follow its display panels (ft_hostmonitors)
+                host["monitors"] = v == "on"
             elif ft_remotekeys.apply_keyboard_kv(host, k, v):
                 pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
                 raise RuntimeError(f"remote host: {kv!r}? (route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none "
-                                   "mic=on|off input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off "
+                                   "mic=on|off input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off monitors=on|off "
                                    "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
+        if monitors is not None:
+            import ft_hostmonitors   # (its own module: a PC's monitors)
+            if monitors == "on":
+                ft_hostmonitors.sync(host, log)
+            else:
+                ft_hostmonitors.release(host, log)
         if not restart:
             return
         # Its streams start over the new way, their panels where they are (ft-screens keeps
@@ -1391,6 +1414,7 @@ def remote_command(args):
                 d["off"] = True
         save_layout(layout)
         if what == "connect":
+            sync_monitors([h for _, h, _ in found])  # a monitor turned off for this panel comes back first
             # Back where it was if ft-screens still knows (this run); else placed like the
             # others, from where you look now.
             try:
@@ -1415,6 +1439,7 @@ def remote_command(args):
                 log(f"disconnected {d['id']}")
         except RuntimeError as e:
             log(f"saved; not stopped now: {e}")
+        sync_monitors([h for _, h, _ in found])  # its monitor goes off while the others stream
         return
     if what in ("kwin-windows", "kwin-add", "kwin-size"):
         import ft_kwinwindows   # (its own module: a KDE PC's windows, KWin Window Stream)
@@ -1575,12 +1600,23 @@ def remote_command(args):
                 d["metres"] = float(v)
             elif k == "app" and app_ok(v):
                 d["app"] = v
+            elif k == "mode" and (v == "own" or re.fullmatch(r"\d+x\d+@\d+", v)):
+                # The mode its monitor is put in (a host whose monitors follow its panels); a
+                # size= after it is the stream's, for a monitor turned a quarter.
+                if v == "own":
+                    d.pop("mode", None)
+                else:
+                    w, h, mhz = (int(x) for x in re.split(r"[x@]", v))
+                    d["mode"] = {"width": w, "height": h, "refresh_mhz": mhz}
+                    d["size"] = list(stream_size(w, h))
             elif ft_remotekeys.apply_keyboard_kv(d, k, v):
                 pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
                 raise RuntimeError(f"remote set: {kv!r}? (size=WxH fps=F bitrate=KBPS label=TEXT app=APP metres=M "
+                                   "mode=WxH@MHZ|own "
                                    "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
+        sync_monitors([host])  # a mode, or another monitor (app=)
         if d.get("off"):
             return  # disconnected: the new settings are for its next connection
         try:
@@ -1600,6 +1636,7 @@ def remote_command(args):
         for profile in layout.get("profiles", {}).values():
             profile.get("remote", {}).pop(d["id"], None)
         save_layout(layout)
+        sync_monitors([host])  # its monitor goes off while the host's other panels stream
         if is_apple_app(d.get("app")):
             # A Mac keeps no pairing; its login stays for its other displays, until Frametop
             # Settings forgets the host (ft_hostsignin.forget).
@@ -1615,7 +1652,7 @@ def remote_command(args):
         log(f"removed {d['id']}; {said[-1] if said else f'unpair exited {code}'}")
         return
     raise RuntimeError("remote list | monitors ADDRESS | auth ADDRESS [options] | add HOST ADDRESS APP [options] | "
-                       "set ID KEY=VALUE... | host NAME route=...|direct=...|mic=...|input=...|clipboard=...|kb_layout=...|keymap=... | "
+                       "set ID KEY=VALUE... | host NAME route=...|direct=...|mic=...|input=...|clipboard=...|monitors=...|kb_layout=...|keymap=... | "
                        "connect ID... | disconnect ID... | remove ID"
                        " | kwin-windows HOST | kwin-add HOST WINDOW [options] | kwin-size N WxH METRES")
 

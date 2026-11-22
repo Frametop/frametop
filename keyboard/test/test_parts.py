@@ -222,6 +222,12 @@ class HandleTest(unittest.TestCase):
         self.touch.turn(4.2, ["move"] + ["1", "0", "0", "0", "0", "1", "0", "0", "0", "0", "1", "0.1"])
         self.assertNotIn("set_pose", [op for op, _ in self.sent])
 
+    def test_a_press_just_past_the_edge_is_neither_a_key_nor_clamped_onto_one(self):
+        self.touch.poke(0.0, self.at("right", "press", 0.0, -0.125 - 0.01), self.GEOMETRY)   # 1 cm below
+        downs = [f for op, f in self.sent if op == "pointer" and f.get("phase") == "down"]
+        self.assertTrue(all(f["v"] > 1.0 for f in downs))
+        self.assertEqual(self.touch.drags, {})
+
     def test_a_key_press_sliding_onto_the_strip_stays_the_keys(self):
         self.touch.poke(0.0, self.at("left", "press", 0.0, 0.0), self.GEOMETRY)
         self.touch.poke(0.1, self.at("left", "move", 0.0, 0.25 * (0.5 - 0.9)), self.GEOMETRY)

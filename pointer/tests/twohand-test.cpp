@@ -108,6 +108,9 @@ int main() {
         assert(session.Step(5, l, r, 1.0, {0, 1.6, 0}).empty());   // the same frame again
         assert(session.Step(6, l, r, 1.0, {0, 1.6, 0}).rfind("move ", 0) == 0);
         assert(session.End() == "end" && !session.On() && session.Step(7, l, r, 1.0, {0, 1.6, 0}).empty());
+        session.Begin(0, false);   // the hands together at first: the begin waits for them to part
+        assert(session.Step(8, {{0, 1.2, -0.5}, {1, 0, 0}}, {{0.02, 1.2, -0.5}, {-1, 0, 0}}, 1.0, {0, 1.6, 0}).empty());
+        assert(session.Step(9, l, r, 1.0, {0, 1.6, 0}) == "begin" && session.End() == "end");
     }
     std::puts("twohand-test: ok");
 }

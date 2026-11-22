@@ -4273,7 +4273,7 @@ void Pointer::AimAndPose() {
     // the eye's line of sight to the cursor, or a hand's ray from the hand
     if (!dragging && !reuse)
         onVrSettings = (fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight)) ||
-                       (rayToGame && (!onPanel || t.key.rfind("openxr_", 0) == 0) && !onScene);   // (a game's menu layer is the game's)
+                       (rayToGame && ((!onPanel && !onScene) || t.key.rfind("openxr_", 0) == 0));   // (a game's menu layer, or near one, is the game's)
     if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
                         t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {
@@ -4471,6 +4471,7 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
     }
 }
 
+constexpr double kKbReach = 3.0;   // metres: a held press's furthest point on Full Keyboard's plane (AimKeyboard)
 void Pointer::AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t) {
     // Where the ray is on Full Keyboard's panel, if it is (see kbray.h). While its press is held the
     // drag's frozen distance isn't the panel's, so the point is where the ray meets the panel's plane,
@@ -4486,7 +4487,8 @@ void Pointer::AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pa
             uo == vr::TrackingUniverseStanding) {
             const Vec3 n{m.m[0][2], m.m[1][2], m.m[2][2]}, c{m.m[0][3], m.m[1][3], m.m[2][3]};
             const double across = Dot(dir, n), along = std::fabs(across) > 1e-6 ? Dot(c - anchor, n) / across : -1;
-            if (along > 0) on = true, p = anchor + dir * along;
+            // (no further than kKbReach: a ray along the plane, a tilted panel's, would fling it far off)
+            if (along > 0) on = true, p = anchor + dir * std::min(along, kKbReach);
         } else if (vr::VROverlayIntersectionResults_t r{}; it != handles.end() && Cast(it->second, anchor, dir, &r)) {
             on = true, p = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};   // (placed some other way: the panel itself)
         }

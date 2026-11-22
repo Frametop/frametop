@@ -130,6 +130,7 @@ public:
         if (!On() || frame == seen_) return "";
         seen_ = frame;
         if (!begun_) {
+            if (md::Length(turner.at - carry.at) < kMinSpan) return "";   // (too close to tell yet: begin on a later frame)
             turn_.Begin(carry, turner, Gain(panelDistance, from, carry, turner)), begun_ = true;
             return "begin";
         }

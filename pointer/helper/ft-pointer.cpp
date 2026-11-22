@@ -1222,6 +1222,15 @@ struct Pointer {
     bool gazeMousePrecision = true;
     bool gazeMouseHeld = true;  // POINTER_GAZE_MOUSE_MOVE (see the top)
     std::string role = "treadmill";
+    std::string roleSent;   // the role the driver was last told (POINTER_ROLE, or a hand in a game)
+    // In a VR game the pointer is a hand: games bind only hands, and a treadmill gets nothing (user,
+    // 2026-11-21: "I can't interact with the game with the 3d mouse"). POINTER_ROLE's hand if it
+    // names one, else the right; outside games POINTER_ROLE again. (SteamVR takes a treadmill hint
+    // back at runtime; the driver gives a hand up while hidden, so a controller keeps its role then.)
+    std::string RoleNow() const {
+        if (!inGame || dashboardUp) return role;
+        return role == "left" || role == "right" ? role : "right";
+    }
     double pickupScale = 1;  // POINTER_CONTROLLER_PICKUP: scales the controller-moved limits
     std::vector<std::string> ignore;  // POINTER_IGNORE (see ParseIgnore)
     float laserWidth = 0;
@@ -1569,7 +1578,8 @@ struct Pointer {
         // Overlay handles and visibility weren't looked at while it was off (see "Idle" at the top).
         lastSlow = lastVisible = t - std::chrono::seconds(10);
         pass.valid = posed.valid = false;
-        SendTo(out, FT_SOCK_POINTER, "role " + role);  // POINTER_ROLE, before it takes it
+        roleSent = RoleNow();
+        SendTo(out, FT_SOCK_POINTER, "role " + roleSent);  // POINTER_ROLE (or a game's hand), before it takes it
         SendTo(out, FT_SOCK_POINTER, "show");
         claimPending = true;  // take the laser without clicking, once SteamVR has bound the device
         claimAt = t + std::chrono::milliseconds(300);
@@ -3077,6 +3087,12 @@ void Pointer::OverlaysAndRole() {
             SendTo(out, FT_SOCK_SCREENS, "steamvr " + std::to_string(steamListSeq) + " " + std::to_string(i) + " " +
                                           std::to_string(parts.size()) + parts[i]);
         ++steamListSeq;
+    }
+
+    if (active && !leftHeld && RoleNow() != roleSent) {
+        roleSent = RoleNow();
+        SendTo(out, FT_SOCK_POINTER, "role " + roleSent);
+        if (debug) std::printf("role %s\n", roleSent.c_str());
     }
 
     // Laser mode on while the pointer is awake, except over a VR game's world: SteamVR's laser mouse

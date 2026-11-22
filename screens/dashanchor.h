@@ -8,7 +8,10 @@
 // finite, a rotation at one scale and not the identity (the pose a hidden bar reports), and only
 // from the second shown read in a row (the first read after
 // the dashboard opens was seen to be off: a nan, or a stale pose, on panels beside it). While
-// the bar is hidden the last good frame stays. Header only, no OpenVR, so its test runs anywhere.
+// the bar is hidden the last good frame stays. Before any read has counted (ft-screens started
+// with the dashboard closed: the hidden bar reads the identity), the dashboard tiles may ride on a
+// guess from the head instead (Guess), where SteamVR opens the dashboard; the first read that
+// counts replaces it. Header only, no OpenVR, so its test runs anywhere.
 #pragma once
 
 #include <cmath>
@@ -19,6 +22,10 @@ constexpr int kSettleReads = 2;       // shown reads in a row before one counts
 constexpr double kMoveEps = 1e-5;     // a frame this close to the last is the same (no re-placing)
 constexpr double kAxisTol = 0.02;     // a rotation's axes, scale taken out: length 1 and at right angles, within this
 constexpr double kMinScale = 1e-3;    // axes shorter than this: no rotation to take out
+// Where SteamVR opens its dashboard's bar from your eyes (seen on the Frame 2026-11-22, SteamOS
+// 0.5.9: 0.96 to 0.97 m ahead, 0.52 to 0.54 m down, facing back at you, over three openings)
+constexpr double kGuessAheadM = 0.96;
+constexpr double kGuessBelowM = 0.53;
 
 inline bool Finite(const float m[3][4]) {
     for (int r = 0; r < 3; ++r)
@@ -60,10 +67,25 @@ inline bool Unscaled(const float m[3][4], float out[3][4], double *scale = nullp
     return true;
 }
 
+// The bar's frame a guess puts it at, from the head's pose: level, kGuessAheadM ahead of the head
+// round where it faces (its right axis, so looking down still has a facing), kGuessBelowM down,
+// its +Z back at you. False with no facing (the head on its side).
+inline bool GuessFrame(const float head[3][4], float out[3][4]) {
+    const double rx = head[0][0], rz = head[2][0], len = std::sqrt(rx * rx + rz * rz);
+    if (!(len > 0.1)) return false;
+    const double x[3] = {rx / len, 0, rz / len}, z[3] = {-rz / len, 0, rx / len};   // (right, and back: right x up)
+    for (int r = 0; r < 3; ++r) {
+        out[r][0] = float(x[r]), out[r][1] = r == 1 ? 1.f : 0.f, out[r][2] = float(z[r]);
+        out[r][3] = float(head[r][3] - z[r] * kGuessAheadM - (r == 1 ? kGuessBelowM : 0));
+    }
+    return true;
+}
+
 struct Anchor {
     float frame[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};   // the last good one (valid once `ever`)
     double scale = 1;       // the bar's scale in the last read that counted (Steam draws it scaled)
     bool ever = false;      // a good read came this run: dashboard pins have a frame
+    bool guessed = false;   // no good read yet, the frame a guess from the head (Guess): the tiles ride on it
     int shownReads = 0;     // good reads in a row (up to kSettleReads)
     const char *why = "no read yet";   // the last read's verdict: why it didn't count, or nullptr (it did)
 
@@ -82,6 +104,7 @@ struct Anchor {
         if (shownReads < kSettleReads) return why = "settling", false;
         why = nullptr;
         scale = sc;
+        guessed = false;
         bool same = ever;
         for (int r = 0; r < 3 && same; ++r)
             for (int c = 0; c < 4 && same; ++c) same = std::fabs(frame[r][c] - m[r][c]) <= kMoveEps;
@@ -89,6 +112,20 @@ struct Anchor {
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c) frame[r][c] = m[r][c];
         ever = true;
+        return true;
+    }
+
+    // A frame to ride on: a read's, or a guess's.
+    bool Framed() const { return ever || guessed; }
+
+    // Before any read counts: the frame guessed from the head's pose (GuessFrame). True when it's
+    // set (the pins move); false once a read has counted, or with no facing.
+    bool Guess(const float head[3][4]) {
+        float m[3][4];
+        if (ever || !GuessFrame(head, m)) return false;
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 4; ++c) frame[r][c] = m[r][c];
+        guessed = true;
         return true;
     }
 };

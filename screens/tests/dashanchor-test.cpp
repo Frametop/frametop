@@ -93,6 +93,30 @@ int main() {
         d.Feed(true, true, b), d.Feed(true, true, b);
         check("tilted frame kept whole", same(d.frame, b) && std::fabs(d.frame[1][1] - std::cos(-0.3)) < 1e-5);
     }
+    {
+        // ft-screens started with the dashboard closed: the tiles ride on a guess from the head
+        // until the bar's first good read
+        Anchor d;
+        float head[3][4];
+        pose(head, 0.6, -0.4, 0.2f, 1.6f, -0.1f);   // turned left, looking down
+        d.Feed(false, true, id);
+        check("a guess from the head: framed, not read", d.Guess(head) && d.Framed() && d.guessed && !d.ever);
+        const double ahead = std::hypot(d.frame[0][3] - head[0][3], d.frame[2][3] - head[2][3]);
+        check("...kGuessAheadM ahead and kGuessBelowM down", std::fabs(ahead - dashanchor::kGuessAheadM) < 1e-5 &&
+              std::fabs(head[1][3] - d.frame[1][3] - dashanchor::kGuessBelowM) < 1e-5);
+        // (facing as the head does round you: its -Z level, from its right axis despite the pitch)
+        const double fx = d.frame[0][3] - head[0][3], fz = d.frame[2][3] - head[2][3];
+        check("...where the head faces, level, facing back at it",
+              std::fabs(std::atan2(-fx, -fz) - 0.6) < 1e-5 && std::fabs(d.frame[1][1] - 1) < 1e-6 &&
+              std::fabs(d.frame[0][2] * fx + d.frame[2][2] * fz + ahead) < 1e-5);
+        check("hidden reads keep the guess", !d.Feed(false, true, id) && d.guessed);
+        d.Feed(true, true, a);
+        check("the first good read replaces it", d.Feed(true, true, a) && d.ever && !d.guessed && same(d.frame, a));
+        check("no guessing after a read", !d.Guess(head) && same(d.frame, a));
+        float side[3][4] = {{0, -1, 0, 0}, {1, 0, 0, 1.6f}, {0, 0, 1, 0}};   // rolled 90 degrees: right axis up
+        Anchor e;
+        check("no facing: no guess", !e.Guess(side) && !e.Framed());
+    }
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed ? 1 : 0;
 }

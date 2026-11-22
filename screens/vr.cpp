@@ -727,11 +727,20 @@ bool UpdateDashAnchor() {
     return moved;
 }
 
+// No read of the bar yet this run: its frame guessed from the head (dashanchor.h's Guess), for the
+// dashboard tiles. True when it's set.
+bool GuessDash(const Mat &head) {
+    if (!g_dash.a.Guess(head.m)) return false;
+    std::printf("dashboard pins: no read of the bar yet (the dashboard closed since ft-screens started): "
+                "guessed in front of you at %.3f %.3f %.3f\n", g_dash.a.frame[0][3], g_dash.a.frame[1][3], g_dash.a.frame[2][3]);
+    return true;
+}
+
 // What a pinned screen rides on: its device's pose, for a floor pin its floor frame, for a dashboard pin the
 // dashboard's (none until it's been seen).
 bool PinFrame(const Screen &s, Mat *out) {
     if (s.pinned == kDashboard) {
-        if (!g_dash.a.ever) return false;
+        if (!g_dash.a.Framed()) return false;   // (a guess's: only the tiles pin to it, vrtiles.cpp)
         *out = DashFrame();
         return true;
     }

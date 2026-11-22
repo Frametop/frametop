@@ -125,7 +125,7 @@ def sync(host, log, request=None):
     request = request or ft_hostapi.request
     name = host.get("name") or host.get("address")
     try:
-        status, answer = ask(host, request=request)
+        status, answer = ask(host, timeout=10.0, request=request)  # a Wi-Fi stall outlasts 3 s
         if status != 200 or not isinstance(answer, dict):
             return log(f"{name}: monitors not changed (it answered {status})")
         listed = {m.get("id"): m for m in answer.get("monitors", []) if isinstance(m, dict)}

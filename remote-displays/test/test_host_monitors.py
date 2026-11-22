@@ -151,6 +151,18 @@ class Backend(Base):
         again = host_monitors.HostMonitors(lambda *a: None)
         self.assertEqual(again._parked, {"pc-dp"}, "kept in " + host_monitors.PARKED_PATH)
 
+    def test_a_panel_list_it_couldnt_keep_isnt_a_failed_change(self):
+        old = host_monitors.ft_store.write_json
+
+        def fail(*a, **kw):
+            raise OSError("read-only")
+        host_monitors.ft_store.write_json = fail
+        self.addCleanup(setattr, host_monitors.ft_store, "write_json", old)
+        self.reply = (200, state(dp_wish={"on": False, "mode": None}))
+        self.b.hostMonitors.refresh("PC")
+        self.assertEqual(self.answer()[2], "", "the PC's change took")
+        self.assertIn(("remote", "disconnect", "pc-dp"), self.ran)
+
     def test_a_sunshine_host_is_not_asked(self):
         set_hosts(dict(PC, kind="sunshine"))
         self.b.hostMonitors.refresh("PC")
@@ -251,6 +263,10 @@ class Page(Base):
         self.assertEqual(dialog.choiceIndex(edp, dialog.property("wishes").toVariant()["eDP-2"]), 2, "its wish: 60 Hz")
         dialog.pick("DP-1", UHD)
         self.assertEqual(dialog.property("wishes").toVariant()["DP-1"], {"on": False, **UHD})
+        dp["wish"] = {"on": True, "mode": UHD}
+        dp["modes"] = []
+        self.assertEqual([c["text"] for c in dialog.choices(dp).toVariant()], ["Its own mode", "3840 × 2160 at 60 Hz"],
+                         "a Windows PC lists no modes for it while it's off: the plan's still shows")
         dialog.pick("eDP-2", None)
         self.assertEqual(dialog.property("wishes").toVariant()["eDP-2"], {"on": True, "width": 0, "height": 0,
                                                                           "refresh_mhz": 0})

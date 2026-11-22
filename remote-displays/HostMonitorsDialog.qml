@@ -30,10 +30,14 @@ Kirigami.PromptDialog {
         return !!a && !!b && a.width === b.width && a.height === b.height && Math.abs(a.refresh_mhz - b.refresh_mhz) <= 10
     }
     // A monitor's mode choices: first its own (no mode in the plan: the one it has without
-    // Frametop), then each mode it lists.
+    // Frametop), then each mode it lists, and the plan's mode if it doesn't list that one (a
+    // Windows PC lists none for a monitor while it's off).
     function choices(m) {
         const own = m.mode && !m.changed ? "Its own mode (" + modeText(m.mode) + ")" : "Its own mode"
-        return [{ text: own, mode: null }].concat(m.modes.map(x => ({ text: modeText(x), mode: x })))
+        const modes = m.modes.slice()
+        const planned = m.wish && m.wish.mode
+        if (planned && !modes.some(x => sameMode(x, planned))) modes.push(planned)
+        return [{ text: own, mode: null }].concat(modes.map(x => ({ text: modeText(x), mode: x })))
     }
     function choiceIndex(m, w) {
         if (!w || !(w.width > 0)) return 0
@@ -117,7 +121,7 @@ Kirigami.PromptDialog {
                 }
                 Controls.ComboBox {
                     objectName: "monitorMode-" + row.modelData.id
-                    enabled: row.wish.on && row.modelData.modes.length > 0
+                    enabled: row.wish.on && entries.length > 1
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                     readonly property var entries: dialog.choices(row.modelData)
                     model: entries

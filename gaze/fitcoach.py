@@ -281,8 +281,10 @@ def read_dots(path=DOTS):
 def seating_from_dots(rows, ipd=None):
     """The newest calibration's seating as a baseline, or None: per eye the pupil looking
     straight ahead and its own Jacobian (Reference.from_dots on that calibration's dots). The
-    glint spacing isn't in the dots, so this baseline has no eye relief."""
-    made = max((r.get("made", "") for r in rows), default=None)
+    newest is the last written (ft-eyes appends; "made" is local time, which can go back). The
+    glint spacing isn't in the dots, so this baseline has no eye relief. An eye that didn't
+    fit is left out: assess() then reads only the other."""
+    made = next((r["made"] for r in reversed(rows) if r.get("made")), None)
     if made is None:
         return None
     ref = Reference.from_dots([r for r in rows if r.get("made", "") == made])
@@ -300,13 +302,11 @@ def from_calibration(baseline):
 
 def own_reference(baseline, ref):
     """The reference to read against baseline: its own Jacobians where it has them (a
-    calibration's seating), else ref's."""
+    calibration's seating: only its eyes), else ref."""
     eyes = {int(c): {"centre": e["centre"], "jacobian": e["jacobian"]}
             for c, e in ((baseline or {}).get("eyes") or {}).items() if e.get("jacobian")}
     if not eyes:
         return ref
-    for c, e in (ref.eyes.items() if ref else ()):
-        eyes.setdefault(c, e)
     return Reference(eyes, ipd=baseline.get("ipd"), source="your calibration", made=baseline.get("made", ""))
 
 
@@ -356,7 +356,9 @@ def assess(summary, ref, ipd=None, baseline=None, previous=None, look=None):
             e["state"] = "lost"
         else:
             e["state"] = "found"
-            centre = centres.get(cam) or (ref.eyes.get(cam) or {}).get("centre") if ref else centres.get(cam)
+            # Against a baseline, only its eyes: one it lacks (a one-eye seating) has no centre to
+            # compare with, and the reference's is another face's.
+            centre = centres.get(cam) if centres else (ref.eyes.get(cam) or {}).get("centre") if ref else None
             if centre and ref and cam in ref.eyes:
                 if look:
                     (ja, jb), (jc, jd) = ref.eyes[cam]["jacobian"]

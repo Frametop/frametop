@@ -37,6 +37,16 @@ check("eyes low, far: nudge it down", fitpill.words({"up": -14.0, "left": 3.0}),
 check("eyes left: nudge it left", fitpill.words({"up": 2.0, "left": 7.0}), ("Nudge slightly left", "left"))
 check("eyes right, the bigger term: right", fitpill.words({"up": 4.0, "left": -9.0}), ("Nudge slightly right", "right"))
 check("no terms: looks good", fitpill.words({}), fitpill.GOOD)
+check("two terms nearly the same: the one said stays",
+      fitpill.words({"up": 6.0, "left": -6.5}, ("Nudge slightly up", "up")), ("Nudge slightly up", "up"))
+check("  until the other is SWITCH_DEG bigger",
+      fitpill.words({"up": 6.0, "left": -8.5}, ("Nudge slightly up", "up")), ("Nudge slightly right", "right"))
+check("  not if the one said turned round",
+      fitpill.words({"up": -6.0, "left": -6.5}, ("Nudge slightly up", "up")), ("Nudge slightly right", "right"))
+check("just under BIG_DEG after past it: still big", fitpill.words({"left": -9.0}, ("Nudge right", "right")),
+      ("Nudge right", "right"))
+check("  under BIG_DEG - SWITCH_DEG: slightly", fitpill.words({"left": -7.5}, ("Nudge right", "right")),
+      ("Nudge slightly right", "right"))
 
 
 def run(pill, steps):
@@ -64,7 +74,12 @@ check("a brief slip: nothing", run(p, [(fitpill.SHOW_HOLD - 0.5, OFF), (1.0, GOO
 check("under SHOW_DEG: nothing", run(p, [(5.0, NEAR)]), [])
 ch = run(p, [(fitpill.SHOW_HOLD + 0.5, OFF)])
 check("off for SHOW_HOLD: it opens once", [c for _, c in ch], [("show", "Nudge slightly right", "right")])
-check("  after SHOW_HOLD", ch[0][0], fitpill.SHOW_HOLD)
+check("  at the first reading past SHOW_HOLD", fitpill.SHOW_HOLD <= ch[0][0] < fitpill.SHOW_HOLD + 0.25, True)
+
+# --- A gap in the readings starts SHOW_HOLD over ---
+q = Pill()
+check("off, then no readings past STALE, then off again: not yet",
+      run(q, [(fitpill.SHOW_HOLD - 0.5, OFF), (fitpill.STALE + 1.0, None), (fitpill.SHOW_HOLD - 0.5, OFF)]), [])
 
 # --- Following, then good ---
 ch = run(p, [(1.0, {"up": 0.0, "left": -12.0})])
@@ -136,6 +151,8 @@ check("  and its own Jacobian",
       all(near(seat["eyes"][str(c)]["jacobian"][i][j], JAC[c][i][j], 1e-3) for c in (0, 1) for i in (0, 1) for j in (0, 1)), True)
 check("  the IPD", seat["ipd"], 0.064)
 check("no dots: no seating", fitcoach.seating_from_dots([]), None)
+check("the last written is the newest, whatever its made says",
+      fitcoach.seating_from_dots(new + [dict(r, made="2026-11-22 01:30:00") for r in new])["made"], "2026-11-22 01:30:00")
 check("a fit check's baseline isn't a calibration's", fitcoach.from_calibration({"eyes": {}}), False)
 
 own = fitcoach.own_reference(seat, REF)
@@ -154,6 +171,10 @@ def summary(yaw, pitch, slip=(0.0, 0.0)):
 
 r = fitcoach.assess(summary(0, 0), own, baseline=seat)
 check("straight ahead at the seating: ok", r["state"], "ok")
+one = {**seat, "eyes": {"0": seat["eyes"]["0"]}}
+r = fitcoach.assess(summary(0, 0), fitcoach.own_reference(one, REF), baseline=one)
+check("a one-eye seating reads only its eye", (r["state"], sorted(e for e in r["eyes"] if "offset_deg" in r["eyes"][e])),
+      ("ok", [0]))
 r = fitcoach.assess(summary(12, -6), own, baseline=seat)
 check("looking aside, no look given: reads as off", r["state"], "adjust")
 r = fitcoach.assess(summary(12, -6), own, baseline=seat, look=(12, -6))

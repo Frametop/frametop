@@ -7758,11 +7758,12 @@ static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                          DeviceLabel(s.dragDevice);
         std::snprintf(reply, size,
                       "ok dashboard=%d steam_front=%d mode=%s manual=%d lasers=%s game=%d paused=%d "
-                      "press=%#x by=%s on=%d catcher=%d drags=%s scene=%s",
+                      "press=%#x by=%s on=%d mouse=%d/%d catcher=%d drags=%s scene=%s",
                       vr::VROverlay()->IsDashboardVisible() ? 1 : 0, SteamInFront() ? 1 : 0,
                       ModeName(), g_manual ? 1 : 0,
                       LasersName(), g_gameRunning ? 1 : 0, g_paused ? 1 : 0, g_press.buttons,
-                      DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
+                      DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_mouseScreen + 1,
+                      ft_vr_mouse_screen() + 1, g_catcherShown ? 1 : 0,
                       drags.empty() ? "-" : drags.c_str(), ftscene::Name(g_scene));
         return;
     }

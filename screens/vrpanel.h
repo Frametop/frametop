@@ -119,8 +119,7 @@ struct Screen {
     // The resize handle (Controls()[kResizePart], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
     // or a hand aims at (UpdateCorner; the bottom right otherwise), brighter the closer the aim, lit
     // while resizing. Any corner resizes, the opposite one staying put.
-    int cornerX = 1, cornerY = -1;            // +1 right, top; one of them 0: that edge (the glow style's)
-    double resizeAlong = 0;                   // an edge's: where along it the laser is (m from the middle), for its glow
+    int cornerX = 1, cornerY = -1;            // +1 right, top
     float cornerGlow = 0;                     // the aim's closeness, 0..1
     bool cornerLit = false;                   // its texture lit (resizing)
     long cornerUntil = 0;                     // aimed at until this tick (then back to the bottom right)
@@ -157,7 +156,6 @@ struct Screen {
     hoverhaptics::Gate barBuzz;
     uint64_t resizePaintedVersion = 0;
     int resizePaintedX = 0, resizePaintedY = 0;
-    double resizePaintedArm = 0, resizePaintedOut = 0, resizePaintedAlong = 0;   // (the glow style's hit area: PaintResizeMask)
     int64_t resizeAnnouncedMs = 0;
     overlayregion::Region resizeRegion;
     std::string resizeRegionMessage;

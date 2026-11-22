@@ -62,6 +62,9 @@ static void peaked() {
     CHECK(!h.parse(c192.data(), c192.size(), err));
     c192[44] = 0, c192[45] = 1;   // 256: bigger than ft-npud's slots
     CHECK(!h.parse(c192.data(), c192.size(), err));
+    auto sq5 = tiny_file(5, 5, 1, 1, 1), rect = tiny_file(4, 5, 1, 1, 1);
+    CHECK(h.parse(sq5.data(), sq5.size(), err));
+    CHECK(!h.parse(rect.data(), rect.size(), err));   // one grid for both axes: H must equal W
 }
 
 static void fixture(const char *path) {

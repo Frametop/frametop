@@ -586,9 +586,10 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         std::vector<std::pair<const Camera *, std::vector<Palm>>> detected;
         const bool det_on = rounds_ && rounds_->healthy();
         if (rounds_) {
+            // a camera that dropped out of this step (its frame missed) keeps its palms for the round, unused
             for (const auto &[name, palms] : rounds_->ready()) {
                 const auto c = cams_.find(name);
-                if (c != cams_.end()) detected.push_back({c->second, palms});
+                if (c != cams_.end() && images.count(name)) detected.push_back({c->second, palms});
             }
             stats.det_rounds += int(rounds_->ready().size());
             stats.det_fallbacks += due && !det_on;

@@ -27,6 +27,9 @@ bool NpuSession::ensure() {
 void NpuSession::fail(const std::string &why) {
     ++failures;
     err_ = why;
+    // the client has closed: wait the retry time before connecting again, so a wedged daemon costs one timeout
+    // per kRetrySeconds and not one a step
+    retry_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(int(kRetrySeconds * 1000));
     std::fprintf(stderr, "npu: %s; the CPU models until ft-npud answers again\n", why.c_str());
 }
 

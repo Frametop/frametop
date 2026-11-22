@@ -326,11 +326,12 @@ int main(int argc, char **argv) {
         if (calib.count(c.name) && (use == "all" || color == (use == "color"))) used[c.name] = calib[c.name];
     }
     Pool pool(threads, {2, 3, 4});
-    Tracker tracker(used, nets, pool, max_views);
-    tracker.set_hand_budget(hand_budget);
     std::unique_ptr<NpuSession> npu_session;
     std::unique_ptr<NpuLandmarks> npu;
     std::unique_ptr<NpuDetector> npu_detector;
+    // after the NPU backends it points at, so it goes first on the way out
+    Tracker tracker(used, nets, pool, max_views);
+    tracker.set_hand_budget(hand_budget);
     if (!npu_dir.empty()) {
         npu_session = std::make_unique<NpuSession>(npu_dir);
         if (!npu_cpu_landmarks)

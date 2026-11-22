@@ -633,10 +633,11 @@ int main(int argc, char **argv) {
     if (sched_setaffinity(0, sizeof set, &set) < 0) std::perror("sched_setaffinity");
     nets.set_contrast(palm_contrast, hand_contrast);
     Pool pool(threads, cpus);
-    Tracker tracker(used, nets, pool);
     std::unique_ptr<NpuSession> npu_session;
     std::unique_ptr<NpuLandmarks> npu;
     std::unique_ptr<NpuDetector> npu_detector;
+    // after the NPU backends it points at, so it goes first on the way out
+    Tracker tracker(used, nets, pool);
     if (!npu_dir.empty()) {
         npu_session = std::make_unique<NpuSession>(npu_dir);
         tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, *npu_session)).get());

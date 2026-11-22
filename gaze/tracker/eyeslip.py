@@ -41,11 +41,19 @@ def _r(v, digits=3):
     return [round(float(x), digits) for x in v]
 
 
+def _target(e, truth):
+    """The calibration's gaze for `truth`: what eye e's click refit (its .learn) turns into it."""
+    learn = getattr(e, "learn", None)
+    return learn.undo(truth) if learn else truth
+
+
 def teach_click(eyes, cal, t, truth, before, glance=False):
     """A click at t where you looked at `truth` (yaw, pitch): each eye seen over the `before` s
     up to it, and within its calibration dots, teaches its filter (judged across the eyes:
     slipfilter.teach_click; a `glance`, a free mouse's click, is a weaker reading). Returns the
-    reply's words (each eye's measured slip, or nan) and the clicks log's record per eye."""
+    reply's words (each eye's measured slip, or nan) and the clicks log's record per eye (with
+    `raw`, the calibration's gaze with the shift before it, and the glint pair's `mid`, for its
+    clickrefit.Learner)."""
     out, rec, lessons = [], {}, {}
     for e in eyes:
         g = e.window(t - before, t)
@@ -56,10 +64,12 @@ def teach_click(eyes, cal, t, truth, before, glance=False):
             out += ["nan", "nan"]
             rec[e.eye] = {"pupil": g["pupil"].tolist(), "skipped": "outside its calibration dots"}
             continue
-        d = cal.click_shift(e.eye, g["pupil"], truth)
+        d = cal.click_shift(e.eye, g["pupil"], _target(e, truth))
         lessons[e.eye] = d
         e.filter.predict(t)
+        raw = cal.gaze(e.eye, *g["pupil"], e.filter.s)
         rec[e.eye] = {"pupil": g["pupil"].tolist(), "measured": d.tolist(), "before": e.filter.s.tolist(),
+                      "raw": _r(raw), "mid": None if g["mid"] is None else _r(g["mid"], 2),
                       "sd_before": round(e.filter.slip_sd(), 3), "glint": e.glint[1] if e.glint else None,
                       "a": round(e.find[3], 2) if e.find and e.find[3] is not None else None}
         out += [f"{d[0]:.2f}", f"{d[1]:.2f}"]
@@ -120,7 +130,7 @@ def teach_look(eyes, cal, t, truth, spread):
                 or not cal.inside(e.eye, truth)):
             out += ["nan", "nan"]
             continue
-        d = cal.click_shift(e.eye, g["pupil"], truth)
+        d = cal.click_shift(e.eye, g["pupil"], _target(e, truth))
         took[str(e.eye)] = {"z": _r(d, 2), **e.filter.update("steam", d, t)}
         out += [f"{d[0]:.2f}", f"{d[1]:.2f}"]
     return out, took

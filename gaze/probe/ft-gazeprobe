@@ -2404,6 +2404,7 @@ class Probe(Gtk.ApplicationWindow):
         """Forget what snap and practice clicks taught; the calibration stays."""
         self.live = {s: LiveCorrection() for s in SOURCES}
         self.save_calibration()
+        self.own.ask("clicks-clear")   # the Own tracker's click refit too (a "fail" if it isn't running)
         self.on_status("click corrections cleared")
 
     def reset_calibration(self):

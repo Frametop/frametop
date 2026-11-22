@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""ft-eyes-clickrefit: replay clicks.jsonl, predicting each click from the earlier ones, with the
+shift alone against the shift plus a click refit (clickrefit.py). The go/no-go for the refit.
+
+Each click is mapped with the calibration in use then (the saved calibration*.json made last
+before it). Per eye, the shift is a stand-in for the slip filter: the recency-weighted mean of
+the last SHIFT_N measured shifts, each measured against the model being judged. A headset
+reseat (slip.jsonl) keeps both going, as live. Prints median and p90 misses (degrees), split by
+how far out you looked and by clicks since a calibration or reseat.
+
+  ft-eyes-clickrefit [STATE_DIR]   (default ~/.local/state/frametop/gaze/eyes)
+"""
+import json
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import clickrefit  # noqa: E402
+import eyes_model  # noqa: E402
+
+SHIFT_N = 3
+
+
+def calibrations(folder):
+    out = []
+    for p in folder.glob("calibration*.json"):
+        cal = eyes_model.Calibration.load(p)
+        made = cal.info.get("made")
+        if made:
+            out.append((time.mktime(time.strptime(made, "%Y-%m-%d %H:%M:%S")), made, cal))
+    return sorted(out, key=lambda r: r[0])
+
+
+def centre(cal, eye):
+    b = cal.box.get(eye)
+    return np.array([(b[0] + b[1]) / 2, (b[2] + b[3]) / 2]) if b else np.zeros(2)
+
+
+def replay(folder):
+    cals = calibrations(folder)
+    clicks = [json.loads(line) for line in open(folder / "clicks.jsonl")]
+    reseats = []
+    try:
+        reseats = sorted({round(json.loads(line)["time"], 1) for line in open(folder / "slip.jsonl")
+                          if '"reseat"' in line})
+    except OSError:
+        pass
+    rows = []   # (eye, truth, ecc, since, err shift-only, err refit, applied)
+    state = {}
+    for k in clicks:
+        use = [c for c in cals if c[0] <= k["time"]]
+        if not use:
+            continue
+        made, cal = use[-1][1], use[-1][2]
+        for e_s, v in k["eyes"].items():
+            e = int(e_s)
+            if "measured" not in v or not cal.has("pupil", e):
+                continue
+            key = (made, e)
+            st = state.setdefault(key, {"base": [], "refit": [], "hist": [], "since": 0, "last": k["time"],
+                                        "c": centre(cal, e)})
+            if any(st["last"] < r <= k["time"] for r in reseats):
+                st["since"] = 0
+            st["last"] = k["time"]
+            truth, pupil, glance = np.array(k["truth"]), np.array(v["pupil"]), bool(k.get("glance"))
+            c = st["c"]
+            # shift only
+            s = shift(st["base"])
+            g0 = cal.gaze(e, *(pupil - s)) if s is not None else None
+            # shift plus refit (fit from the earlier clicks, gazes with their shift of the time)
+            r, _ = clickrefit.fit(st["hist"], c)
+            s1 = shift(st["refit"])
+            g1 = None
+            if s1 is not None:
+                raw = cal.gaze(e, *(pupil - s1))
+                g1 = r.apply(raw) if r else raw
+                st["hist"].append((raw, truth, glance))
+            if g0 is not None and g1 is not None:
+                rows.append((e, truth, float(np.hypot(*truth)), st["since"], float(np.hypot(*(g0 - truth))),
+                             float(np.hypot(*(g1 - truth))), r is not None))
+            st["base"].append(cal.click_shift(e, pupil, truth))
+            st["refit"].append(cal.click_shift(e, pupil, r.undo(truth) if r else truth))
+            st["since"] += 1
+    return rows
+
+
+def shift(measured):
+    if not measured:
+        return None
+    m = np.array(measured[-SHIFT_N:])
+    w = 0.5 ** np.arange(len(m))[::-1]
+    return (w[:, None] * m).sum(0) / w.sum()
+
+
+def line(name, rs):
+    if not rs:
+        return f"{name:26s}     0"
+    a, b = np.array([r[4] for r in rs]), np.array([r[5] for r in rs])
+    on = sum(r[6] for r in rs)
+    return (f"{name:26s} {len(rs):5d}  shift {np.median(a):5.2f} {np.percentile(a, 90):5.2f}"
+            f"   +refit {np.median(b):5.2f} {np.percentile(b, 90):5.2f}   refit on {on}")
+
+
+def main():
+    folder = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home() / ".local/state/frametop/gaze/eyes"
+    rows = replay(folder)
+    print(f"{'':26s} {'n':>5s}  {'':5s} {'med':>5s} {'p90':>5s}   {'':6s} {'med':>5s} {'p90':>5s}")
+    print(line("all", rows))
+    for e in (0, 1):
+        print(line(("right", "left")[e] + " eye", [r for r in rows if r[0] == e]))
+    for lo, hi in ((0, 10), (10, 20), (20, 99)):
+        print(line(f"looking {lo}-{hi} deg out", [r for r in rows if lo <= r[2] < hi]))
+    for lo, hi in ((0, 10), (10, 30), (30, 9999)):
+        print(line(f"clicks {lo}-{hi} since reseat", [r for r in rows if lo <= r[3] < hi]))
+    print(line("while a refit was on", [r for r in rows if r[6]]))
+
+
+if __name__ == "__main__":
+    main()

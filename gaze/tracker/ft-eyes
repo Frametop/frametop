@@ -42,12 +42,14 @@ Control socket: abstract datagram "@ft_eyes"; each command gets one reply line.
                                eye is fitted on the dots it was seen at; one seen at too few
                                (eyes_model.MIN_CLICKS) is left out, and the other maps the
                                gaze alone ("..., left not used (9 dots, needs 12)")
-  click T YAW PITCH            a click: you were looking there just before T; teaches the
+  click T YAW PITCH [glance]   a click: you were looking there just before T; teaches the
                                shift: "ok DX0 DY0 DX1 DY1" (the shift each eye measured; nan
                                for an eye not seen, or when YAW PITCH lies outside that eye's
                                calibration dots by over eyes_model.EDGE_MARGIN: a shift measured
                                out there is the fit's extrapolation, so it teaches nothing).
-                               Both eyes are judged together (slipfilter.teach_click)
+                               Both eyes are judged together (slipfilter.teach_click).
+                               "glance": a free mouse's click, a weaker reading that's never
+                               the headset moved and doesn't end a reseat
   look T YAW PITCH             SteamVR's look, held still over eyeslip.LOOK_WINDOW before T (the
                                gaze service's steamlook.py): each eye whose pupil held still
                                then, within its dots, reads its shift against it, a weaker
@@ -615,16 +617,17 @@ class Tracker:
                     + ", ".join(f"{EYES[c]} {cal.spread[c]:.2f} ({seen[c]} dots)" if c in cal.spread
                                 else f"{EYES[c]} not used ({seen[c]} dots, needs {eyes_model.MIN_CLICKS})"
                                 for c in (0, 1)))
-        if w[0] == "click" and len(w) == 4:
+        if w[0] == "click" and (len(w) == 4 or len(w) == 5 and w[4] == "glance"):
             if not self.cal:
                 return "fail not calibrated"
-            t, yaw, pitch = self.command_time(w[1:])
-            out, eyes = eyeslip.teach_click(self.eyes, self.cal, t, (yaw, pitch), CLICK_BEFORE)
-            rec = {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": eyes}
+            glance = len(w) == 5
+            t, yaw, pitch = self.command_time(w[1:4])
+            out, eyes = eyeslip.teach_click(self.eyes, self.cal, t, (yaw, pitch), CLICK_BEFORE, glance)
+            rec = {"time": time.time(), "t": t, "truth": [yaw, pitch], "eyes": eyes, **({"glance": True} if glance else {})}
             self.save_state()
             with open(CLICKS, "a") as f:
                 f.write(json.dumps(rec) + "\n")
-            self.log.event(t, "click", truth=[yaw, pitch], eyes={str(e): v for e, v in rec["eyes"].items()})
+            self.log.event(t, "click", truth=[yaw, pitch], glance=glance, eyes={str(e): v for e, v in rec["eyes"].items()})
             return "ok " + " ".join(out)
         if w[0] == "look" and len(w) == 4:
             if not self.cal:

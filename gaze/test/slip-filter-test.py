@@ -98,6 +98,24 @@ two = {0: sf.SlipFilter(JAC), 1: sf.SlipFilter(JAC)}
 r = sf.teach_click(two, {1: np.array([20.0, 0.0])}, 1.0)
 check("one eye taught: a plain click", (list(r), r[1]["gate"]), ([1], "plain"))
 
+# --- A glance: a free mouse's click (you most likely looked at what you clicked) ---
+moved_pair, glance_pair = sf.load(None, {0: JAC, 1: JAC}), sf.load(None, {0: JAC, 1: JAC})
+lesson = {0: np.array([20.0, 4.0]), 1: np.array([18.0, 6.0])}
+sf.teach_click(moved_pair, lesson, 1.0)
+r = sf.teach_click(glance_pair, lesson, 1.0, glance=True)
+check("a glance both eyes 5 degrees off the same way: never the headset moved", (r[0]["gate"], r[1]["gate"]),
+      ("glance", "glance"))
+plain_one = sf.load(None, {0: JAC, 1: JAC})
+sf.teach_click(plain_one, {0: lesson[0]}, 1.0)   # one eye taught: a plain click
+check("...it pulls less than a plain click, and far less than the headset moved",
+      glance_pair[0].s[0] < plain_one[0].s[0] - 2 and glance_pair[0].s[0] < 0.7 * moved_pair[0].s[0], True)
+check("...and isn't counted as a click", (glance_pair[0].clicks, moved_pair[0].clicks), (0, 1))
+g = sf.load(None, {0: JAC, 1: JAC})
+g[0].reseat(), g[1].reseat()
+sf.teach_click(g, {0: np.array([8.0, 0.0]), 1: np.array([8.0, 0.0])}, 1.0, glance=True)
+check("after a reseat: a glance teaches, but the one-dot check is still asked for",
+      (g[0].s[0] > 4.0, g[0].reseated, g[1].reseated), (True, True, True))
+
 # --- SteamVR's looks: a bias of their own, then the slow slip ---
 f = sf.SlipFilter(JAC)
 B = np.array([8.0, -4.0])   # SteamVR reads 2 degrees off, through our where fit
@@ -441,6 +459,11 @@ check("the clicks log: what the click did", sorted(k for k in rec["eyes"]["0"] i
       ["after", "gate", "innov_deg", "sd_before"])
 st = tracker.status()["eyes"]["right"]
 check("the status' slip_deg: 8 px right in the image is 2 degrees of yaw", near(st["slip_deg"], (-2, 0), 0.6), True)
+t0, t1 = hold(tracker, 5.0, 2.0, slip=(8.0, 0.0))
+check("a glance's command", tracker.command(f"click {t1:.6f} 5.0 2.0 glance").startswith("ok "), True)
+rec = json.loads(fe.CLICKS.read_text().splitlines()[-1])
+check("...logged as one, judged as one", (rec.get("glance"), rec["eyes"]["0"]["gate"]), (True, "glance"))
+check("...a word that isn't 'glance': refused", tracker.command(f"click {t1:.6f} 5.0 2.0 nudge").startswith("ok "), False)
 
 # The headset off: the slip unsure again until readings come.
 check("taught by the click (the shared memory's flags bit)", right.filter.taught, True)

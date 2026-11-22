@@ -203,16 +203,55 @@ class Layout(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.m.remote_command(["set", "pc-dp", "mode=1920x1080"])
 
-    def test_connect_disconnect_and_remove_send_the_plan(self):
+    def with_screens(self):
+        """ft-screens as a stand-in: what's started and stopped goes in self.synced, in order with
+        the plans sent."""
+        events = self.synced
+
+        class Sock:
+            def ask(self, line):
+                events.append(line)
+                return "ok"
+        self.m.screens_socket = Sock
+        self.m.remotes_running = lambda sock: {}
+        self.m.start_remote = lambda sock, n, host, d: events.append(f"start {d['id']}") or "ok"
+        self.m.remote_anchor = lambda sock, layout: ((0, 0, 0), 0)
+        self.m.place_remotes = lambda *a, **kw: None
+
+    def test_connect_sends_before_the_stream_and_disconnect_after(self):
         self.m.remote_command(["host", "PC", "monitors=on"])
+        self.with_screens()
+        self.synced.clear()
         self.m.remote_command(["disconnect", "pc-edp"])
         self.assertTrue(self.host()["displays"][0]["off"])
+        self.assertEqual([e for e in self.synced if not e.startswith("remote ")], ["PC"])
+        self.assertTrue(self.synced[0].startswith("remote ") and self.synced[0].endswith(" stop"),
+                        "the stream stops before its monitor goes off")
+        self.synced.clear()
         self.m.remote_command(["connect", "pc-edp"])
+        self.assertEqual(self.synced, ["PC", "start pc-edp"], "its monitor comes back before the stream starts")
+
+    def test_remove_sends_the_plan(self):
+        self.m.remote_command(["host", "PC", "monitors=on"])
         old = self.m.run_stream
         self.m.run_stream = lambda *a, **kw: (0, "unpaired", "")
         self.addCleanup(setattr, self.m, "run_stream", old)
+        self.synced.clear()
         self.m.remote_command(["remove", "pc-dp"])
-        self.assertEqual(self.synced, ["PC"] * 4)
+        self.assertEqual(self.synced, ["PC"])
+
+    def test_starting_streams_sends_for_the_hosts_started(self):
+        other = pc(name="Other", address="192.0.2.8", monitors=True)
+        for d in other["displays"]:
+            d["id"] = "other-" + d["id"]
+        self.m.save_layout({"hosts": [pc(monitors=True), other]})
+        self.with_screens()
+        self.m.start_remotes(self.m.screens_socket(), self.m.load_layout(), only={"other-pc-dp"})
+        self.assertEqual(self.synced[0], "Other", "only the host of the display started")
+        self.synced.clear()
+        self.m.start_remotes(self.m.screens_socket(), self.m.load_layout())
+        self.assertEqual(sorted(e for e in self.synced if not e.startswith("start ")), ["Other", "PC"])
+        self.assertTrue(all(e.startswith("start ") for e in self.synced[2:]), "plans first, then the streams")
 
     def test_without_the_switch_nothing_is_sent(self):
         self.m.remote_command(["disconnect", "pc-edp"])

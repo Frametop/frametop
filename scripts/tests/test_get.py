@@ -99,6 +99,11 @@ class Get(unittest.TestCase):
         # channel, version, zip, dir, clone-only, any SteamOS, then install.sh's options
         self.assertEqual(r.stdout, "[stable][][][][0][0][--][--yes][--no-hands][--no-keyboard]")
 
+    def test_the_installers_other_options_pass_through(self):
+        r = self.bash(self.MAIN + "--no-gaze --no-hand-recorder --no-eye-recorder")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.endswith("[--][--yes][--no-gaze][--no-hand-recorder][--no-eye-recorder]"), r.stdout)
+
     def test_an_unknown_option_is_refused(self):
         r = self.bash(self.MAIN + "--no-such-thing")
         self.assertEqual(r.returncode, 2)

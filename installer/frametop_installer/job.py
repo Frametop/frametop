@@ -27,7 +27,11 @@ SOCKET = f"/run/user/{host.UID}/frametop-installer/askpass"
 
 
 def unit_state(unit=UNIT):
-    return host.text(["systemctl", "--user", "show", "-P", "ActiveState", unit]) or "inactive"
+    """The service's ActiveState, or None when systemctl couldn't say (a timeout, a failed
+    flatpak-spawn). A unit that doesn't exist reads "inactive", so None never means it's gone."""
+    code, out, _ = host.run(["systemctl", "--user", "show", "-P", "ActiveState", unit], timeout=15)
+    state = out.decode("utf-8", "replace").strip()
+    return state if code == 0 and state else None
 
 
 def install_args(version, flags, dry_run=False):
@@ -38,6 +42,9 @@ def install_args(version, flags, dry_run=False):
 
 def start(version, channel, flags, restart, askpass, dry_run=False):
     """Start the install's service. Returns "" or what went wrong."""
+    if unit_state(FRAMEDROP_UNIT) == "activating":
+        return ("FrameDrop is installing Frametop. Let it finish, then open Frametop Installer "
+                "again.")
     host.stage()
     host.run(["systemctl", "--user", "stop", f"{UNIT}.service"], timeout=30)
     host.run(["systemctl", "--user", "reset-failed", f"{UNIT}.service"], timeout=10)
@@ -82,8 +89,9 @@ def result():
 
 def where_things_are(state, unit, rc, now=None):
     """What the window opens on: "running", "done", "failed", "unfinished" (stopped with no result:
-    a restart or crash), or "new"."""
-    if unit == "activating":
+    a restart or crash), or "new". unit None (systemctl couldn't say) counts as running until a
+    result says otherwise, so one failed check doesn't end a live install."""
+    if unit == "activating" or (unit is None and state and rc is None):
         return "running"
     if not state:
         return "new"

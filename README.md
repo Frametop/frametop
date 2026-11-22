@@ -28,7 +28,7 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 ### With the Frametop Installer (no terminal)
 
 1. In the launcher, choose Launch a program → Desktop.
-2. In a browser on the headset, download [FrametopInstaller.flatpak](https://github.com/Frametop/frametop/releases/latest/download/FrametopInstaller.flatpak) (also on the [releases](https://github.com/Frametop/frametop/releases) page).
+2. In a browser on the headset, download [FrametopInstaller.flatpak](https://github.com/Frametop/frametop/releases/latest/download/FrametopInstaller.flatpak) (also on the [releases](https://github.com/Frametop/frametop/releases) page). Until a stable release includes it, that link finds nothing: take it from the newest experimental release on that page instead.
 3. Open it from Downloads with a double-click. Discover installs Frametop Installer, plus the GNOME runtime it runs on if the headset doesn't have it yet (about 300 MB, from Flathub). Then open Frametop Installer from the application menu.
 
 It asks which version to install, the latest stable release or the latest experimental one, both built already, and shows whether each is tested on your SteamOS. Then it lists the optional parts as checkboxes, all ticked, and asks for your password once if a part you kept needs it. It shows the install's progress, and the install keeps going if you close the window. If the Frame restarts or crashes during the install, open Frametop Installer again and choose Install again. [installer/README.md](installer/README.md) says how it works and what it's allowed to do.

@@ -5,9 +5,9 @@
 # Releases). It's about 1.1 GB, under GitHub's 2 GB a file.
 #
 # A v* tag makes a draft GitHub release with the zip, its FrameDrop manifest, its
-# frametop-release.json, the Frametop Installer app (FrametopInstaller.flatpak), and SHA256SUMS (a prerelease when the tag has a "-", like
-# v0.3.0-exp.1). Nothing is public until someone publishes the draft. A manual run keeps the
-# zip as the run's artifact for a week.
+# frametop-release.json, the Frametop Installer app (FrametopInstaller.flatpak), and SHA256SUMS
+# (a prerelease when the tag has a "-", like v0.3.0-exp.1). Nothing is public until someone
+# publishes the draft. A manual run keeps the zip and the app as the run's artifact for a week.
 #
 # podman, as on the Frame: the zip holds podman save's archive, which the headset loads with
 # podman. Not on pushes or pull requests: Depot's runners are paid, and a fork's pull request

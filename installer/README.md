@@ -21,13 +21,13 @@ The install's choices are saved in `~/.cache/frametop-installer/state.json` when
 | A result it hasn't shown | Done, or failed with the end of the log |
 | Nothing, or a result it has shown | The version page |
 
-Install again is safe: `get.sh` resumes a partial download (`curl -C -`), and the install steps can run again over a finished or half-finished install. FrameDrop's install (`frametop-framedrop-install`) running at the same time is refused.
+Install again is safe: `get.sh` resumes a partial download (`curl -C -`), and the install steps can run again over a finished or half-finished install. An install doesn't start while FrameDrop's install (`frametop-framedrop-install`) is running: the window says so when it opens and again when Install is pressed.
 
 ## The password
 
 The install runs on the host, outside the sandbox's PID namespace, so `sudo` there can't ask the window directly. Instead:
 
-- The window starts `host/helper.py serve` on the host. It listens on `/run/user/UID/frametop-installer/askpass` (a folder only the user can open) and answers only a process in the `frametop-installer` service's cgroup, checked with the socket's peer credentials.
+- The window starts `host/helper.py serve` on the host. It listens on `/run/user/UID/frametop-installer/askpass` (a folder only the user can open) and answers only a process in the `frametop-installer` service's cgroup, checked with the socket's peer credentials. That keeps out sandboxed apps, which can't reach the folder, and processes outside the service. It doesn't stop unsandboxed code running as the same user: that code can already move a process into the service's cgroup, or change the scripts in `~/.cache/frametop-installer/bin`, so it's trusted, as it is with `sudo` in a terminal.
 - The install runs with `SUDO_ASKPASS` set to `host/askpass`, which asks that socket.
 - The password goes from the window to the helper hex-encoded on a pipe. It's never written to a file or put in an argument or the environment, and both drop it when the window closes. If the install asks after the window has gone, askpass fails, and `sudo` treats that as a wrong password: that part fails, the rest goes on.
 

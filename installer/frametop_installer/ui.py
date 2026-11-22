@@ -105,11 +105,15 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
             if where in ("unfinished", "failed", "done"):
                 return self.show_resume(where, state, rc)
             self.show_versions()
-        in_thread(work, done)
+        in_thread(work, done, self.went_wrong)
 
     def show_message(self, title, text):
         self.page("message", label(title, css=("title-1",)), label(text),
                   buttons=[button("Close", self.close)])
+
+    def went_wrong(self, error):
+        self.show_message("Something went wrong", f"{error.__class__.__name__}: {error}. Close this window "
+                                                  "and open Frametop Installer again.")
 
     def show_versions(self):
         if not releases.is_frame(self.osr) and not self.dry_run:
@@ -118,7 +122,8 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
         self.page("loading", Gtk.Spinner(spinning=True, height_request=48),
                   label("Looking up the newest Frametop releases on GitHub...", css=("title-3",), xalign=0.5))
         build = self.osr.get("BUILD_ID", "")
-        in_thread(lambda: (releases.lookup_both(build), host.installed()), self.versions_found)
+        in_thread(lambda: (releases.lookup_both(build), host.installed()), self.versions_found,
+                  self.went_wrong)
 
     def versions_found(self, found):
         self.releases, (inst_version, inst_channel) = found
@@ -226,15 +231,12 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
         """A part whose parent is unticked shows unticked and can't be changed; ticking the parent
         again brings back what was picked for it."""
         picks = self.current_picks()
-        on = options.effective(picks, self.release.supported)
         self.syncing = True
         try:
-            for key, (check, row) in self.checks.items():
-                part = options.BY_KEY[key]
-                if part.needs and part.needs in self.checks:
-                    parent_on = on.get(part.needs, False)
-                    row.set_sensitive(parent_on)
-                    check.set_active(on[key] if not parent_on else self.wanted[key])
+            for key, (ticked, can_change) in options.boxes(picks, self.release.supported).items():
+                check, row = self.checks[key]
+                row.set_sensitive(can_change)
+                check.set_active(ticked)
         finally:
             self.syncing = False
         need = options.needs_password(picks, self.release.supported)
@@ -248,7 +250,6 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
             self.show_password()
         else:
             self.begin(None)
-
 
     # --- the install
 
@@ -280,7 +281,7 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
                 except OSError as e:
                     return started(f"the password helper didn't start: {e}")
             in_thread(lambda: job.start(version, channel, flags, restart, pw is not None, dry_run=self.dry_run),
-                      started)
+                      started, failed)
 
         def started(err):
             if err:
@@ -290,14 +291,17 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
                     self.helper = None
                 return self.show_message("The install didn't start", err)
             self.show_progress()
-        in_thread(work, staged)
 
+        def failed(e):
+            started(f"{e.__class__.__name__}: {e}")
+        in_thread(work, staged, failed)
 
     def show_resume(self, where, state, rc):
         version = state.get("version", "")
         when = GLib.DateTime.new_from_unix_local(state.get("started", 0)).format("%e %b, %H:%M").strip()
-        if where == "done":
+        if where != "unfinished":   # a result, shown once; an unfinished install asks every time
             job.save_state(dict(state, seen=True))
+        if where == "done":
             return self.page("resume", label(f"Frametop {version} is installed", css=("title-1",)),
                              label(f"The install you started on {when} finished. If you haven't yet, restart "
                                    "SteamVR once, or reboot the headset. Then open Launch a program, then "
@@ -334,7 +338,6 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
             return self.show_again_password(state)
         self.begin(self.password if state.get("sudo") else None, state["version"], state.get("channel", ""),
                    state.get("flags", ["--yes"]), state.get("restart", False))
-
 
     # --- closing
 

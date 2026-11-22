@@ -114,6 +114,19 @@ def effective(picked, supported):
     return out
 
 
+def boxes(wanted, supported):
+    """What the box of each part that needs another listed part shows, {key: (ticked, can_change)}:
+    unticked and locked while the part it needs is off, and what was picked for it once that's on."""
+    on = effective(wanted, supported)
+    out = {}
+    for part in PARTS:
+        if (part.needs and availability(part, supported) != "absent"
+                and availability(BY_KEY[part.needs], supported) != "absent"):
+            parent_on = on[part.needs]
+            out[part.key] = (bool(wanted.get(part.key, True)) and parent_on, parent_on)
+    return out
+
+
 def install_flags(picked, supported):
     """get.sh's options for these picks: --yes, then a --no- for each part left out and an
     option for each part --yes would leave out."""

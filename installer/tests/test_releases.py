@@ -1,6 +1,7 @@
 """The Frametop Installer's release lookup, offline: GitHub is a dict of canned answers. It picks
 releases as get.sh --release does, reads what each can leave out, and decides tested, untested
 or broken as install-release.sh's check_release does (the real one runs on the same files)."""
+import http.client
 import json
 import os
 import pathlib
@@ -81,6 +82,16 @@ class Pick(unittest.TestCase):
         gh = github()
         del gh.answers[f"{RAW}/abc1234/pack/install-release.sh"]
         self.assertEqual(releases.lookup_both("B1", get=gh)["stable"].supported, options.BASELINE)
+
+    def test_main_s_table_cut_short_is_no_table(self):
+        gh = github()
+
+        def cut_short(url):
+            if url == releases.TABLE_URL:
+                raise http.client.IncompleteRead(b"{")   # not an OSError
+            return gh(url)
+        found = releases.lookup_both("B1", get=cut_short)
+        self.assertEqual(found["stable"].version, "0.3.0")
 
     def test_github_unreachable_says_so_for_each(self):
         found = releases.lookup_both("B1", get=FakeGitHub({}))

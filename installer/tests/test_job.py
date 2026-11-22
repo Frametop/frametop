@@ -71,6 +71,30 @@ class Start(Temp):
         self.assertIsNone(job.result())
         self.assertEqual(job.LOG.read_text(), "")
 
+    def test_not_while_framedrop_installs(self):
+        def fake_run(argv, input=None, timeout=60):
+            self.calls.append(list(argv))
+            return (0, b"activating\n", b"") if job.FRAMEDROP_UNIT in argv else (0, b"", b"")
+        host.run = fake_run
+        self.assertIn("FrameDrop is installing", job.start("0.3.0", "stable", ["--yes"], False, False))
+        self.assertFalse([c for c in self.calls if c[0] == "systemd-run"])
+        self.assertIsNone(job.load_state())
+
+
+class UnitState(Temp):
+    def answer(self, code, out):
+        host.run = lambda argv, input=None, timeout=60: (code, out, b"")
+        return job.unit_state()
+
+    def test_what_systemctl_says(self):
+        self.assertEqual(self.answer(0, b"active\n"), "active")
+        self.assertEqual(self.answer(0, b"inactive\n"), "inactive")   # also a unit that doesn't exist
+
+    def test_a_failed_check_is_unknown_not_stopped(self):
+        self.assertIsNone(self.answer(124, b""))     # timed out
+        self.assertIsNone(self.answer(127, b""))     # no flatpak-spawn
+        self.assertIsNone(self.answer(0, b""))
+
 
 class Where(unittest.TestCase):
     def test_what_the_window_opens_on(self):
@@ -85,6 +109,10 @@ class Where(unittest.TestCase):
         self.assertEqual(w(s, "failed", 1), "failed")
         self.assertEqual(w(dict(s, seen=True), "active", 0), "new")
         self.assertEqual(w(dict(s, seen=True), "failed", 1), "new")
+        # systemctl couldn't say: a live install keeps being followed until its result is there
+        self.assertEqual(w(s, None, None, now=2000), "running")
+        self.assertEqual(w(s, None, 0), "done")
+        self.assertEqual(w(None, None, None), "new")
 
 
 class Progress(unittest.TestCase):

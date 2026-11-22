@@ -109,6 +109,20 @@ class Picks(unittest.TestCase):
         self.assertTrue(on["gaze"])
         self.assertTrue(on["eye_tracker"])
 
+    def test_a_box_locks_while_the_part_it_needs_is_off(self):
+        picks = dict(self.ALL, hand_recorder=False)
+        self.assertEqual(options.boxes(picks, EXP24)["hand_recorder"], (False, True))
+        off = options.boxes(dict(picks, hands=False), EXP24)
+        self.assertEqual(off["hand_recorder"], (False, False))
+        # ticked again, a box shows what was picked for it, not what it showed while locked
+        self.assertEqual(options.boxes(dict(self.ALL, hands=False), EXP24)["hand_recorder"], (False, False))
+        self.assertEqual(options.boxes(self.ALL, EXP24)["hand_recorder"], (True, True))
+        # two levels: gaze off locks our eye tracker and, through it, the Eye Recorder
+        now = options.BASELINE + ("--no-gaze",)
+        off = options.boxes(dict(self.ALL, gaze=False), now)
+        self.assertEqual((off["eye_tracker"], off["eye_recorder"]), ((False, False), (False, False)))
+        self.assertNotIn("voice", off)   # a part that needs nothing isn't in it
+
     def test_only_sudo_parts_need_the_password(self):
         picks = {k: False for k in self.ALL}
         picks.update(voice=True, gaze=True, eye_recorder=True, keyboard=True, together=True)

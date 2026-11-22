@@ -25,7 +25,7 @@ while [ $# -gt 0 ]; do
   case $1 in
     --arch) arch=${2:?--arch needs one}; shift ;;
     --version) version=${2:?--version needs one}; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift

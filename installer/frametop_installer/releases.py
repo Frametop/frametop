@@ -155,7 +155,7 @@ def newest_table(get=fetch):
     try:
         table = fetch_json(TABLE_URL, get)
         return table if isinstance(table, dict) else None
-    except (OSError, ValueError):
+    except Exception:  # offline, cut short (http.client.IncompleteRead), or not JSON: no table
         return None
 
 

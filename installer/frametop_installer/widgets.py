@@ -1,6 +1,8 @@
 """The Frametop Installer's small GTK pieces: labels, buttons, list rows, and a password field
 with an on-screen keypad for a controller's laser."""
+import sys
 import threading
+import traceback
 
 import gi
 
@@ -12,9 +14,20 @@ def idle(fn, *args):
     GLib.idle_add(lambda: (fn(*args), False)[1])
 
 
-def in_thread(work, done):
-    """Run work() off the main loop, then done(result) on it."""
-    threading.Thread(target=lambda: idle(done, work()), daemon=True).start()
+def in_thread(work, done, failed=None):
+    """Run work() off the main loop, then done(result) on it. If work raises, failed(error) runs
+    instead, so a page waiting on it can say so; with no failed, the error is printed."""
+    def run():
+        try:
+            result = work()
+        except Exception as e:
+            if failed is None:
+                traceback.print_exc(file=sys.stderr)
+            else:
+                idle(failed, e)
+            return
+        idle(done, result)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def label(text="", css=(), xalign=0, wrap=True, **kw):

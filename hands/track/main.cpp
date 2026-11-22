@@ -57,7 +57,8 @@
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
 // stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
-// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_REACQUIRE (seconds
+// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud: landmarks
+// from the NPU student, the CPU model whenever the daemon is missing or fails; track/npulandmarks.h), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
 // begin on a sharp dip of the thumb-index distance, PinchParams::dip), HANDS_PINCH_FIST_CURL (1.2; 0 off:
@@ -72,6 +73,7 @@
 #include "calibfile.h"
 #include "flagbuf.h"
 #include "io.h"
+#include "npulandmarks.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -275,6 +277,7 @@ int main(int argc, char **argv) {
     std::vector<int> cpus = {5, 6, 7};
     if (const auto c = parse_cpus(setting("HANDS_CPUS").c_str()); !c.empty()) cpus = c;
     if (const std::string m = setting("HANDS_MODELS"); !m.empty()) models = m;
+    std::string npu_dir = setting("HANDS_NPU");
     // Which side camera is which (see the top): auto, 0 or 1, and where that came from
     std::string sides_mode = setting("HANDS_SWAP_SIDES"), sides_from = "config";
     if (sides_mode.empty()) sides_mode = "auto", sides_from = "default";
@@ -334,6 +337,7 @@ int main(int argc, char **argv) {
         else if (a == "--threads" && more) threads = std::max(1, std::atoi(argv[++i]));
         else if (a == "--status" && more) status = std::atof(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
+        else if (a == "--npu" && more) npu_dir = argv[++i];
         else if (a == "--nice" && more) niceness = std::atoi(argv[++i]);
         else if (a == "--int8") int8 = true;
         else if (a == "--no-publish") publish = false;
@@ -378,6 +382,7 @@ int main(int argc, char **argv) {
         else {
             std::printf("usage: %s [--seconds N] [--threads N] [--int8] [--status S] [--models DIR] [--nice N] [--no-publish]\n"
                         "          [--no-gestures] (hands for the cutouts only: no pinches or grips)\n"
+                        "          [--npu DIR] (landmarks from the NPU student through ft-npud in DIR, /run/ft-npud)\n"
                         "          [--record DIR] [--record-for S] [--record-hz N] [--record-only] [--cpus 5,6,7]\n"
                         "          [--sides auto|0|1] (auto: tell from the hands which side camera is which; 1: exchange them,\n"
                         "          as --swap-sides; 0: as ft-camd names them)\n"
@@ -624,6 +629,8 @@ int main(int argc, char **argv) {
     nets.set_contrast(palm_contrast, hand_contrast);
     Pool pool(threads, cpus);
     Tracker tracker(used, nets, pool);
+    std::unique_ptr<NpuLandmarks> npu;
+    if (!npu_dir.empty()) tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, npu_dir)).get());
     tracker.set_keep_presence(keep_presence);
     tracker.set_max_hz(max_hz);
     tracker.set_misread_guard(misread_guard);
@@ -1204,6 +1211,11 @@ int main(int argc, char **argv) {
                         tracker.skeleton().fits ? tracker.skeleton().us_total / tracker.skeleton().fits : 0.0,
                         100 * (cpu1 - cpu0) / dt);
             tracker.skeleton().fits = 0, tracker.skeleton().us_total = 0;
+            if (npu)
+                std::printf("        npu %s: %d landmark calls, %d on the CPU, %d requests (%.2f ms DSP each), %d failures%s%s\n",
+                            npu->connected() ? "connected" : "not connected", s.npu_calls, s.npu_fallbacks, npu->requests,
+                            npu->requests ? npu->dsp_ms / npu->requests : 0.0, npu->failures,
+                            npu->last_error().empty() ? "" : "; last: ", npu->last_error().c_str());
             if (!color.empty())
                 std::printf("        cameras %s%s: colour frames at %.1f (bright at %.0f, dim under %.0f), ambient IR %.1f, "
                             "%d steps with colour, colour placed %.1f ms after capture\n",

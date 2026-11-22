@@ -186,6 +186,25 @@ bool Tracker::inside(const Camera &cam, V2 uv) const {
 void Tracker::run_landmarks(const std::map<std::string, Image> &images, std::vector<View *> &views) {
     if (views.empty()) return;
     const auto t0 = std::chrono::steady_clock::now();
+    if (batch_) {
+        std::vector<const Image *> imgs;
+        std::vector<Roi> rois;
+        std::vector<Landmarks> out;
+        for (View *v : views) imgs.push_back(&images.at(v->cam->name)), rois.push_back(v->roi);
+        if (batch_->run(imgs, rois, out)) {
+            for (size_t i = 0; i < views.size(); ++i) {
+                views[i]->lm = out[i];
+                views[i]->has_lm = true;
+                views[i]->fresh = true;
+            }
+            stats.npu_calls += int(views.size());
+            stats.hand_calls += int(views.size());
+            stats.hand_ms += ms_since(t0);
+            ++stats.hand_batches;
+            return;
+        }
+        stats.npu_fallbacks += int(views.size());
+    }
     std::vector<std::function<void()>> jobs;
     for (View *v : views) {
         const Image &img = images.at(v->cam->name);

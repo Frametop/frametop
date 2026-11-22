@@ -1,7 +1,7 @@
 // ft-handreplay: run a recording (ft-hands --record) through the tracker offline, with the
 // live scheduling, and report how well it kept the hands.
 //
-//   ft-handreplay DIR [--oracle N] [--slow F] [--timeline FILE] [--threads N] [--models DIR]
+//   ft-handreplay DIR [--oracle N] [--slow F] [--timeline FILE] [--threads N] [--models DIR] [--npu DIR]
 //             [--from S] [--to S] [--contrast MODE|PALM/HAND] (clahe[:CLIP], none, stretch)
 //             [--sides file|0|1|auto]
 //
@@ -25,6 +25,8 @@
 //             the time to find a hand that never left the view.
 // --pair-sides: two hands seen at once get one left and one right (Tracker::set_pair_sides).
 // --misread-guard: the tracker's guards for fine-tuned landmark models (Tracker::set_misread_guard).
+// --npu DIR: landmarks from the NPU student through ft-npud in DIR (/run/ft-npud; track/npulandmarks.h), the
+//             --models hand model where it refuses a call.
 // --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1,
 //             --pinch-fist-curl R: the pinch detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as
 //             HANDS_PINCH_DIP=1; --pinch-fist-curl: PinchParams::fist_curl, 1.2 as ft-hands, 0 off, as
@@ -101,6 +103,7 @@
 //             header has each camera's centre and focal length.
 #include "flagbuf.h"
 #include "io.h"
+#include "npulandmarks.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -173,7 +176,7 @@ int main(int argc, char **argv) {
     double fixed_rate = 0, want_hz = 0;
     double flag_every = 0;
     std::vector<double> flag_at;
-    std::string flag_out;
+    std::string flag_out, npu_dir;
     FlagConfig flag_cfg;
     flag_cfg.max_bytes = size_t(400) << 20, flag_cfg.writer_cpus.clear();
     // as ft-hands: the fine-tuned models (models/student) when hands/models.sh fetched them, else the stock ones
@@ -196,6 +199,7 @@ int main(int argc, char **argv) {
         else if (a == "--want-hz" && more) want_hz = std::min(30.0, std::atof(argv[++i]));
         else if (a == "--threads" && more) threads = std::atoi(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
+        else if (a == "--npu" && more) npu_dir = argv[++i];
         else if (a == "--cost") cost = true;
         else if (a == "--cost-hand" && more) cost_hand = std::atof(argv[++i]);
         else if (a == "--cost-palm" && more) cost_palm = std::atof(argv[++i]);
@@ -314,6 +318,8 @@ int main(int argc, char **argv) {
     }
     Pool pool(threads, {2, 3, 4});
     Tracker tracker(used, nets, pool);
+    std::unique_ptr<NpuLandmarks> npu;
+    if (!npu_dir.empty()) tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, npu_dir)).get());
     // The side cameras (see the top): names_swapped exchanges slam_left's and slam_right's names
     // as sets are read.
     bool names_swapped = sides == "1";
@@ -827,6 +833,10 @@ int main(int argc, char **argv) {
                 s.handoff_miss, s.dups, s.splits, s.created, s.merged, s.forgotten);
     std::printf("model calls: palm %d (%.1f/s), hand %d (%.1f/s)\n", s.palm_calls, s.palm_calls / std::max(secs, 1e-9),
                 s.hand_calls, s.hand_calls / std::max(secs, 1e-9));
+    if (npu)
+        std::printf("npu: %d landmark calls in %d requests (%.2f ms DSP a request), %d on the CPU, %d failures\n",
+                    s.npu_calls, npu->requests, npu->requests ? npu->dsp_ms / npu->requests : 0.0, s.npu_fallbacks,
+                    npu->failures);
     {
         std::vector<double> r, step;
         std::map<int, double> prev;

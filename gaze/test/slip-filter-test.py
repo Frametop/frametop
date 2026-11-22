@@ -206,8 +206,11 @@ import eyeslip  # noqa: E402
 
 
 class FakeCal:
+    def __init__(self):
+        self.glint = {0, 1}
+
     def has(self, kind, eye):
-        return True
+        return kind != "glint" or eye in self.glint
 
     def inside(self, eye, gaze):
         return abs(gaze[0]) < 30
@@ -272,18 +275,28 @@ for t in (30.0, 31.0, 32.0, 33.0):   # one eye's glints alone: a misread pair, l
     r = glints(eyes, t, {0: (KNOCK, 0.0), 1: (0.0, 0.0)})
 check("one eye's glints alone: not a knock", (r[0]["moved"], eyes[0].filter.s[0] < 0.3 * KNOCK), (False, True))
 eyes = settled()
+moved = []
 for t in (30.0, 31.0, 32.0):
-    r = glints(eyes, t, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)}, gaze=(25, 0))
-check("looking far aside (the glint fit's error shared by both eyes): not a knock", r[-1]["moved"], False)
+    moved += [v["moved"] for v in glints(eyes, t, {0: (KNOCK, 0.0), 1: (KNOCK, 0.0)}, gaze=(25, 0))]
+check("looking far aside (the glint fit's error shared by both eyes): not a knock", any(moved), False)
 eyes = settled()
+moved = []
 for t in (30.0, 31.0, 32.0):
-    r = glints(eyes, t, {0: (80.0, 0.0), 1: (80.0, 0.0)})
-check("past KNOCK_MAX_DEG: a bad pair, not a knock", r[-1]["moved"], False)
+    moved += [v["moved"] for v in glints(eyes, t, {0: (80.0, 0.0), 1: (80.0, 0.0)})]
+check("past KNOCK_MAX_DEG: a bad pair, not a knock", any(moved), False)
 eyes = settled()
 eyes[1].filter = None   # a one-eye calibration
 for t in (30.0, 31.0):
     r = glints(eyes, t, {0: (KNOCK, 0.0), 1: None})
 check("one eye mapped: two readings aren't enough", r[0]["moved"], False)
+r = glints(eyes, 32.0, {0: (KNOCK, 0.0), 1: None})
+check("...three are a knock", r[0]["moved"], True)
+eyes = settled()
+for e in eyes:
+    e.cal.glint = {0}   # the other eye mapped by its pupil alone (too few glint dots)
+for t in (30.0, 31.0):
+    r = glints(eyes, t, {0: (KNOCK, 0.0), 1: None})
+check("other eye without a glint fit: two readings aren't enough", r[0]["moved"], False)
 r = glints(eyes, 32.0, {0: (KNOCK, 0.0), 1: None})
 check("...three are a knock", r[0]["moved"], True)
 
@@ -454,9 +467,10 @@ small = sliplog.SlipLog(Path(HOME) / "small.jsonl", max_bytes=200)
 for i in range(10):
     small.write({"t": i, "pad": "x" * 40})
 small.flush()
-sliplog.FLUSH_EVERY = 0.0
+flush_every, sliplog.FLUSH_EVERY = sliplog.FLUSH_EVERY, 0.0
 timed = sliplog.SlipLog(Path(HOME) / "timed.jsonl")
 timed.write({"t": 1})
+sliplog.FLUSH_EVERY = flush_every
 check("rows reach the file without a flush (ft-eyes is stopped with os._exit)",
       len((Path(HOME) / "timed.jsonl").read_text().splitlines()), 1)
 check("past its size the log moves to .old", ((Path(HOME) / "small.old.jsonl").exists(),

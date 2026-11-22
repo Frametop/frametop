@@ -20,7 +20,8 @@ GLINT_PAIR = 1.5       # s: two glint readings this close are of the same moment
                        # one every GLINT_EVERY, 1 s), in one eye or across the two
 KNOCK_D = 2.0          # a glint reading this far off what the filter expects (Mahalanobis: at
                        # GLINT_SD's noise, 1 in 7 readings; about 6 degrees)...
-KNOCK_STREAK = 2       # ...this many in a row the same way, in both eyes (3 with one eye mapped),
+KNOCK_STREAK = 2       # ...this many in a row the same way, in both eyes (3 when only this eye
+                       # has a glint fit),
                        # each past MOVE_DEG: a misread pair snaps back. Simulated glints with
                        # GLINT_SD's noise (half of it shared by the eyes) knocked never in an
                        # hour; 8-11 degree knocks were followed in 3-4 s (2026-11-22)
@@ -88,12 +89,13 @@ def take_glint(e, other, t, gaze):
         streak = prev.streak + 1 if same else 1
     e.glint_innov = Innov(t, deg, y, streak)
     knocked, o = False, None
-    if streak >= KNOCK_STREAK:
-        o = other.glint_innov if other is not None and other.filter else None
-        if o is not None:
-            knocked = o.streak >= KNOCK_STREAK and t - o.t <= GLINT_PAIR and slipfilter.moved(deg, o.deg)
-        else:
-            knocked = streak >= KNOCK_STREAK + 1 and (other is None or not other.filter)
+    paired = other is not None and other.filter and other.cal.has("glint", other.eye)
+    if streak >= KNOCK_STREAK and paired:
+        o = other.glint_innov
+        knocked = (o is not None and o.streak >= KNOCK_STREAK and t - o.t <= GLINT_PAIR
+                   and slipfilter.moved(deg, o.deg))
+    elif not paired:
+        knocked = streak >= KNOCK_STREAK + 1   # this eye's glints alone
     if knocked:
         e.filter.inflate(y)
         if o is not None:

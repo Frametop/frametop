@@ -1291,7 +1291,7 @@ struct Pointer {
     PoseSent posed;  // the last plain "pose" (devpose.h)
     // lastMouse: any mouse word from the relay (a release, its own pulses too: mayPoint's idle second);
     // lastUsed: a real use (a move, a press, a scroll step, a key at the gaze): last used wins (PickRayOwner).
-    Clock::time_point lastMouse{}, lastUsed{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
+    Clock::time_point lastMouse{}, lastUsed{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, roleAt{}, noWakeUntil{};
     // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
     // panel then (ft-screens' near claim); the gaze last took it back then.
     Clock::time_point controllerTookAt{}, nearBusyAt{}, gazeWokeAt{};
@@ -3163,6 +3163,7 @@ void Pointer::OverlaysAndRole() {
 
     if (active && !leftHeld && RoleNow() != roleSent) {
         roleSent = RoleNow();
+        roleAt = fr.tnow;
         SendTo(out, FT_SOCK_POINTER, "role " + roleSent);
         if (debug) std::printf("role %s\n", roleSent.c_str());
     }
@@ -3189,8 +3190,9 @@ void Pointer::OverlaysAndRole() {
     }
 
     // Didn't get the hand role (a held controller keeps it): release, back off. Not as a treadmill,
-    // which has no controller role at all (see POINTER_ROLE at the top): its hint says so.
-    if (active && fr.tnow - wokeAt > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
+    // which has no controller role at all (see POINTER_ROLE at the top): its hint says so. A second
+    // after waking, or after a new role (a treadmill's on entering a game becomes the right hand's).
+    if (active && fr.tnow - std::max(wokeAt, roleAt) > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
         sys->GetControllerRoleForTrackedDeviceIndex(ours) == vr::TrackedControllerRole_Invalid &&
         sys->GetInt32TrackedDeviceProperty(ours, vr::Prop_ControllerRoleHint_Int32) !=
             vr::TrackedControllerRole_Treadmill) {
@@ -4287,7 +4289,7 @@ void Pointer::AimAndPose() {
     // the eye's line of sight to the cursor, or a hand's ray from the hand
     if (!dragging && !reuse)
         onVrSettings = (fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight)) ||
-                       (rayToGame && !onPanel && !onScene);
+                       (rayToGame && (!onPanel || t.key.rfind("openxr_", 0) == 0) && !onScene);   // (a game's menu layer is the game's)
     if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
                         t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {
@@ -4487,15 +4489,23 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
 
 void Pointer::AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t) {
     // Where the ray is on Full Keyboard's panel, if it is (see kbray.h). While its press is held the
-    // drag's frozen distance isn't the panel's, so the point is where the ray meets the panel itself.
+    // drag's frozen distance isn't the panel's, so the point is where the ray meets the panel's plane,
+    // past its edges too: a fast swing off its handle (a strip at the bottom edge) still drags it.
     Vec3 p = t.point;
     bool on = !dragging && !onScene && t.key == kbray::kPanel && !onVrSettings;
     if (kbRay.Pressed()) {
         on = false;
         auto it = handles.find(kbray::kPanel);
-        vr::VROverlayIntersectionResults_t r{};
-        if (it != handles.end() && Cast(it->second, anchor, dir, &r))
-            on = true, p = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};
+        vr::ETrackingUniverseOrigin uo;
+        vr::HmdMatrix34_t m{};
+        if (it != handles.end() && overlay->GetOverlayTransformAbsolute(it->second, &uo, &m) == vr::VROverlayError_None &&
+            uo == vr::TrackingUniverseStanding) {
+            const Vec3 n{m.m[0][2], m.m[1][2], m.m[2][2]}, c{m.m[0][3], m.m[1][3], m.m[2][3]};
+            const double across = Dot(dir, n), along = std::fabs(across) > 1e-6 ? Dot(c - anchor, n) / across : -1;
+            if (along > 0) on = true, p = anchor + dir * along;
+        } else if (vr::VROverlayIntersectionResults_t r{}; it != handles.end() && Cast(it->second, anchor, dir, &r)) {
+            on = true, p = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};   // (placed some other way: the panel itself)
+        }
     }
     kbSend(kbRay.Aim(secsOf(fr.tnow), on, {p.x, p.y, p.z}, kbSide()));
 }

@@ -258,9 +258,18 @@ std::vector<Event> Link::Poll() {
             }
             case XCB_PROPERTY_NOTIFY: {
                 auto *n = reinterpret_cast<xcb_property_notify_event_t *>(ev);
-                if (d.role != Role::Steam || n->atom != d.target || !d.top.count(n->window)) break;
-                e.type = Event::Retarget, e.win.id = n->window, take = true;
-                e.win.target = n->state == XCB_PROPERTY_DELETE ? 0 : d.Target(n->window);
+                if (d.role != Role::Steam || !d.top.count(n->window)) break;
+                if (n->atom == d.target) {
+                    e.type = Event::Retarget, e.win.id = n->window, take = true;
+                    e.win.target = n->state == XCB_PROPERTY_DELETE ? 0 : d.Target(n->window);
+                } else if (n->atom == d.netName) {
+                    // Steam's CEF windows can map before they're named "SteamVR - <key>" (right after
+                    // boot, Steam's menu and popups mapped untitled and stayed Steam's: user, 2026-11-21,
+                    // "the left are not pinned onto the display for the Steam menu anymore"). A mapped
+                    // one renamed maps again, so it's classified by the name it has now.
+                    bool mapped = false;
+                    if (d.Read(n->window, &e.win, &mapped) && mapped) e.type = Event::Mapped, take = true;
+                }
                 break;
             }
             case XCB_DESTROY_NOTIFY: {

@@ -149,6 +149,14 @@ static void WithX() {
             xcb_delete_property(app, sw, target);
             xcb_flush(app);
             CHECK(Wait(link, Event::Retarget, sw, &se) && se.win.target == 0);
+            // Named after it mapped (Steam's menu after boot): it maps again, with the name it has now
+            const char *name = "SteamVR - valve.steam.gamepadui.frame.menu.1 (1)";
+            xcb_change_property(app, XCB_PROP_MODE_REPLACE, sw, atom("_NET_WM_NAME"), atom("UTF8_STRING"), 8,
+                                uint32_t(std::strlen(name)), name);
+            xcb_flush(app);
+            CHECK(Wait(link, Event::Mapped, sw, &se));
+            link.Describe(&se.win);   // (as gslink.cpp does for each Mapped)
+            CHECK(se.win.title == name);
             link.Close();
             xcb_destroy_window(app, sw);
             xcb_flush(app);

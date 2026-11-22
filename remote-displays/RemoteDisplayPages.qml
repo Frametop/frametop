@@ -661,53 +661,6 @@ Item {
                                     }
                                 }
                             }
-                            // Its own monitors follow its display panels (Frametop's build of
-                            // Vibepollo; host_monitors.py): this changes the PC itself.
-                            ColumnLayout {
-                                visible: hostCard.canOwnMonitors && (backend.hostMonitors.supported[hostCard.modelData.name] === true
-                                                                     || hostCard.modelData.monitors)
-                                spacing: 0
-                                Layout.fillWidth: true
-                                Controls.Switch {
-                                    objectName: "ownMonitors"
-                                    text: "Turn off and set " + hostCard.modelData.name + "'s own monitors"
-                                    checked: hostCard.modelData.monitors
-                                    onToggled: backend.hostMonitors.setControl(hostCard.modelData.name, checked)
-                                }
-                                Controls.Label {
-                                    objectName: "ownMonitorsHelp"
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.Wrap
-                                    opacity: 0.7
-                                    text: "On " + hostCard.modelData.name + " itself: while one of its displays streams here, it "
-                                          + "turns off each of its monitors that has no display here or whose display is "
-                                          + "disconnected, and puts each of the others in the mode picked for its display. "
-                                          + "Two minutes after the last one stops, they all go back as they were."
-                                }
-                                Controls.Label {
-                                    objectName: "ownMonitorsNote"
-                                    visible: hostCard.modelData.monitors && hostCard.monitorsListed.note !== ""
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.Wrap
-                                    color: Kirigami.Theme.negativeTextColor
-                                    text: hostCard.monitorsListed.note
-                                    textFormat: Text.PlainText
-                                }
-                            }
-                            // Its sign-in is from before Frametop could ask for its monitors: the
-                            // switch can't show until it signs in again (with the switch on, the
-                            // note above says so).
-                            Controls.Label {
-                                objectName: "ownMonitorsSignIn"
-                                visible: hostCard.canOwnMonitors && !hostCard.modelData.monitors
-                                         && hostCard.monitorsListed.stale === true
-                                         && backend.hostMonitors.supported[hostCard.modelData.name] !== true
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                opacity: 0.7
-                                text: "To turn off and set " + hostCard.modelData.name + "'s own monitors from here, sign in "
-                                      + "again: its sign-in is from before Frametop could. (It needs Frametop's build of Vibepollo.)"
-                            }
                             // The Frame's microphone rides along with its streams. Only
                             // Frametop's build of Vibepollo receives it.
                             Controls.Switch {
@@ -790,6 +743,62 @@ Item {
                                                        + "Vibepollo's Web UI (Clients), or adding again."
                                 Controls.ToolTip.visible: hovered
                             }
+                            // Its own monitors follow its display panels (Frametop's build of
+                            // Vibepollo; host_monitors.py): this changes the PC itself. Right above
+                            // the displays it acts on.
+                            Kirigami.Separator {
+                                visible: ownMonitorsBox.visible
+                                Layout.fillWidth: true
+                            }
+                            ColumnLayout {
+                                id: ownMonitorsBox
+                                visible: hostCard.canOwnMonitors && (backend.hostMonitors.supported[hostCard.modelData.name] === true
+                                                                     || hostCard.modelData.monitors)
+                                spacing: 0
+                                Layout.fillWidth: true
+                                Controls.Switch {
+                                    objectName: "ownMonitors"
+                                    text: "Let Frametop control " + hostCard.modelData.name + "'s displays"
+                                    checked: hostCard.modelData.monitors
+                                    onToggled: backend.hostMonitors.setControl(hostCard.modelData.name, checked)
+                                    Controls.ToolTip.text: "This setting lets Frametop turn off or resize "
+                                                           + hostCard.modelData.name + "'s displays while connected."
+                                    Controls.ToolTip.visible: hovered
+                                }
+                                Controls.Label {
+                                    objectName: "ownMonitorsHelp"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    opacity: 0.7
+                                    text: "Lets Frametop turn off or resize " + hostCard.modelData.name + "'s displays while "
+                                          + "connected: each display below switches to its stream size and the scale picked "
+                                          + "in its settings, and the ones that aren't below, or are disconnected, turn off. "
+                                          + "They go back two minutes after the last one stops."
+                                }
+                                Controls.Label {
+                                    objectName: "ownMonitorsNote"
+                                    visible: hostCard.modelData.monitors && hostCard.monitorsListed.note !== ""
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    color: Kirigami.Theme.negativeTextColor
+                                    text: hostCard.monitorsListed.note
+                                    textFormat: Text.PlainText
+                                }
+                            }
+                            // Its sign-in is from before Frametop could ask for its monitors: the
+                            // switch can't show until it signs in again (with the switch on, the
+                            // note above says so).
+                            Controls.Label {
+                                objectName: "ownMonitorsSignIn"
+                                visible: hostCard.canOwnMonitors && !hostCard.modelData.monitors
+                                         && hostCard.monitorsListed.stale === true
+                                         && backend.hostMonitors.supported[hostCard.modelData.name] !== true
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                opacity: 0.7
+                                text: "To let Frametop control " + hostCard.modelData.name + "'s displays, sign in "
+                                      + "again: its sign-in is from before Frametop could. (It needs Frametop's build of Vibepollo.)"
+                            }
                             Controls.Label {
                                 visible: hostCard.modelData.displays.length === 0
                                 text: "No displays yet."
@@ -801,13 +810,15 @@ Item {
                                     id: disp
                                     required property var modelData
                                     readonly property bool appleMain: modelData.app === "apple:physical"
-                                    // A monitor of a PC whose monitors follow its panels: it streams at
-                                    // the mode picked here (or its own), so it has no stream size.
-                                    // (From its own entry: the card's properties aren't there yet
-                                    // while the Repeater makes it.)
+                                    // A monitor of a PC whose monitors follow its panels: the PC puts
+                                    // it at the stream size set here. (From its own entry: the card's
+                                    // properties aren't there yet while the Repeater makes it.)
                                     readonly property bool followsMonitor: modelData.followsMonitor
                                                                            && backend.hostMonitors.supported[modelData.host] !== false
-                                    readonly property bool ownSize: !appleMain && !followsMonitor
+                                    readonly property bool ownSize: !appleMain
+                                    // Its PC could set it, with the switch on (Frametop's build of Vibepollo)
+                                    readonly property bool couldFollow: !followsMonitor && !modelData.virtual && !modelData.kwin
+                                                                        && backend.hostMonitors.supported[modelData.host] === true
                                     readonly property var monitor: followsMonitor
                                         ? ((backend.hostMonitors.listed[modelData.host] || {}).monitors || [])
                                               .find(m => "display:" + m.id === modelData.app) || null : null
@@ -907,13 +918,6 @@ Item {
                                                                              sr.currentValue, sb.value * 1000)
                                             }
                                         }
-                                        MonitorModePicker {
-                                            visible: disp.followsMonitor
-                                            Kirigami.FormData.label: "Its monitor:"
-                                            monitor: disp.monitor
-                                            picked: disp.modelData.mode
-                                            onPick: (mode) => backend.hostMonitors.pickMode(disp.modelData.host, disp.modelData.id, mode)
-                                        }
                                         MonitorScalePicker {
                                             // A PC that can set it (Hyprland, KDE; not Windows), or one picked before
                                             visible: disp.followsMonitor && disp.monitor !== null
@@ -924,6 +928,7 @@ Item {
                                             onPick: (scale) => backend.hostMonitors.pickScale(disp.modelData.host, disp.modelData.id, scale)
                                         }
                                         Controls.Label {
+                                            objectName: "streamHelp"
                                             visible: !disp.modelData.virtual && !disp.modelData.kwin
                                             Layout.fillWidth: true
                                             wrapMode: Text.Wrap
@@ -931,7 +936,12 @@ Item {
                                             text: disp.appleMain
                                                   ? "Streams the Mac's main display at its own resolution, keeping the Mac's keyboard and trackpad working."
                                                   : disp.followsMonitor
-                                                  ? "Streams the monitor at the mode picked above, pixel for pixel. Disconnect it to turn the monitor off."
+                                                  ? disp.modelData.host + "'s monitor switches to this size while it streams, pixel for "
+                                                    + "pixel, and back when it stops. Disconnect it to turn the monitor off."
+                                                  : disp.couldFollow
+                                                  ? "The stream crops or fits " + disp.modelData.host + "'s monitor as it is. To switch the "
+                                                    + "monitor to this size, turn on \"Let Frametop control " + disp.modelData.host
+                                                    + "'s displays\" above."
                                                   : "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
                                         }
                                         RowLayout {

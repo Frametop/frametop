@@ -1,5 +1,5 @@
-"""Remote Displays' "Turn off and set its own monitors" switch and the display panels' mode
-and scale pickers (host_monitors.py, MonitorModePicker.qml, MonitorScalePicker.qml). What is asked, what is run, how the panels'
+"""Remote Displays' "Let Frametop control NAME's displays" switch and the display panels' scale
+pickers (host_monitors.py, MonitorScalePicker.qml). What is asked, what is run, how the panels'
 sizes follow, and the page. Same stand-ins as test_app_windows.py (HOME a temp folder, ft-layout
 not run); the PC is a stand-in for ft_hostapi.request. Needs PySide6 and Kirigami.
 
@@ -53,40 +53,10 @@ class Words(unittest.TestCase):
                          "that would leave no display on")
         self.assertEqual(host_monitors.why("PC", 500, "<html>"), "PC answered 500")
 
-    def test_mode_arg(self):
-        self.assertEqual(host_monitors.mode_arg(HZ60), "2560x1600@60000")
-        self.assertEqual(host_monitors.mode_arg(None), "own")
-
     def test_scale_arg(self):
         self.assertEqual(host_monitors.scale_arg(1.25), "1.25")
         self.assertEqual(host_monitors.scale_arg(2), "2")
         self.assertEqual(host_monitors.scale_arg(None), "own")
-
-
-class Sizes(unittest.TestCase):
-    def test_a_panel_streams_at_its_picked_mode_or_its_monitors(self):
-        host = pc()
-        host["displays"][0]["size"] = [1920, 1080]
-        host["displays"][1]["size"] = [1920, 1080]
-        self.assertEqual([a for _, a in host_monitors.size_changes(host, state()["monitors"])],
-                         [("remote", "set", "pc-edp", "size=2560x1600"), ("remote", "set", "pc-dp", "size=3840x2160")])
-
-    def test_same_size_runs_nothing(self):
-        self.assertEqual(host_monitors.size_changes(pc(), state()["monitors"]), [])
-
-    def test_a_monitor_turned_a_quarter_streams_tall(self):
-        self.assertEqual([a for _, a in host_monitors.size_changes(pc(), state(dp_sideways=True)["monitors"])],
-                         [("remote", "set", "pc-dp", "size=2160x3840")])
-
-    def test_without_the_switch_the_panels_keep_their_size(self):
-        self.assertEqual(host_monitors.size_changes(pc(monitors=False), state(dp_sideways=True)["monitors"]), [])
-
-    def test_a_monitor_that_is_off_has_no_mode_to_follow(self):
-        listed = state()["monitors"]
-        listed[1].update(on=False, mode=None)
-        host = pc()
-        host["displays"][1]["size"] = [1920, 1080]
-        self.assertEqual(host_monitors.size_changes(host, listed), [])
 
 
 class Backend(Base):
@@ -110,24 +80,13 @@ class Backend(Base):
         self.assertTrue(spin(self.app, lambda: self.listed), "no answer")
         return self.listed.pop()["PC"]
 
-    def test_refresh_lists_the_monitors_and_the_panels_follow(self):
+    def test_refresh_lists_the_monitors(self):
         self.b.hostMonitors.refresh("PC")
         got = self.answer()
         self.assertEqual((got["note"], len(got["monitors"])), ("", 2))
         self.assertEqual(self.sent, [(ADDRESS, "GET", host_monitors.ft_hostmonitors.PATH, None)])
-        self.assertEqual(self.ran, [("remote", "set", "pc-dp", "size=2160x3840")])
+        self.assertEqual(self.ran, [], "a panel's stream size is the user's: the monitor follows it, not the other way")
         self.assertEqual(self.b.hostMonitors.supported, {"PC": True})
-
-    def test_answers_before_the_size_runs_ask_for_them_once(self):
-        self.b.hostMonitors.refresh("PC")
-        self.answer()
-        self.b.hostMonitors.refresh("PC")
-        self.answer()
-        self.assertEqual(self.ran, [("remote", "set", "pc-dp", "size=2160x3840")], "one stream restart")
-        self.thens[0]()  # it ran (here the layout stays as it was, so it's asked for again)
-        self.b.hostMonitors.refresh("PC")
-        self.answer()
-        self.assertEqual(len(self.ran), 2)
 
     def test_the_pcs_last_error_is_its_note(self):
         self.reply = (200, state(error="DP-1 refused the mode"))
@@ -157,16 +116,6 @@ class Backend(Base):
         self.answer()
         self.assertEqual(self.sent[-1][1], "GET")
 
-    def test_a_pick_saves_the_mode_and_its_stream_size(self):
-        self.b.hostMonitors.refresh("PC")
-        self.answer()
-        self.ran.clear()
-        self.b.hostMonitors.pickMode("PC", "pc-dp", UHD)
-        self.b.hostMonitors.pickMode("PC", "pc-edp", None)
-        self.assertEqual(self.ran, [("remote", "set", "pc-dp", "mode=3840x2160@60000", "size=2160x3840"),
-                                    ("remote", "set", "pc-edp", "mode=own")])
-        self.assertTrue(all(self.thens[-2:]), "each asks the PC again after")
-
     def test_a_scale_pick_saves_only_the_scale(self):
         self.b.hostMonitors.pickScale("PC", "pc-edp", 1.6)
         self.b.hostMonitors.pickScale("PC", "pc-edp", None)
@@ -188,15 +137,12 @@ class Page(Base):
         HOSTS.mkdir(parents=True, exist_ok=True)
         (HOSTS / f"{ADDRESS}.token").write_text("tok\n")
         self.asked, self.picked = [], []
-        olds = (host_monitors.HostMonitors.refresh, host_monitors.HostMonitors.pickMode,
-                host_monitors.HostMonitors.pickScale)
+        olds = (host_monitors.HostMonitors.refresh, host_monitors.HostMonitors.pickScale)
         host_monitors.HostMonitors.refresh = lambda s, name: self.asked.append(name)
-        host_monitors.HostMonitors.pickMode = lambda s, name, display_id, mode: self.picked.append((name, display_id, mode))
         host_monitors.HostMonitors.pickScale = lambda s, name, display_id, scale: self.picked.append(
             ("scale", name, display_id, scale))
         self.addCleanup(setattr, host_monitors.HostMonitors, "refresh", olds[0])
-        self.addCleanup(setattr, host_monitors.HostMonitors, "pickMode", olds[1])
-        self.addCleanup(setattr, host_monitors.HostMonitors, "pickScale", olds[2])
+        self.addCleanup(setattr, host_monitors.HostMonitors, "pickScale", olds[1])
         self.settings = ft_settings.Settings(start="remote-displays", backends={"remote": self.b})
         self.engine = QQmlApplicationEngine()
         self.warnings = []
@@ -226,9 +172,8 @@ class Page(Base):
     def own_size(self):
         return sorted((i.property("modelData")["id"], i.property("ownSize")) for i in self.found(prop="ownSize"))
 
-    def boxes(self, name="monitorMode"):
-        """Monitor id -> its display's mode (or scale) picker (the virtual display's has no
-        monitor)."""
+    def boxes(self, name="monitorScale"):
+        """Monitor id -> its display's scale picker (the virtual display's has no monitor)."""
         pickers = [(js(b.parentItem().property("monitor")), b) for b in self.found(name)]
         return {m["id"]: b for m, b in pickers if m}
 
@@ -252,8 +197,9 @@ class Page(Base):
         self.assertFalse(switch().property("visible"), "not known yet")
         self.answered()
         self.assertTrue(switch().property("visible"))
-        self.assertEqual(switch().property("text"), "Turn off and set PC's own monitors")
-        self.assertTrue(self.found("ownMonitorsHelp")[0].property("text").startswith("On PC itself:"))
+        self.assertEqual(switch().property("text"), "Let Frametop control PC's displays")
+        self.assertTrue(self.found("ownMonitorsHelp")[0].property("text").startswith(
+            "Lets Frametop turn off or resize PC's displays while connected:"))
         self.b.hostMonitors._done("PC", 404, None)
         spin(self.app, seconds=0.1)
         self.assertFalse(switch().property("visible"), "an older build can't")
@@ -272,40 +218,26 @@ class Page(Base):
         self.assertTrue(self.found("ownMonitors")[0].property("visible"))
         self.assertEqual(self.bad_warnings(), [])
 
-    def test_with_the_switch_on_a_monitor_picks_a_mode_instead_of_a_size(self):
+    def test_the_switch_sits_right_above_the_displays_it_acts_on(self):
+        self.answered()
+        y = lambda name: self.found(name)[0].mapToItem(self.root.contentItem(), 0, 0).y()  # noqa: E731
+        self.assertGreater(y("ownMonitors"), y("shareClipboard"), "after the host's other switches")
+        self.assertLess(y("ownMonitors"), min(d.mapToItem(self.root.contentItem(), 0, 0).y()
+                                              for d in self.found(prop="ownSize")))
+
+    def test_a_monitor_keeps_its_size_boxes_and_says_what_the_size_does(self):
         self.answered()
         self.assertEqual(self.own_size(), [("pc-dp", True), ("pc-edp", True), ("pc-virtual", True)])
+        helps = lambda: {js(d.property("modelData"))["id"]: next(  # noqa: E731
+            h.property("text") for h in items(d) if h.objectName() == "streamHelp") for d in self.found(prop="ownSize")}
+        self.assertIn('turn on "Let Frametop control PC\'s displays" above', helps()["pc-edp"],
+                      "off: a size only crops or fits, and the page says where to change that")
         self.switch_on()
         self.answered()
-        self.assertEqual(self.own_size(), [("pc-dp", False), ("pc-edp", False), ("pc-virtual", True)])
+        self.assertEqual(self.own_size(), [("pc-dp", True), ("pc-edp", True), ("pc-virtual", True)],
+                         "on: the size boxes set the monitor")
+        self.assertIn("PC's monitor switches to this size while it streams", helps()["pc-edp"])
         self.assertEqual(self.bad_warnings(), [])
-
-    def test_the_picker_lists_its_own_mode_and_the_monitors(self):
-        self.switch_on()
-        self.answered()
-        boxes = self.boxes()
-        self.assertEqual(sorted(boxes), ["DP-1", "eDP-2"])
-        edp, dp = boxes["eDP-2"], boxes["DP-1"]
-        texts = lambda box: [c["text"] for c in js(box.property("entries"))]  # noqa: E731
-        self.assertEqual(texts(dp), ["Its own mode (3840 × 2160 at 60 Hz)", "3840 × 2160 at 60 Hz"])
-        self.assertEqual(texts(edp), ["Its own mode", "2560 × 1600 at 240 Hz", "2560 × 1600 at 60 Hz"],
-                         "a mode is picked: its mode now isn't its own")
-        self.assertEqual(edp.property("currentIndex"), 2, "the picked 60 Hz")
-        self.assertEqual(dp.property("currentIndex"), 0)
-        edp.parentItem().choose(0)
-        dp.parentItem().choose(0)  # already its own: nothing to send
-        self.assertEqual(self.picked, [("PC", "pc-edp", None)])
-        self.assertEqual(self.bad_warnings(), [])
-
-    def test_a_picked_mode_it_doesnt_list_still_shows(self):
-        self.switch_on()
-        listed = state()
-        listed["monitors"][0].update(on=False, mode=None, modes=[])  # a Windows PC, the monitor off
-        self.answered(listed)
-        box = self.boxes()["eDP-2"]
-        self.assertEqual([c["text"] for c in js(box.property("entries"))],
-                         ["Its own mode", "2560 × 1600 at 60 Hz"])
-        self.assertEqual(box.property("currentIndex"), 1)
 
     def test_the_scale_picker_shows_where_the_pc_can_set_it(self):
         self.switch_on()

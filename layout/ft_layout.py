@@ -1647,8 +1647,8 @@ def remote_command(args):
                                    "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
         keys = {kv.partition("=")[0] for kv in args[2:]}
-        if keys & {"mode", "scale", "app"}:
-            sync_monitors([host])  # another mode or scale, or another monitor
+        if keys & {"size", "mode", "scale", "app"}:
+            sync_monitors([host])  # another size, mode or scale, or another monitor: before the stream starts over
         # Disconnected: the new settings are for its next connection. A scale changes the PC's
         # desktop, not the stream, so the stream goes on.
         if d.get("off") or keys == {"scale"}:

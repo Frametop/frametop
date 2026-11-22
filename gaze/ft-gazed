@@ -575,7 +575,8 @@ class Service:
             return "all"
         kind = self.kind
         if kind == "own":
-            return "own,mmap1,left,right" if self.fusing else "own,mmap1"
+            # left, right: the fusion's, and the fit pill's looks (gazecheck.pill_ask)
+            return "own,mmap1,left,right" if self.fusing or c.pill_steam else "own,mmap1"
         if kind == "eyes":
             return "left,right,mmap1"
         return ",".join(dict.fromkeys((self.source, "mmap1", "mmap2")))  # mmap2: each eye, for the fallback

@@ -115,7 +115,7 @@ gazecheck.Checks.to_panel = lambda self, command: panel.append(command)
 # The fake ft-eyes: "fit" answers with finds where the shipped reference puts eyes offset by
 # eyes_state["offset"] (yaw, pitch degrees, both eyes alike).
 REF = fitcoach.Reference.load()
-eyes_state = {"offset": (0.0, 0.0), "jump": (0.0, 0.0), "asked": 0}
+eyes_state = {"offset": (0.0, 0.0), "jump": (0.0, 0.0), "asked": 0, "feature": "pupil"}
 eyes = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 eyes.bind(gazed.EYES_SOCKET)
 eyes.settimeout(0.2)
@@ -147,7 +147,8 @@ def eyes_answer():
                 (a, b), (c, d) = REF.eyes[cam]["jacobian"]
                 jump[name] = {"reseat": False, "jump": bool(yaw or pitch),
                               "jump_px": [a * yaw + b * pitch, c * yaw + d * pitch]}
-            reply = json.dumps({"calibration": {"dots": 27}, "calibrating": False, "dots": 27, "eyes": jump})
+            reply = json.dumps({"calibration": {"dots": 27}, "calibrating": False, "dots": 27, "eyes": jump,
+                                "feature": eyes_state["feature"]})
         elif w[0] == "fit":
             eyes_state["asked"] += 1
             reply = json.dumps(finds())
@@ -286,7 +287,7 @@ check("  a click lets go", wait(lambda: any("a click" in m for m in logs[mark:])
 check("  and takes the dot", closed_with_capture(), True)
 eyes_state["offset"] = (0.0, 0.0)
 
-# The fit pill: our tracker, gaze mode on, the fit check's saved fit.
+# The fit pill: our tracker, gaze mode on.
 fitpill.AGAIN = 1.0   # (not 10 s between pills in a test)
 SETTINGS["tracker"] = "own"
 HELPER["gaze"] = True
@@ -295,11 +296,56 @@ with open(gazed.CONF, "w") as f:
 check("our tracker in use", wait(lambda: svc.kind == "own" and svc.eyes_proc is not None, 6), True)
 check("gaze mode on", wait(lambda: svc.checks.gaze_on is True, 4), True)
 check("ft-eyes' status comes", wait(lambda: time.monotonic() - svc.own_at < 2, 4), True)
+
+# The fit check's saved fit isn't a calibration's seating: the glint jump since the last click.
 n = len(panel)
-time.sleep(2)
-check("sits as saved: no pill", "show pill" in since(n), False)
+eyes_state["offset"] = (0.0, -12.0)   # (the pupils aren't what it reads)
+time.sleep(fitpill.SHOW_HOLD + 2)
+check("a fit check's saved fit: pupils off, no pill", "show pill" in since(n), False)
+eyes_state["offset"] = (0.0, 0.0)
+eyes_state["jump"] = (0.0, -12.0)
+check("  the glint jump opens it", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+check("  says which way", "text Nudge down" in since(n), True)
+eyes_state["jump"] = (0.0, 0.0)
+check("  the jump gone: looks good", wait(lambda: "text Looks good" in since(n), 4), True)
+check("  then it goes", wait(lambda: "hide" in since(n), fitpill.GOOD_SECONDS + 2), True)
+
+# A full calibration's seating is saved as your fit, and a fit check keeps it.
+os.makedirs(os.path.dirname(fitcoach.DOTS), exist_ok=True)
+with open(fitcoach.DOTS, "w") as f:
+    for yaw, pitch in [(0, 0), (15, 0), (-15, 0), (0, 9), (0, -9), (10, 6), (-10, -6), (10, -6)]:
+        eye = {}
+        for cam in (0, 1):
+            (cx, cy), ((a, b), (c, d)) = REF.eyes[cam]["centre"], REF.eyes[cam]["jacobian"]
+            eye[str(cam)] = {"pupil": [cx + a * yaw + b * pitch, cy + c * yaw + d * pitch], "mid": None}
+        f.write(json.dumps({"made": "2026-11-22 09:05:53", "truth": [yaw, pitch], "eye": eye}) + "\n")
+was = open(fitcoach.BASELINE).read()
+eyes_state["feature"] = "net:test"
+check("ft-eyes' status says the eye net", wait(lambda: svc.own.get("feature") == "net:test", 3), True)
+mark = len(logs)
+svc.checks.save_seating()
+check("with the eye net, no seating saved", open(fitcoach.BASELINE).read(), was)
+check("  saying why", any("needs the pupil finder" in m for m in logs[mark:]), True)
+eyes_state["feature"] = "pupil"
+check("  ft-eyes' status says the pupil finder again", wait(lambda: svc.own.get("feature") == "pupil", 3), True)
+svc.checks.save_seating()
+seat = fitcoach.load_baseline()
+check("the calibration's seating saved", fitcoach.from_calibration(seat), True)
+check("  with each eye's Jacobian", all(seat["eyes"][c].get("jacobian") for c in ("0", "1")), True)
+mark = len(logs)
+check("fitcheck is taken", ask("fitcheck").startswith("ok"), True)
+check("it reads a good fit", wait(lambda: ((svc.checks.check or {}).get("coach") or {}).get("good") is not None, 6), True)
+ask("calquit")
+check("  closed", wait(lambda: svc.checks.check is None, 3), True)
+check("the calibration's seating stays", fitcoach.from_calibration(fitcoach.load_baseline()), True)
+check("  saying so", any("calibration's seating stays" in m for m in logs[mark:]), True)
+
+# Against the seating: ft-eyes' pupils, read all the while.
+n = len(panel)
 asked = eyes_state["asked"]
-check("  read all the while", eyes_state["asked"] > 0 and wait(lambda: eyes_state["asked"] > asked + 2, 3), True)
+time.sleep(2)
+check("sits as calibrated: no pill", "show pill" in since(n), False)
+check("  read all the while", eyes_state["asked"] > asked + 2, True)
 eyes_state["offset"] = (0.0, -12.0)   # the pupils sit low: the headset rode up
 start = time.monotonic()
 check("off: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
@@ -314,13 +360,41 @@ eyes_state["offset"] = (0.0, 0.0)
 check("back: looks good", wait(lambda: "text Looks good" in since(n), 4), True)
 check("  with a tick", "mark good" in since(n), True)
 check("  then it goes", wait(lambda: "hide" in since(n), fitpill.GOOD_SECONDS + 2), True)
+eyes_state["offset"] = (-7.0, 0.0)
+n = len(panel)
+check("off to the side: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+check("  says which way", "text Nudge slightly right" in since(n), True)
+HELPER["gaze"] = False
+n = len(panel)
+check("gaze mode off: it goes", wait(lambda: "hide" in since(n), 4), True)
+eyes_state["offset"] = (0.0, 0.0)
+HELPER["gaze"] = True
+check("gaze mode on again", wait(lambda: svc.checks.gaze_on is True, 4), True)
 
 # Looking aside: the reading follows SteamVR's gaze, so no pill.
 n = len(panel)
 look(12.0, -6.0)
-eyes_state["offset"] = (12.0, -6.0)   # the pupils where the reference puts that look
+eyes_state["offset"] = (12.0, -6.0)   # the pupils where the seating puts that look
 time.sleep(fitpill.SHOW_HOLD + 2)
 check("looking aside, seated: no pill", "show pill" in since(n), False)
+look(25.0, 0.0)
+eyes_state["offset"] = (25.0, -12.0)   # past PILL_CENTRE: not read, slipped or not
+time.sleep(fitpill.SHOW_HOLD + 2)
+check("looking far aside: not read, no pill", "show pill" in since(n), False)
+
+
+class Fusion:   # SteamVR's affine: raw, it reads looks out from the centre too far
+    def steam_gaze(self, left, right, clicks=True):
+        return (left[0] * 0.6, left[1] * 0.6)
+
+
+svc.fusion = Fusion()
+look(20.0, 0.0)                       # raw past PILL_CENTRE; through the affine 12
+eyes_state["offset"] = (12.0, 0.0)
+svc.checks.pill_reading = None
+check("SteamVR's look goes through its affine, so the reading is the seating's",
+      wait(lambda: svc.checks.pill_reading is not None and abs(svc.checks.pill_reading[1]["left"]) < 0.5, 4), True)
+svc.fusion = None
 look(0.0, 0.0)
 eyes_state["offset"] = (0.0, 0.0)
 
@@ -334,41 +408,18 @@ ask("calquit")
 check("  closed", wait(lambda: svc.checks.check is None, 3), True)
 eyes_state["offset"] = (0.0, 0.0)
 
-# No saved fit: ft-eyes' glint jump since the last click instead.
-os.remove(fitcoach.BASELINE)
-time.sleep(1)
+# With the eye net, the glint jump even with a seating saved.
+eyes_state["feature"] = "net:test"
+wait(lambda: svc.own.get("feature") == "net:test", 3)
 n = len(panel)
-eyes_state["jump"] = (0.0, -12.0)
-check("no saved fit: the glint jump opens it", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
-check("  says which way", "text Nudge down" in since(n), True)
-eyes_state["jump"] = (0.0, 0.0)
-check("  the jump gone: looks good", wait(lambda: "text Looks good" in since(n), 4), True)
-
-# A full calibration's seating is saved as your fit, and a fit check keeps it.
-os.makedirs(os.path.dirname(fitcoach.DOTS), exist_ok=True)
-with open(fitcoach.DOTS, "w") as f:
-    for yaw, pitch in [(0, 0), (15, 0), (-15, 0), (0, 9), (0, -9), (10, 6), (-10, -6), (10, -6)]:
-        eye = {}
-        for cam in (0, 1):
-            (cx, cy), ((a, b), (c, d)) = REF.eyes[cam]["centre"], REF.eyes[cam]["jacobian"]
-            eye[str(cam)] = {"pupil": [cx + a * yaw + b * pitch, cy + c * yaw + d * pitch], "mid": None}
-        f.write(json.dumps({"made": "2026-11-22 09:05:53", "truth": [yaw, pitch], "eye": eye}) + "\n")
-svc.checks.save_seating()
-seat = fitcoach.load_baseline()
-check("the calibration's seating saved", fitcoach.from_calibration(seat), True)
-check("  with each eye's Jacobian", all(seat["eyes"][c].get("jacobian") for c in ("0", "1")), True)
-mark = len(logs)
-check("fitcheck is taken", ask("fitcheck").startswith("ok"), True)
-check("it reads a good fit", wait(lambda: ((svc.checks.check or {}).get("coach") or {}).get("good") is not None, 6), True)
-ask("calquit")
-check("  closed", wait(lambda: svc.checks.check is None, 3), True)
-check("the calibration's seating stays", fitcoach.from_calibration(fitcoach.load_baseline()), True)
-check("  saying so", any("calibration's seating stays" in m for m in logs[mark:]), True)
-n = len(panel)
-eyes_state["offset"] = (-7.0, 0.0)
-check("off the seating: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
-check("  says which way", "text Nudge slightly right" in since(n), True)
+eyes_state["offset"] = (0.0, -12.0)
+time.sleep(fitpill.SHOW_HOLD + 2)
+check("the eye net: pupils off, no pill", "show pill" in since(n), False)
 eyes_state["offset"] = (0.0, 0.0)
+eyes_state["jump"] = (0.0, -12.0)
+check("  the glint jump opens it", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+eyes_state["jump"] = (0.0, 0.0)
+eyes_state["feature"] = "pupil"
 
 print("all passed" if not failures else f"{len(failures)} failed: {failures}", flush=True)
 shutil.rmtree(HOME, ignore_errors=True)

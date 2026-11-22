@@ -68,7 +68,8 @@ class Touch:
             self.forwarded = True
             self.pressed.clear()
         self.last[side] = now
-        where = {"u": round(u, 5), "v": round(v, 5)}
+        # (a held press's ray meets the panel's plane, past its edges too: the keys see its edge)
+        where = {"u": round(min(max(u, 0.0), 1.0), 5), "v": round(min(max(v, 0.0), 1.0), 5)}
         if verb in ("hover", "move"):
             self.send("pointer", hand=side, phase="move", **where)
         elif verb == "press":

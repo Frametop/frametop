@@ -131,6 +131,25 @@ class Sending(unittest.TestCase):
         hm.sync(host, self.said.append, self.request)
         self.assertEqual({p for *_, p in self.sent}, {49989})
 
+    def test_the_port_is_a_display_panels_not_a_window_panels(self):
+        host = pc()
+        host["displays"][3]["port"] = 49990  # its Frametop windows instance
+        host["displays"][1]["port"] = 49989
+        hm.sync(host, self.said.append, self.request)
+        self.assertEqual({p for *_, p in self.sent}, {49989})
+
+    def test_a_release_that_didnt_take_is_sent_again(self):
+        owed = pc(monitors=False, monitors_release=True)
+        self.replies["POST"] = (0, None)
+        self.assertFalse(hm.release(owed, self.said.append, self.request))
+        self.assertEqual(hm.sync_all([owed], self.said.append, self.request), set())
+        self.replies["POST"] = (200, {"status": True})
+        self.assertEqual(hm.sync_all([owed], self.said.append, self.request), {"PC"})
+        self.assertEqual([(m, b) for _, m, _, b, _ in self.sent], [("POST", {"monitors": {}})] * 3)
+        self.sent.clear()
+        hm.sync_all([pc(monitors=True, monitors_release=True)], self.said.append, self.request)
+        self.assertEqual([m for _, m, *_ in self.sent], ["GET", "POST"], "switched on again: it owes nothing")
+
     def test_release_sends_no_plan(self):
         hm.release(pc(monitors=False), self.said.append, self.request)
         self.assertEqual([(m, b) for _, m, _, b, _ in self.sent], [("POST", {"monitors": {}})])
@@ -160,15 +179,15 @@ class Layout(unittest.TestCase):
             raise self.m.NoAnswer("ft-screens isn't running")
         self.m.screens_socket = no_screens
         self.m.save_layout({"hosts": [pc(monitors=False)]})
-        self.synced, self.released = [], []
+        self.synced, self.released, self.release_takes = [], [], True
         for name, fn in (("sync", lambda h, log, request=None: self.synced.append(h["name"])),
-                         ("release", lambda h, log, request=None: self.released.append(h["name"]))):
+                         ("release", lambda h, log, request=None: self.released.append(h["name"]) or self.release_takes)):
             old = getattr(hm, name)
             setattr(hm, name, fn)
             self.addCleanup(setattr, hm, name, old)
-        old = hm.sync_all
+        old = self.real_sync_all = hm.sync_all
         hm.sync_all = lambda hosts, log, request=None: self.synced.extend(
-            h["name"] for h in {id(h): h for h in hosts}.values() if hm.controls(h))
+            h["name"] for h in {id(h): h for h in hosts}.values() if hm.controls(h)) or set()
         self.addCleanup(setattr, hm, "sync_all", old)
 
     def tearDown(self):
@@ -187,6 +206,25 @@ class Layout(unittest.TestCase):
         self.assertEqual(self.released, ["PC"])
         with self.assertRaises(RuntimeError):
             self.m.remote_command(["host", "PC", "monitors=maybe"])
+
+    def test_a_release_that_didnt_take_is_kept_until_it_does(self):
+        self.m.remote_command(["host", "PC", "monitors=on"])
+        self.release_takes = False
+        self.m.remote_command(["host", "PC", "monitors=off"])
+        self.assertIs(self.host().get("monitors_release"), True)
+        hm.sync_all = self.real_sync_all  # (its release is the stand-in)
+        layout = self.m.load_layout()
+        self.m.sync_monitors(layout["hosts"])
+        self.assertIs(self.host().get("monitors_release"), True, "still not taken")
+        self.release_takes = True
+        self.m.sync_monitors(layout["hosts"])
+        self.assertNotIn("monitors_release", self.host())
+        self.assertNotIn("monitors_release", layout["hosts"][0], "nor in the caller's layout")
+        self.assertEqual(self.released, ["PC"] * 3)
+        self.release_takes = False
+        self.m.remote_command(["host", "PC", "monitors=off"])
+        self.m.remote_command(["host", "PC", "monitors=on"])
+        self.assertNotIn("monitors_release", self.host(), "switched on again: nothing owed")
 
     def test_a_mode_is_saved_with_its_size(self):
         self.m.remote_command(["host", "PC", "monitors=on"])

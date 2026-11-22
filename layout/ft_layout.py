@@ -1169,9 +1169,20 @@ def open_remotes(layout, name):
 
 def sync_monitors(hosts):
     """The hosts' monitors follow their display panels, for the ones whose switch is on
-    (ft_hostmonitors: a PC's monitors), before their streams start."""
+    (ft_hostmonitors: a PC's monitors), before their streams start; a host whose switch went off
+    while it didn't answer gets its monitors back first."""
     import ft_hostmonitors   # (its own module: a PC's monitors)
-    ft_hostmonitors.sync_all(hosts, log)
+    released = ft_hostmonitors.sync_all(hosts, log)
+    if not released:
+        return
+    for h in hosts:  # the caller's layout too, for a save of its own after this
+        if h.get("name") in released:
+            h.pop("monitors_release", None)
+    layout = load_layout()
+    for h in layout.get("hosts", []):
+        if h.get("name") in released:
+            h.pop("monitors_release", None)
+    save_layout(layout)
 
 
 def start_remotes(sock, layout, only=None):
@@ -1365,6 +1376,7 @@ def remote_command(args):
                     host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
             elif k == "monitors" and v in ("on", "off"):
                 monitors = host["monitors"] = v == "on"  # its monitors follow its display panels (ft_hostmonitors)
+                host.pop("monitors_release", None)
             elif ft_remotekeys.apply_keyboard_kv(host, k, v):
                 pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
@@ -1374,7 +1386,11 @@ def remote_command(args):
         save_layout(layout)
         if monitors is not None:
             import ft_hostmonitors   # (its own module: a PC's monitors)
-            (ft_hostmonitors.sync if monitors else ft_hostmonitors.release)(host, log)
+            if monitors:
+                ft_hostmonitors.sync(host, log)
+            elif not ft_hostmonitors.release(host, log):
+                host["monitors_release"] = True  # asked again before its next display stream
+                save_layout(layout)
         if not restart:
             return
         # Its streams start over the new way, their panels where they are (ft-screens keeps

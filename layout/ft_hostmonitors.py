@@ -91,8 +91,9 @@ def _same_mode(a, b):
 
 
 def port_of(host):
-    """The port of the host's Vibepollo (its displays'), 0 for the default."""
-    return next((int(d["port"]) for d in host.get("displays", []) if d.get("port")), 0)
+    """The port of the host's Vibepollo (its display panels'; a window panel's is its Frametop
+    windows instance), 0 for the default."""
+    return next((int(d["port"]) for d in host.get("displays", []) if d.get("port") and monitor_of(d)), 0)
 
 
 def ask(host, timeout=3.0, request=None):
@@ -124,24 +125,39 @@ def sync(host, log, request=None):
 
 
 def release(host, log, request=None):
-    """The switch turned off: no plan, every monitor back as it was."""
+    """The switch turned off: no plan, every monitor back as it was. False when the PC didn't
+    take it: ft_layout then keeps `monitors_release` on the host, and sync_all tries again."""
     if host.get("kind", "vibepollo") != "vibepollo":
-        return
+        return True
     request = request or ft_hostapi.request
     try:
         status, _ = request(host["address"], "POST", PATH, body={"monitors": {}}, timeout=20.0, port=port_of(host))
-        if status != 200:
-            log(f"{host.get('name')}: its monitors weren't put back (it answered {status}); they go back "
-                "two minutes after its last display stream ends")
+        if status == 200:
+            return True
+        log(f"{host.get('name')}: its monitors weren't put back (it answered {status}); asked again "
+            "before its next display stream")
     except (OSError, ValueError) as e:
-        log(f"{host.get('name')}: its monitors weren't put back: {e}")
+        log(f"{host.get('name')}: its monitors weren't put back: {e}; asked again before its next display stream")
+    return False
+
+
+def owes_release(host):
+    """The switch went off while the PC didn't take it: its plan is still there to take back
+    (else its panels' streams would go on turning its monitors off)."""
+    return bool(host.get("monitors_release")) and not controls(host)
 
 
 def sync_all(hosts, log, request=None):
-    """sync() for each host that controls its monitors, all at once (each may wait for its PC)."""
+    """sync() for each host that controls its monitors, and release() for each that owes one,
+    all at once (each may wait for its PC). The names of the hosts whose release went through."""
     import concurrent.futures
-    hosts = [h for h in {id(h): h for h in hosts}.values() if controls(h)]
+    hosts = [h for h in {id(h): h for h in hosts}.values() if controls(h) or owes_release(h)]
     if not hosts:
-        return
+        return set()
+
+    def one(h):
+        if owes_release(h):
+            return h.get("name") if release(h, log, request) else None
+        sync(h, log, request)
     with concurrent.futures.ThreadPoolExecutor(len(hosts)) as pool:
-        list(pool.map(lambda h: sync(h, log, request), hosts))
+        return {name for name in pool.map(one, hosts) if name}

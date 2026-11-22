@@ -1,5 +1,5 @@
 """Remote Displays' "Turn off and set its own monitors" switch and the display panels' mode
-pickers (host_monitors.py, MonitorModePicker.qml). What is asked, what is run, how the panels'
+and scale pickers (host_monitors.py, MonitorModePicker.qml, MonitorScalePicker.qml). What is asked, what is run, how the panels'
 sizes follow, and the page. Same stand-ins as test_app_windows.py (HOME a temp folder, ft-layout
 not run); the PC is a stand-in for ft_hostapi.request. Needs PySide6 and Kirigami.
 
@@ -37,9 +37,10 @@ def state(dp_sideways=False, error=""):
     return {"status": True, "backend": "hyprland", "streams": 0, "applies": False, "grace_seconds": 120,
             "error": error, "others_off": True,
             "monitors": [{"id": "eDP-2", "name": "<b>Samsung</b>", "on": True, "primary": True, "mode": HZ240,
-                          "modes": [HZ240, HZ60], "changed": False, "sideways": False},
+                          "modes": [HZ240, HZ60], "changed": False, "sideways": False,
+                          "scale": 1.25, "scales": [1, 1.25, 1.6, 2, 2.5]},
                          {"id": "DP-1", "name": "Dell", "on": True, "primary": False, "mode": UHD,
-                          "modes": [UHD], "changed": False, "sideways": dp_sideways}]}
+                          "modes": [UHD], "changed": False, "sideways": dp_sideways, "scale": 1, "scales": []}]}
 
 
 class Words(unittest.TestCase):
@@ -55,6 +56,11 @@ class Words(unittest.TestCase):
     def test_mode_arg(self):
         self.assertEqual(host_monitors.mode_arg(HZ60), "2560x1600@60000")
         self.assertEqual(host_monitors.mode_arg(None), "own")
+
+    def test_scale_arg(self):
+        self.assertEqual(host_monitors.scale_arg(1.25), "1.25")
+        self.assertEqual(host_monitors.scale_arg(2), "2")
+        self.assertEqual(host_monitors.scale_arg(None), "own")
 
 
 class Sizes(unittest.TestCase):
@@ -150,6 +156,13 @@ class Backend(Base):
                                     ("remote", "set", "pc-edp", "mode=own")])
         self.assertTrue(all(self.thens[-2:]), "each asks the PC again after")
 
+    def test_a_scale_pick_saves_only_the_scale(self):
+        self.b.hostMonitors.pickScale("PC", "pc-edp", 1.6)
+        self.b.hostMonitors.pickScale("PC", "pc-edp", None)
+        self.assertEqual(self.ran, [("remote", "set", "pc-edp", "scale=1.6"), ("remote", "set", "pc-edp", "scale=own")],
+                         "no stream size: a scale changes the PC's desktop, not the stream")
+        self.assertTrue(all(self.thens[-2:]), "each asks the PC again after")
+
     def test_a_sunshine_host_is_not_asked(self):
         set_hosts(dict(pc(), kind="sunshine"))
         self.b.hostMonitors.refresh("PC")
@@ -164,11 +177,15 @@ class Page(Base):
         HOSTS.mkdir(parents=True, exist_ok=True)
         (HOSTS / f"{ADDRESS}.token").write_text("tok\n")
         self.asked, self.picked = [], []
-        olds = (host_monitors.HostMonitors.refresh, host_monitors.HostMonitors.pickMode)
+        olds = (host_monitors.HostMonitors.refresh, host_monitors.HostMonitors.pickMode,
+                host_monitors.HostMonitors.pickScale)
         host_monitors.HostMonitors.refresh = lambda s, name: self.asked.append(name)
         host_monitors.HostMonitors.pickMode = lambda s, name, display_id, mode: self.picked.append((name, display_id, mode))
+        host_monitors.HostMonitors.pickScale = lambda s, name, display_id, scale: self.picked.append(
+            ("scale", name, display_id, scale))
         self.addCleanup(setattr, host_monitors.HostMonitors, "refresh", olds[0])
         self.addCleanup(setattr, host_monitors.HostMonitors, "pickMode", olds[1])
+        self.addCleanup(setattr, host_monitors.HostMonitors, "pickScale", olds[2])
         self.settings = ft_settings.Settings(start="remote-displays", backends={"remote": self.b})
         self.engine = QQmlApplicationEngine()
         self.warnings = []
@@ -198,9 +215,10 @@ class Page(Base):
     def own_size(self):
         return sorted((i.property("modelData")["id"], i.property("ownSize")) for i in self.found(prop="ownSize"))
 
-    def boxes(self):
-        """Monitor id -> its display's mode picker (the virtual display's has no monitor)."""
-        pickers = [(js(b.parentItem().property("monitor")), b) for b in self.found("monitorMode")]
+    def boxes(self, name="monitorMode"):
+        """Monitor id -> its display's mode (or scale) picker (the virtual display's has no
+        monitor)."""
+        pickers = [(js(b.parentItem().property("monitor")), b) for b in self.found(name)]
         return {m["id"]: b for m, b in pickers if m}
 
     def bad_warnings(self):
@@ -277,6 +295,35 @@ class Page(Base):
         self.assertEqual([c["text"] for c in js(box.property("entries"))],
                          ["Its own mode", "2560 × 1600 at 60 Hz"])
         self.assertEqual(box.property("currentIndex"), 1)
+
+    def test_the_scale_picker_shows_where_the_pc_can_set_it(self):
+        self.switch_on()
+        self.answered()
+        for disp in self.found(prop="ownSize"):
+            disp.setProperty("expanded", True)  # its settings open
+        spin(self.app, seconds=0.1)
+        boxes = self.boxes("monitorScale")
+        texts = lambda box: [c["text"] for c in js(box.property("entries"))]  # noqa: E731
+        self.assertEqual(texts(boxes["eDP-2"]), ["Its own scale (125%)", "100%", "125%", "160%", "200%", "250%"])
+        self.assertFalse(boxes["DP-1"].parentItem().property("visible"), "it lists none (a Windows PC)")
+        self.assertTrue(boxes["eDP-2"].parentItem().property("visible"))
+        boxes["eDP-2"].parentItem().choose(3)
+        boxes["eDP-2"].parentItem().choose(0)  # already its own: nothing to send
+        self.assertEqual(self.picked, [("scale", "PC", "pc-edp", 1.6)])
+        self.assertEqual(self.bad_warnings(), [])
+
+    def test_a_picked_scale_shows_even_if_not_listed(self):
+        hosts = pc()
+        hosts["displays"][0]["scale"] = 1.5
+        set_hosts(hosts)
+        self.b.changed.emit()
+        spin(self.app, seconds=0.1)
+        self.answered()
+        box = self.boxes("monitorScale")["eDP-2"]
+        entries = [c["text"] for c in js(box.property("entries"))]
+        self.assertEqual(entries[0], "Its own scale", "a scale is picked: its scale now isn't its own")
+        self.assertIn("150%", entries)
+        self.assertEqual(entries[box.property("currentIndex")], "150%")
 
     def test_the_pcs_note_shows_with_the_switch_on(self):
         self.switch_on()

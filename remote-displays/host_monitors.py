@@ -49,6 +49,11 @@ def mode_arg(mode):
     return "own" if not mode else f"{int(mode['width'])}x{int(mode['height'])}@{int(mode['refresh_mhz'])}"
 
 
+def scale_arg(scale):
+    """ft-layout remote set's scale= value."""
+    return "own" if not scale else f"{float(scale):g}"
+
+
 def size_changes(host, monitors):
     """ft-layout runs that make a controlled host's display panels stream at their monitor's
     mode: the one picked for the panel, else the one the monitor has now. [(label, args)]"""
@@ -93,7 +98,7 @@ class HostMonitors(QObject):
     @Property("QVariantMap", notify=listedChanged)
     def listed(self):
         """Host name -> {monitors: the PC's monitors as it answered (id, name, on, mode, modes,
-        sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
+        scale, scales, sideways, changed, wish), note: what went wrong ("" nothing), stale: its sign-in can't
         reach them (401, 403)}."""
         return dict(self._listed)
 
@@ -150,3 +155,10 @@ class HostMonitors(QObject):
             w, h = stream_size(monitor, mode)
             args.append(f"size={w}x{h}")
         self._run("Setting the monitor's mode", *args, then=lambda: self.refresh(name))
+
+    @Slot(str, str, "QVariant")
+    def pickScale(self, name, display_id, scale):
+        """The scale a display panel's monitor is put in on the PC (1.25: 125%; null: its own).
+        The stream keeps its size: a scale changes the PC's desktop, not its pixels."""
+        self._run("Setting the monitor's scale", "remote", "set", display_id, f"scale={scale_arg(scale)}",
+                  then=lambda: self.refresh(name))

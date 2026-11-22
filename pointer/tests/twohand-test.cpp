@@ -63,6 +63,17 @@ int main() {
         // a palm along the line says nothing: the other hand's twist alone
         assert(p.Now({l.at, {1, 0, 0}}, {r.at, md::RotateAbout({0, 1, 0}, axis, a)}, &mv));
         assert(Near(Apply(mv, {0, 1.3, -0.5}) - Apply(mv, {0, 1.2, -0.5}), md::RotateAbout({0, 0.1, 0}, axis, a)));
+        // nearly half a turn each, one wrist just past it (its angle wraps to -pi): their mean, not 0
+        assert(p.Now({l.at, md::RotateAbout({0, 1, 0}, axis, 3.1)}, {r.at, md::RotateAbout({0, 1, 0}, axis, 3.2)}, &mv));
+        assert(Near(Apply(mv, {0, 1.3, -0.5}) - Apply(mv, {0, 1.2, -0.5}), md::RotateAbout({0, 0.1, 0}, axis, 3.15), 1e-4));
+    }
+    // The hands swap ends (half a yaw), palms up: the panel faces the other way.
+    {
+        twohand::Turn p;
+        p.Begin({l.at, {0, 1, 0}}, {r.at, {0, 1, 0}});
+        assert(p.Now({r.at, {0, 1, 0}}, {l.at, {0, 1, 0}}, &mv));
+        assert(Near(Apply(mv, {0, 1.2, -0.4}) - Apply(mv, {0, 1.2, -0.5}), {0, 0, -0.1}));
+        assert(Near(Apply(mv, {0, 1.3, -0.5}) - Apply(mv, {0, 1.2, -0.5}), {0, 0.1, 0}));
     }
     // A panel 3 m off: it turns about its own centre (it doesn't swing round the hands), and the
     // hands' midpoint moves it by the lever.

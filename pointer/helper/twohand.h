@@ -60,14 +60,19 @@ public:
         // the line's own turn (shortest arc), then the twist about it
         Vec3 arcAxis = md::Cross(u0, u);
         const double arcSin = md::Length(arcAxis), arc = std::atan2(arcSin, md::Dot(u0, u));
-        const bool hasArc = arcSin > 1e-9;
-        if (hasArc) arcAxis = arcAxis * (1.0 / arcSin);
+        bool hasArc = arcSin > 1e-9;
+        if (hasArc) {
+            arcAxis = arcAxis * (1.0 / arcSin);
+        } else if (md::Dot(u0, u) < 0) {   // the hands swapped ends: half a turn, about any axis across the line
+            const Vec3 other = std::fabs(u0.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+            arcAxis = md::Normalize(md::Cross(u0, other)), hasArc = true;
+        }
         auto byArc = [&](Vec3 x) { return hasArc ? md::RotateAbout(x, arcAxis, arc) : x; };
-        double twist = 0, ta, tb;
-        int n = 0;
-        if (AngleAbout(byArc(a0_.palm), a.palm, u, &ta)) twist += ta, ++n;
-        if (AngleAbout(byArc(b0_.palm), b.palm, u, &tb)) twist += tb, ++n;
-        if (n) twist /= n;
+        // the twist: both wrists' mean, the short way between them (3.1 and -3.1 rad make pi, not 0)
+        double twist = 0, ta = 0, tb = 0;
+        const bool okA = AngleAbout(byArc(a0_.palm), a.palm, u, &ta), okB = AngleAbout(byArc(b0_.palm), b.palm, u, &tb);
+        if (okA && okB) twist = ta + std::remainder(tb - ta, 2 * M_PI) / 2;
+        else twist = okA ? ta : okB ? tb : 0;
         auto turn = [&](Vec3 x) { return md::RotateAbout(byArc(x), u, twist); };
         const Vec3 cx = turn({1, 0, 0}), cy = turn({0, 1, 0}), cz = turn({0, 0, 1});
         const Vec3 t = ((a.at + b.at) * 0.5 - (a0_.at + b0_.at) * 0.5) * gain_;

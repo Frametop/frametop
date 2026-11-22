@@ -28,6 +28,9 @@ the dev container:
     (ft-layout remote add pairs a client for it). Each one connects and disconnects on its
     own, or all of a host's at once; a disconnected one keeps its place and settings.
     Its stream's resolution, frame rate and bitrate, its width in VR, and whether it shows.
+  - Monitors, per Vibepollo host (Frametop's build): its own monitors on or off and their
+    modes, while Frametop streams from it (host_monitors.py). Its monitors' panels then stream
+    at the monitor's mode, so they have no stream size here.
   - Windows, per KDE Plasma host running utrack's KWin Window Stream (issue 81): Add windows
     lists its open windows, and each one picked is a panel of its own that the window sizes,
     connecting with one of the host's displays' pairings (kwin_windows.py; ft-layout remote
@@ -66,6 +69,7 @@ import ft_hostsignin  # noqa: E402  (the sign-ins that get one)
 import ftipc  # noqa: E402  (questions to the datagram sockets)
 from fthost import host_command  # noqa: E402  (commands on the SteamOS host)
 from kwin_windows import KwinWindows  # noqa: E402  (a KDE PC's windows: Add windows)
+from host_monitors import HostMonitors  # noqa: E402  (a PC's monitors on or off, their modes)
 
 FT_LAYOUT = os.path.join(LAYOUT_DIR, "ft-layout")
 FT_SCREENS = "\0ft_screens"
@@ -140,6 +144,7 @@ class Backend(QObject):
         self._signInDone.connect(self._sign_in_done, Qt.QueuedConnection)
         self._appWindowsDone.connect(self._app_windows_done, Qt.QueuedConnection)
         self._kwin = KwinWindows(lambda *args: self._run(*args), self)  # in this queue, as it is then
+        self._monitors = HostMonitors(lambda *args: self._run(*args), self)
         self.poll = QTimer(interval=2000, timeout=self._check)
         self.poll.start()
         self.ping = QTimer(interval=15000, timeout=self._ping_hosts)
@@ -219,6 +224,11 @@ class Backend(QObject):
     def kwinWindows(self):
         """A KDE PC's open windows, and adding one as a panel (kwin_windows.py)."""
         return self._kwin
+
+    @Property(QObject, constant=True)
+    def hostMonitors(self):
+        """A PC's own monitors turned on or off and their modes (host_monitors.py)."""
+        return self._monitors
 
     @Property(str, notify=busyChanged)
     def busy(self):

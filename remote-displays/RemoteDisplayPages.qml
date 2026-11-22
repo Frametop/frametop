@@ -426,6 +426,7 @@ Item {
 
     // A KDE PC's open windows to add as panels (issue 81; its own file).
     KwinWindowsDialog { id: kwinDialog; windows: root.backend.kwinWindows }
+    HostMonitorsDialog { id: monitorsDialog; monitors: root.backend.hostMonitors }
 
     // A PIN pairing (a host added with "Pair with a PIN"): the PIN to type in on the host, shown
     // while ft-layout waits for it (3 minutes at most). It closes once the pairing ends either way;
@@ -528,6 +529,12 @@ Item {
                         readonly property bool sunshine: modelData.kind === "sunshine"
                         readonly property bool apple: modelData.kind === "apple"
                         readonly property bool vibepollo: !sunshine && !apple
+                        // Its Vibepollo changes its own monitors (Frametop's build): asked once.
+                        readonly property bool ownsMonitors: backend.hostMonitors.supported[modelData.name] === true
+                        Component.onCompleted: if (vibepollo && modelData.hasToken && kind !== "pin"
+                                                   && !(modelData.name in backend.hostMonitors.supported))
+                                                   backend.hostMonitors.refresh(modelData.name)
+                        readonly property string kind: modelData.kind
                         Layout.fillWidth: true
                         contentItem: ColumnLayout {
                             RowLayout {
@@ -573,6 +580,17 @@ Item {
                                     Controls.ToolTip.text: "Open windows on this PC, each as a panel of its own. Needs KDE "
                                                            + "Plasma with KWin Window Stream (github.com/utrack/kwin-window-stream); "
                                                            + "they connect with this computer's displays' pairing."
+                                    Controls.ToolTip.visible: hovered
+                                }
+                                Controls.Button {
+                                    objectName: "monitorsButton"
+                                    visible: hostCard.vibepollo && hostCard.modelData.hasToken && hostCard.kind !== "pin"
+                                             && backend.hostMonitors.supported[hostCard.modelData.name] !== false
+                                    text: "Monitors…"
+                                    icon.name: "video-display"
+                                    onClicked: monitorsDialog.openFor(hostCard.modelData)
+                                    Controls.ToolTip.text: "Turn its own monitors on or off and change their modes "
+                                                           + "while Frametop streams from it. Needs Frametop's build of Vibepollo."
                                     Controls.ToolTip.visible: hovered
                                 }
                                 Controls.Button {
@@ -748,6 +766,10 @@ Item {
                                     id: disp
                                     required property var modelData
                                     readonly property bool appleMain: modelData.app === "apple:physical"
+                                    // A monitor of a PC that changes its own: it streams at the
+                                    // monitor's mode (Monitors…), so it has no stream size here.
+                                    readonly property bool followsMonitor: hostCard.ownsMonitors && String(modelData.app).startsWith("display:")
+                                    readonly property bool ownSize: !appleMain && !followsMonitor
                                     property bool expanded: false
                                     Layout.fillWidth: true
                                     Kirigami.Separator { Layout.fillWidth: true }
@@ -810,14 +832,14 @@ Item {
                                             Kirigami.FormData.label: "Stream:"
                                             Controls.SpinBox {
                                                 id: sw
-                                                visible: !disp.appleMain
+                                                visible: disp.ownSize
                                                 from: 640; to: 7680; stepSize: 8; editable: true
                                                 value: disp.modelData.width
                                             }
-                                            Controls.Label { visible: !disp.appleMain; text: "×" }
+                                            Controls.Label { visible: disp.ownSize; text: "×" }
                                             Controls.SpinBox {
                                                 id: sh
-                                                visible: !disp.appleMain
+                                                visible: disp.ownSize
                                                 from: 360; to: 4320; stepSize: 8; editable: true
                                                 value: disp.modelData.height
                                             }
@@ -836,11 +858,11 @@ Item {
                                             Controls.Label { text: sb.value === 0 ? "Mbit/s (auto)" : "Mbit/s" }
                                             Controls.Button {
                                                 text: "Apply"
-                                                enabled: (!disp.appleMain && (sw.value !== disp.modelData.width || sh.value !== disp.modelData.height))
+                                                enabled: (disp.ownSize && (sw.value !== disp.modelData.width || sh.value !== disp.modelData.height))
                                                          || sr.currentValue !== disp.modelData.fps || sb.value * 1000 !== disp.modelData.bitrate
                                                 onClicked: backend.setStream(disp.modelData.id,
-                                                                             disp.appleMain ? disp.modelData.width : sw.value,
-                                                                             disp.appleMain ? disp.modelData.height : sh.value,
+                                                                             disp.ownSize ? sw.value : disp.modelData.width,
+                                                                             disp.ownSize ? sh.value : disp.modelData.height,
                                                                              sr.currentValue, sb.value * 1000)
                                             }
                                         }
@@ -851,6 +873,8 @@ Item {
                                             opacity: 0.7
                                             text: disp.appleMain
                                                   ? "Streams the Mac's main display at its own resolution, keeping the Mac's keyboard and trackpad working."
+                                                  : disp.followsMonitor
+                                                  ? "Streams the monitor at its own mode, pixel for pixel: change the mode, or turn the monitor off, with Monitors… above."
                                                   : "The monitor switches to the stream's resolution while it streams (or its closest mode with the same shape), and back when it stops."
                                         }
                                         RowLayout {

@@ -279,6 +279,22 @@ utrack's branch also brings back a panel's saved shown or hidden state when ft-s
 
 Not tested yet: a live stream from a KDE PC, since no PC here runs KDE Plasma with the service. The protocol code is utrack's. Its framing and the key pin are covered by `stream/test/kwin-frame-test.cpp` (`stream/kwin-frame.h`), and the layout and page by `layout/tests/test_kwin_windows.py` and `remote-displays/test/test_kwin_windows.py`.
 
+### A PC's monitors (2026-11-22, local experimental)
+
+Remote Displays can turn a PC's own monitors on or off and put them in another mode, not only pick the size of their streams. It needs Frametop's build of Vibepollo (branch `frametop/monitors`), on Windows, Hyprland or KDE Plasma.
+
+- **While Frametop uses the PC.** The PC keeps the plan and applies it while any Frametop stream of it is live (a display, a window or host input), then puts every monitor back as it was 2 minutes after the last one ends. A reboot puts them back too. Nothing is saved to the PC's own display settings.
+- **Off means detached.** A monitor turned off leaves the desktop as if unplugged: Windows takes it out of the topology (`SetDisplayConfig`, using the layout Windows saved for the ones left on), Hyprland and KDE disable the output. A plan with every monitor off is refused.
+- **The monitor's mode drives its stream.** Each monitor has a mode picker (its own list of modes). A monitor's panel then streams at that mode pixel for pixel, so its stream size controls go away. Virtual displays keep theirs.
+
+The API is `GET` and `POST /api/frametop/monitors` on the Web UI port. `POST` takes `{"monitors": {ID: {"on": BOOL, "mode": {"width", "height", "refresh_mhz"}}}}`; a monitor left out goes back as it was, and `{"monitors": {}}` puts all of them back. The answer lists each monitor (id, name, on, primary, mode, modes, the wish for it, whether Frametop changed it), the streams holding the plan and the grace time. IDs are the ones `/api/display-devices` gives, so a `display:ID` panel matches its monitor. The sign-in token needs the route (`conf/ft_hostsignin.py`, `SCOPES`); a token from before gets 401, and the page asks to sign in again.
+
+In the fork, `src/frametop_monitors.{h,cpp}` holds the plan, the lease, the grace timer and the journal (`frametop_monitors.json` beside `state.json`, so the next start puts monitors back after a crash). `frametop_monitors_service.cpp` makes one for the process, and nvhttp takes a lease for every Frametop launch. The platforms are `src/platform/windows/frametop_monitors_windows.cpp` and `src/platform/linux/frametop_monitors_{hyprland,kscreen,linux}.cpp`. Hyprland turns monitors on before it turns others off, so the desktop never has none.
+
+On the Frame, "Monitors…" on a Vibepollo host's card opens `remote-displays/HostMonitorsDialog.qml` (backend `remote-displays/host_monitors.py`). Apply sends the whole plan, and "Put them all back" sends an empty one. After each answer the host's monitor panels follow it: a new mode sets the panel's size (`ft-layout remote set ID size=WxH`), and a monitor turned off has its panel disconnected, since it has nothing to show and a panel trying again would keep the PC in use. Panels disconnected that way connect again when their monitor is back on. The page asks each Vibepollo host once whether it can, and hides the stream size only for those that can.
+
+Tested on oma7 (Hyprland, a test instance): listing, the refusals (every monitor off, an unknown mode or monitor, a bad body) and storing a plan. Not tested yet: Windows and KDE Plasma live, and the broker path of a Linux host's machine instance. Tests: `tests/unit/test_frametop_monitors.cpp` and `tests/unit/platform/linux/test_frametop_monitors_linux.cpp` in the fork, `remote-displays/test/test_host_monitors.py` here.
+
 ### What stock hosts cost us
 
 | Limit | Effect | What can be done |

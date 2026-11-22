@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
         else if (a == "--npu-det") npu_det = true;
         else if (a == "--cpus" && more) {
             cpus = parse_cpus(argv[++i]);
-            if (cpus.empty()) return std::fprintf(stderr, "--cpus: a list such as 5,6,7\n"), 1;
+            if (cpus.empty()) return std::fprintf(stderr, "--cpus: a list such as 5,6,7 or 5-7\n"), 1;
         }
         else if (a == "--npu-cpu-landmarks") npu_cpu_landmarks = true;
         else if (a == "--cost") cost = true;
@@ -291,7 +291,7 @@ int main(int argc, char **argv) {
     cpu_set_t set;   // first, so every thread made from here on (the NPU client on this one) runs there, as in ft-hands
     CPU_ZERO(&set);
     for (int c : cpus) CPU_SET(c, &set);
-    if (sched_setaffinity(0, sizeof set, &set) < 0) std::perror("sched_setaffinity");
+    if (sched_setaffinity(0, sizeof set, &set) < 0) return std::perror("--cpus"), 1;   // a replay measures: never unpinned
     std::string err;
     std::map<std::string, Camera> calib;
     Nets nets;

@@ -54,7 +54,8 @@ build/flagbuf-test: tests/flagbuf_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/flagbuf_test.cpp $(TRACK) $(LDLIBS)
 
 check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/calibfile-test build/npuheads-test \
-       build/npudetector-test build/npuclient-test build/trackerdet-test
+       build/npudetector-test build/npuclient-test build/trackerdet-test build/cpus-test
+	build/cpus-test
 	build/npuheads-test
 	build/npudetector-test
 	build/npuclient-test
@@ -64,6 +65,10 @@ check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test 
 	build/pinch-test
 	build/flagbuf-test
 	build/calibfile-test
+
+build/cpus-test: tests/cpus_test.cpp track/cpus.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ tests/cpus_test.cpp
 
 build/npuheads-test: tests/npuheads_test.cpp track/npuheads.cpp track/npuheads.h
 	@mkdir -p build

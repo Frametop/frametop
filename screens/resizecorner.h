@@ -46,6 +46,70 @@ inline overlayregion::Region LegacyTarget(int sx, int sy) {
     const double outX = sx > 0 ? 0.5 : 0, inX = sx > 0 ? 0 : 0.5, outY = sy > 0 ? 0.5 : 0;
     return {{false, outX, 0, 0.5, 1}, {false, inX, outY, 0.5, 0.5}};   // (v up: sy +1 is the top)
 }
+// The glow style's hit area is the glow itself, outside the panel only (user, 2026-11-21: "the hitbox
+// on the outside corner of the display is too small and doesn't actually match the glow, the hitbox
+// should be the size of the glow but not be inside the display"): at a corner, the glow's L, `out`
+// deep past each edge and `arm` along it; at an edge (sx or sy 0: "if we approach an edge of a display
+// there should be a glow around where the pointer is that allows us to just increase the size on that
+// axis"), a band `out` deep along the whole edge. Panel metres: x right, y up, from its centre.
+inline double GlowArm(double width, double height) { return std::clamp(0.25 * std::min(width, height), 0.03, 0.10); }
+// The hit canvas's side, square, centred on the corner or the edge's middle.
+inline double GlowCanvas(int sx, int sy, double width, double height, double arm, double out) {
+    return sx && sy ? 2 * std::max(arm, out) : (sx ? height : width) + 2 * out;
+}
+inline overlayregion::Region GlowRegion(int sx, int sy, double width, double height, double arm, double out) {
+    const double size = GlowCanvas(sx, sy, width, height, arm, out), cx = sx * width / 2, cy = sy * height / 2;
+    overlayregion::Region region;
+    auto rect = [&](double x0, double x1, double y0, double y1) {   // (panel metres, either order)
+        region.push_back({false, 0.5 + (std::min(x0, x1) - cx) / size, 0.5 + (std::min(y0, y1) - cy) / size,
+                          std::fabs(x1 - x0) / size, std::fabs(y1 - y0) / size});
+    };
+    const double w = width / 2, h = height / 2;
+    if (sx && sy) {
+        rect(sx * w, sx * (w + out), sy * (h - arm), sy * (h + out));
+        rect(sx * (w - arm), sx * (w + out), sy * h, sy * (h + out));
+    } else if (sx) {
+        rect(sx * w, sx * (w + out), -h, h);
+    } else {
+        rect(-w, w, sy * h, sy * (h + out));
+    }
+    return region;
+}
+// Whether panel point x, y is on a glow hit area, and which: a corner's first (its L runs `arm` along
+// each edge), else an edge's. Never on the panel itself.
+inline bool GlowHit(double width, double height, double arm, double out, double x, double y, int *sx, int *sy) {
+    const double ox = std::fabs(x) - width / 2, oy = std::fabs(y) - height / 2;
+    if (ox > out || oy > out || (ox < 0 && oy < 0)) return false;
+    const int ux = x < 0 ? -1 : 1, uy = y < 0 ? -1 : 1;
+    if ((ox >= 0 && oy >= -arm) || (oy >= 0 && ox >= -arm)) *sx = ux, *sy = uy;
+    else if (ox >= 0) *sx = ux, *sy = 0;
+    else *sx = 0, *sy = uy;
+    return true;
+}
+// Coming up to an edge from inside the panel, within half the band's depth of it: the nearest edge
+// and how close (0..kEdgeNear at the edge), a faint glow there before the pointer is off the panel.
+constexpr double kEdgeNear = 0.35;
+inline double EdgeNear(double width, double height, double out, double x, double y, int *sx, int *sy) {
+    const double ix = width / 2 - std::fabs(x), iy = height / 2 - std::fabs(y), reach = out / 2;
+    if (ix < 0 || iy < 0 || reach <= 0) return 0;
+    const bool side = ix <= iy;
+    const double d = side ? ix : iy;
+    if (d >= reach) return 0;
+    *sx = side ? (x < 0 ? -1 : 1) : 0, *sy = side ? 0 : (y < 0 ? -1 : 1);
+    return kEdgeNear * (1 - d / reach);
+}
+// A screen resized by one edge (its aspect kept): the edge grabbed goes to cu (sx) or cv (sy), the
+// opposite edge stays, the panel grows evenly about its middle the other way. Its new width, and its
+// centre's move (u, v), as ResizeFromCorner's.
+inline double ResizeFromEdge(double width, double aspect, int sx, int sy, double cu, double cv, double minW, double maxW,
+                             double *u, double *v) {
+    double w = width;
+    if (sx) w = sx * cu + width / 2;
+    else if (sy && aspect > 0) w = (sy * cv + aspect * width / 2) / aspect;
+    w = std::clamp(w, minW, maxW);
+    *u = sx * (w - width) / 2, *v = sy * aspect * (w - width) / 2;
+    return w;
+}
 inline double LegacyZone(double width, double height) { return std::clamp(0.2 * std::min(width, height), 0.05, 0.2); }
 inline double LegacyCloseness(double distance, double grip, double width, double height) {
     const double size = LegacySize(grip), zone = LegacyZone(width, height);

@@ -1,5 +1,6 @@
 #include "../resizecorner.h"
 #include <cassert>
+#include <cmath>
 #include <iostream>
 
 int main() {
@@ -184,4 +185,39 @@ int main() {
         }
     }
     std::cout << "ok crisp corners: gap, AA, hover, native gray/white growth, roundness and clear canvas\n";
+
+    // The glow style: the hit area is the glow, outside the panel only, corners first, edges along
+    // their whole length; each hit is in the region painted for it (user, 2026-11-21).
+    for (double W : {0.4, 1.2, 2.5}) for (double H : {0.3, 0.7, 1.4}) {
+        const double arm = resizecorner::GlowArm(W, H), out = 0.07;
+        for (double x = -W / 2 - 0.1; x <= W / 2 + 0.1; x += 0.0071)
+            for (double y = -H / 2 - 0.1; y <= H / 2 + 0.1; y += 0.0067) {
+                int sx = 9, sy = 9;
+                const bool hit = resizecorner::GlowHit(W, H, arm, out, x, y, &sx, &sy);
+                const bool inside = std::fabs(x) < W / 2 && std::fabs(y) < H / 2;
+                const bool band = std::fabs(x) <= W / 2 + out && std::fabs(y) <= H / 2 + out;
+                assert(hit == (band && !inside));   // the whole band round it, none of the panel
+                if (!hit) continue;
+                const double size = resizecorner::GlowCanvas(sx, sy, W, H, arm, out);
+                const auto region = resizecorner::GlowRegion(sx, sy, W, H, arm, out);
+                assert(overlayregion::Contains(region, 0.5 + (x - sx * W / 2) / size, 0.5 + (y - sy * H / 2) / size));
+                if (sx && sy) assert(std::fabs(x) >= W / 2 - arm - 1e-9 && std::fabs(y) >= H / 2 - arm - 1e-9);
+                for (const auto &r : region) assert(r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= 1 + 1e-9 && r.y + r.h <= 1 + 1e-9);
+            }
+        int sx = 0, sy = 0;   // an edge's middle, just off it: that edge alone
+        assert(resizecorner::GlowHit(W, H, arm, out, W / 2 + 0.01, 0, &sx, &sy) && sx == 1 && sy == 0);
+        assert(resizecorner::GlowHit(W, H, arm, out, 0, -H / 2 - 0.01, &sx, &sy) && sx == 0 && sy == -1);
+        assert(resizecorner::GlowHit(W, H, arm, out, -W / 2 - 0.01, H / 2 + 0.01, &sx, &sy) && sx == -1 && sy == 1);
+        assert(resizecorner::EdgeNear(W, H, out, W / 2 - 0.005, 0, &sx, &sy) > 0.29 && sx == 1 && sy == 0);
+        assert(resizecorner::EdgeNear(W, H, out, 0, 0, &sx, &sy) == 0);
+    }
+    // One edge: that axis alone, the opposite edge kept, the aspect kept.
+    double u, v;
+    double w = resizecorner::ResizeFromEdge(1.0, 0.5, 1, 0, 0.7, 0, 0.1, 12, &u, &v);   // right edge from 0.5 to 0.7
+    assert(std::fabs(w - 1.2) < 1e-9 && std::fabs(u - 0.1) < 1e-9 && v == 0 && std::fabs((u - w / 2) - -0.5) < 1e-9);
+    w = resizecorner::ResizeFromEdge(1.0, 0.5, 0, -1, 0, -0.35, 0.1, 12, &u, &v);   // bottom edge from -0.25 to -0.35
+    assert(std::fabs(w * 0.5 - 0.6) < 1e-9 && u == 0 && std::fabs((v + w * 0.5 / 2) - 0.25) < 1e-9);
+    w = resizecorner::ResizeFromEdge(1.0, 0.5, -1, 0, 2.0, 0, 0.1, 12, &u, &v);   // dragged past the far edge: the least
+    assert(std::fabs(w - 0.1) < 1e-9);
+    std::cout << "ok glow resize: hit = glow outside the panel, corners then edges, one-edge resize\n";
 }

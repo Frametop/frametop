@@ -25,7 +25,8 @@ KNOCK_STREAK = 2       # ...this many in a row the same way, in both eyes (3 whe
                        # each past MOVE_DEG: a misread pair snaps back. Simulated glints with
                        # GLINT_SD's noise (half of it shared by the eyes) knocked never in an
                        # hour; 8-11 degree knocks were followed in 3-4 s (2026-11-22)
-KNOCK_MAX_DEG = 12.0   # bigger is a bad glint pair, not the headset (re-seats moved 5-8 degrees)
+KNOCK_MAX_DEG = 30.0   # bigger is a bad glint pair, not the headset (a push on purpose moved both
+                       # eyes' glints 18-20 degrees, SteamVR's look the same: 2026-11-22's test)
 KNOCK_CENTRE = 20.0    # degrees: only looking within this of straight ahead, where the glint fit
                        # is best (looking far aside, its error is shared by both eyes)
 

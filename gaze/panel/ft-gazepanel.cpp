@@ -15,7 +15,9 @@
 // tracker's signal, how much of the last 10 s it was seen) and hints. Every dot a check shows
 // must fit its panel: gazecheck.py's PANEL_DEG mirrors these sizes and checks it. "pill" is a
 // capsule PILL_DEG across (5:1), see-through, PILL_PITCH degrees below straight ahead, for the gaze
-// service's fit pill (gaze/fitpill.py): its mark and its text line only, no dot.
+// service's fit pill (gaze/fitpill.py): its mark and its text line only, no dot, nearer than the
+// rest (kPillDistance) so no panel covers it. The others get in front because ft-screens hides its
+// panels while the pointer helper's "calpanel 1" lease holds (gaze/gazecheck.py renews it).
 //
 // Control socket: abstract unix datagram "@ft_gazepanel" (--socket NAME); a sender with an
 // address gets "ok" or "error ...":
@@ -132,6 +134,9 @@ constexpr double kFitDeg = 40;        // FIT_DEG: the headset fit check's width 
 constexpr double kFiveDeg = 40;       // FIVE_DEG: the five-dot check's width (4:3), past its dots
 constexpr double kPillDeg = 16;       // PILL_DEG: the fit pill's capsule (5:1)
 constexpr double kPillPitch = -12;    // PILL_PITCH: the pill's centre, degrees below straight ahead
+constexpr double kPillDistance = 0.4; // m: the pill is nearer than any panel (a "grab that" one comes to
+                                      // 45 cm): the compositor draws a nearer overlay over it whatever
+                                      // their sort order. Only words, so no vergence to keep
 constexpr int kQuickPx = 320, kFullW = 1024, kFullH = 768, kFitW = 800, kFitH = 600, kFiveW = 800, kFiveH = 600;
 constexpr int kPillW = 560, kPillH = 112;
 constexpr double kDotDeg = 1.8;       // the rec mode's dot overlay: the ring's 1.5 degrees, and a margin
@@ -766,12 +771,13 @@ int main(int argc, char **argv) {
         vr::HmdMatrix34_t m{};
         // Turned down about x by the pill's pitch (none for the others), facing the eyes.
         const double tilt = p.pill ? kPillPitch * M_PI / 180 : 0, c = std::cos(tilt), sn = std::sin(tilt);
+        const double d = p.pill ? std::min(distance, kPillDistance) : distance;
         m.m[0][0] = 1;
         m.m[1][1] = float(c), m.m[1][2] = float(-sn), m.m[2][1] = float(sn), m.m[2][2] = float(c);
-        m.m[1][3] = float(distance * sn), m.m[2][3] = float(-distance * c);
+        m.m[1][3] = float(d * sn), m.m[2][3] = float(-d * c);
         std::lock_guard<std::mutex> lk(g_vr);
         ov->SetOverlayTransformTrackedDeviceRelative(h, vr::k_unTrackedDeviceIndex_Hmd, &m);
-        ov->SetOverlayWidthInMeters(h, float(2 * distance * half));
+        ov->SetOverlayWidthInMeters(h, float(2 * d * half));
     };
     auto hideDot = [&] {
         if (dot.shown && !noVr) {

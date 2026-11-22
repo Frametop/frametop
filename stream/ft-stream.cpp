@@ -822,7 +822,8 @@ std::string Route(const std::string &host, int port) {
 }
 
 // Whether the host's entry in the layout has `key` true: "mic" (Frametop Remote Displays' Send my
-// microphone) or "clipboard" (Share the clipboard). Read again every few seconds while streaming.
+// microphone) or "clipboard" (Share the clipboard), read again every few seconds while streaming;
+// "monitors" and "monitors_release" once, before a display stream (ReleaseMonitors).
 bool HostFlag(const std::string &host, const char *key) {
     const nlohmann::json layout = Layout();
     if (layout.is_null()) return false;

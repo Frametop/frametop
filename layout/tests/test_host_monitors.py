@@ -236,6 +236,24 @@ class Layout(unittest.TestCase):
         self.assertIs(self.host().get("monitors_release"), True)
         self.assertTrue(self.host()["displays"][0].get("off"), "the disconnect saved meanwhile stays")
 
+    def test_a_flag_that_cant_be_saved_is_logged(self):
+        self.m.remote_command(["host", "PC", "monitors=on"])
+        self.release_takes = False
+        said = []
+        old_save, old_log = self.m.save_layout, self.m.log
+        self.m.log = said.append
+
+        def locked(layout):
+            if layout.get("hosts", [{}])[0].get("monitors_release"):
+                raise self.m.LayoutFileError("locked")
+            old_save(layout)
+        self.m.save_layout = locked
+        self.addCleanup(setattr, self.m, "save_layout", old_save)
+        self.addCleanup(setattr, self.m, "log", old_log)
+        self.m.remote_command(["host", "PC", "monitors=off"])  # doesn't raise
+        self.assertIs(self.host()["monitors"], False)
+        self.assertTrue(any("not saved" in line for line in said))
+
     def test_a_mode_is_saved_with_its_size(self):
         self.m.remote_command(["host", "PC", "monitors=on"])
         self.m.remote_command(["set", "pc-dp", "mode=1920x1080@60000"])

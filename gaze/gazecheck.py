@@ -44,7 +44,7 @@ directions: look at each one.
 
 The fit watch (GAZE_FIT_WATCH=1 in frametop.conf, off by default until it's been tried; read
 again when the file changes) adds two things, with our tracker installed, its reference
-(gaze/fit-reference.json) and a saved fit:
+(gaze/fit-reference.json) and a saved fit (a full calibration of our tracker saves one):
   put-on  the quick check that opens when the headset goes on first reads the fit coach while
           you look at its dot, against your saved fit, and holds the dot meanwhile (at most
           PUTON_READ). If the headset sits more than fitcoach.MOVED_DEG from it, or the IPD
@@ -52,11 +52,16 @@ again when the file changes) adds two things, with our tracker installed, its re
           until it's back; then the dot is taken as usual. A left click, Enter, a pinch or Meta+J takes it as
           it sits, and after PUTON_TIMEOUT it's taken anyway. So the click teaches our tracker
           the headset where you meant it to be, not where it landed.
-  slip    while gaze mode is on with our tracker, ft-eyes' glint jump (the headset slipped
-          since the last click; "jump_px" in its status) past fitcoach.MOVED_DEG for SLIP_HOLD
-          shows a small note low in view for NOTE_SECONDS (the panel's "note" strip: "Your
-          headset slipped" and which way to push it), at most once every NOTE_COOLDOWN, and
-          never over a check. It goes sooner once the slip is gone.
+  pill    while gaze mode is on with our tracker and no check runs, a small pill low in view
+          (the panel's "pill"; gaze/fitpill.py decides what it says) says which way to nudge
+          the headset once it has sat more than fitpill.SHOW_DEG off your saved fit for
+          fitpill.SHOW_HOLD, follows you as you move it, then says "Looks good" and goes. The
+          saved fit is the seating of your last full calibration (save_seating: the tracker is
+          most accurate there) or a fit check's; it's read every PILL_EVERY from ft-eyes'
+          pupils while SteamVR's gaze holds steady within PILL_CENTRE, each centre moved by the
+          eye's own Jacobian to where SteamVR says you look (fitcoach.assess's look). Without a
+          calibration's seating, or with the eye net, it follows ft-eyes' glint jump since the
+          last click ("jump_px") instead, as the slip note before it did.
 
 A check asked for while the gaze service idles (quickcal, calibrate, fitcheck) wakes it and
 waits until the tracker sends, at most ft-gazed's WAKE_SETTLE; then it opens, or logs why not.
@@ -130,6 +135,7 @@ from collections import deque
 from pathlib import Path
 
 import fitcoach
+import fitpill
 from fitcheck import MIN_REGION, FitCheck, wrap
 from gazecal import DEFAULT_MODEL, EYE_LOST, FUSION, STATE, Fusion, save_calibration, steady_samples
 
@@ -186,9 +192,10 @@ PUTON_REASON = "the headset went on"
 PUTON_READ = 4.0       # seconds the put-on check holds the dot for a straight-ahead reading
 PUTON_TIMEOUT = 30.0   # seconds it says what to move before the dot is taken as it sits
 PUTON_GONE = 5.0       # seconds without eyes that close it meanwhile (adjusting loses them)
-SLIP_HOLD = 2.0        # seconds a slip lasts before its note
-NOTE_SECONDS = 8.0
-NOTE_COOLDOWN = 120.0
+PILL_EVERY = 0.4       # seconds between the fit pill's readings (ft-eyes "fit")
+PILL_CENTRE = 20.0     # degrees: the pill reads only while SteamVR's gaze stays this near straight ahead
+PILL_STEADY = 6.0      # and within this of its median over the window
+PILL_FRESH = 1.0       # seconds a reading counts for
 
 
 def log(msg):
@@ -353,10 +360,12 @@ class Checks:
         self.last_progress = 0.0
         self.asking = None       # (socket, deadline, done): a command to ft-eyes waiting for its reply
         self.watch = (None, False)  # (frametop.conf's mtime, GAZE_FIT_WATCH on)
-        self.slip_ref = None     # the fit coach's reference, for the slip note (loaded once)
-        self.slip_since = None   # a slip past MOVED_DEG since then
-        self.note_until = None   # the slip note shows until then
-        self.note_next = 0.0     # and not again before
+        self.pill = fitpill.Pill()
+        self.pill_looks = deque()    # (t, yaw, pitch): SteamVR's gaze while no check runs
+        self.pill_reading = None     # (t, terms) from the last "fit" asked for it
+        self.pill_at = 0.0           # last asked
+        self.seating = (None, None, None)   # (fit-baseline.json's mtime, the baseline, its reference)
+        self.slip_ref = None         # the shipped reference, for ft-eyes' glint jumps (loaded once)
         if SCREENS_HIDDEN.exists():
             # An ft-gazed before this one died during a full calibration, with the screens
             # hidden: nothing else shows them (ft-screens' hide has no lease). One that isn't
@@ -650,7 +659,7 @@ class Checks:
                       "own_at": now, "run_blind": blind, "went_blind": False}
         log(f"{kind} check: {reason}" + (" (our tracker's first: no gaze yet, so each click takes the look "
                                          "up to it)" if blind else ""))
-        self.note_until = None   # the check's panel replaces the slip note
+        self.pill.close(now)   # the check's panel replaces the fit pill
         if kind == "quick" and reason == PUTON_REASON:
             self.start_puton(now)
         if kind == "full":
@@ -683,7 +692,7 @@ class Checks:
                       "points": {}, "fit": FitCheck(ignore=ignore), "drawn": {}, "drawn_at": 0.0, "step": None,
                       "coach": self.new_coach()}
         log(f"fit check: {reason}")
-        self.note_until = None
+        self.pill.close(now)
         if self.check["coach"]:
             self.check["coach"]["ipd"] = self.panel_ipd()
         self.to_helper("calpanel 1")
@@ -849,42 +858,106 @@ class Checks:
         if c["puton"]["lines"]:
             self.to_panel("text Look at the dot")
 
-    # --- The slip note (the fit watch: see the top) ---
+    # --- The fit pill (the fit watch: see the top) ---
 
-    def slip_watch(self, now):
+    def pill_tick(self, now):
+        """While no check runs: reads where the headset sits and shows the pill (gaze/fitpill.py)."""
+        if self.asking and now >= self.asking[1]:
+            self.drop_ask()
+        if now - self.pill_at < PILL_EVERY:
+            return
+        self.pill_at = now
         svc = self.svc
         own = svc.own if now - svc.own_at < 3 else {}
         on = (svc.kind == "own" and svc.eyes_proc is not None and own and self.gaze_on
               and self.headset is not False and not self.check and self.fit_watch())
-        hint = None
-        if on:
+        if not on:
+            self.pill_send(self.pill.close(now))
+            self.pill_reading = None
+            return
+        baseline, ref = self.load_seating()
+        if baseline and own.get("feature", "pupil") == "pupil":
+            self.pill_ask(now, baseline, ref)
+            r = self.pill_reading
+            terms = r[1] if r and now - r[0] <= PILL_FRESH else None
+        else:
+            # No calibration seating (or the eye net, whose dots aren't pupils): ft-eyes' glint
+            # jump since the last click, as the slip note had it.
             if self.slip_ref is None:
                 self.slip_ref = fitcoach.Reference.load() or False
             jumps = {}
             for cam, name in enumerate(fitcoach.EYES):
                 j = (own.get("eyes") or {}).get(name, {}).get("jump_px")
-                if j and any(j):
+                if j:
                     jumps[cam] = j
-            hint = fitcoach.position_hint(fitcoach.slip_terms(jumps, self.slip_ref or None))
-        if hint is None:
-            self.slip_since = None
-            if self.note_until is not None and not self.check:
-                self.to_panel("hide")
-            self.note_until = None
+            terms = fitcoach.slip_terms(jumps, self.slip_ref or None) if jumps else None
+        self.pill_send(self.pill.step(now, terms))
+
+    def load_seating(self):
+        """The saved fit (a calibration's seating, or a fit check's) and the reference to read it
+        with, reloaded when the file changes; (None, None) without one."""
+        try:
+            m = os.stat(fitcoach.BASELINE).st_mtime_ns
+        except OSError:
+            m = None
+        if m != self.seating[0]:
+            baseline = fitcoach.load_baseline() if m else None
+            ref = fitcoach.own_reference(baseline, fitcoach.Reference.load()) if baseline else None
+            self.seating = (m, baseline if ref else None, ref)
+        return self.seating[1], self.seating[2]
+
+    def pill_ask(self, now, baseline, ref):
+        """Asks ft-eyes for the last second of pupils; read against the seating once it answers,
+        if SteamVR's gaze held steady near straight ahead over that second."""
+        looks = self.pill_looks
+        while looks and looks[0][0] < now - fitcoach.WINDOW:
+            looks.popleft()
+        if self.asking or len(looks) < 10 or looks[-1][0] - looks[0][0] < 0.8 * fitcoach.WINDOW:
             return
-        if self.note_until is not None:
-            if now >= self.note_until:
-                self.to_panel("hide")
-                self.note_until = None
+        look = (statistics.median(v[1] for v in looks), statistics.median(v[2] for v in looks))
+        if (math.hypot(*look) > PILL_CENTRE
+                or any(math.hypot(y - look[0], p - look[1]) > PILL_STEADY for _, y, p in looks)):
             return
-        if self.slip_since is None:
-            self.slip_since = now
-        if now - self.slip_since >= SLIP_HOLD and now >= self.note_next:
-            self.to_panel("show note")
-            self.to_panel("title Your headset slipped")
-            self.to_panel(f"text {hint['text']}")
-            self.note_until, self.note_next = now + NOTE_SECONDS, now + NOTE_COOLDOWN
-            log(f"slip note: {hint['text']} ({hint['amount']:+.1f} deg)")
+
+        def got(reply):
+            try:
+                summary = {int(cam): v for cam, v in json.loads(reply).items()}
+            except (ValueError, AttributeError):
+                return
+            r = fitcoach.assess(summary, ref, baseline=baseline, look=look)
+            if r["state"] in ("ok", "adjust") and "up" in r["terms"]:
+                self.pill_reading = (time.monotonic(), {k: r["terms"][k] for k in ("up", "left")})
+        self.ask_eyes("fit", 0.4, got)
+
+    def pill_send(self, change):
+        if change is None:
+            return
+        if change[0] == "hide":
+            log("fit pill: closed")
+            self.to_panel("hide")
+            return
+        if change[0] == "show":
+            self.to_panel("show pill")
+        self.to_panel(f"mark {change[2] or 'none'}")
+        self.to_panel(f"text {change[1]}")
+        log(f"fit pill: {change[1]}")
+
+    def save_seating(self):
+        """After a full calibration of our tracker: its seating as your saved fit (fitcoach)."""
+        own = self.svc.own if time.monotonic() - self.svc.own_at <= 5 else {}
+        if own.get("feature", "pupil") != "pupil":
+            log("fit pill: the calibration's seating needs the pupil finder (an eye net's dots aren't pupils)")
+            return
+        seating = fitcoach.seating_from_dots(fitcoach.read_dots(), ipd=self.panel_ipd())
+        if seating is None:
+            log("fit pill: no seating from the calibration's dots")
+            return
+        try:
+            fitcoach.save_baseline(seating)
+        except OSError as e:
+            log(f"fit pill: can't save the calibration's seating: {e}")
+            return
+        log(f"fit pill: the calibration's seating saved as your fit ({fitcoach.BASELINE})")
 
     def fit_tick(self, now):
         c = self.check
@@ -962,6 +1035,12 @@ class Checks:
             return
         if c and self.puton_holds(c):
             self.coach_feed(s, self.sample_at)
+        if not c:
+            m1 = s["src"].get("mmap1") or {}
+            if "hy" in m1:
+                self.pill_looks.append((self.sample_at, m1["hy"], m1["hp"]))
+                if len(self.pill_looks) > 400:
+                    self.pill_looks.popleft()
         if not c or c["done_at"] or self.asking:
             return  # (asking: ft-eyes has this dot's look, or the fit)
         if c["own"]:
@@ -1248,6 +1327,7 @@ class Checks:
                     own = svc.own if time.monotonic() - svc.own_at <= 5 else {}
                     svc.own = dict(own, calibration=dict(own.get("calibration") or {}, dots=c["captured"]))
                     svc.own_at = time.monotonic()
+                    self.save_seating()
                 self.close()
 
             self.to_panel("text Saving the calibration")
@@ -1298,7 +1378,9 @@ class Checks:
             r = k["reading"]
             log(f"fit coach, last reading: {r['state']} against the {r['against']}, terms "
                 + ", ".join(f"{n} {v:+.1f}" for n, v in r["terms"].items()))
-        if k and k["good"] and self.check["kind"] == "fit":
+        if k and k["good"] and self.check["kind"] == "fit" and fitcoach.from_calibration(fitcoach.load_baseline()):
+            log("fit coach: a good fit; your calibration's seating stays your saved fit")
+        elif k and k["good"] and self.check["kind"] == "fit":
             try:
                 fitcoach.save_baseline(fitcoach.make_baseline(k["good"], k["ipd"]))
                 log(f"fit coach: a good fit, saved as yours ({fitcoach.BASELINE})")
@@ -1403,9 +1485,10 @@ class Checks:
 
     def tick(self):
         c = self.check
-        if not c:
-            return
         now = time.monotonic()
+        if not c:
+            self.pill_tick(now)
+            return
         if c["kind"] == "fit":
             # Not closed when the eyes go: adjusting the headset loses them.
             if now - c["started"] > FIT_TIMEOUT:
@@ -1483,7 +1566,6 @@ class Checks:
                 self.reseat_seen = True
                 self.auto_quick("our tracker asked for a click")
         self.need_full("gaze mode is on without a calibration")
-        self.slip_watch(now)
 
     def status(self):
         c = self.check
@@ -1492,7 +1574,7 @@ class Checks:
               "problem": self.problem(),
               "panel": self.panel_proc is not None,
               "last_quick_s": round(time.monotonic() - self.last_quick) if self.last_quick else None,
-              "fit_watch": self.watch[1], "slip_note": self.note_until is not None}
+              "fit_watch": self.watch[1], "fit_pill": self.pill.said[0] if self.pill.said else None}
         if c:
             st["check"] = {"kind": c["kind"], "dot": c["i"] + 1, "dots": len(c["dots"]), "captured": c["captured"],
                            "skipped": c["skipped"], "reason": c["reason"]}

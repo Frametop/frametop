@@ -190,7 +190,7 @@ checks.on_sample(sample)
 checks.back_since -= gazecheck.DON_DELAY  # the eyes back for DON_DELAY
 checks.auto_quick = lambda reason: None
 checks.need_full = lambda reason: None
-checks.slip_watch = lambda now: None
+checks.pill_tick = lambda now: None
 checks.periodic()
 check("eyes back for DON_DELAY: the don re-arms the full calibration", (checks.away, checks.full_armed), (False, True))
 took()

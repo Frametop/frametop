@@ -20,7 +20,11 @@ The IPD reading only becomes a hint once we know the eye cameras move with the l
 (HEADSET-TESTS, 2026-10-14): if they're fixed to the housing, the offset also depends on the IPD
 setting, and that needs a reference per setting. Until then it's reported, not advised.
 
-A baseline is the same reading saved from one person's good fit. Compared with a baseline the
+A baseline is the same reading saved from one person's good fit. A full calibration of our
+tracker saves one too (seating_from_dots): where each pupil sat looking straight ahead while it
+was made, and that eye's own pupil movement per degree. That's the seating the tracker is most
+accurate at, so it replaces a fit check's (which then keeps it), and the fit pill
+(gaze/fitpill.py) guides back to it. Compared with a baseline the
 glint pair's spacing says whether the eye is nearer the camera than then (the eye relief: on
 the maintainer's headset it moved 18 % between two seatings, and 4 % within one), and the put-on
 check says how far the headset moved since. The reference starts as the maintainer's
@@ -259,6 +263,53 @@ def save_baseline(baseline, path=None):
     _write_json(path or BASELINE, baseline)
 
 
+def read_dots(path=DOTS):
+    """calibration-dots.jsonl's rows; a line that doesn't read (cut short) is skipped."""
+    rows = []
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return rows
+
+
+def seating_from_dots(rows, ipd=None):
+    """The newest calibration's seating as a baseline, or None: per eye the pupil looking
+    straight ahead and its own Jacobian (Reference.from_dots on that calibration's dots). The
+    glint spacing isn't in the dots, so this baseline has no eye relief."""
+    made = max((r.get("made", "") for r in rows), default=None)
+    if made is None:
+        return None
+    ref = Reference.from_dots([r for r in rows if r.get("made", "") == made])
+    if not ref.eyes:
+        return None
+    eyes = {str(c): {"centre": [round(v, 2) for v in e["centre"]],
+                     "jacobian": [[round(v, 4) for v in row] for row in e["jacobian"]], "spacing": None}
+            for c, e in sorted(ref.eyes.items())}
+    return {"schema": 1, "made": made, "from": "calibration", "ipd": ipd, "eyes": eyes}
+
+
+def from_calibration(baseline):
+    return bool(baseline) and baseline.get("from") == "calibration"
+
+
+def own_reference(baseline, ref):
+    """The reference to read against baseline: its own Jacobians where it has them (a
+    calibration's seating), else ref's."""
+    eyes = {int(c): {"centre": e["centre"], "jacobian": e["jacobian"]}
+            for c, e in ((baseline or {}).get("eyes") or {}).items() if e.get("jacobian")}
+    if not eyes:
+        return ref
+    for c, e in (ref.eyes.items() if ref else ()):
+        eyes.setdefault(c, e)
+    return Reference(eyes, ipd=baseline.get("ipd"), source="your calibration", made=baseline.get("made", ""))
+
+
 def _write_json(path, obj):
     ft_store.write_json(path, obj, indent=1)
 
@@ -283,13 +334,16 @@ HINTS = {
 }
 
 
-def assess(summary, ref, ipd=None, baseline=None, previous=None):
+def assess(summary, ref, ipd=None, baseline=None, previous=None, look=None):
     """The reading: {"state": "ok" | "adjust" | "lost" | "waiting", "eyes": {camera: {...}},
     "terms": {"up", "left", "ipd", "tilt"} in degrees, "hints": [{"key", "text", "amount"}],
     "provisional", "against": "baseline" | "reference"}.
 
     Against a baseline (the person's own good fit) when there is one, else the reference.
-    previous (an earlier assess() result) keeps the state between OK_DEG and ADJUST_DEG."""
+    previous (an earlier assess() result) keeps the state between OK_DEG and ADJUST_DEG.
+    look (yaw, pitch degrees: where the eyes looked over the window, from SteamVR's tracker,
+    which our slips don't move) moves each centre by the reference's Jacobian, so a reading
+    needn't wait for the eyes to look straight ahead."""
     eyes, hints, offsets = {}, [], {}
     centres = {}
     if baseline:
@@ -304,6 +358,9 @@ def assess(summary, ref, ipd=None, baseline=None, previous=None):
             e["state"] = "found"
             centre = centres.get(cam) or (ref.eyes.get(cam) or {}).get("centre") if ref else centres.get(cam)
             if centre and ref and cam in ref.eyes:
+                if look:
+                    (ja, jb), (jc, jd) = ref.eyes[cam]["jacobian"]
+                    centre = [centre[0] + ja * look[0] + jb * look[1], centre[1] + jc * look[0] + jd * look[1]]
                 dx, dy = s["x"] - centre[0], s["y"] - centre[1]
                 offsets[cam] = ref.degrees(cam, dx, dy)
                 e["offset_px"] = [round(dx, 1), round(dy, 1)]

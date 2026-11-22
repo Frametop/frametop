@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Offline test of the fit watch (gaze/gazecheck.py, GAZE_FIT_WATCH): the fit check keeping a
 good fit as yours, the put-on check in the quick check that opens when the headset goes on
-(holds the dot, says what to move, lets go once it's back or on a click), and the slip note
-with our tracker (ft-eyes' glint jump past the threshold for SLIP_HOLD; gone with the slip;
-not again within NOTE_COOLDOWN).
+(holds the dot, says what to move, lets go once it's back or on a click), and the fit pill
+with our tracker (gaze/fitpill.py: which way to nudge the headset from your saved fit, then
+"Looks good"; from ft-eyes' glint jump without a saved fit; a calibration's seating saved as
+your fit, and kept over a fit check's).
 
 fit-coach-check-test.py's harness: ft-gazed's Service with its sockets renamed, HOME in a temp
 folder, a fake pointer helper, a fake ft-gaze, a fake ft-eyes control socket (its finds from
@@ -36,6 +37,7 @@ loader = importlib.machinery.SourceFileLoader("ftgazed", os.path.join(GAZE, "ft-
 gazed = importlib.util.module_from_spec(importlib.util.spec_from_loader("ftgazed", loader))
 loader.exec_module(gazed)
 import fitcoach  # noqa: E402
+import fitpill  # noqa: E402
 import gazecheck  # noqa: E402  (the module ft-gazed imported)
 
 tag = f"ft_gaze_fit_watch_test_{os.getpid()}"
@@ -284,7 +286,8 @@ check("  a click lets go", wait(lambda: any("a click" in m for m in logs[mark:])
 check("  and takes the dot", closed_with_capture(), True)
 eyes_state["offset"] = (0.0, 0.0)
 
-# The slip note: our tracker, gaze mode on.
+# The fit pill: our tracker, gaze mode on, the fit check's saved fit.
+fitpill.AGAIN = 1.0   # (not 10 s between pills in a test)
 SETTINGS["tracker"] = "own"
 HELPER["gaze"] = True
 with open(gazed.CONF, "w") as f:
@@ -294,22 +297,78 @@ check("gaze mode on", wait(lambda: svc.checks.gaze_on is True, 4), True)
 check("ft-eyes' status comes", wait(lambda: time.monotonic() - svc.own_at < 2, 4), True)
 n = len(panel)
 time.sleep(2)
-check("no slip: no note", "show note" in since(n), False)
-eyes_state["jump"] = (0.0, -12.0)    # the pupils dropped: the headset rode up
+check("sits as saved: no pill", "show pill" in since(n), False)
+asked = eyes_state["asked"]
+check("  read all the while", eyes_state["asked"] > 0 and wait(lambda: eyes_state["asked"] > asked + 2, 3), True)
+eyes_state["offset"] = (0.0, -12.0)   # the pupils sit low: the headset rode up
 start = time.monotonic()
-check("a slip: the note", wait(lambda: "show note" in since(n), gazecheck.SLIP_HOLD + 4), True)
-check("  not before SLIP_HOLD", time.monotonic() - start >= gazecheck.SLIP_HOLD, True)
-check("  saying so", "title Your headset slipped" in since(n), True)
-check("  and which way", any(c.startswith("text Let the headset down") for c in since(n)), True)
+check("off: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+check("  not before SHOW_HOLD", time.monotonic() - start >= fitpill.SHOW_HOLD, True)
+check("  says which way", "text Nudge down" in since(n), True)
+check("  with its arrow", "mark down" in since(n), True)
 check("  no pointer hiding for it", any(c == "calpanel 1" for c in since(n)), False)
+check("  in the status", svc.checks.status()["fit_pill"], "Nudge down")
+eyes_state["offset"] = (0.0, -4.0)
+check("nudged partway: slightly", wait(lambda: "text Nudge slightly down" in since(n), 3), True)
+eyes_state["offset"] = (0.0, 0.0)
+check("back: looks good", wait(lambda: "text Looks good" in since(n), 4), True)
+check("  with a tick", "mark good" in since(n), True)
+check("  then it goes", wait(lambda: "hide" in since(n), fitpill.GOOD_SECONDS + 2), True)
+
+# Looking aside: the reading follows SteamVR's gaze, so no pill.
 n = len(panel)
-eyes_state["jump"] = (0.0, 0.0)
-check("the slip gone: the note goes", wait(lambda: "hide" in since(n), 4), True)
+look(12.0, -6.0)
+eyes_state["offset"] = (12.0, -6.0)   # the pupils where the reference puts that look
+time.sleep(fitpill.SHOW_HOLD + 2)
+check("looking aside, seated: no pill", "show pill" in since(n), False)
+look(0.0, 0.0)
+eyes_state["offset"] = (0.0, 0.0)
+
+# A check opening closes it.
+eyes_state["offset"] = (0.0, -12.0)
+n = len(panel)
+check("off again: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+check("a fit check opens", ask("fitcheck").startswith("ok"), True)
+check("  over the pill", wait(lambda: svc.checks.check is not None and not svc.checks.pill.shown, 3), True)
+ask("calquit")
+check("  closed", wait(lambda: svc.checks.check is None, 3), True)
+eyes_state["offset"] = (0.0, 0.0)
+
+# No saved fit: ft-eyes' glint jump since the last click instead.
+os.remove(fitcoach.BASELINE)
+time.sleep(1)
 n = len(panel)
 eyes_state["jump"] = (0.0, -12.0)
-time.sleep(gazecheck.SLIP_HOLD + 3)
-check("again within NOTE_COOLDOWN: no note", "show note" in since(n), False)
+check("no saved fit: the glint jump opens it", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+check("  says which way", "text Nudge down" in since(n), True)
 eyes_state["jump"] = (0.0, 0.0)
+check("  the jump gone: looks good", wait(lambda: "text Looks good" in since(n), 4), True)
+
+# A full calibration's seating is saved as your fit, and a fit check keeps it.
+os.makedirs(os.path.dirname(fitcoach.DOTS), exist_ok=True)
+with open(fitcoach.DOTS, "w") as f:
+    for yaw, pitch in [(0, 0), (15, 0), (-15, 0), (0, 9), (0, -9), (10, 6), (-10, -6), (10, -6)]:
+        eye = {}
+        for cam in (0, 1):
+            (cx, cy), ((a, b), (c, d)) = REF.eyes[cam]["centre"], REF.eyes[cam]["jacobian"]
+            eye[str(cam)] = {"pupil": [cx + a * yaw + b * pitch, cy + c * yaw + d * pitch], "mid": None}
+        f.write(json.dumps({"made": "2026-11-22 09:05:53", "truth": [yaw, pitch], "eye": eye}) + "\n")
+svc.checks.save_seating()
+seat = fitcoach.load_baseline()
+check("the calibration's seating saved", fitcoach.from_calibration(seat), True)
+check("  with each eye's Jacobian", all(seat["eyes"][c].get("jacobian") for c in ("0", "1")), True)
+mark = len(logs)
+check("fitcheck is taken", ask("fitcheck").startswith("ok"), True)
+check("it reads a good fit", wait(lambda: ((svc.checks.check or {}).get("coach") or {}).get("good") is not None, 6), True)
+ask("calquit")
+check("  closed", wait(lambda: svc.checks.check is None, 3), True)
+check("the calibration's seating stays", fitcoach.from_calibration(fitcoach.load_baseline()), True)
+check("  saying so", any("calibration's seating stays" in m for m in logs[mark:]), True)
+n = len(panel)
+eyes_state["offset"] = (-7.0, 0.0)
+check("off the seating: the pill", wait(lambda: "show pill" in since(n), fitpill.SHOW_HOLD + 4), True)
+check("  says which way", "text Nudge slightly right" in since(n), True)
+eyes_state["offset"] = (0.0, 0.0)
 
 print("all passed" if not failures else f"{len(failures)} failed: {failures}", flush=True)
 shutil.rmtree(HOME, ignore_errors=True)

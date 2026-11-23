@@ -706,8 +706,8 @@ def tests():
 
     # The dashboard tiling keys (defaults): Meta+Shift+Left goes to ft-screens as "tile left" only
     # while it says an anchored app's tile has the focus ("tilefocus 1", renewed every 2 s);
-    # otherwise (a screen's or a remote display's tile too: those are dragged), and once that
-    # lapses, it's the desktop's. Meta+arrows alone move the app's tile too, unless the rules bind
+    # otherwise (a screen's or a remote display's tile too: those are dragged, "tilefocus 2"), and
+    # once that lapses, it's the desktop's. Meta+Alt+Up/Down nudge any tile, a display's too. Meta+arrows alone move the app's tile too, unless the rules bind
     # them: on the desktop they'd quick-tile the window, which halves it. Meta+/ lists the key
     # combinations in frunner.
     LEFT, RIGHT, SLASH = 105, 106, 53

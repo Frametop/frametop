@@ -124,7 +124,7 @@ struct Anchor {
 
     // Standing jumped by `jump` (old standing -> new): the kept frame goes with it. Only while the
     // bar is hidden: shown, Steam's own place for it is the frame, and the next read gives it.
-    // True when the frame changed (the pins move).
+    // True when the frame went with it (the pins move); the caller passes only a jump that moved.
     bool Carry(const float jump[3][4]) {
         if (!Framed() || shown) return false;
         float m[3][4];

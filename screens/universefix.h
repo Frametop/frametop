@@ -19,6 +19,12 @@
 // one step of the head around the switch that its motion doesn't explain. Only its turn about the
 // vertical counts, since both standings are level.
 //
+// A step too far to be standing's is tracking that ran away before the switch: XRService gives up
+// once the head is 10 m from its origin, and the head's step back to the new world's is then
+// that far (11.3 to 13.2 m three times on 2026-11-23, against 0.02 to 0.5 m for standing's
+// jumps). It says nothing about where the old standing is in the new one, so nothing follows it:
+// what was placed stays at its numbers, near the new origin as it was near the old.
+//
 // Header only, with no OpenVR calls: vr.cpp reads SteamVR and passes the values in.
 #pragma once
 
@@ -118,6 +124,7 @@ struct Switch {
     uint64_t from = 0, to = 0;
     bool measured = false;     // the head was tracked around it (else the jump is unknown)
     bool moved = false;        // ...and standing jumped (else `jump` is the identity)
+    bool wild = false;         // ...but the step was too far to be standing's (tracking had run away): not moved
     Pose jump = Identity();    // old standing -> new standing
     double metres = 0, height = 0, turnDeg = 0;
     long lag = 0;              // ticks the universe read changed after standing jumped (logged)
@@ -138,6 +145,8 @@ public:
     int window = 6;
     // A step this far off the head's motion is a jump; less is the head moving unevenly.
     double minJump = 0.02, minTurnDeg = 1.5;
+    // A step further than this isn't standing's jump (`wild`): tracking had run away.
+    double maxJump = 5;
 
     // Each tick, after the poses: the universe now (0: couldn't read it) and the head. True with
     // *out once a switch is `window` ticks old and its jump is worked out.
@@ -219,6 +228,7 @@ private:
             sw->turnDeg = sw->moved ? deg : 0;
             sw->lag = sw->moved ? switchTick_ - s.at : 0;
         }
+        if (sw->moved && sw->metres > maxJump) sw->wild = true, sw->moved = false, sw->jump = Identity();
     }
 };
 

@@ -2154,7 +2154,8 @@ class Backend(QObject):
 
         def job():
             try:
-                r = host("python3", HANDSRATE, "on" if on else "off", "--now", timeout=45)
+                # (twice its wait for SteamVR: each look for XRService takes a while under load)
+                r = host("python3", HANDSRATE, "on" if on else "off", "--now", timeout=2 * handsrate.RESTART_WAIT)
                 self._rate_want = None  # from here the switch shows what the files say
                 self.handsChanged.emit()
                 said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:400]

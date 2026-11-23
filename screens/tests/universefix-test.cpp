@@ -181,6 +181,25 @@ int main() {
         check("no head pose around the switch: not measured", !sw.measured && !sw.moved);
     }
     {
+        // tracking ran away before the switch (2026-11-23: the head 13.2 m off, back at the new
+        // world's origin, turned 161.5 degrees): the step isn't standing's jump
+        const double off[3] = {3.387, 1.640, 12.712}, back[3] = {0.069, 1.591, -0.098};
+        const Pose runaway = Jump(-161.5 * M_PI / 180, off, back);
+        Tracker t;
+        Switch sw;
+        const int n = run(t, runaway, 40, 40, 60, &sw);
+        check("a step of 13 m is wild: measured, not moved, the jump the identity",
+              n == 1 && sw.measured && sw.wild && !sw.moved && apart(sw.jump, Identity()) < 1e-9);
+        check("...and says how far it was", sw.metres > 12 && sw.metres < 14);
+        const double from5[3] = {0, 0, 0}, under[3] = {4.9, 0, 0}, over[3] = {5.1, 0, 0};
+        Tracker u;
+        run(u, Jump(0, from5, under), 40, 40, 60, &sw);
+        check("4.9 m is still a jump", sw.moved && !sw.wild);
+        Tracker v;
+        run(v, Jump(0, from5, over), 40, 40, 60, &sw);
+        check("5.1 m isn't", !sw.moved && sw.wild);
+    }
+    {
         Tracker t;
         Switch sw;
         const Pose h = head(0, 1, 0, 0);

@@ -98,7 +98,7 @@ class Page(unittest.TestCase):
 
         def host(*cmd, timeout=20):
             ran.append(cmd)
-            seen.append(dict(self.b.handsRate))   # while it runs
+            seen.append(dict(self.b.handsRate, timeout=timeout))   # while it runs
             return Ran()
         old, fis.host = fis.host, host
         self.addCleanup(setattr, fis, "host", old)
@@ -111,6 +111,7 @@ class Page(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(ran, [("python3", fis.HANDSRATE, "off", "--now")])
         self.assertEqual((seen[0]["on"], seen[0]["busy"], seen[0]["switching"]), (False, True, True))
+        self.assertEqual(seen[0]["timeout"], 60.0)   # twice handsrate's wait for SteamVR
         self.assertEqual(said, [("60 fps hand tracking off: the controllers track again.", False)])
         st = self.b.handsRate
         self.assertEqual((st["on"], st["busy"], st["switching"]), (True, True, False))   # what the files say again; still held

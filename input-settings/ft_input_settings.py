@@ -149,6 +149,8 @@ HAND_INTERACTIONS = [
      "Holding a screen with both hands turns it on every axis with them."),
     ("HANDS_RELEASE_FREEZE", True, "1", "Moving screens", "Let go without a nudge",
      "A held screen stops following as the fingers start to open, so letting go doesn't move it."),
+    ("HANDS_TRACK_GATE", True, "1", "Moving screens", "Steady through tracking glitches",
+     "A held screen ignores impossible jumps of the hand and holds still when the hand leaves the cameras' view."),
     ("HANDS_GRAB_THAT", True, "1", "Gestures", "Grab that",
      "Reach toward a far screen with an open hand, then pull back into a fist: it comes to arm's reach."),
     ("HANDS_PUSH", True, "1", "Gestures", "Push away",
@@ -173,6 +175,8 @@ HAND_INTERACTIONS = [
      "A faint white glow round the screen \"grab that\" would take."),
     ("HANDS_EDGE_GLOW", True, "1", "Feedback", "Resize and edge glows",
      "A glow at the corner or edge a pinch there would resize or move."),
+    ("HANDS_PUSH_GLOW", False, "1", "Feedback", "Push hint glow",
+     "A dim glow on a near screen an open palm faces (a push or flick would send it away)."),
     ("POINTER_GAZE_TWO_HAND", True, "1", "Gaze + hands", "Two-hand drag (like Meta+J, then Meta+K)",
      "With gaze on: hold a pinch on one hand (nudge it into place), then pinch with the other: the left button "
      "goes down where the dot is; the drag lasts while either pinch is held, and the hand still pinching drags."),
@@ -205,10 +209,6 @@ HAND_INTERACTIONS = [
     ("POINTER_PINCH_NO_RAY", False, "1", "Laser", "Pinch with no laser clicks at the pointer",
      "With no laser up, a pinch or a fist presses where the pointer is and drags it (an air mouse). "
      "Off: a pinch with no laser does nothing."),
-    ("HANDS_PUSH_GLOW", False, "1", "Feedback", "Push hint glow",
-     "A dim glow on a near screen an open palm faces (a push or flick would send it away)."),
-    ("HANDS_TRACK_GATE", True, "1", "Feedback", "Steady through tracking glitches",
-     "A held screen ignores impossible jumps of the hand and holds still when the hand leaves the cameras' view."),
 ]
 # Where the lazy susan brings a screen (SCREEN_SPIN_DISTANCE, m): the Hands page's slider under
 # "Lazy susan brings screens to you", sent live to ft-screens ("spindistance M"). At least 0.9 m,
@@ -382,22 +382,37 @@ GAZE_TRACKERS = {"steam": "SteamVR's eye tracker", "own": "our own eye tracker"}
 # container, which has the host's /etc under /run/host.
 EYEGRAB = ("/etc/frametop/ft-eyegrab", "/run/host/etc/frametop/ft-eyegrab")
 GAZE_EYES = {"auto": "auto", "left": "left eye", "right": "right eye"}
-# Pointer settings: key, label, default, min, max, step, unit.
+# Pointer settings: key, label, default, min, max, step, unit, group, help. The Pointer page
+# shows the "basic" group, the "follow" group while head follow is on, and "fine" on request.
 POINTER_SETTINGS = [
-    ("POINTER_SENSITIVITY", "Speed", 0.03, 0.005, 0.12, 0.001, "°/count"),
-    ("POINTER_CURSOR_DEG", "Dot size", 0.4, 0.1, 2.0, 0.05, "°"),
-    ("POINTER_DISTANCE", "Distance in open space", 1.5, 0.5, 4.0, 0.1, "m"),
-    ("POINTER_ORIGIN_FRACTION", "SteamVR dot shrink", 0.95, 0.5, 0.98, 0.01, ""),
-    ("POINTER_ORIGIN_MARGIN", "Room for small controls", 0.15, 0.03, 0.5, 0.01, "m"),
-    ("POINTER_SCENE_RADIUS", "Dock / window-control reach", 0.5, 0.1, 1.5, 0.05, "m"),
-    ("POINTER_EDGE_REACH", "Panel edge reach", 0.3, 0.0, 1.0, 0.05, "m"),
-    ("POINTER_LEASH_DEG", "Head follow leash", 10, 0, 60, 1, "°"),
-    ("POINTER_LEASH_DELAY", "Head follow delay", 0.2, 0.0, 1.0, 0.05, "s"),
-    ("POINTER_LEASH_RETURN", "Head follow catch-up", 0.2, 0.05, 2.0, 0.05, "s"),
-    ("POINTER_FOLLOW_REACH", "Head follow reach", 70, 20, 85, 1, "°"),
-    ("POINTER_WAKE_COUNTS", "Movement to wake", 40, 5, 200, 5, "counts"),
-    ("POINTER_IDLE", "Release after idle", 30, 5, 120, 5, "s"),
-    ("POINTER_CONTROLLER_PICKUP", "Controller movement to take over", 1.0, 0.5, 5.0, 0.1, "×"),
+    ("POINTER_SENSITIVITY", "Speed", 0.03, 0.005, 0.12, 0.001, "°/count", "basic",
+     "How far the pointer turns for each step the mouse reports."),
+    ("POINTER_CURSOR_DEG", "Dot size", 0.4, 0.1, 2.0, 0.05, "°", "basic",
+     "The size of the dot shown when the pointer isn't on a panel."),
+    ("POINTER_DISTANCE", "Distance off panels", 1.5, 0.5, 4.0, 0.1, "m", "basic",
+     "The nearest the dot comes when it isn't on a panel. It keeps the last panel's depth if that was farther."),
+    ("POINTER_LEASH_DEG", "Leash", 10, 0, 60, 1, "°", "follow",
+     "How far your head can turn before the pointer comes along. 0 locks it to your view."),
+    ("POINTER_LEASH_DELAY", "Delay", 0.2, 0.0, 1.0, 0.05, "s", "follow",
+     "How long your head has to stay past the leash, so a glance doesn't move the pointer."),
+    ("POINTER_LEASH_RETURN", "Catch-up", 0.2, 0.05, 2.0, 0.05, "s", "follow",
+     "Once it comes along, how quickly the pointer settles back to its place in your view."),
+    ("POINTER_FOLLOW_REACH", "Reach", 70, 20, 85, 1, "°", "follow",
+     "How far from the middle of your view the mouse can move the pointer."),
+    ("POINTER_WAKE_COUNTS", "Movement to wake", 40, 5, 200, 5, "counts", "fine",
+     "How much the mouse must move within a second to take the laser. Raise it if a bumped desk wakes the pointer."),
+    ("POINTER_IDLE", "Release after idle", 30, 5, 120, 5, "s", "fine",
+     "Time without mouse use before the controllers get their laser back."),
+    ("POINTER_CONTROLLER_PICKUP", "Controller takes over", 1.0, 0.5, 5.0, 0.1, "×", "fine",
+     "How hard a controller must move to take the laser back. Raise it if resting controllers do."),
+    ("POINTER_ORIGIN_FRACTION", "SteamVR dot shrink", 0.95, 0.5, 0.98, 0.01, "", "fine",
+     "How close to its target the pointer's laser starts. Higher makes SteamVR's own blue dot smaller."),
+    ("POINTER_ORIGIN_MARGIN", "Room for small controls", 0.15, 0.03, 0.5, 0.01, "m", "fine",
+     "The laser starts at least this far in front of its target, so small floating controls stay hittable."),
+    ("POINTER_SCENE_RADIUS", "Dock and window-control reach", 0.5, 0.1, 1.5, 0.05, "m", "fine",
+     "How near the dashboard's dock and SteamVR's window controls the pointer must be to hit them."),
+    ("POINTER_EDGE_REACH", "Panel edge reach", 0.3, 0.0, 1.0, 0.05, "m", "fine",
+     "Just off a panel, the pointer stays on its plane this far, to reach its resize edges and controls."),
 ]
 # Overlay keys (shell patterns) the pointer passes through, comma-separated.
 IGNORE_KEY = "POINTER_IGNORE"
@@ -870,13 +885,13 @@ class Backend(QObject):
     def pointerSettings(self):
         conf = read_conf()
         out = []
-        for key, label, default, lo, hi, step, unit in POINTER_SETTINGS:
+        for key, label, default, lo, hi, step, unit, group, tip in POINTER_SETTINGS:
             try:
                 value = float(conf.get(key, default))
             except ValueError:
                 value = default
             out.append({"key": key, "label": label, "value": value, "min": lo, "max": hi, "step": step,
-                        "unit": unit, "default": default})
+                        "unit": unit, "default": default, "group": group, "help": tip})
         return out
 
     @Slot(str, float)
@@ -2031,14 +2046,13 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=handsChanged)
     def handInteractions(self):
-        """The Hands page's interaction switches, in order: key, label, tip, group (the first of each
-        group carries it, for the section's label), on."""
-        conf, out, last = read_conf(), [], None
+        """The Hands page's interaction switches, in order: key, label, tip, group, on. A group's
+        switches follow one another (HandInteractions.qml shows one group at a time)."""
+        conf, out = read_conf(), []
         for key, default, _, group, label, tip in HAND_INTERACTIONS:
             raw = conf.get(key, "").strip()
             on = default if raw == "" else raw not in ("0", "0.0", "off", "no")
-            out.append({"key": key, "label": label, "tip": tip, "group": group if group != last else "", "on": on})
-            last = group
+            out.append({"key": key, "label": label, "tip": tip, "group": group, "on": on})
         return out
 
     @Slot(str, bool)

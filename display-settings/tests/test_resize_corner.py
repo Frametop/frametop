@@ -15,27 +15,24 @@ import ft_settings  # noqa: E402  (Frametop Settings, the window the display pag
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
-PAGES = Path(fds.HERE) / "DisplayPages.qml"
+PAGES = Path(fds.HERE) / "HandlesPage.qml"
 
 
-def page_errors(backend, first_marker, last_marker):
-    """Frametop Settings opened on Visibility & pins; QML errors from DisplayPages.qml's lines
-    first_marker..last_marker. None when Frametop Settings doesn't load here (no Kirigami)."""
+def page_errors(backend):
+    """Frametop Settings opened on Grab bars & corners; the QML errors from HandlesPage.qml. None
+    when Frametop Settings doesn't load here (no Kirigami)."""
     errors = []
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda ws: errors.extend(w.toString() for w in ws))
-    ft_settings.load(engine, ft_settings.Settings(start="visibility", backends={"display": backend}))
+    ft_settings.load(engine, ft_settings.Settings(start="handles", backends={"display": backend}))
     if not engine.rootObjects():
         return None
     for _ in range(20):
         QGuiApplication.processEvents()
-    lines = PAGES.read_text().split("\n")
-    first = next(i for i, t in enumerate(lines) if first_marker in t) + 1
-    last = next(i for i in range(first, len(lines)) if last_marker in lines[i]) + 1
     for root in engine.rootObjects():
         root.close()
     engine.deleteLater()
-    return [e for e in errors if any(f"DisplayPages.qml:{n}:" in e for n in range(first, last + 1))]
+    return [e for e in errors if "HandlesPage.qml:" in e]
 
 
 class ResizeCorner(unittest.TestCase):
@@ -125,7 +122,7 @@ class ResizeCorner(unittest.TestCase):
         self.assertEqual(self.asked, [])
 
     def test_qml_page_and_color_dialogs_load(self):
-        errors = page_errors(self.b, 'label: "Resize corners"', 'label: "Screens shown"')
+        errors = page_errors(self.b)
         if errors is None:
             self.skipTest("Frametop Settings didn't load here (no Kirigami?)")
         self.assertEqual(errors, [], "Resize settings QML failed to load")

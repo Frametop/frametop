@@ -6,8 +6,8 @@ desktop is unchanged until the new components are installed, restarted and
 internal Steam API integration is experimental. Use the screens backend; the
 gamescope backend is refused in protected mode rather than silently unprotected.
 
-**Turning it on (issue 66, 2026-11-20).** Frametop Settings, Visibility & pins,
-"Steam's lock screen": "Hide Frametop while Steam is locked (experimental)" sets
+**Turning it on (issue 66, 2026-11-20).** Frametop Settings, Steam & notifications,
+"Steam's lock screen": "While Steam is locked: Hide Frametop (experimental)" sets
 `STEAM_PIN_LOCK` in `~/.config/frametop.conf` and applies when the desktop starts
 again (its Restart desktop button). It needs the guard installed
 (`desktops.sh install` puts in `frametop-pin-lock.service`) and a PIN set in

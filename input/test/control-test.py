@@ -234,6 +234,9 @@ CASES += [
     ("action screens_toggle, other user", "action screens_toggle", {"uid": OTHER}),
     ("action not a menu one", "action left", {}), ("action run:", "action run:x", {}),
     ("action keys:", "action keys:125+32", {}), ("action unbound", "action dock_all", {"addr": b""}),
+    ("action gaze_quickcal (the palm's eye row)", "action gaze_quickcal", {"addr": b""}),
+    ("action gaze_quickcal, no pointer", "action gaze_quickcal", {"addr": b"", "no_pointer": True}),
+    ("action gaze_quickcal, paused", "action gaze_quickcal", {"paused": True}),
 ]
 # Wrong word counts: each command with a word too many or too few.
 for w in ("vrbtn left/view 1 2", "vrhello 1", "vrgame 1 2", "vrdash", "gamepad", "gamepad desktop 1", "vrpad",

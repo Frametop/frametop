@@ -47,6 +47,87 @@
   "log": [],
   "raised": null
  },
+ "action gaze_quickcal (the palm's eye row)": {
+  "addr": "",
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "quickcal",
+     "\u0000ft_control_test_gazed"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "gaze_quickcal",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action gaze_quickcal",
+  "log": [
+   "gaze_quickcal"
+  ],
+  "raised": null
+ },
+ "action gaze_quickcal, no pointer": {
+  "addr": "",
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "quickcal",
+     "\u0000ft_control_test_gazed"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "gaze_quickcal",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action gaze_quickcal",
+  "log": [
+   "gaze_quickcal"
+  ],
+  "no_pointer": true,
+  "raised": null
+ },
+ "action gaze_quickcal, paused": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "paused",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action gaze_quickcal",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
  "action keys:": {
   "calls": [
    [

@@ -19,7 +19,12 @@ RowLayout {
     signal customPicked(bool on)
 
     readonly property bool lists: sizes.length > 0
-    readonly property int listedAt: sizes.findIndex(s => s[0] === currentWidth && s[1] === currentHeight)
+    // Where the panel's size is in the list (-1: it isn't a listed one). A function, for the
+    // list's handlers: they run before a property made from sizes has its new value.
+    function listedIndex() {
+        return sizes.findIndex(s => s[0] === currentWidth && s[1] === currentHeight)
+    }
+    readonly property int listedAt: listedIndex()
     // The boxes show, not the list
     readonly property bool typed: !lists || (custom === undefined ? listedAt < 0 : custom === true)
     // The size picked here (the panel's own until one is)
@@ -33,8 +38,8 @@ RowLayout {
         visible: picker.lists && !picker.typed
         model: picker.sizes.map(s => s[0] + " × " + s[1])
         // The list is made again when the PC answers: back to the panel's size then.
-        onModelChanged: currentIndex = picker.listedAt
-        Component.onCompleted: currentIndex = picker.listedAt
+        onModelChanged: currentIndex = picker.listedIndex()
+        Component.onCompleted: currentIndex = picker.listedIndex()
         displayText: currentIndex < 0 ? "Pick a size" : currentText
     }
     Controls.SpinBox {

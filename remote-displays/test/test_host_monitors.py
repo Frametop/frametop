@@ -308,6 +308,15 @@ class Page(Base):
         self.assertEqual((picker.property("pickedWidth"), picker.property("pickedHeight"), picker.property("changed")),
                          (2560, 1440, True), "what Apply sends")
 
+    def test_the_size_list_is_at_the_panels_size_when_the_pc_answers_later(self):
+        self.switch_on()  # the page is there before the PC's answer
+        self.assertEqual(js(self.part("pc-dp", "streamSize").property("model")), [])
+        self.answered()
+        box = self.part("pc-dp", "streamSize")
+        self.assertEqual((js(box.property("model")), box.property("currentIndex"), box.property("displayText")),
+                         (["3840 × 2160", "2560 × 1440"], 0, "3840 × 2160"))
+        self.assertFalse(box.parentItem().property("changed"))
+
     def test_custom_size_shows_the_boxes_with_a_warning_and_stays_on(self):
         shown = lambda name: self.part("pc-dp", name).property("visible")  # noqa: E731
         self.switch_on()

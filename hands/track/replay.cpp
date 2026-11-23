@@ -19,6 +19,7 @@
 // --reacquire S, --reacquire-tiles N, --reacquire-fast: aim the palm search at hands lost within S s
 //             (Tracker::set_reacquire; default off, tiles 2).
 // --views N: a hand's landmark views a step at most (2). --hand-budget N: Tracker::set_hand_budget (4).
+// --full-rate 0|1: Tracker::set_full_rate (0), ft-hands' HANDS_FULL_RATE.
 // --near F: Tracker::set_near (0.5). --hold S: Tracker::set_hold (0.3). --search-budget N: palm tiles per round with one hand tracked (2).
 // --drop-every S: the re-acquire test. Every S s, while two hands are tracked, one of them (left and
 //             right in turn) is made invisible for 0.35 s (Tracker::blind: just past the 0.3 s the tracker
@@ -182,6 +183,7 @@ int main(int argc, char **argv) {
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
     std::string ray_out, tips_out;
     double fixed_rate = 0, want_hz = 0;
+    bool full_rate = false;
     double flag_every = 0;
     std::vector<double> flag_at;
     std::string flag_out, npu_dir;
@@ -228,6 +230,7 @@ int main(int argc, char **argv) {
         else if (a == "--drop-every" && more) drop_every = std::atof(argv[++i]);
         else if (a == "--near" && more) near_frac = std::atof(argv[++i]);
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
+        else if (a == "--full-rate" && more) full_rate = std::atoi(argv[++i]) != 0;
         else if (a == "--search-budget" && more) search_budget1 = std::atoi(argv[++i]);
         else if (a == "--views" && more) max_views = std::max(1, std::atoi(argv[++i]));
         else if (a == "--hand-budget" && more) hand_budget = std::atoi(argv[++i]);
@@ -374,6 +377,7 @@ int main(int argc, char **argv) {
     tracker.set_pair_sides(pair_sides);
     tracker.set_near(near_frac);
     tracker.set_hold(hold);
+    tracker.set_full_rate(full_rate);
     tracker.set_search_budget(3, search_budget1);
     std::vector<std::string> trace;
     if (tl) {

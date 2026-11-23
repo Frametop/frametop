@@ -95,6 +95,7 @@ The displays stream without the desktop too. With the Frametop desktop closed, o
 ```
 layout/ft-layout remote list                 # the remote displays and their streams' state
 layout/ft-layout remote connect|disconnect ID...
+layout/ft-layout remote away on|off          # the headset went off or back on (ft-screens runs it): streams stop and PCs' monitors go back, or start again
 layout/ft-layout remote host NAME mic=on|off # send it the Frame's microphone (streams pick it up within 3 s)
 layout/ft-layout remote host NAME input=on|off|keyboard|mouse # use its keyboard, its mouse or both in Frametop while the headset is worn (Linux hosts)
 layout/ft-layout remote host NAME clipboard=on|off # share copied text and images with it both ways (Vibepollo hosts; shared-clipboard.md)

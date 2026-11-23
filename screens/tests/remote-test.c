@@ -508,6 +508,17 @@ static bool apple_backend(void) {
     char reply[256];
     EXPECT(ft_remote_command("remote 101 start frame 192.0.2.7 monitor@2 1920x1080 60 0 1.0 test", reply, sizeof reply));
     EXPECT(!strcmp(reply, "error client, host or app has other characters"));  // '@' is only a Mac's
+    // The headset off: no display's stream starts, a room's panel does.
+    cmd("remote 101 stop");
+    ft_remote_away(true);
+    EXPECT(ft_remote_command("remote 101 start frame 192.0.2.7 Desktop 1920x1080 60 0 1.0 test", reply, sizeof reply));
+    EXPECT(!strcmp(reply, "error the headset is off: it starts when the headset is back on"));
+    EXPECT(ft_remote_command("remote 116 peer 9 1920x1080 1.0 room", reply, sizeof reply) && !strncmp(reply, "ok", 2));
+    cmd("remote 116 stop");
+    ft_remote_away(false);
+    EXPECT(ft_remote_command("remote 101 start frame 192.0.2.7 Desktop 1920x1080 60 0 1.0 test", reply, sizeof reply));
+    EXPECT(!strncmp(reply, "ok", 2));
+    cmd("remote 101 stop");
     return true;
 }
 

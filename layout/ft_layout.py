@@ -138,6 +138,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      the others in their panel's mode (Frametop's Vibepollo)
   ft-layout remote connect ID...     start their streams again (and keep them on)
   ft-layout remote disconnect ID...  stop their streams and panels until connected again
+  ft-layout remote away on|off       the headset went off, or back on (ft-screens runs it): the
+                                     connected displays' streams stop and the PCs' monitors go
+                                     back as they were, or the streams start again
   ft-layout remote remove ID         stops it and unpairs its client (the host stays), unless
                                      another panel of the host uses that client
   ft-layout remote cancel-pin        ends a remote add --pin that waits for its PIN (ft_pinpair)
@@ -1464,6 +1467,9 @@ def remote_command(args):
             log(f"saved; not stopped now: {e}")
         sync_monitors([h for _, h, _ in found])  # its monitor goes off while the others stream
         return
+    if what == "away":
+        import ft_remoteaway   # (its own module: the streams wait while the headset is off)
+        return ft_remoteaway.command(sys.modules[__name__], args[1:])
     if what in ("kwin-windows", "kwin-add", "kwin-size"):
         import ft_kwinwindows   # (its own module: a KDE PC's windows, KWin Window Stream)
         return ft_kwinwindows.command(what, args[1:])
@@ -1687,7 +1693,7 @@ def remote_command(args):
         return
     raise RuntimeError("remote list | monitors ADDRESS | auth ADDRESS [options] | add HOST ADDRESS APP [options] | "
                        "set ID KEY=VALUE... | host NAME route=...|direct=...|mic=...|input=...|clipboard=...|monitors=...|kb_layout=...|keymap=... | "
-                       "connect ID... | disconnect ID... | remove ID"
+                       "connect ID... | disconnect ID... | away on|off | remove ID"
                        " | kwin-windows HOST | kwin-add HOST WINDOW [options] | kwin-size N WxH METRES")
 
 

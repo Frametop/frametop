@@ -155,6 +155,7 @@
 #include "windowdrag.h"
 #include "trackwatch.h"
 #include "universefix.h"
+#include "remoteaway.h"
 #include "steampanels.h"
 #include "../frunner/reserve.h"
 #include "../conf/ft_conf.h"
@@ -367,6 +368,10 @@ void WatchStanding(const char *why, bool universe) {
     g_track.Standing(p, why);
     if (universe && g_universe) g_track.Universe(g_universe);
 }
+
+// Remote displays wait while the headset is off (remoteaway.h).
+remoteaway::Watch g_remoteAway;
+int64_t g_remoteAwayNextMs = 0;   // SteamVR is asked again then (twice a second)
 
 // The screen-jump fix (universefix.h): universe switches, and each universe's kind.
 universefix::Tracker g_universeTrack;
@@ -7302,6 +7307,17 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         universefix::Switch sw;
         if (g_universeTrack.Tick(g_tick, ReadUniverse(), hp.bPoseIsValid, head, &sw)) FollowUniverse(sw);
         else if (g_tick % 90 == 0) UniverseKind(g_universe);   // (read again while it's unknown)
+    }
+    if (const int64_t now = NowMs(); now >= g_remoteAwayNextMs) {
+        g_remoteAwayNextMs = now + 500;
+        const auto level = vr::VRSystem()->GetTrackedDeviceActivityLevel(vr::k_unTrackedDeviceIndex_Hmd);
+        const bool standby = level == vr::k_EDeviceActivityLevel_Standby;
+        const bool idle = standby || level == vr::k_EDeviceActivityLevel_Idle || level == vr::k_EDeviceActivityLevel_Idle_Timeout;
+        if (const auto away = g_remoteAway.Tick(now, idle, standby)) {
+            std::printf("headset %s: remote displays %s\n", *away ? "off" : "back on", *away ? "wait" : "start again");
+            ft_remote_away(*away);
+            RunLayout({"remote", "away", *away ? "on" : "off"});
+        }
     }
     {
         const bool dashMoved = UpdateDashAnchor() | std::exchange(g_dash.carried, false);

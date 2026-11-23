@@ -196,21 +196,44 @@ def sync(host, log, request=None):
         log(f"{name}: monitors not changed: {e}")
 
 
+def _drop_plan(host, request=None):
+    """Asks the PC for no plan: every monitor back as it was, now. Why it didn't take it, as the
+    log goes on (" (it answered 500)", ": timed out"), or "" when it did."""
+    request = request or ft_hostapi.request
+    try:
+        status, _ = request(host["address"], "POST", PATH, body={"monitors": {}}, timeout=20.0, port=port_of(host))
+        return "" if status == 200 else f" (it answered {status})"
+    except (OSError, ValueError) as e:
+        return f": {e}"
+
+
 def release(host, log, request=None):
     """The switch turned off: no plan, every monitor back as it was. False when the PC didn't
     take it: ft_layout then keeps `monitors_release` on the host, and sync_all tries again."""
     if host.get("kind", "vibepollo") != "vibepollo":
         return True
-    request = request or ft_hostapi.request
-    try:
-        status, _ = request(host["address"], "POST", PATH, body={"monitors": {}}, timeout=20.0, port=port_of(host))
-        if status == 200:
-            return True
-        log(f"{host.get('name')}: its monitors weren't put back (it answered {status}); asked again "
-            "before its next display stream")
-    except (OSError, ValueError) as e:
-        log(f"{host.get('name')}: its monitors weren't put back: {e}; asked again before its next display stream")
-    return False
+    why = _drop_plan(host, request)
+    if why:
+        log(f"{host.get('name')}: its monitors weren't put back{why}; asked again before its next display stream")
+    return not why
+
+
+def put_back_all(hosts, log, request=None):
+    """The headset came off (ft_remoteaway): each host that controls its monitors puts them back
+    now, all at once, not two minutes after its streams ended. Its plan goes with that; sync
+    sends it again before the streams start. One that doesn't take it still puts them back
+    after its own two minutes."""
+    import concurrent.futures
+    hosts = [h for h in {id(h): h for h in hosts}.values() if controls(h)]
+    if not hosts:
+        return
+
+    def one(h):
+        why = _drop_plan(h, request)
+        if why:
+            log(f"{h.get('name')}: its monitors weren't put back now{why}; they go back two minutes after its streams ended")
+    with concurrent.futures.ThreadPoolExecutor(len(hosts)) as pool:
+        list(pool.map(one, hosts))
 
 
 def owes_release(host):

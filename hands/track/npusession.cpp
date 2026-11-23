@@ -1,4 +1,5 @@
 #include "npusession.h"
+#include "npuserver.h"
 
 #include <cstdio>
 
@@ -12,7 +13,8 @@ bool NpuSession::ensure() {
     if (now < retry_at_) return false;
     retry_at_ = now + std::chrono::milliseconds(int(kRetrySeconds * 1000));
     std::string e;
-    if (!heads_.load(dir_ + "/ft-npud.heads", e) || !client_.open(dir_, heads_.out_bytes(), heads_.graph_id, e)) {
+    const std::string dir = npu_server_dir(dir_);   // /run/host + dir_ inside the container
+    if (!heads_.load(dir + "/ft-npud.heads", e) || !client_.open(dir, heads_.out_bytes(), heads_.graph_id, e)) {
         if (e != err_) std::fprintf(stderr, "npu: %s; the CPU models instead\n", e.c_str());
         err_ = e;
         return false;

@@ -1,8 +1,11 @@
 #include "npuclient.h"
+#include "npuserver.h"
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
@@ -59,7 +62,11 @@ bool NpuClient::open(const std::string &dir, size_t out_bytes, uint32_t graph_id
     close();
     if (out_bytes > kOutSlot) return err = "the heads' outputs are larger than ft-npud's output slots", false;
     out_bytes_ = out_bytes;
-    const std::string sock_path = dir + "/ft-npud.sock";
+    // Connect through the resolved directory, the one the peer check below walks: a symlink on the way can't
+    // be swapped between the check and the connect.
+    char real[PATH_MAX];
+    if (!::realpath(dir.c_str(), real)) return err = sys_err(dir.c_str()), false;
+    const std::string real_dir = real, sock_path = real_dir + "/ft-npud.sock";
     sockaddr_un a{};
     a.sun_family = AF_UNIX;
     if (sock_path.size() >= sizeof a.sun_path) return err = "socket path too long", false;
@@ -71,11 +78,14 @@ bool NpuClient::open(const std::string &dir, size_t out_bytes, uint32_t graph_id
         return err = errno == EAGAIN ? sock_path + ": ft-npud is not accepting connections"
                                      : sys_err(sock_path.c_str()),
                close(), false;
-    // The daemon runs as root (or, in tests, as this user); anyone else at that path is not ft-npud.
+    // The daemon runs as root (or, in tests, as this user); in the container root shows as the overflow uid,
+    // taken only at a path no one else can write (npuserver.h). Anyone else at that path is not ft-npud.
     ucred peer{};
     socklen_t len = sizeof peer;
-    if (getsockopt(sock_, SOL_SOCKET, SO_PEERCRED, &peer, &len) != 0 || (peer.uid != 0 && peer.uid != getuid()))
-        return close(), err = sock_path + ": not served by root or this user", false;
+    std::string why = "no peer credentials";
+    if (getsockopt(sock_, SOL_SOCKET, SO_PEERCRED, &peer, &len) != 0 ||
+        !npu_server_trusted(peer.uid, getuid(), npu_overflow_uid(), real_dir, why))
+        return close(), err = sock_path + ": " + why, false;
     const int r = wait_readable(sock_, kHelloMs);
     if (r <= 0) return err = r == 0 ? "ft-npud did not answer the connection" : sys_err("ft-npud poll"), close(), false;
     uint8_t status = 0xff;

@@ -57,7 +57,7 @@
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
 // stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
-// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud: landmarks
+// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud, found at /run/host/run/ft-npud from the container: landmarks
 // from the NPU student, the CPU model whenever the daemon is missing or fails; track/npulandmarks.h), HANDS_NPU_DET
 // (1, as --npu-det: the side cameras' palm search on the NPU detector too; track/npudetector.h), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two

@@ -207,7 +207,7 @@ def items(root, env=os.environ):
         P("gslink-test", "screens/tests/gslink-test.cpp", "screens/gslink.cpp", "screens/gsforward.cpp",
           flags=f"{CXX2} -pthread", cflags="-Iscreens", pkgs=XCB),
     ]
-    for name in ("universefix", "posemath", "roomshift", "layoutgrab", "chromepool", "vrcmd", "windowdrag"):
+    for name in ("universefix", "posemath", "roomshift", "layoutgrab", "chromepool", "vrcmd", "windowdrag", "remoteaway"):
         out.append(single(f"screens/tests/{name}-test.cpp", CXX2))
     out.append(single("screens/tests/wallimage-test.cpp", CXX2, watch=("screens/handrender.cpp",)))   # reads it
     # stb_truetype.h, pinned, fetched once (prepare()); without it (no network) only this

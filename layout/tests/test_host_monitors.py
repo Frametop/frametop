@@ -242,6 +242,16 @@ class Sending(unittest.TestCase):
         hm.release(pc(monitors=False), self.said.append, self.request)
         self.assertEqual([(m, b) for _, m, _, b, _ in self.sent], [("POST", {"monitors": {}})])
 
+    def test_the_headset_off_puts_each_controlled_hosts_monitors_back_now(self):
+        a, b = pc(), pc(name="Other", address="192.0.2.8", monitors=False)
+        hm.put_back_all([a, a, b], self.said.append, self.request)
+        self.assertEqual([(ad, m, body) for ad, m, _, body, _ in self.sent], [("192.0.2.7", "POST", {"monitors": {}})])
+        self.assertEqual(self.said, [])
+        self.replies["POST"] = (0, None)
+        hm.put_back_all([a], self.said.append, self.request)
+        self.assertEqual(self.said, ["PC: its monitors weren't put back now (it answered 0); "
+                                     "they go back two minutes after its streams ended"])
+
     def test_sync_all_asks_each_controlled_host_once(self):
         a, b = pc(), pc(name="Other", address="192.0.2.8", monitors=False)
         hm.sync_all([a, a, b], self.said.append, self.request)

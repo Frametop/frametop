@@ -337,6 +337,10 @@ void ft_remote_shutdown(void) {
 
 bool ft_remote_is(int index) { return find(index) != NULL; }
 
+// The headset is off (vr.cpp, remoteaway.h): a display's stream doesn't start until it's back on.
+static bool g_away;
+void ft_remote_away(bool away) { g_away = away; }
+
 const char *ft_remote_host(int index) {
     const struct remote *r = find(index);
     return r ? r->host : NULL;
@@ -571,6 +575,8 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
     const bool peer = strcmp(word, "peer") == 0;
     if (strcmp(word, "start") != 0 && !peer) return snprintf(reply, size, "error remote <N> start|peer|stop|info"), true;
     if (!g_vr) return snprintf(reply, size, "error no SteamVR (--no-vr)"), true;
+    // (a room's panel still starts: the others in the room go on, and it carries no PC's sound)
+    if (g_away && !peer) return snprintf(reply, size, "error the headset is off: it starts when the headset is back on"), true;
     struct remote c = {0};
     int label_at = 0, panel = -1;
     bool restored = false;  // its panel is back where it was before a stop (vr.cpp, Parked)

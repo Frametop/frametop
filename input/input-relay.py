@@ -250,6 +250,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     they aren't a PC's even when its desktop has the keys. Without it (a screen's
                     or a remote display's tile too: those are dragged) they go to the desktop.
                     Ignored from another user
+  tilefocus 2       from ft-screens: a screen's or a remote display's tile has the focus: only the
+                    nudges (TILE_NUDGE_ACTIONS) are ft-screens' (renewed and lapsing as 1)
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
@@ -352,6 +354,7 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     QUICK_SETTINGS_ACTIONS,
     TILE_ACTIONS,
     TILE_FOCUS_ACTIONS,
+    TILE_NUDGE_ACTIONS,
     VOICE_ACTIONS,
     VOICE_KEY_BINDINGS,
     VR_BUTTONS,
@@ -1429,7 +1432,8 @@ class Relay:
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
         self.pc_word = "0"  # ft-screens' "keyboard" sixth word: a PC's desktop has the keys (pc_keys)
-        self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1": the tiling keys are its until then
+        self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1" or "2": the tiling keys are its until then
+        self.tile_focus_app = False  # ...1: an app's tile (every tiling key); 2: a display's (the nudges)
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
         # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
         # characters the desktop's layout has no key for, until text_input_until; None without one.
@@ -1850,13 +1854,16 @@ class Relay:
             return None, None
         combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
         action = self.rules["key_bindings"].get(combo)
-        tile = time.monotonic() < self.tile_focus_until
+        focused = time.monotonic() < self.tile_focus_until
+        tile = focused and self.tile_focus_app
         if action is None and tile:
             action = APP_TILE_KEY_BINDINGS.get(combo)  # Meta+arrows alone on an app's tile
         if not known_action(action):
             combo, action = self.release_combo(code) or (combo, action)
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return combo, None
+        if action in TILE_NUDGE_ACTIONS:
+            return combo, action if focused else None  # (any tile's: a display's too)
         if action in TILE_FOCUS_ACTIONS:
             # An app's tile has the focus: ft-screens' key, on a PC's app window too (its desktop
             # may have the keys). None has: the desktop's key (KWin's, or a PC's).
@@ -2443,10 +2450,12 @@ class Relay:
                 self.do_action(name, 0, now, "frunner")
                 self.reply(addr, {"t": "action", "action": name})
             return
-        if cmd == "tilefocus" and words[1:] in (["1"], ["0"]):
-            # From ft-screens (unbound, no reply): an anchored app's tile has the focus, or not any more.
+        if cmd == "tilefocus" and words[1:] in (["1"], ["2"], ["0"]):
+            # From ft-screens (unbound, no reply): an anchored app's tile has the focus (1), a
+            # screen's or a remote display's (2), or none any more.
             if uid == os.getuid():
-                self.tile_focus_until = now + TILE_FOCUS_LAPSE if words[1] == "1" else 0.0
+                self.tile_focus_until = now + TILE_FOCUS_LAPSE if words[1] != "0" else 0.0
+                self.tile_focus_app = words[1] == "1"
             return
         if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
             # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop

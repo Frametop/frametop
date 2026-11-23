@@ -8,6 +8,7 @@
 // and the tiles' commands (TileCommand).
 
 #include "vrpanel.h"
+#include "centreglow.h"
 #include "overlaytex.h"
 #include "tiling.h"
 
@@ -77,7 +78,7 @@ constexpr double kTileHoldTurnDeg = 20;   // turned this far from it: you look a
 bool g_tileLook = true;                   // DASH_TILE_LOOK: with no pointer on a panel, the one you look at has the focus
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
 constexpr std::chrono::seconds kTilesAddWindow{5};
-int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored app's tile has the focus (KeysTile), 0 not
+int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored app's tile has the focus (KeysTile), 2 a display's, 0 none
 int64_t g_tileFocusSaidMs = 0;
 constexpr int64_t kTileFocusRenewMs = 2000;   // said again this often (the relay lapses it after 5 s)
 constexpr double kTileBorder = 0.003;         // the focused tile's border, metres each side (user, 2026-11-19: "far, far, far less pronounced")
@@ -174,11 +175,31 @@ double OwnShare(int id, const Screen &s) {
 }  // namespace
 
 namespace {
-// Tiled panels flat, the others with their own curves back (tiling.h's FlatWhileTiled).
+// The centre display curved round the arc now (Board::ArcNow; not with something glued to it: its
+// glue is a flat panel's): its curve the arc's radius, its own kept aside as a flat tile's is.
+std::set<int> g_tileArcOn;
+bool ArcTile(int i) { return g_tiles.ArcNow(i) && GluedPx(i) == 0; }
+// Tiled panels flat but the centre curved round the arc, the others with their own curves back
+// (tiling.h's FlatWhileTiled).
 void FlattenTiles() {
     for (auto &[i, s] : g_screens) {
-        if (s.overlay == vr::k_ulOverlayHandleInvalid || !tiling::FlatWhileTiled(g_tiles.Tiled(i), &s.curve, &s.tileCurve))
+        if (s.overlay == vr::k_ulOverlayHandleInvalid) continue;
+        bool changed = false;
+        if (ArcTile(i)) {
+            if (g_tileArcOn.insert(i).second) {   // (its own curve aside, as FlatWhileTiled keeps it)
+                if (s.curve > 0) s.tileCurve = s.curve;
+                s.curve = 0;
+            }
+            const double arc = g_tiles.params.radius;
+            if (std::fabs(s.curve - arc) < 1e-6) continue;
+            s.curve = arc;
+            ApplyCurve(s);   // (not CapCurve'd: the arc's, however far round it reaches)
+            PlaceChrome(s);
             continue;
+        }
+        if (g_tileArcOn.erase(i)) s.curve = 0, changed = true;
+        changed = tiling::FlatWhileTiled(g_tiles.Tiled(i), &s.curve, &s.tileCurve) || changed;
+        if (!changed) continue;
         CapCurve(s);
         ApplyCurve(s);
         PlaceChrome(s);
@@ -207,13 +228,16 @@ void RetileDash() {
         if (s.drag != Drag::None) continue;
         // (a floating window or an app with a stretch on its way: its width once its pixels are there)
         const bool waits = (s.floating || s.gsapp || IsWindowPanel(s)) && !s.steamDash && s.stretchW > 0;
-        const double share = OwnShare(p.id, s), width = p.widthM * share;
+        // (the centre curved round the arc: its middle on it, as wide along it as it spans flat)
+        const bool arc = ArcTile(p.id);
+        const double dist = arc ? g_tiles.params.radius : p.distM;
+        const double share = OwnShare(p.id, s), width = arc ? centreglow::ArcWidth(p.widthM, p.distM, dist) : p.widthM * share;
         if (!waits && std::fabs(s.metres - width) > 0.002) {
             if (s.floating && PictureW(s) > 0) s.mpp = width / PictureW(s);
             SetWidth(s, width);
         }
         double m[3][4];
-        tiling::Pose(p.azDeg, p.elDeg, p.distM, m);
+        tiling::Pose(p.azDeg, p.elDeg, dist, m);
         // (the right of the tile: what's glued to it goes left of it, steamglue.h; the tile is flat)
         for (int r = 0; r < 3; ++r) m[r][3] += m[r][0] * p.widthM * (1 - share) / 2;
         PinIn(s, kDashboard, Mul(g_tileGroupRel, ToMat(m)), levelpin::Rigid);
@@ -225,6 +249,7 @@ void RetileDash() {
         PinIn(it->second, kDashboard, Mul(g_tileGroupRel, ToMat(spot->rel)), levelpin::Rigid);
     }
     PlaceTileBorder();   // (with its tile, not a tick after it)
+    PlaceCentreGlow();
 }
 
 namespace {
@@ -425,6 +450,7 @@ void SetTileLookFocus(bool on) { g_tileLook = on; }
 // is going (a stop: a restart puts them back) or others go with it.
 void TileGone(int i) {
     BarSideGone(i);
+    g_tileArcOn.erase(i);
     const auto k = g_tileKey.find(i);
     const std::string key = k != g_tileKey.end() ? k->second : "";
     if (k != g_tileKey.end() && g_tileMemory.Set(k->second, TileLine(i))) SaveTileMemory();
@@ -456,6 +482,46 @@ bool TileShown(const Screen &s, int i, bool dashUp) {
            (TileStays(s, i) || dashUp || s.drag != Drag::None || i == PadPanel());
 }
 
+// A dragged tile's middle at (az, el) round the group's centre right on the centre display's (not itself).
+bool OverCentre(int i, double az, double el) {
+    const int c = g_tiles.Centre();
+    const tiling::Placed *p = g_tiles.PlacedOf(c);
+    return c >= 0 && c != i && p && !g_tiles.absent.count(c) && centreglow::Over(az, el, p->azDeg, p->elDeg);
+}
+// The tile the centre's glow is round now (vrtilecentre.cpp): one being dragged right onto the
+// centre display (hot: it would take its place), else the centre while the dashboard is open.
+void TileGlowTarget(int *on, bool *hot) {
+    *on = -1, *hot = false;
+    const int c = g_tiles.Centre();
+    if (!g_tileGroupSet || c < 0 || g_tiles.absent.count(c)) return;
+    const Mat toGroup = Inverse(Mul(DashFrame(), g_tileGroupRel));
+    for (const int id : g_tiles.Ids()) {
+        const auto it = g_screens.find(id);
+        Mat p;
+        if (id == c || it == g_screens.end() || it->second.drag != Drag::Move || !ScreenPose(it->second, &p)) continue;
+        const Mat q = Mul(toGroup, p);
+        const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
+        double az, el;
+        tiling::Direction(pt, &az, &el);
+        if (OverCentre(id, az, el)) return (void)(*on = id, *hot = true);
+    }
+    if (vr::VROverlay()->IsDashboardVisible()) *on = c;
+}
+// The curve button, or the menu's Curved, on the centre display: curved round the arc or flat (user,
+// 2026-11-23: "toggle the curve on a per display basis for just that center display"). False for
+// any other panel (its own curve, kept for when it leaves the tiles: FlatWhileTiled).
+bool TileCurveToggle(const Screen &s) {
+    for (const auto &[i, t] : g_screens) {
+        if (&t != &s) continue;
+        if (i != g_tiles.Centre() || !g_tiles.ToggleArc(i)) return false;
+        std::printf("%s: the centre display %s\n", TileLabel(i).c_str(), g_tiles.Arc(i) ? "curved round the arc" : "flat");
+        RetileDash();
+        RememberTiles();
+        return true;
+    }
+    return false;
+}
+
 // Let go after a move: where on the grid it goes; pulled off it, back to its place (dashtiles.h's Drop).
 void TileDrop(Screen &s, int i) {
     Mat p;
@@ -464,6 +530,15 @@ void TileDrop(Screen &s, int i) {
     const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
     double az, el;
     tiling::Direction(pt, &az, &el);
+    if (OverCentre(i, az, el)) {   // (right on the centre display: it takes its place, the two trade)
+        const int was = g_tiles.Centre();
+        g_tiles.TakeCentre(i);
+        RetileDash();
+        std::printf("%s: let go on the centre display (%s): the centre now, the two traded places\n", TileLabel(i).c_str(),
+                    TileLabel(was).c_str());
+        RememberTiles();
+        return;
+    }
     const tiling::Drop d = g_tiles.DropFor(i, az, el, TileInfo);
     g_tiles.Drop(i, d, az);
     static const char *kinds[] = {"into column", "a new column at", "pulled off: back in its place, column", "up, a neighbour pulled in under it, column"};
@@ -538,9 +613,10 @@ void UpdateTileFocus() {
         }
     }
     g_tileFocus = f;
-    const bool tile = KeysTile(f);
-    if (int(tile) != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
-        SendRelay(tile ? "tilefocus 1" : "tilefocus 0");
+    // (1: an app's tile, every tiling key; 2: a screen's or a remote display's, the nudges only)
+    const int tile = KeysTile(f) ? 1 : g_tiles.Anchored(f) ? 2 : 0;
+    if (tile != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
+        SendRelay(tile == 1 ? "tilefocus 1" : tile == 2 ? "tilefocus 2" : "tilefocus 0");
         g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
     }
 }
@@ -755,7 +831,8 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         if (!dashtiles::ParseKey(parsed.word, &key)) return (void)std::snprintf(reply, size, "error no such tiling key");
         const int i = g_tileFocus;
         if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
-        if (!KeysTile(i)) return (void)std::snprintf(reply, size, "ok a screen or a remote display: drag it");
+        const bool nudge = key == dashtiles::Key::NudgeUp || key == dashtiles::Key::NudgeDown;   // (any tile's)
+        if (!nudge && !KeysTile(i)) return (void)std::snprintf(reply, size, "ok a screen or a remote display: drag it");
         g_tileHold = i, g_tileHoldMs = NowMs(), g_mouseScreen = -1;   // (the relay hid the 3D mouse: it keeps the focus)
         if (Mat head; !HeadForward(&head, g_tileHoldFwd)) g_tileHoldFwd[0] = g_tileHoldFwd[1] = g_tileHoldFwd[2] = 0;
         if (!g_tiles.Press(i, key)) return (void)std::snprintf(reply, size, "ok nothing to do");
@@ -780,6 +857,21 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             return;
         }
         if (!std::strcmp(parsed.rest, "gaps")) return TileGaps(reply, size);
+        // "centre N": panel N the centre display, as a drop on the one before does; "centre": which it is.
+        // "arc N": the centre display N curved round the arc, or flat again.
+        if (!std::strncmp(parsed.rest, "centre", 6) || !std::strncmp(parsed.rest, "arc ", 4)) {
+            const bool arc = parsed.rest[0] == 'a';
+            const char *n = parsed.rest + (arc ? 4 : 6);
+            while (*n == ' ') ++n;
+            if (!arc && !*n) return (void)std::snprintf(reply, size, "ok %d", g_tiles.Centre() + 1);
+            const int i = which(n);
+            if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "error no such tile");
+            if (arc && i != g_tiles.Centre()) return (void)std::snprintf(reply, size, "error not the centre display");
+            if (arc ? !g_tiles.ToggleArc(i) : !g_tiles.TakeCentre(i)) return (void)std::snprintf(reply, size, "ok nothing to do");
+            RetileDash();
+            RememberTiles();
+            return (void)std::snprintf(reply, size, "ok %s %d%s", arc ? "arc" : "centre", i + 1, arc ? (g_tiles.Arc(i) ? " on" : " off") : "");
+        }
         if (!std::strcmp(parsed.rest, "recentre")) {   // (a reset: packed again too, tilepack.h)
             g_tiles.Repack(TileInfo);
             RetileDash();

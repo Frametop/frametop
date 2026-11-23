@@ -42,7 +42,7 @@ struct FakeDetector : PalmDetector {
 // records the images it was asked about; finds no hand there
 struct FakeBatch : LandmarkBatch {
     std::vector<const uint8_t *> seen;   // each image's pixels
-    bool run(const std::vector<const Image *> &images, const std::vector<Roi> &rois,
+    bool run(const std::vector<const Image *> &images, const std::vector<Roi> &rois, const std::vector<int> &,
              std::vector<Landmarks> &out) override {
         for (const Image *im : images) seen.push_back(im->data);
         out.assign(rois.size(), Landmarks{});

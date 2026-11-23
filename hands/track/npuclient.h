@@ -39,8 +39,11 @@ public:
     bool connected() const { return sock_ >= 0; }
     // The i-th crop slot (kCrop x kCrop gray bytes), written before run().
     uint8_t *crop(int i) { return shm_ + kCrops + size_t(i) * kCrop * kCrop; }
-    // n crops in, n outputs out (output(i)); false (and closed) on a refusal, timeout or lost daemon.
-    bool run(int n, int timeout_ms, std::string &err);
+    // n crops in, n outputs out (output(i)); false (and closed) on a refusal, timeout or lost daemon. pairs (a
+    // two-view graph only, NpuHeads::two_view): kPair0 when crops 0 and 1 are one hand's views, kPair1 for crops 2
+    // and 3 (n == 4); each such crop is read with its partner's features, every other crop alone.
+    static constexpr uint8_t kPair0 = 0x20, kPair1 = 0x40;
+    bool run(int n, int timeout_ms, std::string &err, uint8_t pairs = 0);
     const uint8_t *output(int i) const { return shm_ + kOuts + size_t(i) * out_bytes_; }
     float wrapper_ms() const;   // the DSP's time for the last request
     float daemon_ms() const;    // ft-npud's own time for it, request received to outputs published

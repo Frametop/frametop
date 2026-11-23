@@ -10,7 +10,9 @@
 class LandmarkBatch {
 public:
     virtual ~LandmarkBatch() = default;
-    // One Landmarks per (image, roi), in order. False: nothing was written to out; the caller falls back.
+    // One Landmarks per (image, roi), in order. hands: the tracked hand each view is of (0: not known yet), so
+    // a two-view model can read one hand's views together. False: nothing was written to out; the caller falls
+    // back.
     virtual bool run(const std::vector<const Image *> &images, const std::vector<Roi> &rois,
-                     std::vector<Landmarks> &out) = 0;
+                     const std::vector<int> &hands, std::vector<Landmarks> &out) = 0;
 };

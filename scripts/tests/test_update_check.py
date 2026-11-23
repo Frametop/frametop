@@ -125,6 +125,7 @@ class HandsRate(unittest.TestCase):
         state, detail = self.verdict(best=45.0, minutes=4, dark=0.0)
         self.assertEqual(state, "warn")
         self.assertIn("45", detail)
+        self.assertEqual(self.verdict(best=45.0, minutes=3, dark=0.0)[0], "warn")   # three is enough
 
     def test_a_faster_mode_warns(self):
         self.assertEqual(self.verdict(best=114.4)[0], "warn")

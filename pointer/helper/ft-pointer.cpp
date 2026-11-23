@@ -298,6 +298,9 @@
 //   A grip begins only with the hand held up, at most POINTER_GRIP_BELOW (0.35 m) below the eyes:
 // hands on a desk curl like a loose fist. (The user's own pinches sat 0.35-0.45 m below the eyes,
 // elbow resting, so pinches have no such limit.)
+//   Hanging hands: a pinch (index or middle, gaze or ray, and the two-hand press's) from a hand
+// hanging at the side isn't one: the knuckles over POINTER_PINCH_HANG_BELOW (0.58 m; 0 off) under the
+// eyes with the forearm over POINTER_PINCH_HANG_FOREARM (20 deg) below level (hanging.h has the take).
 //   The hand's movement is taken in the room, from where the eye was when the gesture began,
 // with the head pose at each frame's capture time, so turning your head doesn't move it.
 // The first gesture while the pointer is off only wakes it. Gestures are ignored in a VR game
@@ -553,7 +556,8 @@
 // (always), POINTER_GAZE_SHOW (1 s): gaze mode, above. POINTER_CONTROLLER_PICKUP (1, 0.5 to 5): how hard a controller must
 // move to take the laser back, above. POINTER_IGNORE (empty): ignored panels, above.
 // POINTER_HANDS (0), POINTER_PINCH_GAIN (0.5), POINTER_PINCH_DEADZONE (1.5 deg),
-// POINTER_GRIP_GAIN (1), POINTER_GRIP_BELOW (0.35 m): hands, above. POINTER_PINCH_TYPING (2 s; 0 off),
+// POINTER_GRIP_GAIN (1), POINTER_GRIP_BELOW (0.35 m), POINTER_PINCH_HANG_BELOW (0.58 m; 0 off),
+// POINTER_PINCH_HANG_FOREARM (20 deg): hands, above. POINTER_PINCH_TYPING (2 s; 0 off),
 // POINTER_TYPING_RAISE (0.08 m), POINTER_TYPING_BELOW (0.2 m: the keyboard zone's palms at least this
 // far under the eyes), POINTER_TYPING_POSTURE (0.3 s; 0 keys only), POINTER_TYPING_RECENT (600 s; 0
 // always): typing, above.
@@ -582,6 +586,7 @@
 #include "gazehand.h"
 #include "../common/overlayregion.h"
 #include "handoff.h"
+#include "hanging.h"
 #include "handsin.h"
 #include "rayowner.h"
 #include "typing.h"
@@ -1184,6 +1189,8 @@ struct Pointer {
     double rayBeamOffset = 0;  // how far along the ray the beam starts now (m)
     double sideCurl[2] = {-1, -1};  // each side's hand (ft-hands' call), newest frame: fhray::FistCurl
     double sideGap[2][2] = {{-1, -1}, {-1, -1}};  // ...its thumb to the index and middle tips (m)
+    hanging::Params hangParams;   // ...whether it hangs at the side (hanging.h): no pinches then
+    hanging::Check sideHang[2];
     // Gaze pinches (gazehand.h): the right-drag (an index pinch within POINTER_GAZE_RIGHT_DRAG s of the other
     // hand's index tap; 0 off), the three-finger scroll (POINTER_GAZE_SCROLL gain, 0 off; POINTER_GAZE_SCROLL_GAP
     // m), the chord (POINTER_GAZE_CHORD, off since the right-drag).
@@ -1474,6 +1481,8 @@ struct Pointer {
         gazeRightDrag = std::clamp(ConfDouble(conf, "POINTER_GAZE_RIGHT_DRAG", 0), 0.0, 5.0);
         gazeTwoHand = ConfDouble(conf, "POINTER_GAZE_TWO_HAND", 1) != 0;
         pinchMaxSpeed = std::clamp(ConfDouble(conf, "POINTER_PINCH_MAX_SPEED", 1.0), 0.0, 10.0);
+        hangParams.below = std::clamp(ConfDouble(conf, "POINTER_PINCH_HANG_BELOW", 0.58), 0.0, 2.0);
+        hangParams.forearmDeg = std::clamp(ConfDouble(conf, "POINTER_PINCH_HANG_FOREARM", 20), -90.0, 90.0);
         typingHide = std::clamp(ConfDouble(conf, "POINTER_TYPING_HIDE", 1.5), 0.0, 30.0);
         gazeScroll = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL", 1.0), -5.0, 5.0);
         gazeScrollGap = std::clamp(ConfDouble(conf, "POINTER_GAZE_SCROLL_GAP", 0.035), 0.01, 0.08);
@@ -2420,6 +2429,12 @@ struct Pointer {
             pinchLog(s, kind, why);
         } else if (kind != 1 && pinchMaxSpeed > 0 && fr.tnow - sideFastAt[s] < std::chrono::milliseconds(250)) {
             pinchLog(s, kind, "ignored (the hand was moving fast: a stroke or a wave, not a pinch)");
+        } else if (kind != 1 && sideHang[s].hanging) {
+            // a hand hanging at the side sways thumb to finger: not a click (hanging.h)
+            char why[112];
+            std::snprintf(why, sizeof why, "ignored (hanging at the side: %.2f m under the eyes, the forearm %.0f deg down)",
+                          sideHang[s].below, sideHang[s].forearmDeg);
+            pinchLog(s, kind, why);
         } else if (gazeOn && gazeTwoHand && kind != 1 && hold.src == Src::Hand && hold.side != s && hold.gaze.On() &&
                    !hold.pressed && aimHeld && !hold.gazeScroll && !hold.rightDrag) {
             // the two-hand press: the held pinch presses where the pointer is (its nudge), and drags
@@ -3223,9 +3238,14 @@ void Pointer::Handoff() {
     TypingHands(newHands, live);
     const bool typingSide[2] = {typist.Blocked(0, secsOf(fr.tnow)), typist.Blocked(1, secsOf(fr.tnow))};
     SendTypingAndRays(typingSide);
-    // Each hand's openness (fhray::FistCurl), for the fist guard on every pinch (gaze or ray).
+    // Each hand's openness (fhray::FistCurl), for the fist guard on every pinch (gaze or ray), and
+    // whether it hangs at the side (hanging.h).
     if (newHands) {
         sideCurl[0] = sideCurl[1] = -1;
+        sideHang[0] = sideHang[1] = {};
+        vr::HmdMatrix34_t capHead;
+        const bool headAt = poses.At(handsRoom.capture_ns, capHead);
+        auto hv = [](Vec3 v) { return hanging::V3{v.x, v.y, v.z}; };
         sideGap[0][0] = sideGap[0][1] = sideGap[1][0] = sideGap[1][1] = -1;
         for (const hin::RoomHand &c : handsRoom.hands)
             if (sideCurl[c.side] < 0) {
@@ -3234,6 +3254,8 @@ void Pointer::Handoff() {
                 sideGap[c.side][1] = c.pinchD[1] >= 0 ? c.pinchD[1] : Length(c.pts[4] - c.pts[12]);
                 if (c.velValid) sideSpeed[c.side] = 0.6 * sideSpeed[c.side] + 0.4 * Length(c.vel);
                 if (pinchMaxSpeed > 0 && sideSpeed[c.side] > pinchMaxSpeed) sideFastAt[c.side] = fr.tnow;
+                if (headAt)
+                    sideHang[c.side] = hanging::Test(hangParams, hv(Position(capHead)), hv(c.knuckle), hv(c.elbow), c.hasElbow);
             }
     }
     HandRays(newHands, live, typingSide);

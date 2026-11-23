@@ -8,7 +8,8 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x484E5446, kVersion = 1, kVersion2V = 2;   // 'FTNH'; 2: a two-view student
+constexpr uint32_t kMagic = 0x484E5446, kVersion = 1, kVersion2V = 2, kVersionFloat = 3;   // 'FTNH'; 2: a two-view
+                                                                                            // student; 3: float outputs
 
 float sigmoid(float v) { return 1.f / (1.f + std::exp(-v)); }
 
@@ -64,6 +65,7 @@ bool NpuHeads::load(const std::string &path, std::string &err) {
 }
 
 size_t NpuHeads::file_bytes(const uint32_t *h) {
+    if (h[0] == kMagic && h[1] == kVersionFloat) return 48;
     if (h[0] != kMagic || (h[1] != kVersion && h[1] != kVersion2V)) return 0;
     const bool two = h[1] == kVersion2V;
     const size_t K = h[3], W = h[5], kpd = h[6], g = h[7], hidden = h[8], in0 = g + K * kpd;
@@ -74,11 +76,16 @@ size_t NpuHeads::file_bytes(const uint32_t *h) {
 
 bool NpuHeads::parse(const uint8_t *data, size_t size, std::string &err) {
     uint32_t h[12];
+    if (size >= sizeof h) {
+        std::memcpy(h, data, sizeof h);
+        if (h[0] == kMagic && h[1] == kVersionFloat) return parse_float(h, size, err);
+    }
     if (size < sizeof h + 12) return err = "heads file too short", false;
     std::memcpy(h, data, sizeof h);
     if (h[0] != kMagic || (h[1] != kVersion && h[1] != kVersion2V))
-        return err = "not a version 1 or 2 heads file", false;
+        return err = "not a version 1, 2 or 3 heads file", false;
     two_view = h[1] == kVersion2V;
+    float_outs = false;
     graph_id = h[2], K = int(h[3]), H = int(h[4]), W = int(h[5]), kpd = int(h[6]), g = int(h[7]);
     hidden = int(h[8]), pool_h = int(h[9]), pool_w = int(h[10]);
     crop = h[11] == 0 ? 224 : int(h[11]);
@@ -114,6 +121,16 @@ bool NpuHeads::parse(const uint8_t *data, size_t size, std::string &err) {
     w0t = transpose(w0, hidden, int(in0));
     w1t = transpose(w1, 3 * K, hidden);
     if (two_view) wpt = transpose(wp, hidden, int(in0));
+    return true;
+}
+
+bool NpuHeads::parse_float(const uint32_t *h, size_t size, std::string &err) {
+    // the header alone: K 21, every shape word 0, the crop the slots hold
+    if (size != 48 || h[3] != 21 || std::any_of(h + 4, h + 11, [](uint32_t v) { return v != 0; }) ||
+        (h[11] != 0 && h[11] != 224))
+        return err = "version 3 heads file: bad header", false;
+    *this = NpuHeads{};
+    graph_id = h[2], K = 21, crop = 224, float_outs = true;
     return true;
 }
 
@@ -158,6 +175,14 @@ void NpuHeads::features(const uint8_t *out, bool pre, float *x, float *screen) c
 
 void NpuHeads::decode(const uint8_t *out, float *screen, float *world, float &presence, float &right,
                       const uint8_t *partner) const {
+    if (float_outs) {   // ncnn's out0..out3, as Nets::landmarks reads them
+        float o[kFloatOuts];
+        std::memcpy(o, out, sizeof o);
+        for (int k = 0; k < 21; ++k) screen[2 * k] = o[3 * k], screen[2 * k + 1] = o[3 * k + 1];
+        presence = o[63], right = o[64];
+        std::copy(o + 65, o + kFloatOuts, world);
+        return;
+    }
     const size_t in0 = size_t(g) + size_t(K) * kpd;
     std::vector<float> x(in0), hid(pad4(hidden)), wo(pad4(3 * K));
     features(out, false, x.data(), screen);

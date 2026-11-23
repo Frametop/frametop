@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "input-settings"))
 sys.path.insert(0, str(ROOT / "settings"))
 import ft_input_settings as fis  # noqa: E402
 import ft_settings  # noqa: E402  (Frametop Settings, the window these pages are in)
+from PySide6.QtCore import QObject  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
@@ -77,7 +78,11 @@ class Page(unittest.TestCase):
     def test_rate_switch_shows_the_camera_mode_and_runs_handsrate(self):
         # Off until the cameras are in the no-dark mode; the warning about the controllers always
         # there. The switch runs handsrate.py on the host with --now, shows what was asked while it
-        # runs, and says what handsrate.py said.
+        # runs, says what handsrate.py said, and stays busy for RATE_COOLDOWN after (each switch
+        # stops XRService, and SteamVR gives up on one that stops too often).
+        self.assertTrue(fis.handsrate.XR_PATH.startswith(HOME + os.sep))   # the files below are the test's
+        self.addCleanup(setattr, fis, "RATE_COOLDOWN", fis.RATE_COOLDOWN)
+        fis.RATE_COOLDOWN = 0.3
         st = self.b.handsRate
         self.assertEqual((st["on"], st["busy"], st["note"]), (False, False, ""))
         self.assertIn("controllers don't track", st["warning"])
@@ -106,7 +111,35 @@ class Page(unittest.TestCase):
         self.assertEqual(ran, [("python3", fis.HANDSRATE, "off", "--now")])
         self.assertEqual((seen[0]["on"], seen[0]["busy"]), (False, True))
         self.assertEqual(said, [("60 fps hand tracking off: the controllers track again.", False)])
+        st = self.b.handsRate
+        self.assertEqual((st["on"], st["busy"]), (True, True))   # what the files say again; still held
+        self.b.setHandsRate(False)                               # held: this one doesn't run
+        for _ in range(200):
+            self.app.processEvents()
+            if not self.b.handsRate["busy"]:
+                break
+            time.sleep(0.01)
         self.assertFalse(self.b.handsRate["busy"])
+        self.assertEqual(len(ran), 1)
+
+    def test_rate_switch_says_what_went_wrong(self):
+        class Failed:
+            returncode, stdout = 1, ""
+            stderr = "handsrate: The settings are written, but ft-hands couldn't be restarted (no bus)\n"
+        said = []
+        old, fis.host, cool, fis.RATE_COOLDOWN = fis.host, lambda *cmd, timeout=20: Failed(), fis.RATE_COOLDOWN, 0
+        self.addCleanup(setattr, fis, "host", old)
+        self.addCleanup(setattr, fis, "RATE_COOLDOWN", cool)
+        self.b.message.connect(lambda text, bad: said.append((text, bad)))
+        self.b.setHandsRate(True)
+        for _ in range(200):
+            self.app.processEvents()
+            if said and not self.b.handsRate["busy"]:
+                break
+            time.sleep(0.01)
+        self.assertEqual(said[-1], ("60 fps hand tracking: handsrate: The settings are written, but ft-hands "
+                                    "couldn't be restarted (no bus)", True))
+        self.assertFalse(self.b.handsRate["on"])   # the fake host wrote nothing: the switch shows the files
 
     def test_page_loads(self):
         errors = []
@@ -124,6 +157,29 @@ class Page(unittest.TestCase):
         mine = [e for e in errors if any(f"InputPages.qml:{n}:" in e for n in range(first - 1, last + 1))
                 and "not placed in the graphics scene" not in e]
         self.assertEqual(mine, [])
+        # The 60 fps switch turns on only where hand tracking is installed and on (the host said
+        # nothing here, so it isn't), and turns off wherever the cameras' mode is on.
+
+        window = engine.rootObjects()[0]   # held: PySide drops a found child's wrapper with its parent's
+
+        def enabled(installed, mode, cameras):
+            self.b._hands_refreshing = True   # the page's timer doesn't ask the host again meanwhile
+            self.b._hands = {"installed": installed}
+            fis.write_conf_value("HANDS_MODE", mode)
+            fis.handsrate.write_cameras(cameras)
+            self.b.handsChanged.emit()
+            for _ in range(5):
+                self.app.processEvents()
+            switch = window.findChild(QObject, "handsRateSwitch")
+            self.assertIsNotNone(switch)
+            return switch.property("enabled"), switch.property("checked")
+        self.addCleanup(fis.handsrate.write_cameras, {})
+        self.addCleanup(setattr, self.b, "_hands_refreshing", False)
+        self.assertTrue(fis.handsrate.XR_PATH.startswith(HOME + os.sep))
+        self.assertEqual(enabled(False, "frametop", {}), (False, False))
+        self.assertEqual(enabled(True, "off", {}), (False, False))
+        self.assertEqual(enabled(True, "frametop", {}), (True, False))
+        self.assertEqual(enabled(False, "off", fis.handsrate.HIGH), (True, True))
         # the slider sits under "Lazy susan brings screens to you", the switches all there round it
         keys = [e["key"] for e in self.b.handInteractions]
         self.assertEqual(len(keys), len(fis.HAND_INTERACTIONS))

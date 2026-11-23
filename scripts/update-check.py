@@ -1027,6 +1027,16 @@ def eye_rate_verdict(setting, on, rate, started, marked_at, ours, failed=None):
                   f" ({setting} on" + (", set by Frametop)" if marked_at is not None else ")"))
 
 
+def repo_module(name, *path):
+    """One of this checkout's Python programs, loaded as a module (they aren't on sys.path, and
+    some have a dash in their name)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location(name, os.path.join(here, "..", *path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def check_eye_rate():
     """gaze/eye-rate.py: SteamVR runs the eye cameras at 15 fps unless its eye-to-head setting is on
     (steamvr.gazeDepEyeToHeadEnable2 on SteamOS 0.5, gazeDepEyeToHeadEnable on 0.4: eye-rate.py
@@ -1036,10 +1046,7 @@ def check_eye_rate():
     if systemctl("is-enabled", "frametop-gaze") != "enabled":
         return
     try:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gaze", "eye-rate.py")
-        spec = importlib.util.spec_from_file_location("eye_rate", path)
-        er = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(er)
+        er = repo_module("eye_rate", "gaze", "eye-rate.py")
         name = er.key()
         marked_at = os.path.getmtime(er.MARK) if name in er.marked() else None
         state, detail = eye_rate_verdict(f"{er.SECTION}.{name}", er.get(name) is True, er.camera_rate(),
@@ -1049,6 +1056,30 @@ def check_eye_rate():
     except Exception as e:  # a broken checkout: say so rather than stop the whole check
         state, detail = "warn", f"couldn't read gaze/eye-rate.py: {e}"
     report(state, "eye cameras", detail)
+
+
+def check_hands_rate(hr=None):
+    """hands/handsrate.py, the 60 fps hand tracking switch: its camera mode is two numbers in
+    SteamVR's XRServiceSettings.json that Valve doesn't document (measured on SteamOS 0.5.9), and
+    XRService reads them as it starts. With the switch on, ft-camd's status lines since XRService
+    started say whether the cameras still give 60 bright frames a second. hr: handsrate, for tests."""
+    try:
+        hr = hr or repo_module("handsrate", "hands", "handsrate.py")
+        on, pending, rate = hr.state()["on"], False, None
+        pids = run("pgrep", "-f", hr.XRSERVICE)[1].split() if on else []
+        if pids:
+            ages = [int(a) for a in run("ps", "-o", "etimes=", "-p", ",".join(pids))[1].split()]
+            started = time.time() - min(ages)
+            pending = os.path.getmtime(hr.XR_PATH) > started
+            rate = hr.bright_rate(run("journalctl", "--user", "-u", "frametop-camd", "-o", "cat", "--no-pager",
+                                      "--since", f"@{int(started)}", "-g", "fps", "-n", "30")[1])
+        # Loaded, not enabled: hands/handsmode.py starts the units by HANDS_MODE.
+        hands = systemctl("show", "-p", "LoadState", "--value", "frametop-camd.service") == "loaded"
+        said = hr.verdict(on, hands, pending, rate)
+    except Exception as e:  # a broken checkout: say so rather than stop the whole check
+        said = "warn", f"couldn't read hands/handsrate.py: {e}"
+    if said:
+        report(said[0], "60 fps hand tracking", said[1])
 
 
 # What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;
@@ -1150,6 +1181,7 @@ def main():
         check_native_focus()
         check_eye_tracker()
         check_eye_rate()
+        check_hands_rate()
         check_dashpatch()
 
     if args == ["--mark-good"]:

@@ -93,6 +93,9 @@ import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
 import handsrate  # noqa: E402  (the 60 fps switch: the cameras' mode and ft-hands' rate)
 HANDSRATE = os.path.join(REPO, "hands", "handsrate.py")
+# The 60 fps switch stays busy this long after a switch: each one stops XRService, and SteamVR
+# gives up on an XRService that stops more than five times in a minute.
+RATE_COOLDOWN = 15.0
 # The hand and eye model catalogs: versions, notes, benchmarks, downloads (standard library only).
 sys.path.insert(0, os.path.join(REPO, "models"))
 sys.path.insert(0, os.path.join(REPO, "commands"))
@@ -569,6 +572,7 @@ class Backend(QObject):
         self._hands = {}  # handsmode.py's status, {} until it answers
         self._hands_lock = threading.Lock()  # one handsmode.py at a time
         self._rate_want = None  # the 60 fps switch's new state while handsrate.py sets it
+        self._rate_busy = False  # from a switch until RATE_COOLDOWN after it
         self._hands_refreshing = False
         self._model_busy = {"hands": "", "eyes": ""}  # what a model download is doing, per kind
         self._model_views = {}
@@ -2131,28 +2135,32 @@ class Backend(QObject):
     @Property("QVariantMap", notify=handsChanged)
     def handsRate(self):
         """The 60 fps switch: "on" (the cameras are in the no-dark mode; while it's being set, what
-        was asked), "busy", "note" (what doesn't match) and "warning" (what it costs)."""
+        was asked), "busy" (being set, or just set: RATE_COOLDOWN), "note" (what doesn't match) and
+        "warning" (what it costs)."""
         st = handsrate.state(read_conf())
         if self._rate_want is not None:
             st["on"] = self._rate_want
-        return dict(st, busy=self._rate_want is not None, warning=handsrate.WARNING)
+        return dict(st, busy=self._rate_busy, warning=handsrate.WARNING)
 
     @Slot(bool)
     def setHandsRate(self, on):
         """handsrate.py on|off --now on the host (it stops XRService there and restarts ft-hands),
-        off the UI thread: SteamVR takes some seconds to start head tracking again."""
-        if self._rate_want is not None:
+        off the UI thread: SteamVR takes some seconds to start head tracking again. One at a time,
+        and not again until RATE_COOLDOWN after it."""
+        if self._rate_busy:
             return
-        self._rate_want = bool(on)
+        self._rate_busy, self._rate_want = True, bool(on)
         self.handsChanged.emit()
 
         def job():
             r = host("python3", HANDSRATE, "on" if on else "off", "--now", timeout=45)
-            self._rate_want = None
+            self._rate_want = None  # from here the switch shows what the files say
             self.handsChanged.emit()
-            said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:300]
-            self.message.emit(said if r.returncode == 0 else "Couldn't switch 60 fps hand tracking: " + said,
-                              r.returncode != 0)
+            said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:400]
+            self.message.emit(said if r.returncode == 0 else "60 fps hand tracking: " + said, r.returncode != 0)
+            time.sleep(RATE_COOLDOWN)
+            self._rate_busy = False
+            self.handsChanged.emit()
         threading.Thread(target=job, daemon=True).start()
 
     # --- models (hands and eyes: models/catalog.py) ---

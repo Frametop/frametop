@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """scripts/update-check.py: what it says about the KWin effects the session turns off, KWin's EIS,
-and the eye cameras' rate.
+the eye cameras' rate, and the tracking cameras' rate under the 60 fps hand tracking switch.
 
 KWin 6.2 has a blur and a contrast effect, each with a factory named in kwin_wayland. KWin 6.6
 (SteamOS 0.5.8) has no contrast effect of its own, which is not something to warn about; a
@@ -9,6 +9,10 @@ KWin without the blur effect is.
   python3 scripts/tests/test_update_check.py
 """
 import importlib.util
+import os
+import tempfile
+import time
+import types
 import unittest
 from pathlib import Path
 
@@ -72,6 +76,58 @@ class KWinEis(unittest.TestCase):
                 state, _, detail = self.m.kwin_eis(path)
                 self.assertEqual(state, "warn")
                 self.assertIn("Zed", detail)
+
+
+class HandsRate(unittest.TestCase):
+    """The 60 fps hand tracking check: what it asks the host, and that it reports
+    hands/handsrate.py's verdict, or nothing while the switch is off (the verdicts themselves:
+    hands/tests/test_handsrate.py). The switch's state and the settings file are made up."""
+    LINE = "[{} s]  og01a1b_4-0036_video9 {} fps (dark 0 at 0.0 stale 0 torn 0 remapped 0 idled 0, sync 0.08 ms)"
+
+    def check(self, on, rate="", loaded="loaded", pids="", written_ago=3600):
+        m, real, said, asked = load(), load().repo_module("handsrate", "hands", "handsrate.py"), [], []
+        settings = tempfile.NamedTemporaryFile()
+        self.addCleanup(settings.close)
+        os.utime(settings.name, (time.time() - written_ago,) * 2)
+        hr = types.SimpleNamespace(state=lambda: {"on": on, "note": ""}, XRSERVICE=real.XRSERVICE,
+                                   XR_PATH=settings.name, bright_rate=real.bright_rate, verdict=real.verdict)
+        journal = "\n".join(self.LINE.format(t, rate) for t in (60, 120, 180)) if rate else ""
+        # Two XRServices, 500 s and 20 s old: the settings count from the newer one's start.
+        answers = {"pgrep": (0 if pids else 1, pids), "ps": (0, "500\n 20\n"), "journalctl": (0, journal)}
+
+        def run(*cmd, **kw):
+            asked.append(cmd)
+            return answers[cmd[0]]
+        m.run, m.systemctl = run, lambda *args: loaded
+        m.report = lambda state, label, detail="": said.append((state, label, detail))
+        m.check_hands_rate(hr)
+        return said, asked
+
+    def test_off_reports_nothing_and_asks_nothing(self):
+        self.assertEqual(self.check(False, "30.0", pids="41\n"), ([], []))
+
+    def test_sixty_since_xrservice_started_is_ok(self):
+        said, asked = self.check(True, "59.9", pids="41\n52\n")
+        (state, label, detail), = said
+        self.assertEqual((state, label), ("ok", "60 fps hand tracking"))
+        self.assertIn("59.9", detail)
+        self.assertEqual(asked[1], ("ps", "-o", "etimes=", "-p", "41,52"))
+        since = int(asked[2][asked[2].index("--since") + 1].lstrip("@"))
+        self.assertAlmostEqual(since, time.time() - 20, delta=5)
+
+    def test_thirty_fails(self):
+        self.assertEqual(self.check(True, "30.0", pids="41\n")[0][0][0], "FAIL")
+
+    def test_written_after_xrservice_started_says_restart(self):
+        (state, _, detail), = self.check(True, "30.0", pids="41\n", written_ago=5)[0]
+        self.assertEqual(state, "warn")
+        self.assertIn("restart SteamVR", detail)
+
+    def test_no_xrservice_is_a_skip(self):
+        self.assertEqual(self.check(True)[0][0][0], "skip")
+
+    def test_hand_tracking_not_installed_warns(self):
+        self.assertEqual(self.check(True, loaded="not-found")[0][0][0], "warn")
 
 
 class EyeRate(unittest.TestCase):

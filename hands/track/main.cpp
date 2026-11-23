@@ -1115,7 +1115,11 @@ int main(int argc, char **argv) {
                 std::fflush(stdout);
                 t_status = mono_ns();
             }
-            if (!track || tmin < next_ns) continue;   // not needed yet at the current rate
+            if (!track) continue;
+            if (tmin < next_ns) {   // not needed yet at the current rate
+                ++passed_by;
+                continue;
+            }
             if (!use_mono) images.clear();            // colour only, driven by mono while recording
             if (use_color && color_pair(raw_off, true, images)) ++color_steps;
             if (images.empty()) continue;
@@ -1136,6 +1140,7 @@ int main(int argc, char **argv) {
                 continue;
             }
             if (t < next_ns) {   // not needed yet: pass it by without copying
+                ++passed_by;
                 for (auto &[name, i] : color) last[name] = ring.latest(i);
                 continue;
             }

@@ -26,8 +26,7 @@ MODES = {'120': {'streamingMode': 0, 'slamFrameFPSMode': 5}, '60': handsrate.HIG
 
 
 def show():
-    data = handsrate.ft_store.load_json_strict(handsrate.XR_PATH, {}, handsrate.check)
-    return json.dumps(handsrate.cameras_of(data) or 'default')
+    return json.dumps(handsrate.read_cameras() or 'default')
 
 
 def main():
@@ -42,11 +41,16 @@ def main():
     if '--kill' not in sys.argv:
         print('applies when XRService next starts (--kill, or restart SteamVR)')
         return
-    print(handsrate.restart_tracking(handsrate.Host()))
+    host = handsrate.Host()
+    running = bool(host.xrservice())
+    restarted, said = handsrate.restart_tracking(host)
+    if running and not restarted:
+        sys.exit(said)
+    print(said)
 
 
 if __name__ == '__main__':
     try:
         main()
-    except handsrate.ft_store.StoreError as e:
+    except handsrate.RateError as e:
         sys.exit('slam-rate: %s' % e)

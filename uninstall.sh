@@ -48,7 +48,8 @@ ondesktop_link=$HOME/.local/bin/ft-ondesktop  # the same: Steam games' launch op
 bashrc_mark='# Frametop commands as shell aliases'  # ...and ~/.bashrc's two lines that read those aliases
 eye_rate=$HOME/.local/state/frametop/gaze/steamvr-eye-rate  # gaze/eye-rate.py turned the setting on
 dash_debugger=$HOME/.local/state/frametop/pointer/dashboard-debugger  # pointer/dashpatch/ft-dashpatch.py turned it on
-hands_rate=  # 1 when hands/handsrate.py's camera mode is on (the 60 fps switch): the controllers don't track
+xr_settings=$HOME/.config/openvr/config/cv/xrservice/XRServiceSettings.json  # SteamVR's; hands/handsrate.py sets the cameras' mode in it
+hands_rate=  # 1 when that mode is on (the 60 fps switch: the controllers don't track) and handsrate.py can take it out
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
 bt_files=(/etc/systemd/system/steamframe-bt-fixups.service /etc/systemd/system/bluetooth.service.d/steamframe.conf
@@ -86,6 +87,17 @@ find_repo() {
 desktop_entries() {
   local f
   for f in "$1"/ft-*.desktop "$1"/frametop-*.desktop; do printf '%s\n' "$f"; done
+}
+
+# 60 fps hand tracking's camera mode, in SteamVR's settings: "1" when it's on and REPO's
+# handsrate.py is there to take it out, "manual" when a camera mode is set and that code is gone.
+hands_rate_state() {  # hands_rate_state REPO
+  if [ -f "$1/hands/handsrate.py" ]; then
+    python3 "$1/hands/handsrate.py" status --json 2>/dev/null | grep -q '"on": true' && echo 1
+  elif grep -qs '"slamFrameFPSMode"' "$xr_settings"; then
+    echo manual
+  fi
+  return 0
 }
 
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
@@ -137,8 +149,13 @@ main() {
   grep -qF "$bashrc_mark" "$HOME/.bashrc" 2>/dev/null && bashrc_lines=1
   [ -f "$eye_rate" ] && [ -f "$repo/gaze/eye-rate.py" ] || eye_rate=
   [ -f "$dash_debugger" ] && [ -f "$repo/pointer/dashpatch/ft-dashpatch.py" ] || dash_debugger=
-  if [ -f "$repo/hands/handsrate.py" ] && python3 "$repo/hands/handsrate.py" status --json 2>/dev/null | grep -q '"on": true'; then
-    hands_rate=1
+  hands_rate=$(hands_rate_state "$repo")
+  if [ "$hands_rate" = manual ]; then
+    hands_rate=
+    echo "note: SteamVR's tracking cameras have a mode set in $xr_settings (slamFrameFPSMode), as 60 fps hand" >&2
+    echo "  tracking sets it, and Frametop's code isn't in $repo to take it out. If the controllers don't track," >&2
+    echo "  take streamingMode and slamFrameFPSMode out of captureSessionSettings.trackingCameras in that file," >&2
+    echo "  then restart SteamVR." >&2
   fi
   exists "${eyegrab_files[@]}" "${bt_files[@]}" && sys=1
 

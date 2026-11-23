@@ -3,8 +3,8 @@
 XRService's settings (other keys kept, a file that doesn't read left alone, nothing left next to
 it), the two ft-hands settings in frametop.conf, what the state says when they don't match,
 applying it with a made-up host, what its Host says when systemctl, pgrep or kill fail (with a
-made-up user: nothing here runs them, or waits), and what scripts/update-check.py says of the
-cameras' rate. hands/tools/slam-rate.py writes through the same code.
+made-up user: nothing here runs them, or waits), and what it reads of the cameras in ft-camd's
+status lines for scripts/update-check.py. hands/tools/slam-rate.py writes through the same code.
 
 Every call here names its files, in a temporary folder of its own, so the real settings stay
 out of reach whatever HOME was when handsrate was first imported. slam-rate.py takes no paths:
@@ -30,8 +30,8 @@ import handsrate as hr  # noqa: E402
 SLAM_RATE = os.path.join(os.path.dirname(HERE), "tools", "slam-rate.py")
 OTHERS = {"captureSessionSettings": {"trackingCameras": {"exposure": 7}, "eyeCameras": {"fps": 90}}, "log": 1}
 FAST = {"streamingMode": 0, "slamFrameFPSMode": 5}  # slam-rate.py's 120
-STATUS = ("[{t} s]  og01a1b_4-0036_video9 {a:.1f} fps (dark 0 at 0.0 stale 0 torn 0 remapped 0 idled 0, sync 0.08 ms "
-          "copy 0.11 ms)  og01a1b_4-0060_video13 {b:.1f} fps (dark 0 at 0.0 stale 0 torn 0 remapped 0 idled 0, sync "
+STATUS = ("[{t} s]  og01a1b_4-0036_video9 {a:.1f} fps (dark {d} at 3.6 stale 0 torn 0 remapped 0 idled 0, sync 0.08 ms "
+          "copy 0.11 ms)  og01a1b_4-0060_video13 {b:.1f} fps (dark {d} at 3.7 stale 0 torn 0 remapped 0 idled 0, sync "
           "0.08 ms copy 0.11 ms)  cam_color PAUSED 30.0 fps (paced 0 half-size copy 0 stale 0 torn 0 paused 0, sync 0.1 ms)")
 
 
@@ -59,11 +59,14 @@ class FakeHost:
 class FakeUser:
     """handsmode.Host for handsrate.Host: what each command answers, and what was run."""
 
-    def __init__(self, returncode=0, stdout="", stderr=""):
+    def __init__(self, returncode=0, stdout="", stderr="", each=None):
         self.answer, self.ran = subprocess.CompletedProcess([], returncode, stdout, stderr), []
+        self.each = each or {}   # {a command's last word: (returncode, stderr)}, for kill by pid
 
     def run(self, cmd, timeout=20):
         self.ran.append(cmd)
+        if cmd[-1] in self.each:
+            return subprocess.CompletedProcess(cmd, self.each[cmd[-1]][0], "", self.each[cmd[-1]][1])
         return self.answer
 
     def systemctl(self, *args):
@@ -233,9 +236,39 @@ class Switch(Files):
     def test_settings_that_cannot_be_written_put_the_cameras_back(self):
         hr.write_cameras(FAST, self.xr_path)
         with mock.patch.object(hr.ft_conf, "set_value", side_effect=OSError("disk full")):
-            with self.assertRaisesRegex(hr.RateError, "as it was"):
+            with self.assertRaisesRegex(hr.RateError, r"frametop.conf couldn't be written \(disk full\).*as they were"):
                 self.switch(True, FakeHost({41}))
         self.assertEqual(hr.read_cameras(self.xr_path), FAST)
+
+    def test_the_second_setting_failing_puts_the_first_back_too(self):
+        self.write_conf("HANDS_MAX_HZ=45\n")
+        real = hr.ft_conf.set_value
+
+        def second_fails(key, value, path):
+            if key == "HANDS_FULL_RATE":
+                raise OSError("disk full")
+            return real(key, value, path)
+        with mock.patch.object(hr.ft_conf, "set_value", side_effect=second_fails):
+            with self.assertRaisesRegex(hr.RateError, "as they were"):
+                self.switch(True)
+        self.assertEqual(self.conf(), {"HANDS_MAX_HZ": "45"})
+        self.assertEqual(self.state(), {"on": False, "note": ""})
+
+    def test_what_cannot_be_put_back_is_said(self):
+        # The disk fills after the cameras' mode is written: the settings and the way back both fail.
+        real, writes = hr.ft_store.write_json, []
+
+        def first_only(*args, **kw):
+            writes.append(args)
+            if len(writes) > 1:
+                raise OSError("No space left on device")
+            return real(*args, **kw)
+        with mock.patch.object(hr.ft_conf, "set_value", side_effect=OSError("No space left on device")), \
+                mock.patch.object(hr.ft_store, "write_json", side_effect=first_only):
+            with self.assertRaisesRegex(hr.RateError, r"frametop.conf couldn't be written.*couldn't be put back.*"
+                                                      "the switch reads on now"):
+                self.switch(True)
+        self.assertTrue(self.state()["on"])
 
     def test_now_restarts_the_hands_and_xrservice(self):
         host = FakeHost({41}, {41}, {52})
@@ -254,7 +287,8 @@ class Switch(Files):
     def test_xrservice_that_stays_down_says_so(self):
         host = FakeHost({41}, set())
         restarted, said = hr.restart_tracking(host, wait=1.0, step=0.5)
-        self.assertFalse(restarted)
+        self.assertIs(restarted, False)
+        self.assertIsNone(hr.restart_tracking(FakeHost())[0])   # it wasn't running: nothing to wait for
         self.assertIn("hasn't restarted", said)
         self.assertEqual(host.calls, [("stop", [41]), "wait", "wait"])
 
@@ -267,7 +301,8 @@ class Switch(Files):
 
     def test_xrservice_that_cannot_be_stopped_says_so(self):
         host = FakeHost({41}, stopping="Operation not permitted")
-        with self.assertRaisesRegex(hr.RateError, r"couldn't be stopped \(Operation not permitted\)"):
+        with self.assertRaisesRegex(hr.RateError, r"settings are written, but XRService couldn't be stopped "
+                                                  r"\(Operation not permitted\)"):
             self.switch(True, host)
         self.assertNotIn("wait", host.calls)
 
@@ -287,13 +322,19 @@ class TheHost(unittest.TestCase):
             with self.subTest(line):
                 self.assertEqual(bool(re.search(hr.XRSERVICE, line)), found)
 
-    def test_stop_asks_all_of_them_and_says_what_went_wrong(self):
+    def test_stop_asks_each_of_them_and_says_what_went_wrong(self):
         user = FakeUser()
         self.assertEqual(hr.Host(user).stop({52, 41}), "")
-        self.assertEqual(user.ran, [["kill", "41", "52"]])
+        self.assertEqual(user.ran, [["kill", "41"], ["kill", "52"]])
         self.assertEqual(hr.Host(FakeUser(1, stderr="kill: (41): Operation not permitted\n")).stop({41}),
                          "kill: (41): Operation not permitted")
-        self.assertEqual(hr.Host(FakeUser(1)).stop({41}), "kill exit 1")
+        self.assertEqual(hr.Host(FakeUser(1)).stop({41}), "kill 41: exit 1")
+
+    def test_one_that_went_by_itself_is_not_a_failure(self):
+        # The old XRService can go while the new one starts: the other is still asked to stop.
+        user = FakeUser(each={"41": (1, "kill: (41): No such process\n")})
+        self.assertEqual(hr.Host(user).stop({41, 52}), "")
+        self.assertEqual(user.ran, [["kill", "41"], ["kill", "52"]])
 
     def test_restart_hands_says_what_went_wrong(self):
         user = FakeUser()
@@ -304,50 +345,51 @@ class TheHost(unittest.TestCase):
         self.assertEqual(hr.Host(FakeUser(5, stderr="Unit frametop-hands.service not found.")).restart_hands(), "")
 
 
-class Rate(unittest.TestCase):
-    """What scripts/update-check.py says of the cameras with the switch on."""
+class Rates(unittest.TestCase):
+    """What ft-camd's status lines say of the cameras, for scripts/update-check.py. The numbers
+    are ft-camd's own, from the journal of 2026-11-22 and 23."""
 
-    def test_the_rate_is_the_highest_after_the_first_line(self):
-        lines = [STATUS.format(t=60, a=12.9, b=12.9), STATUS.format(t=120, a=59.0, b=59.9),
-                 STATUS.format(t=180, a=0.0, b=0.0)]
-        self.assertEqual(hr.bright_rate("\n".join(lines)), 59.9)
-        self.assertIsNone(hr.bright_rate(lines[1]))                 # the first line alone: a part minute
-        self.assertIsNone(hr.bright_rate("\n".join([lines[1], lines[2], lines[2]])))   # parked since
-        self.assertIsNone(hr.bright_rate("XRService is not running; start SteamVR on the headset first\n"))
-        self.assertIsNone(hr.bright_rate(""))
+    def rates(self, *lines):
+        return hr.camera_rates("\n".join(STATUS.format(t=t, a=a, b=b, d=d) for t, a, b, d in lines))
 
-    def test_off_says_nothing(self):
-        self.assertIsNone(hr.verdict(False, True, False, 30.0))
+    def test_the_mode_worn(self):
+        got = self.rates((60, 12.9, 12.9, 0), (120, 59.0, 59.9, 7), (180, 59.9, 59.9, 7))
+        self.assertEqual((got["best"], got["minutes"]), (59.9, 2))
+        self.assertLess(got["dark"], 0.01)
 
-    def test_sixty_is_ok(self):
-        state, detail = hr.verdict(True, True, False, 59.9)
-        self.assertEqual(state, "ok")
-        self.assertIn("59.9", detail)
+    def test_steamvrs_own_mode_is_dark_frames(self):
+        # 30 bright a second and as many dark: the running count grows 1800 a minute.
+        got = self.rates((9242, 2.1, 2.1, 3952), (9302, 30.0, 30.0, 5752), (9362, 29.6, 29.6, 7535),
+                         (9422, 30.0, 30.0, 9335))
+        self.assertEqual((got["best"], got["minutes"]), (30.0, 3))
+        self.assertGreater(got["dark"], 0.4)
 
-    def test_thirty_means_the_mode_no_longer_holds(self):
-        # What a SteamOS update that renumbers the modes looks like: the dark frames are back.
-        state, detail = hr.verdict(True, True, False, 30.0)
-        self.assertEqual(state, "FAIL")
-        self.assertIn("handsrate.py off --now", detail)
-        self.assertIn("slam-rate.py", detail)
+    def test_the_headset_off_measures_nothing(self):
+        # XRService wakes the cameras for some seconds now and then: 5.1 a second over a minute.
+        got = self.rates((240, 5.1, 5.1, 0), (300, 0.0, 0.0, 0), (360, 5.1, 5.1, 0), (420, 0.0, 0.0, 0))
+        self.assertEqual(got, {"best": 5.1, "minutes": 0, "dark": 0.0})
+        self.assertIsNone(self.rates((240, 5.1, 5.1, 0), (300, 0.0, 0.0, 0))["dark"])   # too few frames to say
 
-    def test_a_faster_mode_warns(self):
-        self.assertEqual(hr.verdict(True, True, False, 114.4)[0], "warn")
+    def test_the_first_line_only_starts_the_count(self):
+        self.assertEqual(self.rates((120, 59.9, 59.9, 0)), {"best": 0.0, "minutes": 0, "dark": None})
+        self.assertEqual(hr.camera_rates(""), {"best": 0.0, "minutes": 0, "dark": None})
+        self.assertEqual(hr.camera_rates("XRService is not running; start SteamVR on the headset first\n")["best"], 0.0)
 
-    def test_no_rate_yet_is_a_skip_with_what_to_do(self):
-        state, detail = hr.verdict(True, True, False, None)
-        self.assertEqual(state, "skip")
-        self.assertIn("check again", detail)
+    def test_ft_camd_starting_again_starts_the_count_again(self):
+        # Its clock and its dark count both go back to nothing: that line measures against no other.
+        got = self.rates((9422, 30.0, 30.0, 9335), (60, 40.0, 40.0, 0), (120, 59.9, 59.9, 3))
+        self.assertEqual((got["best"], got["minutes"]), (59.9, 1))
+        self.assertLess(got["dark"], 0.01)
 
-    def test_written_after_steamvr_started_says_restart(self):
-        state, detail = hr.verdict(True, True, True, 30.0)
-        self.assertEqual(state, "warn")
-        self.assertIn("restart SteamVR", detail)
+    def test_lines_newest_first_measure_nothing(self):
+        # journalctl -g with -n gives them so: no line follows the one before it.
+        got = self.rates((180, 59.9, 59.9, 7), (120, 59.0, 59.9, 7), (60, 12.9, 12.9, 0))
+        self.assertEqual((got["best"], got["minutes"]), (0.0, 0))
 
-    def test_on_without_hand_tracking_says_turn_it_off(self):
-        state, detail = hr.verdict(True, False, False, None)
-        self.assertEqual(state, "warn")
-        self.assertIn("handsrate.py off", detail)
+    def test_a_parked_line_counts_as_its_rate(self):
+        line = STATUS.format(t=120, a=0.0, b=0.0, d=0).replace("video9 0.0", "video9 PARKED 0.0")
+        got = hr.camera_rates(STATUS.format(t=60, a=59.9, b=59.9, d=0) + "\n" + line)
+        self.assertEqual((got["best"], got["minutes"]), (0.0, 0))
 
 
 class Main(Files):

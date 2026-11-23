@@ -24,7 +24,8 @@ minute, so Frametop Settings holds the switch for a while after each use.
 The settings file is SteamVR's: this reads it without leaving anything next to it, writes it by a
 temp file and a rename, and never writes over one that doesn't read. The mode numbers and
 XRService's command line are the SteamOS image's (measured on 0.5.9): scripts/update-check.py
-checks, with the switch on, that the cameras still give 60 frames a second.
+checks, with the switch on, that the cameras still give 60 frames a second and no dark ones
+(camera_rates here reads them from ft-camd's status lines).
 
 Known (2026-11-23): with no dark frames, changing Room View between colour and black and white
 restarts the cameras out of step, and head tracking falls to 3DoF until SteamVR restarts
@@ -148,41 +149,28 @@ def state(conf=None, xr_path=XR_PATH, conf_path=CONF_PATH):
     return {"on": on, "note": note}
 
 
-def bright_rate(status):
-    """The tracking cameras' bright frames a second in ft-camd's status lines (its journal's text,
-    a line a minute): the highest a line says for a camera. The first line is left out, since its
-    minute may have begun before the cameras did, and so is a rate under 5 (headset off, hand
-    tracking parked). None when that leaves nothing."""
-    lines = [re.findall(r"([0-9]+\.[0-9]) fps \(dark ", line) for line in status.splitlines()]
-    rates = [max(map(float, found)) for found in lines if found][1:]
-    return max(rates) if rates and max(rates) > 5 else None
-
-
-def verdict(on, hands, pending, rate):
-    """What scripts/update-check.py says of the switch: (state, detail), or None when it's off.
-    hands: hand tracking is installed; pending: the camera mode was written after XRService
-    started, so it doesn't count yet; rate: bright_rate since XRService started."""
-    if not on:
-        return None
-    off = "python3 hands/handsrate.py off --now"
-    if not hands:
-        return "warn", ("on, so the controllers don't track, but hand tracking isn't installed: "
-                        f"turn it off ({off})")
-    if pending:
-        return "warn", "on, but SteamVR started before that, so the cameras are in their old mode: restart SteamVR"
-    if rate is None:
-        return "skip", ("on; ft-camd hasn't measured the cameras since SteamVR started (it needs two "
-                        "minutes with the headset on): wear it and check again")
-    if rate < 50:
-        return "FAIL", (f"on, but the tracking cameras give {rate:g} bright frames a second, not 60: this "
-                        "SteamVR doesn't run slamFrameFPSMode 3 as 60 Hz without dark frames, so hand "
-                        f"tracking has half its frames and the mode may do something else. Turn it off ({off}), "
-                        "then find the mode again with hands/tools/slam-rate.py and fix HIGH in hands/handsrate.py")
-    if rate > 75:
-        return "warn", (f"on, and the tracking cameras give {rate:g} frames a second, not 60: this SteamVR "
-                        "runs slamFrameFPSMode 3 faster, and ft-hands tracks at most 60 (HANDS_MAX_HZ). "
-                        "Find the 60 Hz mode again with hands/tools/slam-rate.py and fix HIGH in hands/handsrate.py")
-    return "ok", f"on: {rate:g} bright frames a second, no dark ones (the controllers don't track)"
+def camera_rates(status):
+    """What ft-camd's status lines (its journal's text, a line a minute) say of the tracking
+    cameras: {"best": the most bright frames a second a camera gave in a minute, "minutes": how
+    many minutes the cameras ran (20 a second or more: with the headset off they give 0 to 5),
+    "dark": the share of their frames that were dark, None under 600 frames}. Each line is
+    measured against the one before it (its dark count is a running total, and the first line's
+    minute may have begun before the cameras did); a line whose clock went back is ft-camd
+    started again, and is the next first line."""
+    best, minutes, bright, dark, before = 0.0, 0, 0.0, 0, None
+    for line in status.splitlines():
+        clock = re.match(r"\[(\d+) s\]", line)
+        cams = re.findall(r"([0-9]+\.[0-9]) fps \(dark (\d+) ", line)
+        if not clock or not cams:
+            continue
+        now = (int(clock.group(1)), [float(rate) for rate, _ in cams], sum(int(n) for _, n in cams))
+        if before and now[0] > before[0] and now[2] >= before[2]:
+            best = max(best, *now[1])
+            minutes += max(now[1]) >= 20
+            bright += sum(now[1]) * (now[0] - before[0])
+            dark += now[2] - before[2]
+        before = now
+    return {"best": best, "minutes": minutes, "dark": dark / (bright + dark) if bright + dark >= 600 else None}
 
 
 class Host:
@@ -202,9 +190,14 @@ class Host:
         return {int(pid) for pid in self.user.run(["pgrep", "-f", XRSERVICE]).stdout.split()}
 
     def stop(self, pids):
-        """Ask them to stop. "" or what went wrong."""
-        r = self.user.run(["kill", *map(str, sorted(pids))])
-        return "" if r.returncode == 0 else (r.stderr.strip() or f"kill exit {r.returncode}")
+        """Ask them to stop, each on its own: one that has gone by itself meanwhile (an old one,
+        as a new one starts) is no failure. "" or what went wrong."""
+        problems = []
+        for pid in sorted(pids):
+            r = self.user.run(["kill", str(pid)])
+            if r.returncode != 0 and "No such process" not in r.stderr:
+                problems.append(r.stderr.strip() or f"kill {pid}: exit {r.returncode}")
+        return "; ".join(problems)
 
     def wait(self, seconds):
         time.sleep(seconds)
@@ -212,11 +205,11 @@ class Host:
 
 def restart_tracking(host, wait=20.0, step=0.2):
     """Stop XRService so SteamVR starts a new one, which reads the camera mode. (restarted, text):
-    restarted is False when it wasn't running or SteamVR hasn't started a new one yet (the text
-    says which). RateError when XRService couldn't be stopped."""
+    restarted is None when it wasn't running, False when SteamVR hasn't started a new one yet.
+    RateError when XRService couldn't be stopped."""
     old = host.xrservice()
     if not old:
-        return False, "The cameras change when SteamVR next starts."
+        return None, "The cameras change when SteamVR next starts."
     problem = host.stop(old)
     if problem:
         raise RateError(f"XRService couldn't be stopped ({problem}), so the cameras keep their old "
@@ -231,19 +224,30 @@ def restart_tracking(host, wait=20.0, step=0.2):
 
 def switch(on, host=None, conf_path=CONF_PATH, xr_path=XR_PATH):
     """Write the three settings for ON or off; a setting that already reads so is left as it is.
-    The cameras go first (a file that doesn't read stops it there, with nothing changed), and
-    they're put back if frametop.conf can't be written, so the two don't part. With a host, apply
-    them now. The text to show; RateError when something wasn't written or applied."""
+    The cameras go first (a file that doesn't read stops it there, with nothing changed). If
+    frametop.conf then can't be written, what was written is put back, so the two don't part,
+    and the error says so, or says what stayed changed. With a host, apply them now. The text
+    to show; RateError when something wasn't written or applied."""
     before = read_cameras(xr_path)
     write_cameras(HIGH if on else {}, xr_path)
+    conf, written = ft_conf.read(conf_path), {}
     try:
-        conf = ft_conf.read(conf_path)
         for key, value in (CONF_ON if on else CONF_OFF).items():
-            if conf.get(key, CONF_OFF[key]) != value:  # off with nothing set writes nothing (uninstall.sh)
+            was = conf.get(key, CONF_OFF[key])
+            if was != value:  # off with nothing set writes nothing (uninstall.sh)
                 ft_conf.set_value(key, value, conf_path)
+                written[key] = was
     except OSError as e:
-        write_cameras(before, xr_path)
-        raise RateError(f"{conf_path} couldn't be written ({e}); the cameras' mode is as it was") from None
+        try:
+            write_cameras(before, xr_path)
+            for key, was in written.items():
+                ft_conf.set_value(key, was, conf_path)
+            kept = "the cameras' mode and ft-hands' settings are as they were"
+        except (RateError, OSError) as again:
+            now = "on" if state(None, xr_path, conf_path)["on"] else "off"
+            kept = (f"and what was written couldn't be put back ({again}): the switch reads {now} now, "
+                    "so set it again once the files can be written")
+        raise RateError(f"{conf_path} couldn't be written ({e}); {kept}") from None
     said = ("60 fps hand tracking on: the controllers don't track." if on
             else "60 fps hand tracking off: the controllers track again.")
     if host is None:
@@ -252,7 +256,10 @@ def switch(on, host=None, conf_path=CONF_PATH, xr_path=XR_PATH):
     if problem:
         raise RateError(f"The settings are written, but ft-hands couldn't be restarted ({problem}): "
                         "restart SteamVR to apply them")
-    return said + " " + restart_tracking(host)[1]
+    try:
+        return said + " " + restart_tracking(host)[1]
+    except RateError as e:
+        raise RateError(f"The settings are written, but {e}") from None
 
 
 def main(argv, conf_path=CONF_PATH, xr_path=XR_PATH):

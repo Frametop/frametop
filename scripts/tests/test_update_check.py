@@ -79,55 +79,124 @@ class KWinEis(unittest.TestCase):
 
 
 class HandsRate(unittest.TestCase):
-    """The 60 fps hand tracking check: what it asks the host, and that it reports
-    hands/handsrate.py's verdict, or nothing while the switch is off (the verdicts themselves:
-    hands/tests/test_handsrate.py). The switch's state and the settings file are made up."""
-    LINE = "[{} s]  og01a1b_4-0036_video9 {} fps (dark 0 at 0.0 stale 0 torn 0 remapped 0 idled 0, sync 0.08 ms)"
+    """The 60 fps hand tracking check: what it says of the cameras (the numbers are ft-camd's,
+    2026-11-22 and 23), what it asks the host, and that it says nothing with the switch off. The
+    switch's state and the settings file are made up; reading the status lines is tested in
+    hands/tests/test_handsrate.py."""
+    LINE = "[{} s]  og01a1b_4-0036_video9 {} fps (dark {} at 3.6 stale 0 torn 0 remapped 0 idled 0, sync 0.08 ms)"
 
-    def check(self, on, rate="", loaded="loaded", pids="", written_ago=3600):
-        m, real, said, asked = load(), load().repo_module("handsrate", "hands", "handsrate.py"), [], []
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load()
+
+    def verdict(self, best=59.9, minutes=2, dark=0.003, on=True, hands="running", pending=False):
+        return self.m.hands_rate_verdict(on, hands, pending, {"best": best, "minutes": minutes, "dark": dark})
+
+    def test_off_says_nothing(self):
+        self.assertIsNone(self.verdict(best=30.0, dark=0.3, on=False))
+
+    def test_sixty_and_no_dark_frames_is_ok(self):
+        state, detail = self.verdict()
+        self.assertEqual(state, "ok")
+        self.assertIn("59.9", detail)
+
+    def test_dark_frames_mean_the_mode_no_longer_holds(self):
+        # SteamVR's own mode, as a SteamOS update that renumbers the modes would leave it.
+        state, detail = self.verdict(best=40.4, minutes=5, dark=0.30)
+        self.assertEqual(state, "FAIL")
+        self.assertIn("handsrate.py off --now", detail)
+        self.assertIn("slam-rate.py", detail)
+
+    def test_the_headset_off_is_a_skip_not_a_failure(self):
+        # 2026-11-23: the cameras idle at 0 to 5.1 a second with the headset off, and the first
+        # check called that a broken mode.
+        state, detail = self.verdict(best=5.1, minutes=0, dark=0.0)
+        self.assertEqual(state, "skip")
+        self.assertIn("check again", detail)
+        self.assertEqual(self.verdict(best=0.0, minutes=0, dark=None)[0], "skip")
+
+    def test_a_part_minute_is_a_skip(self):
+        self.assertEqual(self.verdict(best=30.5, minutes=1, dark=0.0)[0], "skip")
+
+    def test_minutes_at_a_lower_rate_warn(self):
+        state, detail = self.verdict(best=45.0, minutes=4, dark=0.0)
+        self.assertEqual(state, "warn")
+        self.assertIn("45", detail)
+
+    def test_a_faster_mode_warns(self):
+        self.assertEqual(self.verdict(best=114.4)[0], "warn")
+
+    def test_written_after_steamvr_started_says_restart(self):
+        state, detail = self.verdict(best=40.4, minutes=5, dark=0.30, pending=True)
+        self.assertEqual(state, "warn")
+        self.assertIn("restart SteamVR", detail)
+
+    def test_hand_tracking_missing_or_stopped(self):
+        state, detail = self.verdict(hands="missing")
+        self.assertEqual(state, "warn")
+        self.assertIn("handsrate.py off", detail)
+        state, detail = self.verdict(best=0.0, minutes=0, dark=None, hands="stopped")
+        self.assertEqual(state, "skip")
+        self.assertIn("isn't running", detail)
+
+    def check(self, on, lines=(), unit="loaded\nactive", pids="", ages="500\n 20\n", written_ago=3600):
+        m, real, said, asked = load(), self.m.repo_module("handsrate", "hands", "handsrate.py"), [], []
         settings = tempfile.NamedTemporaryFile()
         self.addCleanup(settings.close)
         os.utime(settings.name, (time.time() - written_ago,) * 2)
         hr = types.SimpleNamespace(state=lambda: {"on": on, "note": ""}, XRSERVICE=real.XRSERVICE,
-                                   XR_PATH=settings.name, bright_rate=real.bright_rate, verdict=real.verdict)
-        journal = "\n".join(self.LINE.format(t, rate) for t in (60, 120, 180)) if rate else ""
+                                   XR_PATH=settings.name, camera_rates=real.camera_rates)
+        journal = "\n".join(self.LINE.format(*line) for line in lines)
         # Two XRServices, 500 s and 20 s old: the settings count from the newer one's start.
-        answers = {"pgrep": (0 if pids else 1, pids), "ps": (0, "500\n 20\n"), "journalctl": (0, journal)}
+        answers = {"pgrep": (0 if pids else 1, pids), "ps": (0, ages), "journalctl": (0, journal)}
 
         def run(*cmd, **kw):
             asked.append(cmd)
             return answers[cmd[0]]
-        m.run, m.systemctl = run, lambda *args: loaded
+        m.run, m.systemctl = run, lambda *args: unit
         m.report = lambda state, label, detail="": said.append((state, label, detail))
         m.check_hands_rate(hr)
         return said, asked
 
-    def test_off_reports_nothing_and_asks_nothing(self):
-        self.assertEqual(self.check(False, "30.0", pids="41\n"), ([], []))
+    WORN = ((60, "12.9", 0), (120, "59.9", 7), (180, "59.9", 7))
 
-    def test_sixty_since_xrservice_started_is_ok(self):
-        said, asked = self.check(True, "59.9", pids="41\n52\n")
+    def test_off_reports_nothing_and_asks_nothing(self):
+        self.assertEqual(self.check(False, self.WORN, pids="41\n"), ([], []))
+
+    def test_it_measures_since_the_newest_xrservice_started(self):
+        said, asked = self.check(True, self.WORN, pids="41\n52\n")
         (state, label, detail), = said
         self.assertEqual((state, label), ("ok", "60 fps hand tracking"))
         self.assertIn("59.9", detail)
         self.assertEqual(asked[1], ("ps", "-o", "etimes=", "-p", "41,52"))
-        since = int(asked[2][asked[2].index("--since") + 1].lstrip("@"))
-        self.assertAlmostEqual(since, time.time() - 20, delta=5)
+        journal = asked[2]
+        self.assertAlmostEqual(int(journal[journal.index("--since") + 1].lstrip("@")), time.time() - 20, delta=5)
+        self.assertNotIn("-n", journal)   # with -g, -n gives the lines newest first
 
-    def test_thirty_fails(self):
-        self.assertEqual(self.check(True, "30.0", pids="41\n")[0][0][0], "FAIL")
+    def test_steamvrs_own_mode_fails(self):
+        own = ((9242, "2.1", 3952), (9302, "30.0", 5752), (9362, "29.6", 7535), (9422, "30.0", 9335))
+        self.assertEqual(self.check(True, own, pids="41\n")[0][0][0], "FAIL")
+
+    def test_the_headset_off_skips(self):
+        idle = ((240, "5.1", 0), (300, "0.0", 0), (360, "5.1", 0), (420, "0.0", 0))
+        self.assertEqual(self.check(True, idle, pids="41\n")[0][0][0], "skip")
 
     def test_written_after_xrservice_started_says_restart(self):
-        (state, _, detail), = self.check(True, "30.0", pids="41\n", written_ago=5)[0]
+        (state, _, detail), = self.check(True, self.WORN, pids="41\n", written_ago=5)[0]
         self.assertEqual(state, "warn")
         self.assertIn("restart SteamVR", detail)
 
     def test_no_xrservice_is_a_skip(self):
         self.assertEqual(self.check(True)[0][0][0], "skip")
+        # ...and one that went between pgrep and ps is no broken checkout
+        (state, _, detail), = self.check(True, pids="41\n", ages="")[0]
+        self.assertEqual(state, "skip")
 
-    def test_hand_tracking_not_installed_warns(self):
-        self.assertEqual(self.check(True, loaded="not-found")[0][0][0], "warn")
+    def test_hand_tracking_not_installed_or_not_running(self):
+        self.assertEqual(self.check(True, unit="not-found\ninactive")[0][0][0], "warn")
+        (state, _, detail), = self.check(True, pids="41\n", unit="loaded\ninactive")[0]
+        self.assertEqual(state, "skip")
+        self.assertIn("isn't running", detail)
 
 
 class EyeRate(unittest.TestCase):

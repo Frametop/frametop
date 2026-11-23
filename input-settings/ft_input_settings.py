@@ -2153,14 +2153,16 @@ class Backend(QObject):
         self.handsChanged.emit()
 
         def job():
-            r = host("python3", HANDSRATE, "on" if on else "off", "--now", timeout=45)
-            self._rate_want = None  # from here the switch shows what the files say
-            self.handsChanged.emit()
-            said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:400]
-            self.message.emit(said if r.returncode == 0 else "60 fps hand tracking: " + said, r.returncode != 0)
-            time.sleep(RATE_COOLDOWN)
-            self._rate_busy = False
-            self.handsChanged.emit()
+            try:
+                r = host("python3", HANDSRATE, "on" if on else "off", "--now", timeout=45)
+                self._rate_want = None  # from here the switch shows what the files say
+                self.handsChanged.emit()
+                said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:400]
+                self.message.emit(said if r.returncode == 0 else "60 fps hand tracking: " + said, r.returncode != 0)
+                time.sleep(RATE_COOLDOWN)
+            finally:   # whatever went wrong, the switch isn't left held
+                self._rate_want, self._rate_busy = None, False
+                self.handsChanged.emit()
         threading.Thread(target=job, daemon=True).start()
 
     # --- models (hands and eyes: models/catalog.py) ---

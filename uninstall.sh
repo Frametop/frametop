@@ -90,10 +90,12 @@ desktop_entries() {
 }
 
 # 60 fps hand tracking's camera mode, in SteamVR's settings: "1" when it's on and REPO's
-# handsrate.py is there to take it out, "manual" when a camera mode is set and that code is gone.
+# handsrate.py can take it out, "manual" when a camera mode is set and that code is gone or
+# doesn't run (a broken checkout).
 hands_rate_state() {  # hands_rate_state REPO
-  if [ -f "$1/hands/handsrate.py" ]; then
-    python3 "$1/hands/handsrate.py" status --json 2>/dev/null | grep -q '"on": true' && echo 1
+  local st
+  if [ -f "$1/hands/handsrate.py" ] && st=$(python3 "$1/hands/handsrate.py" status --json 2>/dev/null); then
+    grep -q '"on": true' <<<"$st" && echo 1
   elif grep -qs '"slamFrameFPSMode"' "$xr_settings"; then
     echo manual
   fi
@@ -153,7 +155,7 @@ main() {
   if [ "$hands_rate" = manual ]; then
     hands_rate=
     echo "note: SteamVR's tracking cameras have a mode set in $xr_settings (slamFrameFPSMode), as 60 fps hand" >&2
-    echo "  tracking sets it, and Frametop's code isn't in $repo to take it out. If the controllers don't track," >&2
+    echo "  tracking sets it, and Frametop's code in $repo is gone or doesn't run, so it stays. If the controllers don't track," >&2
     echo "  take streamingMode and slamFrameFPSMode out of captureSessionSettings.trackingCameras in that file," >&2
     echo "  then restart SteamVR." >&2
   fi

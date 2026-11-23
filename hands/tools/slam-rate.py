@@ -41,10 +41,8 @@ def main():
     if '--kill' not in sys.argv:
         print('applies when XRService next starts (--kill, or restart SteamVR)')
         return
-    host = handsrate.Host()
-    running = bool(host.xrservice())
-    restarted, said = handsrate.restart_tracking(host)
-    if running and not restarted:
+    restarted, said = handsrate.restart_tracking(handsrate.Host())
+    if restarted is False:   # it was running, and SteamVR hasn't started a new one
         sys.exit(said)
     print(said)
 

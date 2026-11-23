@@ -67,7 +67,9 @@ class Uninstall(unittest.TestCase):
         switch is on, and says how to by hand when a mode is set and that code is gone."""
         xr = self.home / ".config/openvr/config/cv/xrservice/XRServiceSettings.json"
         xr.parent.mkdir(parents=True)
-        gone, here = self.home / "no-repo", SCRIPT.parent
+        gone, broken, here = self.home / "no-repo", self.home / "broken", SCRIPT.parent
+        (broken / "hands").mkdir(parents=True)
+        (broken / "hands/handsrate.py").write_text("import ft_conf_that_is_gone\n")
         for name, text, repo, want in (
                 ("no settings file", None, here, "[0]"),
                 ("SteamVR's own mode", '{"captureSessionSettings": {"eyeCameras": {}}}', here, "[0]"),
@@ -75,6 +77,9 @@ class Uninstall(unittest.TestCase):
                                   '{"streamingMode": 0, "slamFrameFPSMode": 3}}}', here, "1\n[0]"),
                 ("the switch on, the code gone", '{"captureSessionSettings": {"trackingCameras": '
                                                  '{"streamingMode": 0, "slamFrameFPSMode": 3}}}', gone, "manual\n[0]"),
+                ("the switch on, the code there but broken", '{"captureSessionSettings": {"trackingCameras": '
+                                                             '{"streamingMode": 0, "slamFrameFPSMode": 3}}}', broken,
+                 "manual\n[0]"),
                 ("nothing set, the code gone", "{}", gone, "[0]")):
             with self.subTest(name):
                 if text is not None:

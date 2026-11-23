@@ -152,6 +152,8 @@ class DashTiles(unittest.TestCase):
         fields = {"DASH_TILE_DESK_DEG": "deskDeg", "DASH_TILE_RADIUS": "radius", "DASH_TILE_PX_PER_DEG": "pxPerDeg",
                   "DASH_TILE_WALL_DEG": "wallDeg"}
         for key, (default, _lo, _hi) in dash_tiles.NUMBERS.items():
+            if key not in fields:
+                continue   # (DASH_TILE_CURVE_M: 0, not set, isn't a tiling::Params field)
             with self.subTest(key=key):
                 m = re.search(r"double %s = ([\d.-]+);" % fields[key], src)
                 self.assertIsNotNone(m, key)

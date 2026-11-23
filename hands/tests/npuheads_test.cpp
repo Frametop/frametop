@@ -115,6 +115,10 @@ static void two_view() {
     CHECK(std::fabs(p - sig2) < 1e-6 && std::fabs(r - (1.f - sig2)) < 1e-6);
     file.pop_back();
     CHECK(!h.parse(file.data(), file.size(), err));
+    uint32_t hostile[12];   // sizes that would wrap size_t
+    std::memcpy(hostile, file.data(), sizeof hostile);
+    hostile[8] = 0xFFFFFFFFu;
+    CHECK(NpuHeads::file_bytes(hostile) == 0);
 }
 
 static void fixture(const char *path) {

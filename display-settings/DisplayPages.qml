@@ -1263,6 +1263,25 @@ Item {
                         }
                         Controls.Label { text: tileRadius.value.toFixed(2) + " m to their corners" }
                     }
+                    RowLayout {
+                        Kirigami.FormData.label: "Curve:"
+                        // the arc's radius, its centre to the wall (DASH_TILE_CURVE_M; not set: 2 m past the
+                        // wall's distance). At the distance or less it's round your head. (Steam's bar is
+                        // about 1.15 m away; its real distance is ft-screens'.)
+                        property real wallM: backend.dashTiles.atBar ? 1.15 : backend.dashTiles.radius
+                        Controls.Slider {
+                            id: tileCurve
+                            from: 0.8; to: 12; stepSize: 0.1
+                            value: backend.dashTiles.curveRadius > 0 ? backend.dashTiles.curveRadius : parent.wallM + 2
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.dashTiles.setCurveRadius(value)
+                        }
+                        Controls.Label {
+                            text: tileCurve.value <= parent.wallM + 0.05
+                                  ? "Round you: every panel faces you"
+                                  : tileCurve.value.toFixed(1) + " m radius (smaller curves tighter)"
+                        }
+                    }
                 }
 
                 Ft.Disclosure {

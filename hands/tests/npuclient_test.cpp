@@ -101,14 +101,20 @@ void hello_maps_the_memory() {
         f.map[NpuClient::kDetOuts + NpuClient::kDetBytes] = 0x7f;
         CHECK(cl.det_output(1)[0] == 0x7f);
     }
-    // a request answered OK, then one the daemon never answers before closing
+    // pair bits past the request's crops never reach the daemon
+    CHECK(!cl.run(1, 500, err, NpuClient::kPair0) && !cl.run(3, 500, err, NpuClient::kPair1));
+    CHECK(!cl.run(4, 500, err, 0x80) && cl.connected());
+    // a paired request and a plain one answered OK, then one the daemon never answers before closing
     std::thread t([&] {
         uint8_t req = 0, ok = 0;
+        CHECK(recv(c, &req, 1, 0) == 1 && req == (4 | NpuClient::kPair0 | NpuClient::kPair1));
+        send(c, &ok, 1, MSG_NOSIGNAL);
         CHECK(recv(c, &req, 1, 0) == 1 && req == 3);
         send(c, &ok, 1, MSG_NOSIGNAL);
         CHECK(recv(c, &req, 1, 0) == 1 && req == 1);
         ::close(c);
     });
+    CHECK(cl.run(4, 500, err, NpuClient::kPair0 | NpuClient::kPair1));
     CHECK(cl.run(3, 500, err));
     CHECK(!cl.run(1, 500, err));
     CHECK(err == "ft-npud closed the connection");

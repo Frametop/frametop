@@ -35,12 +35,15 @@ VOICE_ACTIONS = ("dictate", "dictate_hold")
 #
 # The dashboard tiles (screens/dashtiles.h; docs/design.md, Dashboard tiles): Meta+Shift+arrows move
 # the focused tile (user, 2026-11-20; Meta+arrows stay the desktop's and a PC's own, Windows' snap),
-# Meta+Ctrl+arrows size it, Meta+/ lists every key combination in frunner. The relay hands a tiling
+# Meta+Ctrl+arrows size it, Meta+Alt+Up/Down nudge it up or down a degree without moving the rest
+# (user, 2026-11-23: "move a display up or down by degrees without it re-orienting the entire
+# desktop"; kept in the tiles' memory and in layout profiles), Meta+/ lists every key combination in frunner. The relay hands a tiling
 # key to ft-screens only while an anchored panel has the focus (ft-screens' "tilefocus"); otherwise
 # it goes to the desktop as it always did.
 TILE_KEY_BINDINGS = MappingProxyType({"42+125+105": "tile_left", "42+125+106": "tile_right", "42+125+103": "tile_up",
                                       "42+125+108": "tile_down", "29+125+106": "tile_wider", "29+125+105": "tile_narrower",
-                                      "29+125+103": "tile_taller", "29+125+108": "tile_shorter", "125+53": "keys_list"})
+                                      "29+125+103": "tile_taller", "29+125+108": "tile_shorter", "56+125+103": "tile_nudge_up",
+                                      "56+125+108": "tile_nudge_down", "125+53": "keys_list"})
 # Meta+arrows alone on an anchored app window's tile (a floating window: ft-screens' "tilefocus 2")
 # move it as Meta+Shift+arrows do, unless the rules bind that combination to something. On the
 # desktop they're KWin's quick tile, which only halves a window alone on its own output: it looked
@@ -59,6 +62,7 @@ DEFAULT_KEY_BINDINGS = MappingProxyType({"125": "steam_menu", "125+36": "gaze_le
 TILE_ACTIONS = MappingProxyType({"tile_left": "tile left", "tile_right": "tile right", "tile_up": "tile up",
                                  "tile_down": "tile down", "tile_wider": "tile wider", "tile_narrower": "tile narrower",
                                  "tile_taller": "tile taller", "tile_shorter": "tile shorter",
+                                 "tile_nudge_up": "tile nudgeup", "tile_nudge_down": "tile nudgedown",
                                  "anchor_toggle": "anchor focused toggle"})
 # The ones that act only on an anchored panel with the focus: the key goes to the desktop otherwise.
 TILE_FOCUS_ACTIONS = tuple(a for a in TILE_ACTIONS if a != "anchor_toggle")
@@ -147,6 +151,7 @@ ACTION_LABELS = MappingProxyType({
     "tile_up": "Dashboard tile: move up", "tile_down": "Dashboard tile: move down",
     "tile_wider": "Dashboard tile: wider", "tile_narrower": "Dashboard tile: narrower",
     "tile_taller": "Dashboard tile: taller", "tile_shorter": "Dashboard tile: shorter",
+    "tile_nudge_up": "Dashboard tile: nudge up 1°", "tile_nudge_down": "Dashboard tile: nudge down 1°",
     "anchor_toggle": "Anchor the focused panel to the dashboard / let it go",
     "keys_list": "List the key combinations (frunner)",
     "key": "Pass through as key",

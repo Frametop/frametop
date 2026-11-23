@@ -208,6 +208,15 @@ public:
         sc = to;
         return true;
     }
+    // Two panels trade places, each keeping its own size (the centre display taken by a drop onto
+    // it: dashtiles.h's Board::TakeCentre). False when either isn't on the grid, or they're one.
+    bool Swap(int a, int b) {
+        const Where wa = Find(a), wb = Find(b);
+        if (!wa.ok() || !wb.ok() || a == b) return false;
+        Cell &ca = cols_[wa.col].cells[wa.row], &cb = cols_[wb.col].cells[wb.row];
+        std::swap(ca.id, cb.id), std::swap(ca.scale, cb.scale);
+        return true;
+    }
     // A panel's cell, or null.
     const Cell *CellOf(int id) const {
         const Where w = Find(id);

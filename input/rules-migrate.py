@@ -54,6 +54,9 @@ TILE_KEYS_KEY = "dashboard-tile-keys"
 TILE_COMBOS = {"42+125+105": "tile_left", "42+125+106": "tile_right", "42+125+103": "tile_up", "42+125+108": "tile_down",
                "29+125+106": "tile_wider", "29+125+105": "tile_narrower", "29+125+103": "tile_taller",
                "29+125+108": "tile_shorter", "125+53": "keys_list"}
+# The nudge keys came later (2026-11-23): a change of their own, so lists that had the ones above get them too.
+TILE_NUDGE_KEY = "dashboard-tile-nudge-keys"
+TILE_NUDGE_COMBOS = {"56+125+103": "tile_nudge_up", "56+125+108": "tile_nudge_down"}
 CLOSE_APP_KEY = "close-app-key"
 CLOSE_APP_COMBO, CLOSE_APP_ACTION = "125+17", "close_app"
 
@@ -183,8 +186,14 @@ def close_app_key(path):
                        "close the app you're typing in", "Close app")
 
 
+def tile_nudge_keys(path):
+    return add_bindings(path, TILE_NUDGE_KEY, TILE_NUDGE_COMBOS, "Meta+Alt+Up/Down",
+                        "nudge a dashboard tile up or down a degree", "Dashboard tile: nudge ...")
+
+
 MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key), (RELEASE_KEYS_KEY, release_keys_key),
-              (DESKTOPLESS_KEY, desktopless_key), (TILE_KEYS_KEY, tile_keys), (CLOSE_APP_KEY, close_app_key))
+              (DESKTOPLESS_KEY, desktopless_key), (TILE_KEYS_KEY, tile_keys), (CLOSE_APP_KEY, close_app_key),
+              (TILE_NUDGE_KEY, tile_nudge_keys))
 
 
 def main(rules=RULES, state_path=STATE):

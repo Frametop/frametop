@@ -20,8 +20,8 @@ XRService, so SteamVR starts a new one: head tracking drops for about 15 seconds
 that long without tracking before it starts XRService again), and with the headset off SteamVR
 starts it when the headset is next worn. The new XRService tracks in a new world, turned from the
 old one, so ft-screens moves what you had open with it (screens/universefix.h). Without --now the
-cameras change when SteamVR next starts. SteamVR gives up on an XRService that stops more than five times in a
-minute, so Frametop Settings holds the switch for a while after each use.
+cameras change when SteamVR next starts. SteamVR gives up on an XRService that stops more than
+five times in a minute, so Frametop Settings holds the switch for a while after each use.
 
 The settings file is SteamVR's: this reads it without leaving anything next to it, writes it by a
 temp file and a rename, and never writes over one that doesn't read. The mode numbers and

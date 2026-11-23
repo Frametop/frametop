@@ -144,7 +144,7 @@ int main() {
         pose(back, 2.86, 0, float(-(c * 0.15 - s * 0.13)), 0.006f, float(-(s * 0.15 + c * 0.13)));
         d.Feed(false, true, id);   // (closed again)
         std::memcpy(was, d.frame, sizeof was);
-        near = d.Carry(jump) && d.Carry(back);
+        near = d.Carry(jump) && std::fabs(d.frame[0][3] - was[0][3]) > 0.1 && d.Carry(back);
         for (int r = 0; r < 3; ++r)
             for (int k = 0; k < 4; ++k) near = near && std::fabs(d.frame[r][k] - was[r][k]) < 1e-4;
         check("the jump and its inverse leave the frame where it was", near);

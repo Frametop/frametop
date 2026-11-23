@@ -744,12 +744,15 @@ bool GuessDash(const Mat &head) {
 
 // A universe change (FollowUniverse; `from` the kind of the one left): the kept frame follows it by
 // a panel's rule (universefix::Follows), and goes with its jump unless the bar is shown
-// (dashanchor.h's Carry). Not with a wild one (tracking had run away): the frame was read near the
-// origin as a rule, and the new world starts at the head, so at its old numbers it's near you again,
-// as it was before the frame followed. True when it moved: the pins move this tick (g_dash.carried).
+// (dashanchor.h's Carry). Not with a wild one (tracking had run away): a frame read before the
+// runaway is near the origin, and the new world starts at the head, so at its old numbers it's near
+// you again, as it was before the frame followed (one read during the runaway is left far off until
+// the dashboard is opened). True when it moved: the pins move this tick (g_dash.carried).
 bool FollowDash(const universefix::Switch &sw, universefix::Kind from) {
     if (!g_dash.a.Framed() || !universefix::Follows(g_dash.universe, sw, from)) return false;
     g_dash.universe = sw.to;
+    if (sw.wild)
+        std::printf("dashboard pins: a head step of %.1f m is tracking that ran away: the frame keeps its numbers\n", sw.metres);
     return g_dash.carried = sw.moved && !sw.wild && g_dash.a.Carry(sw.jump.m);
 }
 
@@ -7129,9 +7132,7 @@ void FollowUniverse(const universefix::Switch &sw) {
     std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
                 (unsigned long long)sw.to, universefix::KindName(to), jump,
                 from != universefix::Kind::Temporary ? "panels placed there stay" : moved.empty() ? "no panel moved" : "moved screen(s)",
-                moved.c_str(),
-                dash ? "; moved the dashboard's frame and what's pinned to it"
-                : sw.wild ? "; that far is tracking that ran away: the dashboard's frame stays" : "",
+                moved.c_str(), dash ? "; moved the dashboard's frame and what's pinned to it" : "",
                 kept.empty() ? "" : "; now belong to the new one, not moved:", kept.c_str());
 }
 

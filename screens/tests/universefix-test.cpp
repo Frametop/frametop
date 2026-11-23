@@ -188,7 +188,7 @@ int main() {
         Tracker t;
         Switch sw;
         const int n = run(t, runaway, 40, 40, 60, &sw);
-        // (within 3 cm that far from the origin: the turn's error times the reach)
+        // (within 3 cm: the head's own motion is taken from steps on both sides, and the turn reverses it)
         check("a step of 13 m is wild, and still the jump", n == 1 && sw.wild && sw.moved && apart(sw.jump, runaway) < 0.03);
         check("...and says how far it was", sw.metres > 12 && sw.metres < 14);
         const double origin[3] = {0, 0, 0}, under[3] = {8.9, 0, 0}, over[3] = {9.1, 0, 0};

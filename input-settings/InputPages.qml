@@ -1975,7 +1975,8 @@ Item {
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         // What it needs, once the host has said what's installed (st is {} until then).
-                        text: hpage.rate.note || (hpage.rate.on || hpage.rateUsable || hpage.st.installed === undefined ? ""
+                        text: hpage.rate.switching ? "Restarting head tracking: about 15 seconds."
+                              : hpage.rate.note || (hpage.rate.on || hpage.rateUsable || hpage.st.installed === undefined ? ""
                               : hpage.st.installed ? "It needs hand tracking: turn that on above first."
                               : "It needs hand tracking, which isn't installed.")
                     }

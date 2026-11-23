@@ -110,10 +110,10 @@ class Page(unittest.TestCase):
                 break
             time.sleep(0.01)
         self.assertEqual(ran, [("python3", fis.HANDSRATE, "off", "--now")])
-        self.assertEqual((seen[0]["on"], seen[0]["busy"]), (False, True))
+        self.assertEqual((seen[0]["on"], seen[0]["busy"], seen[0]["switching"]), (False, True, True))
         self.assertEqual(said, [("60 fps hand tracking off: the controllers track again.", False)])
         st = self.b.handsRate
-        self.assertEqual((st["on"], st["busy"]), (True, True))   # what the files say again; still held
+        self.assertEqual((st["on"], st["busy"], st["switching"]), (True, True, False))   # what the files say again; still held
         self.b.setHandsRate(False)                               # held: this one doesn't run
         for _ in range(200):
             self.app.processEvents()

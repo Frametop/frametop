@@ -634,14 +634,17 @@ bool FloorFrame(levelpin::Mode mode, Mat *out) {
 // OpenVR won't let another process read the dashboard's transform (valve.steam.gamepadui.main is a
 // DashboardTab overlay), but Steam's bar under it (kDashKey) is an Absolute overlay placed rigidly with it:
 // read every tick (dashanchor.h says which reads count), it's the frame dashboard pins ride on, placed by
-// us as floor pins are (MoveFramePins). Hidden (the dashboard closed), the last good frame stays. A
-// Steam-internal name: scripts/update-check.py checks it's still there.
+// us as floor pins are (MoveFramePins). Hidden (the dashboard closed), the last good frame stays, and
+// follows a universe's jump as a panel placed in the room does (FollowUniverse). A Steam-internal
+// name: scripts/update-check.py checks it's still there.
 constexpr const char *kDashKey = "valve.steam.gamepadui.bar";
 struct DashAnchor {
     vr::VROverlayHandle_t bar = vr::k_ulOverlayHandleInvalid;
     long retryAt = 0;          // missing: g_tick to look for it again at
     bool missingLogged = false;
     dashanchor::Anchor a;      // a.ever: dashboard pins have a frame
+    uint64_t universe = 0;     // the universe the frame is in: read, guessed or carried into (FollowUniverse)
+    bool carried = false;      // a universe's jump moved the frame: the pins move this tick
 };
 DashAnchor g_dash;
 const dashanchor::Anchor &Dash() { return g_dash.a; }
@@ -713,6 +716,7 @@ bool UpdateDashAnchor() {
     const bool first = !g_dash.a.ever;
     const char *before = g_dash.a.why;
     const bool moved = g_dash.a.Feed(shown, err == vr::VROverlayError_None && origin == vr::TrackingUniverseStanding, m.m);
+    if (!g_dash.a.why) g_dash.universe = g_universe;   // (a read that counted: the frame is in the universe now)
     // Each change of verdict, with what was read (why a read didn't count shows in the log).
     if (g_dash.a.why != before) {
         double ax[3];
@@ -731,6 +735,7 @@ bool UpdateDashAnchor() {
 // dashboard tiles. True when it's set.
 bool GuessDash(const Mat &head) {
     if (!g_dash.a.Guess(head.m)) return false;
+    g_dash.universe = g_universe;
     std::printf("dashboard pins: no read of the bar yet (the dashboard closed since ft-screens started): "
                 "guessed in front of you at %.3f %.3f %.3f\n", g_dash.a.frame[0][3], g_dash.a.frame[1][3], g_dash.a.frame[2][3]);
     return true;
@@ -7065,12 +7070,20 @@ void ft_vr_forget(const void *key) {
 
 // A universe change (universefix.h): the panels placed in the one left, if it was temporary, move
 // by standing's jump, so they stay where you saw them, and belong to the new one now. The others
-// stay: SteamVR's restore put the room's back where they were in it.
+// stay: SteamVR's restore put the room's back where they were in it. The dashboard's frame, kept
+// while the dashboard is closed, follows by the same rule, and the tiles and pins on it with it:
+// they stayed behind you when XRService started again in a world turned 164 degrees (2026-11-23,
+// the 60 fps hand tracking switch) until the dashboard was opened.
 void FollowUniverse(const universefix::Switch &sw) {
     const universefix::Kind from = UniverseKind(sw.from), to = UniverseKind(sw.to);
     const auto follows = [&](uint64_t u) { return universefix::Follows(u, sw, from); };
     Mat j;
     std::memcpy(j.m, sw.jump.m, sizeof j.m);
+    bool dash = false;
+    if (g_dash.a.Framed() && follows(g_dash.universe)) {
+        dash = g_dash.carried = sw.moved && g_dash.a.Carry(sw.jump.m);
+        g_dash.universe = sw.to;
+    }
     std::string moved, kept;
     for (auto &[i, s] : g_screens) {
         // One on its way is in the universe it's headed to in.
@@ -7084,7 +7097,7 @@ void FollowUniverse(const universefix::Switch &sw) {
             if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
             SetAbsolute(s, Mul(j, s.pose), sw.to);
             moved += " " + std::to_string(i + 1);
-        } else {
+        } else if (!(dash && s.pinned == kDashboard)) {   // (those went with the dashboard's frame)
             kept += " " + std::to_string(i + 1);
         }
         if (move) move->universe = sw.to;
@@ -7105,10 +7118,11 @@ void FollowUniverse(const universefix::Switch &sw) {
         std::snprintf(jump, sizeof jump,
                       sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s)" : "standing didn't jump",
                       sw.metres, sw.height, sw.turnDeg, sw.lag);
-    std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
+    std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
                 (unsigned long long)sw.to, universefix::KindName(to), jump,
                 from != universefix::Kind::Temporary ? "panels placed there stay" : moved.empty() ? "no panel moved" : "moved screen(s)",
-                moved.c_str(), kept.empty() ? "" : "; now belong to the new one, not moved:", kept.c_str());
+                moved.c_str(), dash ? "; moved the dashboard's frame and what's pinned to it" : "",
+                kept.empty() ? "" : "; now belong to the new one, not moved:", kept.c_str());
 }
 
 // "shift DX DZ YAW": you moved yourself through a shared room (together/roompanels/moving.py),
@@ -7279,7 +7293,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         else if (g_tick % 90 == 0) UniverseKind(g_universe);   // (read again while it's unknown)
     }
     {
-        const bool dashMoved = UpdateDashAnchor();
+        const bool dashMoved = UpdateDashAnchor() | std::exchange(g_dash.carried, false);
         AttachDashWaits();
         MoveFramePins(dashMoved);
         UpdateDashTiles();

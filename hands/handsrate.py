@@ -16,8 +16,10 @@ Off takes the two camera keys out again (SteamVR's own mode) and writes ft-hands
 HANDS_MAX_HZ=30 and HANDS_FULL_RATE=0.
 
 XRService and ft-hands read these as they start. --now restarts ft-hands if it runs and stops
-XRService, so SteamVR starts a new one: head tracking drops for a few seconds, and with the
-headset off SteamVR starts it when the headset is next worn. Without --now the cameras change
+XRService, so SteamVR starts a new one: head tracking drops for about 15 seconds (SteamVR waits
+that long without tracking before it starts XRService again), and with the headset off SteamVR
+starts it when the headset is next worn. The new XRService tracks in a new world, turned from the
+old one, so ft-screens moves what you had open with it (screens/universefix.h). Without --now the cameras change
 when SteamVR next starts. SteamVR gives up on an XRService that stops more than five times in a
 minute, so Frametop Settings holds the switch for a while after each use.
 
@@ -61,8 +63,9 @@ HANDS_UNIT = handsmode.TRACKING[1]
 # By its command line, as scripts/update-check.py finds it: XRService renames its main thread.
 XRSERVICE = "^(/[^ ]*/)?XRService( |$)"
 WARNING = ("While it's on the controllers don't track: the cameras stop taking the dark frames that "
-           "show their lights, and SteamVR says so in the headset. Switching it restarts head tracking, "
-           "so the view holds still for a few seconds. Changing Room View between colour and black and "
+           "show their lights, and SteamVR says so in the headset. Switching it restarts head tracking "
+           "and hand tracking: the view stops following your head for about 15 seconds, and if the "
+           "screens aren't in front of you afterwards, open the Steam dashboard. Changing Room View between colour and black and "
            "white drops head tracking for about 15 seconds while it's on.")
 
 
@@ -208,8 +211,9 @@ class Host:
         time.sleep(seconds)
 
 
-def restart_tracking(host, wait=20.0, step=0.2):
-    """Stop XRService so SteamVR starts a new one, which reads the camera mode. (restarted, text):
+def restart_tracking(host, wait=30.0, step=0.2):
+    """Stop XRService so SteamVR starts a new one, which reads the camera mode: it does after 15 s
+    without tracking (its own timer; 16.5 s from the stop, worn 2026-11-23). (restarted, text):
     restarted is None when it wasn't running, False when SteamVR hasn't started a new one yet.
     RateError when XRService couldn't be stopped."""
     old = host.xrservice()

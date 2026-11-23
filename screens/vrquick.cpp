@@ -9,6 +9,8 @@
 //   Its header shows CPU, GPU, memory and temperature (vrstats.cpp) and the Quick Settings button, which
 // turns the card to its toggles (quicksettings.h: those QUICK_SETTINGS in frametop.conf picks, read as
 // it opens) with Back in the button's place; hidden, it's on its first page again.
+//   With gaze mode on (vrgazemode.cpp, read as it shows), a wide Quick Eye Calibrate row sits under the
+// tiles on both pages: the gaze service's quick check (the input relay's gaze_quickcal).
 #include "vrpanel.h"
 #include "label.h"
 #include "overlaytex.h"
@@ -31,6 +33,7 @@ constexpr const char *kKey = "frametop.quickaccess";
 constexpr int64_t kLaserKeepMs = 500;   // a laser on it keeps it (engaged) this long after it last moved there
 constexpr int kText = 28, kStatsText = 24;
 using quickaccess::kButton;
+using quickaccess::kEyeCal;
 using quickaccess::kSlots;
 
 // How a tile looks: what Draw last drew of it, so a change repaints only it. kOn: a toggle that's on;
@@ -59,10 +62,12 @@ struct {
     float widthSet = -1;        // the width SetOverlayWidthInMeters has
     bool settings = false;      // on the Quick Settings page
     std::vector<int> toggles;   // ...its toggles (quicksettings::kAll's), in the tiles' order
+    bool eyes = false;          // the Quick Eye Calibrate row shows (gaze mode was on as it showed)
     std::vector<uint8_t> px;                // the card as shown
     std::vector<uint8_t> bg;                // ...without its tiles or header
     std::vector<uint8_t> styles[kStyles];   // a tile's box in each style, without its label
     std::vector<uint8_t> button[kStyles];   // ...and the header button's
+    std::vector<uint8_t> eyeRow[kStyles];   // ...and the eye row's
     Look looks[kSlots];
     std::string head;                       // what the header's left last showed (empty: drawn again)
 } g_card;
@@ -77,7 +82,10 @@ int ToggleAt(int i) {
     return g_card.settings && i >= 0 && i < int(g_card.toggles.size()) ? g_card.toggles[i] : -1;
 }
 
+int H() { return quickaccess::Height(g_card.eyes); }   // the card's height in pixels now
+
 std::string Label(int i) {
+    if (i == kEyeCal) return g_card.eyes ? quickaccess::kEyeSpec.label : "";
     if (i == kButton) return g_card.settings ? "Back" : "Quick Settings";
     if (g_card.settings) return ToggleAt(i) >= 0 ? quicksettings::kAll[ToggleAt(i)].label : "";
     if (i < 0 || i >= quickaccess::kTiles) return "";
@@ -113,15 +121,16 @@ void MakeBoxes(std::vector<uint8_t> (&out)[kStyles], int x0, int y0, int w, int 
 // FillRound per tile cost ~1.8 ms on a little core; a copy, next to nothing).
 void MakeImages() {
     using namespace quickaccess;
-    g_card.bg.assign(size_t(kW) * kH * 4, 0);
+    g_card.bg.assign(size_t(kW) * H() * 4, 0);
     const uint8_t bg[4] = {24, 24, 30, 230};
-    FillRound(g_card.bg, kW, kH, 0, 0, kW, kH, 24, bg);
+    FillRound(g_card.bg, kW, H(), 0, 0, kW, H(), 24, bg);
     g_card.px = g_card.bg;
     int x0, y0, x1, y1;
     Box(0, &x0, &y0, &x1, &y1);   // (every tile's box has the same card under it)
     MakeBoxes(g_card.styles, x0, y0, kTile, kTile);
     Box(kButton, &x0, &y0, &x1, &y1);
     MakeBoxes(g_card.button, x0, y0, x1 - x0, y1 - y0);
+    if (g_card.eyes) Box(kEyeCal, &x0, &y0, &x1, &y1), MakeBoxes(g_card.eyeRow, x0, y0, x1 - x0, y1 - y0);
 }
 
 // One tile (or the header's button), onto g_card.px.
@@ -130,7 +139,7 @@ void DrawTile(int i, const Look &look) {
     int x0, y0, x1, y1;
     Box(i, &x0, &y0, &x1, &y1);
     const int w = x1 - x0;
-    const std::vector<uint8_t> &t = (i == kButton ? g_card.button : g_card.styles)[look.style];
+    const std::vector<uint8_t> &t = (i == kButton ? g_card.button : i == kEyeCal ? g_card.eyeRow : g_card.styles)[look.style];
     for (int y = 0; y < y1 - y0; ++y)
         std::memcpy(&g_card.px[(size_t(y0 + y) * kW + x0) * 4], &t[size_t(y) * w * 4], size_t(w) * 4);
     const uint8_t v = look.style == kHot ? 20 : look.style == kDim ? 120 : 245;
@@ -139,11 +148,11 @@ void DrawTile(int i, const Look &look) {
     const std::string &text = look.text;
     const size_t sp = text.find(' ');
     const int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    if (label::Width(text.c_str(), kText) <= kTile - 20 || sp == std::string::npos) {
-        label::Draw(g_card.px.data(), kW, kH, text.c_str(), kText, cx, cy, 255, ink);
+    if (label::Width(text.c_str(), kText) <= (i == kEyeCal ? w : kTile) - 20 || sp == std::string::npos) {
+        label::Draw(g_card.px.data(), kW, H(), text.c_str(), kText, cx, cy, 255, ink);
     } else {
-        label::Draw(g_card.px.data(), kW, kH, text.substr(0, sp).c_str(), kText, cx, cy - kText * 6 / 10, 255, ink);
-        label::Draw(g_card.px.data(), kW, kH, text.substr(sp + 1).c_str(), kText, cx, cy + kText * 6 / 10, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), text.substr(0, sp).c_str(), kText, cx, cy - kText * 6 / 10, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), text.substr(sp + 1).c_str(), kText, cx, cy + kText * 6 / 10, 255, ink);
     }
 }
 
@@ -151,6 +160,7 @@ void DrawTile(int i, const Look &look) {
 // header's button always does: Game Pause is on the page it opens).
 bool Idle(int i) {
     if (!g_paused || i == kButton) return false;
+    if (i == kEyeCal) return true;   // (the gaze service holds its checks while a game has the headset)
     if (g_card.settings) return ToggleAt(i) >= 0 && !quicksettings::WorksPaused(ToggleAt(i));
     return i >= 0 && i < quickaccess::kTiles && !quickaccess::WorksPaused(quickaccess::kSpecs[i].tile);
 }
@@ -178,10 +188,10 @@ bool DrawHead() {
     const uint8_t ink[3] = {225, 225, 232};
     const int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, size = g_card.settings && b.empty() ? kText : kStatsText;
     if (b.empty()) {
-        label::Draw(g_card.px.data(), kW, kH, a.c_str(), size, cx, cy, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), a.c_str(), size, cx, cy, 255, ink);
     } else {
-        label::Draw(g_card.px.data(), kW, kH, a.c_str(), size, cx, cy - size * 7 / 10, 255, ink);
-        label::Draw(g_card.px.data(), kW, kH, b.c_str(), g_card.settings ? 20 : size, cx, cy + size * 7 / 10, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), a.c_str(), size, cx, cy - size * 7 / 10, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), b.c_str(), g_card.settings ? 20 : size, cx, cy + size * 7 / 10, 255, ink);
     }
     g_card.head = text;
     return true;
@@ -200,7 +210,7 @@ void Draw() {
         Look &look = now[i];
         look.valid = true;
         look.text = Label(i);
-        const bool blank = g_card.settings && i != kButton && ToggleAt(i) < 0;
+        const bool blank = i == kEyeCal ? !g_card.eyes : g_card.settings && i != kButton && ToggleAt(i) < 0;
         look.style = blank                ? kBlank
                      : Idle(i)            ? kDim
                      : i == lit           ? kHot
@@ -213,7 +223,7 @@ void Draw() {
     if (!changed) return;
     // (kept only once it's on the overlay; if that failed, what it drew isn't what any look says, so
     // those tiles are drawn again whatever they look like next)
-    const bool ok = overlaytex::Set(g_card.overlay, g_card.px.data(), kW, kH) == vr::VROverlayError_None;
+    const bool ok = overlaytex::Set(g_card.overlay, g_card.px.data(), kW, H()) == vr::VROverlayError_None;
     for (int i = 0; i < kSlots; ++i)
         if (!(now[i] == g_card.looks[i])) g_card.looks[i] = ok ? now[i] : Look{};
     if (!ok) g_card.head.clear();
@@ -248,6 +258,7 @@ void PressTile(int i, const char *by) {
     std::fflush(stdout);
     if (Idle(i)) return (void)std::printf("palm Quick Access: not while paused for a game\n");
     if (i == kButton) return TurnPage(!g_card.settings);
+    if (i == kEyeCal) return SendRelay(std::string("action ") + quickaccess::kEyeSpec.action);
     if (g_card.settings) {
         // (the input relay's own action, under its rules, as the tiles' are)
         return SendRelay(std::string("action ") + quicksettings::kAll[ToggleAt(i)].action);
@@ -268,7 +279,7 @@ bool Make() {
         return false;
     }
     vr::VROverlay()->SetOverlayInputMethod(g_card.overlay, vr::VROverlayInputMethod_Mouse);
-    const vr::HmdVector2_t scale = {{float(quickaccess::kW), float(quickaccess::kH)}};
+    const vr::HmdVector2_t scale = {{float(quickaccess::kW), float(H())}};
     vr::VROverlay()->SetOverlayMouseScale(g_card.overlay, &scale);
     vr::VROverlay()->SetOverlaySortOrder(g_card.overlay, 22);
     vr::VROverlay()->SetOverlayFlag(g_card.overlay, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);   // (a carry's wheel over it: PollOverlay)
@@ -305,6 +316,7 @@ int StepDrag(const palmmenu::PalmMenu &palm, int side) {
 
 void UpdateQuickAccess(const QuickAccessIn &in) {
     const palmmenu::PalmMenu &palm = *in.palm;
+    const bool eyes = GazeModeOn();   // (asked every tick, hidden or not, so it's current as the card shows)
     // the palm it's over while that shows; else whichever shows (both up: the right). (Paused for a VR
     // game, it shows with the dashboard open, as the palm menu does: Steam Menu works, the rest dim.)
     const int side = g_card.side >= 0 && palm.shown(g_card.side) ? g_card.side : palm.shown(1) ? 1 : palm.shown(0) ? 0 : -1;
@@ -326,9 +338,15 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
         g_card.side = side, g_card.shownMs = NowMs(), g_card.hover = -1, g_card.laserMs = -1;
         g_card.poke.Reset(NowMs()), g_card.drag.End();   // (the other palm's drag ends)
         if (g_card.settings) TurnPage(false);
-        std::printf("palm Quick Access: over the %s palm\n", side ? "right" : "left");
+        if (eyes != g_card.eyes) {
+            // a card of the other height: its pictures made again, and the mouse's scale with it
+            g_card.eyes = eyes, g_card.px.clear();
+            const vr::HmdVector2_t scale = {{float(quickaccess::kW), float(H())}};
+            vr::VROverlay()->SetOverlayMouseScale(g_card.overlay, &scale);
+        }
+        std::printf("palm Quick Access: over the %s palm%s\n", side ? "right" : "left", g_card.eyes ? ", with Quick Eye Calibrate" : "");
     }
-    g_card.w = palm.params().size, g_card.h = g_card.w * quickaccess::kH / quickaccess::kW;
+    g_card.w = palm.params().size, g_card.h = g_card.w * H() / quickaccess::kW;
     // this Update's release: the tile under its last held frame, as drawn (council, 2026-11-19: not the
     // release frame's, whose contact moves as the fingers open; palmmenu let go only with the palm up)
     if (released >= 0) {
@@ -379,7 +397,7 @@ void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data
         // (only a laser keeps the card: the mouse's or gaze's cursor would hold it wherever you look)
         const bool laser = FromLaser(ev);
         if (ev.eventType == vr::VREvent_MouseMove) {
-            g_card.hover = quickaccess::TileAtMouse(ev.data.mouse.x, ev.data.mouse.y);
+            g_card.hover = quickaccess::TileAtMouse(ev.data.mouse.x, ev.data.mouse.y, H());
             if (laser) g_card.laserMs = NowMs();
         } else if (ev.eventType == vr::VREvent_FocusEnter) {   // (its data is an overlay's, not a point)
             if (laser) g_card.laserMs = NowMs();
@@ -389,7 +407,7 @@ void PollQuickAccess(void (*handle)(const struct ft_event *, void *), void *data
         } else if (ev.eventType == vr::VREvent_MouseButtonDown && ev.data.mouse.button == vr::VRMouseButton_Left && g_card.side >= 0) {
             if (laser) g_card.laserMs = NowMs();
             if (NowMs() - g_card.shownMs >= quickaccess::kShownMs)
-                PressTile(quickaccess::TileAtMouse(ev.data.mouse.x, ev.data.mouse.y), DeviceLabel(ev.trackedDeviceIndex).c_str());
+                PressTile(quickaccess::TileAtMouse(ev.data.mouse.x, ev.data.mouse.y, H()), DeviceLabel(ev.trackedDeviceIndex).c_str());
         } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
             EndDragsBy(ev.trackedDeviceIndex);
             ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);

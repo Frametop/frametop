@@ -13,6 +13,10 @@
 // settings menu that when clicked opens a small window that has toggle options"): CPU, GPU, memory and
 // temperature (sysstats.h) on the left, and on the right a button, kButton, that turns the card to its
 // Quick Settings page (quicksettings.h's toggles in the tiles' places, the button then Back).
+//   Under the tiles, while gaze mode is on, one wide row: Quick Eye Calibrate, the gaze service's quick
+// check (user, 2026-11-22: "a quick eye calibrate option to the palm menu ... only an option if eye
+// tracking is on"). The card is kEyesH tall then, kH without it; a card's height in pixels follows from its
+// size in metres (PxH), so the pokes and the drag find the row with no more to say.
 // Pure: the tiles, their layout, a fingertip's pokes and Reset's ask (screens/tests/quickaccess-test.cpp);
 // vrquick.cpp draws the card, places it over the palm and gives it the tip and the clicks.
 #pragma once
@@ -24,7 +28,7 @@
 
 namespace quickaccess {
 
-enum class Tile { SteamMenu, Screens, Reset, SpinLeft, SpinRight, DockAll };
+enum class Tile { SteamMenu, Screens, Reset, SpinLeft, SpinRight, DockAll, EyeCal };
 
 struct Spec {
     Tile tile;
@@ -34,7 +38,8 @@ struct Spec {
 
 constexpr int kCols = 3, kRows = 2, kTiles = kCols * kRows;
 constexpr int kButton = kTiles;      // the header's button: Quick Settings, or Back on that page
-constexpr int kSlots = kTiles + 1;   // what TileAt can say
+constexpr int kEyeCal = kTiles + 1;  // the row under the tiles, with gaze mode on
+constexpr int kSlots = kTiles + 2;   // what TileAt can say
 constexpr Spec kSpecs[kTiles] = {
     {Tile::SteamMenu, "Steam Menu", "steam_menu"},
     {Tile::Screens, "Hide Screens", "screens_toggle"},
@@ -43,6 +48,7 @@ constexpr Spec kSpecs[kTiles] = {
     {Tile::SpinRight, "Spin Right", "spin_next"},
     {Tile::DockAll, "Dock Windows", "dock_all"},
 };
+constexpr Spec kEyeSpec = {Tile::EyeCal, "Quick Eye Calibrate", "gaze_quickcal"};
 
 // What still works while Frametop is paused for a VR game: the relay's PAUSED_ACTIONS
 // (input/game_pause.py) has steam_menu and none of the others; Reset is ours, and the screens are hidden.
@@ -66,9 +72,20 @@ constexpr int kTile = 150, kGap = 12, kPad = 16, kHead = 84;
 constexpr int kTop = kPad + kHead + kGap;   // the first row of tiles
 constexpr int kW = 2 * kPad + kCols * kTile + (kCols - 1) * kGap;
 constexpr int kH = kTop + kPad + kRows * kTile + (kRows - 1) * kGap;
+constexpr int kEyeH = 84;                      // the eye row's height
+constexpr int kEyesH = kH + kGap + kEyeH;      // ...and the card's with it
+
+// The card's height in pixels: with the eye row or not.
+inline int Height(bool eyes) { return eyes ? kEyesH : kH; }
+// ...for a card w x h metres (its pixels' shape), nearest of the two.
+inline int PxH(double w, double h) { return w > 0 && h * kW > w * (kH + kEyesH) / 2.0 ? kEyesH : kH; }
 
 // Tile i's box in pixels (x right, y down from the card's top left); kButton's, the header's right.
 inline void Box(int i, int *x0, int *y0, int *x1, int *y1) {
+    if (i == kEyeCal) {
+        *x0 = kPad, *y0 = kH - kPad + kGap, *x1 = kW - kPad, *y1 = *y0 + kEyeH;
+        return;
+    }
     const int c = i == kButton ? kCols - 1 : i % kCols, r = i / kCols;
     *x0 = kPad + c * (kTile + kGap), *y0 = i == kButton ? kPad : kTop + r * (kTile + kGap);
     *x1 = *x0 + kTile, *y1 = *y0 + (i == kButton ? kHead : kTile);
@@ -79,11 +96,12 @@ inline void StatsBox(int *x0, int *y0, int *x1, int *y1) {
     *x0 = kPad, *y0 = kPad, *x1 = kPad + (kCols - 1) * kTile + (kCols - 2) * kGap, *y1 = kPad + kHead;
 }
 
-// The tile under pixel (x, y) (y down), -1 none: kButton in the header's right, none in its left. The
-// gaps between tiles go to the nearer one: a fingertip 4 mm off a tile's edge meant that tile, not
-// nothing; past the card's padding, nothing.
-inline int TileAt(double x, double y) {
-    if (x < kPad / 2.0 || x > kW - kPad / 2.0 || y < kPad / 2.0 || y > kH - kPad / 2.0) return -1;
+// The tile under pixel (x, y) (y down) on a card `h` pixels tall (Height), -1 none: kButton in the header's
+// right, none in its left, kEyeCal under the tiles on a card with the eye row. The gaps between tiles go to
+// the nearer one: a fingertip 4 mm off a tile's edge meant that tile, not nothing; past the card's padding, nothing.
+inline int TileAt(double x, double y, int h = kH) {
+    if (x < kPad / 2.0 || x > kW - kPad / 2.0 || y < kPad / 2.0 || y > h - kPad / 2.0) return -1;
+    if (h == kEyesH && y >= kH - kPad + kGap / 2.0) return kEyeCal;
     auto cell = [](double p, int n) {
         const int k = int((p - kPad + kGap / 2.0) / (kTile + kGap));
         return k < 0 ? 0 : k >= n ? n - 1 : k;
@@ -92,12 +110,12 @@ inline int TileAt(double x, double y) {
     return cell(y - (kTop - kPad), kRows) * kCols + cell(x, kCols);
 }
 
-// ...under a laser's mouse point (OpenVR's mouse y is up from the bottom; its scale, kW x kH).
-inline int TileAtMouse(double x, double yUp) { return TileAt(x, kH - yUp); }
+// ...under a laser's mouse point (OpenVR's mouse y is up from the bottom; its scale, kW x h).
+inline int TileAtMouse(double x, double yUp, int h = kH) { return TileAt(x, h - yUp, h); }
 
 // A point on its face (metres from its centre, y up) for a card w x h metres, in pixels (y down).
 inline void FaceToPx(double u, double v, double w, double h, double *x, double *y) {
-    *x = (u / w + 0.5) * kW, *y = (0.5 - v / h) * kH;
+    *x = (u / w + 0.5) * kW, *y = (0.5 - v / h) * PxH(w, h);
 }
 
 // ...the tile under it.
@@ -105,19 +123,20 @@ inline int TileAtFace(double u, double v, double w, double h) {
     if (w <= 0 || h <= 0) return -1;
     double x, y;
     FaceToPx(u, v, w, h, &x, &y);
-    return TileAt(x, y);
+    return TileAt(x, y, PxH(w, h));
 }
 
 // The tile a fingertip is over, kept while it's within kStick of that one's box (council, 2026-11-19:
 // a tip trembling by a tile's edge lit one and then the other, ~15 redraws a second).
 constexpr int kStick = 12;   // px, ~3 mm on a 12 cm card
-inline int StickyTileAt(int prev, double x, double y) {
+inline int StickyTileAt(int prev, double x, double y, int h = kH) {
     if (prev >= 0 && prev < kSlots) {
         int x0, y0, x1, y1;
         Box(prev, &x0, &y0, &x1, &y1);
-        if (x >= x0 - kStick && x <= x1 + kStick && y >= y0 - kStick && y <= y1 + kStick) return prev;
+        if ((prev != kEyeCal || h == kEyesH) && x >= x0 - kStick && x <= x1 + kStick && y >= y0 - kStick && y <= y1 + kStick)
+            return prev;
     }
-    return TileAt(x, y);
+    return TileAt(x, y, h);
 }
 
 // The other hand's index tip at the card, one hands frame at a time: the tile it's over (held at an
@@ -158,7 +177,7 @@ public:
         if (near_) {
             double x, y;
             FaceToPx(l[0], l[1], w, h, &x, &y);
-            hover_ = StickyTileAt(hover_, x, y);
+            hover_ = StickyTileAt(hover_, x, y, PxH(w, h));
         } else {
             hover_ = -1;
         }
@@ -185,7 +204,7 @@ public:
         if (!through || spent_ >= 0) return -1;
         double x, y;
         FaceToPx(at[0], at[1], w, h, &x, &y);
-        const int t = StickyTileAt(held, x, y);
+        const int t = StickyTileAt(held, x, y, PxH(w, h));
         if (t < 0) return -1;
         spent_ = t, lostMs_ = -1;   // (too soon after it showed: spent, so it comes out before it presses)
         if (near_) hover_ = t;
@@ -204,10 +223,11 @@ private:
         if (x0 == kPad) x0 = 0;
         if (x1 == kW - kPad) x1 = kW;
         if (y0 == kPad) y0 = 0;
-        if (y1 == kH - kPad) y1 = kH;
+        const int H = PxH(w, h);
+        if (y1 == H - kPad) y1 = H;
         double x, y;
         FaceToPx(l[0], l[1], w, h, &x, &y);
-        const double mx = m / w * kW, my = m / h * kH;
+        const double mx = m / w * kW, my = m / h * H;
         return x < x0 - mx || x > x1 + mx || y < y0 - my || y > y1 + my;
     }
 
@@ -243,17 +263,18 @@ public:
             if (!haveFrom_) from_[0] = at[0], from_[1] = at[1], haveFrom_ = true;
             int x0, y0, x1, y1;
             Box(start_, &x0, &y0, &x1, &y1);
-            const double u0 = ((x0 + x1) / 2.0 / kW - 0.5) * w, v0 = (0.5 - (y0 + y1) / 2.0 / kH) * h;
+            const int H = PxH(w, h);
+            const double u0 = ((x0 + x1) / 2.0 / kW - 0.5) * w, v0 = (0.5 - (y0 + y1) / 2.0 / H) * h;
             double x, y;
             FaceToPx(u0 + kGain * (at[0] - from_[0]), v0 + kGain * (at[1] - from_[1]), w, h, &x, &y);
-            const double mx = kCancel / w * kW, my = kCancel / h * kH;
-            if (x < -mx || x > kW + mx || y < -my || y > kH + my) place_ = -1;
+            const double mx = kCancel / w * kW, my = kCancel / h * H;
+            if (x < -mx || x > kW + mx || y < -my || y > H + my) place_ = -1;
             else {
                 // (over the header's readouts, which aren't a tile: the tile below them, so a pinch drifting up
                 // off Steam Menu keeps it as it did when the card's top was there)
-                const double cx = std::fmin(std::fmax(x, kPad), kW - kPad), cy = std::fmin(std::fmax(y, kPad), kH - kPad);
-                place_ = StickyTileAt(place_, cx, cy);
-                if (place_ < 0) place_ = StickyTileAt(-1, cx, kTop);
+                const double cx = std::fmin(std::fmax(x, kPad), kW - kPad), cy = std::fmin(std::fmax(y, kPad), H - kPad);
+                place_ = StickyTileAt(place_, cx, cy, H);
+                if (place_ < 0) place_ = StickyTileAt(-1, cx, kTop, H);
             }
         }
         tile_ = up ? place_ : -1;

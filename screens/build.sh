@@ -52,6 +52,7 @@ $cxx -c -o build/vrbarside.o vrbarside.cpp
 $cxx -c -o build/vrresetask.o vrresetask.cpp
 $cxx -c -o build/vrvoice.o vrvoice.cpp
 $cxx -c -o build/vrquick.o vrquick.cpp
+$cxx -c -o build/vrgazemode.o vrgazemode.cpp
 $cxx -c -o build/vrstats.o vrstats.cpp
 $cxx -c -o build/vrsteamwin.o vrsteamwin.cpp
 $cxx -c -o build/vrsteamfollow.o vrsteamfollow.cpp
@@ -95,7 +96,7 @@ for f in micear ownface; do   # the face of the avatar you wear: its mouth from 
   avatars="$avatars build/avatars-$f.o"
 done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrbarmenu.o build/vrbarhold.o build/vrturn.o build/vrbarside.o build/vrresetask.o build/vrvoice.o build/vrquick.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/vrkbspot.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/steamcdp.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrbarmenu.o build/vrbarhold.o build/vrturn.o build/vrbarside.o build/vrresetask.o build/vrvoice.o build/vrquick.o build/vrgazemode.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/vrkbspot.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/steamcdp.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1 xcb xcb-xtest xcb-icccm) $vrlibs -pthread
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs

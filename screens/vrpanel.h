@@ -293,6 +293,7 @@ bool IsHandController(vr::TrackedDeviceIndex_t i);   // a hand's controller (not
 int ControllerHolds(vr::TrackedDeviceIndex_t dev);   // a button down on it: 1, 0, or -1 (SteamVR won't say)
 vr::EVROverlayError PinShow(vr::VROverlayHandle_t overlay);
 void SendRelay(const std::string &msg);
+bool GazeModeOn();   // the pointer helper says gaze mode is on (vrgazemode.cpp; asks every 2 s, call it each tick)
 void AnnounceOverlay(const char *key);
 void SendDashpatch(const std::string &msg);   // to ft-dashpatch (@ft_dashpatch)
 bool MakePanel(Screen &s, const char *prefix, const char *label);

@@ -823,6 +823,9 @@ Item {
                                     readonly property var monitor: followsMonitor
                                         ? ((backend.hostMonitors.listed[modelData.host] || {}).monitors || [])
                                               .find(m => "display:" + m.id === modelData.app) || null : null
+                                    // The biggest size its monitor takes ([width, height], or null: not
+                                    // known): its size boxes stop there.
+                                    readonly property var largest: monitor && monitor.largest ? monitor.largest : null
                                     // Kept by the page: the list is made again when the layout changes
                                     // (Apply, a scale pick), and its settings stay open through that.
                                     property bool expanded: root.openDisplays[modelData.id] === true
@@ -889,14 +892,18 @@ Item {
                                             Controls.SpinBox {
                                                 id: sw
                                                 visible: disp.ownSize
-                                                from: 640; to: 7680; stepSize: 8; editable: true
+                                                objectName: "streamWidth"
+                                                from: 640; to: disp.largest ? Math.max(640, disp.largest[0]) : 7680
+                                                stepSize: 8; editable: true
                                                 value: disp.modelData.width
                                             }
                                             Controls.Label { visible: disp.ownSize; text: "×" }
                                             Controls.SpinBox {
                                                 id: sh
                                                 visible: disp.ownSize
-                                                from: 360; to: 4320; stepSize: 8; editable: true
+                                                objectName: "streamHeight"
+                                                from: 360; to: disp.largest ? Math.max(360, disp.largest[1]) : 4320
+                                                stepSize: 8; editable: true
                                                 value: disp.modelData.height
                                             }
                                             Controls.ComboBox {
@@ -942,6 +949,8 @@ Item {
                                                   : disp.followsMonitor
                                                   ? disp.modelData.host + "'s monitor switches to this size while it streams, pixel for "
                                                     + "pixel, and back when it stops. Disconnect it to turn the monitor off."
+                                                    + (disp.largest ? " Its largest size is " + disp.largest[0] + " × "
+                                                                      + disp.largest[1] + "." : "")
                                                   : disp.couldFollow
                                                   ? "The stream crops or fits " + disp.modelData.host + "'s monitor as it is. To switch the "
                                                     + "monitor to this size, turn on \"Let Frametop control " + disp.modelData.host

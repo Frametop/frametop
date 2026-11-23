@@ -87,6 +87,15 @@ class Plan(unittest.TestCase):
         host["displays"][1]["size"] = [3840, 2160]
         self.assertNotIn("mode", hm.plan_body(host, listed())["monitors"]["HDMI-A-1"], "an older build takes no size")
 
+    def test_a_monitors_largest_size_is_its_widest_and_tallest_mode(self):
+        known = listed()
+        self.assertEqual(hm.largest_size(known["eDP-2"]), (2560, 1600))
+        wide = dict(known["DP-1"], modes=[UHD, {"width": 5120, "height": 1440, "refresh_mhz": 60000}])
+        self.assertEqual(hm.largest_size(wide), (5120, 2160))
+        self.assertEqual(hm.largest_size(dict(known["DP-1"], sideways=True)), (2160, 3840), "as its stream is")
+        self.assertIsNone(hm.largest_size({"id": "DP-2", "modes": []}), "Windows lists none while it's off")
+        self.assertIsNone(hm.largest_size({"id": "DP-2", "modes": [{"width": "wide"}]}))
+
     def test_a_sideways_monitor_is_asked_for_its_size_unrotated(self):
         host = pc()
         host["displays"][1]["size"] = [2160, 3840]
@@ -167,6 +176,15 @@ class Sending(unittest.TestCase):
         self.replies["POST"] = (400, {"status": False, "error": "that would leave no display on"})
         hm.sync(pc(), self.said.append, self.request)
         self.assertEqual(self.said, ["PC: monitors not changed: that would leave no display on"])
+
+    def test_a_size_its_monitor_refused_is_logged(self):
+        said = "Samsung can't be 2560x1800: it stays 2560x1600"
+        self.replies["POST"] = (200, {"status": True, "applies": True, "error": said})
+        hm.sync(pc(), self.said.append, self.request)
+        self.assertEqual(self.said, [f"PC: {said}"])
+        self.replies["POST"] = (200, {"status": True, "applies": False, "error": said})
+        hm.sync(pc(), self.said.append, self.request)
+        self.assertEqual(len(self.said), 1, "not applied now: the error is an earlier change's")
 
     def test_it_never_raises(self):
         def broken(*a, **kw):

@@ -2135,12 +2135,12 @@ class Backend(QObject):
     @Property("QVariantMap", notify=handsChanged)
     def handsRate(self):
         """The 60 fps switch: "on" (the cameras are in the no-dark mode; while it's being set, what
-        was asked), "busy" (being set, or just set: RATE_COOLDOWN), "note" (what doesn't match) and
-        "warning" (what it costs)."""
+        was asked), "switching" (being set: head tracking is restarting), "busy" (being set, or
+        just set: RATE_COOLDOWN), "note" (what doesn't match) and "warning" (what it costs)."""
         st = handsrate.state(read_conf())
         if self._rate_want is not None:
             st["on"] = self._rate_want
-        return dict(st, busy=self._rate_busy, warning=handsrate.WARNING)
+        return dict(st, switching=self._rate_want is not None, busy=self._rate_busy, warning=handsrate.WARNING)
 
     @Slot(bool)
     def setHandsRate(self, on):

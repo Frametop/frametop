@@ -11,7 +11,9 @@
 // the bar is hidden the last good frame stays. Before any read has counted (ft-screens started
 // with the dashboard closed: the hidden bar reads the identity), the dashboard tiles may ride on a
 // guess from the head instead (Guess), where SteamVR opens the dashboard; the first read that
-// counts replaces it. Header only, no OpenVR, so its test runs anywhere.
+// counts replaces it. When standing jumps while the bar is hidden (SteamVR lost tracking and came
+// back in a new universe: universefix.h), the kept frame goes with the jump (Carry), so what rides
+// on it stays where you saw it. Header only, no OpenVR, so its test runs anywhere.
 #pragma once
 
 #include <cmath>
@@ -86,6 +88,7 @@ struct Anchor {
     double scale = 1;       // the bar's scale in the last read that counted (Steam draws it scaled)
     bool ever = false;      // a good read came this run: dashboard pins have a frame
     bool guessed = false;   // no good read yet, the frame a guess from the head (Guess): the tiles ride on it
+    bool shown = false;     // the bar was shown at the last read (Feed)
     int shownReads = 0;     // good reads in a row (up to kSettleReads)
     const char *why = "no read yet";   // the last read's verdict: why it didn't count, or nullptr (it did)
 
@@ -94,6 +97,7 @@ struct Anchor {
     bool Feed(bool shown, bool read, const float raw[3][4]) {
         float m[3][4];
         double sc = 1;
+        this->shown = shown;
         why = !shown ? "hidden" : !read ? "unreadable" : !Finite(raw) ? "not finite" : Identity(raw) ? "identity"
             : !Unscaled(raw, m, &sc) || !Rotation(m) ? "not a rotation" : nullptr;
         if (why) {
@@ -117,6 +121,20 @@ struct Anchor {
 
     // A frame to ride on: a read's, or a guess's.
     bool Framed() const { return ever || guessed; }
+
+    // Standing jumped by `jump` (old standing -> new): the kept frame goes with it. Only while the
+    // bar is hidden: shown, Steam's own place for it is the frame, and the next read gives it.
+    // True when the frame changed (the pins move).
+    bool Carry(const float jump[3][4]) {
+        if (!Framed() || shown) return false;
+        float m[3][4];
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 4; ++c)
+                m[r][c] = jump[r][0] * frame[0][c] + jump[r][1] * frame[1][c] + jump[r][2] * frame[2][c] + (c == 3 ? jump[r][3] : 0);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 4; ++c) frame[r][c] = m[r][c];
+        return true;
+    }
 
     // Before any read counts: the frame guessed from the head's pose (GuessFrame). True when it's
     // set (the pins move); false once a read has counted, or with no facing.

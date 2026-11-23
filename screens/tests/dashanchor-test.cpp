@@ -117,6 +117,29 @@ int main() {
         Anchor e;
         check("no facing: no guess", !e.Guess(side) && !e.Framed());
     }
+    {
+        // Standing jumps while the dashboard is closed (universefix.h): the kept frame goes with
+        // it. The jump of 2026-11-23, XRService started again: turned 164 degrees, 0.2 m off.
+        float jump[3][4], want[3][4];
+        pose(jump, -2.86, 0, 0.15f, -0.006f, 0.13f);
+        const double c = std::cos(-2.86), s = std::sin(-2.86);
+        Anchor d;
+        check("no frame: nothing to carry", !d.Carry(jump));
+        d.Feed(true, true, a), d.Feed(true, true, a);
+        check("shown: Steam places it, not carried", !d.Carry(jump) && same(d.frame, a));
+        d.Feed(false, true, id);
+        // the bar's place turned about the vertical and moved, its facing turned the same
+        pose(want, 1.97 - 2.86, 0, float(c * a[0][3] + s * a[2][3] + 0.15), a[1][3] - 0.006f, float(-s * a[0][3] + c * a[2][3] + 0.13));
+        bool near = d.Carry(jump);
+        for (int r = 0; r < 3; ++r)
+            for (int k = 0; k < 4; ++k) near = near && std::fabs(d.frame[r][k] - want[r][k]) < 1e-5;
+        check("hidden: the frame goes with the jump", near && d.ever);
+        check("reopened: a read replaces the carried frame", !d.Feed(true, true, b) && d.Feed(true, true, b) && same(d.frame, b));
+        Anchor g;
+        float head[3][4];
+        pose(head, 0.4, 0, 0.1f, 1.6f, 0.2f);
+        check("a guess is carried too", g.Guess(head) && g.Carry(jump) && g.guessed);
+    }
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed ? 1 : 0;
 }

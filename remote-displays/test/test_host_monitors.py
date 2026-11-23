@@ -84,6 +84,8 @@ class Backend(Base):
         self.b.hostMonitors.refresh("PC")
         got = self.answer()
         self.assertEqual((got["note"], len(got["monitors"])), ("", 2))
+        self.assertEqual([m["largest"] for m in got["monitors"]], [[2560, 1600], [2160, 3840]],
+                         "the most each takes, as its stream is (DP-1 is turned a quarter)")
         self.assertEqual(self.sent, [(ADDRESS, "GET", host_monitors.ft_hostmonitors.PATH, None)])
         self.assertEqual(self.ran, [], "a panel's stream size is the user's: the monitor follows it, not the other way")
         self.assertEqual(self.b.hostMonitors.supported, {"PC": True})
@@ -122,6 +124,20 @@ class Backend(Base):
         self.assertEqual(self.ran, [("remote", "set", "pc-edp", "scale=1.6"), ("remote", "set", "pc-edp", "scale=own")],
                          "no stream size: a scale changes the PC's desktop, not the stream")
         self.assertTrue(all(self.thens[-2:]), "each asks the PC again after")
+
+    def test_a_new_stream_size_asks_the_pc_again_for_its_note(self):
+        self.b.setStream("pc-edp", 2560, 1200, 60, 0)
+        self.assertEqual(self.ran[-1][:4], ("remote", "set", "pc-edp", "size=2560x1200"))
+        self.thens[-1]()
+        self.answer()
+        self.assertEqual(self.sent[-1][1], "GET", "a size its monitor refused is the PC's note")
+        self.b.setStream("pc-virtual", 1920, 1200, 60, 0)
+        self.thens[-1]()
+        set_hosts(pc(monitors=False))
+        self.b.setStream("pc-edp", 2560, 1600, 60, 0)
+        self.thens[-1]()
+        spin(self.app, seconds=0.1)
+        self.assertEqual(len(self.sent), 1, "a virtual display, or the switch off: no monitor follows it")
 
     def test_a_sunshine_host_is_not_asked(self):
         set_hosts(dict(pc(), kind="sunshine"))
@@ -237,6 +253,21 @@ class Page(Base):
         self.assertEqual(self.own_size(), [("pc-dp", True), ("pc-edp", True), ("pc-virtual", True)],
                          "on: the size boxes set the monitor")
         self.assertIn("PC's monitor switches to this size while it streams", helps()["pc-edp"])
+        self.assertEqual(self.bad_warnings(), [])
+
+    def test_the_size_boxes_stop_at_the_monitors_largest_size(self):
+        tops = lambda: {js(d.property("modelData"))["id"]: tuple(  # noqa: E731
+            next(b.property("to") for b in items(d) if b.objectName() == name) for name in ("streamWidth", "streamHeight"))
+            for d in self.found(prop="ownSize")}
+        self.answered()
+        self.assertEqual(set(tops().values()), {(7680, 4320)}, "the switch off: a size only crops or fits")
+        self.switch_on()
+        self.answered()
+        self.assertEqual(tops(), {"pc-edp": (2560, 1600), "pc-dp": (3840, 2160), "pc-virtual": (7680, 4320)},
+                         "a bigger size than its panel has wouldn't take")
+        help_of = next(h.property("text") for d in self.found(prop="ownSize") if js(d.property("modelData"))["id"] == "pc-edp"
+                       for h in items(d) if h.objectName() == "streamHelp")
+        self.assertIn("Its largest size is 2560 × 1600.", help_of)
         self.assertEqual(self.bad_warnings(), [])
 
     def test_the_scale_picker_shows_where_the_pc_can_set_it(self):

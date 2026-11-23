@@ -6,7 +6,8 @@ a plan made from the host's display panels: each monitor with a connected panel 
 its panel's stream size (the PC picks a mode of that size, or makes one on Hyprland) and the
 scale picked for it (`scale`, else its own), and every other monitor (no panel here, or its
 panel disconnected) goes off. The PC applies it only while one of those panels streams, and
-puts every monitor back two minutes after the last one ends (/api/frametop/monitors).
+puts every monitor back two minutes after the last one ends (/api/frametop/monitors). A size
+its monitor refuses (one bigger than its panel) is in the PC's answer as its `error`.
 
 ft_layout sends the plan whenever the panels change (connect, disconnect, set, remove, and
 before it starts their streams). Nothing here stops a stream: a PC that doesn't answer, or
@@ -50,6 +51,21 @@ def size_of(d):
     except (TypeError, ValueError):
         return None
     return {"width": w, "height": h, "refresh_mhz": 0} if w > 0 and h > 0 else None
+
+
+def largest_size(m):
+    """The largest stream size the PC's monitor (as it answered) can be put at, (width, height),
+    or None when it lists no modes: its widest and its tallest listed mode, height by width for
+    one turned a quarter. A PC that makes modes (Hyprland) makes smaller ones; a bigger one than
+    its panel has it takes and the panel refuses."""
+    try:
+        sizes = [(int(mode["width"]), int(mode["height"])) for mode in m.get("modes") or []]
+    except (KeyError, TypeError, ValueError):
+        return None
+    w, h = max((s[0] for s in sizes), default=0), max((s[1] for s in sizes), default=0)
+    if w <= 0 or h <= 0:
+        return None
+    return (h, w) if m.get("sideways") else (w, h)
 
 
 SCALES = (0.5, 4.0)  # the scales the PC takes in a plan
@@ -156,9 +172,11 @@ def sync(host, log, request=None):
         if body is None:
             return
         status, answer = request(host["address"], "POST", PATH, body=body, timeout=20.0, port=port_of(host))
+        error = answer.get("error") if isinstance(answer, dict) else None
         if status != 200:
-            error = answer.get("error") if isinstance(answer, dict) else None
             log(f"{name}: monitors not changed: {error or f'it answered {status}'}")
+        elif error and answer.get("applies"):
+            log(f"{name}: {error}")  # taken, and applied now: a size its monitor refused, one kept on
     except (OSError, ValueError) as e:
         log(f"{name}: monitors not changed: {e}")
 

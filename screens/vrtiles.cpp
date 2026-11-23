@@ -77,7 +77,7 @@ constexpr double kTileHoldTurnDeg = 20;   // turned this far from it: you look a
 bool g_tileLook = true;                   // DASH_TILE_LOOK: with no pointer on a panel, the one you look at has the focus
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
 constexpr std::chrono::seconds kTilesAddWindow{5};
-int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus (2: an app window's), 0 not
+int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored app's tile has the focus (KeysTile), 0 not
 int64_t g_tileFocusSaidMs = 0;
 constexpr int64_t kTileFocusRenewMs = 2000;   // said again this often (the relay lapses it after 5 s)
 constexpr double kTileBorder = 0.003;         // the focused tile's border, metres each side (user, 2026-11-19: "far, far, far less pronounced")
@@ -495,12 +495,22 @@ bool HeadForward(Mat *head, double fwd[3]) {
     fwd[0] = -head->m[0][2], fwd[1] = -head->m[1][2], fwd[2] = -head->m[2][2];
     return true;
 }
+// The tiling keys move and size an anchored app's tile only: a floating window, a gamescope app or
+// a PC's app window. A desktop screen and a remote display are placed by dragging (user,
+// 2026-11-23: "screens/monitors and remote displays should require manually dragging, standalone
+// apps are the ones that should tile. Whether they are remote apps or in headset"), so on those
+// the keys stay the desktop's and the PC's.
+bool KeysTile(int i) {
+    const auto it = g_screens.find(i);
+    if (it == g_screens.end() || !g_tiles.Anchored(i)) return false;
+    const Screen &s = it->second;
+    return s.floating || s.gsapp || IsWindowPanel(s);
+}
 // The panel the tiling keys act on: the one a tiling key just moved (g_tileHold: until the 3D mouse
 // is back on a panel or, with DASH_TILE_LOOK, you turn to another), else the one under the pointer, else the one you're
 // looking at (within 25 degrees of straight ahead; unless DASH_TILE_LOOK is off). The relay is told
-// when it's an anchored one (the keys are the desktop's otherwise), and it gets a thin border. An
-// app window's tile (a floating window) is "tilefocus 2": Meta+arrows alone move it too, since on
-// the desktop they'd only quick-tile a window alone on its output, halving it (user, 2026-11-23).
+// when it's an anchored app's tile (KeysTile; the keys are the desktop's or the PC's otherwise),
+// and that one gets a thin border.
 void UpdateTileFocus() {
     const int64_t now = NowMs();
     Mat head;
@@ -528,12 +538,10 @@ void UpdateTileFocus() {
         }
     }
     g_tileFocus = f;
-    const bool tile = f >= 0 && g_tiles.Anchored(f);
-    const auto focused = g_screens.find(f);
-    const int say = !tile ? 0 : focused != g_screens.end() && focused->second.floating ? 2 : 1;
-    if (say != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
-        SendRelay(say == 2 ? "tilefocus 2" : say == 1 ? "tilefocus 1" : "tilefocus 0");
-        g_tileFocusSaid = say, g_tileFocusSaidMs = now;
+    const bool tile = KeysTile(f);
+    if (int(tile) != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
+        SendRelay(tile ? "tilefocus 1" : "tilefocus 0");
+        g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
     }
 }
 }  // namespace
@@ -543,7 +551,7 @@ void UpdateTileFocus() {
 void PlaceTileBorder() {
     const int f = g_tileFocus;
     const auto it = g_screens.find(f);
-    const bool tile = it != g_screens.end() && it->second.visible && g_tiles.Anchored(f);
+    const bool tile = it != g_screens.end() && it->second.visible && KeysTile(f);
     TileBorder &b = g_tileBorder;
     if (!tile) {
         if (b.on >= 0 && b.overlay != vr::k_ulOverlayHandleInvalid) PinHide(b.overlay);
@@ -747,6 +755,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
         if (!dashtiles::ParseKey(parsed.word, &key)) return (void)std::snprintf(reply, size, "error no such tiling key");
         const int i = g_tileFocus;
         if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
+        if (!KeysTile(i)) return (void)std::snprintf(reply, size, "ok a screen or a remote display: drag it");
         g_tileHold = i, g_tileHoldMs = NowMs(), g_mouseScreen = -1;   // (the relay hid the 3D mouse: it keeps the focus)
         if (Mat head; !HeadForward(&head, g_tileHoldFwd)) g_tileHoldFwd[0] = g_tileHoldFwd[1] = g_tileHoldFwd[2] = 0;
         if (!g_tiles.Press(i, key)) return (void)std::snprintf(reply, size, "ok nothing to do");

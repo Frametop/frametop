@@ -123,7 +123,7 @@ Kirigami.ApplicationWindow {
                 delegate: Controls.ItemDelegate {
                     required property var modelData
                     width: ListView.view.width
-                    text: modelData.title.replace(/&/g, "&&")  // a lone & would be a mnemonic
+                    text: modelData.title
                     icon.name: modelData.icon
                     highlighted: modelData.name === root.current
                     onClicked: root.showSection(modelData.name)

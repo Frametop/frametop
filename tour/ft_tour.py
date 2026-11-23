@@ -403,8 +403,10 @@ def pages(f, keys):
         "rows": ["Screens",
                  ["Screens", "How many screens, their resolution, size in VR, scale, and curve", "settings:screens"],
                  ["Layout & profiles", "The arrangement, saved profiles, and how the desktop starts", "settings:layout"],
-                 ["Visibility & pins", "When screens show, pins, hidden screens, notifications, and dashboard apps",
+                 ["Visibility & pins", "When screens show, pins, hidden screens, and dashboard tiles",
                   "settings:visibility"],
+                 ["Grab bars & corners", "How easy the bar under a screen is to hit, and how its resize corners look",
+                  "settings:handles"],
                  ["Desktopless mode", "Every app window its own panel, without the screens, and which sources "
                                       "are in it: this Frame, each PC", "settings:desktopless"],
                  ["Remote displays", "Another computer's monitors as Frametop screens", "settings:remote-displays"],
@@ -442,6 +444,8 @@ def pages(f, keys):
                                     "temperature readouts", "settings:quick-settings"],
                  ["Power", "Turning the displays off when the headset is unused, and staying awake on the charger",
                   "settings:power"],
+                 ["Steam & notifications", "Where the desktop's notifications show, Steam's lock screen, and how apps "
+                                           "from the SteamVR dashboard open", "settings:steam"],
                  ["Remote access", "See and use the Frametop desktop from another computer on your tailnet, over VNC",
                   "settings:remote-access"],
                  ["Frametop Together", "A room shared with other Steam Frames on your tailnet: open one or join "

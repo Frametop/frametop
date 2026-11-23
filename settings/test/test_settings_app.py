@@ -19,7 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "settings"))
 import ft_settings  # noqa: E402
-from PySide6.QtCore import QObject  # noqa: E402
+from PySide6.QtCore import QObject, QPointF  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
@@ -113,8 +113,32 @@ class App(unittest.TestCase):
     def test_gamescope_has_no_visibility_page(self):
         w = Window(self, kind="gamescope")
         names = [s["name"] for s in w.settings.sections]
-        self.assertNotIn("visibility", names)
+        for name in ft_settings.SCREENS_ONLY:   # ft-screens' pages
+            self.assertNotIn(name, names)
         self.assertIn("screens", names)
+
+    def test_no_page_is_wider_than_the_window(self):
+        # A switch or a line of help with long text makes its form wider than the page: the form's
+        # labels then stack over their controls and the text is cut off at the window's edge. Long
+        # text goes in a Hint (settings/controls) under a short label.
+        w = Window(self)
+        right = w.root.contentItem().width()
+
+        def shown(item):
+            if not item.isVisible():
+                return
+            yield item
+            for child in item.childItems():
+                yield from shown(child)
+
+        for name, area, group, title, icon, words in ft_settings.SECTIONS:
+            with self.subTest(section=name):
+                w.show(name)
+                w.spin(0.3)
+                wide = sorted({str(item.property("text"))[:60] for item in shown(w.root.contentItem())
+                               if item.property("text") and item.width() > 0
+                               and item.mapToScene(QPointF(item.width(), 0)).x() > right + 1})
+                self.assertEqual(wide, [], "text past the window's right edge")
 
     def test_search(self):
         w = Window(self)

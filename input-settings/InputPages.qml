@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "../settings/controls" as Ft
 
 Item {
     id: root
@@ -258,6 +259,32 @@ Item {
         }
     }
 
+    // One group of the Pointer page's sliders (ft_input_settings.py POINTER_SETTINGS). The rows
+    // are counted, not listed: a new list would rebuild them, and FormLayout puts rebuilt rows last.
+    component PointerSliders: Repeater {
+        id: sliders
+        property string group
+        property bool shown: true
+        readonly property var settings: backend.pointerSettings.filter(s => s.group === group)
+        model: settings.length
+        delegate: Ft.SliderRow {
+            required property int index
+            readonly property var setting: sliders.settings[index]
+            visible: sliders.shown
+            Kirigami.FormData.label: setting.label + ":"
+            from: setting.min
+            to: setting.max
+            stepSize: setting.step
+            value: setting.value
+            sliderWidth: Kirigami.Units.gridUnit * 14
+            shown: (setting.step < 1 ? value.toFixed(setting.step < 0.01 ? 3 : 2) : Math.round(value))
+                   + (setting.unit ? " " + setting.unit : "")
+            reset: setting.default
+            tip: setting.help
+            onMoved: backend.setPointerSetting(setting.key, value)
+        }
+    }
+
     // ---------------------------------------------------------------- Devices
     Component {
         id: devicesPage
@@ -382,10 +409,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "Move or press a device to see which row it is. 3D pointer: grabbed, drives the SteamVR pointer. "
                       + "Pass through: left alone, but its key combinations (Keyboard page) work. "
                       + "Keyboard + 3D pointer, for a keyboard with a touchpad: the keys pass through, the touchpad "
@@ -599,11 +623,12 @@ Item {
 
                     Controls.Switch {
                         Kirigami.FormData.label: "Global input:"
-                        text: "SteamVR's \"Enable global input from overlays (Experimental)\", which mapped buttons need"
+                        text: "Mapped buttons work with any app in front"
                         checked: cpage.status.global
                         enabled: cpage.status.helper
                         onToggled: backend.setGlobalInput(checked)
                     }
+                    Ft.Hint { text: "SteamVR's own setting, \"Enable global input from overlays (Experimental)\". Mapped buttons need it." }
                     Controls.Switch {
                         Kirigami.FormData.label: "In games:"
                         text: "Mapped buttons work while a game is running too (the game loses them)"
@@ -630,6 +655,9 @@ Item {
                             valueRole: "value"
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 10
                         }
+                    }
+                    RowLayout {
+                        Kirigami.FormData.label: "It does:"
                         Controls.ComboBox {
                             id: newControllerAction
                             model: backend.controllerActions
@@ -732,11 +760,12 @@ Item {
                 }
                 Controls.Switch {
                     Kirigami.FormData.label: "Keep it open:"
-                    text: "Until you close it (its X) or press your keyboard button, not only while the text field has focus"
+                    text: "Until you close it, not only while a text field has focus"
                     checked: backend.vrKeyboardPersist
                     enabled: backend.vrKeyboard !== "never"
                     onToggled: backend.setVrKeyboardPersist(checked)
                 }
+                Ft.Hint { text: "Close it with its X or your keyboard button." }
                 Controls.ComboBox {
                     objectName: "steamFieldsKeyboard"
                     Kirigami.FormData.label: "In Steam's text fields:"
@@ -811,16 +840,18 @@ Item {
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Key combinations" }
                 Controls.Switch {
                     Kirigami.FormData.label: "Meta tap:"
-                    text: "Meta pressed and let go on its own does its combination below (Meta + other keys always work)"
+                    text: "Meta pressed and let go alone does its combination below"
                     checked: backend.metaTap
                     onToggled: backend.setMetaTap(checked)
                 }
+                Ft.Hint { text: "Meta with other keys always works." }
                 Controls.Switch {
                     Kirigami.FormData.label: "Carry floated windows:"
-                    text: "A window you float from the desktop starts carried by the 3D mouse, as carry_toggle does, until a click or Enter"
+                    text: "A window you float starts carried by the 3D mouse"
                     checked: backend.carryOnFloat
                     onToggled: backend.setCarryOnFloat(checked)
                 }
+                Ft.Hint { text: "As the carry_toggle combination does, until a click or Enter." }
                 Controls.ComboBox {
                     id: windowDragMod
                     Kirigami.FormData.label: "Window drag:"
@@ -921,10 +952,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "Frametop's keyboard (Full Keyboard) opens in front of you, below your eyes, and closes with its X or a layout reset "
                       + "(or when the text field loses focus, with Keep it open off). "
                       + "Type on it with a laser, the 3D mouse, a controller's tip or a fingertip. It types into any "
@@ -1173,32 +1201,34 @@ Item {
             ]
 
             Kirigami.FormLayout {
+                PointerSliders { group: "basic" }
+
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Head follow" }
                 Controls.Switch {
                     Kirigami.FormData.label: "Head follow:"
-                    text: "Pointer follows your head (experimental; leash below, 0° locks it to your view)"
+                    text: "The pointer follows your head (experimental)"
                     checked: backend.pointerFollow
                     onToggled: backend.setPointerFollow(checked)
                 }
-                Kirigami.InlineMessage {
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
-                    visible: true
-                    type: Kirigami.MessageType.Warning
-                    text: "Head follow is experimental. It's only lightly tested and not finished: the head "
-                          + "follow settings below are a starting point, and polishing how it feels is left open "
-                          + "for anyone who wants to take it further."
+                Ft.Hint {
+                    text: "Lightly tested and not finished: the settings here are a starting point, and how "
+                          + "it feels is open for anyone who wants to take it further."
                 }
+                PointerSliders { group: "follow"; shown: backend.pointerFollow }
+
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Travel" }
                 Controls.Switch {
                     Kirigami.FormData.label: "Travel mode:"
-                    text: "SteamVR tracks for a moving car, train or plane (SteamVR's own setting, off by default)"
+                    text: "Track in a moving car, train or plane"
                     checked: backend.travelMode
                     enabled: backend.travelKnown && !backend.travelBusy
                     onToggled: backend.setTravelMode(checked)
                     Component.onCompleted: backend.refreshTravel()
                 }
+                Ft.Hint { text: "SteamVR's own setting, off by default." }
                 RowLayout {
                     visible: backend.travelNote !== ""
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     Controls.Label {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
@@ -1211,43 +1241,19 @@ Item {
                         onClicked: backend.refreshTravel()  // after starting SteamVR
                     }
                 }
-                Repeater {
-                    model: backend.pointerSettings
-                    delegate: RowLayout {
-                        required property var modelData
-                        Kirigami.FormData.label: modelData.label + ":"
-                        Controls.Slider {
-                            id: slider
-                            from: modelData.min
-                            to: modelData.max
-                            stepSize: modelData.step
-                            value: modelData.value
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 14
-                            onMoved: backend.setPointerSetting(modelData.key, value)
-                        }
-                        Controls.Label {
-                            text: (modelData.step < 1 ? slider.value.toFixed(modelData.step < 0.01 ? 3 : 2) : Math.round(slider.value))
-                                  + (modelData.unit ? " " + modelData.unit : "")
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-                        }
-                        Controls.ToolButton {
-                            icon.name: "edit-undo"
-                            display: Controls.AbstractButton.IconOnly
-                            text: "Default (" + modelData.default + ")"
-                            Controls.ToolTip.text: text
-                            Controls.ToolTip.visible: hovered
-                            onClicked: { slider.value = modelData.default; backend.setPointerSetting(modelData.key, modelData.default) }
-                        }
-                    }
+
+                Kirigami.Separator { Kirigami.FormData.isSection: true }
+                Ft.Disclosure {
+                    id: pointerFine
+                    title: "Fine tuning"
+                    summary: "waking, handing back to controllers, reach"
                 }
+                PointerSliders { group: "fine"; shown: pointerFine.expanded }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
-                text: "Changes apply live. SteamVR dot shrink: how close to the target the pointer's laser starts; "
-                      + "higher makes SteamVR's own blue dot smaller (max 0.98)."
+            footer: Ft.HelpFooter {
+                text: "Changes apply live. Hold the pointer over a slider to read what it does; the arrow "
+                      + "beside it goes back to the default."
             }
         }
     }
@@ -1377,10 +1383,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "Saved as POINTER_IGNORE in ~/.config/frametop.conf, and applied at once. A whole app is "
                       + "its key followed by *, which also covers panels it opens later. Frametop's own screens "
                       + "aren't listed."
@@ -1455,6 +1458,7 @@ Item {
                     }
                     Controls.Label {
                         Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         text: "Frametop stays up while Steam Link streams the PC's SteamVR Home. It knows a PC game runs "
@@ -1494,6 +1498,7 @@ Item {
                     }
                     Controls.Label {
                         Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         text: (backend.pauseGesture.first === "" ? "No gesture: a mapped button, a key combination, or ft-pause still work."
@@ -1690,6 +1695,7 @@ Item {
                 Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Eye tracker" }
                 ModelPicker {
                     Kirigami.FormData.label: "Tracker:"
+                    Kirigami.FormData.labelAlignment: Qt.AlignTop
                     kind: "eyes"
                     view: backend.eyeModels
                     Component.onCompleted: backend.reloadModels()
@@ -1840,10 +1846,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "Map a mouse button (Buttons) or a key combination (Keyboard) to \"Gaze pointer on/off\" "
                       + "to switch it on the fly. A click waits for the release: if the gaze is off, drag onto the target "
                       + "with the button held and let go there. Hold still to drag: hold a press this long without moving "
@@ -1869,8 +1872,6 @@ Item {
             header: DriverWarning {}
             property var st: backend.handsStatus
             readonly property var range: backend.handsMarginRange
-            readonly property var spinRange: backend.spinDistanceRange
-            readonly property int spinAt: backend.handInteractions.findIndex(e => e.key === "SCREEN_SPIN_BRING")
             // What runs, and why it can't: asked on the host, while this page is open.
             Timer {
                 running: true
@@ -1880,178 +1881,135 @@ Item {
                 onTriggered: backend.refreshHands()
             }
 
-            Kirigami.FormLayout {
-                Kirigami.InlineMessage {
+            ColumnLayout {
+                spacing: Kirigami.Units.smallSpacing
+                Kirigami.FormLayout {
                     Layout.fillWidth: true
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
-                    visible: !!hpage.st.problem
-                    type: backend.handsMode === "off" ? Kirigami.MessageType.Information : Kirigami.MessageType.Warning
-                    text: hpage.st.problem || ""
-                }
-                ColumnLayout {
-                    Kirigami.FormData.label: "Hand tracking:"
-                    Repeater {
-                        model: backend.handsModes
-                        delegate: Controls.RadioButton {
-                            required property var modelData
-                            text: modelData.text
-                            checked: backend.handsMode === modelData.value
-                            onToggled: if (checked) backend.setHandsMode(modelData.value)
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        visible: !!hpage.st.problem
+                        type: backend.handsMode === "off" ? Kirigami.MessageType.Information : Kirigami.MessageType.Warning
+                        text: hpage.st.problem || ""
+                    }
+                    ColumnLayout {
+                        Kirigami.FormData.label: "Hand tracking:"
+                        Kirigami.FormData.labelAlignment: Qt.AlignTop
+                        Repeater {
+                            model: backend.handsModes
+                            delegate: Controls.RadioButton {
+                                required property var modelData
+                                text: modelData.text
+                                checked: backend.handsMode === modelData.value
+                                onToggled: if (checked) backend.setHandsMode(modelData.value)
+                            }
                         }
                     }
-                }
-                Controls.Label {
-                    text: hpage.st.summary === undefined ? "…" : hpage.st.summary
-                    opacity: 0.7
-                    font: Kirigami.Theme.smallFont
-                }
-                Controls.Switch {
-                    Kirigami.FormData.label: "Hand cutouts:"
-                    text: "Cut a hole per hand in the panels, so Room View shows your real hands through them"
-                    checked: backend.handsCutouts
-                    onToggled: backend.setHandsCutouts(checked)
-                }
-                RowLayout {
-                    Kirigami.FormData.label: "Hand cutout margin:"
-                    enabled: backend.handsCutouts
-                    Controls.Label { text: "smaller"; opacity: 0.7 }
-                    Controls.Slider {
-                        id: marginSlider
-                        from: hpage.range.min
-                        to: hpage.range.max
-                        stepSize: hpage.range.step
-                        snapMode: Controls.Slider.SnapAlways
-                        value: backend.handsMargin
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                        onMoved: backend.setHandsMargin(value)
-                    }
-                    Controls.Label { text: "bigger"; opacity: 0.7 }
                     Controls.Label {
-                        text: marginSlider.value.toFixed(2) + "°"
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                        text: hpage.st.summary === undefined ? "…" : hpage.st.summary
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
                     }
-                    Controls.ToolButton {
-                        icon.name: "edit-undo"
-                        display: Controls.AbstractButton.IconOnly
-                        text: "Default (" + hpage.range.default + "°)"
-                        Controls.ToolTip.text: text
-                        Controls.ToolTip.visible: hovered
-                        onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
-                    }
-                }
-
-                // Which hand models ft-hands runs (HANDS_MODEL): latest, a version, or stock MediaPipe.
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand model" }
-                ModelPicker {
-                    Kirigami.FormData.label: "Model:"
-                    kind: "hands"
-                    view: backend.handModels
-                    Component.onCompleted: backend.reloadModels()
-                }
-
-                // Three ways the hands work the desktop, each on its own (handsmode.METHODS).
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand input" }
-                Controls.Switch {
-                    Kirigami.FormData.label: "With gaze on:"
-                    text: "Pinch to click where you look"
-                    checked: !!backend.handMethods.gaze_clicks
-                    onToggled: backend.setHandMethod("gaze_clicks", checked)
-                    Controls.ToolTip.visible: hovered
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    Controls.ToolTip.text: "Your eyes aim and your hands are the mouse's buttons. Index pinch: left click. "
-                        + "Middle finger to thumb: right click. Pinch and hold still to press and drag. Hold a pinch "
-                        + "with one hand and pinch with the other: both buttons held, each until its pinch opens."
-                }
-                Controls.Switch {
-                    Kirigami.FormData.label: "With gaze off:"
-                    text: "Point a raised hand for a ray"
-                    checked: !!backend.handMethods.ray
-                    onToggled: backend.setHandMethod("ray", checked)
-                    Controls.ToolTip.visible: hovered
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    Controls.ToolTip.text: "A hand raised in front and pointing shows a ray that works like a controller's "
-                        + "laser: pinch to click, middle pinch to right-click or scroll. A pinch with the hand held low "
-                        + "presses where the pointer is."
-                }
-                Controls.Switch {
-                    Kirigami.FormData.label: "Direct touch:"
-                    text: "Poke and grab Frametop's screens, gaze on or off"
-                    checked: !!backend.handMethods.touch
-                    onToggled: backend.setHandMethod("touch", checked)
-                    Controls.ToolTip.visible: hovered
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    Controls.ToolTip.text: "Touch a screen with your index finger to click it. Pinch its bar, an edge or "
-                        + "a corner to move or resize it."
-                }
-                Controls.Label {
-                    visible: backend.handsMode === "off"
-                    text: "These need hand tracking on (above)."
-                    opacity: 0.7
-                    font: Kirigami.Theme.smallFont
-                }
-
-                // Every interaction on Frametop's screens, each on its own (ft_input_settings.HAND_INTERACTIONS);
-                // they apply at once. Direct touch above switches all of them. The lazy susan's distance
-                // (SCREEN_SPIN_DISTANCE) goes under its switch, so the list is in two.
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
-                Repeater {
-                    model: backend.handInteractions.slice(0, hpage.spinAt + 1)
-                    delegate: interactionSwitch
-                }
-                RowLayout {
-                    enabled: !!backend.handMethods.touch && hpage.spinAt >= 0 && backend.handInteractions[hpage.spinAt].on
-                    Controls.Label { text: "Comes" }
-                    Controls.Slider {
-                        id: spinSlider
-                        from: hpage.spinRange.min
-                        to: hpage.spinRange.max
-                        stepSize: hpage.spinRange.step
-                        snapMode: Controls.Slider.SnapAlways
-                        value: backend.spinDistance
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 10
-                        onMoved: backend.setSpinDistance(value)
-                        Controls.ToolTip.visible: hovered
-                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                        Controls.ToolTip.text: "How far in front of you a brought screen comes (at least 0.9 m, behind "
-                            + "frunner's search). One you push or pull there comes back that far next time, until the reset button."
-                    }
-                    Controls.Label {
-                        text: spinSlider.value.toFixed(2) + " m out"
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                    }
-                    Controls.ToolButton {
-                        icon.name: "edit-undo"
-                        display: Controls.AbstractButton.IconOnly
-                        text: "Default (" + hpage.spinRange.default + " m)"
-                        Controls.ToolTip.text: text
-                        Controls.ToolTip.visible: hovered
-                        onClicked: { spinSlider.value = hpage.spinRange.default; backend.setSpinDistance(hpage.spinRange.default) }
-                    }
-                }
-                Repeater {
-                    model: backend.handInteractions.slice(hpage.spinAt + 1)
-                    delegate: interactionSwitch
-                }
-                Component {
-                    id: interactionSwitch
                     Controls.Switch {
-                        required property var modelData
-                        Kirigami.FormData.label: modelData.group ? modelData.group + ":" : ""
-                        text: modelData.label
-                        checked: modelData.on
-                        enabled: !!backend.handMethods.touch
-                        onToggled: backend.setHandInteraction(modelData.key, checked)
-                        Controls.ToolTip.visible: hovered
-                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                        Controls.ToolTip.text: modelData.tip
+                        Kirigami.FormData.label: "Hand cutouts:"
+                        text: "Show your real hands through the panels"
+                        checked: backend.handsCutouts
+                        onToggled: backend.setHandsCutouts(checked)
                     }
+                    Ft.Hint { text: "Cuts a hole per hand in the panels, so Room View shows through them." }
+                    RowLayout {
+                        Kirigami.FormData.label: "Hand cutout margin:"
+                        enabled: backend.handsCutouts
+                        Controls.Label { text: "smaller"; opacity: 0.7 }
+                        Controls.Slider {
+                            id: marginSlider
+                            from: hpage.range.min
+                            to: hpage.range.max
+                            stepSize: hpage.range.step
+                            snapMode: Controls.Slider.SnapAlways
+                            value: backend.handsMargin
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.setHandsMargin(value)
+                        }
+                        Controls.Label { text: "bigger"; opacity: 0.7 }
+                        Controls.Label {
+                            text: marginSlider.value.toFixed(2) + "°"
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                        }
+                        Controls.ToolButton {
+                            icon.name: "edit-undo"
+                            display: Controls.AbstractButton.IconOnly
+                            text: "Default (" + hpage.range.default + "°)"
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered
+                            onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
+                        }
+                    }
+
+                    // Which hand models ft-hands runs (HANDS_MODEL): latest, a version, or stock MediaPipe.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand model" }
+                    ModelPicker {
+                        Kirigami.FormData.label: "Model:"
+                        Kirigami.FormData.labelAlignment: Qt.AlignTop
+                        kind: "hands"
+                        view: backend.handModels
+                        Component.onCompleted: backend.reloadModels()
+                    }
+
+                    // Three ways the hands work the desktop, each on its own (handsmode.METHODS).
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand input" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "With gaze on:"
+                        text: "Pinch to click where you look"
+                        checked: !!backend.handMethods.gaze_clicks
+                        onToggled: backend.setHandMethod("gaze_clicks", checked)
+                    }
+                    Ft.Hint {
+                        text: "Your eyes aim and your hands are the mouse's buttons. Index pinch: left click. "
+                            + "Middle finger to thumb: right click. Pinch and hold still to press and drag. Hold a pinch "
+                            + "with one hand and pinch with the other: both buttons held, each until its pinch opens."
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "With gaze off:"
+                        text: "Point a raised hand for a ray"
+                        checked: !!backend.handMethods.ray
+                        onToggled: backend.setHandMethod("ray", checked)
+                    }
+                    Ft.Hint {
+                        text: "A hand raised in front and pointing shows a ray that works like a controller's "
+                            + "laser: pinch to click, middle pinch to right-click or scroll. A pinch with the hand held low "
+                            + "presses where the pointer is."
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "Direct touch:"
+                        text: "Poke and grab Frametop's screens, gaze on or off"
+                        checked: !!backend.handMethods.touch
+                        onToggled: backend.setHandMethod("touch", checked)
+                    }
+                    Ft.Hint {
+                        text: "Touch a screen with your index finger to click it. Pinch its bar, an edge or "
+                            + "a corner to move or resize it."
+                    }
+                    Controls.Label {
+                        visible: backend.handsMode === "off"
+                        text: "These need hand tracking on (above)."
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                    }
+
+                    // Every interaction on Frametop's screens, each on its own: HandInteractions.qml, below.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
+                }
+
+                HandInteractions {
+                    backend: root.backend
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "Your hands show through Frametop's screens where they're in front of them. Hand tracking "
                       + "uses a lot of the headset's CPU. The margin is how far past your hand the screen opens up; "
                       + "it applies right away. The hand inputs are separate: any of them can be on alone, and they "
@@ -2155,10 +2113,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "A command runs with sh in the background, on the headset, as you. Nothing waits for it, and "
                       + "its output goes to the journal (ft-cmd log NAME). Run it from: a button, a controller "
                       + "button or a key combination (pick \"Run command NAME\" on those pages); frunner (Meta+Space, "
@@ -2219,10 +2174,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: "Pair new devices in Steam (Settings → Bluetooth). After pairing an LE mouse or keyboard, "
                       + "use Apply Bluetooth fixes once so it reconnects on its own."
             }

@@ -1,7 +1,7 @@
 """Display Settings' "Hide Frametop while Steam is locked" (issue 66): it sets STEAM_PIN_LOCK in
 frametop.conf (docs/steam-pin-lock.md), refuses the gamescope backend the session would refuse,
-says a restart is due when it differs from what the desktop started with, and its section of
-the page loads without QML errors. No headset, no Steam, no desktop.
+says a restart is due when it differs from what the desktop started with, and its page
+(Steam & notifications, SteamPage.qml) loads without QML errors. No headset, no Steam, no desktop.
 
   python3 display-settings/tests/test_steam_pin_lock.py
 """
@@ -68,7 +68,7 @@ class SteamPinLock(unittest.TestCase):
         self.assertFalse(self.b.steamPinLockRestartNeeded, "nothing to restart")
 
     def test_its_section_loads(self):
-        errors = page_errors(self.b, "Steam's lock screen", "Apps from the SteamVR dashboard")
+        errors = page_errors(self.b, "steam", "SteamPage.qml")
         if errors is None:
             self.skipTest("Frametop Settings doesn't load here (no Kirigami)")
         self.assertEqual(errors, [])

@@ -1,11 +1,13 @@
-// Frametop Settings' display pages: Screens, Desktopless mode, Layout, Visibility & pins and Power (settings/main.qml
-// loads this file the first time one of them opens). Backend: ft_display_settings.py ("backend",
-// made then: settings/ft_settings.py).
+// Frametop Settings' display pages: Screens, Desktopless mode, Layout, Visibility & pins, Grab bars & corners,
+// Steam & notifications and Power (settings/main.qml loads this file the first time one of them opens).
+// Desktopless mode, Grab bars & corners and Steam & notifications are files of their own beside this one.
+// Backend: ft_display_settings.py ("backend", made then: settings/ft_settings.py).
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "../settings/controls" as Ft
 
 Item {
     id: root
@@ -16,11 +18,13 @@ Item {
     function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
 
     // The page for a section of the app, by name; null for a name that isn't one of these.
-    // Visibility & pins is ft-screens' (the gamescope backend has none).
+    // Visibility & pins, Grab bars & corners and Steam & notifications are ft-screens' (the gamescope
+    // backend has none; settings/sections.py SCREENS_ONLY).
     function page(name) {
-        if (name === "visibility" && backend.backend !== "screens") return screensPage
+        const screensOnly = ["visibility", "handles", "steam"]
+        if (screensOnly.includes(name) && backend.backend !== "screens") return screensPage
         return ({ screens: screensPage, desktopless: desktoplessPage, layout: layoutPage, visibility: visibilityPage,
-                  power: powerPage })[name] || null
+                  handles: handlesPage, steam: steamPage, power: powerPage })[name] || null
     }
 
     // "1 hour", "15 minutes", "30 seconds".
@@ -482,10 +486,7 @@ Item {
                 }
             }
 
-            footer: Controls.Label {
-                padding: Kirigami.Units.largeSpacing
-                wrapMode: Text.Wrap
-                opacity: 0.7
+            footer: Ft.HelpFooter {
                 text: spage.md
                       ? "Each screen is a real monitor of its own: any resolution, portrait by choosing a tall one. Resolution, "
                         + "width, and curve apply at once. In VR: move a screen by the bar underneath, curve it with the round "
@@ -984,30 +985,15 @@ Item {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "When the screens show" }
 
-                    Repeater {
-                        model: [
+                    Ft.RadioChoices {
+                        choices: [
                             { value: "always", text: "Always", help: "Meta+Shift+H (or a key or button mapped to it) hides them and shows them again. During VR games, see below." },
                             { value: "dashboard", text: "Only with the SteamVR dashboard open", help: "They come and go with the dashboard. Meta+Shift+H shows them anyway." },
                             { value: "gesture", text: "While I look at my wrist", help: "They show while you look toward the controller below. Meta+Shift+H shows them anyway." },
                             { value: "toggle", text: "Only when I show them", help: "Hidden until Meta+Shift+H (or a key or button mapped to it) shows them." }
                         ]
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            spacing: 0
-                            Controls.RadioButton {
-                                text: modelData.text
-                                checked: vpage.v.mode === modelData.value
-                                onToggled: if (checked) backend.setVisibility("mode", modelData.value)
-                            }
-                            Controls.Label {
-                                text: modelData.help
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                leftPadding: Kirigami.Units.gridUnit * 1.6
-                                wrapMode: Text.Wrap
-                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                            }
-                        }
+                        value: vpage.v.mode
+                        onChose: backend.setVisibility("mode", picked)
                     }
 
                     RowLayout {
@@ -1036,29 +1022,14 @@ Item {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "During VR games" }
 
-                    Repeater {
-                        model: [
+                    Ft.RadioChoices {
+                        enabled: vpage.v.mode === "always"
+                        choices: [
                             { value: "hide", text: "Hide them unless the SteamVR dashboard is open", help: "The game has the view to itself; open the dashboard (or press Meta+Shift+H) to see the screens." },
                             { value: "visible", text: "Keep them visible over the game", help: "They float over the game as they are outside it. Turn off Pause while a VR game runs in Frametop Settings (Game optimization), or Frametop pauses and hides them anyway." }
                         ]
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            spacing: 0
-                            Controls.RadioButton {
-                                text: modelData.text
-                                enabled: vpage.v.mode === "always"
-                                checked: (vpage.v.in_games || "hide") === modelData.value
-                                onToggled: if (checked) backend.setVisibility("in_games", modelData.value)
-                            }
-                            Controls.Label {
-                                text: modelData.help
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                leftPadding: Kirigami.Units.gridUnit * 1.6
-                                wrapMode: Text.Wrap
-                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                            }
-                        }
+                        value: vpage.v.in_games || "hide"
+                        onChose: backend.setVisibility("in_games", picked)
                     }
                     Controls.Label {
                         visible: vpage.v.mode !== "always"
@@ -1071,341 +1042,14 @@ Item {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controllers on the screens" }
 
-                    Repeater {
-                        model: [
+                    Ft.RadioChoices {
+                        choices: [
                             { value: "outside_games", text: "Except during VR games", help: "Over a VR game the screens stay up, but the controllers stay in the game. Use the 3D mouse, or open the SteamVR dashboard, to work the screens." },
                             { value: "always", text: "Always", help: "Controllers' lasers work the screens whenever they're visible, even over a VR game (which then can't use the controllers)." },
                             { value: "dashboard", text: "Only with the SteamVR dashboard open", help: "Otherwise only the 3D mouse works the screens. Also for flatscreen games, which don't count as VR games." }
                         ]
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            spacing: 0
-                            Controls.RadioButton {
-                                text: modelData.text
-                                checked: (vpage.v.controllers || "outside_games") === modelData.value
-                                onToggled: if (checked) backend.setVisibility("controllers", modelData.value)
-                            }
-                            Controls.Label {
-                                text: modelData.help
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                leftPadding: Kirigami.Units.gridUnit * 1.6
-                                wrapMode: Text.Wrap
-                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                            }
-                        }
-                    }
-
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Window controls" }
-
-                    RowLayout {
-                        Kirigami.FormData.label: "Vertical padding (each side):"
-                        Controls.Slider {
-                            id: grabBarPaddingY
-                            from: 0; to: 50; stepSize: 0.1
-                            value: backend.grabBarPaddingY
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setGrabBarPaddingY(value)
-                        }
-                        Controls.Label { text: grabBarPaddingY.value.toFixed(1) + " cm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Horizontal padding (each side):"
-                        Controls.Slider {
-                            id: grabBarPaddingX
-                            from: 0; to: 50; stepSize: 0.1
-                            value: backend.grabBarPaddingX
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setGrabBarPaddingX(value)
-                        }
-                        Controls.Label { text: grabBarPaddingX.value.toFixed(1) + " cm" }
-                    }
-                    Controls.CheckBox {
-                        text: "Show drag zone"
-                        checked: backend.grabBarPreview
-                        onToggled: backend.setGrabBarPreview(checked)
-                    }
-                    Controls.CheckBox {
-                        text: "Hover haptics (move bar, controller lasers only)"
-                        checked: backend.grabBarHaptics
-                        onToggled: backend.setGrabBarHaptics(checked)
-                    }
-                    Controls.CheckBox {
-                        text: "Keep drag zones visible while their windows are visible"
-                        enabled: backend.grabBarPreview
-                        checked: backend.grabBarPreviewAlways
-                        onToggled: backend.setGrabBarPreviewAlways(checked)
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Zone fill color:"
-                        enabled: backend.grabBarPreview
-                        Rectangle {
-                            width: Kirigami.Units.gridUnit * 2; height: Kirigami.Units.gridUnit
-                            color: backend.grabBarPreviewColor
-                            border.color: Kirigami.Theme.textColor
-                        }
-                        Controls.Button { text: "Choose…"; onClicked: barFillDialog.open() }
-                        ColorDialog {
-                            id: barFillDialog
-                            title: "Drag zone fill color"
-                            selectedColor: backend.grabBarPreviewColor
-                            onAccepted: backend.setGrabBarPreviewColor(selectedColor.toString())
-                        }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Fill opacity:"
-                        enabled: backend.grabBarPreview
-                        Controls.Slider {
-                            id: barFillOpacity
-                            from: 0; to: 1; stepSize: 0.01
-                            value: backend.grabBarPreviewOpacity
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setGrabBarPreviewOpacity(value)
-                        }
-                        Controls.Label { text: Math.round(barFillOpacity.value * 100) + "%" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Outline color:"
-                        enabled: backend.grabBarPreview
-                        Rectangle {
-                            width: Kirigami.Units.gridUnit * 2; height: Kirigami.Units.gridUnit
-                            color: backend.grabBarOutlineColor
-                            border.color: Kirigami.Theme.textColor
-                        }
-                        Controls.Button { text: "Choose…"; onClicked: barOutlineDialog.open() }
-                        ColorDialog {
-                            id: barOutlineDialog
-                            title: "Drag zone outline color"
-                            selectedColor: backend.grabBarOutlineColor
-                            onAccepted: backend.setGrabBarOutlineColor(selectedColor.toString())
-                        }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Outline opacity:"
-                        enabled: backend.grabBarPreview
-                        Controls.Slider {
-                            id: barOutlineOpacity
-                            from: 0; to: 1; stepSize: 0.01
-                            value: backend.grabBarOutlineOpacity
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setGrabBarOutlineOpacity(value)
-                        }
-                        Controls.Label { text: Math.round(barOutlineOpacity.value * 100) + "%" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Outline thickness:"
-                        enabled: backend.grabBarPreview
-                        Controls.Slider {
-                            id: barOutlineWidth
-                            from: 0; to: 8; stepSize: 1
-                            value: backend.grabBarOutlineWidth
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setGrabBarOutlineWidth(value)
-                        }
-                        Controls.Label { text: Math.round(barOutlineWidth.value) + " px" }
-                    }
-                    Controls.Label {
-                        text: "Add a fixed margin around the bar: horizontal padding on the left and right, "
-                              + "vertical padding above and below. For example, 2 cm adds 4 cm to that dimension; "
-                              + "0 cm is the original target. Padding stays the same physical size as the bar auto-sizes. "
-                              + "The visible pill stays the same size; the row moves down and its buttons move sideways "
-                              + "when needed to keep them outside the target. The preview follows the bars' normal fade, "
-                              + "unless kept visible. Settings apply immediately and are saved. Outline pixels are relative "
-                              + "to the original 256×24 pill texture; 0 hides the outline."
-                        wrapMode: Text.Wrap
-                        opacity: 0.7
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                    }
-
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Resize corners" }
-                    Controls.CheckBox {
-                        text: "Preview resize hover targets"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        checked: backend.resizeCornerPreview
-                        onToggled: backend.setResizeCornerPreview(checked)
-                    }
-                    Repeater {
-                        model: 4
-                        delegate: Controls.CheckBox {
-                            required property int index
-                            enabled: backend.resizeCornerStyle !== "glow"
-                            text: "Always show " + ["top-left", "top-right", "bottom-left", "bottom-right"][index] + " corner"
-                            checked: backend.resizeCornerAlways[index]
-                            onToggled: {
-                                backend.setResizeCornerAlways(index, checked)
-                                checked = Qt.binding(() => backend.resizeCornerAlways[index])
-                            }
-                        }
-                    }
-                    Controls.ComboBox {
-                        Kirigami.FormData.label: "Indicator style:"
-                        model: ["Sharp outline", "Soft glow (original behavior)", "SteamOS-like (gray → white)"]
-                        currentIndex: backend.resizeCornerStyle === "native" ? 2 : backend.resizeCornerStyle === "glow" ? 1 : 0
-                        onActivated: backend.setResizeCornerStyle(["sharp", "glow", "native"][currentIndex])
-                    }
-                    Controls.CheckBox {
-                        text: "Hover haptics (controller lasers only)"
-                        checked: backend.resizeCornerHaptics
-                        onToggled: backend.setResizeCornerHaptics(checked)
-                    }
-                    Controls.Label {
-                        visible: backend.resizeCornerStyle === "glow"
-                        text: "Original soft glow restores the original appearance, proximity fade and square resize hit area. "
-                              + "The new geometry, colors, opacity, preview, always-visible corners and exclusion rules are not used. "
-                              + "Your settings remain saved for the other styles. Optional hover haptics still apply."
-                        wrapMode: Text.Wrap
-                        opacity: 0.7
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Indicator color:"
-                        enabled: backend.resizeCornerStyle === "sharp"
-                        Rectangle {
-                            color: backend.resizeCornerColor
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 2
-                            Layout.preferredHeight: Kirigami.Units.gridUnit
-                            border.color: Kirigami.Theme.textColor
-                        }
-                        Controls.Button { text: "Choose…"; onClicked: resizeCornerColorDialog.open() }
-                        ColorDialog {
-                            id: resizeCornerColorDialog
-                            title: "Resize corner color"
-                            selectedColor: backend.resizeCornerColor
-                            onAccepted: backend.setResizeCornerColor(selectedColor.toString())
-                        }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Indicator opacity:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerOpacity
-                            from: 0; to: 1; stepSize: 0.01
-                            value: backend.resizeCornerOpacity
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerOpacity(value)
-                        }
-                        Controls.Label { text: Math.round(resizeCornerOpacity.value * 100) + "%" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Outline arm length:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerLength
-                            from: 1; to: 10; stepSize: 0.1
-                            value: backend.resizeCornerLength
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerLength(value)
-                        }
-                        Controls.Label { text: resizeCornerLength.value.toFixed(1) + " cm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Outline thickness:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerWidth
-                            from: 0.5; to: 6; stepSize: 0.1
-                            value: backend.resizeCornerWidth
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerWidth(value)
-                        }
-                        Controls.Label { text: resizeCornerWidth.value.toFixed(1) + " mm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Gap from window:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerGap
-                            from: 0; to: 10; stepSize: 0.1
-                            value: backend.resizeCornerGap
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerGap(value)
-                        }
-                        Controls.Label { text: resizeCornerGap.value.toFixed(1) + " cm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Corner roundness:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerRoundness
-                            from: 0; to: 100; stepSize: 1
-                            value: backend.resizeCornerRoundness
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerRoundness(value)
-                        }
-                        Controls.Label { text: Math.round(resizeCornerRoundness.value) + "%" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Hover padding around outline:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerPadding
-                            from: 0.1; to: 10; stepSize: 0.1
-                            value: backend.resizeCornerPadding
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerPadding(value)
-                        }
-                        Controls.Label { text: resizeCornerPadding.value.toFixed(1) + " cm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Screen exclusion margin:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerExclusion
-                            from: 0; to: 5; stepSize: 0.1
-                            value: backend.resizeCornerExclusion
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerExclusion(value)
-                        }
-                        Controls.Label { text: resizeCornerExclusion.value.toFixed(1) + " cm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Approach preview radius:"
-                        enabled: backend.resizeCornerStyle !== "glow"
-                        Controls.Slider {
-                            id: resizeCornerReach
-                            from: 1; to: 50; stepSize: 0.5
-                            value: backend.resizeCornerReach
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                            onMoved: backend.setResizeCornerReach(value)
-                        }
-                        Controls.Label { text: resizeCornerReach.value.toFixed(1) + " cm" }
-                    }
-                    RowLayout {
-                        Kirigami.FormData.label: "Ready-to-drag color:"
-                        enabled: backend.resizeCornerStyle === "sharp"
-                        Rectangle {
-                            color: backend.resizeCornerHoverColor
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 2
-                            Layout.preferredHeight: Kirigami.Units.gridUnit
-                            border.color: Kirigami.Theme.textColor
-                        }
-                        Controls.Button { text: "Choose…"; onClicked: resizeCornerHoverColorDialog.open() }
-                        ColorDialog {
-                            id: resizeCornerHoverColorDialog
-                            title: "Ready-to-drag corner color"
-                            selectedColor: backend.resizeCornerHoverColor
-                            onAccepted: backend.setResizeCornerHoverColor(selectedColor.toString())
-                        }
-                    }
-                    Controls.Label {
-                        visible: backend.resizeCornerStyle !== "glow"
-                        text: "A crisp, rounded corner outside the panel, or the original soft glow. "
-                              + "The indicator follows whichever of the four corners you approach. "
-                              + "The laser target follows the outline with padding, never a square. The window and its exclusion margin "
-                              + "cannot resize. The outline moves outward as needed to keep its whole padded target clear of that margin. "
-                              + "The approach radius only controls when feedback starts appearing. "
-                              + "On the actual target, the outline changes color, thickens and becomes fully bright: ready to drag. "
-                              + "SteamOS-like uses gray then almost-white feedback, with 12% longer arms, 20% thicker lines "
-                              + "and 3 mm extra gap on hover, without overwriting your custom colors. "
-                              + "Roundness runs from a square bend to a full round bend. "
-                              + "Hover growth/shrink and color changes animate over 180 ms inside a stable target. The preview draws the shaped target, "
-                              + "not the approach radius. Always-show choices keep any combination of corners visible on visible panels; "
-                              + "they do not bypass hiding, minimizing or pausing, or disable automatic feedback at other corners. "
-                              + "Laser target size also applies to the 3D mouse; "
-                              + "near-hand reach is unchanged. Native SteamVR window controls are unchanged."
-                        wrapMode: Text.Wrap
-                        opacity: 0.7
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                        value: vpage.v.controllers || "outside_games"
+                        onChose: backend.setVisibility("controllers", picked)
                     }
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Screens shown" }
@@ -1532,41 +1176,44 @@ Item {
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Dashboard tiles" }
                     Controls.Switch {
                         Kirigami.FormData.label: "Stay visible:"
-                        text: "Anchored panels stay with the dashboard closed (a long press on a panel's anchor sets it the other way)"
+                        text: "Anchored panels stay with the dashboard closed"
                         checked: backend.dashTiles.stay
                         onToggled: backend.dashTiles.setStay(checked)
                     }
+                    Ft.Hint { text: "A long press on a panel's anchor button sets it the other way for that panel." }
                     Controls.Switch {
                         Kirigami.FormData.label: "In the theater:"
-                        text: "...and over a game in SteamVR's theater with the dashboard closed"
+                        text: "Also over a game in SteamVR's theater"
                         enabled: backend.dashTiles.stay
                         checked: backend.dashTiles.stayTheater
                         onToggled: backend.dashTiles.setStayTheater(checked)
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "Look to focus:"
-                        text: "With no mouse or laser on a panel, Meta+Shift+arrows move the tile you're looking at"
+                        text: "Meta+Shift+arrows move the tile you look at"
                         checked: backend.dashTiles.lookFocus
                         onToggled: backend.dashTiles.setLookFocus(checked)
                     }
+                    Ft.Hint { text: "When no mouse or laser is on a panel." }
                     Controls.Switch {
                         Kirigami.FormData.label: "Dashboard apps:"
-                        text: "Apps started from the dashboard open as Frametop panels"
+                        text: "Open as Frametop panels"
                         checked: backend.dashTiles.gsApps
                         onToggled: backend.dashTiles.setGsApps(checked)
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "Steam's window:"
-                        text: "Steam's dashboard page and its menu are Frametop panels, tiled with the rest"
+                        text: "Steam's page and menu are Frametop panels"
                         checked: backend.dashTiles.steamWindows
                         onToggled: backend.dashTiles.setSteamWindows(checked)
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "At Steam's bar:"
-                        text: "The middle panel just above Steam's bar, as far away as it is"
+                        text: "Middle panel just above Steam's bar"
                         checked: backend.dashTiles.atBar
                         onToggled: backend.dashTiles.setAtBar(checked)
                     }
+                    Ft.Hint { text: "As far away as the bar is. Off: at the desk line and distance below." }
                     RowLayout {
                         Kirigami.FormData.label: "Desk line:"
                         enabled: !backend.dashTiles.atBar
@@ -1637,7 +1284,13 @@ Item {
                     }
                 }
 
+                Ft.Disclosure {
+                    id: pinHelp
+                    title: "How pinning and anchoring work"
+                    summary: "wrist, head, dashboard"
+                }
                 Controls.Label {
+                    visible: pinHelp.expanded
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
@@ -1668,133 +1321,19 @@ Item {
                           + "shows it on a panel of its own, as before."
                 }
 
-                Kirigami.FormLayout {
-                    Layout.fillWidth: true
-
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Notifications" }
-
-                    Repeater {
-                        model: [
-                            { value: "auto", text: "Show them in the Steam session", help: "The desktop's notifications go to the Steam session's notification server, such as one that shows them in VR, with their buttons. Plasma's own popups stay off meanwhile; its history keeps them. Not to SteamOS's own server, which can't show them on the Frame." },
-                            { value: "on", text: "Always send them to the Steam session", help: "Whatever serves notifications there, SteamOS's own server too, which can't show them on the Frame: they're lost then." },
-                            { value: "off", text: "Keep them in the desktop", help: "Plasma shows them on the desktop's screens." }
-                        ]
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            spacing: 0
-                            // "on" can lose them (SteamOS's server): set in frametop.conf, shown only then
-                            visible: modelData.value !== "on" || backend.notifyForward === "on"
-                            Controls.RadioButton {
-                                text: modelData.text
-                                checked: backend.notifyForward === modelData.value
-                                onToggled: if (checked) backend.setNotifyForward(modelData.value)
-                            }
-                            Controls.Label {
-                                text: modelData.help
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                leftPadding: Kirigami.Units.gridUnit * 1.6
-                                wrapMode: Text.Wrap
-                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                            }
-                        }
-                    }
-                    Controls.Label {
-                        Kirigami.FormData.label: "Now:"
-                        visible: backend.desktopRunning
-                        text: backend.notifyForwardState === "forwarding" ? "In the Steam session"
-                            : backend.notifyForwardState === "waiting" ? "In the desktop: the Steam session has no notification server that can show them"
-                            : "In the desktop"
-                        wrapMode: Text.Wrap
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                    }
-                    RowLayout {
-                        visible: backend.notifyRestartNeeded
-                        Controls.Label {
-                            text: "Applies when the desktop starts again."
-                            wrapMode: Text.Wrap
-                        }
-                        Controls.Button {
-                            text: "Restart desktop"
-                            icon.name: "system-reboot"
-                            onClicked: restartDialog.open()
-                        }
-                    }
-
-                    // Steam's PIN lock (issue 66): Frametop hides with it. Experimental and opt-in;
-                    // what it turns off and what's still untested: docs/steam-pin-lock.md.
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Steam's lock screen" }
-
-                    ColumnLayout {
-                        spacing: 0
-                        Controls.Switch {
-                            objectName: "steamPinLock"
-                            text: "Hide Frametop while Steam is locked (experimental)"
-                            enabled: backend.backend === "screens" || backend.steamPinLock
-                            checked: backend.steamPinLock
-                            onToggled: backend.setSteamPinLock(checked)
-                        }
-                        Controls.Label {
-                            text: "While Steam asks for its PIN (a PIN set in Steam's Security settings), every Frametop "
-                                  + "screen, window and keyboard hides and takes no input; apps keep running and keep "
-                                  + "your work. Remote access to this desktop and sending its notifications to the Steam "
-                                  + "session stay off while this is on. Turned on in an unlocked session, Frametop stays "
-                                  + "hidden until Steam locks and unlocks once. Needs the screens backend."
-                            opacity: 0.7
-                            font: Kirigami.Theme.smallFont
-                            leftPadding: Kirigami.Units.gridUnit * 1.6
-                            wrapMode: Text.Wrap
-                            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                        }
-                    }
-                    RowLayout {
-                        visible: backend.steamPinLockRestartNeeded
-                        Controls.Label {
-                            text: "Applies when the desktop starts again."
-                            wrapMode: Text.Wrap
-                        }
-                        Controls.Button {
-                            text: "Restart desktop"
-                            icon.name: "system-reboot"
-                            onClicked: restartDialog.open()
-                        }
-                    }
-
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Apps from the SteamVR dashboard" }
-
-                    Repeater {
-                        model: [
-                            { value: "steamvr", text: "Open as SteamVR windows", help: "Apps picked in the dashboard's Launch a program list open as SteamVR's own windows, as without Frametop." },
-                            { value: "frametop", text: "Open as Frametop floating windows", help: "They open in the Frametop desktop instead, floating in front of you (where that app last floated), so drag and drop, the clipboard, frunner and profiles work with them. When the desktop isn't running, Frametop is paused, or all floating windows are in use, they open as SteamVR windows. Steam, SteamVR and Frametop's own layout entries always stay SteamVR's." }
-                        ]
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            spacing: 0
-                            Controls.RadioButton {
-                                text: modelData.text
-                                enabled: backend.floatSlots > 0
-                                checked: backend.dashboardApps === modelData.value
-                                onToggled: if (checked) backend.setDashboardApps(modelData.value)
-                            }
-                            Controls.Label {
-                                text: modelData.help
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                leftPadding: Kirigami.Units.gridUnit * 1.6
-                                wrapMode: Text.Wrap
-                                Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                            }
-                        }
-                    }
-                    Controls.Label {
-                        visible: backend.floatSlots === 0
-                        text: "Floating windows are off (FLOAT_SLOTS=0 in ~/.config/frametop.conf), so these open in SteamVR."
-                        wrapMode: Text.Wrap
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-                    }
-                }
             }
         }
+    }
+
+    // ---------------------------------------------------------------- Grab bars & corners, Steam & notifications
+    // (their own files: HandlesPage.qml, SteamPage.qml)
+    Component {
+        id: handlesPage
+        HandlesPage { backend: root.backend }
+    }
+    Component {
+        id: steamPage
+        SteamPage { backend: root.backend; onRestartAsked: restartDialog.open() }
     }
 
     // ---------------------------------------------------------------- Power

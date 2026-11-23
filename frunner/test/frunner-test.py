@@ -462,16 +462,22 @@ try:
     check("a plain open after the OS menu lists nothing again", json.loads(ask("rows")[3:]), [])
     press(ESC)
 
-    # The key list (the relay's keys_list, Meta+/; frunner/keylist.py): every key combination, the
-    # Rebind row first; Enter does a tiling key or a menu action, and only says which keys for the rest.
+    # The key list (the relay's keys_list, Meta+/; frunner/keylist.py): every key combination by what
+    # it does (its keys are the row's small line), the Rebind row first; Enter does a tiling key or
+    # a menu action, and only says which keys for the rest.
     with open(os.path.join(home, ".config", "frametop-input.json"), "w") as f:
         json.dump({"key_bindings": {"125+105": "tile_left", "42+125+33": "float_toggle", "125+53": "keys_list",
                                     "29": "none"}}, f)
     check("toggle ... keys opens the key list", ask("toggle keyboard keys"), "ok")
     check("...Rebind first, then each binding by its action's name, none left out", json.loads(ask("rows")[3:]),
-          ["Rebind keys in Frametop Settings", "Meta+Left", "Shift+Meta+F", "Meta+/"])
+          ["Rebind keys in Frametop Settings", "Dashboard tile: move left", "Float window in VR / put it back",
+           "List the key combinations (frunner)"])
+    type_text("shift")
+    check("typing a key finds its combination first", json.loads(ask("rows")[3:])[0], "Float window in VR / put it back")
+    press(ESC)
+    ask("open keyboard keys")
     type_text("tile")
-    check("typing filters it", json.loads(ask("rows")[3:]), ["Meta+Left"])
+    check("...and by what it does", json.loads(ask("rows")[3:]), ["Dashboard tile: move left"])
     relay.take()
     press(ENTER)
     check("Enter on a tiling key: the relay does it", relay.take(), ["action tile_left"])

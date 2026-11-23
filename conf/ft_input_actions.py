@@ -31,6 +31,7 @@ VOICE_ACTIONS = ("dictate", "dictate_hold")
 # KWin (clicks moved windows, as Meta+click does). It has no Meta, the key that sticks,
 # and it's free: KWin's Ctrl+Alt+Esc (kill a window) and Windows' Ctrl+Shift+Esc (Task Manager,
 # on a remote display) need their modifiers exactly, and four keys don't happen by accident.
+# Meta+W closes the app you're typing in (close_app: Alt+F4 where typing goes; user, 2026-11-23).
 #
 # The dashboard tiles (screens/dashtiles.h; docs/design.md, Dashboard tiles): Meta+Shift+arrows move
 # the focused tile (user, 2026-11-20; Meta+arrows stay the desktop's and a PC's own, Windows' snap),
@@ -43,7 +44,8 @@ TILE_KEY_BINDINGS = MappingProxyType({"42+125+105": "tile_left", "42+125+106": "
 DEFAULT_KEY_BINDINGS = MappingProxyType({"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
                         "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",
-                        "42+125+32": "desktopless_toggle", "29+42+56+1": "release_keys", **TILE_KEY_BINDINGS})
+                        "42+125+32": "desktopless_toggle", "29+42+56+1": "release_keys", "125+17": "close_app",
+                        **TILE_KEY_BINDINGS})
 
 # The tiling actions: ft-screens' command for each ("tile KEY" on the focused tile; anchor_toggle
 # anchors it, or lets it go, as its anchor button does).
@@ -133,6 +135,7 @@ ACTION_LABELS = MappingProxyType({
     "hands_toggle": "Hand tracking on/off",
     "release_keys": "Release all keys (a stuck modifier)",
     "desktopless_toggle": "Desktopless mode on/off",
+    "close_app": "Close app",
     "tile_left": "Dashboard tile: move left", "tile_right": "Dashboard tile: move right",
     "tile_up": "Dashboard tile: move up", "tile_down": "Dashboard tile: move down",
     "tile_wider": "Dashboard tile: wider", "tile_narrower": "Dashboard tile: narrower",

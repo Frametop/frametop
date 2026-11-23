@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline test of input/rules-migrate.py, the one-time changes to the input relay's rules: a
-key_bindings list of its own gets Meta+Shift+H once, Ctrl+Alt+Shift+Esc once, Meta+Shift+D once and
-the dashboard tiling keys once, and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
+key_bindings list of its own gets Meta+Shift+H once, Ctrl+Alt+Shift+Esc once, Meta+Shift+D once,
+the dashboard tiling keys once and Meta+W once, and nothing else in the file changes. Works on files in a temporary folder, never ~/.config/frametop-input.json.
 
   input/test/rules-migrate-test.py
 """
@@ -205,7 +205,7 @@ try:
 
     # Ctrl+Alt+Shift+Esc, with the changes before it, as an install of its day ran them.
     check("every change runs, in order", [name for name, _ in ALL_MIGRATIONS],
-          ["screens-toggle-key", "release-keys-key", "desktopless-key", "dashboard-tile-keys"])
+          ["screens-toggle-key", "release-keys-key", "desktopless-key", "dashboard-tile-keys", "close-app-key"])
     rm.MIGRATIONS = ALL_MIGRATIONS[:2]
     # A list that got Meta+Shift+H already (an install with the screens-toggle key change): it gets this one, once.
     with_h = {**CUSTOM, "key_bindings": {"42+125+35": "screens_toggle", **CUSTOM["key_bindings"]}}
@@ -342,7 +342,7 @@ try:
 
     # The dashboard tiling keys, with every change, as an install runs them now: the ones the list
     # lacks go first, in one change; one the user bound already stays theirs.
-    rm.MIGRATIONS = ALL_MIGRATIONS
+    rm.MIGRATIONS = ALL_MIGRATIONS[:4]
     sys.path.insert(0, os.path.join(HERE, "..", "..", "conf"))
     import ft_input_actions
     check("the tiling keys are ft_input_actions' defaults", rm.TILE_COMBOS, dict(ft_input_actions.TILE_KEY_BINDINGS))
@@ -367,6 +367,40 @@ try:
         f.write(before)
     rm.main(rules, state)
     check("...removed afterwards: not added again", read(rules), before)
+
+    # Meta+W (close app), with every change, as an install runs them now.
+    rm.MIGRATIONS = ALL_MIGRATIONS
+    check("Meta+W is ft_input_actions' default", ft_input_actions.DEFAULT_KEY_BINDINGS.get(rm.CLOSE_APP_COMBO),
+          rm.CLOSE_APP_ACTION)
+    CLOSE_LINE = '    "125+17": "close_app",\n'
+    with_tiles = {**with_three, "key_bindings": {**{c: rm.TILE_COMBOS[c] for c in added}, **with_three["key_bindings"]}}
+    before_close = {rm.SCREENS_TOGGLE_KEY: True, rm.RELEASE_KEYS_KEY: True, rm.DESKTOPLESS_KEY: True, rm.TILE_KEYS_KEY: True}
+    rules, state = case("close-app-after", with_tiles)
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump(before_close, f)
+    before = read(rules)
+    reloads()
+    check("after the tiling keys change: done", rm.main(rules, state), 0)
+    after = read(rules)
+    check("...Meta+W added first, the others in their order", list(json.loads(after)["key_bindings"]),
+          ["125+17", *with_tiles["key_bindings"]])
+    check("...every other byte as it was", after.decode().replace(CLOSE_LINE, "", 1).encode(), before)
+    check("...backed up, marked, the relay told once",
+          (read(rules + ".bak-close-app-key"), marked(state, rm.CLOSE_APP_KEY), reloads()), (before, True, 1))
+    with open(rules, "wb") as f:
+        f.write(before)
+    rm.main(rules, state)
+    check("...removed afterwards: not added again", read(rules), before)
+    rules, state = case("close-app-taken", {**with_tiles, "key_bindings": {**with_tiles["key_bindings"],
+                                                                           "125+17": "command:mine"}})
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump(before_close, f)
+    before = read(rules)
+    rm.main(rules, state)
+    check("Meta+W bound already: unchanged, no backup, marked",
+          (read(rules), read(rules + ".bak-close-app-key"), marked(state, rm.CLOSE_APP_KEY)), (before, None, True))
 finally:
     rm.MIGRATIONS = ALL_MIGRATIONS
     relay.close()

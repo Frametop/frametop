@@ -189,9 +189,11 @@ void Tracker::run_landmarks(const std::map<std::string, Image> &images, std::vec
     if (batch_) {
         std::vector<const Image *> imgs;
         std::vector<Roi> rois;
+        std::vector<int> hands;
         std::vector<Landmarks> out;
-        for (View *v : views) imgs.push_back(&images.at(v->cam->name)), rois.push_back(v->roi);
-        if (batch_->run(imgs, rois, out)) {
+        for (View *v : views)
+            imgs.push_back(&images.at(v->cam->name)), rois.push_back(v->roi), hands.push_back(v->hand);
+        if (batch_->run(imgs, rois, hands, out)) {
             for (size_t i = 0; i < views.size(); ++i) {
                 views[i]->lm = out[i];
                 views[i]->has_lm = true;

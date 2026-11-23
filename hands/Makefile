@@ -19,7 +19,7 @@ LDFLAGS  ?=
 
 CAMD  = camd/camd.c camd/tp.c camd/xrcams.c
 TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp track/calibfile.cpp \
-        track/npuheads.cpp track/npuclient.cpp track/npuserver.cpp track/npusession.cpp track/npulandmarks.cpp track/npudetector.cpp track/detrounds.cpp
+        track/npuheads.cpp track/npuclient.cpp track/npuserver.cpp track/npusession.cpp track/npulandmarks.cpp track/npurequests.cpp track/npudetector.cpp track/detrounds.cpp
 HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h include/fh_calib.h ../conf/ft_conf.h
 
 all: build/ft-camd build/ft-hands
@@ -54,9 +54,11 @@ build/flagbuf-test: tests/flagbuf_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/flagbuf_test.cpp $(TRACK) $(LDLIBS)
 
 check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/calibfile-test build/npuheads-test \
-       build/npudetector-test build/npuclient-test build/npuserver-test build/trackerdet-test build/cpus-test
+       build/npudetector-test build/npuclient-test build/npuserver-test build/npurequests-test build/trackerdet-test \
+       build/cpus-test
 	build/cpus-test
 	build/npuserver-test
+	build/npurequests-test
 	build/npuheads-test
 	build/npudetector-test
 	build/npuclient-test
@@ -90,6 +92,10 @@ build/npuclient-test: tests/npuclient_test.cpp track/npuclient.cpp track/npuclie
 build/npuserver-test: tests/npuserver_test.cpp track/npuserver.cpp track/npuserver.h
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ tests/npuserver_test.cpp track/npuserver.cpp
+
+build/npurequests-test: tests/npurequests_test.cpp track/npurequests.cpp track/npurequests.h track/npuclient.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ tests/npurequests_test.cpp track/npurequests.cpp
 
 build/calibfile-test: tests/calibfile_test.cpp track/calibfile.cpp track/calibfile.h track/calib.h include/fh_calib.h include/fh_shm.hpp
 	@mkdir -p build

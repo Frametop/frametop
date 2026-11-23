@@ -123,9 +123,11 @@ void NpuClient::close() {
     if (shm_) munmap(shm_, shm_bytes_), shm_ = nullptr;
 }
 
-bool NpuClient::run(int n, int timeout_ms, std::string &err) {
+bool NpuClient::run(int n, int timeout_ms, std::string &err, uint8_t pairs) {
     if (n < 1 || n > kMaxCrops) return err = "crop count out of range", false;
-    return request(uint8_t(n), timeout_ms, err);
+    if ((pairs & ~(kPair0 | kPair1)) || ((pairs & kPair0) && n < 2) || ((pairs & kPair1) && n < 4))
+        return err = "pair bits past the request's crops", false;
+    return request(uint8_t(n | pairs), timeout_ms, err);
 }
 
 bool NpuClient::has_detector() const {

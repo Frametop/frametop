@@ -463,6 +463,37 @@ int main() {
         check("every toggle fits the page", quicksettings::kCount <= kTiles);
     }
 
+    {
+        // The Quick Eye Calibrate row under the tiles, on a card with it (gaze mode on).
+        int x0, y0, x1, y1;
+        Box(kEyeCal, &x0, &y0, &x1, &y1);
+        const double cx = (x0 + x1) / 2.0, cy = (y0 + y1) / 2.0;
+        check("the eye row's action is the relay's gaze_quickcal", !std::strcmp(kEyeSpec.action, "gaze_quickcal"));
+        check("the eye row is under the tiles, card wide", y0 > kH - kPad && x0 == kPad && x1 == kW - kPad && y1 == kEyesH - kPad);
+        check("its centre is it on a card with it, nothing on one without",
+              TileAt(cx, cy, kEyesH) == kEyeCal && TileAt(cx, cy) == -1 && TileAtMouse(cx, kEyesH - cy, kEyesH) == kEyeCal);
+        check("the bottom row is still itself above it", TileAt(kW / 2.0, kH - kPad - 2, kEyesH) == 4 &&
+                                                          TileAt(kPad + 2, kTop + 2, kEyesH) == 0);
+        const double w = 0.12, hEyes = w * kEyesH / kW, hNo = w * kH / kW;
+        check("a card's metres say its pixels", PxH(w, hEyes) == kEyesH && PxH(w, hNo) == kH && PxH(0, 0) == kH);
+        check("on the face too", TileAtFace((cx / kW - 0.5) * w, (0.5 - cy / kEyesH) * hEyes, w, hEyes) == kEyeCal);
+        check("...and a tile there is the same tile",
+              TileAtFace(-0.04, 0.02 - (hEyes - hNo) / 2, w, hEyes) == 0);
+        Poke p;
+        p.Reset(0);
+        const double u = (cx / kW - 0.5) * w, v = (0.5 - cy / kEyesH) * hEyes;
+        int got = -1;
+        int64_t t = 1000;
+        for (const double mm : {60.0, 30.0, 10.0, -5.0}) {
+            const double l[3] = {u, v, mm / 1000.0};
+            const int r = p.Step(l, w, hEyes, t);
+            if (r >= 0) got = r;
+            t += 33;
+        }
+        check("a poke on the eye row presses it", got == kEyeCal);
+        check("a sticky hover on it lapses on a card without it", StickyTileAt(kEyeCal, cx, cy) == -1);
+    }
+
     std::printf(failed ? "%d failed\n" : "all passed\n", failed);
     return failed ? 1 : 0;
 }

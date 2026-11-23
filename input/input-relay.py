@@ -241,7 +241,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
   action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS,
                     and from its key list the tiling keys: KEY_LIST_RUNNABLE; from this user only),
                     as a button would ({"t": "action"}, or an error); from ft-screens' palm Quick
-                    Access too, unbound, so no answer
+                    Access too (its tiles, Quick Settings and gaze_quickcal: PALM_ACTIONS), unbound,
+                    so no answer
   tilefocus 1|0     from ft-screens: an anchored dashboard tile has the focus (renewed every 2 s,
                     lapses TILE_FOCUS_LAPSE after the last), so the tiling keys (TILE_FOCUS_ACTIONS)
                     are ft-screens'; without it they go to the desktop. Ignored from another user
@@ -503,11 +504,14 @@ def known_action(a):
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS and a not in TILE_ACTIONS
             and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "keys_list", "hands_toggle", "release_keys",
-                          "desktopless_toggle")
+                          "desktopless_toggle", "gaze_quickcal")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
 QUICK_SETTINGS_NAMES = frozenset(name for name, _ in QUICK_SETTINGS_ACTIONS)
+# ...and the palm Quick Access card's own rows past its tiles: Quick Eye Calibrate (shown while gaze
+# mode is on, screens/vrquick.cpp).
+PALM_ACTIONS = frozenset({"gaze_quickcal"})
 
 
 def works_paused(a):
@@ -1041,11 +1045,6 @@ class Pointer:
         elif name == "gaze_toggle":
             self.send("gaze toggle")  # until the next restart; the setting is POINTER_GAZE
             log("gaze mode toggled")
-        elif name == "gaze_quickcal":
-            try:
-                self.sock.sendto(b"quickcal", GAZED)
-            except OSError:
-                pass  # the gaze service isn't running
         elif name == "layout_reset":
             # Runs a few seconds and borrows the pointer; ft-layout refuses a second copy.
             subprocess.Popen([FT_LAYOUT, "reset"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1641,6 +1640,14 @@ class Relay:
                 # to this service's log.
                 subprocess.Popen(["python3", HANDSMODE, "toggle", *(["--sound"] if self.pause.settings["sound"] else [])],
                                  stdin=subprocess.DEVNULL, start_new_session=True)
+                log(action)
+        elif action == "gaze_quickcal":
+            if value == 1:
+                # (no pointer needed: the gaze service runs the check, from a key or the palm menu)
+                try:
+                    self.screens_sock.sendto(b"quickcal", GAZED)
+                except OSError:
+                    log("gaze_quickcal: the gaze service isn't running")
                 log(action)
         elif action.startswith(KEYS):
             if value == 1:
@@ -2406,12 +2413,12 @@ class Relay:
         if cmd == "action" and len(words) == 2:
             # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu; or
             # from ft-screens (unbound, no reply): a tile of the palm's Quick Access, or one of its Quick
-            # Settings toggles. Only those (KEY_LIST_RUNNABLE, QUICK_SETTINGS_ACTIONS), and only from this
-            # user: never run:, command: or keys:.
+            # Settings toggles or its eye row. Only those (KEY_LIST_RUNNABLE, QUICK_SETTINGS_ACTIONS,
+            # PALM_ACTIONS), and only from this user: never run:, command: or keys:.
             name = words[1]
             if uid != os.getuid():
                 self.reply(addr, {"t": "error", "error": "another user's"})
-            elif name not in KEY_LIST_RUNNABLE and name not in QUICK_SETTINGS_NAMES:
+            elif name not in KEY_LIST_RUNNABLE and name not in QUICK_SETTINGS_NAMES and name not in PALM_ACTIONS:
                 self.reply(addr, {"t": "error", "error": f"not a menu action {name!r}"})
             elif self.pause.paused and not works_paused(name):
                 self.reply(addr, {"t": "error", "error": "paused"})

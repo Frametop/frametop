@@ -67,6 +67,7 @@ size_t NpuHeads::file_bytes(const uint32_t *h) {
     if (h[0] != kMagic || (h[1] != kVersion && h[1] != kVersion2V)) return 0;
     const bool two = h[1] == kVersion2V;
     const size_t K = h[3], W = h[5], kpd = h[6], g = h[7], hidden = h[8], in0 = g + K * kpd;
+    if (K > 64 || W > 64 || kpd > 256 || g > 1024 || hidden > 4096) return 0;   // no size_t wrap on a bad header
     return 48 + 4 * (3 + two) + 4 * (W + 2 * (g + 1) + hidden * in0 + hidden + 3 * K * hidden + 3 * K) +
            (two ? 4 * (hidden * in0 + 2 * g) : 0);
 }

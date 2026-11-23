@@ -13,9 +13,11 @@ static int failures = 0;
         if (!(c)) std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c), ++failures; \
     } while (0)
 
-// every view exactly once, every pair bit over two views of one known hand, and the fewest requests
+// every view exactly once, every pair bit over two views of one known hand, no hand paired twice, and the fewest
+// requests
 static void sane(const std::vector<int> &hands, const std::vector<NpuRequest> &rs) {
     std::multiset<int> seen;
+    std::set<int> paired;
     for (const NpuRequest &r : rs) {
         CHECK(r.n >= 1 && r.n <= NpuClient::kMaxCrops);
         for (int c = 0; c < r.n; ++c) seen.insert(r.views[c]);
@@ -23,7 +25,8 @@ static void sane(const std::vector<int> &hands, const std::vector<NpuRequest> &r
             if (r.pairs & (p ? NpuClient::kPair1 : NpuClient::kPair0)) {
                 CHECK(2 * p + 1 < r.n);
                 const int a = hands[r.views[2 * p]], b = hands[r.views[2 * p + 1]];
-                CHECK(a != 0 && a == b);
+                CHECK(a > 0 && a == b);
+                CHECK(paired.insert(a).second);
             }
     }
     CHECK(seen.size() == hands.size());
@@ -57,6 +60,21 @@ int main() {
     rs = npu_requests(six, true);
     sane(six, rs);
     CHECK(rs.size() == 2 && rs[1].n == 2 && rs[1].pairs == NpuClient::kPair0);
+    // one hand seen four times (replays' --views 4): its first two views pair, the other two go alone
+    const std::vector<int> four = {5, 5, 5, 5};
+    rs = npu_requests(four, true);
+    sane(four, rs);
+    CHECK(rs.size() == 1 && rs[0].pairs == NpuClient::kPair0 && rs[0].views[0] == 0 && rs[0].views[1] == 1);
+    // the tracker's step-local ids (-1, -2) are not hands yet
+    const std::vector<int> local = {-1, -1, -2, -2};
+    rs = npu_requests(local, true);
+    sane(local, rs);
+    CHECK(rs[0].pairs == 0);
+    // five views, two pairs: the fifth view alone in a second request
+    const std::vector<int> five = {1, 2, 1, 2, 3};
+    rs = npu_requests(five, true);
+    sane(five, rs);
+    CHECK(rs.size() == 2 && rs[1].n == 1 && rs[1].pairs == 0 && rs[1].views[0] == 4);
     CHECK(npu_requests({}, true).empty());
     std::printf(failures ? "npurequests: %d failures\n" : "npurequests: ok\n", failures);
     return failures != 0;

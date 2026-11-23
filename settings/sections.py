@@ -25,7 +25,9 @@ SECTIONS = [
     ("layout", "display", "Screens", "Layout & profiles", "view-grid",
      "arrange curved flat rows distance gap height preset profile save"),
     ("visibility", "display", "Screens", "Visibility & pins", "view-visible",
-     "show hide dashboard look controller wrist pin head notifications launch program floating"),
+     "show hide dashboard look controller wrist pin head tiles anchor games"),
+    ("handles", "display", "Screens", "Grab bars & corners", "transform-scale",
+     "window controls grab bar move drag zone padding resize corner indicator outline glow haptics color"),
     ("desktopless", "display", "Screens", "Desktopless mode", "preferences-system-windows",
      "desktopless desktop windows apps panels float every window own panel pc frame meta shift d"),
     ("remote-displays", "remote", "Screens", "Remote displays", "network-workgroup",
@@ -55,12 +57,16 @@ SECTIONS = [
      "palm menu quick access toggles resources cpu gpu memory temperature"),
     ("power", "display", "System", "Power", "preferences-system-power-management",
      "display off sleep idle plugged autostart start with steamvr"),
+    ("steam", "display", "System", "Steam & notifications", "preferences-desktop-notification",
+     "notifications popup steam lock screen pin dashboard apps launch program floating"),
     ("remote-access", "access", "System", "Remote access", "preferences-desktop-remote-desktop",
      "vnc tailscale tailnet password screen sharing"),
     ("together", "together", "System", "Frametop Together", "system-users",
      "room guest friend invite join people collaborate multiplayer mute"),
 ]
 NAMES = [s[0] for s in SECTIONS]
+# Sections only ft-screens has (the gamescope backend has no panels of its own to show, pin or grab).
+SCREENS_ONLY = ("visibility", "handles", "steam")
 
 
 def start_section(argv=None, environ=None):

@@ -6,8 +6,10 @@ sections by group, with a search field; each section is one page from one area:
   - input: Devices, Buttons, Controllers, Keyboard, Commands, Pointer, Ignored panels,
     Bluetooth, Gaze, Hands, Voice and Game optimization (input-settings/: ft_input_settings.py
     and InputPages.qml)
-  - display: Screens, Layout, Visibility & pins and Power (display-settings/:
-    ft_display_settings.py and DisplayPages.qml)
+  - display: Screens, Layout, Visibility & pins, Grab bars & corners, Steam & notifications and
+    Power (display-settings/: ft_display_settings.py, DisplayPages.qml and the page files beside it)
+Controls the pages share (a slider with its value, dim help text, a group that opens) are in
+settings/controls/.
   - remote: Remote displays (remote-displays/: ft_remote_displays.py and RemoteDisplayPages.qml)
   - access: Remote access over VNC (remote/: remote_access.py and RemoteAccessPages.qml)
   - avatar: Appearance, the hand model your hands are drawn with (avatar/: ft_avatar_settings.py
@@ -34,7 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 TOUR = os.path.join(REPO, "tour", "ft_tour.py")
 sys.path.insert(0, HERE)
-from sections import AREAS, NAMES, SECTIONS, start_section  # noqa: E402,F401  (the sections, without Qt)
+from sections import AREAS, NAMES, SCREENS_ONLY, SECTIONS, start_section  # noqa: E402,F401  (the sections, without Qt)
 
 def make_backend(area):
     folder, module, _ = AREAS[area]
@@ -45,7 +47,7 @@ def make_backend(area):
 
 
 def display_kind():
-    """ft_layout.backend(): "screens" (ft-screens) or "gamescope"; Visibility & pins is ft-screens' only."""
+    """ft_layout.backend(): "screens" (ft-screens) or "gamescope"; sections.SCREENS_ONLY are ft-screens' only."""
     path = os.path.join(REPO, "layout")
     if path not in sys.path:
         sys.path.insert(0, path)
@@ -86,7 +88,7 @@ class Settings(QObject):
     def sections(self):
         shown = []
         for name, area, group, title, icon, words in SECTIONS:
-            if area not in self._areas or (name == "visibility" and self.kind() != "screens"):
+            if area not in self._areas or (name in SCREENS_ONLY and self.kind() != "screens"):
                 continue
             shown.append({"name": name, "area": area, "group": group, "title": title, "icon": icon,
                           "keywords": words})

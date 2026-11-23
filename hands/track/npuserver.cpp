@@ -14,10 +14,11 @@ bool exists(const std::string &path) {
 }  // namespace
 
 std::string npu_server_dir(const std::string &dir) {
-    const std::string sock = "/ft-npud.sock";
-    if (dir.empty() || dir[0] != '/' || exists(dir + sock)) return dir;
+    // the heads file: the daemon writes it next to its socket, and the session reads it first
+    const std::string heads = "/ft-npud.heads";
+    if (dir.empty() || dir[0] != '/' || exists(dir + heads)) return dir;
     const std::string host = "/run/host" + dir;
-    return exists(host + sock) ? host : dir;
+    return exists(host + heads) ? host : dir;
 }
 
 uid_t npu_overflow_uid() {

@@ -47,8 +47,12 @@ int main() {
     CHECK(!npu_server_trusted(over, self, over, "run/ft-npud", why));
     // / alone: root's (or the container's root), not writable by others on any sane system
     CHECK(npu_server_trusted(over, self, over, "/", why));
-    // finding the daemon: DIR when it has the socket (or it's relative or empty), else DIR's error later
+    // finding the daemon: DIR when it has the heads file (or it's relative or empty), else DIR's error later
     CHECK(npu_server_dir(base) == base);
+    const std::string heads = safe + "/ft-npud.heads";
+    if (FILE *f = std::fopen(heads.c_str(), "w")) std::fclose(f);
+    CHECK(npu_server_dir(safe) == safe);
+    unlink(heads.c_str());
     CHECK(npu_server_dir("relative/dir") == "relative/dir");
     CHECK(npu_server_dir("") == "");
 
@@ -61,8 +65,8 @@ int main() {
         CHECK(npu_server_trusted(ov, self, ov, "/run/host/run", why));
         CHECK(!npu_server_trusted(12345, self, 12345, "/run/host/run", why));
         CHECK(why.find("belongs to uid " + std::to_string(ov)) != std::string::npos);
-        struct stat sock{};
-        if (lstat("/run/ft-npud/ft-npud.sock", &sock) != 0 && lstat("/run/host/run/ft-npud/ft-npud.sock", &sock) == 0)
+        struct stat heads{};
+        if (lstat("/run/ft-npud/ft-npud.heads", &heads) != 0 && lstat("/run/host/run/ft-npud/ft-npud.heads", &heads) == 0)
             CHECK(npu_server_dir("/run/ft-npud") == "/run/host/run/ft-npud");
         std::printf("npuserver: container checks ran\n");
     }

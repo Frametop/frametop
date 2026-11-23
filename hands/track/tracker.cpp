@@ -174,7 +174,7 @@ double Tracker::interval() const {
     double fastest = -1;
     for (const auto &[id, h] : hands_)
         if (h.seen_ns == last_ns_) fastest = std::max(fastest, norm(h.dpalm));   // filtered: noise isn't speed
-    return fastest < 0 ? 1 / 5.0 : fastest > kFastSpeed ? 1 / max_hz_ : 2 / max_hz_;
+    return fastest < 0 ? 1 / 5.0 : full_rate_ || fastest > kFastSpeed ? 1 / max_hz_ : 2 / max_hz_;
 }
 
 bool Tracker::inside(const Camera &cam, V2 uv) const {

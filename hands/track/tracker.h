@@ -95,6 +95,8 @@ public:
     std::vector<const Hand *> step(const std::map<std::string, Image> &images, int64_t t_ns);
     // Seconds until the next frame set is worth processing (max_hz for fast hands, half that slow, 5 Hz none).
     double interval() const;
+    // Slow hands get max_hz too, so every set with a hand in view is tracked (HANDS_FULL_RATE). No hand: still 5 Hz.
+    void set_full_rate(bool on) { full_rate_ = on; }
     // The fastest rate interval() asks for (30 by default; XRService's 60 and 120 Hz SLAM modes allow more).
     void set_max_hz(double hz) { max_hz_ = std::clamp(hz, 10.0, 120.0); }
     double max_hz() const { return max_hz_; }
@@ -210,6 +212,7 @@ private:
     double near_frac_ = 0.5;
     double hold_s_ = 0.3;
     double max_hz_ = 30;
+    bool full_rate_ = false;
     double reacquire_s_ = 0, reacquire_clear_ = 0.12;   // a lost hand this near a tracked one isn't aimed at
     int reacquire_tiles_ = 2;
     bool reacquire_fast_ = false;

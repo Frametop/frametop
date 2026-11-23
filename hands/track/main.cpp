@@ -312,6 +312,8 @@ int main(int argc, char **argv) {
     // cameras at 60 or 120 Hz with no controller frames (captureSessionSettings.trackingCameras).
     double max_hz = 30;
     num("HANDS_MAX_HZ", max_hz, 10, 120);
+    // Track every set with a hand in view at that rate, slow hands too (HANDS_FULL_RATE=1, --full-rate 1).
+    bool full_rate = setting("HANDS_FULL_RATE") == "1";
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
@@ -351,6 +353,7 @@ int main(int argc, char **argv) {
         else if (a == "--record" && more) record = argv[++i];
         else if (a == "--record-for" && more) record_for = std::atof(argv[++i]);
         else if (a == "--max-hz" && more) max_hz = std::clamp(std::atof(argv[++i]), 10.0, 120.0);
+        else if (a == "--full-rate" && more) full_rate = std::atoi(argv[++i]) != 0;
         else if (a == "--record-hz" && more) record_hz = std::max(0.0, std::atof(argv[++i]));
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard" && more) misread_guard = std::string(argv[++i]) == "1";
@@ -384,6 +387,7 @@ int main(int argc, char **argv) {
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
                         "          [--max-hz N] (30: fast hands; half that slow, 5 idle; HANDS_MAX_HZ)\n"
+                        "          [--full-rate 0|1] (0; 1: slow hands get --max-hz too; HANDS_FULL_RATE)\n"
                         "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
                         "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
@@ -634,6 +638,7 @@ int main(int argc, char **argv) {
     }
     tracker.set_keep_presence(keep_presence);
     tracker.set_max_hz(max_hz);
+    tracker.set_full_rate(full_rate);
     tracker.set_misread_guard(misread_guard);
     tracker.set_reacquire(reacquire, 2, true);
     tracker.set_pair_sides(pair_sides);
@@ -722,6 +727,7 @@ int main(int argc, char **argv) {
     struct stat flag_st;   // a request left from before this run is stale
     if (stat(flag_file.c_str(), &flag_st) == 0 && std::time(nullptr) - flag_st.st_mtime > 10) unlink(flag_file.c_str());
     uint64_t t_flag_check = 0;
+    int passed_by = 0;   // camera sets skipped at the current rate since the last status line
     size_t flags_told = 0;
     std::string flag_error_told;
     std::map<std::string, uint64_t> lit_seen;   // per colour camera: the frame last counted for the light
@@ -1045,6 +1051,7 @@ int main(int argc, char **argv) {
             const bool full = with.size() == follow.size();
             // not needed at the current rate, and not recorded: skip it without copying images
             if (track && !rec && !g_record && t0 < next_ns) {
+                ++passed_by;
                 note_step(t0, t1);
                 for (const std::string &name : lead) last[name] = latest[name];
                 for (auto &[name, n] : with) last[name] = n;
@@ -1226,6 +1233,10 @@ int main(int argc, char **argv) {
                             "%d steps with colour, colour placed %.1f ms after capture\n",
                             cams_name(mode), switching ? " (auto)" : "", light.level, light.on, light.off, ambient(),
                             color_steps, mono_delay_ns / 1e6);
+            // sets/s under the cameras' rate (ft-camd's status) with few passed by: steps ran late, not the rate rule
+            std::printf("        rate: %d camera sets passed by (fast hands %.0f Hz, slow %.0f, none 5)\n", passed_by,
+                        max_hz, full_rate ? max_hz : max_hz / 2);
+            passed_by = 0;
             if (s.sets)
                 std::printf("        sets with a hand: left %2.0f%% right %2.0f%% both %2.0f%%  views lost %d, handoff misses %d, "
                             "dups %d, splits %d  hands new %d merged %d forgotten %d%s\n",

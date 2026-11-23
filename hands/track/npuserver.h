@@ -10,8 +10,8 @@
 #include <string>
 #include <sys/types.h>
 
-// DIR as given when DIR/ft-npud.sock exists, else /run/host + DIR when that one does (inside the container), else
-// DIR (and connecting fails with DIR's error).
+// DIR as given when DIR/ft-npud.heads exists, else /run/host + DIR when that one does (inside the container), else
+// DIR (and connecting fails with DIR's error). The heads file, not the socket: a socket link alone isn't a daemon.
 std::string npu_server_dir(const std::string &dir);
 
 // The kernel's overflow uid (/proc/sys/kernel/overflowuid), 65534 when it can't be read.

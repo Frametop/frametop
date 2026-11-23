@@ -62,5 +62,34 @@ class Uninstall(unittest.TestCase):
             with self.subTest(name):
                 self.assertRegex(text, pattern)
 
+    def test_the_60_fps_camera_mode(self):
+        """Step 1 puts the tracking cameras' mode back through hands/handsrate.py when the 60 fps
+        switch is on, and says how to by hand when a mode is set and that code is gone."""
+        xr = self.home / ".config/openvr/config/cv/xrservice/XRServiceSettings.json"
+        xr.parent.mkdir(parents=True)
+        gone, broken, here = self.home / "no-repo", self.home / "broken", SCRIPT.parent
+        (broken / "hands").mkdir(parents=True)
+        (broken / "hands/handsrate.py").write_text("import ft_conf_that_is_gone\n")
+        for name, text, repo, want in (
+                ("no settings file", None, here, "[0]"),
+                ("SteamVR's own mode", '{"captureSessionSettings": {"eyeCameras": {}}}', here, "[0]"),
+                ("the switch on", '{"captureSessionSettings": {"trackingCameras": '
+                                  '{"streamingMode": 0, "slamFrameFPSMode": 3}}}', here, "1\n[0]"),
+                ("the switch on, the code gone", '{"captureSessionSettings": {"trackingCameras": '
+                                                 '{"streamingMode": 0, "slamFrameFPSMode": 3}}}', gone, "manual\n[0]"),
+                ("the switch on, the code there but broken", '{"captureSessionSettings": {"trackingCameras": '
+                                                             '{"streamingMode": 0, "slamFrameFPSMode": 3}}}', broken,
+                 "manual\n[0]"),
+                ("nothing set, the code gone", "{}", gone, "[0]")):
+            with self.subTest(name):
+                if text is not None:
+                    xr.write_text(text)
+                r = self.bash(f'hands_rate_state "{repo}"; echo "[$?]"')
+                self.assertEqual(r.stdout.strip(), want, r.stderr)
+        text = SCRIPT.read_text()
+        self.assertRegex(text, r'\[ -n "\$hands_rate" \] && \{ run python3 "\$repo/hands/handsrate\.py" off \|\|')
+        self.assertRegex(text, r'\[ -n "\$eye_rate" \] \|\| \[ -n "\$dash_debugger" \] \|\| \[ -n "\$hands_rate" \]; then\s+step "Step 1')
+
+
 if __name__ == "__main__":
     unittest.main()

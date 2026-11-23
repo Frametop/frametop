@@ -12,8 +12,9 @@
 #   1. Frametop stops starting. The launcher's Desktop entry goes back to the stock desktop, and
 #      Frametop's Native Desktop entry, services, SteamVR driver, menu entries, and system files
 #      (our eye tracker's frame grabber and the Bluetooth fixes, with sudo) are removed, and so
-#      are the file capabilities of hand tracking's camera broker (ft-camd, with sudo). What runs
-#      now keeps running until you restart the headset.
+#      are the file capabilities of hand tracking's camera broker (ft-camd, with sudo). The
+#      tracking cameras go back to SteamVR's own mode if 60 fps hand tracking changed it. What
+#      runs now keeps running until you restart the headset.
 #   2. After the restart, run it again. It deletes the code (~/frametop, or the releases in
 #      ~/.local/share/frametop/releases with their containers and images) and, if you want, your
 #      settings, voice dictation's speech models, the avatar and hand models you imported, and
@@ -47,6 +48,8 @@ ondesktop_link=$HOME/.local/bin/ft-ondesktop  # the same: Steam games' launch op
 bashrc_mark='# Frametop commands as shell aliases'  # ...and ~/.bashrc's two lines that read those aliases
 eye_rate=$HOME/.local/state/frametop/gaze/steamvr-eye-rate  # gaze/eye-rate.py turned the setting on
 dash_debugger=$HOME/.local/state/frametop/pointer/dashboard-debugger  # pointer/dashpatch/ft-dashpatch.py turned it on
+xr_settings=$HOME/.config/openvr/config/cv/xrservice/XRServiceSettings.json  # SteamVR's; hands/handsrate.py sets the cameras' mode in it
+hands_rate=  # 1 when that mode is on (the 60 fps switch: the controllers don't track) and handsrate.py can take it out
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
 bt_files=(/etc/systemd/system/steamframe-bt-fixups.service /etc/systemd/system/bluetooth.service.d/steamframe.conf
@@ -84,6 +87,19 @@ find_repo() {
 desktop_entries() {
   local f
   for f in "$1"/ft-*.desktop "$1"/frametop-*.desktop; do printf '%s\n' "$f"; done
+}
+
+# 60 fps hand tracking's camera mode, in SteamVR's settings: "1" when it's on and REPO's
+# handsrate.py can take it out, "manual" when a camera mode is set and that code is gone or
+# doesn't run (a broken checkout).
+hands_rate_state() {  # hands_rate_state REPO
+  local st
+  if [ -f "$1/hands/handsrate.py" ] && st=$(python3 "$1/hands/handsrate.py" status --json 2>/dev/null); then
+    grep -q '"on": true' <<<"$st" && echo 1
+  elif grep -qs '"slamFrameFPSMode"' "$xr_settings"; then
+    echo manual
+  fi
+  return 0
 }
 
 # Frametop's programs that are running now (step 1 leaves them running until the restart).
@@ -135,10 +151,18 @@ main() {
   grep -qF "$bashrc_mark" "$HOME/.bashrc" 2>/dev/null && bashrc_lines=1
   [ -f "$eye_rate" ] && [ -f "$repo/gaze/eye-rate.py" ] || eye_rate=
   [ -f "$dash_debugger" ] && [ -f "$repo/pointer/dashpatch/ft-dashpatch.py" ] || dash_debugger=
+  hands_rate=$(hands_rate_state "$repo")
+  if [ "$hands_rate" = manual ]; then
+    hands_rate=
+    echo "note: SteamVR's tracking cameras have a mode set in $xr_settings (slamFrameFPSMode), as 60 fps hand" >&2
+    echo "  tracking sets it, and Frametop's code in $repo is gone or doesn't run, so it stays. If the controllers don't track," >&2
+    echo "  take streamingMode and slamFrameFPSMode out of captureSessionSettings.trackingCameras in that file," >&2
+    echo "  then restart SteamVR." >&2
+  fi
   exists "${eyegrab_files[@]}" "${bt_files[@]}" && sys=1
 
   if [ -n "$override" ] || [ -n "$native_copy" ] || [ ${#units[@]} -gt 0 ] || [ ${#entries[@]} -gt 0 ] ||
-     [ -d "$driver" ] || [ -n "$handsctl" ] || [ -n "$cmd_link" ] || [ -n "$ondesktop_link" ] || [ "$bashrc_lines" = 1 ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ]; then
+     [ -d "$driver" ] || [ -n "$handsctl" ] || [ -n "$cmd_link" ] || [ -n "$ondesktop_link" ] || [ "$bashrc_lines" = 1 ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ] || [ -n "$hands_rate" ]; then
     step "Step 1 of 2: stop Frametop from starting"
     echo "This removes:"
     [ -n "$override" ] && echo "  - the launcher's Desktop entry (Launch a program -> Desktop opens the stock desktop again)"
@@ -152,6 +176,7 @@ main() {
     [ "$bashrc_lines" = 1 ] && echo "  - the two lines in ~/.bashrc that read your commands' aliases"
     [ -n "$eye_rate" ] && echo "  - gaze mode's SteamVR setting for 90 fps eye cameras (steamvr.gazeDepEyeToHeadEnable2, or gazeDepEyeToHeadEnable before SteamOS 0.5)"
     [ -n "$dash_debugger" ] && echo "  - SteamVR's dashboard debugger, which the 3D mouse's window moves use (VRWebHelper.DebuggerEnabled)"
+    [ -n "$hands_rate" ] && echo "  - 60 fps hand tracking's camera mode in SteamVR's XRServiceSettings.json (the controllers track again after the restart)"
     [ -n "$camd_caps" ] && echo "  - the hand camera broker's file capabilities (needs your password)"
     exists "${eyegrab_files[@]}" && echo "  - our eye tracker's frame grabber (a system service: needs your password)"
     exists "${bt_files[@]}" && echo "  - the Bluetooth fixes (system files: needs your password)"
@@ -183,6 +208,8 @@ main() {
       echo "warning: SteamVR's eye camera setting stays on. Turn it off with: python3 $repo/gaze/eye-rate.py off" >&2; }
     [ -n "$dash_debugger" ] && { run python3 -I "$repo/pointer/dashpatch/ft-dashpatch.py" off ||
       echo "warning: SteamVR's dashboard debugger stays on. Turn it off with: python3 -I $repo/pointer/dashpatch/ft-dashpatch.py off" >&2; }
+    [ -n "$hands_rate" ] && { run python3 "$repo/hands/handsrate.py" off ||
+      echo "warning: the tracking cameras stay in 60 fps hand tracking's mode, where the controllers don't track. Put SteamVR's own back with: python3 $repo/hands/handsrate.py off" >&2; }
     if [ "$sys" = 1 ]; then
       echo "The system files need your password (sudo)."
       # $1 is ft-camd when it has capabilities to remove, else empty; the system files follow.

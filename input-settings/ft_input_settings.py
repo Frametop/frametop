@@ -40,6 +40,8 @@ to the input relay over its control socket (@frametop_relay):
     POINTER_GAZE_PINCH), the hand ray with gaze off (POINTER_HAND_RAY), and direct touch on
     Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off"), and the hand
     models (HANDS_MODEL, from hands/models.json: latest, a version, or stock MediaPipe), the same way.
+    Its 60 fps switch (hands/handsrate.py on the host) puts the tracking cameras in their no-dark
+    mode, which stops the controllers, and has ft-hands track every frame.
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -89,6 +91,11 @@ NOT_SAVED = object()   # what Backend._edit_rules returns when the rules weren't
 sys.path.insert(0, os.path.join(REPO, "hands"))
 import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
+import handsrate  # noqa: E402  (the 60 fps switch: the cameras' mode and ft-hands' rate)
+HANDSRATE = os.path.join(REPO, "hands", "handsrate.py")
+# The 60 fps switch stays busy this long after a switch: each one stops XRService, and SteamVR
+# gives up on an XRService that stops more than five times in a minute.
+RATE_COOLDOWN = 15.0
 # The hand and eye model catalogs: versions, notes, benchmarks, downloads (standard library only).
 sys.path.insert(0, os.path.join(REPO, "models"))
 sys.path.insert(0, os.path.join(REPO, "commands"))
@@ -564,6 +571,8 @@ class Backend(QObject):
         self._pause_at = 0.0
         self._hands = {}  # handsmode.py's status, {} until it answers
         self._hands_lock = threading.Lock()  # one handsmode.py at a time
+        self._rate_want = None  # the 60 fps switch's new state while handsrate.py sets it
+        self._rate_busy = False  # from a switch until RATE_COOLDOWN after it
         self._hands_refreshing = False
         self._model_busy = {"hands": "", "eyes": ""}  # what a model download is doing, per kind
         self._model_views = {}
@@ -2121,6 +2130,40 @@ class Backend(QObject):
         write_conf_value("HANDS_MATTE_MARGIN", value)
         self._send(f"cutouts margin {value}", SCREENS)
         self.handsChanged.emit()
+
+    # --- 60 fps hand tracking (hands/handsrate.py) ---
+    @Property("QVariantMap", notify=handsChanged)
+    def handsRate(self):
+        """The 60 fps switch: "on" (the cameras are in the no-dark mode; while it's being set, what
+        was asked), "busy" (being set, or just set: RATE_COOLDOWN), "note" (what doesn't match) and
+        "warning" (what it costs)."""
+        st = handsrate.state(read_conf())
+        if self._rate_want is not None:
+            st["on"] = self._rate_want
+        return dict(st, busy=self._rate_busy, warning=handsrate.WARNING)
+
+    @Slot(bool)
+    def setHandsRate(self, on):
+        """handsrate.py on|off --now on the host (it stops XRService there and restarts ft-hands),
+        off the UI thread: SteamVR takes some seconds to start head tracking again. One at a time,
+        and not again until RATE_COOLDOWN after it."""
+        if self._rate_busy:
+            return
+        self._rate_busy, self._rate_want = True, bool(on)
+        self.handsChanged.emit()
+
+        def job():
+            try:
+                r = host("python3", HANDSRATE, "on" if on else "off", "--now", timeout=45)
+                self._rate_want = None  # from here the switch shows what the files say
+                self.handsChanged.emit()
+                said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:400]
+                self.message.emit(said if r.returncode == 0 else "60 fps hand tracking: " + said, r.returncode != 0)
+                time.sleep(RATE_COOLDOWN)
+            finally:   # whatever went wrong, the switch isn't left held
+                self._rate_want, self._rate_busy = None, False
+                self.handsChanged.emit()
+        threading.Thread(target=job, daemon=True).start()
 
     # --- models (hands and eyes: models/catalog.py) ---
     def _model_view(self, kind):

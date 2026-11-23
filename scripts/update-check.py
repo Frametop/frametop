@@ -1027,6 +1027,16 @@ def eye_rate_verdict(setting, on, rate, started, marked_at, ours, failed=None):
                   f" ({setting} on" + (", set by Frametop)" if marked_at is not None else ")"))
 
 
+def repo_module(name, *path):
+    """One of this checkout's Python programs, loaded as a module (they aren't on sys.path, and
+    some have a dash in their name)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location(name, os.path.join(here, "..", *path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def check_eye_rate():
     """gaze/eye-rate.py: SteamVR runs the eye cameras at 15 fps unless its eye-to-head setting is on
     (steamvr.gazeDepEyeToHeadEnable2 on SteamOS 0.5, gazeDepEyeToHeadEnable on 0.4: eye-rate.py
@@ -1036,10 +1046,7 @@ def check_eye_rate():
     if systemctl("is-enabled", "frametop-gaze") != "enabled":
         return
     try:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gaze", "eye-rate.py")
-        spec = importlib.util.spec_from_file_location("eye_rate", path)
-        er = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(er)
+        er = repo_module("eye_rate", "gaze", "eye-rate.py")
         name = er.key()
         marked_at = os.path.getmtime(er.MARK) if name in er.marked() else None
         state, detail = eye_rate_verdict(f"{er.SECTION}.{name}", er.get(name) is True, er.camera_rate(),
@@ -1049,6 +1056,65 @@ def check_eye_rate():
     except Exception as e:  # a broken checkout: say so rather than stop the whole check
         state, detail = "warn", f"couldn't read gaze/eye-rate.py: {e}"
     report(state, "eye cameras", detail)
+
+
+def hands_rate_verdict(hands, pending, rates):
+    """What the 60 fps hand tracking check says with the switch on: (state, detail). hands:
+    "running", "stopped" or "missing" (ft-camd, which measures the cameras); pending: the camera
+    mode was written after XRService started, so it doesn't count yet; rates:
+    handsrate.camera_rates since XRService started."""
+    off = "python3 hands/handsrate.py off --now"
+    again = "find the mode again with hands/tools/slam-rate.py and fix HIGH in hands/handsrate.py"
+    if hands == "missing":
+        return "warn", f"on, so the controllers don't track, but hand tracking isn't installed: turn it off ({off})"
+    if pending:
+        return "warn", "on, but SteamVR started before that, so the cameras are in their old mode: restart SteamVR"
+    if hands == "stopped":
+        return "skip", ("on, but hand tracking isn't running, so the cameras aren't measured (and the controllers "
+                        f"don't track meanwhile): check again while it runs, or turn it off ({off})")
+    best, minutes, dark = rates["best"], rates["minutes"], rates["dark"]
+    # Measured 2026-11-23 over 47 runs of ft-camd: 0 to 1.3% in the mode, 30 to 51% in SteamVR's own.
+    if dark is not None and dark >= 0.05:
+        return "FAIL", (f"on, but {dark:.0%} of the tracking cameras' frames are dark: this SteamVR doesn't run "
+                        "slamFrameFPSMode 3 without dark frames, so hand tracking loses those frames and the "
+                        f"mode may do something else. Turn it off ({off}), then {again}")
+    if best > 75:
+        return "warn", (f"on, and the tracking cameras give {best:g} frames a second, not 60: this SteamVR runs "
+                        f"slamFrameFPSMode 3 faster, and ft-hands tracks at most 60 (HANDS_MAX_HZ): {again}")
+    if best >= 50:
+        return "ok", f"on: {best:g} bright frames a second, {dark or 0:.1%} dark (the controllers don't track)"
+    if minutes >= 3:
+        return "warn", (f"on, but in {minutes} full minutes the tracking cameras gave at most {best:g} bright frames a "
+                        f"second, not 60: this SteamVR may run slamFrameFPSMode 3 slower: {again}")
+    return "skip", ("on; the tracking cameras haven't run long enough since SteamVR started to be measured (with "
+                    "the headset off they idle): wear it for a few minutes and check again")
+
+
+def check_hands_rate(hr=None):
+    """hands/handsrate.py, the 60 fps hand tracking switch: its camera mode is two numbers in
+    SteamVR's XRServiceSettings.json that Valve doesn't document (measured on SteamOS 0.5.9), and
+    XRService reads them as it starts. With the switch on, ft-camd's status lines since XRService
+    started say whether the cameras still give 60 bright frames a second and no dark ones.
+    hr: handsrate, for tests."""
+    try:
+        hr = hr or repo_module("handsrate", "hands", "handsrate.py")
+        if not hr.state()["on"]:
+            return
+        pending, status = False, ""
+        pids = run("pgrep", "-f", hr.XRSERVICE)[1].split()
+        ages = [int(a) for a in run("ps", "-o", "etimes=", "-p", ",".join(pids))[1].split()] if pids else []
+        if ages:   # the newest XRService: the one that has the cameras
+            started = time.time() - min(ages)
+            pending = os.path.getmtime(hr.XR_PATH) > started
+            status = run("journalctl", "--user", "-u", "frametop-camd", "-o", "cat", "--no-pager",
+                         "--since", f"@{int(started)}", "-g", r"fps \(dark ")[1]   # no -n: with -g that's newest first
+        # Loaded, not enabled: hands/handsmode.py starts the units by HANDS_MODE.
+        unit = systemctl("show", "-p", "LoadState,ActiveState", "--value", "frametop-camd.service").split()
+        hands = "missing" if unit[:1] != ["loaded"] else "running" if unit[1:] == ["active"] else "stopped"
+        said = hands_rate_verdict(hands, pending, hr.camera_rates(status))
+    except Exception as e:  # a broken checkout, or an answer that doesn't parse: say so rather than stop the whole check
+        said = "warn", f"couldn't check it: {e}"
+    report(said[0], "60 fps hand tracking", said[1])
 
 
 # What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;
@@ -1150,6 +1216,7 @@ def main():
         check_native_focus()
         check_eye_tracker()
         check_eye_rate()
+        check_hands_rate()
         check_dashpatch()
 
     if args == ["--mark-good"]:

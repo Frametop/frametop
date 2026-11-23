@@ -1871,6 +1871,9 @@ Item {
             title: "Hands"
             header: DriverWarning {}
             property var st: backend.handsStatus
+            property var rate: backend.handsRate   // read once a change: it reads two files
+            // The 60 fps switch turns on only where hand tracking runs; on, it can always be turned off.
+            readonly property bool rateUsable: !!st.installed && backend.handsMode !== "off"
             readonly property var range: backend.handsMarginRange
             // What runs, and why it can't: asked on the host, while this page is open.
             Timer {
@@ -1944,6 +1947,37 @@ Item {
                             Controls.ToolTip.visible: hovered
                             onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
                         }
+                    }
+
+                    // 60 tracked frames a second (hands/handsrate.py): the cameras' no-dark mode, which stops
+                    // the controllers, and ft-hands tracking every frame. The warning always shows.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Frame rate" }
+                    Controls.Switch {
+                        objectName: "handsRateSwitch"
+                        Kirigami.FormData.label: "60 fps hand tracking:"
+                        text: "Track every camera frame (the controllers stop tracking)"
+                        checked: !!hpage.rate.on
+                        enabled: !hpage.rate.busy && (!!hpage.rate.on || hpage.rateUsable)
+                        onToggled: backend.setHandsRate(checked)
+                    }
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        visible: true
+                        type: Kirigami.MessageType.Warning
+                        text: hpage.rate.warning
+                    }
+                    Controls.Label {
+                        objectName: "handsRateNote"
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        visible: text !== ""
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        // What it needs, once the host has said what's installed (st is {} until then).
+                        text: hpage.rate.note || (hpage.rate.on || hpage.rateUsable || hpage.st.installed === undefined ? ""
+                              : hpage.st.installed ? "It needs hand tracking: turn that on above first."
+                              : "It needs hand tracking, which isn't installed.")
                     }
 
                     // Which hand models ft-hands runs (HANDS_MODEL): latest, a version, or stock MediaPipe.

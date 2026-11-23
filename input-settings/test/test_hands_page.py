@@ -111,7 +111,7 @@ class Page(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(ran, [("python3", fis.HANDSRATE, "off", "--now")])
         self.assertEqual((seen[0]["on"], seen[0]["busy"], seen[0]["switching"]), (False, True, True))
-        self.assertEqual(seen[0]["timeout"], 60.0)   # twice handsrate's wait for SteamVR
+        self.assertEqual(seen[0]["timeout"], 2 * fis.handsrate.RESTART_WAIT)   # room for its wait for SteamVR
         self.assertEqual(said, [("60 fps hand tracking off: the controllers track again.", False)])
         st = self.b.handsRate
         self.assertEqual((st["on"], st["busy"], st["switching"]), (True, True, False))   # what the files say again; still held

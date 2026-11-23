@@ -744,11 +744,16 @@ bool GuessDash(const Mat &head) {
 
 // A universe change (FollowUniverse; `from` the kind of the one left): the kept frame follows it by
 // a panel's rule (universefix::Follows), and goes with its jump unless the bar is shown
-// (dashanchor.h's Carry). True when it moved: the pins move this tick (g_dash.carried).
+// (dashanchor.h's Carry). Not with a wild one (tracking had run away): a frame read before the
+// runaway is near the origin, and the new world starts at the head, so at its old numbers it's near
+// you again, as it was before the frame followed (one read during the runaway is left far off until
+// the dashboard is opened). True when it moved: the pins move this tick (g_dash.carried).
 bool FollowDash(const universefix::Switch &sw, universefix::Kind from) {
     if (!g_dash.a.Framed() || !universefix::Follows(g_dash.universe, sw, from)) return false;
     g_dash.universe = sw.to;
-    return g_dash.carried = sw.moved && g_dash.a.Carry(sw.jump.m);
+    if (sw.wild)
+        std::printf("dashboard pins: a head step of %.1f m is tracking that ran away: the frame keeps its numbers\n", sw.metres);
+    return g_dash.carried = sw.moved && !sw.wild && g_dash.a.Carry(sw.jump.m);
 }
 
 // What a pinned screen rides on: its device's pose, for a floor pin its floor frame, for a dashboard pin the
@@ -7163,8 +7168,7 @@ void ft_vr_forget(const void *key) {
 // stay: SteamVR's restore put the room's back where they were in it. The dashboard's frame, kept
 // while the dashboard is closed, follows by the same rule, and the tiles and pins on it with it:
 // they stayed behind you when XRService started again in a world turned 164 degrees (2026-11-23,
-// the 60 fps hand tracking switch) until the dashboard was opened. A step too far to be standing's
-// (sw.wild: tracking had run away) moves nothing.
+// the 60 fps hand tracking switch) until the dashboard was opened.
 void FollowUniverse(const universefix::Switch &sw) {
     const universefix::Kind from = UniverseKind(sw.from), to = UniverseKind(sw.to);
     const auto follows = [&](uint64_t u) { return universefix::Follows(u, sw, from); };
@@ -7200,13 +7204,10 @@ void FollowUniverse(const universefix::Switch &sw) {
         if (sw.moved && k.pinned == kNone) k.pose = Mul(j, k.pose);
         k.universe = sw.to;
     }
-    char jump[160] = "no head pose around it: jump unknown";
+    char jump[128] = "no head pose around it: jump unknown";
     if (sw.measured)
         std::snprintf(jump, sizeof jump,
-                      sw.wild    ? "the head stepped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s): too far for "
-                                   "standing's jump (tracking had run away), nothing moved"
-                      : sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s)"
-                                 : "standing didn't jump",
+                      sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s)" : "standing didn't jump",
                       sw.metres, sw.height, sw.turnDeg, sw.lag);
     std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
                 (unsigned long long)sw.to, universefix::KindName(to), jump,

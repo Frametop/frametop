@@ -295,8 +295,8 @@ class Switch(Files):
     def test_the_wait_outlasts_steamvrs_timer(self):
         host = FakeHost({41}, set())
         self.assertIs(hr.restart_tracking(host)[0], False)
-        self.assertEqual(hr.RESTART_WAIT, 30.0)   # SteamVR starts a new XRService after 15 s (16.5 measured)
-        self.assertEqual(host.calls.count("wait"), 150)   # 30 s in steps of 0.2 s
+        # 30 s in steps of 0.2 s: SteamVR starts a new XRService after 15 s (16.5 measured)
+        self.assertEqual(host.calls.count("wait"), 150)
 
     def test_hands_that_cannot_be_restarted_stop_it_there(self):
         host = FakeHost({41}, hands="Failed to connect to bus")

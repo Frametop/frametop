@@ -2230,6 +2230,15 @@
   "raised": null,
   "uid": "OTHER"
  },
+ "tilefocus 2 (an app window's tile)": {
+  "calls": [],
+  "changed": {
+   "tile_focus_until": 105.0
+  },
+  "datagram": "tilefocus 2",
+  "log": [],
+  "raised": null
+ },
  "tilefocus bad": {
   "calls": [
    [
@@ -2245,7 +2254,7 @@
    ]
   ],
   "changed": {},
-  "datagram": "tilefocus 2",
+  "datagram": "tilefocus 3",
   "log": [],
   "raised": null
  },

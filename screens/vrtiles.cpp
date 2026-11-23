@@ -77,7 +77,7 @@ constexpr double kTileHoldTurnDeg = 20;   // turned this far from it: you look a
 bool g_tileLook = true;                   // DASH_TILE_LOOK: with no pointer on a panel, the one you look at has the focus
 Clock::time_point g_tilesSetAt;           // the last "tiles set" or "tiles add": an add long after it is one on its own
 constexpr std::chrono::seconds kTilesAddWindow{5};
-int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus, 0 not
+int g_tileFocusSaid = -1;                 // what the relay was told last: 1 an anchored panel has the focus (2: an app window's), 0 not
 int64_t g_tileFocusSaidMs = 0;
 constexpr int64_t kTileFocusRenewMs = 2000;   // said again this often (the relay lapses it after 5 s)
 constexpr double kTileBorder = 0.003;         // the focused tile's border, metres each side (user, 2026-11-19: "far, far, far less pronounced")
@@ -498,7 +498,9 @@ bool HeadForward(Mat *head, double fwd[3]) {
 // The panel the tiling keys act on: the one a tiling key just moved (g_tileHold: until the 3D mouse
 // is back on a panel or, with DASH_TILE_LOOK, you turn to another), else the one under the pointer, else the one you're
 // looking at (within 25 degrees of straight ahead; unless DASH_TILE_LOOK is off). The relay is told
-// when it's an anchored one (the keys are the desktop's otherwise), and it gets a thin border.
+// when it's an anchored one (the keys are the desktop's otherwise), and it gets a thin border. An
+// app window's tile (a floating window) is "tilefocus 2": Meta+arrows alone move it too, since on
+// the desktop they'd only quick-tile a window alone on its output, halving it (user, 2026-11-23).
 void UpdateTileFocus() {
     const int64_t now = NowMs();
     Mat head;
@@ -527,9 +529,11 @@ void UpdateTileFocus() {
     }
     g_tileFocus = f;
     const bool tile = f >= 0 && g_tiles.Anchored(f);
-    if (int(tile) != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
-        SendRelay(tile ? "tilefocus 1" : "tilefocus 0");
-        g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
+    const auto focused = g_screens.find(f);
+    const int say = !tile ? 0 : focused != g_screens.end() && focused->second.floating ? 2 : 1;
+    if (say != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
+        SendRelay(say == 2 ? "tilefocus 2" : say == 1 ? "tilefocus 1" : "tilefocus 0");
+        g_tileFocusSaid = say, g_tileFocusSaidMs = now;
     }
 }
 }  // namespace

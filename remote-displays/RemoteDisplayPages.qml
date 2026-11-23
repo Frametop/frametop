@@ -12,6 +12,7 @@ Item {
     property QtObject backend
     property var window
     property var openDisplays: ({})  // display id -> its settings are open (each display's expanded)
+    property var customSizes: ({})   // display id -> its "Custom size" switch, once the user set it
     function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
 
     function page(name) { return name === "remote-displays" ? hostsPage : null }
@@ -826,6 +827,9 @@ Item {
                                     // The biggest size its monitor takes ([width, height], or null: not
                                     // known): its size boxes stop there.
                                     readonly property var largest: monitor && monitor.largest ? monitor.largest : null
+                                    // "Custom size", as the user left it (StreamSizePicker's custom); kept
+                                    // by the page like expanded.
+                                    property var customSize: root.customSizes[modelData.id]
                                     // Its monitor can't be its stream size (the PC's driver refused it,
                                     // or it lists no such mode): the stream crops or fits it.
                                     readonly property bool cantBeSize: monitor !== null && backend.hostMonitors.cantBe(
@@ -900,22 +904,18 @@ Item {
                                         RowLayout {
                                             visible: !disp.modelData.kwin  // the window sets its size
                                             Kirigami.FormData.label: "Stream:"
-                                            Controls.SpinBox {
-                                                id: sw
+                                            StreamSizePicker {
+                                                id: ss
                                                 visible: disp.ownSize
-                                                objectName: "streamWidth"
-                                                from: 640; to: disp.largest ? Math.max(640, disp.largest[0]) : 7680
-                                                stepSize: 8; editable: true
-                                                value: disp.modelData.width
-                                            }
-                                            Controls.Label { visible: disp.ownSize; text: "×" }
-                                            Controls.SpinBox {
-                                                id: sh
-                                                visible: disp.ownSize
-                                                objectName: "streamHeight"
-                                                from: 360; to: disp.largest ? Math.max(360, disp.largest[1]) : 4320
-                                                stepSize: 8; editable: true
-                                                value: disp.modelData.height
+                                                sizes: disp.monitor && disp.monitor.sizes ? disp.monitor.sizes : []
+                                                largest: disp.largest
+                                                currentWidth: disp.modelData.width
+                                                currentHeight: disp.modelData.height
+                                                custom: disp.customSize
+                                                onCustomPicked: (on) => {
+                                                    root.customSizes[disp.modelData.id] = on
+                                                    disp.customSize = on
+                                                }
                                             }
                                             Controls.ComboBox {
                                                 id: sr
@@ -932,22 +932,33 @@ Item {
                                             Controls.Label { text: sb.value === 0 ? "Mbit/s (auto)" : "Mbit/s" }
                                             Controls.Button {
                                                 text: "Apply"
-                                                enabled: (disp.ownSize && (sw.value !== disp.modelData.width || sh.value !== disp.modelData.height))
+                                                enabled: (disp.ownSize && ss.changed)
                                                          || sr.currentValue !== disp.modelData.fps || sb.value * 1000 !== disp.modelData.bitrate
                                                 onClicked: backend.setStream(disp.modelData.id,
-                                                                             disp.ownSize ? sw.value : disp.modelData.width,
-                                                                             disp.ownSize ? sh.value : disp.modelData.height,
+                                                                             disp.ownSize ? ss.pickedWidth : disp.modelData.width,
+                                                                             disp.ownSize ? ss.pickedHeight : disp.modelData.height,
                                                                              sr.currentValue, sb.value * 1000)
                                             }
                                         }
                                         MonitorScalePicker {
-                                            // A PC that can set it (Hyprland, KDE; not Windows), or one picked before
+                                            // A PC that can set it (Hyprland, KDE; not Windows), or one picked before.
+                                            // It then always has 125%, 150%, 175% and 200%.
                                             visible: disp.followsMonitor && disp.monitor !== null
                                                      && ((disp.monitor.scales || []).length > 0 || disp.modelData.scale > 0)
                                             Kirigami.FormData.label: "Its scale:"
                                             monitor: disp.monitor
                                             picked: disp.modelData.scale
                                             onPick: (scale) => backend.hostMonitors.pickScale(disp.modelData.host, disp.modelData.id, scale)
+                                        }
+                                        Controls.Label {
+                                            objectName: "streamCustomWarning"
+                                            visible: ss.visible && ss.lists && ss.typed
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            color: Kirigami.Theme.neutralTextColor
+                                            text: "A custom size may not work: it depends on the sizes " + disp.modelData.host
+                                                  + "'s monitor accepts. If the monitor doesn't take it, it stays as it is and "
+                                                  + "the stream crops or fits it."
                                         }
                                         Controls.Label {
                                             objectName: "streamHelp"
@@ -965,8 +976,8 @@ Item {
                                                   : disp.followsMonitor
                                                   ? disp.modelData.host + "'s monitor switches to this size while it streams, pixel for "
                                                     + "pixel, and back when it stops. Disconnect it to turn the monitor off."
-                                                    + (disp.largest ? " Its largest size is " + disp.largest[0] + " × "
-                                                                      + disp.largest[1] + "." : "")
+                                                    + (ss.typed && disp.largest ? " Its largest size is " + disp.largest[0] + " × "
+                                                                                  + disp.largest[1] + "." : "")
                                                   : disp.couldFollow
                                                   ? "The stream crops or fits " + disp.modelData.host + "'s monitor as it is. To switch the "
                                                     + "monitor to this size, turn on \"Let Frametop control " + disp.modelData.host

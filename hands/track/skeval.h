@@ -382,6 +382,23 @@ public:
                         label_len[r.right][b].push_back(norm(best->kp[kBones[b][1]] - best->kp[kBones[b][0]]));
                 }
             }
+            int lab_n = 0, lab_found = 0;   // the labels' side: labelled hands (conf >= 0.3) a tracked hand matched
+            for (auto &[t, n] : label_hits) {
+                (void)n;
+                const auto it = labels.find(t);
+                if (it == labels.end()) continue;
+                const double ts = (t - t0) / 1e9;
+                for (const Label &l : it->second) {
+                    if (l.conf < 0.3) continue;
+                    ++lab_n;
+                    for (const Rec &r : recs)
+                        if (std::fabs(r.ts - ts) <= 1e-6 && norm(l.kp[0] - r.pts[0][0]) < 0.06) {
+                            ++lab_found;
+                            break;
+                        }
+                }
+            }
+            std::printf("labelled hands tracked: %d of %d (%.1f%%)\n", lab_found, lab_n, 100.0 * lab_found / std::max(lab_n, 1));
             std::printf("against the labels (%d hands matched within 6 cm of the wrist, %d not): mean landmark error median "
                         "measured %.1f, One Euro %.1f, skeleton %.1f (unfiltered %.1f) mm (90%% %.1f, %.1f, %.1f, %.1f); "
                         "index tip median %.1f, %.1f, %.1f (%.1f) mm\n",

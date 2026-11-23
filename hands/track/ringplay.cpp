@@ -3,7 +3,7 @@
 // run after run. For A/B tests of how the tracker runs.
 //
 //   ft-ringplay DIR --ring PATH [--from S] [--to S] [--loop] [--cpus 0,1]
-//               [--upper-skew MS] [--upper-drift MS_PER_S]
+//               [--upper-skew MS] [--upper-drift MS_PER_S] [--speed F]
 //
 // Frames are stamped as they're published, so the tracker's latency figures stay
 // meaningful. Cameras carry their calibration name and no device node (ft-hands maps
@@ -12,6 +12,8 @@
 // --upper-skew and --upper-drift stamp the upper cameras' frames MS (plus MS_PER_S a second,
 // modulo a 30 fps frame) later than the sides', as after a colour module hot plug that left
 // them out of step (hands/README.md, "Frame sets").
+// --speed F plays F times faster (4 turns a 30 fps recording into 120 sets a second), to load
+// the tracker the way faster cameras would; hands move F times faster too.
 #include "record.h"
 
 extern "C" {
@@ -93,12 +95,12 @@ bool is_dark(const char *name) {
 int main(int argc, char **argv) {
     if (argc < 2 || argv[1][0] == '-') {
         std::fprintf(stderr, "usage: %s DIR --ring PATH [--from S] [--to S] [--loop] [--cpus 0,1] [--upper-skew MS] "
-                             "[--upper-drift MS_PER_S]\n", argv[0]);
+                             "[--upper-drift MS_PER_S] [--speed F]\n", argv[0]);
         return 1;
     }
     const std::string dir = argv[1];
     std::string ring_path;
-    double from = 0, to = 1e9, upper_skew_ms = 0, upper_drift_ms = 0;
+    double from = 0, to = 1e9, upper_skew_ms = 0, upper_drift_ms = 0, speed = 1;
     bool loop = false;
     std::vector<int> cpus = {0, 1};
     for (int i = 2; i < argc; ++i) {
@@ -110,6 +112,7 @@ int main(int argc, char **argv) {
         else if (a == "--loop") loop = true;
         else if (a == "--upper-skew" && more) upper_skew_ms = std::atof(argv[++i]);
         else if (a == "--upper-drift" && more) upper_drift_ms = std::atof(argv[++i]);
+        else if (a == "--speed" && more) speed = std::clamp(std::atof(argv[++i]), 0.1, 10.0);
         else if (a == "--cpus" && more) {
             cpus.clear();
             for (char *p = argv[++i]; *p;) {
@@ -203,7 +206,7 @@ int main(int argc, char **argv) {
         const double first = set_time(cams);
         const uint64_t start = clock_ns(CLOCK_MONOTONIC);
         while (have && !g_stop && set_time(cams) - rec0 <= to) {
-            const uint64_t due = start + uint64_t((set_time(cams) - first) * 1e9);
+            const uint64_t due = start + uint64_t((set_time(cams) - first) / speed * 1e9);
             for (uint64_t now = clock_ns(CLOCK_MONOTONIC); now < due && !g_stop; now = clock_ns(CLOCK_MONOTONIC)) {
                 __atomic_store_n(&hdr->heartbeat_ns, now, __ATOMIC_RELEASE);
                 const uint64_t wait = std::min<uint64_t>(due - now, 100'000'000);

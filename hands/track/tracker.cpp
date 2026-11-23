@@ -174,7 +174,7 @@ double Tracker::interval() const {
     double fastest = -1;
     for (const auto &[id, h] : hands_)
         if (h.seen_ns == last_ns_) fastest = std::max(fastest, norm(h.dpalm));   // filtered: noise isn't speed
-    return fastest < 0 ? 1 / 5.0 : fastest > kFastSpeed ? 1 / 30.0 : 1 / 15.0;
+    return fastest < 0 ? 1 / 5.0 : fastest > kFastSpeed ? 1 / max_hz_ : 2 / max_hz_;
 }
 
 bool Tracker::inside(const Camera &cam, V2 uv) const {
@@ -186,6 +186,25 @@ bool Tracker::inside(const Camera &cam, V2 uv) const {
 void Tracker::run_landmarks(const std::map<std::string, Image> &images, std::vector<View *> &views) {
     if (views.empty()) return;
     const auto t0 = std::chrono::steady_clock::now();
+    if (batch_) {
+        std::vector<const Image *> imgs;
+        std::vector<Roi> rois;
+        std::vector<Landmarks> out;
+        for (View *v : views) imgs.push_back(&images.at(v->cam->name)), rois.push_back(v->roi);
+        if (batch_->run(imgs, rois, out)) {
+            for (size_t i = 0; i < views.size(); ++i) {
+                views[i]->lm = out[i];
+                views[i]->has_lm = true;
+                views[i]->fresh = true;
+            }
+            stats.npu_calls += int(views.size());
+            stats.hand_calls += int(views.size());
+            stats.hand_ms += ms_since(t0);
+            ++stats.hand_batches;
+            return;
+        }
+        stats.npu_fallbacks += int(views.size());
+    }
     std::vector<std::function<void()>> jobs;
     for (View *v : views) {
         const Image &img = images.at(v->cam->name);
@@ -426,6 +445,9 @@ void Tracker::associate() {
 std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &images, int64_t t_ns) {
     const auto t_step = std::chrono::steady_clock::now();
     ++stats.sets;
+    // the detector's palms posted last step, before this step's other NPU requests
+    const double det_blocked = rounds_ ? rounds_->blocked_ms : 0;
+    if (rounds_) rounds_->begin_step();
     // Views in cameras without a frame in this set wait, as they are, for their camera's
     // next one: the colour cameras run on their own clock, so a set can hold the mono
     // cameras, the colour ones, or both (drop_camera ends them when a camera stops being used).
@@ -554,10 +576,31 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         for (int id : tracked) ids += " " + std::to_string(id);
         note("search-blocked tracked%s", ids.c_str());
     }
-    if (tracked.size() < 2 && due) {
+    const bool det_ready = rounds_ && !rounds_->ready().empty();
+    if (tracked.size() < 2 && (due || det_ready)) {
         const bool rotation_due = (t_ns - search_ns_) / 1e9 >= kSearchInterval - 0.01;
         search_ns_ = rotation_due ? t_ns : search_ns_;
         const int budget = tracked.empty() ? search_budget_ : search_budget1_;
+        // the detector's cameras: the palms it found there last step, and no CPU tiles there while it works; a
+        // search due starts its next round (posted at the end of this step)
+        std::vector<std::pair<const Camera *, std::vector<Palm>>> detected;
+        const bool det_on = rounds_ && rounds_->healthy();
+        if (rounds_) {
+            // a camera that dropped out of this step (its frame missed) keeps its palms for the round, unused
+            for (const auto &[name, palms] : rounds_->ready()) {
+                const auto c = cams_.find(name);
+                if (c != cams_.end() && images.count(name)) detected.push_back({c->second, palms});
+            }
+            stats.det_rounds += int(rounds_->ready().size());
+            stats.det_fallbacks += due && !det_on;
+            if (due) {
+                std::vector<std::string> covered;
+                for (auto &[name, cam] : cams_)
+                    if (images.count(name) && rounds_->covers(name)) covered.push_back(name);
+                rounds_->start(covered);
+            }
+        }
+        auto by_detector = [&](const Camera *c) { return det_on && rounds_->covers(c->name); };
         std::vector<Tile *> picked;
         // first, tiles on where lost hands should be now
         std::vector<Tile> aimed;
@@ -567,7 +610,7 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
             const V3 p = l.palm + l.vel * std::min(age, 0.25);
             std::vector<std::pair<double, const Camera *>> cams;
             for (auto &[name, cam] : cams_) {
-                if (!images.count(name)) continue;
+                if (!images.count(name) || by_detector(cam)) continue;
                 double z;
                 const V2 uv = cam->project(p, &z);
                 const double m = 0.03;
@@ -590,49 +633,55 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
         for (Tile &t : aimed) picked.push_back(&t);
         // aimed tiles share the budget, but the rotation keeps at least one tile (unless it's not due:
         // with every_step, aimed tiles go up between the rotation's rounds)
-        const int rotation = rotation_due ? std::max(1, budget - int(aimed.size())) : 0;
+        // (with the detector on, one tile: the cameras it doesn't cover hold under 1% of hands)
+        const int rotation = !rotation_due ? 0 : det_on ? 1 : std::max(1, budget - int(aimed.size()));
         if (rotation_due)
             for (Tile &t : tiles_)
-                if (images.count(t.cam->name)) t.credit += t.weight;
+                if (images.count(t.cam->name) && !by_detector(t.cam)) t.credit += t.weight;
         for (int b = 0; b < rotation; ++b) {
             Tile *best = nullptr;
             for (Tile &t : tiles_)
-                if (images.count(t.cam->name) && std::find(picked.begin(), picked.end(), &t) == picked.end() &&
-                    (!best || t.credit > best->credit))
+                if (images.count(t.cam->name) && !by_detector(t.cam) &&
+                    std::find(picked.begin(), picked.end(), &t) == picked.end() && (!best || t.credit > best->credit))
                     best = &t;
             if (!best) break;
             best->credit = 0;
             picked.push_back(best);
         }
-        if (!picked.empty()) {
-            const auto t0 = std::chrono::steady_clock::now();
-            std::vector<std::vector<Palm>> found(picked.size());
-            std::vector<std::function<void()>> jobs;
-            for (size_t i = 0; i < picked.size(); ++i) {
-                Tile *t = picked[i];
-                const Image &img = images.at(t->cam->name);
-                jobs.push_back([this, t, &img, &found, i] { found[i] = nets_.palms(img, t->center, t->size, t->rotation); });
+        if (!picked.empty() || !detected.empty()) {
+            if (!picked.empty()) {
+                const auto t0 = std::chrono::steady_clock::now();
+                std::vector<std::vector<Palm>> found(picked.size());
+                std::vector<std::function<void()>> jobs;
+                for (size_t i = 0; i < picked.size(); ++i) {
+                    Tile *t = picked[i];
+                    const Image &img = images.at(t->cam->name);
+                    jobs.push_back([this, t, &img, &found, i] { found[i] = nets_.palms(img, t->center, t->size, t->rotation); });
+                }
+                pool_.run(jobs);
+                stats.palm_calls += int(picked.size());
+                stats.palm_ms += ms_since(t0);
+                ++stats.palm_batches;
+                for (size_t i = 0; i < picked.size(); ++i) detected.push_back({picked[i]->cam, std::move(found[i])});
             }
-            pool_.run(jobs);
-            stats.palm_calls += int(picked.size());
-            stats.palm_ms += ms_since(t0);
-            ++stats.palm_batches;
             std::vector<View> fresh;
             std::string tl;
-            if (trace_)
+            if (trace_) {
                 for (Tile *t : picked)
                     tl += " " + t->cam->name + "#" +
                           (t >= tiles_.data() && t < tiles_.data() + tiles_.size() ? std::to_string(t - tiles_.data()) : std::string("aim"));
+                for (size_t i = 0; i + picked.size() < detected.size(); ++i) tl += " " + detected[i].first->name + "#det";
+            }
             int nfound = 0, nnear = 0;
-            for (size_t i = 0; i < picked.size(); ++i)
-                for (const Palm &p : found[i]) {
+            for (const auto &[cam, palms] : detected)
+                for (const Palm &p : palms) {
                     const Roi roi = p.roi();
                     bool near = false;
                     for (auto *list : {&views_, &fresh})
                         for (View &v : *list)
-                            near = near || (v.cam == picked[i]->cam && norm(v.roi.center - roi.center) < near_frac_ * roi.size);
+                            near = near || (v.cam == cam && norm(v.roi.center - roi.center) < near_frac_ * roi.size);
                     ++nfound, nnear += near;
-                    if (!near) fresh.push_back({picked[i]->cam, roi, 0, {}, false, 0});
+                    if (!near) fresh.push_back({cam, roi, 0, {}, false, 0});
                 }
             note("search tracked %zu tiles%s palms %d near-tracked %d", tracked.size(), tl.c_str(), nfound, nnear);
             std::vector<View *> ptrs;
@@ -749,6 +798,11 @@ std::vector<const Hand *> Tracker::step(const std::map<std::string, Image> &imag
             ++stats.created;
             note("new %d %s (split off)", v.hand, v.cam->name.c_str());
         }
+    // the detector's next camera, after this step's other NPU requests
+    if (rounds_) {
+        rounds_->end_step(images);
+        stats.det_ms += rounds_->blocked_ms - det_blocked;
+    }
     last_ns_ = t_ns;
     stats.step_ms += ms_since(t_step);
     return out;

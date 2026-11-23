@@ -325,7 +325,8 @@ class TheHost(unittest.TestCase):
     def test_stop_asks_each_of_them_and_says_what_went_wrong(self):
         user = FakeUser()
         self.assertEqual(hr.Host(user).stop({52, 41}), "")
-        self.assertEqual(user.ran, [["kill", "41"], ["kill", "52"]])
+        # In C, whatever the user's language: "No such process" is read from what kill says.
+        self.assertEqual(user.ran, [["env", "LC_ALL=C", "kill", "41"], ["env", "LC_ALL=C", "kill", "52"]])
         self.assertEqual(hr.Host(FakeUser(1, stderr="kill: (41): Operation not permitted\n")).stop({41}),
                          "kill: (41): Operation not permitted")
         self.assertEqual(hr.Host(FakeUser(1)).stop({41}), "kill 41: exit 1")
@@ -334,7 +335,13 @@ class TheHost(unittest.TestCase):
         # The old XRService can go while the new one starts: the other is still asked to stop.
         user = FakeUser(each={"41": (1, "kill: (41): No such process\n")})
         self.assertEqual(hr.Host(user).stop({41, 52}), "")
-        self.assertEqual(user.ran, [["kill", "41"], ["kill", "52"]])
+        self.assertEqual([cmd[-1] for cmd in user.ran], ["41", "52"])
+
+    def test_kill_answers_in_c_on_this_machine(self):
+        # The real kill, on a process id past the kernel's highest (4194304): nothing is stopped.
+        r = hr.handsmode.Host().run(["env", "LC_ALL=C", "kill", "4999999"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("No such process", r.stderr)
 
     def test_restart_hands_says_what_went_wrong(self):
         user = FakeUser()
@@ -354,15 +361,25 @@ class Rates(unittest.TestCase):
 
     def test_the_mode_worn(self):
         got = self.rates((60, 12.9, 12.9, 0), (120, 59.0, 59.9, 7), (180, 59.9, 59.9, 7))
-        self.assertEqual((got["best"], got["minutes"]), (59.9, 2))
+        self.assertEqual((got["best"], got["minutes"]), (59.9, 0))   # two minutes: neither has one on both sides
         self.assertLess(got["dark"], 0.01)
 
     def test_steamvrs_own_mode_is_dark_frames(self):
         # 30 bright a second and as many dark: the running count grows 1800 a minute.
         got = self.rates((9242, 2.1, 2.1, 3952), (9302, 30.0, 30.0, 5752), (9362, 29.6, 29.6, 7535),
                          (9422, 30.0, 30.0, 9335))
-        self.assertEqual((got["best"], got["minutes"]), (30.0, 3))
+        self.assertEqual((got["best"], got["minutes"]), (30.0, 1))
         self.assertGreater(got["dark"], 0.4)
+
+    def test_short_wears_are_no_full_minutes(self):
+        # 80 s worn twice at 60 a second, each across one of ft-camd's lines: four minutes at 40,
+        # none of them full, where a mode that runs slower gives full minutes at its rate.
+        got = self.rates((60, 0.0, 0.0, 0), (120, 40.0, 40.0, 0), (180, 40.0, 40.0, 0), (240, 0.0, 0.0, 0),
+                         (300, 40.0, 40.0, 1), (360, 40.0, 40.0, 1), (420, 0.0, 0.0, 1))
+        self.assertEqual((got["best"], got["minutes"]), (40.0, 0))
+        got = self.rates((60, 0.0, 0.0, 0), (120, 21.0, 21.0, 0), *((180 + 60 * i, 45.0, 45.0, 0) for i in range(4)),
+                         (420, 30.0, 30.0, 0), (480, 0.0, 0.0, 0))
+        self.assertEqual((got["best"], got["minutes"]), (45.0, 4))
 
     def test_the_headset_off_measures_nothing(self):
         # XRService wakes the cameras for some seconds now and then: 5.1 a second over a minute.
@@ -378,7 +395,11 @@ class Rates(unittest.TestCase):
     def test_ft_camd_starting_again_starts_the_count_again(self):
         # Its clock and its dark count both go back to nothing: that line measures against no other.
         got = self.rates((9422, 30.0, 30.0, 9335), (60, 40.0, 40.0, 0), (120, 59.9, 59.9, 3))
-        self.assertEqual((got["best"], got["minutes"]), (59.9, 1))
+        self.assertEqual((got["best"], got["minutes"]), (59.9, 0))
+        # Minutes either side of the start aren't one run of the cameras.
+        got = self.rates((300, 30.0, 30.0, 0), (360, 30.0, 30.0, 0), (60, 30.0, 30.0, 0), (120, 30.0, 30.0, 0),
+                         (180, 30.0, 30.0, 0))
+        self.assertEqual(got["minutes"], 0)
         self.assertLess(got["dark"], 0.01)
 
     def test_lines_newest_first_measure_nothing(self):

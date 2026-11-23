@@ -152,24 +152,28 @@ def state(conf=None, xr_path=XR_PATH, conf_path=CONF_PATH):
 def camera_rates(status):
     """What ft-camd's status lines (its journal's text, a line a minute) say of the tracking
     cameras: {"best": the most bright frames a second a camera gave in a minute, "minutes": how
-    many minutes the cameras ran (20 a second or more: with the headset off they give 0 to 5),
-    "dark": the share of their frames that were dark, None under 600 frames}. Each line is
-    measured against the one before it (its dark count is a running total, and the first line's
-    minute may have begun before the cameras did); a line whose clock went back is ft-camd
-    started again, and is the next first line."""
-    best, minutes, bright, dark, before = 0.0, 0, 0.0, 0, None
+    many full minutes the cameras ran, "dark": the share of their frames that were dark, None
+    under 600 frames}. Each line is measured against the one before it (its dark count is a
+    running total, and the first line's minute may have begun before the cameras did); a line
+    whose clock went back is ft-camd started again, and is the next first line. A minute is full
+    when the cameras ran (20 a second or more: with the headset off they give 0 to 5) in it and
+    in the minutes before and after it: the headset goes on and comes off part way through one,
+    which reads as a lower rate than the cameras' own."""
+    best, ran, bright, dark, before = 0.0, [], 0.0, 0, None
     for line in status.splitlines():
         clock = re.match(r"\[(\d+) s\]", line)
         cams = re.findall(r"([0-9]+\.[0-9]) fps \(dark (\d+) ", line)
         if not clock or not cams:
             continue
         now = (int(clock.group(1)), [float(rate) for rate, _ in cams], sum(int(n) for _, n in cams))
-        if before and now[0] > before[0] and now[2] >= before[2]:
+        measured = bool(before) and now[0] > before[0] and now[2] >= before[2]
+        if measured:
             best = max(best, *now[1])
-            minutes += max(now[1]) >= 20
             bright += sum(now[1]) * (now[0] - before[0])
             dark += now[2] - before[2]
+        ran.append(measured and max(now[1]) >= 20)
         before = now
+    minutes = sum(a and b and c for a, b, c in zip(ran, ran[1:], ran[2:]))
     return {"best": best, "minutes": minutes, "dark": dark / (bright + dark) if bright + dark >= 600 else None}
 
 
@@ -191,10 +195,11 @@ class Host:
 
     def stop(self, pids):
         """Ask them to stop, each on its own: one that has gone by itself meanwhile (an old one,
-        as a new one starts) is no failure. "" or what went wrong."""
+        as a new one starts) is no failure. kill says that in the user's language, so it is run
+        without one. "" or what went wrong."""
         problems = []
         for pid in sorted(pids):
-            r = self.user.run(["kill", str(pid)])
+            r = self.user.run(["env", "LC_ALL=C", "kill", str(pid)])
             if r.returncode != 0 and "No such process" not in r.stderr:
                 problems.append(r.stderr.strip() or f"kill {pid}: exit {r.returncode}")
         return "; ".join(problems)

@@ -6,6 +6,7 @@ Run: python3 input-settings/test/test_hands_page.py"""
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -141,6 +142,22 @@ class Page(unittest.TestCase):
                                     "couldn't be restarted (no bus)", True))
         self.assertFalse(self.b.handsRate["on"])   # the fake host wrote nothing: the switch shows the files
 
+    def test_rate_switch_frees_itself_when_the_host_call_breaks(self):
+        def host(*cmd, timeout=20):
+            raise RuntimeError("no host")
+        broke = []
+        old, fis.host, hook, threading.excepthook = fis.host, host, threading.excepthook, broke.append
+        self.addCleanup(setattr, fis, "host", old)
+        self.addCleanup(setattr, threading, "excepthook", hook)
+        self.b.setHandsRate(True)
+        for _ in range(200):
+            self.app.processEvents()
+            if broke and not self.b.handsRate["busy"]:
+                break
+            time.sleep(0.01)
+        self.assertEqual(str(broke[0].exc_value), "no host")
+        self.assertFalse(self.b.handsRate["busy"])   # not held for good: the switch can be used again
+
     def test_page_loads(self):
         errors = []
         engine = QQmlApplicationEngine()
@@ -173,12 +190,18 @@ class Page(unittest.TestCase):
             switch = window.findChild(QObject, "handsRateSwitch")
             self.assertIsNotNone(switch)
             return switch.property("enabled"), switch.property("checked")
+
+        def note():
+            return window.findChild(QObject, "handsRateNote").property("text")
         self.addCleanup(fis.handsrate.write_cameras, {})
         self.addCleanup(setattr, self.b, "_hands_refreshing", False)
         self.assertTrue(fis.handsrate.XR_PATH.startswith(HOME + os.sep))
         self.assertEqual(enabled(False, "frametop", {}), (False, False))
+        self.assertEqual(note(), "It needs hand tracking, which isn't installed.")
         self.assertEqual(enabled(True, "off", {}), (False, False))
+        self.assertEqual(note(), "It needs hand tracking: turn that on above first.")
         self.assertEqual(enabled(True, "frametop", {}), (True, False))
+        self.assertEqual(note(), "")
         self.assertEqual(enabled(False, "off", fis.handsrate.HIGH), (True, True))
         # the slider sits under "Lazy susan brings screens to you", the switches all there round it
         keys = [e["key"] for e in self.b.handInteractions]

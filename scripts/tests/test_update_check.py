@@ -89,16 +89,17 @@ class HandsRate(unittest.TestCase):
     def setUpClass(cls):
         cls.m = load()
 
-    def verdict(self, best=59.9, minutes=2, dark=0.003, on=True, hands="running", pending=False):
-        return self.m.hands_rate_verdict(on, hands, pending, {"best": best, "minutes": minutes, "dark": dark})
-
-    def test_off_says_nothing(self):
-        self.assertIsNone(self.verdict(best=30.0, dark=0.3, on=False))
+    def verdict(self, best=59.9, minutes=2, dark=0.003, hands="running", pending=False):
+        return self.m.hands_rate_verdict(hands, pending, {"best": best, "minutes": minutes, "dark": dark})
 
     def test_sixty_and_no_dark_frames_is_ok(self):
         state, detail = self.verdict()
         self.assertEqual(state, "ok")
         self.assertIn("59.9", detail)
+        self.assertIn("0.3% dark", detail)
+        # The most the mode gave in a run of ft-camd (1.25%), and the least SteamVR's own did (30%).
+        self.assertEqual(self.verdict(dark=0.0125)[0], "ok")
+        self.assertEqual(self.verdict(dark=0.299)[0], "FAIL")
 
     def test_dark_frames_mean_the_mode_no_longer_holds(self):
         # SteamVR's own mode, as a SteamOS update that renumbers the modes would leave it.
@@ -115,8 +116,10 @@ class HandsRate(unittest.TestCase):
         self.assertIn("check again", detail)
         self.assertEqual(self.verdict(best=0.0, minutes=0, dark=None)[0], "skip")
 
-    def test_a_part_minute_is_a_skip(self):
-        self.assertEqual(self.verdict(best=30.5, minutes=1, dark=0.0)[0], "skip")
+    def test_part_minutes_are_a_skip(self):
+        # Short wears: handsrate.camera_rates counts no full minute in them.
+        self.assertEqual(self.verdict(best=40.0, minutes=0, dark=0.0)[0], "skip")
+        self.assertEqual(self.verdict(best=30.5, minutes=2, dark=0.0)[0], "skip")
 
     def test_minutes_at_a_lower_rate_warn(self):
         state, detail = self.verdict(best=45.0, minutes=4, dark=0.0)
@@ -153,7 +156,11 @@ class HandsRate(unittest.TestCase):
         def run(*cmd, **kw):
             asked.append(cmd)
             return answers[cmd[0]]
-        m.run, m.systemctl = run, lambda *args: unit
+
+        def systemctl(*args):
+            asked.append(("systemctl",) + args)
+            return unit
+        m.run, m.systemctl = run, systemctl
         m.report = lambda state, label, detail="": said.append((state, label, detail))
         m.check_hands_rate(hr)
         return said, asked

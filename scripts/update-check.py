@@ -1058,13 +1058,11 @@ def check_eye_rate():
     report(state, "eye cameras", detail)
 
 
-def hands_rate_verdict(on, hands, pending, rates):
-    """What the 60 fps hand tracking check says: (state, detail), or None with the switch off.
-    hands: "running", "stopped" or "missing" (ft-camd, which measures the cameras); pending: the
-    camera mode was written after XRService started, so it doesn't count yet; rates:
+def hands_rate_verdict(hands, pending, rates):
+    """What the 60 fps hand tracking check says with the switch on: (state, detail). hands:
+    "running", "stopped" or "missing" (ft-camd, which measures the cameras); pending: the camera
+    mode was written after XRService started, so it doesn't count yet; rates:
     handsrate.camera_rates since XRService started."""
-    if not on:
-        return None
     off = "python3 hands/handsrate.py off --now"
     again = "find the mode again with hands/tools/slam-rate.py and fix HIGH in hands/handsrate.py"
     if hands == "missing":
@@ -1075,7 +1073,8 @@ def hands_rate_verdict(on, hands, pending, rates):
         return "skip", ("on, but hand tracking isn't running, so the cameras aren't measured (and the controllers "
                         f"don't track meanwhile): check again while it runs, or turn it off ({off})")
     best, minutes, dark = rates["best"], rates["minutes"], rates["dark"]
-    if dark is not None and dark >= 0.1:   # measured 2026-11-23: 0.3% in the mode, 30% in SteamVR's own
+    # Measured 2026-11-23 over 47 runs of ft-camd: 0 to 1.3% in the mode, 30 to 51% in SteamVR's own.
+    if dark is not None and dark >= 0.05:
         return "FAIL", (f"on, but {dark:.0%} of the tracking cameras' frames are dark: this SteamVR doesn't run "
                         "slamFrameFPSMode 3 without dark frames, so hand tracking loses those frames and the "
                         f"mode may do something else. Turn it off ({off}), then {again}")
@@ -1083,12 +1082,12 @@ def hands_rate_verdict(on, hands, pending, rates):
         return "warn", (f"on, and the tracking cameras give {best:g} frames a second, not 60: this SteamVR runs "
                         f"slamFrameFPSMode 3 faster, and ft-hands tracks at most 60 (HANDS_MAX_HZ): {again}")
     if best >= 50:
-        return "ok", f"on: {best:g} bright frames a second, no dark ones (the controllers don't track)"
+        return "ok", f"on: {best:g} bright frames a second, {dark or 0:.1%} dark (the controllers don't track)"
     if minutes >= 3:
-        return "warn", (f"on, but in {minutes} minutes the tracking cameras gave at most {best:g} bright frames a "
+        return "warn", (f"on, but in {minutes} full minutes the tracking cameras gave at most {best:g} bright frames a "
                         f"second, not 60: this SteamVR may run slamFrameFPSMode 3 slower: {again}")
-    return "skip", ("on; the tracking cameras haven't run a full minute since SteamVR started (with the headset "
-                    "off they idle): wear it for two minutes and check again")
+    return "skip", ("on; the tracking cameras haven't run long enough since SteamVR started to be measured (with "
+                    "the headset off they idle): wear it for a few minutes and check again")
 
 
 def check_hands_rate(hr=None):
@@ -1099,11 +1098,11 @@ def check_hands_rate(hr=None):
     hr: handsrate, for tests."""
     try:
         hr = hr or repo_module("handsrate", "hands", "handsrate.py")
-        on, pending, status = hr.state()["on"], False, ""
-        ages = []
-        if on:
-            pids = run("pgrep", "-f", hr.XRSERVICE)[1].split()
-            ages = [int(a) for a in run("ps", "-o", "etimes=", "-p", ",".join(pids))[1].split()] if pids else []
+        if not hr.state()["on"]:
+            return
+        pending, status = False, ""
+        pids = run("pgrep", "-f", hr.XRSERVICE)[1].split()
+        ages = [int(a) for a in run("ps", "-o", "etimes=", "-p", ",".join(pids))[1].split()] if pids else []
         if ages:   # the newest XRService: the one that has the cameras
             started = time.time() - min(ages)
             pending = os.path.getmtime(hr.XR_PATH) > started
@@ -1112,11 +1111,10 @@ def check_hands_rate(hr=None):
         # Loaded, not enabled: hands/handsmode.py starts the units by HANDS_MODE.
         unit = systemctl("show", "-p", "LoadState,ActiveState", "--value", "frametop-camd.service").split()
         hands = "missing" if unit[:1] != ["loaded"] else "running" if unit[1:] == ["active"] else "stopped"
-        said = hands_rate_verdict(on, hands, pending, hr.camera_rates(status))
+        said = hands_rate_verdict(hands, pending, hr.camera_rates(status))
     except Exception as e:  # a broken checkout, or an answer that doesn't parse: say so rather than stop the whole check
         said = "warn", f"couldn't check it: {e}"
-    if said:
-        report(said[0], "60 fps hand tracking", said[1])
+    report(said[0], "60 fps hand tracking", said[1])
 
 
 # What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;

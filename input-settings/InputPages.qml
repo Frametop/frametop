@@ -1968,6 +1968,7 @@ Item {
                         text: hpage.rate.warning
                     }
                     Controls.Label {
+                        objectName: "handsRateNote"
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                         visible: text !== ""
                         wrapMode: Text.Wrap

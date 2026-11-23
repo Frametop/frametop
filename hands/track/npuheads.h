@@ -4,6 +4,9 @@
 // the soft-argmax in crop pixels, the heatmap-weighted keypoint features, and the presence, side and world MLPs.
 // A two-view student (heads file version 2) also reads the other view of the same hand: its pre-fusion pool and
 // keypoint features add to the world, presence and side layers (no biases), when the crops were sent as a pair.
+// A float-output graph (heads file version 3: v30a on the HMX image, npu-hands npud/v30a_serve.py) comes finished:
+// kFloatOuts f32 a crop, out0 [63] (x, y, z in crop pixels), presence, side, world [63], as ncnn's out0..out3; the
+// file is its 12-word header alone and decode() only copies.
 #pragma once
 
 #include <cstdint>
@@ -15,6 +18,8 @@ struct NpuHeads {
     int K = 0, H = 0, W = 0, kpd = 0, g = 0, hidden = 0, pool_h = 0, pool_w = 0;
     int crop = 224;   // the crop side in pixels the graph reads (header word 11; 0 in older files: 224)
     bool two_view = false;   // version 2: crops go in pairs (NpuClient::kPair0/kPair1), outputs add pool_pre
+    bool float_outs = false; // version 3: finished f32 outputs, no weights
+    static constexpr int kFloatOuts = 63 + 1 + 1 + 63;
     float s_heat = 0, s_kp = 0, s_pool = 0, s_pool_pre = 0;
     std::vector<float> grid, pres_w, right_w, w0, b0, w1, b1;
     std::vector<float> wp, pres_pw, right_pw;   // two-view: world_p [hidden][g + K kpd], pres_p [g], right_p [g]
@@ -29,7 +34,11 @@ struct NpuHeads {
     bool parse(const uint8_t *data, size_t size, std::string &err);
     // Bytes of one crop's outputs as ft-npud lays them out: heat s8 [K][H][W], kp_feat s8 [kpd][H][W],
     // pool u8 [g][pool_h][pool_w], and for a two-view graph pool_pre u8 [g][pool_h][pool_w].
-    size_t out_bytes() const { return size_t(K + kpd) * H * W + size_t(g) * pool_h * pool_w * (two_view ? 2 : 1); }
+    // A version 3 graph's: kFloatOuts f32.
+    size_t out_bytes() const {
+        return float_outs ? 4 * size_t(kFloatOuts)
+                          : size_t(K + kpd) * H * W + size_t(g) * pool_h * pool_w * (two_view ? 2 : 1);
+    }
     // The heads file's size for a header (12 u32): 0 for a bad magic or version, or shapes too big to
     // size without wrapping. Not a validation: parse() checks the shapes.
     static size_t file_bytes(const uint32_t *hdr);
@@ -42,4 +51,5 @@ private:
     // a crop's head inputs: x = [pool mean (g) | keypoint features (K kpd)] from pool (or pool_pre with pre), and
     // screen when non-null
     void features(const uint8_t *out, bool pre, float *x, float *screen) const;
+    bool parse_float(const uint32_t *hdr, size_t size, std::string &err);
 };

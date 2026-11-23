@@ -121,6 +121,28 @@ static void two_view() {
     CHECK(NpuHeads::file_bytes(hostile) == 0);
 }
 
+// version 3 (float outputs): a 12-word header alone, decode copies out0..out3 as Nets::landmarks reads them
+static void float_outs() {
+    uint32_t hdr[12] = {0x484E5446u, 3u, 0x31c77f1cu, 21u, 0, 0, 0, 0, 0, 0, 0, 224u};
+    NpuHeads h;
+    std::string err;
+    CHECK(NpuHeads::file_bytes(hdr) == 48);
+    CHECK(h.parse(reinterpret_cast<const uint8_t *>(hdr), sizeof hdr, err));
+    CHECK(h.float_outs && !h.two_view && h.graph_id == 0x31c77f1cu && h.crop == 224);
+    CHECK(h.out_bytes() == 4 * 128);
+    float o[128];
+    for (int i = 0; i < 128; ++i) o[i] = float(i);
+    float screen[42], world[63], p = 0, r = 0;
+    h.decode(reinterpret_cast<const uint8_t *>(o), screen, world, p, r);
+    CHECK(screen[0] == 0.f && screen[1] == 1.f && screen[2] == 3.f && screen[41] == 61.f);
+    CHECK(p == 63.f && r == 64.f && world[0] == 65.f && world[62] == 127.f);
+    std::vector<uint8_t> longer(sizeof hdr + 4, 0);
+    std::memcpy(longer.data(), hdr, sizeof hdr);
+    CHECK(!h.parse(longer.data(), longer.size(), err));   // only the header
+    hdr[5] = 28;
+    CHECK(!h.parse(reinterpret_cast<const uint8_t *>(hdr), sizeof hdr, err));   // shape words must be 0
+}
+
 static void fixture(const char *path) {
     std::ifstream f(path, std::ios::binary);
     std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -158,6 +180,7 @@ static void fixture(const char *path) {
 int main(int argc, char **argv) {
     peaked();
     two_view();
+    float_outs();
     if (argc > 1) fixture(argv[1]);
     std::printf(failures ? "npuheads: %d failures\n" : "npuheads: ok\n", failures);
     return failures != 0;

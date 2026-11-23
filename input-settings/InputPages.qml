@@ -1946,6 +1946,32 @@ Item {
                         }
                     }
 
+                    // 60 tracked frames a second (hands/handsrate.py): the cameras' no-dark mode, which stops
+                    // the controllers, and ft-hands tracking every frame. The warning always shows.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Frame rate" }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "60 fps hand tracking:"
+                        text: "Track every camera frame (the controllers stop tracking)"
+                        checked: !!backend.handsRate.on
+                        enabled: !backend.handsRate.busy
+                        onToggled: backend.setHandsRate(checked)
+                    }
+                    Kirigami.InlineMessage {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        visible: true
+                        type: Kirigami.MessageType.Warning
+                        text: backend.handsRate.warning
+                    }
+                    Controls.Label {
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        visible: !!backend.handsRate.note
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        text: backend.handsRate.note || ""
+                    }
+
                     // Which hand models ft-hands runs (HANDS_MODEL): latest, a version, or stock MediaPipe.
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand model" }
                     ModelPicker {

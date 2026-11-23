@@ -1,10 +1,12 @@
 """Frametop Settings' Hands page: the lazy susan's distance (SCREEN_SPIN_DISTANCE) read, kept in
-range, written to frametop.conf and sent to ft-screens, and the page loading with its slider. HOME is a
+range, written to frametop.conf and sent to ft-screens, the 60 fps switch (hands/handsrate.py: its
+state and warning, and the command it runs on the host), and the page loading with its slider. HOME is a
 temporary directory; nothing goes to the host. Needs PySide6 and Kirigami (the image's python3).
 Run: python3 input-settings/test/test_hands_page.py"""
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -71,6 +73,40 @@ class Page(unittest.TestCase):
         self.assertEqual(fis.read_conf()["HANDS_CUTOUTS"], "0")
         self.assertEqual(self.sent[-1], ("cutouts off", fis.SCREENS))
         self.assertIn("# mine", Path(fis.CONF_PATH).read_text())
+
+    def test_rate_switch_shows_the_camera_mode_and_runs_handsrate(self):
+        # Off until the cameras are in the no-dark mode; the warning about the controllers always
+        # there. The switch runs handsrate.py on the host with --now, shows what was asked while it
+        # runs, and says what handsrate.py said.
+        st = self.b.handsRate
+        self.assertEqual((st["on"], st["busy"], st["note"]), (False, False, ""))
+        self.assertIn("controllers don't track", st["warning"])
+        fis.handsrate.write_cameras(fis.handsrate.HIGH)
+        self.addCleanup(fis.handsrate.write_cameras, {})
+        self.assertTrue(self.b.handsRate["on"])
+        self.assertIn("HANDS_FULL_RATE", self.b.handsRate["note"])   # the cameras alone: it says so
+
+        class Ran:
+            returncode, stdout, stderr = 0, "60 fps hand tracking off: the controllers track again.\n", ""
+        ran, said, seen = [], [], []
+
+        def host(*cmd, timeout=20):
+            ran.append(cmd)
+            seen.append(dict(self.b.handsRate))   # while it runs
+            return Ran()
+        old, fis.host = fis.host, host
+        self.addCleanup(setattr, fis, "host", old)
+        self.b.message.connect(lambda text, bad: said.append((text, bad)))
+        self.b.setHandsRate(False)
+        for _ in range(200):
+            self.app.processEvents()
+            if said:
+                break
+            time.sleep(0.01)
+        self.assertEqual(ran, [("python3", fis.HANDSRATE, "off", "--now")])
+        self.assertEqual((seen[0]["on"], seen[0]["busy"]), (False, True))
+        self.assertEqual(said, [("60 fps hand tracking off: the controllers track again.", False)])
+        self.assertFalse(self.b.handsRate["busy"])
 
     def test_page_loads(self):
         errors = []

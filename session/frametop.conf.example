@@ -90,6 +90,8 @@ GAZE_PUTON_QUICK=0         # gaze service, fit watch on, our tracker in use: 1 =
 HANDS_MODE=off             # hand tracking (hands/run.sh install; install.sh sets frametop when it installs it), when it runs: frametop = while the Frametop desktop runs | always = whenever SteamVR runs, in games and the dashboard too | off = only by hand (ft-handsctl on). Frametop Settings' Hands page applies it at once
 HANDS_SWAP_SIDES=auto      # hand tracking: which side camera is which. auto = ft-hands tells from the hands and fixes ft-camd's names, which some SteamVR restarts swap | 0 = keep ft-camd's | 1 = exchange them
 HANDS_CPUS=5,6,7           # hand tracking: the CPUs its model threads run on
+HANDS_MAX_HZ=30            # hand tracking: the most frame sets a second it tracks, 10-120 (a fast hand gets this, a slow one half, no hand 5). SteamVR's cameras give 30 bright sets a second; Frametop Settings' 60 fps hand tracking switch (hands/handsrate.py) sets 60 here with the cameras' no-dark mode, where the controllers don't track
+HANDS_FULL_RATE=0          # hand tracking: 1 = a slow hand is tracked at HANDS_MAX_HZ too, so every frame set with a hand in view (the 60 fps switch sets it)
 HANDS_CAMERAS=auto         # hand tracking: auto (by the light) | mono (the IR cameras; also keeps ft-camd off the colour ones) | color | all
 HANDS_BRIGHT=all           # hand tracking, auto: the cameras in bright light, all | color
 HANDS_BRIGHT_ON=40         # hand tracking, auto: the colour frames' mean brightness (0-255) that counts as bright (a dim room reads about 9)

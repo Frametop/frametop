@@ -1,4 +1,5 @@
-// track/npuheads.cpp: a peaked heatmap lands on its cell's centre, a bad heads file is refused, and with a fixture
+// track/npuheads.cpp: a peaked heatmap lands on its cell's centre, a bad heads file is refused, a tiny two-view file
+// adds exactly its partner terms, and with a fixture
 // (npu-hands npud/heads_file.py fixture G.npz OUT.bin) every case matches int8_ref.heads: a two-view graph's cases
 // (heads file version 2) read with their partner's outputs, or alone when the case's has2 is 0.
 //   build/npuheads-test [FIXTURE]
@@ -73,6 +74,49 @@ static void peaked() {
     CHECK(!h.parse(v2.data(), v2.size(), err) && err.find("version") != std::string::npos);
 }
 
+// A two-view file (version 2) with g = kpd = hidden = 1 and a 2 x 2 pool: every weight 0 but world1 (all 1), and the
+// partner terms world_p (pool 2, keypoint 0's feature 0.5), pres_p 1, right_p -1. A crop's outputs are 21 heat
+// planes, one kp_feat plane, then pool and pool_pre (4 bytes each).
+static std::vector<uint8_t> tiny_v2() {
+    std::vector<uint8_t> b;
+    auto u = [&b](uint32_t v) { b.insert(b.end(), (uint8_t *)&v, (uint8_t *)&v + 4); };
+    auto f = [&b](float v) { b.insert(b.end(), (uint8_t *)&v, (uint8_t *)&v + 4); };
+    auto fs = [&f](int n, float v) { for (int i = 0; i < n; ++i) f(v); };
+    for (uint32_t v : {0x484E5446u, 2u, 0x2feu, 21u, 4u, 4u, 1u, 1u, 1u, 2u, 2u, 0u}) u(v);
+    f(0.5f), f(0.1f), f(0.01f), f(0.02f);   // heat, kp, pool, pool_pre
+    for (int i = 0; i < 4; ++i) f(8.f * i + 3.5f);
+    fs(2 * (1 + 1), 0.f);              // pres w, b; right w, b
+    fs(22 + 1, 0.f);                   // world0 w [1][22], b
+    fs(63, 1.f), fs(63, 0.f);          // world1 w [63][1], b
+    f(2.f), f(0.5f), fs(20, 0.f);      // world_p w [1][g + 21 kpd]: pool, then keypoint 0's feature
+    f(1.f), f(-1.f);                   // pres_p, right_p
+    return b;
+}
+
+static void two_view() {
+    NpuHeads h;
+    std::string err;
+    auto file = tiny_v2();
+    CHECK(h.parse(file.data(), file.size(), err));
+    CHECK(h.two_view && h.out_bytes() == 21 * 16 + 16 + 4 + 4);
+    // own: pool 0 (its pool_pre 200 is the partner's business); partner: pool 50 (unused), pool_pre 100, kp 10,
+    // flat heatmaps -> pooled pre 100 * 0.02 = 2, keypoint 0's feature 10 * 0.1 = 1
+    std::vector<uint8_t> own(h.out_bytes(), 0), mate(h.out_bytes(), 0);
+    std::memset(own.data() + 21 * 16 + 16 + 4, 200, 4);
+    std::memset(mate.data() + 21 * 16, 10, 16);
+    std::memset(mate.data() + 21 * 16 + 16, 50, 4);
+    std::memset(mate.data() + 21 * 16 + 16 + 4, 100, 4);
+    float screen[42], world[63], p = 0, r = 0;
+    h.decode(own.data(), screen, world, p, r);
+    CHECK(std::fabs(world[0]) < 1e-6 && std::fabs(p - 0.5f) < 1e-6 && std::fabs(r - 0.5f) < 1e-6);
+    h.decode(own.data(), screen, world, p, r, mate.data());
+    const float sig2 = 1.f / (1.f + std::exp(-2.f));
+    for (int i = 0; i < 63; ++i) CHECK(std::fabs(world[i] - 4.5f) < 1e-5);   // relu(2 * 2 + 0.5 * 1) * 1
+    CHECK(std::fabs(p - sig2) < 1e-6 && std::fabs(r - (1.f - sig2)) < 1e-6);
+    file.pop_back();
+    CHECK(!h.parse(file.data(), file.size(), err));
+}
+
 static void fixture(const char *path) {
     std::ifstream f(path, std::ios::binary);
     std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -109,6 +153,7 @@ static void fixture(const char *path) {
 
 int main(int argc, char **argv) {
     peaked();
+    two_view();
     if (argc > 1) fixture(argv[1]);
     std::printf(failures ? "npuheads: %d failures\n" : "npuheads: ok\n", failures);
     return failures != 0;

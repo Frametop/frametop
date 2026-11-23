@@ -51,12 +51,21 @@ bool g_tileSteamOverBar = false;          // ...and Steam's tile turned over it 
 // The command-center arc (tiling::FromEyes): its centre this far behind your eyes. The wall's numbers
 // (Wall, DASH_TILE_GAP_DEG, DASH_TILE_WALL_DEG) are as your eyes see them, a panel's size too (TileInfo).
 constexpr double kFocusBackM = 2.0;
+// DASH_TILE_CURVE_M (user, 2026-11-22: "they might want to have the tiling curve at a sharper angle
+// around them"): the arc's radius, its centre to the wall, metres; at the wall's distance or less the
+// arc is round your head. 0, not set: kFocusBackM behind your eyes, whatever the wall's distance.
+double g_tileCurveM = 0;
+double BackFor(double wallM) { return g_tileCurveM > 0 ? std::max(0.0, g_tileCurveM - wallM) : kFocusBackM; }
 tiling::Eyes g_tileEyes;                  // the gaps' and the desk's width (the wall and the desk line: Wall's)
 double g_tileFit = 0;                     // DASH_TILE_FIT: 1, the tiles fitted by size with no columns (tilefit.h)
 void ApplyWall() {
     const Wall &w = g_tileWallAtBar || g_tileWallKeepBar ? g_tileWallBar : g_tileWallSet;
     g_tileEyes.radius = w.radius, g_tileEyes.deskDeg = w.deskDeg;
-    tiling::FromEyes(g_tileEyes, kFocusBackM, &g_tiles.params);
+    const double back = BackFor(w.radius), moved = back - g_tiles.params.backM;
+    // (the arc's centre moved along the group's +Z: your eyes stay where they were; Regroup sets the frame anew)
+    if (g_tileGroupSet && moved != 0)
+        for (int r = 0; r < 3; ++r) g_tileGroupRel.m[r][3] += float(g_tileGroupRel.m[r][2] * moved);
+    tiling::FromEyes(g_tileEyes, back, &g_tiles.params);
     g_tiles.params.fit = g_tileFit >= 0.5;
 }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
@@ -236,8 +245,8 @@ bool Regroup(bool atHead = false) {
     if (!g_tileWallAtBar) dashtiles::GroupFrame(h, fwd, up, g);
     g_tileWallBarKnown = g_tileWallBarKnown || g_tileWallAtBar;
     g_tileWallKeepBar = atHead && g_tileAtBar && g_tileWallBarKnown;
-    for (int r = 0; r < 3; ++r) g[r][3] += g[r][2] * kFocusBackM;   // (the arc's centre behind your eyes: its +Z)
     ApplyWall();
+    for (int r = 0; r < 3; ++r) g[r][3] += g[r][2] * g_tiles.params.backM;   // (the arc's centre behind your eyes: its +Z)
     const double barW = DashWidth();
     // (at the bar, Steam's page over it, just in front of the tiles: the slot as wide as the page, or they'd show behind it)
     const double slotW = g_tileWallAtBar ? std::max(barW, SteamPageWidth()) : barW;
@@ -270,7 +279,7 @@ bool Regroup(bool atHead = false) {
 }  // namespace
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
-std::array<TileSetting, 6> TileSettings() {
+std::array<TileSetting, 7> TileSettings() {
     // (the desk and the wall while they aren't at Steam's bar, DASH_TILE_AT_BAR, which keeps to their ranges)
     static_assert(dashtiles::kDeskMinDeg == -40 && dashtiles::kDeskMaxDeg == 20 && dashtiles::kWallMinM == 0.8 &&
                   dashtiles::kWallMaxM == 6, "AtBar's ranges are DASH_TILE_DESK_DEG's and DASH_TILE_RADIUS's");
@@ -279,7 +288,8 @@ std::array<TileSetting, 6> TileSettings() {
              {"DASH_TILE_PX_PER_DEG", &g_tiles.params.pxPerDeg, 15, 120},   // a panel's natural size
              {"DASH_TILE_GAP_DEG", &g_tileEyes.gapDeg, 0, 10},   // between tiles, round you and up
              {"DASH_TILE_WALL_DEG", &g_tileEyes.wallDeg, 30, 300},   // the desk's width before panels stack
-             {"DASH_TILE_FIT", &g_tileFit, 0, 1}}};   // 1: fitted by size, no columns (tilefit.h)
+             {"DASH_TILE_FIT", &g_tileFit, 0, 1},   // 1: fitted by size, no columns (tilefit.h)
+             {"DASH_TILE_CURVE_M", &g_tileCurveM, 0, 12}}};   // the arc's radius (0: kFocusBackM behind your eyes)   // 1: fitted by size, no columns (tilefit.h)
 }
 // One of them live: false if it isn't one, or out of its range. The tiles go round again.
 bool SetTileSetting(const char *name, double value) {

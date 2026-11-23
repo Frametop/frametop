@@ -25,7 +25,7 @@ Frunner works while the Frametop desktop is running and Frametop isn't paused fo
 
 ## The key list
 
-The `keys_list` action (`Meta+/` by default) opens frunner as a list of every key combination the input relay has bound, each by what it does (`frunner/keylist.py`). Typing filters it. Enter on a dashboard tiling key or one of the OS menu's actions does it; on any other it says which keys to press. The first item, Rebind keys, opens Frametop Settings' Keyboard page.
+The `keys_list` action (`Meta+/` by default) opens frunner as a list of every key combination the input relay has bound (`frunner/keylist.py`). Each row leads with what the combination does, with its keys in the smaller line under it. Typing filters it. Enter on a dashboard tiling key or one of the OS menu's actions does it; on any other it says which keys to press. The first item, Rebind keys, opens Frametop Settings' Keyboard page.
 
 ## The OS menu
 

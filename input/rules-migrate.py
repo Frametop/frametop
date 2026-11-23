@@ -26,6 +26,9 @@ user removes afterwards stays removed.
   binds already stays the user's. (The moves were Meta+arrows until 2026-11-20, changed here
   before any release had this change, so no install outside development ran that version.)
 
+  close-app-key (2026-11-23): Meta+W closes the app you're typing in ("125+17": close_app, a new
+  default). Added the same way.
+
   input/rules-migrate.py [RULES [STATE]]
 Python 3 standard library only: it runs on the SteamOS host.
 """
@@ -51,6 +54,8 @@ TILE_KEYS_KEY = "dashboard-tile-keys"
 TILE_COMBOS = {"42+125+105": "tile_left", "42+125+106": "tile_right", "42+125+103": "tile_up", "42+125+108": "tile_down",
                "29+125+106": "tile_wider", "29+125+105": "tile_narrower", "29+125+103": "tile_taller",
                "29+125+108": "tile_shorter", "125+53": "keys_list"}
+CLOSE_APP_KEY = "close-app-key"
+CLOSE_APP_COMBO, CLOSE_APP_ACTION = "125+17", "close_app"
 
 
 def read_state(path):
@@ -173,8 +178,13 @@ def tile_keys(path):
                         "move and size the dashboard tiles, list the key combinations", "Dashboard tile: ...")
 
 
+def close_app_key(path):
+    return add_binding(path, CLOSE_APP_KEY, CLOSE_APP_COMBO, CLOSE_APP_ACTION, "Meta+W",
+                       "close the app you're typing in", "Close app")
+
+
 MIGRATIONS = ((SCREENS_TOGGLE_KEY, screens_toggle_key), (RELEASE_KEYS_KEY, release_keys_key),
-              (DESKTOPLESS_KEY, desktopless_key), (TILE_KEYS_KEY, tile_keys))
+              (DESKTOPLESS_KEY, desktopless_key), (TILE_KEYS_KEY, tile_keys), (CLOSE_APP_KEY, close_app_key))
 
 
 def main(rules=RULES, state_path=STATE):

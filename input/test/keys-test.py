@@ -745,6 +745,16 @@ def tests():
     check("the tiling actions and keys_list work without pointer mode",
           [a for a in (*relay.TILE_ACTIONS, "keys_list") if not relay.known_action(a) or relay.needs_pointer(a)], [])
 
+    # Meta+W (default) closes the app typing goes to: Alt+F4 tapped there, and W isn't typed.
+    W_KEY, F4 = 17, 62
+    got = meta(W_KEY)
+    check("Meta+W (default): Alt+F4 tapped on the desktop, W not typed",
+          ([m for m in got if m.split()[:2] in (["key", str(ALT)], ["key", str(F4)])], f"key {W_KEY} 1" in got),
+          ([f"key {ALT} 1", f"key {F4} 1", f"key {F4} 0", f"key {ALT} 0"], False))
+    check("close_app works without pointer mode, and not while paused",
+          (relay.known_action("close_app"), relay.needs_pointer("close_app"), relay.works_paused("close_app")),
+          (True, False, False))
+
     # A PC's desktop has the keys (ft-screens' sixth "keyboard" word: 1 the 3D mouse on it, 2 on
     # no panel since and asleep): Meta+Space and a Meta tap are the PC's, typed through, not
     # frunner's or Steam's menu. 0 (the 3D mouse moved off it) gives them back.

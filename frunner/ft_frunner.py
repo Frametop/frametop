@@ -675,7 +675,8 @@ class Frunner:
         if item.kind == "keybind":
             if item.key == keylist.REBIND_KEY:
                 return Entry("item", item.title, item.generic, SETTINGS_ICON, "Open", run=self.open_key_settings, item=item)
-            return Entry("item", item.data["keys"], keylist.label(item.data["action"]), ACTION_ICON,
+            # what it does in the row's large line, its keys in the small one under it
+            return Entry("item", keylist.label(item.data["action"]), item.data["keys"], ACTION_ICON,
                          "Do" if item.data["runnable"] else "", run=lambda: self.run_keybind(item), item=item)
         if item.kind == "action":
             return Entry("item", item.title, "Frametop", ACTION_ICON, "Do", run=lambda: self.run_action(item), item=item)

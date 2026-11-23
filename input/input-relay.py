@@ -53,7 +53,8 @@ it runs, else start it, until the next desktop or SteamVR start (hands/handsmode
 by default), release_keys = let go of every key held anywhere: what the desktop, a remote
 display and this relay hold, and every modifier in KWin, known to be held or not ("keys
 release" to ft-screens; Ctrl+Alt+Shift+Esc by default), desktopless_toggle = desktopless mode on or off
-(ft-layout desktopless toggle, docs/desktopless.md; Meta+Shift+D by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
+(ft-layout desktopless toggle, docs/desktopless.md; Meta+Shift+D by default), close_app = close the app
+you're typing in: Alt+F4 tapped where typing goes, as a keys: action is (Meta+W by default), run:NAME = run your command NAME in the background (commands/ft_commands.py: a
 transient systemd user unit, output to the journal; docs/commands.md), command:CMD = run CMD with
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
 ft-layout, ft-float, ft-steam, ft-voice and ft-room need no path), keys:CODES = tap that key combination
@@ -79,12 +80,13 @@ stops on its release, and a key, mouse button or scroll in between makes it a sh
 cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
 Meta+K: gaze_right, Meta+Shift+F: float_toggle, Meta+Shift+H: screens_toggle, Ctrl+Alt+Shift+Esc:
-release_keys, Meta+arrows and Meta+Ctrl+arrows: the dashboard tiling keys, Meta+/: keys_list), plus a
+release_keys, Meta+W: close_app, Meta+arrows and Meta+Ctrl+arrows: the dashboard tiling keys, Meta+/:
+keys_list), plus a
 Right Ctrl tap for dictate once Frametop Voice is installed
 (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. A combination bound to
 release_keys also fires with more modifiers held than it names, so one stuck here doesn't stop it.
-The float, screens, profile, Steam menu, pause, dictation, hand tracking, release and command
-actions work without pointer mode too. A combination with Meta also sends the desktop Meta's
+The float, screens, profile, Steam menu, pause, dictation, hand tracking, release, close app and
+command actions work without pointer mode too. A combination with Meta also sends the desktop Meta's
 release right away, after an F24 press when Meta is the only key it holds: so letting go of Meta
 doesn't open Plasma's launcher (another held key, the Shift of Meta+Shift+H, already stops that,
 and F24 would reach the app), and a gaze click isn't Meta+click (KWin's window move and resize).
@@ -383,8 +385,8 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
            "pointer_toggle", "follow_toggle", "gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze_right",
            "gaze_quickcal", "sens_up", "sens_down", "layout_reset", "screens_toggle", "keyboard_toggle", "float_toggle",
            "dock_all", "spin_next", "spin_prev", "carry_toggle", "steam_menu", "pause_toggle", "dictate", "dictate_hold",
-           "frunner", "os_menu", "hands_toggle", "release_keys", "desktopless_toggle", *TILE_ACTIONS, "keys_list",
-           "key", "none")
+           "frunner", "os_menu", "hands_toggle", "release_keys", "desktopless_toggle", "close_app", *TILE_ACTIONS,
+           "keys_list", "key", "none")
 # GAZE_ACTIONS (mouse and keyboard only) and DEFAULT_KEY_BINDINGS, the key combinations a rules
 # file without "key_bindings" gets, are ft_input_actions'.
 # Frametop Voice (voice/): dictation starts and stops on its socket. With it installed (its unit
@@ -482,6 +484,9 @@ KEYS_MAX = 6  # keys in one "keys:" action at most
 # Never in a "keys:" action: the volume keys (see the top) and power, sleep, wake and suspend,
 # which logind may act on from the virtual keyboard. Input Settings' is_keys has the same list.
 KEYS_REFUSED = {KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, 116, 142, 143, 205}
+# close_app taps these where typing goes: Alt+F4 closes the window with the keyboard focus on the
+# Frametop desktop (KWin), on a PC's desktop and in Steam's session, so it closes what you type in.
+CLOSE_APP_KEYS = (56, 62)
 
 
 def keys_codes(a):
@@ -504,7 +509,7 @@ def known_action(a):
 def needs_pointer(a):
     return (a not in FLOAT_ACTIONS and a not in SCREENS_ACTIONS and a not in VOICE_ACTIONS and a not in TILE_ACTIONS
             and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "keys_list", "hands_toggle", "release_keys",
-                          "desktopless_toggle", "gaze_quickcal")
+                          "desktopless_toggle", "close_app", "gaze_quickcal")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
@@ -1652,6 +1657,10 @@ class Relay:
         elif action.startswith(KEYS):
             if value == 1:
                 self.tap_keys(keys_codes(action), now)
+        elif action == "close_app":
+            if value == 1:
+                self.tap_keys(list(CLOSE_APP_KEYS), now)
+                log(action)
         elif action.startswith(COMMAND):
             if value == 1:
                 subprocess.Popen(["sh", "-c", action[len(COMMAND):]], stdin=subprocess.DEVNULL,

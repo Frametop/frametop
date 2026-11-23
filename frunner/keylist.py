@@ -45,8 +45,9 @@ def label(action):
 
 
 def items(table):
-    """The list's items, the Rebind one first, then each binding by its action's name. Kind "keybind";
-    data: {"combo", "keys", "action", "runnable"}. Pass-through and do-nothing bindings aren't listed."""
+    """The list's items, the Rebind one first, then each binding by its action's name: what it does,
+    then its keys. Kind "keybind"; data: {"combo", "keys", "action", "runnable"}. Pass-through and
+    do-nothing bindings aren't listed."""
     out = [spotsearch.Item("keybind", REBIND_KEY, "Rebind keys in Frametop Settings", "Keyboard page",
                            ("rebind", "settings", "shortcut", "change"), "",
                            {"combo": "", "keys": "", "action": "", "runnable": False})]
@@ -55,7 +56,7 @@ def items(table):
         if action in ("key", "none"):
             continue
         keys = combo_name(combo)
-        rows.append(spotsearch.Item("keybind", "keys:" + combo, f"{keys}  {label(action)}", "",
+        rows.append(spotsearch.Item("keybind", "keys:" + combo, f"{label(action)}  {keys}", "",
                                     (keys, action, *keys.split("+")), "",
                                     {"combo": combo, "keys": keys, "action": action,
                                      "runnable": action in KEY_LIST_RUNNABLE}))

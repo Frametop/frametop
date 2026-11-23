@@ -1,7 +1,7 @@
 // ft-handreplay: run a recording (ft-hands --record) through the tracker offline, with the
 // live scheduling, and report how well it kept the hands.
 //
-//   ft-handreplay DIR [--oracle N] [--slow F] [--timeline FILE] [--threads N] [--models DIR]
+//   ft-handreplay DIR [--oracle N] [--slow F] [--timeline FILE] [--threads N] [--models DIR] [--npu DIR] [--npu-det]
 //             [--from S] [--to S] [--contrast MODE|PALM/HAND] (clahe[:CLIP], none, stretch)
 //             [--sides file|0|1|auto]
 //
@@ -18,6 +18,7 @@
 // --keep-presence P: landmark presence a tracked view needs to stay (default 0.5, as new ones).
 // --reacquire S, --reacquire-tiles N, --reacquire-fast: aim the palm search at hands lost within S s
 //             (Tracker::set_reacquire; default off, tiles 2).
+// --views N: a hand's landmark views a step at most (2). --hand-budget N: Tracker::set_hand_budget (4).
 // --near F: Tracker::set_near (0.5). --hold S: Tracker::set_hold (0.3). --search-budget N: palm tiles per round with one hand tracked (2).
 // --drop-every S: the re-acquire test. Every S s, while two hands are tracked, one of them (left and
 //             right in turn) is made invisible for 0.35 s (Tracker::blind: just past the 0.3 s the tracker
@@ -25,6 +26,11 @@
 //             the time to find a hand that never left the view.
 // --pair-sides: two hands seen at once get one left and one right (Tracker::set_pair_sides).
 // --misread-guard: the tracker's guards for fine-tuned landmark models (Tracker::set_misread_guard).
+// --npu DIR: landmarks from the NPU student through ft-npud in DIR (/run/ft-npud; track/npulandmarks.h), the
+//             --models hand model where it refuses a call. --npu-det: the side cameras' palm search on the NPU
+//             detector too (track/npudetector.h), the CPU tiles where it refuses a round. --npu-cpu-landmarks:
+//             only the detector on the NPU, the landmarks on the CPU (to score the detector alone).
+// --cpus LIST: the cores the replay and its model threads run on (5,6,7: ft-hands' default, off ft-npud's 2-4).
 // --pinch-begin M, --pinch-end M, --pinch-triangulated, --pinch-palm-down MAX, --pinch-dip 0|1,
 //             --pinch-fist-curl R: the pinch detector (track/pinch.h; --pinch-dip 1: PinchParams::dip, as
 //             HANDS_PINCH_DIP=1; --pinch-fist-curl: PinchParams::fist_curl, 1.2 as ft-hands, 0 off, as
@@ -99,8 +105,11 @@
 //             cameras, triangulation residual, hand scale, measured and published palm, and
 //             each view's one-view palm (Tracker::single_view at the hand's scale). The
 //             header has each camera's centre and focal length.
+#include "cpus.h"
 #include "flagbuf.h"
 #include "io.h"
+#include "npudetector.h"
+#include "npulandmarks.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -108,6 +117,7 @@
 #include "tracker.h"
 
 #include <json/json.h>
+#include <sched.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -150,6 +160,7 @@ int main(int argc, char **argv) {
     }
     const std::string dir = argv[1];
     int oracle = 0, threads = 2;
+    std::vector<int> cpus = {5, 6, 7};   // as ft-hands: not ft-npud's cores 2-4
     double slow = 1.0, from = 0, to = 1e9;
     bool cost = false;
     double cost_hand = 10, cost_palm = 18;
@@ -162,7 +173,7 @@ int main(int argc, char **argv) {
     double drop_every = 0;   // seconds; 0: off
     double reacquire_clear = 0.12;
     double near_frac = 0.5, hold = 0.3;
-    int search_budget1 = 2;
+    int search_budget1 = 2, max_views = 2, hand_budget = 4;
     bool skeleton = true, pinch_fitted = false;
     skel::Params skel_params;
     std::string labels, hmd_poses, skeleton_dump, publish_dump;
@@ -173,7 +184,8 @@ int main(int argc, char **argv) {
     double fixed_rate = 0, want_hz = 0;
     double flag_every = 0;
     std::vector<double> flag_at;
-    std::string flag_out;
+    std::string flag_out, npu_dir;
+    bool npu_det = false, npu_cpu_landmarks = false;
     FlagConfig flag_cfg;
     flag_cfg.max_bytes = size_t(400) << 20, flag_cfg.writer_cpus.clear();
     // as ft-hands: the fine-tuned models (models/student) when hands/models.sh fetched them, else the stock ones
@@ -196,6 +208,13 @@ int main(int argc, char **argv) {
         else if (a == "--want-hz" && more) want_hz = std::min(30.0, std::atof(argv[++i]));
         else if (a == "--threads" && more) threads = std::atoi(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
+        else if (a == "--npu" && more) npu_dir = argv[++i];
+        else if (a == "--npu-det") npu_det = true;
+        else if (a == "--cpus" && more) {
+            cpus = parse_cpus(argv[++i]);
+            if (cpus.empty()) return std::fprintf(stderr, "--cpus: a list such as 5,6,7 or 5-7\n"), 1;
+        }
+        else if (a == "--npu-cpu-landmarks") npu_cpu_landmarks = true;
         else if (a == "--cost") cost = true;
         else if (a == "--cost-hand" && more) cost_hand = std::atof(argv[++i]);
         else if (a == "--cost-palm" && more) cost_palm = std::atof(argv[++i]);
@@ -210,6 +229,8 @@ int main(int argc, char **argv) {
         else if (a == "--near" && more) near_frac = std::atof(argv[++i]);
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
         else if (a == "--search-budget" && more) search_budget1 = std::atoi(argv[++i]);
+        else if (a == "--views" && more) max_views = std::max(1, std::atoi(argv[++i]));
+        else if (a == "--hand-budget" && more) hand_budget = std::atoi(argv[++i]);
         else if (a == "--no-skeleton") skeleton = false;
         else if (a == "--pinch-fitted") pinch_fitted = true;
         else if (a == "--labels" && more) labels = argv[++i];
@@ -267,6 +288,13 @@ int main(int argc, char **argv) {
         else if (a == "--to" && more) to = std::atof(argv[++i]);
         else return std::fprintf(stderr, "unknown option %s\n", a.c_str()), 1;
     }
+    cpu_set_t set;   // first, so every thread made from here on (the NPU client on this one) runs there, as in ft-hands
+    CPU_ZERO(&set);
+    for (int c : cpus) CPU_SET(c, &set);
+    if (sched_setaffinity(0, sizeof set, &set) < 0) return std::perror("--cpus"), 1;   // a replay measures: never unpinned
+    cpu_set_t got;   // the kernel drops CPUs this machine doesn't have and keeps the rest: never measure on fewer
+    if (sched_getaffinity(0, sizeof got, &got) < 0 || !CPU_EQUAL(&got, &set))
+        return std::fprintf(stderr, "--cpus: not every CPU listed is online here\n"), 1;
     std::string err;
     std::map<std::string, Camera> calib;
     Nets nets;
@@ -312,8 +340,19 @@ int main(int argc, char **argv) {
         const bool color = std::string(c.name).rfind("color_", 0) == 0;
         if (calib.count(c.name) && (use == "all" || color == (use == "color"))) used[c.name] = calib[c.name];
     }
-    Pool pool(threads, {2, 3, 4});
-    Tracker tracker(used, nets, pool);
+    Pool pool(threads, cpus);
+    std::unique_ptr<NpuSession> npu_session;
+    std::unique_ptr<NpuLandmarks> npu;
+    std::unique_ptr<NpuDetector> npu_detector;
+    // after the NPU backends it points at, so it goes first on the way out
+    Tracker tracker(used, nets, pool, max_views);
+    tracker.set_hand_budget(hand_budget);
+    if (!npu_dir.empty()) {
+        npu_session = std::make_unique<NpuSession>(npu_dir);
+        if (!npu_cpu_landmarks)
+            tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, *npu_session)).get());
+        if (npu_det) tracker.set_palm_detector((npu_detector = std::make_unique<NpuDetector>(nets, *npu_session)).get());
+    }
     // The side cameras (see the top): names_swapped exchanges slam_left's and slam_right's names
     // as sets are read.
     bool names_swapped = sides == "1";
@@ -827,6 +866,13 @@ int main(int argc, char **argv) {
                 s.handoff_miss, s.dups, s.splits, s.created, s.merged, s.forgotten);
     std::printf("model calls: palm %d (%.1f/s), hand %d (%.1f/s)\n", s.palm_calls, s.palm_calls / std::max(secs, 1e-9),
                 s.hand_calls, s.hand_calls / std::max(secs, 1e-9));
+    if (npu)
+        std::printf("npu: %d landmark calls in %d requests (%s), %d on the CPU, %d failures\n", s.npu_calls,
+                    npu->times.requests, npu->times.summary().c_str(), s.npu_fallbacks, npu_session->failures);
+    if (npu_detector)
+        std::printf("npu detector: %d cameras searched (%.2f ms of the steps each), %d searches on the CPU tiles, %d requests (%s)\n",
+                    s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
+                    npu_detector->times.requests, npu_detector->times.summary().c_str());
     {
         std::vector<double> r, step;
         std::map<int, double> prev;

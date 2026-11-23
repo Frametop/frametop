@@ -57,7 +57,9 @@
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
 // stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
-// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_REACQUIRE (seconds
+// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud: landmarks
+// from the NPU student, the CPU model whenever the daemon is missing or fails; track/npulandmarks.h), HANDS_NPU_DET
+// (1, as --npu-det: the side cameras' palm search on the NPU detector too; track/npudetector.h), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
 // begin on a sharp dip of the thumb-index distance, PinchParams::dip), HANDS_PINCH_FIST_CURL (1.2; 0 off:
@@ -70,8 +72,11 @@
 // checked 4 times a second and removed when taken; the folder's manifest.json is written last.
 #include "../../conf/ft_conf.h"
 #include "calibfile.h"
+#include "cpus.h"
 #include "flagbuf.h"
 #include "io.h"
+#include "npudetector.h"
+#include "npulandmarks.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -179,18 +184,6 @@ bool setting_number(const std::string &key, double &v) {
     return true;
 }
 
-std::vector<int> parse_cpus(const char *p) {
-    std::vector<int> out;
-    while (*p) {
-        char *end;
-        const long c = std::strtol(p, &end, 10);
-        if (end == p) break;
-        out.push_back(int(c));
-        p = *end == ',' ? end + 1 : end;
-    }
-    return out;
-}
-
 // Where SIGUSR1 puts recordings: $XDG_DATA_HOME/frametop/hands (~/.local/share/...).
 std::string recordings_dir() {
     const char *data = std::getenv("XDG_DATA_HOME"), *home = std::getenv("HOME");
@@ -275,6 +268,8 @@ int main(int argc, char **argv) {
     std::vector<int> cpus = {5, 6, 7};
     if (const auto c = parse_cpus(setting("HANDS_CPUS").c_str()); !c.empty()) cpus = c;
     if (const std::string m = setting("HANDS_MODELS"); !m.empty()) models = m;
+    std::string npu_dir = setting("HANDS_NPU");
+    bool npu_det = setting("HANDS_NPU_DET") == "1";
     // Which side camera is which (see the top): auto, 0 or 1, and where that came from
     std::string sides_mode = setting("HANDS_SWAP_SIDES"), sides_from = "config";
     if (sides_mode.empty()) sides_mode = "auto", sides_from = "default";
@@ -313,6 +308,10 @@ int main(int argc, char **argv) {
     num("HANDS_PINCH_DRAG_OPEN", pinch_params.drag_open_m, 0.03, 0.12);
     num("HANDS_PINCH_DRAG_OPEN_S", pinch_params.drag_open_s, 0.0, 1.0);
     num("HANDS_GRIP_TAKEOVER_S", pinch_params.grip_takeover_s, 0.0, 1.0);
+    // The fastest tracking rate (HANDS_MAX_HZ, --max-hz): 30 unless XRService runs the SLAM
+    // cameras at 60 or 120 Hz with no controller frames (captureSessionSettings.trackingCameras).
+    double max_hz = 30;
+    num("HANDS_MAX_HZ", max_hz, 10, 120);
     GripParams grip_params;
     bool gesture_log = false;   // what the pinch and grip detectors measure, 10 times a second
     double record_for = 120, record_hz = 0;   // record_hz: at most this many sets a second (0: all)
@@ -330,6 +329,8 @@ int main(int argc, char **argv) {
         else if (a == "--threads" && more) threads = std::max(1, std::atoi(argv[++i]));
         else if (a == "--status" && more) status = std::atof(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
+        else if (a == "--npu" && more) npu_dir = argv[++i];
+        else if (a == "--npu-det") npu_det = true;
         else if (a == "--nice" && more) niceness = std::atoi(argv[++i]);
         else if (a == "--int8") int8 = true;
         else if (a == "--no-publish") publish = false;
@@ -349,6 +350,7 @@ int main(int argc, char **argv) {
         else if (a == "--ring" && more) ring_path = argv[++i];
         else if (a == "--record" && more) record = argv[++i];
         else if (a == "--record-for" && more) record_for = std::atof(argv[++i]);
+        else if (a == "--max-hz" && more) max_hz = std::clamp(std::atof(argv[++i]), 10.0, 120.0);
         else if (a == "--record-hz" && more) record_hz = std::max(0.0, std::atof(argv[++i]));
         else if (a == "--keep-presence" && more) keep_presence = std::atof(argv[++i]);
         else if (a == "--misread-guard" && more) misread_guard = std::string(argv[++i]) == "1";
@@ -373,12 +375,15 @@ int main(int argc, char **argv) {
         else {
             std::printf("usage: %s [--seconds N] [--threads N] [--int8] [--status S] [--models DIR] [--nice N] [--no-publish]\n"
                         "          [--no-gestures] (hands for the cutouts only: no pinches or grips)\n"
+                        "          [--npu DIR] (landmarks from the NPU student through ft-npud in DIR, /run/ft-npud)\n"
+                        "          [--npu-det] (with --npu: the side cameras' palm search on the NPU detector too)\n"
                         "          [--record DIR] [--record-for S] [--record-hz N] [--record-only] [--cpus 5,6,7]\n"
                         "          [--sides auto|0|1] (auto: tell from the hands which side camera is which; 1: exchange them,\n"
                         "          as --swap-sides; 0: as ft-camd names them)\n"
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
+                        "          [--max-hz N] (30: fast hands; half that slow, 5 idle; HANDS_MAX_HZ)\n"
                         "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
                         "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
@@ -617,8 +622,18 @@ int main(int argc, char **argv) {
     if (sched_setaffinity(0, sizeof set, &set) < 0) std::perror("sched_setaffinity");
     nets.set_contrast(palm_contrast, hand_contrast);
     Pool pool(threads, cpus);
+    std::unique_ptr<NpuSession> npu_session;
+    std::unique_ptr<NpuLandmarks> npu;
+    std::unique_ptr<NpuDetector> npu_detector;
+    // after the NPU backends it points at, so it goes first on the way out
     Tracker tracker(used, nets, pool);
+    if (!npu_dir.empty()) {
+        npu_session = std::make_unique<NpuSession>(npu_dir);
+        tracker.set_landmark_batch((npu = std::make_unique<NpuLandmarks>(nets, *npu_session)).get());
+        if (npu_det) tracker.set_palm_detector((npu_detector = std::make_unique<NpuDetector>(nets, *npu_session)).get());
+    }
     tracker.set_keep_presence(keep_presence);
+    tracker.set_max_hz(max_hz);
     tracker.set_misread_guard(misread_guard);
     tracker.set_reacquire(reacquire, 2, true);
     tracker.set_pair_sides(pair_sides);
@@ -986,7 +1001,7 @@ int main(int argc, char **argv) {
                 (rt.tv_sec - st.st_mtim.tv_sec) * 1e9 + (rt.tv_nsec - st.st_mtim.tv_nsec) < 1e9)
                 if (FILE *f = std::fopen(want_hz_file.c_str(), "r")) {
                     if (std::fscanf(f, "%lf", &want_hz) != 1 || !(want_hz > 0)) want_hz = 0;
-                    want_hz = std::min(want_hz, 30.0);
+                    want_hz = std::min(want_hz, max_hz);
                     std::fclose(f);
                 }
         }
@@ -1157,7 +1172,7 @@ int main(int argc, char **argv) {
         // a gesture down or closing gets the full rate, even while the palm holds still
         // and so does a reader that asks for it (want-hz)
         next_ns = tmin + uint64_t((std::min({tracker.interval(),
-                                             pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / 30.0 : 1.0,
+                                             pinch.engaged() || middle.engaged() || grip.engaged() ? 1 / max_hz : 1.0,
                                              want_hz > 0 ? 1 / want_hz : 1.0}) -
                                    0.005) * 1e9);
         if (publish) pub.write(hands, capture);
@@ -1197,6 +1212,15 @@ int main(int argc, char **argv) {
                         tracker.skeleton().fits ? tracker.skeleton().us_total / tracker.skeleton().fits : 0.0,
                         100 * (cpu1 - cpu0) / dt);
             tracker.skeleton().fits = 0, tracker.skeleton().us_total = 0;
+            if (npu)
+                std::printf("        npu %s: %d landmark calls, %d on the CPU, %d requests (%s), %d failures%s%s\n",
+                            npu_session->connected() ? "connected" : "not connected", s.npu_calls, s.npu_fallbacks,
+                            npu->times.requests, npu->times.summary().c_str(), npu_session->failures,
+                            npu_session->last_error().empty() ? "" : "; last: ", npu_session->last_error().c_str());
+            if (npu_detector)
+                std::printf("        npu detector: %d cameras searched (%.2f ms of the steps each), %d searches on the CPU tiles, %d requests (%s)\n",
+                            s.det_rounds, s.det_rounds ? s.det_ms / s.det_rounds : 0.0, s.det_fallbacks,
+                            npu_detector->times.requests, npu_detector->times.summary().c_str());
             if (!color.empty())
                 std::printf("        cameras %s%s: colour frames at %.1f (bright at %.0f, dim under %.0f), ambient IR %.1f, "
                             "%d steps with colour, colour placed %.1f ms after capture\n",

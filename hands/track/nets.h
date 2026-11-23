@@ -54,6 +54,15 @@ public:
     bool load(const std::string &dir, bool int8, std::string &err);
     std::vector<Palm> palms(const Image &img, V2 center, double size, double rotation) const;
     Landmarks landmarks(const Image &img, const Roi &roi) const;
+    // The landmark model's crop for roi as size x size gray bytes, equalized as landmarks() does, and its
+    // crop-to-image matrix (for crop_to_image): what another landmark backend (the NPU's) reads. The CPU model
+    // reads kHandCrop; the NPU graph says its own size.
+    static constexpr int kHandCrop = 224;
+    void hand_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6], int size = kHandCrop) const;
+    static V2 crop_to_image(const float tm[6], double x, double y);
+    // The same size of crop equalized like the palm search's crops instead: the NPU detector's input (npu-hands
+    // train/student/det.py: a camera image's tiles).
+    void palm_crop(const Image &img, const Roi &roi, uint8_t *out, float tm[6]) const;
     // Before any palms()/landmarks(): how the palm search's and the landmark model's crops
     // are equalized.
     void set_contrast(const Contrast &palm, const Contrast &hand) { palm_contrast_ = palm, hand_contrast_ = hand; }

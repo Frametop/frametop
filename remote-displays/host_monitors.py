@@ -41,11 +41,13 @@ def scale_arg(scale):
     """ft-layout remote set's scale= value."""
     return "own" if not scale else f"{float(scale):g}"
 
-def _with_largest(monitor):
-    """The PC's monitor with `largest`, [width, height]: the most its panel's stream size boxes
-    go to (none when it lists no modes)."""
-    largest = ft_hostmonitors.largest_size(monitor) if isinstance(monitor, dict) else None
-    return dict(monitor, largest=list(largest)) if largest else monitor
+def _with_sizes(monitor):
+    """The PC's monitor with `largest`, [width, height] (the most its panel's stream size boxes
+    go to), and `sizes`, the stream sizes it lists, largest first. Neither when it lists none."""
+    sizes = ft_hostmonitors.listed_sizes(monitor) if isinstance(monitor, dict) else []
+    if not sizes:
+        return monitor
+    return dict(monitor, largest=list(ft_hostmonitors.largest_size(monitor)), sizes=[list(s) for s in sizes])
 
 
 class HostMonitors(QObject):
@@ -89,7 +91,7 @@ class HostMonitors(QObject):
             self._supported[name] = known
             self.supportedChanged.emit()
         before = self._listed.get(name, {})
-        monitors = [_with_largest(m) for m in answer.get("monitors", [])] if not error else before.get("monitors", [])
+        monitors = [_with_sizes(m) for m in answer.get("monitors", [])] if not error else before.get("monitors", [])
         note = error or answer.get("error") or ""  # its last change that didn't take
         # A sign-in from before Frametop could: the page says to sign in again even with the
         # switch off, or nothing would show that the switch is there.
@@ -114,6 +116,13 @@ class HostMonitors(QObject):
             if ft_hostmonitors.controls(host) and any(
                     d.get("id") == display_id and ft_hostmonitors.monitor_of(d) for d in host.get("displays", [])):
                 return self.refresh(host.get("name"))
+
+    @Slot(str, str, int, int, result=bool)
+    def cantBe(self, name, monitor_id, width, height):
+        """Whether the host's monitor (as last listed) can't be put at a stream size: its panel
+        then crops or fits it as it is."""
+        return any(m.get("id") == monitor_id and ft_hostmonitors.cant_be(m, width, height)
+                   for m in self._listed.get(name, {}).get("monitors", []))
 
     @Slot(str, bool)
     def setControl(self, name, on):

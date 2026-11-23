@@ -41,6 +41,13 @@ VOICE_ACTIONS = ("dictate", "dictate_hold")
 TILE_KEY_BINDINGS = MappingProxyType({"42+125+105": "tile_left", "42+125+106": "tile_right", "42+125+103": "tile_up",
                                       "42+125+108": "tile_down", "29+125+106": "tile_wider", "29+125+105": "tile_narrower",
                                       "29+125+103": "tile_taller", "29+125+108": "tile_shorter", "125+53": "keys_list"})
+# Meta+arrows alone on an anchored app window's tile (a floating window: ft-screens' "tilefocus 2")
+# move it as Meta+Shift+arrows do, unless the rules bind that combination to something. On the
+# desktop they're KWin's quick tile, which only halves a window alone on its own output: it looked
+# like a resize where a move was meant (user, 2026-11-23). On a screen's or a remote display's tile
+# they stay the desktop's and the PC's.
+APP_TILE_KEY_BINDINGS = MappingProxyType({"125+105": "tile_left", "125+106": "tile_right", "125+103": "tile_up",
+                                          "125+108": "tile_down"})
 DEFAULT_KEY_BINDINGS = MappingProxyType({"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
                         "42+125+33": "float_toggle", "56+125+15": "spin_next", "42+56+125+15": "spin_prev",
                         "125+57": "frunner", "125+35": "hands_toggle", "42+125+35": "screens_toggle",

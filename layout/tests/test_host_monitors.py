@@ -96,6 +96,25 @@ class Plan(unittest.TestCase):
         self.assertIsNone(hm.largest_size({"id": "DP-2", "modes": []}), "Windows lists none while it's off")
         self.assertIsNone(hm.largest_size({"id": "DP-2", "modes": [{"width": "wide"}]}))
 
+    def test_a_monitors_listed_sizes_are_largest_first(self):
+        wide = {"id": "HDMI-A-1", "modes": [dict(UHD, width=3840, height=1080), {"width": 5120, "height": 1440, "refresh_mhz": 240000},
+                                            {"width": 5120, "height": 1440, "refresh_mhz": 120000}, HZ60]}
+        self.assertEqual(hm.listed_sizes(wide), [(5120, 1440), (3840, 1080), (2560, 1600)], "each size once")
+        self.assertEqual(hm.listed_sizes(dict(wide, sideways=True))[0], (1440, 5120), "as its stream is")
+        self.assertEqual(hm.listed_sizes({"id": "DP-2", "modes": [{"width": "wide"}]}), [])
+
+    def test_a_size_the_monitor_refused_or_doesnt_list_is_one_it_cant_be(self):
+        known = listed()
+        self.assertFalse(hm.cant_be(known["eDP-2"], 2560, 1200), "Hyprland makes it")
+        refused = dict(known["eDP-2"], refused=[{"width": 2560, "height": 1200}])
+        self.assertTrue(hm.cant_be(refused, 2560, 1200), "it said so: its driver refuses made modes")
+        self.assertFalse(hm.cant_be(refused, 2560, 1600))
+        self.assertTrue(hm.cant_be(dict(refused, sideways=True), 1200, 2560), "asked unrotated")
+        self.assertTrue(hm.cant_be(known["DP-1"], 2560, 1440), "Windows makes none, and it lists none")
+        self.assertFalse(hm.cant_be(known["DP-1"], 3840, 2160))
+        self.assertFalse(hm.cant_be(dict(known["DP-1"], modes=[]), 2560, 1440), "off on Windows: no modes to tell by")
+        self.assertFalse(hm.cant_be(known["HDMI-A-1"], 2560, 1440), "an older build sets no size at all")
+
     def test_a_sideways_monitor_is_asked_for_its_size_unrotated(self):
         host = pc()
         host["displays"][1]["size"] = [2160, 3840]

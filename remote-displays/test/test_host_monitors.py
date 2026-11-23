@@ -33,11 +33,12 @@ def js(value):
     return value.toVariant() if hasattr(value, "toVariant") else value
 
 
-def state(dp_sideways=False, error=""):
+def state(dp_sideways=False, error="", refused=()):
     return {"status": True, "backend": "hyprland", "streams": 0, "applies": False, "grace_seconds": 120,
             "error": error, "others_off": True,
             "monitors": [{"id": "eDP-2", "name": "<b>Samsung</b>", "on": True, "primary": True, "mode": HZ240,
-                          "modes": [HZ240, HZ60], "changed": False, "sideways": False,
+                          "modes": [HZ240, HZ60], "changed": False, "sideways": False, "any_mode": True,
+                          "refused": [{"width": w, "height": h} for w, h in refused],
                           "scale": 1.25, "scales": [1, 1.25, 1.6, 2, 2.5]},
                          {"id": "DP-1", "name": "Dell", "on": True, "primary": False, "mode": UHD,
                           "modes": [UHD], "changed": False, "sideways": dp_sideways, "scale": 1, "scales": []}]}
@@ -86,6 +87,7 @@ class Backend(Base):
         self.assertEqual((got["note"], len(got["monitors"])), ("", 2))
         self.assertEqual([m["largest"] for m in got["monitors"]], [[2560, 1600], [2160, 3840]],
                          "the most each takes, as its stream is (DP-1 is turned a quarter)")
+        self.assertEqual([m["sizes"] for m in got["monitors"]], [[[2560, 1600]], [[2160, 3840]]])
         self.assertEqual(self.sent, [(ADDRESS, "GET", host_monitors.ft_hostmonitors.PATH, None)])
         self.assertEqual(self.ran, [], "a panel's stream size is the user's: the monitor follows it, not the other way")
         self.assertEqual(self.b.hostMonitors.supported, {"PC": True})
@@ -268,6 +270,21 @@ class Page(Base):
         help_of = next(h.property("text") for d in self.found(prop="ownSize") if js(d.property("modelData"))["id"] == "pc-edp"
                        for h in items(d) if h.objectName() == "streamHelp")
         self.assertIn("Its largest size is 2560 × 1600.", help_of)
+        self.assertEqual(self.bad_warnings(), [])
+
+    def test_a_size_its_monitor_refused_is_said_under_the_size_boxes(self):
+        helps = lambda: {js(d.property("modelData"))["id"]: next(  # noqa: E731
+            h.property("text") for h in items(d) if h.objectName() == "streamHelp") for d in self.found(prop="ownSize")}
+        host = pc()
+        host["displays"][0]["size"] = [2560, 1200]  # a size Hyprland makes a mode for
+        set_hosts(host)
+        self.b.changed.emit()
+        self.answered()
+        self.assertNotIn("can't be", helps()["pc-edp"])
+        self.answered(state(error="Samsung can't be 2560x1200", refused=[(2560, 1200)]))
+        self.assertEqual(helps()["pc-edp"], "PC's monitor can't be 2560 × 1200, so the stream crops or fits it as it is."
+                                            " Sizes it has: 2560 × 1600.")
+        self.assertNotIn("can't be", helps()["pc-dp"], "another monitor's panel")
         self.assertEqual(self.bad_warnings(), [])
 
     def test_the_scale_picker_shows_where_the_pc_can_set_it(self):

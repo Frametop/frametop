@@ -186,6 +186,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace ftvr {
@@ -643,7 +644,7 @@ struct DashAnchor {
     long retryAt = 0;          // missing: g_tick to look for it again at
     bool missingLogged = false;
     dashanchor::Anchor a;      // a.ever: dashboard pins have a frame
-    uint64_t universe = 0;     // the universe the frame is in: read, guessed or carried into (FollowUniverse)
+    uint64_t universe = 0;     // the universe the frame is in: read, guessed or carried into (FollowDash)
     bool carried = false;      // a universe's jump moved the frame: the pins move this tick
 };
 DashAnchor g_dash;
@@ -739,6 +740,15 @@ bool GuessDash(const Mat &head) {
     std::printf("dashboard pins: no read of the bar yet (the dashboard closed since ft-screens started): "
                 "guessed in front of you at %.3f %.3f %.3f\n", g_dash.a.frame[0][3], g_dash.a.frame[1][3], g_dash.a.frame[2][3]);
     return true;
+}
+
+// A universe change (FollowUniverse; `from` the kind of the one left): the kept frame follows it by
+// a panel's rule (universefix::Follows), and goes with its jump unless the bar is shown
+// (dashanchor.h's Carry). True when it moved: the pins move this tick (g_dash.carried).
+bool FollowDash(const universefix::Switch &sw, universefix::Kind from) {
+    if (!g_dash.a.Framed() || !universefix::Follows(g_dash.universe, sw, from)) return false;
+    g_dash.universe = sw.to;
+    return g_dash.carried = sw.moved && g_dash.a.Carry(sw.jump.m);
 }
 
 // What a pinned screen rides on: its device's pose, for a floor pin its floor frame, for a dashboard pin the
@@ -7153,17 +7163,14 @@ void ft_vr_forget(const void *key) {
 // stay: SteamVR's restore put the room's back where they were in it. The dashboard's frame, kept
 // while the dashboard is closed, follows by the same rule, and the tiles and pins on it with it:
 // they stayed behind you when XRService started again in a world turned 164 degrees (2026-11-23,
-// the 60 fps hand tracking switch) until the dashboard was opened.
+// the 60 fps hand tracking switch) until the dashboard was opened. A step too far to be standing's
+// (sw.wild: tracking had run away) moves nothing.
 void FollowUniverse(const universefix::Switch &sw) {
     const universefix::Kind from = UniverseKind(sw.from), to = UniverseKind(sw.to);
     const auto follows = [&](uint64_t u) { return universefix::Follows(u, sw, from); };
     Mat j;
     std::memcpy(j.m, sw.jump.m, sizeof j.m);
-    bool dash = false;
-    if (g_dash.a.Framed() && follows(g_dash.universe)) {
-        dash = g_dash.carried = sw.moved && g_dash.a.Carry(sw.jump.m);
-        g_dash.universe = sw.to;
-    }
+    const bool dash = FollowDash(sw, from);
     std::string moved, kept;
     for (auto &[i, s] : g_screens) {
         // One on its way is in the universe it's headed to in.
@@ -7193,10 +7200,13 @@ void FollowUniverse(const universefix::Switch &sw) {
         if (sw.moved && k.pinned == kNone) k.pose = Mul(j, k.pose);
         k.universe = sw.to;
     }
-    char jump[128] = "no head pose around it: jump unknown";
+    char jump[160] = "no head pose around it: jump unknown";
     if (sw.measured)
         std::snprintf(jump, sizeof jump,
-                      sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s)" : "standing didn't jump",
+                      sw.wild    ? "the head stepped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s): too far for "
+                                   "standing's jump (tracking had run away), nothing moved"
+                      : sw.moved ? "standing jumped %.3f m (height %+.3f m), turned %+.1f deg, lag %ld tick(s)"
+                                 : "standing didn't jump",
                       sw.metres, sw.height, sw.turnDeg, sw.lag);
     std::printf("universe %llu (%s) -> %llu (%s): %s; %s%s%s%s%s\n", (unsigned long long)sw.from, universefix::KindName(from),
                 (unsigned long long)sw.to, universefix::KindName(to), jump,

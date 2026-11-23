@@ -80,7 +80,7 @@ stops on its release, and a key, mouse button or scroll in between makes it a sh
 cancels that dictation quietly ("cancel keyboard quiet"). A rules
 file without "key_bindings" gets DEFAULT_KEY_BINDINGS (Meta tap: steam_menu, Meta+J: gaze_left,
 Meta+K: gaze_right, Meta+Shift+F: float_toggle, Meta+Shift+H: screens_toggle, Ctrl+Alt+Shift+Esc:
-release_keys, Meta+W: close_app, Meta+arrows and Meta+Ctrl+arrows: the dashboard tiling keys, Meta+/:
+release_keys, Meta+W: close_app, Meta+Shift+arrows and Meta+Ctrl+arrows: the dashboard tiling keys, Meta+/:
 keys_list), plus a
 Right Ctrl tap for dictate once Frametop Voice is installed
 (VOICE_KEY_BINDINGS); one with its own, even an empty one, doesn't. A combination bound to
@@ -245,9 +245,11 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     as a button would ({"t": "action"}, or an error); from ft-screens' palm Quick
                     Access too (its tiles, Quick Settings and gaze_quickcal: PALM_ACTIONS), unbound,
                     so no answer
-  tilefocus 1|0     from ft-screens: an anchored dashboard tile has the focus (renewed every 2 s,
+  tilefocus 2|1|0   from ft-screens: an anchored dashboard tile has the focus (renewed every 2 s,
                     lapses TILE_FOCUS_LAPSE after the last), so the tiling keys (TILE_FOCUS_ACTIONS)
-                    are ft-screens'; without it they go to the desktop. Ignored from another user
+                    are ft-screens'; without it they go to the desktop. 2: the tile is an app
+                    window's (a floating window), so unbound Meta+arrows move it too
+                    (APP_TILE_KEY_BINDINGS). Ignored from another user
   vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
@@ -343,6 +345,7 @@ import kwin_ei  # noqa: E402  (the desktop's wheel through KWin's EIS, issue 108
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "input-settings"))
 import desktop_layout  # noqa: E402  (desktop_env: the running desktop's bus)
 from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabulary)
+    APP_TILE_KEY_BINDINGS,
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
     KEY_LIST_RUNNABLE,
@@ -1426,7 +1429,8 @@ class Relay:
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
         self.pc_word = "0"  # ft-screens' "keyboard" sixth word: a PC's desktop has the keys (pc_keys)
-        self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1": the tiling keys are its until then
+        self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1" or "2": the tiling keys are its until then
+        self.tile_focus_app = False  # ...its "2": the tile is an app window's, so Meta+arrows move it too
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
         # ft-textinput's address while a desktop text field is focused (its "textfield 1"), for the
         # characters the desktop's layout has no key for, until text_input_until; None without one.
@@ -1848,6 +1852,8 @@ class Relay:
             return None, None
         combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
         action = self.rules["key_bindings"].get(combo)
+        if action is None and self.tile_focus_app:
+            action = APP_TILE_KEY_BINDINGS.get(combo)  # Meta+arrows on an app window's tile (lapsed: the desktop's, below)
         if not known_action(action):
             combo, action = self.release_combo(code) or (combo, action)
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
@@ -2436,10 +2442,12 @@ class Relay:
                 self.do_action(name, 0, now, "frunner")
                 self.reply(addr, {"t": "action", "action": name})
             return
-        if cmd == "tilefocus" and words[1:] in (["1"], ["0"]):
-            # From ft-screens (unbound, no reply): an anchored tile has the focus, or not any more.
+        if cmd == "tilefocus" and words[1:] in (["2"], ["1"], ["0"]):
+            # From ft-screens (unbound, no reply): an anchored tile has the focus (2: an app
+            # window's), or not any more.
             if uid == os.getuid():
-                self.tile_focus_until = now + TILE_FOCUS_LAPSE if words[1] == "1" else 0.0
+                self.tile_focus_until = now + TILE_FOCUS_LAPSE if words[1] != "0" else 0.0
+                self.tile_focus_app = words[1] == "2"
             return
         if cmd == "pause" and words[1:] in (["enforce"], ["defer", "remote"]):
             # From frametop-session.sh (input/ft-pause enforce|defer-remote) as a desktop

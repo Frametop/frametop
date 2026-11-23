@@ -826,6 +826,17 @@ Item {
                                     // The biggest size its monitor takes ([width, height], or null: not
                                     // known): its size boxes stop there.
                                     readonly property var largest: monitor && monitor.largest ? monitor.largest : null
+                                    // Its monitor can't be its stream size (the PC's driver refused it,
+                                    // or it lists no such mode): the stream crops or fits it.
+                                    readonly property bool cantBeSize: monitor !== null && backend.hostMonitors.cantBe(
+                                        modelData.host, monitor.id, modelData.width, modelData.height)
+                                    readonly property string sizesItHas: {
+                                        const sizes = monitor && monitor.sizes ? monitor.sizes : []
+                                        if (sizes.length === 0)
+                                            return ""
+                                        return " Sizes it has: " + sizes.slice(0, 4).map(s => s[0] + " × " + s[1]).join(", ")
+                                               + (sizes.length > 4 ? " and smaller." : ".")
+                                    }
                                     // Kept by the page: the list is made again when the layout changes
                                     // (Apply, a scale pick), and its settings stay open through that.
                                     property bool expanded: root.openDisplays[modelData.id] === true
@@ -943,9 +954,14 @@ Item {
                                             visible: !disp.modelData.virtual && !disp.modelData.kwin
                                             Layout.fillWidth: true
                                             wrapMode: Text.Wrap
-                                            opacity: 0.7
+                                            opacity: disp.cantBeSize ? 1 : 0.7
+                                            color: disp.cantBeSize ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                                             text: disp.appleMain
                                                   ? "Streams the Mac's main display at its own resolution, keeping the Mac's keyboard and trackpad working."
+                                                  : disp.cantBeSize
+                                                  ? disp.modelData.host + "'s monitor can't be " + disp.modelData.width + " × "
+                                                    + disp.modelData.height + ", so the stream crops or fits it as it is."
+                                                    + disp.sizesItHas
                                                   : disp.followsMonitor
                                                   ? disp.modelData.host + "'s monitor switches to this size while it streams, pixel for "
                                                     + "pixel, and back when it stops. Disconnect it to turn the monitor off."

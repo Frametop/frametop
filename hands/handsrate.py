@@ -19,8 +19,8 @@ XRService and ft-hands read these as they start. --now restarts ft-hands if it r
 XRService, so SteamVR starts a new one: head tracking drops for about 15 seconds (SteamVR waits
 that long without tracking before it starts XRService again), and with the headset off SteamVR
 starts it when the headset is next worn. The new XRService tracks in a new world, turned from the
-old one, so ft-screens moves what you had open with it (screens/universefix.h). Without --now the cameras change
-when SteamVR next starts. SteamVR gives up on an XRService that stops more than five times in a
+old one, so ft-screens moves what you had open with it (screens/universefix.h). Without --now the
+cameras change when SteamVR next starts. SteamVR gives up on an XRService that stops more than five times in a
 minute, so Frametop Settings holds the switch for a while after each use.
 
 The settings file is SteamVR's: this reads it without leaving anything next to it, writes it by a
@@ -64,9 +64,12 @@ HANDS_UNIT = handsmode.TRACKING[1]
 XRSERVICE = "^(/[^ ]*/)?XRService( |$)"
 WARNING = ("While it's on the controllers don't track: the cameras stop taking the dark frames that "
            "show their lights, and SteamVR says so in the headset. Switching it restarts head tracking "
-           "and hand tracking: the view stops following your head for about 15 seconds, and if the "
-           "screens aren't in front of you afterwards, open the Steam dashboard. Changing Room View between colour and black and "
-           "white drops head tracking for about 15 seconds while it's on.")
+           "and hand tracking: for about 15 seconds the view only turns with your head, and if your "
+           "screens aren't in front of you afterwards, open the Steam dashboard. Changing Room View "
+           "between colour and black and white drops head tracking for about 15 seconds while it's on.")
+# How long --now waits for SteamVR's new XRService: its own timer is 15 s (16.5 s from the stop,
+# worn 2026-11-23). Frametop Settings gives the whole switch twice this.
+RESTART_WAIT = 30.0
 
 
 class RateError(RuntimeError):
@@ -211,7 +214,7 @@ class Host:
         time.sleep(seconds)
 
 
-def restart_tracking(host, wait=30.0, step=0.2):
+def restart_tracking(host, wait=RESTART_WAIT, step=0.2):
     """Stop XRService so SteamVR starts a new one, which reads the camera mode: it does after 15 s
     without tracking (its own timer; 16.5 s from the stop, worn 2026-11-23). (restarted, text):
     restarted is None when it wasn't running, False when SteamVR hasn't started a new one yet.

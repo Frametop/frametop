@@ -1263,6 +1263,25 @@ Item {
                         }
                         Controls.Label { text: tileRadius.value.toFixed(2) + " m to their corners" }
                     }
+                    RowLayout {
+                        Kirigami.FormData.label: "Curve:"
+                        // the arc's radius, its centre to the wall (DASH_TILE_CURVE_M; not set: 2 m past the
+                        // wall's distance). At the distance or less it's round your head. (Steam's bar is
+                        // about 1.15 m away; its real distance is ft-screens'.)
+                        property real wallM: backend.dashTiles.atBar ? 1.15 : backend.dashTiles.radius
+                        Controls.Slider {
+                            id: tileCurve
+                            from: 0.8; to: 12; stepSize: 0.1
+                            value: backend.dashTiles.curveRadius > 0 ? backend.dashTiles.curveRadius : parent.wallM + 2
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                            onMoved: backend.dashTiles.setCurveRadius(value)
+                        }
+                        Controls.Label {
+                            text: tileCurve.value <= parent.wallM + 0.05
+                                  ? "Round you: every panel faces you"
+                                  : tileCurve.value.toFixed(1) + " m radius (smaller curves tighter)"
+                        }
+                    }
                 }
 
                 Ft.Disclosure {
@@ -1293,7 +1312,8 @@ Item {
                           + "page when it's in front. Once the desk is as wide as Desk width, a new panel goes on top of the lowest column. They "
                           + "show only with the dashboard open, unless Stay visible is on (a "
                           + "long press on the anchor button switches it for one panel). With the pointer or your gaze on "
-                          + "one, Meta+arrows move it between columns and rows and Meta+Ctrl+arrows make it bigger or smaller; Meta+/ "
+                          + "one, Meta+Shift+arrows move it between columns and rows (on an app window's tile Meta+arrows do "
+                          + "too) and Meta+Ctrl+arrows make it bigger or smaller; Meta+/ "
                           + "lists every key. Drag a tile to reorder; pull it well away and it stays anchored where you let "
                           + "go. Anchored before the dashboard has opened, a panel stays where it is until the dashboard "
                           + "first opens. Each app, screen and remote display remembers whether it was anchored.\n\nWith "

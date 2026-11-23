@@ -740,6 +740,31 @@ def tests():
     time.sleep(0.35)
     check("tilefocus lapses without renewal", [m for m in meta(SHIFT, LEFT) if m.startswith("tile ")], [])
     relay.TILE_FOCUS_LAPSE = lapse
+    # An app window's tile focused ("tilefocus 2"): Meta+arrows alone move it too (on the desktop
+    # they'd quick-tile the window, which halves it). Not on a screen's tile, and not once bound.
+    UP, DOWN = 103, 108
+    to_relay("tilefocus 2")
+    time.sleep(0.05)
+    got = [meta(c) for c in (LEFT, RIGHT, UP, DOWN)]
+    check("Meta+arrows, an app window's tile focused: ft-screens moves it, the desktop gets no arrow",
+          ([m for g in got for m in g if m.startswith("tile ")],
+           [c for c, g in zip((LEFT, RIGHT, UP, DOWN), got) if f"key {c} 1" in g]),
+          (["tile left", "tile right", "tile up", "tile down"], []))
+    check("...Meta+Shift+Left still moves it", [m for m in meta(SHIFT, LEFT) if m.startswith("tile ")], ["tile left"])
+    use({**relay.DEFAULT_KEY_BINDINGS, "125+105": "key"})
+    to_relay("tilefocus 2")
+    time.sleep(0.05)
+    got = meta(LEFT)
+    check("...Meta+Left bound in the rules (pass through): the rules' own", ([m for m in got if m.startswith("tile ")],
+                                                                              f"key {LEFT} 1" in got), ([], True))
+    use(None)
+    to_relay("tilefocus 1")
+    time.sleep(0.05)
+    got = meta(LEFT)
+    check("tilefocus 1 after 2 (a screen's tile now): Meta+Left is the desktop's again",
+          ([m for m in got if m.startswith("tile ")], f"key {LEFT} 1" in got), ([], True))
+    to_relay("tilefocus 0")
+    time.sleep(0.05)
     meta(SLASH)
     check("Meta+/ (default): frunner lists the key combinations", frunner_got(), ["toggle keyboard keys"])
     check("the tiling actions and keys_list work without pointer mode",
@@ -747,6 +772,9 @@ def tests():
 
     # Meta+W (default) closes the app typing goes to: Alt+F4 tapped there, and W isn't typed.
     W_KEY, F4 = 17, 62
+    to_relay("keyboard desktop")  # (ft-screens renews it; the checks above took a while)
+    time.sleep(0.05)
+    typed()
     got = meta(W_KEY)
     check("Meta+W (default): Alt+F4 tapped on the desktop, W not typed",
           ([m for m in got if m.split()[:2] in (["key", str(ALT)], ["key", str(F4)])], f"key {W_KEY} 1" in got),

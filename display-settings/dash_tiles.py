@@ -33,6 +33,7 @@ NUMBERS = {
     "DASH_TILE_RADIUS": (2.7, 0.8, 6.0),            # metres from your head to the tiles' corners
     "DASH_TILE_PX_PER_DEG": (48.0, 15.0, 120.0),    # a panel's natural size: this many of its pixels a degree
     "DASH_TILE_WALL_DEG": (80.0, 30.0, 300.0),      # how wide the desk gets before new panels stack up
+    "DASH_TILE_CURVE_M": (0.0, 0.0, 12.0),          # the arc's radius, metres (0: its centre 2 m behind your eyes)
 }
 
 
@@ -137,3 +138,13 @@ class DashTiles(QObject):
     @Slot(float)
     def setWallDeg(self, deg):
         self.set_number("DASH_TILE_WALL_DEG", deg)
+
+    @Property(float, notify=changed)
+    def curveRadius(self):
+        """The tiles' arc, its centre to the wall, metres; 0 when not set (ft-screens' kFocusBackM:
+        the centre 2 m behind your eyes, whatever the wall's distance)."""
+        return self.number("DASH_TILE_CURVE_M")
+
+    @Slot(float)
+    def setCurveRadius(self, metres):
+        self.set_number("DASH_TILE_CURVE_M", metres)

@@ -140,6 +140,8 @@ void DrawTile(int i, const Look &look) {
     Box(i, &x0, &y0, &x1, &y1);
     const int w = x1 - x0;
     const std::vector<uint8_t> &t = (i == kButton ? g_card.button : i == kEyeCal ? g_card.eyeRow : g_card.styles)[look.style];
+    // a box past the card, or a picture of the wrong size, would copy outside g_card.px or t
+    if (x0 < 0 || y0 < 0 || x1 > kW || y1 > H() || t.size() != size_t(w) * (y1 - y0) * 4) return;
     for (int y = 0; y < y1 - y0; ++y)
         std::memcpy(&g_card.px[(size_t(y0 + y) * kW + x0) * 4], &t[size_t(y) * w * 4], size_t(w) * 4);
     const uint8_t v = look.style == kHot ? 20 : look.style == kDim ? 120 : 245;
@@ -207,6 +209,8 @@ void Draw() {
     bool changed = DrawHead();
     Look now[kSlots];
     for (int i = 0; i < kSlots; ++i) {
+        // (no eye row with gaze mode off: the card ends above where it would be, and its pictures weren't made)
+        if (i == kEyeCal && !g_card.eyes) continue;
         Look &look = now[i];
         look.valid = true;
         look.text = Label(i);

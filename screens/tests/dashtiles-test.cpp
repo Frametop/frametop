@@ -210,8 +210,9 @@ int main() {
         b.Drop(1, b.DropFor(1, 15, 0, desk), 15);   // (moved: off centre)
         b.Arrange(desk);
         b.Anchor(2, -1, dashtiles::Stay::Default);
-        const tiling::Layout &a = b.Arrange(desk);
-        check("late: an anchored one: the strip centred", near(a.az0, -a.az1, 1e-9));
+        b.Arrange(desk);
+        check("late: an anchored one: the centre display straight ahead (two as wide: not the seam)",
+              b.Centre() >= 0 && near(b.PlacedOf(b.Centre())->azDeg, 0, 1e-9));
         dashtiles::State st;
         dashtiles::Parse(b.Remember(2), &st);
         b.Restore(3, st, 2);
@@ -316,7 +317,8 @@ int main() {
         b.params.reserveAzDeg = 160;   // (behind you)
         b.SlotMoved(), b.Recentre();   // (as Regroup does)
         b.Arrange(desk);
-        check("split: a menu the strip doesn't reach: no slot, centred", b.Last().split == -1 && near(b.Last().az0, -b.Last().az1));
+        check("split: a menu the strip doesn't reach: no slot, the centre display straight ahead",
+              b.Last().split == -1 && b.Centre() >= 0 && near(b.PlacedOf(b.Centre())->azDeg, 0, 1e-6));
         check("split: ...the splits kept for when it does (council, 2026-11-16)", b.Grid().Split(1) == 2 && b.Grid().Split(0) == 1);
         b.params.reserveAzDeg = 0;   // (the Steam button's again, after the palm menu's)
         b.SlotMoved();
@@ -1620,6 +1622,57 @@ int main() {
         check("a change after the write: due again later", !s.Due(11000) && s.Due(12000));
         s.Changed(20000);
         check("shutting down: flushed once", s.Flush() && !s.Flush() && !s.Due(30000));
+    }
+    // --- the centre display, its curve round the arc, and nudges (user, 2026-11-23)
+    {
+        const auto wide = [](int id) { return dashtiles::Info{id == 2 ? 3.4 : 1.6, 0.9}; };
+        dashtiles::Board b;
+        for (int id : {1, 2, 3}) b.Anchor(id, -1, dashtiles::Stay::Default);
+        b.Arrange(wide);
+        check("centre: the widest by default, straight ahead", b.Centre() == 2 && near(b.PlacedOf(2)->azDeg, 0, 1e-9));
+        dashtiles::Board e;
+        for (int id : {1, 2, 3, 4}) e.Anchor(id, -1, dashtiles::Stay::Default);
+        e.Arrange(desk);
+        check("centre: four as wide: one of the middle two straight ahead, not the seam",
+              (e.Centre() == 2 || e.Centre() == 3) && near(e.PlacedOf(e.Centre())->azDeg, 0, 1e-9));
+        e.steam = 4;
+        e.Arrange(desk);
+        check("centre: Steam's window when it's a tile", e.Centre() == 4);
+        const tilegrid::Where was1 = b.Grid().Find(1), was2 = b.Grid().Find(2);
+        check("centre: taken by a drop on it: the two trade places", b.TakeCentre(1) && b.Grid().Find(1).col == was2.col &&
+                                                                         b.Grid().Find(2).col == was1.col);
+        b.Arrange(wide);
+        check("centre: ...the new one straight ahead", b.Centre() == 1 && near(b.PlacedOf(1)->azDeg, 0, 1e-9));
+        check("centre: ...taking it again: nothing", !b.TakeCentre(1));
+        check("arc: only the centre display", !b.ToggleArc(2) && b.ToggleArc(1) && b.ArcNow(1) && b.Arc(1));
+        b.absent = {1};
+        check("arc: ...not while it's hidden", !b.ArcNow(1));
+        b.absent.clear();
+        b.Arrange(wide);
+        const double az2 = b.PlacedOf(2)->azDeg, e3 = b.PlacedOf(3)->elDeg;
+        check("nudge: up a degree", b.Press(3, dashtiles::Key::NudgeUp) && b.Press(3, dashtiles::Key::NudgeUp));
+        b.Arrange(wide);
+        check("nudge: ...it alone moves up, the others and the grid stay", near(b.PlacedOf(3)->elDeg, e3 + 2, 1e-9) &&
+                                                                              near(b.PlacedOf(2)->azDeg, az2, 1e-9) && b.Nudge(2) == 0);
+        dashtiles::State st;
+        check("state: centre, arc and nudge remembered", dashtiles::Parse(b.Remember(1), &st) && st.centre && st.arc &&
+                                                            dashtiles::Parse(b.Remember(3), &st) && near(st.nudgeDeg, 2) && !st.centre);
+        dashtiles::Board r;
+        for (int id : {1, 2, 3}) r.Anchor(id, -1, dashtiles::Stay::Default);
+        r.Restore(3, b.Remember(3), -1);
+        r.Restore(1, b.Remember(1), -1);
+        r.Arrange(wide);
+        check("state: ...back from it: the centre, curved, the other nudged",
+              r.Centre() == 1 && r.ArcNow(1) && near(r.Nudge(3), 2));
+        for (int i = 0; i < 40; ++i) b.Press(3, dashtiles::Key::NudgeDown);
+        check("nudge: no more than 30 degrees", near(b.Nudge(3), -30));
+        check("state: old lines read as before, flags round trip",
+              dashtiles::Parse("tile 0 1 2 0 1.000", &st) && !st.centre && !st.arc && st.nudgeDeg == 0 &&
+                  dashtiles::Parse("tile 0 1 2 0 1.000 dr centre arc nudge=-3.0", &st) && st.below && st.centre && st.arc &&
+                  near(st.nudgeDeg, -3) && dashtiles::Text(st) == "tile 0 1 2 0 1.000 dr centre arc nudge=-3.0");
+        b.Unanchor(1);
+        b.Arrange(wide);
+        check("centre: the chosen one gone: the widest again", b.Centre() == 2);
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

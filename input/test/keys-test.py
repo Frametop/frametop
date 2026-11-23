@@ -737,9 +737,19 @@ def tests():
            [c for c, g in zip((LEFT, RIGHT, UP, DOWN), got) if f"key {c} 1" in g]),
           (["tile left", "tile right", "tile up", "tile down"], []))
     check("Meta+Ctrl+Right: wider", [m for m in meta(CTRL, RIGHT) if m.startswith("tile ")], ["tile wider"])
+    check("Meta+Alt+Up/Down: nudged", [m for c in (UP, DOWN) for m in meta(ALT, c) if m.startswith("tile ")],
+          ["tile nudgeup", "tile nudgedown"])
+    # A screen's or a remote display's tile ("tilefocus 2"): it's dragged, but nudged by the keys.
+    to_relay("tilefocus 2")
+    time.sleep(0.05)
+    got = [meta(SHIFT, LEFT), meta(LEFT), meta(ALT, UP)]
+    check("tilefocus 2: only the nudge is ft-screens', the moves the desktop's",
+          ([m for g in got for m in g if m.startswith("tile ")], [f"key {LEFT} 1" in g for g in got[:2]]),
+          (["tile nudgeup"], [True, True]))
     to_relay("tilefocus 0")
     time.sleep(0.05)
     check("tilefocus 0: Meta+Shift+Left is the desktop's again", [m for m in meta(SHIFT, LEFT) if m.startswith("tile ")], [])
+    check("tilefocus 0: Meta+Alt+Up too", [m for m in meta(ALT, UP) if m.startswith("tile ")], [])
     lapse, relay.TILE_FOCUS_LAPSE = relay.TILE_FOCUS_LAPSE, 0.2
     to_relay("tilefocus 1")
     time.sleep(0.35)

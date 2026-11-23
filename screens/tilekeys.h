@@ -13,10 +13,13 @@
 
 namespace dashtiles {
 
-enum class Key { Left, Right, Up, Down, Wider, Narrower, Taller, Shorter };
-constexpr const char *kKeyNames[] = {"left", "right", "up", "down", "wider", "narrower", "taller", "shorter"};
+// NudgeUp and NudgeDown move one tile up or down a degree, nothing else with it (dashtiles.h's
+// Board::Press; user, 2026-11-23: "move a display up or down by degrees without it re-orienting the
+// entire desktop").
+enum class Key { Left, Right, Up, Down, Wider, Narrower, Taller, Shorter, NudgeUp, NudgeDown };
+constexpr const char *kKeyNames[] = {"left", "right", "up", "down", "wider", "narrower", "taller", "shorter", "nudgeup", "nudgedown"};
 inline bool ParseKey(const char *word, Key *k) {
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < int(sizeof kKeyNames / sizeof *kKeyNames); ++i)
         if (std::strcmp(word, kKeyNames[i]) == 0) return *k = Key(i), true;
     return false;
 }
@@ -74,6 +77,8 @@ inline bool Press(tilegrid::Grid &g, slotsplit::Policy &slot, const View &v, int
         case Key::Taller: return g.Scale(id, tilegrid::kStep);
         case Key::Narrower:
         case Key::Shorter: return g.Scale(id, 1 / tilegrid::kStep);
+        case Key::NudgeUp:
+        case Key::NudgeDown: return false;   // (not the grid's: Board::Press)
     }
     return false;
 }

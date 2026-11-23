@@ -1180,6 +1180,7 @@ void SetWidth(Screen &s, double metres) {
 
 // Curve toward the head: the radius is the head's distance to the screen now.
 void ToggleCurve(Screen &s) {
+    if (TileCurveToggle(s)) return;   // (the centre dashboard tile: round the tiles' arc)
     Mat head, p;
     if (s.curve > 0 || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) || !ScreenPose(s, &p)) {
         s.curve = 0;
@@ -7677,6 +7678,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdateCutouts();
     UpdateCatcher();
     PlaceTileBorder();   // (after everything that moves panels this tick)
+    PlaceCentreGlow();
     SaveTileMemoryDue();
 }
 

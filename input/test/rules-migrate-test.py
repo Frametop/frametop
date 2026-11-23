@@ -205,7 +205,8 @@ try:
 
     # Ctrl+Alt+Shift+Esc, with the changes before it, as an install of its day ran them.
     check("every change runs, in order", [name for name, _ in ALL_MIGRATIONS],
-          ["screens-toggle-key", "release-keys-key", "desktopless-key", "dashboard-tile-keys", "close-app-key"])
+          ["screens-toggle-key", "release-keys-key", "desktopless-key", "dashboard-tile-keys", "close-app-key",
+           "dashboard-tile-nudge-keys"])
     rm.MIGRATIONS = ALL_MIGRATIONS[:2]
     # A list that got Meta+Shift+H already (an install with the screens-toggle key change): it gets this one, once.
     with_h = {**CUSTOM, "key_bindings": {"42+125+35": "screens_toggle", **CUSTOM["key_bindings"]}}
@@ -345,7 +346,8 @@ try:
     rm.MIGRATIONS = ALL_MIGRATIONS[:4]
     sys.path.insert(0, os.path.join(HERE, "..", "..", "conf"))
     import ft_input_actions
-    check("the tiling keys are ft_input_actions' defaults", rm.TILE_COMBOS, dict(ft_input_actions.TILE_KEY_BINDINGS))
+    check("the tiling keys are ft_input_actions' defaults", {**rm.TILE_COMBOS, **rm.TILE_NUDGE_COMBOS},
+          dict(ft_input_actions.TILE_KEY_BINDINGS))
     with_three = {**with_both, "key_bindings": {"42+125+32": "desktopless_toggle", "125+53": "command:mine",
                                                 **with_both["key_bindings"]}}
     rules, state = case("tile-keys-after", with_three)
@@ -369,7 +371,7 @@ try:
     check("...removed afterwards: not added again", read(rules), before)
 
     # Meta+W (close app), with every change, as an install runs them now.
-    rm.MIGRATIONS = ALL_MIGRATIONS
+    rm.MIGRATIONS = ALL_MIGRATIONS[:5]
     check("Meta+W is ft_input_actions' default", ft_input_actions.DEFAULT_KEY_BINDINGS.get(rm.CLOSE_APP_COMBO),
           rm.CLOSE_APP_ACTION)
     CLOSE_LINE = '    "125+17": "close_app",\n'
@@ -401,6 +403,22 @@ try:
     rm.main(rules, state)
     check("Meta+W bound already: unchanged, no backup, marked",
           (read(rules), read(rules + ".bak-close-app-key"), marked(state, rm.CLOSE_APP_KEY)), (before, None, True))
+
+    # Meta+Alt+Up/Down (nudge a tile), after every other change: a list that has the tiling keys gets them too.
+    rm.MIGRATIONS = ALL_MIGRATIONS
+    with_close = {**with_tiles, "key_bindings": {"125+17": "close_app", **with_tiles["key_bindings"]}}
+    rules, state = case("tile-nudge-after", with_close)
+    os.makedirs(os.path.dirname(state))
+    with open(state, "w") as f:
+        json.dump({**before_close, rm.CLOSE_APP_KEY: True}, f)
+    before = read(rules)
+    reloads()
+    check("after Meta+W: done", rm.main(rules, state), 0)
+    after = json.loads(read(rules))["key_bindings"]
+    check("...the nudge keys added first, the others in their order", list(after),
+          [*rm.TILE_NUDGE_COMBOS, *with_close["key_bindings"]])
+    check("...backed up, marked, the relay told once",
+          (read(rules + ".bak-dashboard-tile-nudge-keys"), marked(state, rm.TILE_NUDGE_KEY), reloads()), (before, True, 1))
 finally:
     rm.MIGRATIONS = ALL_MIGRATIONS
     relay.close()

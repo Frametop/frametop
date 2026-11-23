@@ -379,6 +379,10 @@ void TileDrop(Screen &s, int i);
 void TileResized(Screen &s, int i);
 void UpdateDashTiles();
 void PlaceTileBorder();
+void TileGlowTarget(int *on, bool *hot);   // the panel the centre's glow is round now, and whether it's a drop onto it (vrtilecentre.cpp)
+bool TileCurveToggle(const Screen &s);     // the centre display's curve round the arc on or off (false: not the centre)
+// ---------------------------------------------------------------- vrtilecentre.cpp's
+void PlaceCentreGlow();   // the centre display's blue glow, behind it or a tile dragged onto it
 void TileStay(int i, bool on, const char *by);   // anchored: shown with the dashboard closed too, or not
 void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *reply, int size);
 

@@ -13,6 +13,16 @@
 // the anchor button's long press set one the other way. Each app or display remembers what it was last: anchored or not,
 // its place on the grid or as a satellite, and whether it stays, for the next time it opens.
 //
+// The centre display (user, 2026-11-23: "a center display that the tiling justifies around ... it's
+// really easy to end up with multiple curved displays that you never have one that's looking directly
+// at you"): the strip, recentred (the dashboard opening, a panel anchored or back, a new centre), turns
+// to put it straight ahead, not the middle of the strip (two as wide: the seam between them); moves by
+// hand keep it where they leave it, as they keep the others. It's the one you chose (a drop right onto the
+// one before: TakeCentre), else Steam's window while it's a tile (it was over its bar), else the
+// widest. It alone may curve (ToggleArc: round the tiles' arc, vrtiles.cpp). Any tile may be nudged
+// up or down on its own (Key::NudgeUp, NudgeDown), the others staying where they are. All three are
+// in its remembered state, so per app and in profiles.
+//
 // The group frame (tileframe.h): at your head when the dashboard opened, level, -Z toward Steam's bar
 // (AtBar) or the way you faced (GroupFrame).
 // Header only, no OpenVR, so its test runs anywhere.
@@ -108,6 +118,8 @@ public:
     // Not anchored any more (or gone). False if it wasn't.
     bool Unanchor(int id) {
         Forget(id);
+        nudge_.erase(id), arc_.erase(id);
+        if (centre_ == id) centre_ = -1;
         gaps_.Forget(id);
         marks_.Unmark(id);
         grid_.Remove(id);
@@ -251,12 +263,50 @@ public:
     // A tiling key on a tiled panel (a satellite: nothing). False when nothing changed.
     bool Press(int id, Key k) {
         if (!grid_.Has(id)) return false;
+        if (k == Key::NudgeUp || k == Key::NudgeDown) {   // (it alone: the grid and the others as they are)
+            const double was = Nudge(id), to = std::clamp(was + (k == Key::NudgeUp ? kNudgeStepDeg : -kNudgeStepDeg), -kNudgeMaxDeg, kNudgeMaxDeg);
+            if (to == was) return false;
+            EndBatch();
+            if (std::fabs(to) < 1e-9) nudge_.erase(id);
+            else nudge_[id] = to;
+            moved_ = -1, movedAz_ = NAN, recentre_ = false;
+            return true;
+        }
         int moved = id;
         const std::vector<int> mates = Marks::Mates(grid_, id);
         if (!Changed(tilekeys::Press(grid_, slot_, Laid(), id, k, &moved))) return false;   // (refused: nothing changed, nothing forgotten)
         moved_ = moved, movedAz_ = NAN, recentre_ = false;   // (moved by a key: the others keep their places, not it)
         return ByHand(id, mates), true;   // (a lift's: the one pulled in, a new stackmate)
     }
+    static constexpr double kNudgeStepDeg = 1, kNudgeMaxDeg = 30;
+    double Nudge(int id) const {
+        const auto it = nudge_.find(id);
+        return it == nudge_.end() ? 0 : it->second;
+    }
+    // The centre display as laid out last (-1: none), and whether it's curved round the arc now.
+    int Centre() const { return centreNow_; }
+    bool ArcNow(int id) const { return id >= 0 && id == centreNow_ && arc_.count(id) && !absent.count(id); }
+    bool Arc(int id) const { return arc_.count(id) != 0; }
+    // The centre display's curve round the tiles' arc on or off (kept if another takes the centre:
+    // it curves again when it's the centre again). False for any other panel.
+    bool ToggleArc(int id) {
+        if (id < 0 || id != centreNow_ || !grid_.Has(id)) return false;
+        EndBatch();
+        if (!arc_.erase(id)) arc_.insert(id);
+        return true;
+    }
+    // `id` the centre display: let go right on the one before, the two trade places (each keeps its
+    // size). False when it isn't a tile or already is the centre.
+    bool TakeCentre(int id) {
+        if (!grid_.Has(id) || (id == centreNow_ && id == centre_)) return false;
+        EndBatch();
+        if (centreNow_ >= 0 && centreNow_ != id) grid_.Swap(id, centreNow_);
+        centre_ = id, centreNow_ = id;
+        moved_ = -1, movedAz_ = NAN;
+        Recentre();   // (it straight ahead)
+        return true;
+    }
+
     // Resized by its corner on the grid: `factor` times as big as its tile was.
     // Within kResizeSlack of 1: a corner let go where it was (vrtiles.cpp's size there is only kept
     // to 2 mm), nothing.
@@ -341,8 +391,11 @@ public:
             shownFills_.push_back(tilepack::FillOf(shown, params.gapDeg));
         }
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
+        centreNow_ = CentreOf(info);
         pan_ = l.split >= 0 || params.fit ? 0 : Pan(l);   // (fitted: always round the middle)
         if (pan_ != 0) tiling::Turn(&l, pan_);
+        for (tiling::Placed &p : l.tiles)   // (nudged: it alone, up or down)
+            if (const double n = Nudge(p.id); n != 0) p.elDeg += n, p.el0 += n, p.el1 += n;
         moved_ = -1, recentre_ = false;
         return last_ = std::move(l);
     }
@@ -377,6 +430,7 @@ public:
         const tilegrid::Cell &cell = col.cells[size_t(w.row)];
         st.kind = State::Kind::Tile, st.col = w.col, st.row = w.row, st.alone = col.cells.size() == 1;
         st.scale = cell.scale, st.below = col.Below(w.row), st.align = cell.align;
+        st.centre = centre_ == id, st.arc = Arc(id), st.nudgeDeg = Nudge(id);
         return st;
     }
     // Back as it was remembered (`focused`: a new tile's neighbour when its column is gone). False
@@ -394,6 +448,9 @@ public:
         Recentre();   // (as Anchor)
         Spot &s = spots_[id];
         s.stay = st.stay;
+        if (st.nudgeDeg != 0) nudge_[id] = std::clamp(st.nudgeDeg, -kNudgeMaxDeg, kNudgeMaxDeg);
+        if (st.arc) arc_.insert(id);
+        if (st.centre) centre_ = id;
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
         int col = st.col;   // (back in the stack it left: the panel pulled into its gap goes back first)
@@ -475,10 +532,11 @@ private:
     // centred round: Steam's bar, or where you faced).
     double Pan(const tiling::Layout &l) const {
         double pan = pan_;
-        if (recentre_) {
-            pan = 0;
+        if (recentre_) {   // (round the one asked for, else the centre display: one straight ahead,
+            pan = 0;       // not the seam between two: user, 2026-11-23)
+            const int on = centreOn_ >= 0 ? centreOn_ : absent.count(centreNow_) ? -1 : centreNow_;
             for (const tiling::Placed &p : l.tiles)
-                if (p.id == centreOn_) pan = -p.azDeg;
+                if (p.id == on) pan = -p.azDeg;
         } else {
             // (a vote a column, its widest panel's, which leans against nothing; the median: most
             // columns stay exactly where they were. A mean let one odd panel pull the rest: a narrower
@@ -507,6 +565,27 @@ private:
         }
         return std::clamp(pan, -l.az1, -l.az0);
     }
+    // The centre display: the one chosen (TakeCentre, or remembered) while it's a tile, else Steam's
+    // window, else the widest (its own size, shown or not: one hidden keeps its place as the centre),
+    // of ones as wide the one nearest the middle column.
+    template <typename InfoOf>
+    int CentreOf(InfoOf info) const {
+        if (grid_.Has(centre_)) return centre_;
+        if (grid_.Has(steam)) return steam;
+        int best = -1;
+        double widest = 0, off = 0;
+        const double mid = (double(grid_.Cols().size()) - 1) / 2;
+        for (size_t c = 0; c < grid_.Cols().size(); ++c)
+            for (const tilegrid::Cell &cell : grid_.Cols()[c].cells) {
+                const double w = info(cell.id).widthM * cell.scale, o = std::fabs(double(c) - mid);
+                if (w > widest + 1e-6 || (w > widest - 1e-6 && o < off - 1e-9)) widest = w, off = o, best = cell.id;
+            }
+        return best;
+    }
+    int centre_ = -1;             // the centre display chosen (-1: none: CentreOf's default)
+    int centreNow_ = -1;          // ...the one laid out last
+    std::set<int> arc_;           // curved round the arc while the centre
+    std::map<int, double> nudge_; // moved up (down: negative), degrees
     double pan_ = 0;              // the strip turned this far from centred
     bool recentre_ = false;
     int centreOn_ = -1;

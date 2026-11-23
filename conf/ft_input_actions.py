@@ -34,21 +34,21 @@ VOICE_ACTIONS = ("dictate", "dictate_hold")
 # Meta+W closes the app you're typing in (close_app: Alt+F4 where typing goes; user, 2026-11-23).
 #
 # The dashboard tiles (screens/dashtiles.h; docs/design.md, Dashboard tiles): Meta+Shift+arrows move
-# the focused tile (user, 2026-11-20; Meta+arrows stay the desktop's and a PC's own, Windows' snap),
-# Meta+Ctrl+arrows size it, Meta+Alt+Up/Down nudge it up or down a degree without moving the rest
-# (user, 2026-11-23: "move a display up or down by degrees without it re-orienting the entire
-# desktop"; kept in the tiles' memory and in layout profiles), Meta+/ lists every key combination in frunner. The relay hands a tiling
-# key to ft-screens only while an anchored panel has the focus (ft-screens' "tilefocus"); otherwise
-# it goes to the desktop as it always did.
+# the focused app's tile (user, 2026-11-20), Meta+Ctrl+arrows size it, Meta+/ lists every key
+# combination in frunner. Meta+Alt+Up/Down nudge the focused tile up or down a degree without
+# moving the rest (user, 2026-11-23: "move a display up or down by degrees without it re-orienting
+# the entire desktop"; kept in the tiles' memory and in layout profiles). The relay hands a tiling key to ft-screens only while an anchored app's
+# tile has the focus (ft-screens' "tilefocus": a floating window, a gamescope app or a PC's app
+# window); otherwise it goes to the desktop as it always did. A screen's and a remote display's
+# tile are dragged, never moved by a key (user, 2026-11-23).
 TILE_KEY_BINDINGS = MappingProxyType({"42+125+105": "tile_left", "42+125+106": "tile_right", "42+125+103": "tile_up",
                                       "42+125+108": "tile_down", "29+125+106": "tile_wider", "29+125+105": "tile_narrower",
                                       "29+125+103": "tile_taller", "29+125+108": "tile_shorter", "56+125+103": "tile_nudge_up",
                                       "56+125+108": "tile_nudge_down", "125+53": "keys_list"})
-# Meta+arrows alone on an anchored app window's tile (a floating window: ft-screens' "tilefocus 2")
-# move it as Meta+Shift+arrows do, unless the rules bind that combination to something. On the
-# desktop they're KWin's quick tile, which only halves a window alone on its own output: it looked
-# like a resize where a move was meant (user, 2026-11-23). On a screen's or a remote display's tile
-# they stay the desktop's and the PC's.
+# Meta+arrows alone move an app's tile too while it has the focus, as Meta+Shift+arrows do, unless
+# the rules bind that combination to something. On the desktop they're KWin's quick tile, which only
+# halves a window alone on its own output: it looked like a resize where a move was meant (user,
+# 2026-11-23). With no app's tile focused they stay the desktop's and a PC's own (Windows' snap).
 APP_TILE_KEY_BINDINGS = MappingProxyType({"125+105": "tile_left", "125+106": "tile_right", "125+103": "tile_up",
                                           "125+108": "tile_down"})
 DEFAULT_KEY_BINDINGS = MappingProxyType({"125": "steam_menu", "125+36": "gaze_left", "125+37": "gaze_right",
@@ -66,6 +66,9 @@ TILE_ACTIONS = MappingProxyType({"tile_left": "tile left", "tile_right": "tile r
                                  "anchor_toggle": "anchor focused toggle"})
 # The ones that act only on an anchored panel with the focus: the key goes to the desktop otherwise.
 TILE_FOCUS_ACTIONS = tuple(a for a in TILE_ACTIONS if a != "anchor_toggle")
+# The nudges work on a screen's and a remote display's tile too (ft-screens' "tilefocus 2"): those
+# are dragged, but a degree up or down is what a drag can't do (user, 2026-11-23).
+TILE_NUDGE_ACTIONS = ("tile_nudge_up", "tile_nudge_down")
 
 # With Frametop Voice installed (its unit file), a rules file without "key_bindings" gets these
 # too: a Right Ctrl tap, Right Ctrl alone, so a Left Ctrl tap (crouch in many games) doesn't

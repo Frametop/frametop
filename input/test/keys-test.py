@@ -705,9 +705,11 @@ def tests():
           [a for a in sys.modules["ft_input_actions"].MENU_ACTION_NAMES if not relay.known_action(a) or relay.needs_pointer(a)], [])
 
     # The dashboard tiling keys (defaults): Meta+Shift+Left goes to ft-screens as "tile left" only
-    # while it says an anchored tile has the focus ("tilefocus 1", renewed every 2 s); otherwise, and
-    # once that lapses, it's the desktop's. Meta+Left alone is always the desktop's (a PC's snap).
-    # Meta+/ lists the key combinations in frunner.
+    # while it says an anchored app's tile has the focus ("tilefocus 1", renewed every 2 s);
+    # otherwise (a screen's or a remote display's tile too: those are dragged), and once that
+    # lapses, it's the desktop's. Meta+arrows alone move the app's tile too, unless the rules bind
+    # them: on the desktop they'd quick-tile the window, which halves it. Meta+/ lists the key
+    # combinations in frunner.
     LEFT, RIGHT, SLASH = 105, 106, 53
     to_relay("keyboard desktop")
     time.sleep(0.05)
@@ -728,41 +730,51 @@ def tests():
     got = meta(SHIFT, LEFT)
     check("Meta+Shift+Left, a tile focused: ft-screens moves it, the desktop doesn't get Left",
           ([m for m in got if m.startswith("tile ")], f"key {LEFT} 1" in got), (["tile left"], False))
-    got = meta(LEFT)
-    check("Meta+Left, a tile focused: still the desktop's", ([m for m in got if m.startswith("tile ")],
-                                                             f"key {LEFT} 1" in got), ([], True))
+    UP, DOWN = 103, 108
+    got = [meta(c) for c in (LEFT, RIGHT, UP, DOWN)]
+    check("Meta+arrows alone, a tile focused: ft-screens moves it, the desktop gets no arrow",
+          ([m for g in got for m in g if m.startswith("tile ")],
+           [c for c, g in zip((LEFT, RIGHT, UP, DOWN), got) if f"key {c} 1" in g]),
+          (["tile left", "tile right", "tile up", "tile down"], []))
     check("Meta+Ctrl+Right: wider", [m for m in meta(CTRL, RIGHT) if m.startswith("tile ")], ["tile wider"])
+    check("Meta+Alt+Up/Down: nudged", [m for c in (UP, DOWN) for m in meta(ALT, c) if m.startswith("tile ")],
+          ["tile nudgeup", "tile nudgedown"])
+    # A screen's or a remote display's tile ("tilefocus 2"): it's dragged, but nudged by the keys.
+    to_relay("tilefocus 2")
+    time.sleep(0.05)
+    got = [meta(SHIFT, LEFT), meta(LEFT), meta(ALT, UP)]
+    check("tilefocus 2: only the nudge is ft-screens', the moves the desktop's",
+          ([m for g in got for m in g if m.startswith("tile ")], [f"key {LEFT} 1" in g for g in got[:2]]),
+          (["tile nudgeup"], [True, True]))
     to_relay("tilefocus 0")
     time.sleep(0.05)
     check("tilefocus 0: Meta+Shift+Left is the desktop's again", [m for m in meta(SHIFT, LEFT) if m.startswith("tile ")], [])
+    check("tilefocus 0: Meta+Alt+Up too", [m for m in meta(ALT, UP) if m.startswith("tile ")], [])
     lapse, relay.TILE_FOCUS_LAPSE = relay.TILE_FOCUS_LAPSE, 0.2
     to_relay("tilefocus 1")
     time.sleep(0.35)
     check("tilefocus lapses without renewal", [m for m in meta(SHIFT, LEFT) if m.startswith("tile ")], [])
     relay.TILE_FOCUS_LAPSE = lapse
-    # An app window's tile focused ("tilefocus 2"): Meta+arrows alone move it too (on the desktop
-    # they'd quick-tile the window, which halves it). Not on a screen's tile, and not once bound.
-    UP, DOWN = 103, 108
-    to_relay("tilefocus 2")
-    time.sleep(0.05)
-    got = [meta(c) for c in (LEFT, RIGHT, UP, DOWN)]
-    check("Meta+arrows, an app window's tile focused: ft-screens moves it, the desktop gets no arrow",
-          ([m for g in got for m in g if m.startswith("tile ")],
-           [c for c, g in zip((LEFT, RIGHT, UP, DOWN), got) if f"key {c} 1" in g]),
-          (["tile left", "tile right", "tile up", "tile down"], []))
-    check("...Meta+Shift+Left still moves it", [m for m in meta(SHIFT, LEFT) if m.startswith("tile ")], ["tile left"])
-    use({**relay.DEFAULT_KEY_BINDINGS, "125+105": "key"})
-    to_relay("tilefocus 2")
-    time.sleep(0.05)
     got = meta(LEFT)
-    check("...Meta+Left bound in the rules (pass through): the rules' own", ([m for m in got if m.startswith("tile ")],
-                                                                              f"key {LEFT} 1" in got), ([], True))
-    use(None)
+    check("no tile focused: Meta+Left is the desktop's (KWin's snap, or a PC's)",
+          ([m for m in got if m.startswith("tile ")], f"key {LEFT} 1" in got), ([], True))
+    use({**relay.DEFAULT_KEY_BINDINGS, "125+105": "key"})
     to_relay("tilefocus 1")
     time.sleep(0.05)
     got = meta(LEFT)
-    check("tilefocus 1 after 2 (a screen's tile now): Meta+Left is the desktop's again",
+    check("Meta+Left bound in the rules (pass through), a tile focused: the rules' own",
           ([m for m in got if m.startswith("tile ")], f"key {LEFT} 1" in got), ([], True))
+    use(None)
+    # A PC's app window's tile: its desktop has the keys (the sixth "keyboard" word), and the
+    # tiling keys are still ft-screens'.
+    to_relay("keyboard desktop 1 0 1 1")
+    to_relay("tilefocus 1")
+    time.sleep(0.05)
+    got = [meta(SHIFT, LEFT), meta(LEFT)]
+    check("a PC has the keys, its app's tile focused: Meta+Shift+Left and Meta+Left move the tile",
+          ([m for g in got for m in g if m.startswith("tile ")], [f"key {LEFT} 1" in g for g in got]),
+          (["tile left", "tile left"], [False, False]))
+    to_relay("keyboard desktop 1 0 1 0")
     to_relay("tilefocus 0")
     time.sleep(0.05)
     meta(SLASH)

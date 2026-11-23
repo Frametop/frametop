@@ -2234,7 +2234,7 @@
   "raised": null,
   "uid": "OTHER"
  },
- "tilefocus 2 (an app window's tile)": {
+ "tilefocus 2": {
   "calls": [],
   "changed": {
    "tile_focus_until": 105.0

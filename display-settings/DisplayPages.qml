@@ -1190,7 +1190,7 @@ Item {
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "Look to focus:"
-                        text: "Meta+Shift+arrows move the tile you look at"
+                        text: "Meta+arrows move the app tile you look at"
                         checked: backend.dashTiles.lookFocus
                         onToggled: backend.dashTiles.setLookFocus(checked)
                     }
@@ -1312,8 +1312,9 @@ Item {
                           + "page when it's in front. Once the desk is as wide as Desk width, a new panel goes on top of the lowest column. They "
                           + "show only with the dashboard open, unless Stay visible is on (a "
                           + "long press on the anchor button switches it for one panel). With the pointer or your gaze on "
-                          + "one, Meta+Shift+arrows move it between columns and rows (on an app window's tile Meta+arrows do "
-                          + "too) and Meta+Ctrl+arrows make it bigger or smaller; Meta+/ "
+                          + "an app's tile (in the headset or a PC's), Meta+arrows or Meta+Shift+arrows move it between "
+                          + "columns and rows and Meta+Ctrl+arrows make it bigger or smaller; screens and remote displays "
+                          + "move by dragging. Meta+/ "
                           + "lists every key. Drag a tile to reorder; pull it well away and it stays anchored where you let "
                           + "go. Anchored before the dashboard has opened, a panel stays where it is until the dashboard "
                           + "first opens. Each app, screen and remote display remembers whether it was anchored.\n\nWith "

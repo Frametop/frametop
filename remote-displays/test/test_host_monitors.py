@@ -1,5 +1,5 @@
 """Remote Displays' "Let Frametop control NAME's displays" switch and the display panels' scale
-pickers (host_monitors.py, MonitorScalePicker.qml). What is asked, what is run, how the panels'
+pickers and stream size lists (host_monitors.py, MonitorScalePicker.qml, StreamSizePicker.qml). What is asked, what is run, how the panels'
 sizes follow, and the page. Same stand-ins as test_app_windows.py (HOME a temp folder, ft-layout
 not run); the PC is a stand-in for ft_hostapi.request. Needs PySide6 and Kirigami.
 
@@ -18,6 +18,7 @@ from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 HZ240, HZ60 = ({"width": 2560, "height": 1600, "refresh_mhz": 240000},
                {"width": 2560, "height": 1600, "refresh_mhz": 60000})
 UHD = {"width": 3840, "height": 2160, "refresh_mhz": 60000}
+QHD = {"width": 2560, "height": 1440, "refresh_mhz": 60000}
 
 
 def pc(monitors=True):
@@ -41,7 +42,7 @@ def state(dp_sideways=False, error="", refused=()):
                           "refused": [{"width": w, "height": h} for w, h in refused],
                           "scale": 1.25, "scales": [1, 1.25, 1.6, 2, 2.5]},
                          {"id": "DP-1", "name": "Dell", "on": True, "primary": False, "mode": UHD,
-                          "modes": [UHD], "changed": False, "sideways": dp_sideways, "scale": 1, "scales": []}]}
+                          "modes": [UHD, QHD], "changed": False, "sideways": dp_sideways, "scale": 1, "scales": []}]}
 
 
 class Words(unittest.TestCase):
@@ -87,7 +88,7 @@ class Backend(Base):
         self.assertEqual((got["note"], len(got["monitors"])), ("", 2))
         self.assertEqual([m["largest"] for m in got["monitors"]], [[2560, 1600], [2160, 3840]],
                          "the most each takes, as its stream is (DP-1 is turned a quarter)")
-        self.assertEqual([m["sizes"] for m in got["monitors"]], [[[2560, 1600]], [[2160, 3840]]])
+        self.assertEqual([m["sizes"] for m in got["monitors"]], [[[2560, 1600]], [[2160, 3840], [1440, 2560]]])
         self.assertEqual(self.sent, [(ADDRESS, "GET", host_monitors.ft_hostmonitors.PATH, None)])
         self.assertEqual(self.ran, [], "a panel's stream size is the user's: the monitor follows it, not the other way")
         self.assertEqual(self.b.hostMonitors.supported, {"PC": True})
@@ -195,6 +196,11 @@ class Page(Base):
         pickers = [(js(b.parentItem().property("monitor")), b) for b in self.found(name)]
         return {m["id"]: b for m, b in pickers if m}
 
+    def part(self, display, name):
+        """The item called `name` in a display's settings."""
+        return next(i for d in self.found(prop="ownSize") if js(d.property("modelData"))["id"] == display
+                    for i in items(d) if i.objectName() == name)
+
     def bad_warnings(self):
         return [w for w in self.warnings if "not placed in the graphics scene" not in w]
 
@@ -267,10 +273,80 @@ class Page(Base):
         self.answered()
         self.assertEqual(tops(), {"pc-edp": (2560, 1600), "pc-dp": (3840, 2160), "pc-virtual": (7680, 4320)},
                          "a bigger size than its panel has wouldn't take")
-        help_of = next(h.property("text") for d in self.found(prop="ownSize") if js(d.property("modelData"))["id"] == "pc-edp"
-                       for h in items(d) if h.objectName() == "streamHelp")
-        self.assertIn("Its largest size is 2560 × 1600.", help_of)
+        help_of = lambda: next(  # noqa: E731
+            h.property("text") for d in self.found(prop="ownSize") if js(d.property("modelData"))["id"] == "pc-edp"
+            for h in items(d) if h.objectName() == "streamHelp")
+        self.assertNotIn("Its largest size", help_of(), "its sizes are in the list")
+        self.part("pc-edp", "streamCustom").parentItem().customPicked.emit(True)
+        spin(self.app, seconds=0.1)
+        self.assertIn("Its largest size is 2560 × 1600.", help_of())
         self.assertEqual(self.bad_warnings(), [])
+
+    def test_a_followed_monitor_picks_its_stream_size_from_the_sizes_it_lists(self):
+        shown = lambda display, name: self.part(display, name).property("visible")  # noqa: E731
+        self.answered()
+        for d in self.found(prop="ownSize"):
+            d.setProperty("expanded", True)
+        spin(self.app, seconds=0.1)
+        self.assertEqual([shown("pc-dp", n) for n in ("streamSize", "streamWidth", "streamCustom", "streamCustomWarning")],
+                         [False, True, False, False], "the switch off: a size only crops or fits, so any size")
+        self.switch_on()
+        self.answered()
+        for d in self.found(prop="ownSize"):
+            d.setProperty("expanded", True)
+        spin(self.app, seconds=0.1)
+        self.assertEqual([shown("pc-dp", n) for n in ("streamSize", "streamWidth", "streamCustom", "streamCustomWarning")],
+                         [True, False, True, False])
+        self.assertEqual([shown("pc-virtual", n) for n in ("streamSize", "streamWidth", "streamCustom")],
+                         [False, True, False], "a virtual display is made in any size")
+        box = self.part("pc-dp", "streamSize")
+        self.assertEqual(js(box.property("model")), ["3840 × 2160", "2560 × 1440"])
+        self.assertEqual(box.property("currentIndex"), 0, "the panel's size")
+        picker = box.parentItem()
+        self.assertFalse(picker.property("changed"))
+        box.setProperty("currentIndex", 1)
+        self.assertEqual((picker.property("pickedWidth"), picker.property("pickedHeight"), picker.property("changed")),
+                         (2560, 1440, True), "what Apply sends")
+
+    def test_custom_size_shows_the_boxes_with_a_warning_and_stays_on(self):
+        shown = lambda name: self.part("pc-dp", name).property("visible")  # noqa: E731
+        self.switch_on()
+        self.answered()
+        self.part("pc-dp", "streamSize").parentItem().customPicked.emit(True)
+        for d in self.found(prop="ownSize"):
+            d.setProperty("expanded", True)
+        spin(self.app, seconds=0.1)
+        self.assertEqual([shown(n) for n in ("streamSize", "streamWidth", "streamCustom", "streamCustomWarning")],
+                         [False, True, True, True])
+        self.assertTrue(self.part("pc-dp", "streamCustom").property("checked"))
+        self.assertEqual(self.part("pc-dp", "streamCustomWarning").property("text"),
+                         "A custom size may not work: it depends on the sizes PC's monitor accepts. If the monitor "
+                         "doesn't take it, it stays as it is and the stream crops or fits it.")
+        self.b.changed.emit()  # the list is made again (Apply)
+        spin(self.app, seconds=0.1)
+        self.assertTrue(shown("streamWidth"), "still custom")
+        self.part("pc-dp", "streamSize").parentItem().customPicked.emit(False)
+        spin(self.app, seconds=0.1)
+        self.assertEqual([shown(n) for n in ("streamSize", "streamWidth")], [True, False])
+        self.assertEqual(self.bad_warnings(), [])
+
+    def test_a_size_its_monitor_doesnt_list_starts_as_custom(self):
+        host = pc()
+        host["displays"][0]["size"] = [2560, 1200]  # a size Hyprland makes a mode for
+        set_hosts(host)
+        self.b.changed.emit()
+        self.answered()
+        for d in self.found(prop="ownSize"):
+            d.setProperty("expanded", True)
+        spin(self.app, seconds=0.1)
+        self.assertTrue(self.part("pc-edp", "streamWidth").property("visible"))
+        self.assertTrue(self.part("pc-edp", "streamCustom").property("checked"))
+        picker = self.part("pc-edp", "streamSize").parentItem()
+        picker.customPicked.emit(False)
+        spin(self.app, seconds=0.1)
+        box = self.part("pc-edp", "streamSize")
+        self.assertEqual((box.property("currentIndex"), box.property("displayText")), (-1, "Pick a size"))
+        self.assertFalse(picker.property("changed"), "nothing to apply until a size is picked")
 
     def test_a_size_its_monitor_refused_is_said_under_the_size_boxes(self):
         helps = lambda: {js(d.property("modelData"))["id"]: next(  # noqa: E731
@@ -295,12 +371,14 @@ class Page(Base):
         spin(self.app, seconds=0.1)
         boxes = self.boxes("monitorScale")
         texts = lambda box: [c["text"] for c in js(box.property("entries"))]  # noqa: E731
-        self.assertEqual(texts(boxes["eDP-2"]), ["Its own scale (125%)", "100%", "125%", "160%", "200%", "250%"])
+        self.assertEqual(texts(boxes["eDP-2"]), [
+            "Its own scale (125%)", "100%", "125%", "150% (160% on this monitor)", "175% (160% on this monitor)",
+            "200%", "250%"], "125, 150, 175 and 200 always; one it doesn't list says what the PC fits it to")
         self.assertFalse(boxes["DP-1"].parentItem().property("visible"), "it lists none (a Windows PC)")
         self.assertTrue(boxes["eDP-2"].parentItem().property("visible"))
         boxes["eDP-2"].parentItem().choose(3)
         boxes["eDP-2"].parentItem().choose(0)  # already its own: nothing to send
-        self.assertEqual(self.picked, [("scale", "PC", "pc-edp", 1.6)])
+        self.assertEqual(self.picked, [("scale", "PC", "pc-edp", 1.5)])
         self.assertEqual(self.bad_warnings(), [])
 
     def test_a_picked_scale_shows_even_if_not_listed(self):
@@ -312,9 +390,9 @@ class Page(Base):
         texts = lambda: [c["text"] for c in js(self.boxes("monitorScale")["eDP-2"].property("entries"))]  # noqa: E731
         self.answered()
         entries = texts()
+        self.assertNotIn("160%", entries, "it stands in for 150% and 175%")
         self.assertEqual(entries[0], "Its own scale (125%)", "not applied yet (no stream): its scale is its own")
-        self.assertIn("150%", entries)
-        self.assertEqual(entries[self.boxes("monitorScale")["eDP-2"].property("currentIndex")], "150%")
+        self.assertEqual(entries[self.boxes("monitorScale")["eDP-2"].property("currentIndex")], "150% (160% on this monitor)")
         applied = state()
         applied["monitors"][0].update(scale=1.5, changed=True, own_scale=1.25)
         self.answered(applied)
@@ -322,6 +400,22 @@ class Page(Base):
         del applied["monitors"][0]["own_scale"]  # a PC from before own_scale
         self.answered(applied)
         self.assertEqual(texts()[0], "Its own scale", "its scale now isn't its own")
+
+    def test_a_picked_scale_that_stands_in_for_another_still_shows(self):
+        hosts = pc()
+        hosts["displays"][0]["scale"] = 1.6
+        set_hosts(hosts)
+        self.b.changed.emit()
+        self.answered()
+        box = self.boxes("monitorScale")["eDP-2"]
+        entries = [c["text"] for c in js(box.property("entries"))]
+        self.assertEqual(entries[box.property("currentIndex")], "160%")
+        listed = state()
+        listed["monitors"][0]["scales"] = [1, 1.25, 1.5, 1.75, 2]  # a mode that takes all four
+        self.answered(listed)
+        box = self.boxes("monitorScale")["eDP-2"]
+        self.assertEqual([c["text"] for c in js(box.property("entries"))],
+                         ["Its own scale (125%)", "100%", "125%", "150%", "160% (150% on this monitor)", "175%", "200%"])
 
     def test_its_settings_stay_open_when_the_list_is_made_again(self):
         self.switch_on()

@@ -3,14 +3,16 @@
 #include "npuclient.h"
 
 #include <algorithm>
+#include <set>
 
 std::vector<NpuRequest> npu_requests(const std::vector<int> &hands, bool two_view) {
     // the crop order: each pair at an even position, so no pair straddles a request (requests start every 4th)
     std::vector<int> order;
     std::vector<bool> used(hands.size(), false);
+    std::set<int> paired_hands;   // a hand's first two views only: a 4-view hand (replays' --views) pairs once
     if (two_view)
         for (size_t i = 0; i < hands.size(); ++i) {
-            if (hands[i] == 0 || used[i]) continue;
+            if (hands[i] <= 0 || used[i] || !paired_hands.insert(hands[i]).second) continue;
             for (size_t j = i + 1; j < hands.size(); ++j)
                 if (!used[j] && hands[j] == hands[i]) {
                     order.push_back(int(i)), order.push_back(int(j));

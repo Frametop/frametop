@@ -103,6 +103,7 @@ void hello_maps_the_memory() {
     }
     // pair bits past the request's crops never reach the daemon
     CHECK(!cl.run(1, 500, err, NpuClient::kPair0) && !cl.run(3, 500, err, NpuClient::kPair1));
+    CHECK(!cl.run(2, 500, err, NpuClient::kPair1) && !cl.run(3, 500, err, NpuClient::kPair0 | NpuClient::kPair1));
     CHECK(!cl.run(4, 500, err, 0x80) && cl.connected());
     // a paired request and a plain one answered OK, then one the daemon never answers before closing
     std::thread t([&] {

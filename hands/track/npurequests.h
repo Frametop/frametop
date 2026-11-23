@@ -12,7 +12,7 @@ struct NpuRequest {
     uint8_t pairs = 0;
 };
 
-// The requests for views of hands (0: none known), as few as the views allow. With two_view, each hand's first
+// The requests for views of hands (0 or less: none known), as few as the views allow. With two_view, each hand's first
 // two views go together at crops (0, 1) or (2, 3) with that pair's bit; every other view is read alone. Without,
 // the views in order.
 std::vector<NpuRequest> npu_requests(const std::vector<int> &hands, bool two_view);

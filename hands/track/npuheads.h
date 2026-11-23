@@ -30,7 +30,8 @@ struct NpuHeads {
     // Bytes of one crop's outputs as ft-npud lays them out: heat s8 [K][H][W], kp_feat s8 [kpd][H][W],
     // pool u8 [g][pool_h][pool_w], and for a two-view graph pool_pre u8 [g][pool_h][pool_w].
     size_t out_bytes() const { return size_t(K + kpd) * H * W + size_t(g) * pool_h * pool_w * (two_view ? 2 : 1); }
-    // The heads file's size for a header (12 u32): 0 for a bad magic or version.
+    // The heads file's size for a header (12 u32): 0 for a bad magic or version, or shapes too big to
+    // size without wrapping. Not a validation: parse() checks the shapes.
     static size_t file_bytes(const uint32_t *hdr);
     // One crop: screen [K][2] in crop pixels, world [3K], presence and side as probabilities. partner: the other
     // crop of its pair when it was sent as one (two-view only), else null.

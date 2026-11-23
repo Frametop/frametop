@@ -146,14 +146,16 @@ int main() {
         check("left of one not tiled: as without it", b.Grid().Find(8).col == 1);
     }
     // --- moved, the strip stays where it was (user, 2026-11-18: a monitor moved from the right to the
-    // left was centred and every other one pushed right, 30 degrees and more)
+    // left was centred and every other one pushed right, 30 degrees and more); recentred (the
+    // dashboard opening), the centre display straight ahead (user, 2026-11-23)
     {
         dashtiles::Board b;
         for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
         b.Arrange(desk);
         const auto at = [&](int id) { const tiling::Placed *p = b.PlacedOf(id); return p ? p->azDeg : NAN; };
         const double w = at(2) - at(1), a1 = at(1), a2 = at(2);
-        check("pan: three, centred at first", near(at(2), 0, 1e-9) && w > 20);
+        check("pan: three as wide: the middle one the centre display, straight ahead at first",
+              b.Centre() == 2 && near(at(2), 0, 1e-9) && w > 20);
         const double left = a1 - w * 0.4;   // (on 1's left edge)
         b.Drop(3, b.DropFor(3, left, 0, desk), left);
         b.Arrange(desk);
@@ -191,8 +193,9 @@ int main() {
         b.Arrange(desk);
         check("pan: arranged again unchanged: still", near(b.PanDeg(), steady, 1e-9));
         b.Recentre();
-        const tiling::Layout &c = b.Arrange(desk);
-        check("pan: recentred: the strip's middle straight ahead", near(c.az0, -c.az1, 1e-9));
+        b.Arrange(desk);
+        check("pan: recentred: the centre display straight ahead (moves left it off to one side)",
+              b.Centre() >= 0 && near(at(b.Centre()), 0, 1e-9));
         b.Recentre(1);
         b.Arrange(desk);
         check("pan: recentred on one: it straight ahead", near(at(1), 0, 1e-9));
@@ -201,8 +204,8 @@ int main() {
         check("pan: a key press: the strip still reaches straight ahead", b.Last().az0 <= 1e-9 && b.Last().az1 >= -1e-9);
     }
     // --- panels that come after the strip was laid out (back from a profile, or anchored): the strip
-    // centred with them, not grown off to one side (testbench, 2026-11-19: one tile up when the
-    // dashboard opened, two more after it, the strip -52..23)
+    // recentred with them on the centre display, not grown off to one side (testbench, 2026-11-19:
+    // one tile up when the dashboard opened, two more after it, the strip -52..23)
     {
         dashtiles::Board b;
         b.Anchor(1, -1, dashtiles::Stay::Default);
@@ -217,10 +220,13 @@ int main() {
         dashtiles::Parse(b.Remember(2), &st);
         b.Restore(3, st, 2);
         const tiling::Layout &r = b.Arrange(desk);
-        check("late: a restored one: the strip centred", near(r.az0, -r.az1, 1e-9) && b.PlacedOf(3));
+        check("late: a restored one: three as wide, the middle one the centre, straight ahead",
+              b.PlacedOf(3) && b.Centre() == b.Grid().Cols()[1].cells[0].id && near(b.PlacedOf(b.Centre())->azDeg, 0, 1e-9));
+        const int centre = b.Centre();
         b.Drop(3, b.DropFor(3, r.az0 + 5, 0, desk), r.az0 + 5);
-        const tiling::Layout &m = b.Arrange(desk);
-        check("late: then moved: not centred again", !near(m.az0, -m.az1, 1e-3));
+        b.Arrange(desk);
+        check("late: then moved: not pulled back straight ahead (the centre where the move left it)",
+              b.Centre() >= 0 && !near(b.PlacedOf(b.Centre())->azDeg, 0, 1e-3) && b.Grid().Has(centre));
     }
     // --- a narrow panel flipping its lean doesn't move the other columns (testbench, 2026-11-18: one
     // flip took the column next to it 6 degrees)

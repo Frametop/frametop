@@ -131,6 +131,10 @@ int main() {
     { Cmd t; check("tiles recentre: the rest after it", Parse("tiles recentre", t) == Tiles && t.rest && !std::strcmp(t.rest, "recentre")); }
     { Cmd t; check("tiles clear", Parse("tiles clear", t) == Tiles && t.rest && !std::strcmp(t.rest, "clear")); }
     { Cmd t; check("tiles gaps", Parse("tiles gaps", t) == Tiles && t.rest && !std::strcmp(t.rest, "gaps")); }
+    { Cmd t; check("tiles centre: the rest after it", Parse("tiles centre 3", t) == Tiles && t.rest && !std::strcmp(t.rest, "centre 3")); }
+    { Cmd t; check("tiles centre alone", Parse("tiles centre", t) == Tiles && t.rest && !std::strcmp(t.rest, "centre")); }
+    { Cmd t; check("tiles arc: the rest after it", Parse("tiles arc 3", t) == Tiles && t.rest && !std::strcmp(t.rest, "arc 3")); }
+    check("tiles: not tiles centrex", V("tiles centrex") == Tile);
     { Cmd t; check("tiles alone: no rest", Parse("tiles", t) == Tiles && !t.rest); }
     check("tiles: not a tile key, nor tilesx", V("tilesx") == Tile && V("tiles setx") == Tile);
     check("stay is no state", V("state") == State && V("stay 1") == Unknown);

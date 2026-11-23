@@ -664,7 +664,7 @@ class Backend(QObject):
     def setStream(self, display_id, width, height, fps, bitrate):
         """Its stream's resolution, frame rate and bitrate (it starts over)."""
         self._run("Changing the stream", "remote", "set", display_id, f"size={width}x{height}", f"fps={fps}",
-                  f"bitrate={bitrate}")
+                  f"bitrate={bitrate}", then=lambda: self._monitors.refresh_of(display_id))
 
     def _save(self, layout):
         """Save the layout; False, said in the window, when it can't be (a frametop-layout.json

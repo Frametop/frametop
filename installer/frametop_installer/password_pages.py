@@ -76,7 +76,7 @@ class PasswordPages:
             self.busy = False
             if err:
                 pw[:] = bytes(len(pw))
-                return self.say(f"passwd didn't take it: {err}")
+                return self.say(f"Couldn't set the password: {err}")
             self.verified(pw)
         in_thread(lambda: "" if self.dry_run else host.set_password(pw), done,
                   lambda e: done(f"{e.__class__.__name__}: {e}"))
@@ -127,7 +127,8 @@ class PasswordPages:
                 self.forget_password()
                 self.password = pw
                 self.install_again()
-            in_thread(lambda: self.dry_run or host.check_password(pw), done, lambda _: done(False))
+            in_thread(lambda: self.dry_run or bool(state.get("dry_run")) or host.check_password(pw), done,
+                      lambda _: done(False))
 
         self.pw_entry, field = password_field("Your SteamOS password", go, self.keypads)
         self.page("password", label("Your password", css=("title-1",)),

@@ -120,8 +120,13 @@ def check_password(pw):
 
 def set_password(pw):
     """Give this user a password with passwd (the helper answers its prompts on a pty).
-    Returns "" or what passwd said was wrong."""
-    code, out, _ = run(["python3", str(BIN / "helper.py"), "setpw"], input=bytes(pw).hex().encode() + b"\n",
-                       timeout=60)
-    msg = out.decode("utf-8", "replace").strip()
+    Returns "" or what went wrong. This page comes before an install ever started, so the helper
+    is put on the host here first."""
+    try:
+        stage()
+    except OSError as e:
+        return f"couldn't put the installer's scripts in {BIN}: {e}"
+    code, out, err = run(["python3", str(BIN / "helper.py"), "setpw"], input=bytes(pw).hex().encode() + b"\n",
+                         timeout=60)
+    msg = (out.strip() or err.strip()).decode("utf-8", "replace")
     return "" if code == 0 else (msg or "passwd didn't take it")

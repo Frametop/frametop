@@ -253,9 +253,10 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
 
     # --- the install
 
-    def begin(self, pw, version=None, channel=None, flags=None, restart=None):
-        """Start the install. version/flags/restart come from the last install's state for
+    def begin(self, pw, version=None, channel=None, flags=None, restart=None, dry_run=None):
+        """Start the install. version/flags/restart/dry_run come from the last install's state for
         Install again; otherwise from the pages."""
+        dry_run = self.dry_run if dry_run is None else dry_run
         if version is None:
             version, channel = self.release.version, self.release.channel
             flags = options.install_flags(self.picked, self.release.supported)
@@ -276,12 +277,17 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
             # The helper listens before the install starts, so its first sudo finds it.
             if pw is not None and self.helper is None:
                 try:
-                    self.helper = Helper(self.ask_again)
+                    self.helper = Helper(self.ask_again, self.helper_gone)
                     self.helper.give(pw)
                 except OSError as e:
                     return started(f"the password helper didn't start: {e}")
-            in_thread(lambda: job.start(version, channel, flags, restart, pw is not None, dry_run=self.dry_run),
-                      started, failed)
+            helper = self.helper if pw is not None else None
+
+            def start():
+                if helper and not helper.wait_ready():
+                    return "the password helper didn't start, so nothing could answer sudo"
+                return job.start(version, channel, flags, restart, pw is not None, dry_run=dry_run)
+            in_thread(start, started, failed)
 
         def started(err):
             if err:
@@ -333,11 +339,12 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
         state = self.state or job.load_state() or {}
         if not state.get("version"):
             return self.show_versions()
-        self.dry_run = self.dry_run or bool(state.get("dry_run"))
+        # (a test run again is a test run; the window's own dry_run stays what it was started as)
+        dry_run = self.dry_run or bool(state.get("dry_run"))
         if state.get("sudo") and not self.password:
             return self.show_again_password(state)
         self.begin(self.password if state.get("sudo") else None, state["version"], state.get("channel", ""),
-                   state.get("flags", ["--yes"]), state.get("restart", False))
+                   state.get("flags", ["--yes"]), state.get("restart", False), dry_run=dry_run)
 
     # --- closing
 

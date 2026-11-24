@@ -62,7 +62,10 @@ def start(version, channel, flags, restart, askpass, dry_run=False):
     cmd += ["/usr/bin/bash", str(host.BIN / "run-install.sh"), str(host.CACHE),
             "1" if restart and not dry_run else "0", "--", *install_args(version, flags, dry_run)]
     code, _, err = host.run(cmd, timeout=30)
-    return "" if code == 0 else (err.decode("utf-8", "replace").strip() or f"systemd-run failed ({code})")
+    if code == 0:
+        return ""
+    STATE.unlink(missing_ok=True)   # nothing started: the next open starts fresh, not on "unfinished"
+    return err.decode("utf-8", "replace").strip() or f"systemd-run failed ({code})"
 
 
 def save_state(state):
@@ -116,23 +119,26 @@ DOWNLOAD_SHARE = 0.35    # of the bar: the 1.2 GB download
 LOAD_AT = 0.40           # the image loading into podman (install-release.sh's step 0)
 
 
+def _text(line):
+    return ANSI.sub("", line.decode("utf-8", "replace"))
+
+
 @dataclass
 class Progress:
     fraction: float = 0.0
     step: str = "Starting"
     download: str = ""
     lines: list = field(default_factory=list)   # log lines to show, without curl's meter
-    _partial: str = ""
+    _partial: bytes = b""   # the line a read stopped in: decoded whole, once the rest of it comes
 
     def feed(self, data):
         """Take more of the log (bytes). Returns the new lines to show."""
-        text = self._partial + ANSI.sub("", data.decode("utf-8", "replace"))
-        *chunks, self._partial = re.split(r"[\r\n]", text)
-        return self._take(chunks)
+        *chunks, self._partial = re.split(rb"[\r\n]", self._partial + data)
+        return self._take([_text(c) for c in chunks])
 
     def flush(self):
-        rest, self._partial = self._partial, ""
-        return self._take([rest]) if rest else []
+        rest, self._partial = self._partial, b""
+        return self._take([_text(rest)]) if rest else []
 
     def _take(self, chunks):
         new = []

@@ -80,6 +80,27 @@ class Start(Temp):
         self.assertFalse([c for c in self.calls if c[0] == "systemd-run"])
         self.assertIsNone(job.load_state())
 
+    def test_an_install_that_didnt_start_isnt_unfinished(self):
+        def fake_run(argv, input=None, timeout=60):
+            return (1, b"", b"Failed to start transient service unit\n") if argv[0] == "systemd-run" else (0, b"", b"")
+        host.run = fake_run
+        self.assertIn("Failed to start", job.start("0.3.0", "stable", ["--yes"], False, False))
+        self.assertEqual(job.where_things_are(job.load_state(), "inactive", job.result()), "new")
+
+
+class SetPassword(Temp):
+    def test_the_helper_is_on_the_host_before_it_runs(self):
+        # The Set a password page comes before any install: nothing staged the helper yet.
+        there = []
+
+        def fake_run(argv, input=None, timeout=60):
+            there.append((argv[:1] + argv[2:], pathlib.Path(argv[1]).is_file(), input))
+            return 1, b"", b"passwd: Authentication token manipulation error\n"
+        host.run = fake_run
+        said = host.set_password(bytearray(b"hunter22"))
+        self.assertEqual(there, [(["python3", "setpw"], True, b"hunter22".hex().encode() + b"\n")])
+        self.assertIn("Authentication token", said)   # stderr, when the helper printed nothing
+
 
 class UnitState(Temp):
     def answer(self, code, out):
@@ -147,6 +168,17 @@ class Progress(unittest.TestCase):
         self.assertEqual(p.step, "Loading Frametop 0.3.0 (a minute or two)")
         p.feed(b"== 7/13 multi-screen desktop\n")
         self.assertEqual(p.step, "Step 7 of 13: multi-screen desktop")
+
+    def test_a_read_that_stops_mid_character(self):
+        # The log is read as it grows: a read can end inside a colour code or a UTF-8 character.
+        data = "\x1b[1m== 3/13 3D mouse\x1b[0m\nGerät: é ✓ done\n".encode()
+        for cut in range(1, len(data)):
+            p = job.Progress()
+            p.feed(data[:cut])
+            p.feed(data[cut:])
+            p.flush()
+            self.assertEqual(p.lines, ["== 3/13 3D mouse", "Gerät: é ✓ done"], cut)
+            self.assertEqual(p.step, "Step 3 of 13: 3D mouse", cut)
 
 
 class RunInstall(unittest.TestCase):

@@ -64,7 +64,7 @@ class ProgressPage:
                   expander, self.done_buttons)
         if state.get("sudo") and self.helper is None:
             try:
-                self.helper = Helper(self.ask_again)
+                self.helper = Helper(self.ask_again, self.helper_gone)
                 if self.password:
                     self.helper.give(self.password)
             except OSError as e:
@@ -73,6 +73,16 @@ class ProgressPage:
         self.unit = "activating"
         GLib.timeout_add(500, self.tick)
         self.tick()
+
+    def helper_gone(self):
+        """The host helper ended on its own: nothing answers the install's sudo now."""
+        if self.helper:
+            self.helper.close()
+            self.helper = None
+        if self.stack.get_visible_child_name() == "progress" and not self.finished and self.state.get("sudo"):
+            self.ask_box.set_visible(False)
+            self.add_log(["(the password helper stopped. If the install still needs your password, close this "
+                          "window and open Frametop Installer again; otherwise it skips those parts)"])
 
     def ask_again(self):
         if self.password and self.helper:
@@ -100,7 +110,8 @@ class ProgressPage:
                 pw[:] = bytes(len(pw))
                 self.ask_error.set_label("sudo didn't take that password.")
                 self.ask_error.set_visible(True)
-        in_thread(lambda: self.dry_run or host.check_password(pw), done, lambda _: done(False))
+        in_thread(lambda: self.dry_run or bool(self.state.get("dry_run")) or host.check_password(pw), done,
+                  lambda _: done(False))
 
     def skip_ask(self):
         if self.helper:
@@ -115,9 +126,7 @@ class ProgressPage:
         adj = self.logscroll.get_vadjustment()
         GLib.idle_add(lambda: (adj.set_value(adj.get_upper()), False)[1])
 
-    def tick(self):
-        if self.finished or self.stack.get_visible_child_name() != "progress":
-            return False
+    def read_log(self):
         try:
             with open(job.LOG, "rb") as f:
                 f.seek(self.offset)
@@ -127,6 +136,11 @@ class ProgressPage:
             data = b""
         if data:
             self.add_log(self.progress.feed(data))
+
+    def tick(self):
+        if self.finished or self.stack.get_visible_child_name() != "progress":
+            return False
+        self.read_log()
         p = self.progress
         self.step.set_label(p.step)
         self.download.set_label(p.download)
@@ -148,6 +162,7 @@ class ProgressPage:
         where = job.where_things_are(self.state, unit, rc)
         if where == "running":
             return
+        self.read_log()   # what it wrote since the last tick: the end of the log says why it failed
         self.add_log(self.progress.flush())
         self.finish(where, rc)
 

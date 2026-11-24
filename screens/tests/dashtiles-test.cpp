@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 static int failed = 0;
@@ -1675,6 +1676,31 @@ int main() {
               r.Centre() == 1 && r.ArcNow(1) && near(r.Nudge(3), 2));
         for (int i = 0; i < 40; ++i) b.Press(3, dashtiles::Key::NudgeDown);
         check("nudge: no more than 30 degrees", near(b.Nudge(3), -30));
+        // picked up and let go where it's shown: its place in the grid, not a stack with a neighbour (council, 2026-11-24)
+        const auto small = [](int) { return dashtiles::Info{0.8, 0.45}; };
+        const auto cells = [](const dashtiles::Board &g) {
+            std::string s;
+            for (const auto &c : g.Grid().Cols()) {
+                for (const auto &cell : c.cells) s += std::to_string(cell.id) + " ";
+                s += "| ";
+            }
+            return s;
+        };
+        bool stays = true;
+        for (const int presses : {5, 12, -12, -16}) {
+            dashtiles::Board n;
+            tiling::FromEyes(tiling::Eyes{1.4, -12, 0.8, 70}, 2.0, &n.params);
+            n.params.reserveDeg = 0;
+            for (int id : {1, 2, 3}) n.Anchor(id, id - 1, dashtiles::Stay::Default), n.Arrange(small);
+            for (int i = 0; i < std::abs(presses); ++i) n.Press(2, presses > 0 ? dashtiles::Key::NudgeUp : dashtiles::Key::NudgeDown);
+            n.Arrange(small);
+            const std::string before = cells(n);
+            const tiling::Placed at = *n.PlacedOf(2);
+            n.Drop(2, n.DropFor(2, at.azDeg, at.elDeg, small), at.azDeg);
+            n.Arrange(small);
+            stays = stays && cells(n) == before && near(n.PlacedOf(2)->elDeg, at.elDeg, 1e-9);
+        }
+        check("nudge: a nudged tile let go where it is stays in its place, nudged", stays);
         check("state: old lines read as before, flags round trip",
               dashtiles::Parse("tile 0 1 2 0 1.000", &st) && !st.centre && !st.arc && st.nudgeDeg == 0 &&
                   dashtiles::Parse("tile 0 1 2 0 1.000 dr centre arc nudge=-3.0", &st) && st.below && st.centre && st.arc &&

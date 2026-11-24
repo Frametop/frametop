@@ -152,12 +152,15 @@ public:
     }
     // Where a drop at (az, el) goes: aimed at the grid as you see it (the dragged panel's place
     // still in it: the others don't move while you drag), as indices in the grid without it.
+    // A nudged panel is shown off its place: the others are aimed at where their nudges show them,
+    // and the dragged one goes by where its place went, so let go where it was, it stays put.
     template <typename InfoOf>
     tiling::Drop DropFor(int id, double az, double el, InfoOf info) const {
         const auto cols = Columns(info);
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : tiling::Arrange(cols, params, Split());
         if (l.split < 0) tiling::Turn(&l, pan_);   // (as you see it)
-        return Without(grid_, id, tiling::DropAt(l, cols, az, el, id));
+        ShowNudges(&l, id);
+        return Without(grid_, id, tiling::DropAt(l, cols, az, el - Nudge(id), id));
     }
     // Let go at `az` round you: where DropFor said (a column's indices are the grid's without it), or
     // torn off at `rel`. The strip then goes where it keeps it nearest `az` (Arrange; NAN: the others
@@ -297,6 +300,11 @@ public:
         const auto it = nudge_.find(id);
         return it == nudge_.end() ? 0 : it->second;
     }
+    // Each nudged panel of a layout where it's shown: it alone, up or down (not `except`).
+    void ShowNudges(tiling::Layout *l, int except = -1) const {
+        for (tiling::Placed &p : l->tiles)
+            if (const double n = Nudge(p.id); n != 0 && p.id != except) p.elDeg += n, p.el0 += n, p.el1 += n;
+    }
     // The centre display as laid out last (-1: none), and whether it's curved round the arc now.
     int Centre() const { return centreNow_; }
     // ...the one the wall's middle section is (tilecurve.h): it, or while it's hidden (no size) the shown
@@ -427,8 +435,7 @@ public:
         centreNow_ = CentreOf(info);
         pan_ = l.split >= 0 || params.fit ? 0 : Pan(l);   // (fitted: always round the middle)
         if (pan_ != 0) tiling::Turn(&l, pan_);
-        for (tiling::Placed &p : l.tiles)   // (nudged: it alone, up or down)
-            if (const double n = Nudge(p.id); n != 0) p.elDeg += n, p.el0 += n, p.el1 += n;
+        ShowNudges(&l);
         moved_ = -1, recentre_ = false;
         return last_ = std::move(l);
     }

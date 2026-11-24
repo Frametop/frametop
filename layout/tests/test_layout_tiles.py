@@ -71,6 +71,24 @@ class Pure(unittest.TestCase):
                          ["tiles remember", f"tiles remember remote:10.0.0.2/Desktop {TILE} centre",
                           f"tiles remember screen:1 {SAT}"])
 
+    def test_a_key_with_spaces_is_one_word(self):
+        # ft-screens splits "tiles remember KEY STATE" at the first space, and keeps its keys cleaned
+        keys = {"remote:tv": "remote:10.0.0.2/Steam Big Picture"}
+        self.assertEqual(layout_tiles.remember_commands([["remote:tv", TILE]], keys),
+                         ["tiles remember", f"tiles remember remote:10.0.0.2/Steam_Big_Picture {TILE}"])
+
+    def test_a_tile_it_refuses_doesnt_stop_the_others(self):
+        asked = []
+
+        def ask(text):
+            asked.append(text)
+            if "screen:1" in text and "remember" in text:
+                raise RuntimeError("error tiles remember KEY STATE")
+            return "ok"
+        keys = {"screen:1": "screen:1", "screen:2": "screen:2"}
+        layout_tiles.restore(ask, [["screen:1", TILE], ["screen:2", SAT]], {}, keys)
+        self.assertIn(f"tiles remember screen:2 {SAT}", asked)
+
     def test_older_ft_screens_still_takes_the_set(self):
         asked = []
 

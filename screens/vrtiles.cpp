@@ -913,7 +913,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             if (k0 == 0 || v0 == std::string::npos || !dashtiles::Parse(line.substr(v0), &st))
                 return (void)std::snprintf(reply, size, "error tiles remember KEY STATE");
             const std::string key = line.substr(k0, k1 - k0);
-            if (st.centre) g_tiles.profileCentre = key;
+            if (st.centre) g_tiles.profileCentre = dashtiles::Memory::Clean(key);   // (as Restore gets it)
             if (g_tileMemory.Set(key, line.substr(v0))) SaveTileMemory();
             return (void)std::snprintf(reply, size, "ok");
         }

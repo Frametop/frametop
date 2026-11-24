@@ -1460,6 +1460,24 @@ def tests():
     from_kb("kbkey 30 1")
     from_kb("kbkey 30 0")
     check("its keys reach the desktop", (typed(), emitted()), (["key 30 1", "key 30 0"], []))
+    # A "keys:" action lifts the modifiers the desktop holds for its tap. A keyboard's stay up
+    # (above); Full Keyboard's goes down again at once: its release, and the next key, are its own.
+    devices["controller"] = {"right/b": "keys:125+32"}
+    use({})
+    to_relay("keyboard desktop 1")
+    from_kb(f"kbkey {SHIFT} 1")
+    typed()
+    to_relay("vrbtn right/b 1")
+    to_relay("vrbtn right/b 0")
+    time.sleep(0.1)
+    check("Shift held on Full Keyboard, a keys: action from a controller: Shift is up for the tap only",
+          typed(), [f"key {SHIFT} 0", "key 125 1", "key 32 1", "key 32 0", "key 125 0", f"key {SHIFT} 1"])
+    from_kb(f"kbkey {SHIFT} 0")
+    check("...and its release still reaches the desktop", typed(), [f"key {SHIFT} 0"])
+    devices["controller"] = {}
+    use({})
+    from_kb("kbhello 1")  # (it counts as running for a few seconds after a hello: this took a while)
+    heard(), typed()
     LOG.clear()
     from_kb("kbtext a\u00e9b")
     from_kb(f"kbkey {ENTER} 1")

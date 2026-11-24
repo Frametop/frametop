@@ -1732,23 +1732,29 @@ class Relay:
         goes (the desktop's screens, else the virtual keyboard for Steam). Down and up together,
         so a release that never comes (a controller gone) can't leave a key held. Modifiers the
         desktop holds (the key combination that did this) come up there first, and one the action
-        has too is left as it is, so the desktop gets the action's keys alone. The ones that came
-        up stay up there (held.lifted): put down again at once, each would be let go with no key
-        in between, a tap of its own there (Alt's opens a window's menu). key_binding puts them
-        down again before the next key that's typed, and drops their real release. Steam reads
-        the keyboards itself, so there it sees the held ones too."""
+        has too is left as it is, so the desktop gets the action's keys alone. A keyboard's that
+        came up stay up there (held.lifted): put down again at once, each would be let go with
+        no key in between, a tap of its own there (Alt's opens a window's menu). key_binding puts
+        them down again before the next key that's typed, and drops their real release. One the
+        relay holds itself (typed_down) goes down again at once, as its release and the next key
+        come from there. Steam reads the keyboards itself, so there it sees the held ones too."""
         if not codes:
             return
         desktop = now < self.desktop_until
         held = sorted(c for c in self.held.desktop if c in MODIFIERS) if desktop else []
-        for code in held:
-            if code not in codes:
-                self.to_screens(code, 0)
-                self.held.lifted.add(code)
+        lift = [c for c in held if c not in codes]
+        own = self.typed_down() if lift else ()
+        for code in lift:
+            self.to_screens(code, 0)
         for value, order in ((1, codes), (0, codes[::-1])):
             for code in order:
                 if code not in held:
                     self.type_key(code, value, desktop)
+        for code in lift:
+            if code in own:
+                self.to_screens(code, 1)
+            else:
+                self.held.lifted.add(code)
         log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):
@@ -1970,6 +1976,8 @@ class Relay:
             except OSError:
                 return  # ft-screens not running
             (self.held.desktop.add if value else self.held.desktop.discard)(code)
+            if not value:
+                self.held.lifted.discard(code)  # (its release, by a way that isn't key_binding: a mouse's key)
 
     def type_text(self, text, quiet=False):
         """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
@@ -2180,6 +2188,12 @@ class Relay:
             down.update(i * 8 + bit for i, b in enumerate(buf) if b for bit in range(8) if b >> bit & 1)
         return down
 
+    def typed_down(self):
+        """The keys the relay itself holds down on the desktop: dictation's character, coming up
+        next, and Full Keyboard's."""
+        typed = {k for code, mods, desktop in self.typing.down if desktop for k in (code, *mods)}
+        return typed | {sent for sent, desktop in self.typing.kb_held.values() if desktop}
+
     def reconcile_desktop_keys(self):
         """A key the desktop has down that no device holds comes up there, and the key
         combinations forget a Meta or modifier no device holds. A key can be left down when
@@ -2189,9 +2203,7 @@ class Relay:
         if not self.held.desktop and not self.held.meta and not self.held.modifiers:
             return
         down = self.physically_down()
-        typed = {k for code, mods, desktop in self.typing.down if desktop for k in (code, *mods)}  # dictation's, coming up next
-        typed |= {sent for sent, desktop in self.typing.kb_held.values() if desktop}  # Full Keyboard's
-        for code in sorted(self.held.desktop - down - typed):
+        for code in sorted(self.held.desktop - down - self.typed_down()):
             self.to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")
         self.held.forget_up(down)

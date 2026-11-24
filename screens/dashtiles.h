@@ -40,6 +40,7 @@
 #include "tilefit.h"
 #include "tilestate.h"
 #include "tileview.h"
+#include "tiledrop.h"
 #include "tiling.h"
 
 #include <algorithm>
@@ -95,7 +96,7 @@ public:
 
     // Anchored (already: nothing): a column of its own right of `focused`'s (not tiled: at the
     // strip's end that brings its middle nearer in front of you, the left one when Steam's slot has
-    // pushed it right). On a full desk (OnTopOf, with its `info`): on top of the lowest column.
+    // pushed it right). On a full desk (RoomFor, with its `info`): on top of the lowest column.
     // With `leftOf` tiled: a column of its own just left of its.
     // The strip centred again with it (user, 2026-11-19: "the tiling doesn't keep itself centered";
     // a panel that came back after the dashboard opened grew the strip off to one side).
@@ -105,10 +106,10 @@ public:
         spots_[id].stay = stay;
         Recentre();
         if (const tilegrid::Where w = grid_.Find(leftOf); w.ok()) return grid_.Insert(id, w.col, 0, true);
-        if (const int c = info ? Laid().OnTopOf(*info) : -1; c >= 0) {
+        if (const View::Room r = info ? Laid().RoomFor(*info) : View::Room{}; r.col >= 0) {
             if (!sized) marks_.Unsized(id);
             marks_.Stacked(id);
-            return grid_.Insert(id, c, 0, false);
+            return grid_.Insert(id, r.col, r.under ? INT_MAX : 0, false, 1, false, r.under);
         }
         if (grid_.Has(focused)) return grid_.Add(id, focused);
         // none: the end that brings the strip's middle nearer in front (its left one when it leans
@@ -179,6 +180,8 @@ public:
             const bool into = d.kind == tiling::Drop::Into;
             grid_.Insert(id, d.col, d.row, !into, scale, d.leftOfSlot, into && d.below);
             grid_.SetAlign(id, into ? d.align : 0);
+            grid_.SetRow(id, into && d.ownRow);
+            if (into) grid_.SetRow(d.before, false);
             return true;
         });
         // Where you put it stays, and a stack you put it in is yours. Let go where it was: nothing.
@@ -326,7 +329,7 @@ public:
         for (const tilegrid::Col &col : grid_.Cols())
             for (const tilegrid::Cell &cell : col.cells) {
                 const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);   // (not shown: a column of its own)
-                items.push_back({cell.id, SpanDeg(params, i.widthM * cell.scale), SpanDeg(params, i.heightM * cell.scale)});
+                items.push_back(ItemOf({cell.id, i.widthM * cell.scale, i.heightM * cell.scale}));
                 scales[cell.id] = cell.scale;
             }
         if (items.empty()) return;
@@ -347,6 +350,9 @@ public:
     }
 
 private:
+    tilepack::Item ItemOf(const tiling::Tile &t) const {
+        return {t.id, SpanDeg(params, t.widthM), SpanDeg(params, t.heightM), tiling::Wide(params, t.widthM, t.heightM), t.row};
+    }
     bool Changed(bool changed) {
         if (changed) EndBatch();
         return changed;
@@ -362,7 +368,7 @@ public:
             c.base = gc.base;
             for (const tilegrid::Cell &cell : gc.cells) {
                 const Info i = absent.count(cell.id) ? Info{0, 0} : info(cell.id);
-                c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale, cell.align});
+                c.tiles.push_back({cell.id, i.widthM * cell.scale, i.heightM * cell.scale, cell.align, cell.row});
             }
             cols.push_back(c);
         }
@@ -373,22 +379,27 @@ public:
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
         const std::vector<tiling::Column> cols = Columns(info);
-        fills_.clear(), shownFills_.clear();
-        for (size_t ci = 0; ci < cols.size(); ++ci) {   // (each column's shelves so far, from the desk up: OnTopOf)
+        fills_.clear(), shownFills_.clear(), underFills_.clear();
+        for (size_t ci = 0; ci < cols.size(); ++ci) {   // (each column's shelves so far, from the desk up and down: RoomFor)
             const tiling::Column &c = cols[ci];
-            std::vector<tilepack::Item> deskUp, shown;   // (shown: its hidden ones at their own size, Settle)
+            std::vector<tilepack::Item> deskUp, shown, deskDown;   // (shown: its hidden ones at their own size, Settle)
+            const int wideRow = tiling::WideRow(c, params);   // (its display's shelves are as wide as it, over it and under it)
+            const double widest = wideRow < 0 ? 0 : SpanDeg(params, c.tiles[size_t(wideRow)].widthM);
+            for (int r = c.Base() + 1; r < int(c.tiles.size()); ++r)
+                deskDown.push_back(ItemOf(c.tiles[size_t(r)]));
             for (int r = c.Base(); r >= 0; --r) {
                 const tiling::Tile &t = c.tiles[size_t(r)];
-                deskUp.push_back({t.id, SpanDeg(params, t.widthM), SpanDeg(params, t.heightM)});
+                deskUp.push_back(ItemOf(t));
                 shown.push_back(deskUp.back());
                 if (absent.count(t.id)) {
                     const Info own = info(t.id);
                     const double scale = grid_.Cols()[ci].cells[size_t(r)].scale;   // (cells and tiles row for row)
-                    shown.back().wDeg = SpanDeg(params, own.widthM * scale), shown.back().hDeg = SpanDeg(params, own.heightM * scale);
+                    shown.back() = ItemOf({t.id, own.widthM * scale, own.heightM * scale, t.align, t.row});
                 }
             }
-            fills_.push_back(tilepack::FillOf(deskUp, params.gapDeg));
-            shownFills_.push_back(tilepack::FillOf(shown, params.gapDeg));
+            fills_.push_back(tilepack::FillOf(deskUp, params.gapDeg, widest, wideRow >= 0));
+            shownFills_.push_back(tilepack::FillOf(shown, params.gapDeg, widest, wideRow >= 0));
+            underFills_.push_back(tilepack::FillOf(deskDown, params.gapDeg, widest, wideRow >= 0));
         }
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
         centreNow_ = CentreOf(info);
@@ -410,7 +421,7 @@ public:
     const tiling::Layout &Last() const { return last_; }
     const tiling::Placed *PlacedOf(int id) const { return Laid().PlacedOf(id); }
     // The board as laid out last, to ask what fits where (tileview.h).
-    View Laid() const { return {params, grid_, last_, fills_, absent, slot_, steam}; }
+    View Laid() const { return {params, grid_, last_, fills_, underFills_, absent, slot_, steam}; }
 
     // A panel's state, to remember it (tilestate.h's text).
     std::string Remember(int id) const { return Text(StateOf(id)); }
@@ -429,7 +440,7 @@ public:
         const tilegrid::Col &col = grid_.Cols()[size_t(w.col)];
         const tilegrid::Cell &cell = col.cells[size_t(w.row)];
         st.kind = State::Kind::Tile, st.col = w.col, st.row = w.row, st.alone = col.cells.size() == 1;
-        st.scale = cell.scale, st.below = col.Below(w.row), st.align = cell.align;
+        st.scale = cell.scale, st.below = col.Below(w.row), st.align = cell.align, st.ownRow = cell.row;
         st.centre = centre_ == id, st.arc = Arc(id), st.nudgeDeg = Nudge(id);
         return st;
     }
@@ -457,7 +468,7 @@ public:
         if (!st.alone && fill.pulled >= 0 && tilegap::Undo(grid_, fill, Laid().SideOf(grid_.Find(fill.stayed).col) < 0))
             col = grid_.Find(fill.stayed).col, marks_.NotStacked(fill.pulled);   // (back in its own column)
         grid_.Insert(id, col, st.row, st.alone, st.scale, false, st.below);
-        grid_.SetAlign(id, st.align);
+        grid_.SetAlign(id, st.align), grid_.SetRow(id, st.ownRow);
         if (!st.alone && (taken || marks_.AutoStacked(grid_, grid_.Find(id).col))) marks_.Unsized(id);   // (its stack isn't as it left it: Settle)
     }
     // The profile put back last is done with: an add after this goes after the other tiles.
@@ -596,7 +607,7 @@ private:
         const int at = int(g.Cols().size());
         for (size_t r = 0; r < c.cells.size(); ++r) {
             g.Insert(c.cells[r].id, at, int(r), r == 0, c.cells[r].scale, false, c.Below(int(r)));
-            g.SetAlign(c.cells[r].id, c.cells[r].align);
+            g.SetAlign(c.cells[r].id, c.cells[r].align), g.SetRow(c.cells[r].id, c.cells[r].row);
         }
     }
     // A drop aimed at `g` as it is, as indices once `id` is out of it.
@@ -616,7 +627,8 @@ private:
     std::map<int, Spot> spots_;
     tilegrid::Grid grid_;
     tiling::Layout last_;
-    std::vector<tilepack::Fill> fills_;        // each column as laid out last (OnTopOf)
+    std::vector<tilepack::Fill> fills_;        // each column as laid out last (RoomFor), from the desk line up
+    std::vector<tilepack::Fill> underFills_;   // ...and down
     std::vector<tilepack::Fill> shownFills_;   // ...with its hidden panels at their own size (Settle)
     slotsplit::Policy slot_;   // which split round Steam's menu, and when it's chosen again
     tilegap::Book gaps_;       // the gaps panels left (Leave, FillGap), and the fills to undo

@@ -1701,6 +1701,39 @@ int main() {
             stays = stays && cells(n) == before && near(n.PlacedOf(2)->elDeg, at.elDeg, 1e-9);
         }
         check("nudge: a nudged tile let go where it is stays in its place, nudged", stays);
+        // Dragged off where it's shown, it goes by where it's let go: back level with its row it stays
+        // in its column (not into a neighbour's, drawn over it), and onto a neighbour's top it stacks
+        // over that one, not under the desk line.
+        bool level = true, onto = true;
+        for (const int presses : {4, 6, 8, 15, 25, -4, -8, -14}) {
+            dashtiles::Board n;
+            tiling::FromEyes(tiling::Eyes{1.4, -12, 0.8, 70}, 2.0, &n.params);
+            n.params.reserveDeg = 0;
+            for (int id : {1, 2, 3}) n.Anchor(id, id - 1, dashtiles::Stay::Default), n.Arrange(small);
+            for (int i = 0; i < std::abs(presses); ++i) n.Press(2, presses > 0 ? dashtiles::Key::NudgeUp : dashtiles::Key::NudgeDown);
+            n.Arrange(small);
+            const std::string before = cells(n);
+            const tiling::Placed one = *n.PlacedOf(1), three = *n.PlacedOf(3);
+            const tiling::Drop top = n.DropFor(2, one.azDeg, one.el1 - 1, small);
+            onto = onto && top.kind == tiling::Drop::Into && top.col == 0 && !top.below;
+            const double az = n.PlacedOf(2)->azDeg;
+            n.Drop(2, n.DropFor(2, az, three.elDeg, small), az);
+            n.Arrange(small);
+            level = level && cells(n) == before;
+        }
+        {   // another let go on a nudged one's upper part, above where its column's top was: on it, not over the column
+            dashtiles::Board n;
+            tiling::FromEyes(tiling::Eyes{1.4, -12, 0.8, 70}, 2.0, &n.params);
+            n.params.reserveDeg = 0;
+            for (int id : {1, 2, 3}) n.Anchor(id, id - 1, dashtiles::Stay::Default), n.Arrange(small);
+            for (int i = 0; i < 6; ++i) n.Press(1, dashtiles::Key::NudgeUp);
+            n.Arrange(small);
+            const tiling::Placed one = *n.PlacedOf(1);
+            const tiling::Drop d = n.DropFor(3, one.azDeg, one.el1 - 1, small);
+            check("nudge: ...the others are aimed at where their nudges show them", d.kind == tiling::Drop::Into && d.col == 0 && !d.over);
+        }
+        check("nudge: ...dragged back level with its row, it stays in its column", level);
+        check("nudge: ...dragged onto a neighbour's top, it stacks over that one", onto);
         check("state: old lines read as before, flags round trip",
               dashtiles::Parse("tile 0 1 2 0 1.000", &st) && !st.centre && !st.arc && st.nudgeDeg == 0 &&
                   dashtiles::Parse("tile 0 1 2 0 1.000 dr centre arc nudge=-3.0", &st) && st.below && st.centre && st.arc &&

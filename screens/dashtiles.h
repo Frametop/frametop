@@ -152,15 +152,22 @@ public:
     }
     // Where a drop at (az, el) goes: aimed at the grid as you see it (the dragged panel's place
     // still in it: the others don't move while you drag), as indices in the grid without it.
-    // A nudged panel is shown off its place: the others are aimed at where their nudges show them,
-    // and the dragged one goes by where its place went, so let go where it was, it stays put.
+    // A nudged panel is shown off its place: the others are aimed at where their nudges show them
+    // (one nudged past the strip's tear-off edge can't be aimed at). The dragged one, let go over
+    // where it's shown, goes by its place, so it stays put; let go anywhere else, it goes by where
+    // you let it go, as any panel does.
     template <typename InfoOf>
     tiling::Drop DropFor(int id, double az, double el, InfoOf info) const {
         const auto cols = Columns(info);
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : tiling::Arrange(cols, params, Split());
         if (l.split < 0) tiling::Turn(&l, pan_);   // (as you see it)
         ShowNudges(&l, id);
-        return Without(grid_, id, tiling::DropAt(l, cols, az, el - Nudge(id), id));
+        if (const double n = Nudge(id); n != 0) {
+            const double a = tiling::WrapNear(az, (l.az0 + l.az1) / 2);
+            for (const tiling::Placed &p : l.tiles)
+                if (p.id == id && a >= p.az0 && a <= p.az1 && el - n >= p.el0 && el - n <= p.el1) el -= n;
+        }
+        return Without(grid_, id, tiling::DropAt(l, cols, az, el, id));
     }
     // Let go at `az` round you: where DropFor said (a column's indices are the grid's without it), or
     // torn off at `rel`. The strip then goes where it keeps it nearest `az` (Arrange; NAN: the others

@@ -347,7 +347,7 @@ struct TileSetting {
     double *value;
     double lo, hi;
 };
-std::array<TileSetting, 8> TileSettings();
+std::array<TileSetting, 9> TileSettings();
 bool SetTileSetting(const char *name, double value);   // false: not one, or out of its range
 extern dashtiles::Memory g_tileMemory;   // each app's or display's last state (its key's)
 void LoadTileMemory();

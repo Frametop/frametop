@@ -776,6 +776,15 @@ Item {
                     onToggled: backend.setVrKeyboardPersist(checked)
                 }
                 Ft.Hint { text: "Close it with its X or your keyboard button." }
+                Controls.Button {
+                    objectName: "toggleVrKeyboard"
+                    Kirigami.FormData.label: "Now:"
+                    text: "Open or close the keyboard"
+                    icon.name: "input-keyboard-virtual"
+                    enabled: backend.vrKeyboard !== "never" && backend.relayRunning
+                    onClicked: backend.toggleVrKeyboard()
+                }
+                Ft.Hint { text: "Also brings it back after you quit it from its own panel." }
                 Controls.ComboBox {
                     objectName: "steamFieldsKeyboard"
                     Kirigami.FormData.label: "In Steam's text fields:"

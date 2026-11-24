@@ -1100,6 +1100,13 @@ class Backend(QObject):
             return
         self.message.emit("Keyboard: " + ("stays open until you hide it" if on else "closes with the text field"), False)
 
+    @Slot()
+    def toggleVrKeyboard(self):
+        """The Keyboard page's button: the relay's Open/close keyboard action, which also starts a
+        keyboard that was quit from its own panel (input/kb_revive.py)."""
+        if not self._send("action keyboard_toggle"):
+            self.message.emit("Keyboard: the input relay isn't running", True)
+
     # --- the desktop's keyboard layout (desktop_layout.py) ---
     def _xkb_rules(self):
         if self._xkb is None:

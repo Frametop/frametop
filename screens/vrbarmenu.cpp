@@ -2,8 +2,8 @@
 // a hold and press acts as the current behavior"), and the edge each panel's bar is on. It looks as the
 // Option C design draws it (user, 2026-11-19: "Use that as the design"; barmenuart.h, menulayout.h).
 //   A tap on the bar (vr.cpp's BarTap), a poke on it, or `barside N menu` opens the main page: quick tiles
-// on top (Curved, Rotate; a floating window's To Desktop and Close), then Placement, View in Theater,
-// Move All Screens, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
+// on top (Curved, Rotate; a floating window's To Desktop and Close), then Placement, a PC app window's Scale
+// (vrappscale.cpp), View in Theater, Move All Screens, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
 // Keep in View, Tiled (the one it is checked) and Stay Shown while it's on the dashboard.
 // A right click on the bar, as before, or `barside N edges` opens the edges page: Bottom, Top, Left,
 // Right (the panel's own checked), and View in Theater where the panel has it. Bar Position goes there
@@ -20,6 +20,7 @@
 // (pointer/dashpatch/steampage.py), so this is where it went. A Steam game's panel has it too: the
 // game's window lent to SteamVR's theater (vrgsapps.cpp: GsToTheater).
 #include "vrpanel.h"
+#include "appscale.h"
 #include "barmenuart.h"
 #include "overlaytex.h"
 #include "handsoff.h"
@@ -106,6 +107,7 @@ panelmenu::Kind KindOf(const Screen &s, int i) {
     k.floating = s.floating, k.gsapp = s.gsapp;
     k.theater = i == SteamDashIndex() || GsCanTheater(i);
     k.anchored = TileAnchored(i);
+    k.scales = AppScale(i) > 0;
     return k;
 }
 
@@ -127,6 +129,7 @@ bool On(const panelmenu::Row &r, const Screen &s, int i) {
         case panelmenu::Item::OnDashboard: return Placed(s, i) == Where::Dashboard;
         case panelmenu::Item::StayShown: return TileStays(s, i);
         case panelmenu::Item::Edge: return s.barSide == r.side;
+        case panelmenu::Item::ScaleStep: return appscale::Same(AppScale(i), r.percent / 100.0);
         default: return false;
     }
 }
@@ -158,6 +161,8 @@ barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const 
         case Item::Reset: l.icon = Icon::Reset, l.red = true; break;
         case Item::Back: l.icon = Icon::Back; break;
         case Item::Edge: break;
+        case Item::Scale: l.icon = Icon::Scale, l.value = appscale::Label(appscale::Percent(AppScale(i))); break;
+        case Item::ScaleStep: break;
     }
     l.chevron = panelmenu::Opens(r.item);
     const bool on = On(r, s, i);
@@ -180,7 +185,8 @@ void DrawMenu(const Screen &s, int i) {
     const menulayout::Layout &L = g_menu.layout;
     const int n = int(g_menu.rows.size()), lit = g_menu.hover >= 0 ? g_menu.hover : g_menu.handHover;
     const bool pressed = g_menu.holding != kNone;
-    std::string page = std::to_string(int(s.barSide)) + "/" + std::to_string(int(Placed(s, i))) + "/";
+    std::string page = std::to_string(int(s.barSide)) + "/" + std::to_string(int(Placed(s, i))) + "/" +
+                       std::to_string(appscale::Percent(AppScale(i))) + "/";
     for (const auto &r : g_menu.rows) page += char('a' + int(r.item)), page += On(r, s, i) ? '1' : '0';
     const std::string what = std::to_string(lit) + "/" + (pressed ? "p" : "") + page;
     if (what == g_menu.drawn) return;
@@ -215,10 +221,11 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
     if (it == g_screens.end() || row < 0 || row >= int(g_menu.rows.size())) return;
     Screen &s = it->second;
     const panelmenu::Row r = g_menu.rows[size_t(row)];
-    std::printf("screen %d: grab bar menu: %s (%s)\n", i + 1, panelmenu::Label(r), by);
+    std::printf("screen %d: grab bar menu: %s (%s)\n", i + 1, panelmenu::Label(r).c_str(), by);
     using panelmenu::Item;
     switch (r.item) {
         case Item::Placement: return ToPage(s, i, panelmenu::Page::Placement);
+        case Item::Scale: return ToPage(s, i, panelmenu::Page::Scale);
         case Item::BarPosition: return ToPage(s, i, panelmenu::Page::Edges);
         case Item::Back: return ToPage(s, i, panelmenu::Page::Main);
         case Item::Rotate:
@@ -233,7 +240,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             return;
         default: break;
     }
-    CloseMenu(panelmenu::Label(r));
+    CloseMenu(panelmenu::Label(r).c_str());
     switch (r.item) {
         case Item::Curve: ToggleCurve(s); break;
         case Item::Rotate: LevelScreen(s, i, by); break;
@@ -252,6 +259,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             else GsToTheater(i);
             break;
         case Item::Reset: DoReset(i, "its bar's menu"); break;   // (ft-layout's reset counts 3-2-1 in front of you first)
+        case Item::ScaleStep: SetAppScale(i, r.percent / 100.0, "its bar's menu"); break;
         case Item::Edge: SetBarSide(i, r.side, "its bar's menu"); break;
         default: break;
     }

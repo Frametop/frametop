@@ -1,0 +1,28 @@
+// A PC app window's scale steps (appscale.h).
+#include "../appscale.h"
+
+#include <cstdio>
+
+int main() {
+    int failed = 0;
+    auto check = [&](const char *what, bool ok) {
+        std::printf("%s %s\n", ok ? "ok" : "FAIL", what);
+        failed += !ok;
+    };
+    using appscale::Step;
+    check("one step bigger", appscale::Same(Step(1.0, 1), 1.25) && appscale::Same(Step(1.5, 1), 1.6));
+    check("one step smaller", appscale::Same(Step(1.25, -1), 1.0) && appscale::Same(Step(2.0, -1), 1.75));
+    check("several at once", appscale::Same(Step(1.0, 3), 1.6) && appscale::Same(Step(2.5, -7), 1.0));
+    check("the ends hold", appscale::Same(Step(2.5, 2), 2.5) && appscale::Same(Step(1.0, -1), 1.0));
+    check("from between two steps, to the one beside it", appscale::Same(Step(5.0 / 3, 1), 1.75) && appscale::Same(Step(5.0 / 3, -1), 1.6));
+    check("past the steps: bigger stays, smaller comes in", appscale::Same(Step(3.0, 1), 3.0) && appscale::Same(Step(3.0, -1), 2.5));
+    check("below them too", appscale::Same(Step(0.75, -1), 0.75) && appscale::Same(Step(0.75, 1), 1.0));
+    check("no step", Step(1.1, 0) == 1.1);
+    appscale::Wheel w;
+    check("a whole notch is a step", w.Add(1) == 1 && w.Add(-2) == -2);
+    check("a smooth wheel's parts add up", w.Add(0.4) == 0 && w.Add(0.4) == 0 && w.Add(0.4) == 1);
+    check("a turn back starts over", w.Add(-0.9) == 0 && w.Add(-0.2) == -1);
+    check("labels", appscale::Label(appscale::Percent(5.0 / 3)) == "167%" && appscale::Label(100) == "100%");
+    if (failed) std::printf("%d failed\n", failed);
+    return failed != 0;
+}

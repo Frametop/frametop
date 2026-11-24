@@ -293,6 +293,8 @@ bool IsHandController(vr::TrackedDeviceIndex_t i);   // a hand's controller (not
 int ControllerHolds(vr::TrackedDeviceIndex_t dev);   // a button down on it: 1, 0, or -1 (SteamVR won't say)
 vr::EVROverlayError PinShow(vr::VROverlayHandle_t overlay);
 void SendRelay(const std::string &msg);
+void RunLayout(const std::vector<std::string> &args);   // `ft-layout ARGS` in the background
+bool IsWindowPanel(const Screen &s);   // a PC app window's panel
 bool GazeModeOn();   // the pointer helper says gaze mode is on (vrgazemode.cpp; asks every 2 s, call it each tick)
 void AnnounceOverlay(const char *key);
 void SendDashpatch(const std::string &msg);   // to ft-dashpatch (@ft_dashpatch)
@@ -450,6 +452,10 @@ bool BarMenuOn(int i);   // its menu is open (its controls stay)
 // closed it until that tip has come back out (so the same poke doesn't go on into the panel's content).
 bool BarMenuHasHands(int i);
 void UpdateBarMenu();    // each tick: it follows its panel; a fingertip through a row presses it
+// A PC app window's scale (vrappscale.cpp): 0 for a panel that has none.
+double AppScale(int i);
+void SetAppScale(int i, double scale, const char *by);
+void UpdateAppScale();   // each tick: Meta+scroll's, once the wheel rests
 int TypingPanel();       // the panel typing goes to (compositor.c's keys_update), -1 Steam
 void UpdateVoice();      // each tick: dictation's notice (vrvoice.cpp)
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data);

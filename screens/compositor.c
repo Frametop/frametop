@@ -738,6 +738,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
             s->keys_clicked = true;
         }
         if (e->type == FT_BUTTON && e->pressed && e->button == BTN_LEFT) remote_clicked(s, e->screen);   // (as relay_button)
+        if (e->type == FT_SCROLL && ft_vr_app_scale_wheel(e->screen, e->dy)) return;
         ft_remote_event(e);
         return;
     }

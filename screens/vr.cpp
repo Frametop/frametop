@@ -1895,7 +1895,6 @@ void Stretch(Screen &s, int w, int h) {
 constexpr long kStretchAnswerTicks = 120;   // about 1.3 s at 90 Hz for ft-floatd's answer to a resize
 constexpr long kWindowResizeTicks = 90 * 30; // about 30 s for a PC window's stream to come back at its new size
                                              // (a host's streams start one at a time; a later picture still fits)
-void RunLayout(const std::vector<std::string> &args);
 
 // A stretch has ended: the window gets its pixels, in one resize. The answer ("float") sets the panel
 // to the new crop; if none comes (the window can't take that size) it goes back (stretchUntil).
@@ -7670,6 +7669,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
     UpdatePill();
     UpdateVoice();
     UpdateBarMenu();
+    UpdateAppScale();
     UpdatePad();
     UpdateControls();
     UpdateGuides();

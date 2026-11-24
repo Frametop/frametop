@@ -11,7 +11,7 @@ namespace barmenuicons {
 
 enum class Icon {
     None, Curved, Rotate, Desktop, Close, Theater, InRoom, InView, Dashboard, Controller, StayShown, MoveAll,
-    BarPosition, Reset, Back, Chevron, Check,
+    BarPosition, Reset, Back, Chevron, Check, Scale,
 };
 
 inline std::vector<iconpath::Shape> Shapes(Icon i) {
@@ -42,6 +42,10 @@ inline std::vector<iconpath::Shape> Shapes(Icon i) {
         case Icon::Back: return {{Parse("M15 5l-7 7 7 7 1.4-1.4L10.8 12l5.6-5.6z")}};
         case Icon::Chevron: return {{Parse("M9 5l7 7-7 7-1.4-1.4 5.6-5.6-5.6-5.6z")}};
         case Icon::Check: return {{Parse("M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L21 7.5l-1.4-1.4z")}};
+        // (not the design's: a small and a big letter A, in its style)
+        case Icon::Scale:
+            return {{Parse("M14 4h2.4L22 20h-2.5l-1.4-4.2h-5.8L10.9 20H8.4zM15.2 7l-2.2 6.6h4.4z"), true},
+                    {Parse("M4.4 11h1.7L9.4 20H7.6l-.8-2.4H3.7L2.9 20H1.1zM5.2 13l-1.1 3.2h2.3z"), true}};
         case Icon::None: break;
     }
     return {};

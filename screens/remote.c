@@ -24,6 +24,8 @@
 //       here. Its program is ft-peerpanel (together/ft-peerpanel.cpp), which speaks ft-stream's
 //       words and takes the video from ft-together; its client is "peer-<panel>", and it has
 //       no host: nothing of a host's queue below holds for it.
+//   remote <N> scale <S>   a PC app window's scale as its PC has it now (0: its PC takes none), for
+//       its bar's menu; its stream goes on.
 //   remote <N> stop
 //   remotes  -> "ok <count> <N>:<client>:<state>:<W>x<H> ..."   (state: queued, starting,
 //               connecting, live, lost)
@@ -572,8 +574,18 @@ bool ft_remote_command(const char *cmd, char *reply, int size) {
         if (!r) return snprintf(reply, size, "error no remote screen %d", number), true;
         return snprintf(reply, size, "ok %s", r->state), true;
     }
+    if (strcmp(word, "scale") == 0) {
+        double scale;
+        char *end;
+        const char *at = strstr(cmd, " scale") + 6;
+        scale = strtod(at, &end);
+        if (end == at || *end || !(scale >= 0 && scale <= 4)) return snprintf(reply, size, "error remote <N> scale <0 to 4>"), true;
+        if (!r) return snprintf(reply, size, "error no remote screen %d", number), true;
+        ft_vr_remote_scale(index, scale);
+        return snprintf(reply, size, "ok"), true;
+    }
     const bool peer = strcmp(word, "peer") == 0;
-    if (strcmp(word, "start") != 0 && !peer) return snprintf(reply, size, "error remote <N> start|peer|stop|info"), true;
+    if (strcmp(word, "start") != 0 && !peer) return snprintf(reply, size, "error remote <N> start|peer|stop|info|scale"), true;
     if (!g_vr) return snprintf(reply, size, "error no SteamVR (--no-vr)"), true;
     // (a room's panel still starts: the others in the room go on, and it carries no PC's sound)
     if (g_away && !peer) return snprintf(reply, size, "error the headset is off: it starts when the headset is back on"), true;

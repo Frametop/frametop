@@ -12,6 +12,7 @@ import re
 
 import ft_layout as L
 import ft_hostapi  # noqa: E402  (questions to a PC's Vibepollo Web UI API; on the path ft_layout sets)
+import ft_windowscale
 
 WINDOW_SIZE = (1280, 800)  # a launched app's first size
 WINDOW_MAX = (1920, 1200)  # an opened window's first size at most: a tiled one can be 5096 wide
@@ -103,6 +104,20 @@ def window_size(opts, default):
         raise RuntimeError(f"window: --size is WxH, not {opts['--size']!r}")
     w, h = (int(v) for v in opts["--size"].lower().split("x"))
     return L.stream_size(min(max(w, 320), 7680), min(max(h, 240), 4320))
+
+
+def window_opening(host, answer, app, size):
+    """(size, fields) of a window opening there, with the scale its app starts at: window_add's, and
+    the open's "scale" (`answer`: the PC's window list)."""
+    return ft_windowscale.opening(host, answer, app, size, WINDOW_RESIZE_MIN, WINDOW_RESIZE_MAX)
+
+
+def window_launch(host, port, app, size, fields):
+    """The PC starts `app` in a window of its own there: its answer (address, title)."""
+    body = {"app": app, "width": size[0], "height": size[1]}
+    if "scale" in fields:
+        body["scale"] = fields["scale"]
+    return window_api(host, port, "POST", "/api/frametop/windows/open", body)
 
 
 def window_add(layout, host, port, address, title, size, fields=None):
@@ -249,6 +264,9 @@ def window_resize(layout, args):
     w = min(max(w, WINDOW_RESIZE_MIN[0]), WINDOW_RESIZE_MAX[0])
     h = min(max(h, WINDOW_RESIZE_MIN[1]), WINDOW_RESIZE_MAX[1])
     d["size"] = list(L.stream_size(w, h))
+    scale = ft_windowscale.valid(d.get("scale"))
+    if scale:
+        ft_windowscale.shape(d, d["size"], scale, WINDOW_RESIZE_MIN, WINDOW_RESIZE_MAX)
     d["metres"] = round(metres, 4)
     L.save_layout(layout)
     n = int(args[0])
@@ -259,6 +277,53 @@ def window_resize(layout, args):
         L.start_remote(L.screens_socket(), n, host, d)   # (ft-screens starts its stream over: the size changed)
     except RuntimeError as e:
         L.log(f"saved; not applied now: {e}")
+
+
+def window_scale(layout, args):
+    """A window panel's scale (its bar's menu, Meta+scroll): the PC draws the app at it in the same
+    pixels, so the stream goes on. Where the panel's size doesn't take that scale, the size moves a
+    few pixels and the stream starts over. Kept for the app's next window on that PC."""
+    host, d = numbered(layout, args[0], "scale")
+    now = ft_windowscale.valid(d.get("scale")) if d.get("window") else None
+    if not now:
+        raise RuntimeError(f"window scale: {d['id']} isn't a window whose PC takes a scale")
+    try:
+        scale = ft_windowscale.valid(float(args[1]))
+    except ValueError:
+        scale = None
+    if not scale:
+        raise RuntimeError(f"window scale: a scale is {ft_windowscale.LIMITS[0]:g} to {ft_windowscale.LIMITS[1]:g}, not {args[1]!r}")
+    n, before = int(args[0]), list(d["size"])
+    ft_windowscale.shape(d, tuple(d.get("asked_size") or before), scale, WINDOW_RESIZE_MIN, WINDOW_RESIZE_MAX)
+    same = d["size"] == before
+    if same and not d.get("off"):
+        try:
+            answer = window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/resize",
+                                {"address": d["app"][7:], "scale": d["scale"]})
+        except RuntimeError:
+            tell_scale(n, now)   # (its menu goes back to what the PC has)
+            raise
+        d["scale"] = round(ft_windowscale.valid(answer.get("scale")) or d["scale"], 6)
+    ft_windowscale.keep(host, d.get("pc_app"), d["scale"])
+    L.save_layout(layout)
+    L.log(f"{d['id']}: scale {d['scale'] * 100:.0f}%" + ("" if same else f" at {d['size'][0]}x{d['size'][1]}"))
+    if d.get("off"):
+        return
+    if same:
+        tell_scale(n, d["scale"])
+        return
+    try:
+        L.start_remote(L.screens_socket(), n, host, d)   # (its size changed: ft-stream opens it with both)
+    except RuntimeError as e:
+        L.log(f"saved; not applied now: {e}")
+
+
+def tell_scale(n, scale):
+    """Panel n's scale to ft-screens, for its menu."""
+    try:
+        L.screens_socket().ask(f"remote {n} scale {scale:g}")
+    except RuntimeError as e:
+        L.log(f"screen {n}'s scale isn't in its menu: {e}")
 
 
 def window_pull(layout, args):
@@ -279,11 +344,14 @@ def window_pull(layout, args):
     address = str(hit.get("address", ""))
     if not WINDOW_ADDRESS.fullmatch(address):
         raise RuntimeError(f"window pull: the PC named no window ({address!r})")
-    window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
+    answer = window_api(host, port, "GET", "/api/frametop/windows")
+    window_prune(layout, host, answer.get("windows", []))
+    listed = next((w for w in answer.get("windows", []) if w.get("address") == address), hit)
 
     size = window_size({}, (int(number(hit.get("width") or None, WINDOW_SIZE[0], 1, WINDOW_MAX[0])),
                             int(number(hit.get("height") or None, WINDOW_SIZE[1], 1, WINDOW_MAX[1]))))
-    panel = window_add(layout, host, port, address, str(hit.get("title") or hit.get("class") or ""), size)
+    size, fields = window_opening(host, answer, ft_windowscale.app_of(listed), size)
+    panel = window_add(layout, host, port, address, str(hit.get("title") or hit.get("class") or ""), size, fields)
     grab = hit.get("grab") if isinstance(hit.get("grab"), list) and len(hit["grab"]) == 2 else [0.5, 0.5]
     fx, fy = (number(g, 0.5, 0.0, 1.0) for g in grab)
     n = next(k for k, _, e in L.remote_displays(layout) if e is panel)
@@ -345,24 +413,27 @@ def window_command(args):
             address = args[2]
             if not WINDOW_ADDRESS.fullmatch(address):
                 raise RuntimeError("window open: ADDRESS is a window's address (0x...: window list)")
-            windows = window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
+            answer = window_api(host, port, "GET", "/api/frametop/windows")
+            windows = answer.get("windows", [])
             window_prune(layout, host, windows)  # frees their clients
             found = next((w for w in windows if w.get("address") == address), None)
             if found is None:
                 raise RuntimeError(f"{host.get('name')} has no window {address}")
             size = window_size(opts, (int(number(found.get("width") or None, WINDOW_SIZE[0], 1, WINDOW_MAX[0])),
                                       int(number(found.get("height") or None, WINDOW_SIZE[1], 1, WINDOW_MAX[1]))))
+            size, fields = window_opening(host, answer, ft_windowscale.app_of(found), size)
             title = found.get("title") or found.get("class") or ""
         else:
             if not WINDOW_APP.fullmatch(args[2]):
                 raise RuntimeError("window launch: APP is an app's id from window apps")
             size = window_size(opts, WINDOW_SIZE)
-            window_prune(layout, host, window_api(host, port, "GET", "/api/frametop/windows").get("windows", []))
-            opened = window_api(host, port, "POST", "/api/frametop/windows/open",
-                                {"app": args[2], "width": size[0], "height": size[1]})
+            answer = window_api(host, port, "GET", "/api/frametop/windows")
+            window_prune(layout, host, answer.get("windows", []))
+            size, fields = window_opening(host, answer, args[2], size)
+            opened = window_launch(host, port, args[2], size, fields)
             address = str(opened.get("address", ""))
             title = window_app_title(args[2], opened)
-        d = window_add(layout, host, port, address, title, size)
+        d = window_add(layout, host, port, address, title, size, fields)
         print(d["id"])
         return
     if what == "drop" and len(args) == 7:
@@ -374,6 +445,9 @@ def window_command(args):
     if what == "resize" and len(args) == 4:
         window_resize(L.load_layout(), args[1:])
         return
+    if what == "scale" and len(args) == 3:
+        window_scale(L.load_layout(), args[1:])
+        return
     if what == "close" and len(args) == 2:
         layout = L.load_layout()
         _, host, d = L.find_display(layout, args[1])
@@ -382,4 +456,5 @@ def window_command(args):
         window_close(layout, host, d)
         return
     raise RuntimeError("window list HOST | apps HOST | catalog HOST | open HOST ADDRESS [--size WxH] | "
-                       "launch HOST APP [--size WxH] | close ID | drop N M U V FX FY | pull N U V [SEQ] | resize N WxH METRES")
+                       "launch HOST APP [--size WxH] | close ID | drop N M U V FX FY | pull N U V [SEQ] | resize N WxH METRES | "
+                       "scale N SCALE")

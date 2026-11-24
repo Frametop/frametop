@@ -7147,11 +7147,11 @@ void ShiftCommand(vrcmd::Verb verb, const vrcmd::Cmd &c, char *reply, int size) 
 
 // ---------------------------------------------------------------- for the layout's carry (vrlayoutgrab.cpp)
 
-void SpinForget(int i) { g_spin.base.erase(i); }
+extern "C++" void ftvr::SpinForget(int i) { g_spin.base.erase(i); }
 // Another laser, its title bar or a hand has it.
-bool HeldElsewhere(const Screen &s, int i) { return s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i); }
+extern "C++" bool ftvr::HeldElsewhere(const Screen &s, int i) { return s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i); }
 // On its way somewhere, its way moves by `step` too (as a universe's jump moves it, FollowUniverse): true if it was.
-bool StepOnItsWay(Screen &s, int i, const Mat &step) {
+extern "C++" bool ftvr::StepOnItsWay(Screen &s, int i, const Mat &step) {
     const auto m = g_grabMoves.find(i);
     if (m == g_grabMoves.end()) return false;
     GrabMove &move = m->second;
@@ -7160,7 +7160,7 @@ bool StepOnItsWay(Screen &s, int i, const Mat &step) {
     return true;
 }
 // The places in the room no panel is in now: the front slot's home, a stopped remote display's.
-void StepPlaces(const Mat &step) {
+extern "C++" void ftvr::StepPlaces(const Mat &step) {
     if (g_front.panel >= 0) {
         g_front.home = Mul(step, g_front.home);
         if (LayoutMoves(g_front.panel)) g_front.to = Mul(step, g_front.to);

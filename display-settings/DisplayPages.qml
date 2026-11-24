@@ -1226,8 +1226,10 @@ Item {
                         }
                         Controls.Label {
                             text: Math.abs(Math.round(tileDesk.value)) + "° " + (tileDesk.value < 0 ? "below" : "above") + " your eyes"
+                            visible: !backend.dashTiles.atBar   // (not where they are then)
                         }
                     }
+                    Ft.Hint { visible: backend.dashTiles.atBar; text: "Set by Steam's bar. Turn off At Steam's bar to change it." }
                     RowLayout {
                         Kirigami.FormData.label: "Panel size:"
                         Controls.Slider {
@@ -1261,14 +1263,18 @@ Item {
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                             onMoved: backend.dashTiles.setRadius(value)
                         }
-                        Controls.Label { text: tileRadius.value.toFixed(2) + " m to their corners" }
+                        Controls.Label {
+                            text: tileRadius.value.toFixed(2) + " m to their corners"
+                            visible: !backend.dashTiles.atBar
+                        }
                     }
+                    Ft.Hint { visible: backend.dashTiles.atBar; text: "Set by Steam's bar. Turn off At Steam's bar to change it." }
                     RowLayout {
                         Kirigami.FormData.label: "Curve:"
                         // the arc's radius, its centre to the wall (DASH_TILE_CURVE_M; not set: 2 m past the
-                        // wall's distance). At the distance or less it's round your head. (Steam's bar is
-                        // about 1.15 m away; its real distance is ft-screens'.)
-                        property real wallM: backend.dashTiles.atBar ? 1.15 : backend.dashTiles.radius
+                        // wall's distance). At the distance or less it's round your head. (At Steam's bar
+                        // the wall is about 1.4 m away, 0.3 m past the bar; its real distance is ft-screens'.)
+                        property real wallM: backend.dashTiles.atBar ? 1.4 : backend.dashTiles.radius
                         Controls.Slider {
                             id: tileCurve
                             from: 0.8; to: 12; stepSize: 0.1

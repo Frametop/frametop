@@ -1211,10 +1211,11 @@ def start_remotes(sock, layout, only=None):
         if displays:
             log("remote displays: this ft-screens can't show them (build it again)")
         return False
-    if only is None:
-        for n in set(running) - {n for n, _, d in displays if not d.get("off")}:
-            sock.ask(f"remote {n} stop")
-    sync_monitors([h for _, h, d in displays if not d.get("off") and (only is None or d.get("id") in only)])
+    stopped = set(running) - {n for n, _, d in displays if not d.get("off")} if only is None else set()
+    for n in stopped:
+        sock.ask(f"remote {n} stop")
+    starting = [h for _, h, d in displays if not d.get("off") and (only is None or d.get("id") in only)]
+    sync_monitors(starting)
     for n, host, d in displays:
         if d.get("off"):
             continue
@@ -1223,6 +1224,9 @@ def start_remotes(sock, layout, only=None):
                 start_remote(sock, n, host, d)
             except RuntimeError as e:
                 log(f"remote display {d.get('id')}: {e}")
+    # PCs left with nothing connected get their monitors back; last, so that one that doesn't
+    # answer holds up no stream.
+    sync_monitors([h for n, h, _ in displays if n in stopped and not any(h is s for s in starting)])
     return True
 
 
@@ -1465,7 +1469,8 @@ def remote_command(args):
                 log(f"disconnected {d['id']}")
         except RuntimeError as e:
             log(f"saved; not stopped now: {e}")
-        sync_monitors([h for _, h, _ in found])  # its monitor goes off while the others stream
+        # Its monitor goes off while the others stream; after the last one, they all go back.
+        sync_monitors([h for _, h, _ in found])
         return
     if what == "away":
         import ft_remoteaway   # (its own module: the streams wait while the headset is off)

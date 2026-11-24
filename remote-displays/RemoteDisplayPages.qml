@@ -775,7 +775,7 @@ Item {
                                     text: "Lets Frametop turn off or resize " + hostCard.modelData.name + "'s displays while "
                                           + "connected: each display below switches to its stream size and the scale picked "
                                           + "in its settings, and the ones that aren't below, or are disconnected, turn off. "
-                                          + "They go back two minutes after the last one stops."
+                                          + "They go back when the last one is disconnected, or 15 seconds after its stream is lost."
                                 }
                                 Controls.Label {
                                     objectName: "ownMonitorsNote"

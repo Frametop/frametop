@@ -161,7 +161,7 @@
    "id": "edge-taps",
    "title": "Taps off to the side",
    "kind": "scene",
-   "intro": "A window straight ahead. Keep looking at it with your head still: your hand stays out at the side and taps there when a button lights. Nothing happens when you tap: the cameras record your hand.",
+   "intro": "A window straight ahead. Keep looking at it with your head still: your hand stays out at the side and taps there when a button lights. If the panel says it can't see your hand, carry on. Nothing happens when you tap: the cameras record your hand.",
    "prompts": [
     {
      "id": "right-out",

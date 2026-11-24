@@ -46,7 +46,7 @@
   {
    "id": "moving",
    "title": "In front of something moving",
-   "intro": "Face a running fan, out of reach, or a TV or monitor playing something fast with nothing private on it (a video or a game), one to two metres away. The steps call it the moving thing. Keep it behind your hands for the whole round: the cameras should see your hand with the movement behind it.",
+   "intro": "Face a running fan, out of reach (a fan is best), or a TV or monitor playing something fast with nothing private on it (a video or a game), one to two metres away. The steps call it the moving thing. Keep it behind your hands for the whole round: the cameras should see your hand with the movement behind it.",
    "prompts": [
     {
      "id": "moving/right-still",

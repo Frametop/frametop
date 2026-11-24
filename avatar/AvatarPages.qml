@@ -124,7 +124,7 @@ Item {
     Component {
         id: appearancePage
         Kirigami.ScrollablePage {
-            title: "Appearance"
+            title: "Hands & avatar"
             // The models are read each time the page opens (ft-handview reads your folder again).
             Component.onCompleted: backend.refresh()
 
@@ -134,8 +134,7 @@ Item {
                 Controls.Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: "The hands Frametop draws where your tracked hands are: over games, over the void, and "
-                          + "over your real hands in Room View. Pick a model, or import one of your own."
+                    text: "Choose how your tracked hands and full-body avatar appear in VR. Pick a built-in hand style or import your own 3D model."
                 }
 
                 Kirigami.Heading {
@@ -183,9 +182,7 @@ Item {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                     textFormat: Text.PlainText
-                    text: "Takes a VRM avatar, or a glTF, GLB or FBX model with a hand skeleton: its hands become "
-                          + "yours. A model with more detail than a hand needs is reduced, and one whose hand bones "
-                          + "can't be told is refused with the reason. Your models are kept in " + backend.folder + "."
+                    text: "Supports VRM, glTF, GLB, and FBX models with rigged hands. High-detail meshes are optimized automatically. Imported files are stored in " + backend.folder + "."
                 }
 
                 Kirigami.Heading {
@@ -197,9 +194,8 @@ Item {
                     wrapMode: Text.Wrap
                     textFormat: Text.PlainText
                     text: backend.avatars.length > 0
-                          ? "The body you wear. Its hands become yours, and the mirror shows all of it, moving as you do."
-                          : "None yet. Import a model that is a whole person (a VRM avatar, or a glTF or FBX with a "
-                            + "humanoid skeleton) to wear its body, not only its hands."
+                          ? "Choose a full-body avatar to wear. Its hands replace your hand model, and the mirror lets you see yourself move."
+                          : "No full-body avatars imported yet. Import a VRM, glTF, GLB, or FBX humanoid character above to wear its full body."
                 }
                 Flow {
                     Layout.fillWidth: true
@@ -237,10 +233,9 @@ Item {
                     font: Kirigami.Theme.smallFont
                     visible: backend.avatars.length > 0
                     text: backend.avatar === ""
-                          ? "Pick an avatar to see yourself in the mirror."
-                          : "The mirror stands on the floor in front of where you look when you turn it on, and "
-                            + "stays until you turn it off here. Turn it off and on to move it. While it is up it "
-                            + "listens to your microphone to move the avatar's mouth: nothing is recorded or sent."
+                          ? "Select an avatar above to preview yourself in the mirror."
+                          : "Places a full-length mirror in front of you. Toggle it off and back on to reposition it. "
+                            + "Uses your microphone locally for lip-sync while open — nothing is recorded or sent."
                 }
                 Controls.Switch {
                     id: belowSwitch
@@ -261,9 +256,7 @@ Item {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                     visible: backend.avatars.length > 0 && backend.avatar !== ""
-                    text: "Your avatar's body, without its head, under your own while the mirror is up. It is a "
-                          + "trial: it can trail a little when you walk or lean, and a panel far behind it can show "
-                          + "through it."
+                    text: "Experimental: shows your avatar's body below your view while the mirror is active. It may lag slightly when walking or leaning."
                 }
 
                 Kirigami.FormLayout {
@@ -291,7 +284,7 @@ Item {
                     Controls.Switch {
                         objectName: "inRoomSwitch"
                         Kirigami.FormData.label: "In Room View:"
-                        text: "Draw them over your real hands too"
+                        text: "Show virtual hands over your real hands in Room View"
                         checked: backend.inRoom
                         onToggled: backend.setInRoom(checked)
                     }
@@ -300,7 +293,7 @@ Item {
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
-                        text: "Off, the drawn hands show only where the room doesn't: in games and over the void."
+                        text: "When off, virtual hands only appear in VR environments and games, leaving your real hands unobstructed in passthrough."
                     }
                 }
             }

@@ -125,7 +125,7 @@ Item {
         }
         Controls.Label {
             visible: picker.opt.follows === true
-            text: "The newest version. Picked, it follows updates: when a newer version ships, Frametop moves to it without asking. Any other version stays put when picked."
+            text: "Automatically stays on the newest release as updates ship. Selecting a specific version locks to that version."
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             opacity: 0.7
@@ -138,17 +138,62 @@ Item {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
         }
+        RowLayout {
+            Controls.Button {
+                text: picker.inUse ? "Active"
+                      : !picker.opt.installed ? "Download & use"
+                      : "Use this"
+                icon.name: picker.inUse ? "checkmark" : !picker.opt.installed ? "download" : "dialog-ok-apply"
+                enabled: !picker.inUse && picker.opt.usable !== false && picker.busy === "" && !!picker.opt.name
+                onClicked: backend.useModel(picker.kind, picker.opt.name)
+            }
+            Controls.Button {
+                text: "Remove download"
+                icon.name: "edit-delete"
+                visible: !picker.opt.builtin && !picker.opt.follows && picker.opt.installed === true
+                         && picker.opt.target !== picker.running && picker.opt.name !== picker.view.choice
+                enabled: picker.busy === ""
+                onClicked: backend.removeModel(picker.kind, picker.opt.name)
+            }
+            Controls.Button {
+                text: "Check for updates"
+                icon.name: "view-refresh"
+                enabled: picker.busy === ""
+                onClicked: backend.refreshModels(picker.kind)
+            }
+            Controls.BusyIndicator {
+                visible: picker.busy !== ""
+                running: visible
+                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                Layout.preferredWidth: Layout.preferredHeight
+            }
+            Controls.Label {
+                visible: picker.busy !== ""
+                text: picker.busy
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+            }
+        }
+        readonly property bool hasBench: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
+        Ft.Disclosure {
+            id: techDetails
+            Layout.fillWidth: true
+            visible: !!picker.opt.notes || !!picker.opt.cost || picker.hasBench
+            title: "Technical details & benchmarks"
+            summary: "release notes, resource cost, scores"
+        }
         Controls.Label {
             text: picker.opt.notes || ""
-            visible: text !== ""
+            visible: techDetails.expanded && text !== ""
             textFormat: Text.PlainText
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             opacity: 0.85
+            font: Kirigami.Theme.smallFont
         }
         Controls.Label {
-            text: picker.opt.cost ? "Cost: " + picker.opt.cost : ""
-            visible: text !== ""
+            text: picker.opt.cost ? "Resource cost: " + picker.opt.cost : ""
+            visible: techDetails.expanded && text !== ""
             textFormat: Text.PlainText
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
@@ -156,7 +201,7 @@ Item {
             font: Kirigami.Theme.smallFont
         }
         GridLayout {
-            visible: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
+            visible: techDetails.expanded && picker.hasBench
             columns: 3
             columnSpacing: Kirigami.Units.largeSpacing
             rowSpacing: 2
@@ -212,51 +257,16 @@ Item {
             }
         }
         Controls.Label {
-            visible: (picker.view.metrics || []).some(m => picker.opt.bench && picker.opt.bench[m.key] !== undefined)
-            text: "Green: better than " + (picker.otherName || "the other") + ", red: worse. Hover a row for how it was measured."
+            visible: techDetails.expanded && picker.hasBench
+            text: "Green: better than " + (picker.otherName || "baseline") + "; red: worse. Hover any metric for details."
             textFormat: Text.PlainText
             opacity: 0.7
             font: Kirigami.Theme.smallFont
         }
-        RowLayout {
-            Controls.Button {
-                text: picker.inUse ? "In use"
-                      : !picker.opt.installed ? "Download and use"
-                      : "Use this"
-                icon.name: picker.inUse ? "checkmark" : !picker.opt.installed ? "download" : "dialog-ok-apply"
-                enabled: !picker.inUse && picker.opt.usable !== false && picker.busy === "" && !!picker.opt.name
-                onClicked: backend.useModel(picker.kind, picker.opt.name)
-            }
-            Controls.Button {
-                text: "Remove download"
-                icon.name: "edit-delete"
-                visible: !picker.opt.builtin && !picker.opt.follows && picker.opt.installed === true
-                         && picker.opt.target !== picker.running && picker.opt.name !== picker.view.choice
-                enabled: picker.busy === ""
-                onClicked: backend.removeModel(picker.kind, picker.opt.name)
-            }
-            Controls.Button {
-                text: "Check for new versions"
-                icon.name: "view-refresh"
-                enabled: picker.busy === ""
-                onClicked: backend.refreshModels(picker.kind)
-            }
-            Controls.BusyIndicator {
-                visible: picker.busy !== ""
-                running: visible
-                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
-                Layout.preferredWidth: Layout.preferredHeight
-            }
-            Controls.Label {
-                visible: picker.busy !== ""
-                text: picker.busy
-                opacity: 0.7
-                font: Kirigami.Theme.smallFont
-            }
-        }
         Controls.Label {
-            text: "List from " + (picker.view.source || "this install")
-                  + (picker.view.checked ? ", checked " + picker.view.checked : "")
+            visible: techDetails.expanded
+            text: "Catalog source: " + (picker.view.source || "built-in")
+                  + (picker.view.checked ? " (checked " + picker.view.checked + ")" : "")
             opacity: 0.6
             font: Kirigami.Theme.smallFont
         }
@@ -299,7 +309,15 @@ Item {
     Component {
         id: devicesPage
         Kirigami.ScrollablePage {
-            title: "Devices"
+            title: "Mice & keyboards"
+            actions: [
+                Kirigami.Action {
+                    text: "Bluetooth"
+                    icon.name: "preferences-system-bluetooth"
+                    tooltip: "View paired Bluetooth devices and apply reconnect fixes"
+                    onTriggered: root.show("bluetooth")
+                }
+            ]
 
             header: ColumnLayout {
                 spacing: 0
@@ -310,8 +328,8 @@ Item {
                     position: Kirigami.InlineMessage.Position.Header
                     type: backend.relayRunning ? Kirigami.MessageType.Information : Kirigami.MessageType.Error
                     text: !backend.relayRunning
-                          ? "The input relay isn't running (frametop-input-relay.service)."
-                          : "Pointer mode is off (POINTER=0): pointer devices act as a plain mouse."
+                          ? "Frametop's input service isn't running right now, so devices and shortcuts won't respond."
+                          : "3D pointer mode is turned off in your config, so mice behave as standard 2D mice."
                 }
             }
 
@@ -378,9 +396,9 @@ Item {
                             }
                             Controls.Label {
                                 text: row.modelData.connected
-                                      ? row.modelData.bus + " · " + row.modelData.kinds.join(" + ") + " · " + row.modelData.id
-                                        + (row.modelData.grabbed ? " · grabbed" : "")
-                                      : "not connected · saved settings · " + row.modelData.id
+                                      ? row.modelData.bus + " · " + row.modelData.kinds.join(" + ")
+                                        + (row.modelData.grabbed ? " · active 3D pointer" : "")
+                                      : "Disconnected · saved preference"
                                 opacity: 0.7
                                 font: Kirigami.Theme.smallFont
                                 Layout.fillWidth: true
@@ -420,10 +438,10 @@ Item {
             }
 
             footer: Ft.HelpFooter {
-                text: "Move or press a device to see which row it is. 3D pointer: grabbed, drives the SteamVR pointer. "
-                      + "Pass through: left alone, but its key combinations (Keyboard page) work. "
-                      + "Keyboard + 3D pointer, for a keyboard with a touchpad: the keys pass through, the touchpad "
-                      + "drives the pointer. Ignore: left alone."
+                text: "Move a mouse or press a key to flash its row's indicator light. "
+                      + "3D pointer: controls the VR cursor. Pass through: types normally while supporting Frametop shortcuts. "
+                      + "Keyboard + 3D pointer: best for keyboards with a built-in touchpad (keys type, touchpad steers the pointer). "
+                      + "Ignore: Frametop leaves the device completely untouched."
             }
         }
     }
@@ -433,7 +451,7 @@ Item {
         id: buttonsPage
         Kirigami.ScrollablePage {
             id: bpage
-            title: "Buttons"
+            title: "Mouse buttons"
             header: DriverWarning {}
             actions: [
                 Kirigami.Action {
@@ -464,7 +482,7 @@ Item {
                     Layout.fillWidth: true
                     visible: bpage.pointerDevices.length === 0
                     text: "No 3D pointer devices"
-                    explanation: "Set a device's role to 3D pointer on the Devices page."
+                    explanation: "Assign a mouse to 3D pointer on the Mice & keyboards page first."
                 }
 
                 Kirigami.FormLayout {
@@ -560,9 +578,9 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "Buttons without a mapping pass through (mouse buttons as clicks, keys as keys). "
-                          + "The Z3's extra buttons show up as keys from its keyboard node. "
-                          + "The Frame controllers' buttons are on the Controllers page."
+                    text: "Unmapped buttons work normally as regular clicks or keys. Extra programmable buttons on some "
+                          + "mice may appear as keyboard keys when captured. To remap VR controller buttons, open the "
+                          + "Controllers page."
                 }
             }
         }
@@ -611,21 +629,20 @@ Item {
                     Layout.fillWidth: true
                     visible: !cpage.status.helper
                     type: Kirigami.MessageType.Error
-                    text: "The pointer helper isn't answering (frametop-pointer.service, needs SteamVR). "
-                          + "It reads the controller buttons."
+                    text: "Frametop's pointer service isn't responding (requires SteamVR to be running). "
+                          + "Controller button mappings need it to detect presses."
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
                     visible: cpage.status.helper && !cpage.status.manifest
                     type: Kirigami.MessageType.Error
-                    text: "The pointer helper couldn't set up SteamVR input (pointer/helper/actions). See its log."
+                    text: "Couldn't register controller actions with SteamVR. Try restarting SteamVR or checking the pointer log."
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
                     visible: cpage.status.helper && !cpage.status.global && backend.controllerMappings.length > 0
                     type: Kirigami.MessageType.Warning
-                    text: "Global input is off, so the mapped buttons only reach Frametop when nothing else has "
-                          + "focus, if at all."
+                    text: "Global input is currently off, so mapped controller buttons may not work while another app is active."
                 }
 
                 Kirigami.FormLayout {
@@ -638,10 +655,10 @@ Item {
                         enabled: cpage.status.helper
                         onToggled: backend.setGlobalInput(checked)
                     }
-                    Ft.Hint { text: "SteamVR's own setting, \"Enable global input from overlays (Experimental)\". Mapped buttons need it." }
+                    Ft.Hint { text: "Required for controller mappings (controls SteamVR's \"Enable global input from overlays\" setting)." }
                     Controls.Switch {
                         Kirigami.FormData.label: "In games:"
-                        text: "Mapped buttons work while a game is running too (the game loses them)"
+                        text: "Keep mapped buttons active during VR games (overrides the game)"
                         checked: backend.controllerInGames
                         onToggled: backend.setControllerInGames(checked)
                     }
@@ -667,7 +684,7 @@ Item {
                         }
                     }
                     RowLayout {
-                        Kirigami.FormData.label: "It does:"
+                        Kirigami.FormData.label: "Action:"
                         Controls.ComboBox {
                             id: newControllerAction
                             model: backend.controllerActions
@@ -733,10 +750,9 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "Outside games, a mapped button is Frametop's; while a game runs it's the game's, unless "
-                          + "\"In games\" is on. Unmapped buttons are left alone, and the system button stays SteamVR's. "
-                          + "Clicks and scrolling go to the 3D pointer. The trigger and grip also move SteamVR's laser "
-                          + "to that controller, so they're better left unmapped."
+                    text: "Mapped buttons trigger Frametop actions outside of games, and return to the game while you play "
+                          + "(unless \"In games\" is turned on above). The system button is always reserved by SteamVR. "
+                          + "Tip: avoid remapping the trigger or grip since SteamVR uses them to aim its laser."
                 }
             }
         }
@@ -747,7 +763,7 @@ Item {
         id: keyboardPage
         Kirigami.ScrollablePage {
             id: kpage
-            title: "Keyboard"
+            title: "Keyboard & shortcuts"
             // Pass-through keyboards connected now: with "no_keyboard", the keyboard waits for none.
             // A program's uinput keyboard (a remote desktop's, say) doesn't count.
             property var keyboards: backend.devices.filter(d => d.connected && (d.role === "passthrough" || d.role === "combo")
@@ -784,7 +800,7 @@ Item {
                     enabled: backend.vrKeyboard !== "never" && backend.relayRunning
                     onClicked: backend.toggleVrKeyboard()
                 }
-                Ft.Hint { text: "Also brings it back after you quit it from its own panel." }
+                Ft.Hint { text: "Also reopens the keyboard if you previously closed it from its panel." }
                 Controls.ComboBox {
                     objectName: "steamFieldsKeyboard"
                     Kirigami.FormData.label: "In Steam's text fields:"
@@ -811,8 +827,8 @@ Item {
                     objectName: "keyedPointers"
                     visible: kpage.keyedPointers.length > 0
                     text: "Not counted, because its role is 3D pointer: " + kpage.keyedPointers.map(d => d.name).join(", ")
-                          + ". If that is a keyboard with a touchpad, set its role to Keyboard + 3D pointer on the "
-                          + "Devices page: its keys then type, and the touchpad still drives the pointer."
+                          + ". If that's a keyboard with a touchpad, change its role to Keyboard + 3D pointer in "
+                          + "Mice & keyboards so its keys type while the touchpad steers the pointer."
                     wrapMode: Text.Wrap
                     opacity: 0.7
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 24
@@ -846,7 +862,7 @@ Item {
                     onActivated: { backend.setDesktopVariant(currentValue); currentIndex = indexOfValue(backend.desktopVariant) }
                 }
                 Controls.Label {
-                    text: "What your keyboards type on the Frametop desktop: USB and Bluetooth keyboards, Full Keyboard and dictation. Pick the same language in Full Keyboard. Steam and VR games keep their own layout."
+                    text: "Sets the typing language for physical keyboards, the VR keyboard, and voice dictation on the desktop (Steam and VR games use their own language setting)."
                     wrapMode: Text.Wrap
                     opacity: 0.7
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 24
@@ -856,21 +872,21 @@ Item {
                     icon.name: "input-keyboard"
                     onClicked: backend.openKeyboardLayouts()
                 }
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Key combinations" }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Keyboard shortcuts" }
                 Controls.Switch {
                     Kirigami.FormData.label: "Meta tap:"
-                    text: "Meta pressed and let go alone does its combination below"
+                    text: "Tap the Meta (Windows/Super) key alone to trigger its shortcut"
                     checked: backend.metaTap
                     onToggled: backend.setMetaTap(checked)
                 }
-                Ft.Hint { text: "Meta with other keys always works." }
+                Ft.Hint { text: "Shortcuts that combine Meta with another key always work either way." }
                 Controls.Switch {
                     Kirigami.FormData.label: "Carry floated windows:"
-                    text: "A window you float starts carried by the 3D mouse"
+                    text: "Automatically attach a newly floated window to your pointer"
                     checked: backend.carryOnFloat
                     onToggled: backend.setCarryOnFloat(checked)
                 }
-                Ft.Hint { text: "As the carry_toggle combination does, until a click or Enter." }
+                Ft.Hint { text: "Move your pointer to place the window, then click or press Enter to drop it." }
                 Controls.ComboBox {
                     id: windowDragMod
                     Kirigami.FormData.label: "Window drag:"
@@ -881,7 +897,7 @@ Item {
                     onActivated: { backend.setWindowDrag("mod", currentValue); currentIndex = indexOfValue(backend.windowDrag.mod) }
                 }
                 Controls.Label {
-                    text: "Hold it and press a mouse button anywhere in a window to move or resize it, without clicking the window: on the desktop's screens, floating windows and PC windows. Carrying one, push it into a screen with the wheel (or into its PC's display) and it lands there; pull the wheel on a PC's display and the window under the pointer comes off it."
+                    text: "Hold this key and drag anywhere inside a window with the mouse to move or resize it without grabbing its title bar. While carrying a floating window, scroll forward into a screen to dock it there, or scroll back on a remote PC screen to pop a window out."
                     wrapMode: Text.Wrap
                     opacity: 0.7
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 24
@@ -952,33 +968,27 @@ Item {
                     placeholderText: "e.g. ft-layout use Work"
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 24
                 }
+                Controls.Button {
+                    text: "Configure shortcuts for remote PCs…"
+                    icon.name: "preferences-desktop-keyboard-shortcut"
+                    onClicked: root.show("remote-keys")
+                }
                 Controls.Label {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
-                    text: "Hold the modifiers (Ctrl, Alt, Shift, Meta), then press the key, on any keyboard. Or tap "
-                          + "one modifier on its own: a left one taps either side, a right one only itself (Right Ctrl). "
-                          + "The combination's last key isn't typed; the modifiers still reach "
-                          + "the app. While you're in Steam or a game, they see the keys too. Until you remove or change "
-                          + "them, a Meta tap opens the Steam menu (or closes the dashboard) instead of the desktop's "
-                          + "launcher, Meta+Shift+F floats the desktop window under the pointer in VR, or puts it "
-                          + "back, Meta+Shift+H hides or shows the screens, Meta+W closes the app you're typing in, and "
-                          + "Ctrl+Alt+Shift+Esc lets go of every key, for a modifier stuck on the desktop. A command runs with sh as the input "
-                          + "relay's service, outside the desktop's session, with Frametop's ft-layout, ft-float and "
-                          + "ft-steam on its path; its output goes to the relay's log (journalctl --user -u "
-                          + "frametop-input-relay)."
+                    text: "To record a shortcut, hold modifier keys (Ctrl, Alt, Shift, Meta) and press a key — or tap a "
+                          + "single modifier on its own. Built-in defaults: Meta tap opens the Steam menu, Meta+Shift+F "
+                          + "floats/docks the window under your pointer, Meta+Shift+H hides/shows screens, Meta+W closes "
+                          + "the focused app, and Ctrl+Alt+Shift+Esc releases any stuck keys."
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
             }
 
             footer: Ft.HelpFooter {
-                text: "Frametop's keyboard (Full Keyboard) opens in front of you, below your eyes, and closes with its X or a layout reset "
-                      + "(or when the text field loses focus, with Keep it open off). "
-                      + "Type on it with a laser, the 3D mouse, a controller's tip or a fingertip. It types into any "
-                      + "app, but only Qt, GTK and Firefox apps say when a text field is selected; for the rest "
-                      + "(Chromium, Electron and X11 apps), map Open/close keyboard to a button on the Buttons or "
-                      + "Controllers page. Keyboards set to Ignore, and keyboards other programs make, don't "
-                      + "count as connected."
+                text: "Frametop's VR keyboard opens in front of you and works with controller lasers, the 3D mouse, or direct "
+                      + "fingertip taps. Some apps (such as Chrome or Electron apps) don't report when a text box is focused — "
+                      + "for those, map \"Open/close keyboard\" in Mouse buttons or Controllers, or click the button above."
             }
         }
     }
@@ -988,7 +998,7 @@ Item {
         id: voicePage
         Kirigami.ScrollablePage {
             id: vpage
-            title: "Voice"
+            title: "Voice dictation"
             property var st: backend.voiceStatus
             property var vs: backend.voiceSettings
             property bool capturing: false
@@ -1015,14 +1025,14 @@ Item {
                     Layout.fillWidth: true
                     visible: !backend.voiceInstalled
                     type: Kirigami.MessageType.Information
-                    text: "Voice dictation isn't installed. Run voice/run.sh install in Frametop's folder: it "
-                          + "downloads about 320 MB of speech models, which stay on the headset."
+                    text: "Voice dictation isn't installed yet. Run voice/run.sh install from the Frametop folder in a "
+                          + "terminal to download the offline speech models (~320 MB, runs completely on the headset)."
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
                     visible: backend.voiceInstalled && backend.voiceEnabled && !vpage.st.running
                     type: Kirigami.MessageType.Warning
-                    text: "Voice dictation is on but not running. See journalctl --user -u frametop-voice."
+                    text: "Voice dictation is enabled but the background service stopped. Check logs with: journalctl --user -u frametop-voice."
                 }
 
                 Kirigami.FormLayout {
@@ -1046,7 +1056,7 @@ Item {
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 24
                     }
                     Controls.Button {
-                        text: "Change on the Keyboard page"
+                        text: "Change in Keyboard & shortcuts"
                         icon.name: "input-keyboard"
                         onClicked: root.show("keyboard")
                     }
@@ -1126,7 +1136,7 @@ Item {
                         onActivated: backend.setVoiceLanguage(currentValue)
                     }
                     Controls.ComboBox {
-                        Kirigami.FormData.label: "Whisper model:"
+                        Kirigami.FormData.label: "Speech model:"
                         model: backend.voiceModels
                         textRole: "text"
                         valueRole: "value"
@@ -1141,8 +1151,8 @@ Item {
                     }
                     Controls.Label {
                         text: vpage.vs.language === "en"
-                              ? "Moonshine types English as you talk. Whisper types it when \"As you talk\" is off, and hears the wake word's commands."
-                              : "Whisper types other languages, slower than Moonshine types English. Bigger models hear better and take longer; large-v3-turbo can make VR stutter."
+                              ? "Fast live English dictation is used when \"Type as you speak\" is on. The speech model above is used for full-sentence dictation and voice commands."
+                              : "Larger models improve accuracy for non-English languages but respond slower. The largest model (large-v3-turbo) may cause VR stutter."
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 24
@@ -1150,8 +1160,8 @@ Item {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Typing" }
                     Controls.Switch {
-                        Kirigami.FormData.label: "As you talk:"
-                        text: "Type words while you're still talking (off: all at once when you stop)"
+                        Kirigami.FormData.label: "Live typing:"
+                        text: "Type words as you speak (off: type after you finish)"
                         checked: vpage.vs.live_typing
                         onToggled: backend.setVoiceOption("live_typing", checked)
                     }
@@ -1164,8 +1174,8 @@ Item {
 
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Wake word" }
                     Controls.Switch {
-                        Kirigami.FormData.label: "Wake word:"
-                        text: "Listen for it, then for a command (the microphone stays open)"
+                        Kirigami.FormData.label: "Hands-free wake word:"
+                        text: "Keep microphone listening for a wake phrase + voice command"
                         checked: vpage.vs.wake_word
                         onToggled: backend.setVoiceOption("wake_word", checked)
                     }
@@ -1193,13 +1203,10 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "Speech is recognised on the headset; nothing leaves it. Text is typed where you type: the "
-                          + "desktop window you clicked last, or Steam and games. It waits while you hold Ctrl, Alt, "
-                          + "Shift or Meta, so letters don't turn into shortcuts. A key held to talk "
-                          + "dictates while it's down; pressing another key with it cancels. A key works only on its own: with another modifier held it's a shortcut, not "
-                          + "dictation. Controller buttons still do what they do in games. After the wake word, a "
-                          + "command goes to voice/hooks/on-command, or runs a program you set in "
-                          + "~/.config/frametop-voice.json (\"commands\"; see voice/README.md)."
+                    text: "All speech recognition runs privately on your headset — no audio is sent online. Dictated text "
+                          + "types into whichever window or Steam field you last clicked. Push-to-talk keys pause while you hold "
+                          + "other modifiers so they don't trigger shortcuts accidentally. Voice commands can run any saved "
+                          + "entry from Custom commands."
                 }
             }
         }
@@ -1230,8 +1237,7 @@ Item {
                     onToggled: backend.setPointerFollow(checked)
                 }
                 Ft.Hint {
-                    text: "Lightly tested and not finished: the settings here are a starting point, and how "
-                          + "it feels is open for anyone who wants to take it further."
+                    text: "Experimental feature: keeps the 3D pointer moving along with your view when you turn your head."
                 }
                 PointerSliders { group: "follow"; shown: backend.pointerFollow }
 
@@ -1244,7 +1250,7 @@ Item {
                     onToggled: backend.setTravelMode(checked)
                     Component.onCompleted: backend.refreshTravel()
                 }
-                Ft.Hint { text: "SteamVR's own setting, off by default." }
+                Ft.Hint { text: "Prevents headset tracking from drifting in moving vehicles (controls SteamVR's Travel mode setting)." }
                 RowLayout {
                     visible: backend.travelNote !== ""
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 26
@@ -1271,8 +1277,8 @@ Item {
             }
 
             footer: Ft.HelpFooter {
-                text: "Changes apply live. Hold the pointer over a slider to read what it does; the arrow "
-                      + "beside it goes back to the default."
+                text: "All pointer changes take effect immediately. Hover over any slider for details, or click its "
+                      + "reset arrow to restore the default value."
             }
         }
     }
@@ -1282,7 +1288,7 @@ Item {
         id: ignorePage
         Kirigami.ScrollablePage {
             id: ipage
-            title: "Ignored panels"
+            title: "Click-through panels"
             header: DriverWarning {}
 
             Timer {
@@ -1301,24 +1307,23 @@ Item {
                     Layout.fillWidth: true
                     visible: !backend.controllerStatus.helper
                     type: Kirigami.MessageType.Error
-                    text: "The pointer helper isn't answering (frametop-pointer.service, needs SteamVR). "
-                          + "It lists SteamVR's panels and does the ignoring."
+                    text: "Frametop's pointer service isn't responding (requires SteamVR to be running). "
+                          + "It is needed to list active VR overlays and let clicks pass through them."
                 }
                 Controls.Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: "The mouse pointer passes through the panels ticked here to whatever is behind them, "
-                          + "as if they weren't there. Use it for panels you only look at, like a performance "
-                          + "overlay that follows your view. Ignore a whole app, or only some of its panels. "
-                          + "Controllers aren't affected."
+                    text: "Checked panels become click-through for your 3D mouse pointer so clicks reach the screen "
+                          + "behind them. Useful for view-only overlays like FPS counters or performance graphs. "
+                          + "VR controllers are not affected."
                 }
                 Controls.Switch {
                     id: showHidden
-                    text: "Also list panels that aren't showing now"
+                    text: "Show currently hidden overlays"
                 }
                 Controls.Label {
                     visible: backend.controllerStatus.helper && !backend.panelsLoaded
-                    text: "Asking the pointer helper for SteamVR's panels…"
+                    text: "Loading active SteamVR overlays…"
                     opacity: 0.7
                 }
 
@@ -1343,7 +1348,7 @@ Item {
                             }
                             Item { Layout.fillWidth: true }
                             Controls.CheckBox {
-                                text: "Ignore the whole app"
+                                text: "Click through entire app"
                                 checked: grp.modelData.appIgnored
                                 onToggled: backend.setAppIgnored(grp.modelData.app, checked)
                             }
@@ -1382,7 +1387,7 @@ Item {
                 Kirigami.Heading {
                     visible: backend.ignoreOrphans.length > 0
                     level: 3
-                    text: "Ignored, not open now"
+                    text: "Saved click-through rules (not currently open)"
                 }
                 Repeater {
                     model: backend.ignoreOrphans
@@ -1403,9 +1408,8 @@ Item {
             }
 
             footer: Ft.HelpFooter {
-                text: "Saved as POINTER_IGNORE in ~/.config/frametop.conf, and applied at once. A whole app is "
-                      + "its key followed by *, which also covers panels it opens later. Frametop's own screens "
-                      + "aren't listed."
+                text: "Changes apply immediately. Checking an entire app also makes any future overlays from that app "
+                      + "click-through. Frametop's own screens are excluded from this list."
             }
         }
     }
@@ -1415,7 +1419,7 @@ Item {
         id: gamesPage
         Kirigami.ScrollablePage {
             id: gmpage
-            title: "Game optimization"
+            title: "VR games"
             property var st: backend.pauseStatus
 
             // The gesture's boxes follow the saved gesture (which may tidy what was picked).
@@ -1442,16 +1446,16 @@ Item {
                     visible: !gmpage.st.relay
                     type: Kirigami.MessageType.Error
                     text: gmpage.st.old
-                          ? "The input relay that runs is older and can't pause. Restart it: "
-                            + "systemctl --user restart frametop-input-relay"
-                          : "The input relay isn't answering (frametop-input-relay.service). It does the pausing."
+                          ? "Your running input service is from an older version and can't pause for games. "
+                            + "Restart it in a terminal: systemctl --user restart frametop-input-relay"
+                          : "Frametop's input service isn't responding right now, so automatic game pausing is unavailable."
                 }
 
                 Kirigami.FormLayout {
                     Layout.fillWidth: true
 
                     RowLayout {
-                        Kirigami.FormData.label: "Frametop:"
+                        Kirigami.FormData.label: "Status:"
                         Controls.Label { text: gmpage.st.summary }
                         Controls.Button {
                             text: gmpage.st.paused ? "Resume" : "Pause now"
@@ -1461,8 +1465,8 @@ Item {
                         }
                     }
                     Controls.Switch {
-                        Kirigami.FormData.label: "VR games:"
-                        text: "Pause while a VR game runs, and resume when it ends"
+                        Kirigami.FormData.label: "Auto-pause:"
+                        text: "Automatically pause Frametop when a VR game launches"
                         checked: backend.pauseAuto
                         onToggled: backend.setPauseAuto(checked)
                     }
@@ -1480,11 +1484,10 @@ Item {
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                         wrapMode: Text.Wrap
                         opacity: 0.7
-                        text: "Frametop stays up while Steam Link streams the PC's SteamVR Home. It knows a PC game runs "
-                              + "when the PC runs Frametop's Vibepollo and was added in Remote Displays."
+                        text: "Frametop stays active while viewing SteamVR Home over Steam Link. Detecting PC VR games requires adding your PC in Remote displays with Vibepollo installed."
                     }
 
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controller gesture" }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Quick pause/resume shortcut" }
                     Controls.ComboBox {
                         id: firstBox
                         Kirigami.FormData.label: "Button:"
@@ -1520,11 +1523,10 @@ Item {
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                         wrapMode: Text.Wrap
                         opacity: 0.7
-                        text: (backend.pauseGesture.first === "" ? "No gesture: a mapped button, a key combination, or ft-pause still work."
-                               : "Pauses and resumes Frametop, in games too. The game still gets the presses, so pick buttons it "
-                                 + "doesn't use this way. Two buttons count as together when both go down within a third of a "
-                                 + "second, and twice means within 0.7 s. A gesture with a button on each controller works with "
-                                 + "one controller too: while only one is connected, its button alone, clicked twice, does it.")
+                        text: (backend.pauseGesture.first === "" ? "No controller gesture set (you can still map \"Pause/resume Frametop\" in Keyboard & shortcuts or Mouse buttons)."
+                               : "Lets you pause or resume Frametop anytime, even mid-game. The game still receives the button presses, "
+                                 + "so choose a combo you won't hit accidentally. If a combo uses one button on each controller, double-pressing "
+                                 + "either button works when only one controller is turned on.")
                               + (gmpage.st.relay && backend.pauseGesture.first !== "" && !gmpage.st.gestureReader
                                  ? " Not reading the controllers right now (SteamVR isn't running?)." : "")
                     }
@@ -1551,13 +1553,9 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "Paused, Frametop leaves the headset's CPU and GPU to the game. The gaze service and our eye "
-                          + "tracker stop, and nothing reads SteamVR's eye tracking. Hand tracking and remote desktop stop "
-                          + "if they run. The desktop hides and slows down, or closes, as chosen above. The 3D mouse lets go, "
-                          + "so the mouse is a plain one for SteamVR. Mapped buttons and key combinations do nothing but "
-                          + "pausing, the Steam menu, and your own commands. Resuming brings back what pausing stopped. "
-                          + "Map \"Pause/resume Frametop\" to a button or key combination on the other pages, or run "
-                          + "input/ft-pause."
+                    text: "When paused, Frametop frees up CPU and GPU performance for your VR game by stopping eye tracking, "
+                          + "hand tracking, and remote desktop streaming, and hiding or closing the desktop as chosen above. "
+                          + "Everything resumes automatically when your game exits or when you unpause."
                 }
             }
         }
@@ -1568,7 +1566,7 @@ Item {
         id: gazePage
         Kirigami.ScrollablePage {
             id: gpage
-            title: "Gaze"
+            title: "Eye tracking"
             header: DriverWarning {}
             property var status: backend.gazeStatus
             // The gaze service idles while the gaze isn't used; open, this page keeps it going.
@@ -1630,13 +1628,12 @@ Item {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     visible: true
                     type: Kirigami.MessageType.Warning
-                    text: "Gaze mode is experimental. The pointer goes where you look and the mouse does the last bit; "
-                          + "moving the mouse takes over, looking well away hands it back. A small nudge and a click "
-                          + "teach the gaze service where it was off."
+                    text: "Eye tracking pointer is experimental. Look at what you want to click, then nudge with your mouse "
+                          + "or pinch to fine-tune if needed — each small correction teaches eye tracking to become more accurate."
                 }
                 Controls.Switch {
-                    Kirigami.FormData.label: "Gaze pointer:"
-                    text: backend.gazeMode < 0 ? "Pointer helper not running" : "Pointer goes where you look"
+                    Kirigami.FormData.label: "Eye-tracking pointer:"
+                    text: backend.gazeMode < 0 ? "Pointer service not running" : "Move pointer where you look"
                     enabled: backend.gazeMode >= 0
                     checked: backend.gazeMode > 0
                     onToggled: backend.setGazeMode(checked)
@@ -1693,19 +1690,17 @@ Item {
                           + "teach the eye tracker the wrong thing."
                 }
                 Controls.Switch {
-                    Kirigami.FormData.label: "Gaze dot:"
-                    text: "Always shown (off: only while the mouse moves it)"
+                    Kirigami.FormData.label: "Eye cursor dot:"
+                    text: "Always visible (off: only shows while adjusting)"
                     checked: backend.gazeDotAlways
                     onToggled: backend.setGazeDotAlways(checked)
                 }
                 Controls.Label {
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
-                    text: "Gaze works with the mouse and the keyboard. Keyboard clicks (Meta+J left, Meta+K right by "
-                          + "default): tap to click where you look, or hold, turn your head until the dot sits on the "
-                          + "target, and let go; hold still to drag. The Frame controllers don't take part, and moving "
-                          + "one hands the pointer back to them. Gaze pointer on/off, Gaze precision, and Gaze drag can "
-                          + "also go on a mouse button (Buttons page) or another key combination (Keyboard page)."
+                    text: "Works with your mouse, keyboard (Meta+J to left-click, Meta+K to right-click), or hand pinches. "
+                          + "Hold a click key and turn your head slightly to fine-tune, or hold still to drag. "
+                          + "You can also bind \"Gaze pointer on/off\" in Mouse buttons or Keyboard & shortcuts."
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
@@ -1722,10 +1717,10 @@ Item {
                 Controls.Label {
                     // Ours is the default once it's installed (GAZE_TRACKER=auto, gaze/ft-gazed).
                     visible: backend.gazeTracker === "steam" && !backend.gazeOwnInstalled
-                    text: "Our own tracker (the classic one and the eye nets) needs its frame grabber. Install it "
-                          + "with gaze/tracker/install.sh in the Frametop folder, in a terminal (asks for sudo)"
-                          + (backend.gazeTrackerAuto ? "; gaze then uses it, and you calibrate it once."
-                                                     : ", then pick it here and calibrate it once.")
+                    text: "Frametop's built-in eye tracker needs a one-time setup step. Run gaze/tracker/install.sh in a "
+                          + "terminal (asks for your password)"
+                          + (backend.gazeTrackerAuto ? ", then run Calibrate above."
+                                                     : ", then select it here and run Calibrate above.")
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 30
                     wrapMode: Text.WordWrap
                     opacity: 0.7
@@ -1736,7 +1731,7 @@ Item {
                     // (gaze/tracker/install.sh, root) and keeps its own calibration.
                     visible: backend.gazeTracker === "own" && backend.gazeServiceRunning
                              && (!gpage.status.own_running || gpage.status.own_reseat || !gpage.status.calibration_samples)
-                    text: !gpage.status.eyegrab ? "Needs its frame grabber: run gaze/tracker/install.sh (asks for sudo)"
+                    text: !gpage.status.eyegrab ? "Setup required: run gaze/tracker/install.sh in a terminal (asks for your password)"
                           : !gpage.status.own_running ? "Starting…"
                           : !gpage.status.calibration_samples ? "Not calibrated: use Calibrate"
                           : "The headset was off: your first nudge and click resets where it sits"
@@ -1744,7 +1739,7 @@ Item {
                     font: Kirigami.Theme.smallFont
                 }
                 RowLayout {
-                    Kirigami.FormData.label: "Eye bias:"
+                    Kirigami.FormData.label: "Dominant eye:"
                     Controls.RadioButton {
                         text: "Auto"
                         checked: backend.gazeEye === "auto"
@@ -1775,11 +1770,38 @@ Item {
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                 }
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Gaze pointer tuning" }
+                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Status" }
+                Controls.Label {
+                    Kirigami.FormData.label: "Eye tracking:"
+                    text: backend.gazeServiceRunning
+                          ? (gpage.status.awake === false ? "Ready (idle until used)"
+                             : gpage.status.ft_gaze ? "Running" : "Starting up…")
+                          : backend.gazeServiceInstalled ? "Not running (starts automatically with SteamVR)"
+                          : "Not installed — run gaze/run.sh install in a terminal"
+                    color: backend.gazeServiceRunning ? Kirigami.Theme.textColor : Kirigami.Theme.negativeTextColor
+                    wrapMode: Text.Wrap
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                }
+                Controls.Label {
+                    visible: backend.gazeServiceRunning
+                    Kirigami.FormData.label: "Calibration:"
+                    text: gpage.status.calibration_samples > 0
+                          ? gpage.status.calibration_samples + " calibration points saved"
+                          : "Not calibrated yet — click Calibrate above"
+                    wrapMode: Text.Wrap
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                }
+
+                Ft.Disclosure {
+                    id: gazeTuning
+                    title: "Pointer fine-tuning"
+                    summary: "hand-back angle, drag hold, pinch speed"
+                }
                 Repeater {
                     model: backend.gazeSettings
                     delegate: RowLayout {
                         required property var modelData
+                        visible: gazeTuning.expanded
                         Kirigami.FormData.label: modelData.label + ":"
                         Controls.Slider {
                             id: gslider
@@ -1805,31 +1827,25 @@ Item {
                     }
                 }
 
-                Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Gaze service" }
-
-                Controls.Label {
-                    Kirigami.FormData.label: "Service:"
-                    text: backend.gazeServiceRunning
-                          ? (gpage.status.awake === false ? "idle: " + gpage.status.idle + " (it starts when the gaze is used)"
-                             : gpage.status.ft_gaze ? "running" : "running, eye tracker reader starting")
-                          : backend.gazeServiceInstalled ? "not running (frametop-gaze.service, starts with SteamVR)"
-                          : "not installed: run gaze/run.sh install in the Frametop folder, in a terminal"
-                    color: backend.gazeServiceRunning ? Kirigami.Theme.textColor : Kirigami.Theme.negativeTextColor
+                Ft.Disclosure {
+                    id: gazeDiag
+                    visible: backend.gazeServiceRunning
+                    title: "Tracking diagnostics"
+                    summary: "sample rate, eye visibility, learned corrections"
                 }
                 Controls.Label {
-                    visible: backend.gazeServiceRunning
-                    Kirigami.FormData.label: "Headset:"
-                    text: gpage.status.headset_on ? "on" : "off"
+                    visible: backend.gazeServiceRunning && gazeDiag.expanded
+                    Kirigami.FormData.label: "Headset worn:"
+                    text: gpage.status.headset_on ? "Yes" : "No"
                 }
                 Controls.Label {
-                    visible: backend.gazeServiceRunning
-                    Kirigami.FormData.label: "Tracking:"
+                    visible: backend.gazeServiceRunning && gazeDiag.expanded
+                    Kirigami.FormData.label: "Tracking rate:"
                     text: gpage.status.rate === undefined || gpage.status.rate === null ? "…"
-                          : Math.round(gpage.status.rate) + " samples/s"
-                            + (gpage.status.one_eye_share > 0.5 ? " · only one eye tracked" : "")
+                          : Math.round(gpage.status.rate) + " Hz"
+                            + (gpage.status.one_eye_share > 0.5 ? " · one eye only" : "")
                     color: gpage.status.one_eye_share > 0.5 ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
-                    Controls.ToolTip.text: "Only one eye tracked: the gaze comes from the other eye, a little less "
-                                           + "precisely. Check headset fit shows where the tracker loses it."
+                    Controls.ToolTip.text: "Only one eye is currently visible to the tracker, which slightly reduces accuracy. Use Check headset fit above to adjust."
                     Controls.ToolTip.visible: gpage.status.one_eye_share > 0.5 && ghover.hovered
                     HoverHandler { id: ghover }
                 }
@@ -1837,47 +1853,27 @@ Item {
                     // Share of the last second's samples where the tracker had lost each eye.
                     property real lostL: gpage.status.lost_left_share || 0
                     property real lostR: gpage.status.lost_right_share || 0
-                    visible: backend.gazeServiceRunning && gpage.status.lost_left !== undefined
-                    Kirigami.FormData.label: "Eyes:"
-                    text: lostL < 0.05 && lostR < 0.05 ? "both tracked"
-                          : (lostL >= 0.05 ? "left eye lost " + Math.round(lostL * 100) + "%" : "")
+                    visible: backend.gazeServiceRunning && gazeDiag.expanded && gpage.status.lost_left !== undefined
+                    Kirigami.FormData.label: "Eye visibility:"
+                    text: lostL < 0.05 && lostR < 0.05 ? "Both eyes tracked"
+                          : (lostL >= 0.05 ? "Left eye lost " + Math.round(lostL * 100) + "%" : "")
                             + (lostL >= 0.05 && lostR >= 0.05 ? " · " : "")
-                            + (lostR >= 0.05 ? "right eye lost " + Math.round(lostR * 100) + "%" : "")
-                            + ((lostL >= 0.05) !== (lostR >= 0.05) ? " (the other eye stands in)" : "")
+                            + (lostR >= 0.05 ? "Right eye lost " + Math.round(lostR * 100) + "%" : "")
+                            + ((lostL >= 0.05) !== (lostR >= 0.05) ? " (using other eye)" : "")
                     color: lostL >= 0.05 || lostR >= 0.05 ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
                 }
                 Controls.Label {
-                    visible: backend.gazeServiceRunning
-                    Kirigami.FormData.label: "Calibration:"
-                    text: gpage.status.calibration_samples > 0
-                          ? gpage.status.calibration_samples + " points ("
-                            + (gpage.status.tracker === "own" ? "Own tracker, " + gpage.status.calibration_made
-                               + (gpage.status.own_mapped && gpage.status.own_mapped.length === 1
-                                  ? ", " + gpage.status.own_mapped[0] + " eye only" : "")
-                               : gpage.status.kind === "eyes" ? gpage.status.model + ", each eye" : gpage.status.model) + ")"
-                          : "none yet: use Calibrate"
-                }
-                Controls.Label {
-                    visible: backend.gazeServiceRunning
-                    Kirigami.FormData.label: "Learned from nudges:"
-                    text: gpage.status.lessons + (gpage.status.lessons === 1 ? " nudge" : " nudges")
-                          + (gpage.status.refused > 0 ? " (" + gpage.status.refused + " too far off, ignored)" : "")
+                    visible: backend.gazeServiceRunning && gazeDiag.expanded
+                    Kirigami.FormData.label: "Learned nudges:"
+                    text: gpage.status.lessons + (gpage.status.lessons === 1 ? " correction" : " corrections")
+                          + (gpage.status.refused > 0 ? " (" + gpage.status.refused + " large jumps ignored)" : "")
                 }
             }
 
             footer: Ft.HelpFooter {
-                text: "Map a mouse button (Buttons) or a key combination (Keyboard) to \"Gaze pointer on/off\" "
-                      + "to switch it on the fly. A click waits for the release: if the gaze is off, drag onto the target "
-                      + "with the button held and let go there. Hold still to drag: hold a press this long without moving "
-                      + "to drag something instead. Look away to hand back: how far from the pointer you look before the "
-                      + "gaze takes it back from the mouse. Largest correction to learn: a click corrected further than "
-                      + "this isn't learned; the tracker is that far off, so the quick check runs instead. With hand tracking, "
-                      + "a pinch clicks where you look; pinch, hold and move the hand to nudge the pointer first. Pinch nudge "
-                      + "starts after: how far the hand moves before the pointer does. Pinch nudge speed: how far the pointer "
-                      + "moves for each degree of hand movement after that. Eye tracker: SteamVR's, or our own "
-                      + "(gaze/tracker), the classic pupil finder or an eye net; each keeps its own calibration. Eye bias: the gaze "
-                      + "combines both eyes, since their errors partly cancel; Left or Right counts that eye twice as "
-                      + "much, and Auto weights each by how far off it was at your recent nudges."
+                text: "Start with Calibrate above if this is your first time. Each eye tracker keeps its own calibration. "
+                      + "Dominant eye lets you favor your steadier eye (Auto balances both automatically based on recent clicks). "
+                      + "Use Quick check anytime if aim feels slightly off after adjusting the headset."
             }
         }
     }
@@ -1933,14 +1929,14 @@ Item {
                         font: Kirigami.Theme.smallFont
                     }
                     Controls.Switch {
-                        Kirigami.FormData.label: "Hand cutouts:"
-                        text: "Show your real hands through the panels"
+                        Kirigami.FormData.label: "Real-hand passthrough:"
+                        text: "Show your real hands in front of screens"
                         checked: backend.handsCutouts
                         onToggled: backend.setHandsCutouts(checked)
                     }
-                    Ft.Hint { text: "Cuts a hole per hand in the panels, so Room View shows through them." }
+                    Ft.Hint { text: "Reveals your real hands via camera passthrough whenever they pass in front of a virtual screen." }
                     RowLayout {
-                        Kirigami.FormData.label: "Hand cutout margin:"
+                        Kirigami.FormData.label: "Passthrough margin:"
                         enabled: backend.handsCutouts
                         Controls.Label { text: "smaller"; opacity: 0.7 }
                         Controls.Slider {
@@ -1974,7 +1970,7 @@ Item {
                     Controls.Switch {
                         objectName: "handsRateSwitch"
                         Kirigami.FormData.label: "60 fps hand tracking:"
-                        text: "Track every camera frame (the controllers stop tracking)"
+                        text: "Smoother tracking (disables VR controller tracking)"
                         checked: !!hpage.rate.on
                         enabled: !hpage.rate.busy && (!!hpage.rate.on || hpage.rateUsable)
                         onToggled: backend.setHandsRate(checked)
@@ -2011,48 +2007,46 @@ Item {
                     }
 
                     // Three ways the hands work the desktop, each on its own (handsmode.METHODS).
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand input" }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "How hands control the desktop" }
                     Controls.Switch {
-                        Kirigami.FormData.label: "With gaze on:"
-                        text: "Pinch to click where you look"
+                        Kirigami.FormData.label: "Eye + pinch:"
+                        text: "Pinch to click wherever you're looking"
                         checked: !!backend.handMethods.gaze_clicks
                         onToggled: backend.setHandMethod("gaze_clicks", checked)
                     }
                     Ft.Hint {
-                        text: "Your eyes aim and your hands are the mouse's buttons. Index pinch: left click. "
-                            + "Middle finger to thumb: right click. Pinch and hold still to press and drag. Hold a pinch "
-                            + "with one hand and pinch with the other: both buttons held, each until its pinch opens."
+                        text: "When eye tracking is on, look at a button and pinch thumb + index to left-click, or thumb + "
+                            + "middle finger to right-click. Hold a pinch to drag."
                     }
                     Controls.Switch {
-                        Kirigami.FormData.label: "With gaze off:"
-                        text: "Point a raised hand for a ray"
+                        Kirigami.FormData.label: "Hand pointer ray:"
+                        text: "Point a raised hand to aim a laser (when eye tracking is off)"
                         checked: !!backend.handMethods.ray
                         onToggled: backend.setHandMethod("ray", checked)
                     }
                     Ft.Hint {
-                        text: "A hand raised in front and pointing shows a ray that works like a controller's "
-                            + "laser: pinch to click, middle pinch to right-click or scroll. A pinch with the hand held low "
-                            + "presses where the pointer is."
+                        text: "Raise your hand to point a ray at distant screens — index pinch to click, middle pinch to "
+                            + "right-click or scroll."
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "Direct touch:"
-                        text: "Poke and grab Frametop's screens, gaze on or off"
+                        text: "Tap, grab, and resize nearby screens directly with your hands"
                         checked: !!backend.handMethods.touch
                         onToggled: backend.setHandMethod("touch", checked)
                     }
                     Ft.Hint {
-                        text: "Touch a screen with your index finger to click it. Pinch its bar, an edge or "
-                            + "a corner to move or resize it."
+                        text: "Tap any nearby screen with your index finger to click, or pinch a screen's grab bar, edge, "
+                            + "or corner to move and resize it."
                     }
                     Controls.Label {
                         visible: backend.handsMode === "off"
-                        text: "These need hand tracking on (above)."
+                        text: "Turn on Hand tracking above to use these controls."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                     }
 
                     // Every interaction on Frametop's screens, each on its own: HandInteractions.qml, below.
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Hand interactions" }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Gestures & fine-tuning" }
                 }
 
                 HandInteractions {
@@ -2064,11 +2058,9 @@ Item {
             }
 
             footer: Ft.HelpFooter {
-                text: "Your hands show through Frametop's screens where they're in front of them. Hand tracking "
-                      + "uses a lot of the headset's CPU. The margin is how far past your hand the screen opens up; "
-                      + "it applies right away. The hand inputs are separate: any of them can be on alone, and they "
-                      + "apply within a second. A hand holding a controller, or whose controller you just used, "
-                      + "does none of them."
+                text: "Hand tracking uses extra headset CPU while active. Each control method above can be toggled "
+                      + "independently and takes effect within a second. A hand holding or recently using a VR controller "
+                      + "automatically pauses hand input."
             }
         }
     }
@@ -2078,7 +2070,7 @@ Item {
         id: commandsPage
         Kirigami.ScrollablePage {
             id: cpage
-            title: "Commands"
+            title: "Custom commands"
             header: DriverWarning {}
             property string problem: ""
             property bool adding: false
@@ -2168,12 +2160,10 @@ Item {
             }
 
             footer: Ft.HelpFooter {
-                text: "A command runs with sh in the background, on the headset, as you. Nothing waits for it, and "
-                      + "its output goes to the journal (ft-cmd log NAME). Run it from: a button, a controller "
-                      + "button or a key combination (pick \"Run command NAME\" on those pages); frunner (Meta+Space, "
-                      + "type its name); Frametop Voice (the wake word, then \"run\" and its name, dashes said as "
-                      + "spaces); or a terminal, where its name is an alias (ft-cmd list, ft-cmd stop NAME). The "
-                      + "aliases live in ~/.config/frametop/aliases.sh, which one line in ~/.bashrc reads."
+                text: "Saved shell commands run in the background on your headset. Trigger any saved command from Mouse "
+                      + "buttons, Controllers, Keyboard & shortcuts (choose \"Run command NAME\"), Frunner (Meta+Space), "
+                      + "Voice dictation (say your wake word, then \"run NAME\"), or directly by name in a terminal "
+                      + "(use ft-cmd log NAME to view output)."
             }
         }
     }
@@ -2196,7 +2186,7 @@ Item {
                 Kirigami.Action {
                     text: "Apply Bluetooth fixes"
                     icon.name: "tools-wizard"
-                    tooltip: "Privacy off, and address resolution on bonded LE devices (asks for your password)"
+                    tooltip: "Adjusts Bluetooth Low Energy settings so paired wireless mice and keyboards reconnect reliably (asks for your password)"
                     onTriggered: backend.applyBluetoothFixes()
                 }
             ]
@@ -2236,8 +2226,8 @@ Item {
             }
 
             footer: Ft.HelpFooter {
-                text: "Pair new devices in Steam (Settings → Bluetooth). After pairing an LE mouse or keyboard, "
-                      + "use Apply Bluetooth fixes once so it reconnects on its own."
+                text: "Pair new wireless devices in Steam (Settings → Bluetooth). If a Bluetooth mouse or keyboard doesn't "
+                      + "reconnect automatically after sleeping, click Apply Bluetooth fixes once above."
             }
         }
     }

@@ -88,7 +88,7 @@ ColumnLayout {
             }
             Controls.Button {
                 objectName: "takeButton"
-                text: "Take it back"
+                text: "Revoke control"
                 icon.name: "edit-undo"
                 onClicked: rows.control.take(givenRow.modelData.number, givenRow.modelData.person)
             }
@@ -119,12 +119,12 @@ ColumnLayout {
             Controls.Button {
                 objectName: "askButton"
                 visible: panelRow.modelData.ask
-                text: "Ask to use it"
+                text: "Request control"
                 onClicked: rows.control.ask(panelRow.modelData.id)
             }
             Controls.ToolButton {
                 objectName: "goPanel"
-                text: "Go to it"
+                text: "Focus"
                 icon.name: "go-jump"
                 onClicked: rows.backend.goTo("panel", panelRow.modelData.id)
             }
@@ -136,8 +136,7 @@ ColumnLayout {
         wrapMode: Text.Wrap
         opacity: 0.7
         font: Kirigami.Theme.smallFont
-        text: "Someone you give a screen can click and type on your desktop and move that screen, for as "
-              + "long as you wear the headset. With a window of your PC they click and type on that PC. "
-              + "The room's owner can move any panel."
+        text: "Anyone you grant control to can click, type, and move that screen while you wear the headset "
+              + "(or control that remote PC for a shared PC window). The room host can reposition any panel."
     }
 }

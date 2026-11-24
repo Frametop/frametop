@@ -54,14 +54,14 @@ Item {
     Kirigami.PromptDialog {
         id: allowDialog
         objectName: "allowDialog"
-        title: "Let the others have your avatar?"
-        subtitle: "The people you share a room with get a copy of its file, to see you in it. "
-                  + "Say yes only for a model that is yours to pass on: one you made, or one whose licence allows it."
+        title: "Share your avatar with the room?"
+        subtitle: "People in this room will receive a copy of your avatar file so they can see you. "
+                  + "Only allow this for a model you made or have permission to share."
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {
                 objectName: "allowAction"
-                text: "Let them have it"
+                text: "Share avatar"
                 icon.name: "dialog-ok"
                 onTriggered: { allowDialog.close(); backend.allowAvatar() }
             },
@@ -84,9 +84,9 @@ Item {
                 Controls.Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: "Share a room with up to three other Steam Frames on your tailnet: you see each other, "
-                          + "talk, and look at the screens each of you chooses to share. Nothing is shared until "
-                          + "you say so, and nobody comes in until you let them."
+                    text: "Share a virtual room with up to three other Steam Frames on your Tailscale network. "
+                          + "You can see each other, talk, and share screens. Nothing is shared until you choose to, "
+                          + "and nobody enters unless you let them in."
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
@@ -121,7 +121,7 @@ Item {
                         Controls.ToolButton {
                             icon.name: "edit-copy"
                             display: Controls.AbstractButton.IconOnly
-                            text: "Copy the address"
+                            text: "Copy address"
                             Controls.ToolTip.text: text
                             Controls.ToolTip.visible: hovered
                             onClicked: backend.copy(backend.here)
@@ -173,7 +173,7 @@ Item {
                         id: joinAddress
                         objectName: "joinAddress"
                         Kirigami.FormData.label: "Their headset:"
-                        placeholderText: "its tailnet name or number"
+                        placeholderText: "Tailscale name or IP address"
                         maximumLength: 260
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 14
                     }
@@ -188,7 +188,7 @@ Item {
                     }
                     Controls.Button {
                         objectName: "joinButton"
-                        text: "Ask to come in"
+                        text: "Request to join"
                         icon.name: "go-next"
                         enabled: joinAddress.text !== "" && joinCode.text !== ""
                         onClicked: backend.join(joinAddress.text, joinCode.text)
@@ -198,7 +198,7 @@ Item {
                 Controls.Button {
                     objectName: "cancelButton"
                     visible: backend.ready && backend.mode === "calling"
-                    text: "Stop asking"
+                    text: "Cancel request"
                     icon.name: "dialog-cancel"
                     onClicked: backend.leave()
                 }
@@ -212,7 +212,7 @@ Item {
                         Kirigami.FormData.label: "Invite someone:"
                         Controls.Button {
                             objectName: "inviteButton"
-                            text: backend.code === "" ? "Make an invite code" : "Make another"
+                            text: backend.code === "" ? "Create invite code" : "Create another"
                             icon.name: "list-add-user"
                             onClicked: backend.invite()
                         }
@@ -228,7 +228,7 @@ Item {
                             visible: backend.code !== ""
                             icon.name: "edit-copy"
                             display: Controls.AbstractButton.IconOnly
-                            text: "Copy the code"
+                            text: "Copy invite code"
                             Controls.ToolTip.text: text
                             Controls.ToolTip.visible: hovered
                             onClicked: backend.copy(backend.code)
@@ -239,8 +239,8 @@ Item {
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
-                        text: "Give them this headset's address and the code. A code lets one person ask, once; "
-                              + "you still say yes or no here."
+                        text: "Share your headset's address and this code. Each code lets one person request to join once — "
+                              + "you still approve or decline them here."
                     }
                 }
                 Repeater {
@@ -320,7 +320,7 @@ Item {
                     Controls.Button {
                         objectName: "leaveButton"
                         Layout.topMargin: Kirigami.Units.smallSpacing
-                        text: backend.mode === "hosting" ? "Close the room…" : "Leave the room"
+                        text: backend.mode === "hosting" ? "Close room…" : "Leave room"
                         icon.name: "window-close"
                         onClicked: backend.mode === "hosting" && backend.people.length > 1 ? closeDialog.open() : backend.leave()
                     }

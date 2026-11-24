@@ -47,7 +47,7 @@ ColumnLayout {
             Controls.Button {
                 objectName: "allowAvatarButton"
                 visible: shares.backend.avatarAllow
-                text: "Let them have it…"
+                text: "Allow sharing…"
                 onClicked: shares.allowAvatar()
             }
         }
@@ -68,7 +68,7 @@ ColumnLayout {
             wrapMode: Text.Wrap
             opacity: 0.7
             font: Kirigami.Theme.smallFont
-            text: "Off until you turn it on, and for this room only. Only a direction leaves this headset, never a picture of your eyes. The others see your avatar's eyes turn, and a faint mark on the panel you look at."
+            text: "Off by default and applies only to this room. Only your gaze direction is sent, never a picture of your eyes. Others see your avatar's eyes move and a faint mark on the panel you look at."
         }
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
@@ -95,14 +95,13 @@ ColumnLayout {
             opacity: 0.7
             font: Kirigami.Theme.smallFont
             text: shares.backend.shares.length === 0
-                  ? "The desktop's screens show here while the Frametop desktop runs."
-                  : "Up to three at a time. The others see a shared screen where it stands in your room; "
-                    + "they can click and type on it only once you give it to them. Windows of your PC "
-                    + "that stand here as panels can be shared as well, up to four: your PC sends them itself."
+                  ? "Your desktop screens appear here while the Frametop desktop is running."
+                  : "Share up to three desktop screens at a time. Others can see them, and can only click or type "
+                    + "if you grant them control. You can also share up to four remote PC windows directly from your PC."
         }
         Controls.ComboBox {
             objectName: "qualityBox"
-            Kirigami.FormData.label: "Their video:"
+            Kirigami.FormData.label: "Stream quality:"
             model: shares.quality.names
             enabled: shares.quality.can
             currentIndex: shares.quality.index
@@ -117,7 +116,7 @@ ColumnLayout {
             wrapMode: Text.Wrap
             opacity: 0.7
             font: Kirigami.Theme.smallFont
-            text: shares.quality.text + ". That is the most it uses: it gets less by itself on a slow link, and while nobody looks straight at the screen."
+            text: shares.quality.text + " maximum. Quality lowers automatically — it gets less by itself on a slow link or when nobody is looking directly at the screen."
         }
     }
 }

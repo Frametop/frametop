@@ -15,7 +15,7 @@ Kirigami.ScrollablePage {
     signal restartAsked()
 
     component RestartRow: RowLayout {
-        Controls.Label { text: "Applies when the desktop starts again." }
+        Controls.Label { text: "Takes effect after restarting the desktop." }
         Controls.Button {
             text: "Restart desktop"
             icon.name: "system-reboot"
@@ -24,25 +24,25 @@ Kirigami.ScrollablePage {
     }
 
     Kirigami.FormLayout {
-        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Notifications" }
+        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Desktop notifications" }
         Ft.RadioChoices {
-            Kirigami.FormData.label: "Where they show:"
+            Kirigami.FormData.label: "Show notifications:"
             Kirigami.FormData.labelAlignment: Qt.AlignTop
             choices: [
-                { value: "auto", text: "Show them in the Steam session", help: "The desktop's notifications go to the Steam session's notification server, such as one that shows them in VR, with their buttons. Plasma's own popups stay off meanwhile; its history keeps them. Not to SteamOS's own server, which can't show them on the Frame." },
+                { value: "auto", text: "In SteamVR when supported (recommended)", help: "Forwards desktop notifications into VR whenever a VR notification viewer is active, so you can see and click them without looking at a desktop screen. Regular desktop popups stay quiet while forwarding, though notification history still keeps them." },
                 // "on" can lose them (SteamOS's server): set in frametop.conf, shown only then
-                { value: "on", text: "Always send them to the Steam session", hidden: backend.notifyForward !== "on", help: "Whatever serves notifications there, SteamOS's own server too, which can't show them on the Frame: they're lost then." },
-                { value: "off", text: "Keep them in the desktop", help: "Plasma shows them on the desktop's screens." }
+                { value: "on", text: "Always forward to Steam", help: "Forwards notifications even if no VR notification viewer is available, which may cause notifications to be missed." },
+                { value: "off", text: "On desktop screens only", help: "Shows standard desktop notification popups directly on your virtual screens." }
             ]
             value: backend.notifyForward
             onChose: backend.setNotifyForward(picked)
         }
         Controls.Label {
-            Kirigami.FormData.label: "Now:"
+            Kirigami.FormData.label: "Current status:"
             visible: backend.desktopRunning
-            text: backend.notifyForwardState === "forwarding" ? "In the Steam session"
-                : backend.notifyForwardState === "waiting" ? "In the desktop: the Steam session has no notification server that can show them"
-                : "In the desktop"
+            text: backend.notifyForwardState === "forwarding" ? "Showing in SteamVR"
+                : backend.notifyForwardState === "waiting" ? "Showing on desktop screens (no VR notification viewer active)"
+                : "Showing on desktop screens"
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 26
@@ -51,39 +51,39 @@ Kirigami.ScrollablePage {
 
         // Steam's PIN lock (issue 66): Frametop hides with it. Experimental and opt-in;
         // what it turns off and what's still untested: docs/steam-pin-lock.md.
-        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Steam's lock screen" }
+        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Steam lock screen (PIN)" }
         Controls.Switch {
             objectName: "steamPinLock"
-            Kirigami.FormData.label: "While Steam is locked:"
-            text: "Hide Frametop (experimental)"
+            Kirigami.FormData.label: "When Steam is locked:"
+            text: "Hide Frametop screens & windows (experimental)"
             enabled: backend.backend === "screens" || backend.steamPinLock
             checked: backend.steamPinLock
             onToggled: backend.setSteamPinLock(checked)
         }
         Ft.Hint {
-            text: "While Steam asks for its PIN (a PIN set in Steam's Security settings), every Frametop "
-                  + "screen, window and keyboard hides and takes no input; apps keep running and keep "
-                  + "your work. Remote access to this desktop and sending its notifications to the Steam "
-                  + "session stay off while this is on. Turned on in an unlocked session, Frametop stays "
-                  + "hidden until Steam locks and unlocks once. Needs the screens backend."
+            text: "Whenever Steam prompts for your Security PIN, all Frametop screens, windows, and the "
+                  + "VR keyboard hide and stop accepting input, while your apps keep running safely in "
+                  + "the background. Remote access and notification forwarding also stay off while this "
+                  + "protection is enabled. After turning this on, lock and unlock Steam once to activate "
+                  + "normal visibility."
         }
         RestartRow { visible: backend.steamPinLockRestartNeeded }
 
-        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Apps from the SteamVR dashboard" }
+        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Apps launched from SteamVR" }
         Ft.RadioChoices {
-            Kirigami.FormData.label: "Launch a program:"
+            Kirigami.FormData.label: "Open dashboard apps:"
             Kirigami.FormData.labelAlignment: Qt.AlignTop
             enabled: backend.floatSlots > 0
             choices: [
-                { value: "steamvr", text: "Open as SteamVR windows", help: "Apps picked in the dashboard's Launch a program list open as SteamVR's own windows, as without Frametop." },
-                { value: "frametop", text: "Open as Frametop floating windows", help: "They open in the Frametop desktop instead, floating in front of you (where that app last floated), so drag and drop, the clipboard, frunner and profiles work with them. When the desktop isn't running, Frametop is paused, or all floating windows are in use, they open as SteamVR windows. Steam, SteamVR and Frametop's own layout entries always stay SteamVR's." }
+                { value: "steamvr", text: "As standard SteamVR windows", help: "Apps you open from SteamVR's Launch a program list appear as regular SteamVR overlays, just like without Frametop." },
+                { value: "frametop", text: "As Frametop floating windows", help: "Opens apps in the Frametop desktop floating in front of you, so copy/paste, drag-and-drop, Frunner, and saved profiles work seamlessly. Falls back to SteamVR windows if the desktop isn't running or is paused." }
             ]
             value: backend.dashboardApps
             onChose: backend.setDashboardApps(picked)
         }
         Ft.Hint {
             visible: backend.floatSlots === 0
-            text: "Floating windows are off (FLOAT_SLOTS=0 in ~/.config/frametop.conf), so these open in SteamVR."
+            text: "Floating windows are currently disabled in your configuration (FLOAT_SLOTS=0), so dashboard apps will open in SteamVR."
         }
     }
 }

@@ -33,8 +33,8 @@ Item {
                 Controls.Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: "Look at your open palm in VR and Quick Access shows over it. Its Quick Settings button "
-                          + "opens these toggles. Pick the ones it shows; the change shows the next time it opens."
+                    text: "Hold your open palm toward your face in VR to open the palm Quick Access menu, then tap Quick Settings "
+                          + "to reach these toggles. Choose which shortcuts appear there — changes apply the next time you open it."
                 }
 
                 Kirigami.FormLayout {

@@ -18,56 +18,56 @@ Kirigami.ScrollablePage {
     Kirigami.FormLayout {
         Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Grab bars" }
         Ft.Hint {
-            text: "The bar under each screen and window moves it. Extra room makes the bar easier to "
-                  + "hit without making it look bigger. Changes apply at once."
+            text: "Use the bar underneath a screen or window to move it. Adding grab padding makes the "
+                  + "bar easier to aim at without making the bar itself look larger. Changes apply immediately."
         }
         Ft.SliderRow {
-            Kirigami.FormData.label: "Extra room above and below:"
+            Kirigami.FormData.label: "Vertical grab padding:"
             from: 0; to: 50; stepSize: 0.1
             value: backend.grabBarPaddingY
             shown: value.toFixed(1) + " cm"
             onMoved: backend.setGrabBarPaddingY(value)
         }
         Ft.SliderRow {
-            Kirigami.FormData.label: "Extra room left and right:"
+            Kirigami.FormData.label: "Horizontal grab padding:"
             from: 0; to: 50; stepSize: 0.1
             value: backend.grabBarPaddingX
             shown: value.toFixed(1) + " cm"
             onMoved: backend.setGrabBarPaddingX(value)
         }
         Ft.Hint {
-            text: "Added on each side: 2 cm makes the target 4 cm bigger that way, and 0 is the bar "
-                  + "alone. The bar's buttons move aside to stay outside the target."
+            text: "Added to each side (for example, 2 cm expands the target by 4 cm total; 0 cm matches "
+                  + "the visible bar). Nearby bar buttons automatically shift aside to avoid overlapping."
         }
         Controls.Switch {
-            Kirigami.FormData.label: "Buzz:"
-            text: "The controller buzzes when its laser reaches a bar"
+            Kirigami.FormData.label: "Haptic feedback:"
+            text: "Vibrate controller when aiming at a grab bar"
             checked: backend.grabBarHaptics
             onToggled: backend.setGrabBarHaptics(checked)
         }
         Controls.Switch {
-            Kirigami.FormData.label: "Drag zone:"
-            text: "Draw the area that counts as the bar"
+            Kirigami.FormData.label: "Highlight grab area:"
+            text: "Show the expanded clickable area around the bar"
             checked: backend.grabBarPreview
             onToggled: backend.setGrabBarPreview(checked)
         }
         Ft.Disclosure {
             id: zoneLook
             visible: backend.grabBarPreview
-            title: "Drag zone look"
-            summary: "colors, outline, when it shows"
+            title: "Grab area appearance"
+            summary: "colors, outline, visibility"
         }
         Controls.Switch {
             visible: zoneLook.visible && zoneLook.expanded
-            Kirigami.FormData.label: "Keep showing:"
-            text: "While the window shows, not only near the bar"
+            Kirigami.FormData.label: "Always show:"
+            text: "Keep visible whenever the window is shown"
             checked: backend.grabBarPreviewAlways
             onToggled: backend.setGrabBarPreviewAlways(checked)
         }
         Ft.ColorRow {
             visible: zoneLook.visible && zoneLook.expanded
             Kirigami.FormData.label: "Fill color:"
-            title: "Drag zone fill color"
+            title: "Grab area fill color"
             color: backend.grabBarPreviewColor
             onChose: backend.setGrabBarPreviewColor(picked)
         }
@@ -82,7 +82,7 @@ Kirigami.ScrollablePage {
         Ft.ColorRow {
             visible: zoneLook.visible && zoneLook.expanded
             Kirigami.FormData.label: "Outline color:"
-            title: "Drag zone outline color"
+            title: "Grab area outline color"
             color: backend.grabBarOutlineColor
             onChose: backend.setGrabBarOutlineColor(picked)
         }
@@ -99,43 +99,42 @@ Kirigami.ScrollablePage {
             Kirigami.FormData.label: "Outline thickness:"
             from: 0; to: 8; stepSize: 1
             value: backend.grabBarOutlineWidth
-            shown: Math.round(value) === 0 ? "no outline" : Math.round(value) + " px"
+            shown: Math.round(value) === 0 ? "None" : Math.round(value) + " px"
             onMoved: backend.setGrabBarOutlineWidth(value)
         }
         Ft.Hint {
             visible: zoneLook.visible && zoneLook.expanded
-            text: "The zone fades with the bar unless it keeps showing. Outline pixels are those of "
-                  + "the bar's own 256×24 picture."
+            text: "Unless Always show is on, the highlight fades in and out with the grab bar."
         }
 
         Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Resize corners" }
         Ft.Hint {
-            text: "Drag a screen's corner to resize it. The mark shows at the corner you come near."
+            text: "Drag any corner of a screen to resize it. A corner handle appears when you point near it."
         }
         Controls.ComboBox {
-            Kirigami.FormData.label: "Corner mark:"
-            model: ["Sharp outline", "Soft glow (the original)", "SteamOS-like (gray, then white)"]
+            Kirigami.FormData.label: "Corner style:"
+            model: ["Sharp outline", "Soft glow (classic)", "SteamOS style (gray to white)"]
             currentIndex: backend.resizeCornerStyle === "native" ? 2 : backend.resizeCornerStyle === "glow" ? 1 : 0
             onActivated: backend.setResizeCornerStyle(["sharp", "glow", "native"][currentIndex])
         }
         Ft.Hint {
             text: page.outline
-                  ? "A crisp, rounded corner just outside the screen. On the corner itself it changes "
-                    + "color, thickens and goes fully bright: ready to drag."
-                  : "A soft glow in a square at the corner, fading in as you come near. The outline "
-                    + "settings below aren't used, and stay saved for the other marks."
+                  ? "A crisp rounded corner bracket just outside the screen. When you point directly at "
+                    + "it, it brightens and thickens to show it's ready to drag."
+                  : "A soft glow at the corner that fades in as you point near it. The outline options "
+                    + "below don't apply to this style, though your custom values are kept if you switch back."
         }
         Controls.Switch {
-            Kirigami.FormData.label: "Buzz:"
-            text: "The controller buzzes when its laser reaches a corner"
+            Kirigami.FormData.label: "Haptic feedback:"
+            text: "Vibrate controller when aiming at a corner"
             checked: backend.resizeCornerHaptics
             onToggled: backend.setResizeCornerHaptics(checked)
         }
         Ft.Disclosure {
             id: cornerLook
             visible: page.outline
-            title: "Outline look and reach"
-            summary: "which corners, size, colors"
+            title: "Corner appearance & sensitivity"
+            summary: "always-visible corners, size, colors, reach"
         }
         ColumnLayout {
             visible: cornerLook.visible && cornerLook.expanded
@@ -158,8 +157,8 @@ Kirigami.ScrollablePage {
         }
         Controls.Switch {
             visible: cornerLook.visible && cornerLook.expanded
-            Kirigami.FormData.label: "Show targets:"
-            text: "Draw the area each corner's laser target covers"
+            Kirigami.FormData.label: "Show hit areas:"
+            text: "Highlight the clickable area around each corner"
             checked: backend.resizeCornerPreview
             onToggled: backend.setResizeCornerPreview(checked)
         }
@@ -174,7 +173,7 @@ Kirigami.ScrollablePage {
         Ft.ColorRow {
             visible: cornerLook.visible && cornerLook.expanded
             enabled: backend.resizeCornerStyle === "sharp"
-            Kirigami.FormData.label: "Color when ready to drag:"
+            Kirigami.FormData.label: "Hover color:"
             title: "Ready-to-drag corner color"
             color: backend.resizeCornerHoverColor
             onChose: backend.setResizeCornerHoverColor(picked)
@@ -205,7 +204,7 @@ Kirigami.ScrollablePage {
         }
         Ft.SliderRow {
             visible: cornerLook.visible && cornerLook.expanded
-            Kirigami.FormData.label: "Roundness:"
+            Kirigami.FormData.label: "Corner roundness:"
             from: 0; to: 100; stepSize: 1
             value: backend.resizeCornerRoundness
             shown: Math.round(value) + "%"
@@ -213,7 +212,7 @@ Kirigami.ScrollablePage {
         }
         Ft.SliderRow {
             visible: cornerLook.visible && cornerLook.expanded
-            Kirigami.FormData.label: "Gap from the screen:"
+            Kirigami.FormData.label: "Gap from screen:"
             from: 0; to: 10; stepSize: 0.1
             value: backend.resizeCornerGap
             shown: value.toFixed(1) + " cm"
@@ -221,7 +220,7 @@ Kirigami.ScrollablePage {
         }
         Ft.SliderRow {
             visible: cornerLook.visible && cornerLook.expanded
-            Kirigami.FormData.label: "Target room around the mark:"
+            Kirigami.FormData.label: "Hit area padding:"
             from: 0.1; to: 10; stepSize: 0.1
             value: backend.resizeCornerPadding
             shown: value.toFixed(1) + " cm"
@@ -229,7 +228,7 @@ Kirigami.ScrollablePage {
         }
         Ft.SliderRow {
             visible: cornerLook.visible && cornerLook.expanded
-            Kirigami.FormData.label: "Kept clear round the screen:"
+            Kirigami.FormData.label: "Safe margin around screen:"
             from: 0; to: 5; stepSize: 0.1
             value: backend.resizeCornerExclusion
             shown: value.toFixed(1) + " cm"
@@ -237,7 +236,7 @@ Kirigami.ScrollablePage {
         }
         Ft.SliderRow {
             visible: cornerLook.visible && cornerLook.expanded
-            Kirigami.FormData.label: "Starts showing from:"
+            Kirigami.FormData.label: "Appear distance:"
             from: 1; to: 50; stepSize: 0.5
             value: backend.resizeCornerReach
             shown: value.toFixed(1) + " cm away"
@@ -245,14 +244,11 @@ Kirigami.ScrollablePage {
         }
         Ft.Hint {
             visible: cornerLook.visible && cornerLook.expanded
-            text: "The laser's target follows the mark with the room round it, never a square, and the "
-                  + "mark moves outward as needed to keep that target off the screen and the strip kept "
-                  + "clear round it, which never resize. Starts showing from only sets when the mark "
-                  + "appears. SteamOS-like goes from gray to almost white with 12% longer arms, 20% "
-                  + "thicker lines and 3 mm more gap on the corner, without changing your colors. "
-                  + "Roundness runs from a square bend to a full round one. Corners set to always show "
-                  + "still hide with their screen. The target's size counts for the 3D mouse too; "
-                  + "a hand's reach and SteamVR's own window controls are unchanged."
+            text: "Hit area padding makes the corner easier to grab with both controller lasers and the "
+                  + "3D pointer. Safe margin pushes the handle outward so it never accidentally catches "
+                  + "clicks near the edge of the screen. Appear distance only controls how close you "
+                  + "point before the corner fades in. SteamOS style automatically shifts from gray to "
+                  + "bright white and slightly enlarges on hover."
         }
     }
 }

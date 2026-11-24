@@ -1,4 +1,4 @@
-// Frametop Settings' Remote display keys page: the key combinations a remote display's computer
+// Frametop Settings' Remote PC shortcuts page: the key combinations a remote display's computer
 // gets while you type on it (the input rules' "remote_key_bindings", conf/ft_remote_keys.py), as
 // they are or as other keys. Its object is remote_keys.py's RemoteKeys ("backend.remoteKeys").
 import QtQuick
@@ -11,13 +11,13 @@ Kirigami.ScrollablePage {
     id: page
     property QtObject backend   // InputPages.qml sets it: ft_input_settings.py
     readonly property QtObject keys: backend.remoteKeys
-    title: "Remote display keys"
+    title: "Remote PC shortcuts"
 
     actions: [
         Kirigami.Action {
-            text: "Defaults"
+            text: "Restore defaults"
             icon.name: "edit-undo"
-            tooltip: "Frametop's own Meta combinations go to the computer, but the gaze clicks"
+            tooltip: "Send Frametop's Meta shortcuts to the remote computer (except eye-tracking clicks)"
             enabled: !page.keys.isDefault
             onTriggered: page.keys.reset()
         }
@@ -26,9 +26,9 @@ Kirigami.ScrollablePage {
     Kirigami.FormLayout {
         Ft.Hint {
             objectName: "remoteKeysIntro"
-            text: "While you type on a remote display, Frametop's own key combinations still work: "
-                  + "Meta+J clicks where you look. The ones here go to the computer instead, as they "
-                  + "are or as other keys."
+            text: "When you type on a remote PC or Mac display, Frametop shortcuts normally still control "
+                  + "the headset. Any shortcut listed here is forwarded to the remote computer instead "
+                  + "(either as-is, or remapped to a different key combo)."
         }
         Repeater {
             model: page.keys.rows
@@ -38,14 +38,14 @@ Kirigami.ScrollablePage {
                 ColumnLayout {
                     spacing: 0
                     Controls.Label {
-                        text: modelData.same ? "The computer gets it as it is"
-                                             : "The computer gets " + modelData.sentLabel
+                        text: modelData.same ? "Sent to remote computer as-is"
+                                             : "Sends " + modelData.sentLabel + " to remote computer"
                         elide: Text.ElideRight
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 22
                     }
                     Controls.Label {
                         visible: modelData.instead !== ""
-                        text: "Elsewhere: " + modelData.instead
+                        text: "On headset: " + modelData.instead
                         elide: Text.ElideRight
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
@@ -55,7 +55,7 @@ Kirigami.ScrollablePage {
                 Controls.ToolButton {
                     icon.name: "edit-delete"
                     display: Controls.AbstractButton.IconOnly
-                    text: "Remove: it stays Frametop's on a remote display"
+                    text: "Remove (keep as a headset shortcut)"
                     Controls.ToolTip.text: text
                     Controls.ToolTip.visible: hovered
                     onClicked: page.keys.remove(modelData.pressed)
@@ -65,29 +65,29 @@ Kirigami.ScrollablePage {
         Controls.Label {
             objectName: "remoteKeysNone"
             visible: page.keys.rows.length === 0
-            Kirigami.FormData.label: "To the computer:"
-            text: "nothing: every key combination of Frametop's works on a remote display"
+            Kirigami.FormData.label: "Forwarded shortcuts:"
+            text: "None — all Frametop shortcuts stay on the headset"
             opacity: 0.7
         }
 
-        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "New" }
+        Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Add shortcut rule" }
         RowLayout {
-            Kirigami.FormData.label: "You press:"
+            Kirigami.FormData.label: "When you press:"
             Controls.Button {
                 objectName: "remoteKeysPress"
-                text: page.keys.capturing === "pressed" ? "Press the keys… (Cancel)" : "Set keys…"
+                text: page.keys.capturing === "pressed" ? "Press keys now… (Cancel)" : "Record keys…"
                 enabled: page.keys.capturing !== "sent"
                 onClicked: page.keys.capturing === "pressed" ? page.keys.cancelCapture() : page.keys.capture("pressed")
             }
             Controls.Label { text: page.keys.pressedLabel }
         }
         RowLayout {
-            Kirigami.FormData.label: "The computer gets:"
+            Kirigami.FormData.label: "Send to remote PC:"
             enabled: page.keys.pressed !== ""
-            Controls.Label { text: page.keys.sentLabel === "" ? "The same keys" : page.keys.sentLabel }
+            Controls.Label { text: page.keys.sentLabel === "" ? "Same keys" : page.keys.sentLabel }
             Controls.Button {
                 objectName: "remoteKeysSend"
-                text: page.keys.capturing === "sent" ? "Press the keys… (Cancel)" : "Other keys…"
+                text: page.keys.capturing === "sent" ? "Press keys now… (Cancel)" : "Remap keys…"
                 enabled: page.keys.capturing !== "pressed"
                 onClicked: page.keys.capturing === "sent" ? page.keys.cancelCapture() : page.keys.capture("sent")
             }
@@ -95,7 +95,7 @@ Kirigami.ScrollablePage {
                 visible: page.keys.sentLabel !== ""
                 icon.name: "edit-clear"
                 display: Controls.AbstractButton.IconOnly
-                text: "The same keys"
+                text: "Reset to same keys"
                 Controls.ToolTip.text: text
                 Controls.ToolTip.visible: hovered
                 onClicked: page.keys.sendSame()
@@ -103,7 +103,7 @@ Kirigami.ScrollablePage {
         }
         Controls.Button {
             objectName: "remoteKeysAdd"
-            text: "Add"
+            text: "Add rule"
             icon.name: "list-add"
             enabled: page.keys.pressed !== "" && page.keys.capturing === "" && page.keys.problem === ""
             onClicked: page.keys.add()
@@ -119,12 +119,10 @@ Kirigami.ScrollablePage {
     }
 
     footer: Ft.HelpFooter {
-        text: "This applies while the 3D mouse is on a remote display and you type there. Keys the computer gets as "
-              + "they are stay down as long as you hold them. Other keys are tapped once when you press yours (a "
-              + "modifier's tap: when you let it go), so Meta+Shift+Space can open the computer's launcher "
-              + "(Meta+Space there) while Meta+Space stays frunner's. A combination Frametop does nothing with reaches the computer anyway; list it only to "
-              + "send other keys. Hold the modifiers (Ctrl, Alt, Shift, Meta), then press the key, or tap one "
-              + "modifier on its own. Ctrl+Alt+Shift+Esc always stays Frametop's: it lets go of every key, for one "
-              + "stuck on the computer too. Frametop's own combinations are on the Keyboard page."
+        text: "Applies whenever your pointer is on a remote PC or Mac display. Shortcuts that Frametop doesn't "
+              + "use already go straight to the remote computer; you only need to add rules here to override a "
+              + "Frametop shortcut or remap one (for example, sending Meta+Space when you press Meta+Shift+Space). "
+              + "Ctrl+Alt+Shift+Esc always stays on the headset to release stuck keys. Manage headset shortcuts "
+              + "in Keyboard & shortcuts."
     }
 }

@@ -170,8 +170,8 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 text: hostDialog.byPin
-                      ? "For any host that pairs Moonlight clients by PIN, such as an unmodified Sunshine. Each display you add shows a PIN to type in on the host: its Web UI's PIN page, or its own pairing page. Frametop can't list its monitors or set its permissions."
-                      : "Sign in with its Vibepollo or Sunshine Web UI user name and password, or on a Mac with Screen Sharing turned on, your Mac user name and password. From Vibepollo, Frametop keeps a token that can only pair its displays, set their permissions and list the monitors; for macOS Screen Sharing, it keeps the login in a private file for reconnecting; Sunshine has no tokens, so the login pairs the displays you pick next and isn't kept."
+                      ? "Use PIN pairing for standard Sunshine or Moonlight servers without Web UI sign-in. Each display you add shows a 4-digit PIN to enter on your PC (monitor auto-detection isn't available in PIN mode)."
+                      : "Sign in with your Vibepollo/Sunshine Web UI login, or your Mac login (with macOS Screen Sharing enabled). Vibepollo saves a limited pairing token instead of your password; Mac logins are saved privately for reconnecting; Sunshine logins are only used once to pair."
             }
             Kirigami.FormLayout {
                 Layout.fillWidth: true
@@ -240,7 +240,7 @@ Item {
             Controls.Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "Its apps and open windows show in the launcher (Meta+Space), and each one opens as a panel of its own. Sign in with the Web UI user name and password of the Vibepollo that shares them: on a Windows PC, the one its displays use; on a Linux PC (Hyprland), the one you made there with vibepollo-frametop-windows setup. Frametop keeps a token for its windows. The password isn't kept."
+                text: "Lists this computer's apps and open windows in Frunner (Meta+Space) so each window opens as its own VR panel. Sign in with your Vibepollo Web UI credentials (on Linux/Hyprland, the login created with vibepollo-frametop-windows setup). Only a pairing token is saved — your password is not stored."
             }
             Kirigami.FormLayout {
                 Layout.fillWidth: true
@@ -381,7 +381,7 @@ Item {
                 // Sunshine can't make them on a Mac, nor a host paired by PIN without its API.
                 visible: !displayDialog.loading && displayDialog.kind !== "sunshine" && displayDialog.kind !== "pin"
                 enabled: !displayDialog.virtualAlready
-                text: "A virtual display (the host makes a new monitor at the size you pick)"
+                text: "Create a virtual monitor (at the resolution you choose below)"
                       + (displayDialog.virtualAlready ? ": added" : "")
                 checked: displayDialog.virtualChosen
                 onToggled: {
@@ -411,7 +411,7 @@ Item {
                 RowLayout {
                     Kirigami.FormData.label: "Bitrate:"
                     Controls.SpinBox { id: displayBitrate; from: 0; to: 150; stepSize: 5; value: 0; editable: true }
-                    Controls.Label { text: displayBitrate.value === 0 ? "Mbit/s (0: by size and rate)" : "Mbit/s" }
+                    Controls.Label { text: displayBitrate.value === 0 ? "Mbps (0 = automatic)" : "Mbps" }
                 }
             }
         }
@@ -453,7 +453,7 @@ Item {
             Controls.Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "Type this PIN in on the host: its Web UI's PIN page (Sunshine: PIN), or its own pairing page."
+                text: "Enter this PIN on your computer's streaming pairing page (in Sunshine or Vibepollo's Web UI → PIN)."
             }
             Kirigami.Heading {
                 objectName: "pinText"
@@ -511,12 +511,12 @@ Item {
                     }
                 ]
                 text: !backend.desktopRunning
-                      ? "The Frametop desktop isn't running. The connected displays start with it, or stream them on their own now."
+                      ? "The Frametop desktop isn't running. Connected displays will start automatically with the desktop, or you can stream them on their own now."
                       : backend.streamsOnly
-                        ? "Streaming without the desktop: the connected displays are panels on their own. Stop streaming before you start the desktop."
+                        ? "Streaming remote displays standalone (without the Frametop desktop). Click Stop streaming before starting the full desktop."
                         : backend.hosts.length === 0
-                        ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo (a Mac: built-in Screen Sharing, or Sunshine): add it, sign in, then pick its displays."
-                        : "Each display is a panel like a screen: move, size, curve and pin it in VR, and Save as profile (Layout & profiles) keeps where it is. A disconnected display keeps its place and settings."
+                        ? "Bring your PC or Mac monitors into VR alongside your Frametop screens. Install Vibepollo or Sunshine on your PC (or turn on Screen Sharing on a Mac), then click Add computer above."
+                        : "Each remote monitor behaves like a VR screen — move, resize, curve, or pin it, and save its position in Layout & profiles. Disconnected displays keep their saved settings."
             }
             ColumnLayout {
                 spacing: Kirigami.Units.largeSpacing
@@ -626,7 +626,7 @@ Item {
                                     valueRole: "value"
                                     currentIndex: Math.max(0, indexOfValue(hostCard.modelData.route))
                                     onActivated: if (currentValue !== hostCard.modelData.route) backend.setRoute(hostCard.modelData.name, currentValue)
-                                    Controls.ToolTip.text: "Changing it starts the host's streams over (a virtual display is made again, so its windows move)"
+                                    Controls.ToolTip.text: "Switching connection restarts this computer's active display streams (virtual displays reconnect fresh)"
                                     Controls.ToolTip.visible: hovered
                                 }
                                 Controls.Label { visible: route.hasDongle; text: "Dongle:" }
@@ -713,7 +713,7 @@ Item {
                                 id: appWindows
                                 objectName: "appWindows"
                                 visible: hostCard.vibepollo
-                                text: "Show its apps and windows in the launcher"
+                                text: "Show apps and windows in the launcher"
                                 checked: hostCard.modelData.appWindows
                                 onToggled: {
                                     if (checked) {
@@ -884,7 +884,7 @@ Item {
                                         Controls.ToolButton {
                                             icon.name: disp.expanded ? "go-up" : "configure"
                                             display: Controls.AbstractButton.IconOnly
-                                            text: disp.expanded ? "Hide its settings" : "Its stream and size"
+                                            text: disp.expanded ? "Hide display settings" : "Stream & size settings"
                                             Controls.ToolTip.text: text
                                             Controls.ToolTip.visible: hovered
                                             onClicked: disp.expanded = !disp.expanded
@@ -929,7 +929,7 @@ Item {
                                                 from: 0; to: 150; stepSize: 5; editable: true
                                                 value: Math.round(disp.modelData.bitrate / 1000)
                                             }
-                                            Controls.Label { text: sb.value === 0 ? "Mbit/s (auto)" : "Mbit/s" }
+                                            Controls.Label { text: sb.value === 0 ? "Mbps (auto)" : "Mbps" }
                                             Controls.Button {
                                                 text: "Apply"
                                                 enabled: (disp.ownSize && ss.changed)
@@ -945,7 +945,7 @@ Item {
                                             // It then always has 125%, 150%, 175% and 200%.
                                             visible: disp.followsMonitor && disp.monitor !== null
                                                      && ((disp.monitor.scales || []).length > 0 || disp.modelData.scale > 0)
-                                            Kirigami.FormData.label: "Its scale:"
+                                            Kirigami.FormData.label: "Display scale:"
                                             monitor: disp.monitor
                                             picked: disp.modelData.scale
                                             onPick: (scale) => backend.hostMonitors.pickScale(disp.modelData.host, disp.modelData.id, scale)

@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import "../settings/controls" as Ft
 
 Item {
     id: root
@@ -58,9 +59,8 @@ Item {
                 Controls.Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: "See and use the Frametop desktop from another computer on your tailnet, with any VNC "
-                          + "viewer (RealVNC Viewer, TigerVNC, or macOS Screen Sharing). It shows the primary "
-                          + "screen, the one with the taskbar, and follows it when you change the layout."
+                    text: "View and control your headset's primary desktop screen from another computer on your Tailscale network "
+                          + "using any VNC viewer (such as RealVNC Viewer, TigerVNC, or macOS Screen Sharing)."
                 }
 
                 Kirigami.FormLayout {
@@ -130,23 +130,32 @@ Item {
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
-                        text: "VNC takes at most 8 characters. The connection itself is encrypted by the tailnet, "
-                              + "and only devices on it can reach the Frame."
+                        text: "Standard VNC passwords use up to 8 characters. Your connection is encrypted end-to-end by Tailscale, "
+                              + "so only devices on your private Tailscale network can connect."
                     }
                 }
 
-                Kirigami.Heading {
-                    level: 3
-                    text: "How it works"
-                }
                 Controls.Label {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    opacity: 0.8
-                    text: "KDE's krdp captures the desktop on 127.0.0.1 only, and a VNC server on the tailnet "
-                          + "address shows its primary screen. Turning it on in a desktop that started with it off "
-                          + "takes a desktop restart (KWin allows the capture only from its start). Logs: "
-                          + "/tmp/frametop-remote.log and /tmp/frametop-vnc.log."
+                    opacity: 0.75
+                    text: "Note: If your desktop started with Remote access turned off, restart the desktop once after enabling it."
+                }
+                Ft.Disclosure {
+                    id: techInfo
+                    Layout.fillWidth: true
+                    title: "Technical details"
+                    summary: "how capture works, log paths"
+                }
+                Controls.Label {
+                    visible: techInfo.expanded
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    text: "KDE's krdp captures the primary desktop screen locally on 127.0.0.1, and a VNC server "
+                          + "exposes it on your Tailscale address only. Logs are written to /tmp/frametop-remote.log "
+                          + "and /tmp/frametop-vnc.log."
                 }
             }
         }

@@ -10,6 +10,7 @@ Kirigami.ScrollablePage {
     id: dpage
     property QtObject backend   // DisplayPages.qml sets it: ft_display_settings.py
     title: "Desktopless mode"
+    signal openSection(string name)
     property bool md: backend.backend === "screens"
 
     ColumnLayout {
@@ -19,7 +20,7 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             visible: !dpage.md
             type: Kirigami.MessageType.Information
-            text: "Desktopless mode needs the screens backend (ft-screens)."
+            text: "Desktopless mode requires the Frametop multi-screen desktop (not gamescope)."
         }
 
         Kirigami.AbstractCard {
@@ -31,7 +32,7 @@ Kirigami.ScrollablePage {
                     Kirigami.Heading { level: 2; text: "Desktopless mode" }
                     Controls.Label {
                         Layout.fillWidth: true
-                        text: "The desktops go, their apps stay: every app window from the sources below becomes a panel of its own, and their screens or displays hide. Turned off, each window goes back where it was. Meta+Shift+D or the launcher does the same."
+                        text: "Float each open app window as its own VR panel and hide the virtual desktop screens. Turn this off to put every window back on its screen. You can also toggle it with Meta+Shift+D or from the launcher."
                         opacity: 0.7
                         wrapMode: Text.Wrap
                     }
@@ -47,11 +48,11 @@ Kirigami.ScrollablePage {
             }
         }
 
-        Kirigami.Heading { level: 3; text: "What's in it"; enabled: dpage.md }
+        Kirigami.Heading { level: 3; text: "Included devices"; enabled: dpage.md }
         Controls.Label {
             Layout.fillWidth: true
             enabled: dpage.md
-            text: "A source that's out keeps its desktop: the Frame its screens, a PC its display panels. PCs are out by default, since one with many windows open would make too many panels. While the mode is on, a switch applies right away."
+            text: "Choose which devices float individual app windows in Desktopless mode. Devices turned off keep their normal desktop screens. Remote PCs are off by default so a busy PC doesn't flood your space with panels. Changes apply right away while Desktopless mode is on."
             opacity: 0.7
             wrapMode: Text.Wrap
         }
@@ -75,12 +76,12 @@ Kirigami.ScrollablePage {
                         Controls.Label {
                             Layout.fillWidth: true
                             text: !source.modelData.name
-                                  ? (source.modelData.on ? "In: its screens hide and its windows float as panels."
-                                                         : "Out: its screens and windows stay as they are.")
+                                  ? (source.modelData.on ? "Included: virtual screens hide and each app floats as its own panel."
+                                                         : "Not included: virtual screens and windows stay as normal.")
                                   : !source.modelData.windows
-                                  ? "Out: first turn on \"Show its apps and windows in the launcher\" on its card in Remote displays."
-                                  : (source.modelData.on ? "In: its displays hide and each of its windows is a panel."
-                                                         : "Out: its displays stay as display panels.")
+                                  ? "Not ready: enable \"Show apps and windows in the launcher\" for this computer in Remote displays first."
+                                  : (source.modelData.on ? "Included: remote monitors hide and each app window floats as its own panel."
+                                                         : "Not included: remote monitors stay as normal display panels.")
                             opacity: 0.7
                             wrapMode: Text.Wrap
                         }
@@ -96,12 +97,20 @@ Kirigami.ScrollablePage {
                 }
             }
         }
-        Controls.Label {
+        RowLayout {
             visible: backend.desktoplessSources.length === 1
             Layout.fillWidth: true
-            text: "No PCs yet: add one in Remote displays."
-            opacity: 0.7
-            wrapMode: Text.Wrap
+            Controls.Label {
+                Layout.fillWidth: true
+                text: "No remote PCs added yet."
+                opacity: 0.7
+                wrapMode: Text.Wrap
+            }
+            Controls.Button {
+                text: "Open Remote displays"
+                icon.name: "network-workgroup"
+                onClicked: dpage.openSection("remote-displays")
+            }
         }
     }
 }

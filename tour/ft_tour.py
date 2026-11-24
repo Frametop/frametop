@@ -255,9 +255,9 @@ def pages(f, keys):
         "intro": "These key combinations work on any keyboard, whatever has focus.",
         "keys": keys,
         "rows": [["Meta+Shift+R", "Reset Screen Layout"]],
-        "note": "Macros: on the Keyboard page of Frametop Settings, any key combination, or a modifier "
+        "note": "Macros: on the Keyboard & shortcuts page of Frametop Settings, any key combination, or a modifier "
                 "tapped on its own, can do a Frametop or Steam action, open a profile, or run a command of your "
-                "own. The Buttons and Controllers pages map mouse buttons and controller buttons the same way.",
+                "own. The Mouse buttons and Controllers pages map mouse buttons and controller buttons the same way.",
         "actions": [{"id": "settings:keyboard", "text": "Keyboard shortcuts", "icon": "input-keyboard"},
                     {"id": "settings:buttons", "text": "Mouse buttons", "icon": "input-mouse"},
                     {"id": "settings:controllers", "text": "Controller buttons", "icon": "input-gamepad"}],
@@ -285,7 +285,7 @@ def pages(f, keys):
                                                                    "learning it"]],
             "actions": [{"id": "gaze:calibrate", "text": "Calibrate", "icon": "crosshairs"},
                         {"id": "gaze:quickcal", "text": "Quick check", "icon": "view-visible"},
-                        {"id": "settings:gaze", "text": "Gaze settings", "icon": "configure"}]}
+                        {"id": "settings:gaze", "text": "Eye tracking settings", "icon": "configure"}]}
     if not f["gaze"]:
         gaze.update(intro="In gaze mode the pointer goes where you look, and the keyboard or the mouse does the last "
                           "bit. It isn't installed here: install it with gaze/run.sh install, then our own eye "
@@ -294,7 +294,7 @@ def pages(f, keys):
     else:
         gaze["practice"] = "gaze"
         if not f["gazeOn"]:
-            gaze["note"] = "Gaze mode is off now: turn it on, and calibrate, on the Gaze page of Frametop Settings."
+            gaze["note"] = "Eye tracking is off right now: turn it on and calibrate on the Eye tracking page of Frametop Settings."
     out.append(gaze)
 
     hands = {"id": "hands", "title": "Hand tracking: touch and move screens", "icon": "transform-browse",
@@ -391,81 +391,83 @@ def pages(f, keys):
         "rows": [["Click both thumbsticks together, twice", "Pauses Frametop, or brings it back, in a game or not"],
                  ["With one controller: click its thumbstick twice", "The same"],
                  ["Start a VR game", "Frametop pauses, and comes back 5 seconds after the game ends"]],
-        "note": "The gesture, and what the desktop does while paused, are on the Game optimization page of "
+        "note": "The controller shortcut and what the desktop does while paused are on the VR games page of "
                 "Frametop Settings.",
-        "actions": [{"id": "settings:games", "text": "Game optimization", "icon": "applications-games"}],
+        "actions": [{"id": "settings:games", "text": "VR games", "icon": "applications-games"}],
         "clips": []}]
 
     out.append({
         "id": "settings", "title": "Settings, page by page", "icon": "configure",
         "intro": "Everything in this tour can be changed in Frametop Settings: a page for each part of Frametop, "
                  "and a search for any setting. Open any page from its row.",
-        "rows": ["Screens",
-                 ["Screens", "How many screens, their resolution, size in VR, scale, and curve", "settings:screens"],
-                 ["Layout & profiles", "The arrangement, saved profiles, and how the desktop starts", "settings:layout"],
-                 ["Visibility & pins", "When screens show, pins, hidden screens, and dashboard tiles",
+        "rows": ["Screens & windows",
+                 ["Screens", "How many virtual screens, their resolution, size in VR, zoom, curve, and 3D wallpaper",
+                  "settings:screens"],
+                 ["Layout & profiles", "Screen arrangement, saved workspace profiles, and how the desktop starts",
+                  "settings:layout"],
+                 ["Visibility & pins", "When screens appear, pinning them to your wrist or head, and dashboard tiles",
                   "settings:visibility"],
-                 ["Grab bars & corners", "How easy the bar under a screen is to hit, and how its resize corners look",
+                 ["Desktopless mode", "Float every app window on its own panel without full desktop screens",
+                  "settings:desktopless"],
+                 ["Grab bars & corners", "How easy grab bars are to reach and how resize corners look",
                   "settings:handles"],
-                 ["Desktopless mode", "Every app window its own panel, without the screens, and which sources "
-                                      "are in it: this Frame, each PC", "settings:desktopless"],
-                 ["Remote displays", "Another computer's monitors as Frametop screens", "settings:remote-displays"],
-                 "Input",
-                 ["Devices", "Every mouse and keyboard, and its role: 3D pointer (it moves the dot), Keyboard + 3D "
-                             "pointer (a keyboard with a touchpad), Pass through, or Ignore", "settings:devices"],
-                 ["Buttons", "A mouse's extra buttons as Frametop or Steam actions, profiles, or your own commands",
-                  "settings:buttons"],
-                 ["Controllers", "The same for the Frame controllers' buttons, outside games or in them too",
-                  "settings:controllers"],
-                 ["Keyboard", "When Frametop's VR keyboard shows, and your key combinations and modifier taps",
-                  "settings:keyboard"],
-                 ["Remote display keys", "The key combinations a remote display's computer gets while you type on "
-                                         "it, as they are or as other keys", "settings:remote-keys"],
-                 ["Commands", "Your own shell commands by name: run them from a button, frunner, your voice, or a "
-                              "terminal alias", "settings:commands"],
-                 ["Pointer", "The dot's speed, size, and distance, head follow, and Recenter. Changes apply live",
-                  "settings:pointer"],
-                 ["Ignored panels", "Panels the mouse passes through, like a performance overlay that follows your "
-                                    "view", "settings:ignore"],
-                 ["Bluetooth", "Paired mice and keyboards, and the fix that makes an LE one reconnect by itself",
+                 "Controls & devices",
+                 ["Mice & keyboards", "Your connected mice and keyboards, and whether each acts as a 3D pointer, "
+                                      "typing keyboard, or both", "settings:devices"],
+                 ["Bluetooth", "Paired wireless mice and keyboards, plus a fix for devices that fail to reconnect",
                   "settings:bluetooth"],
-                 "Eyes, hands & voice",
-                 ["Gaze", "Gaze mode on or off, Calibrate, Quick check, Check headset fit, the mouse buttons, and "
-                          "which eye tracker", "settings:gaze"],
-                 ["Hands", "When hand tracking runs, the hand model, the three ways to use your hands, and every "
-                           "gesture on or off", "settings:hands"],
-                 ["Appearance", "The hands Frametop draws for you: pick a model, or import your own from a VRM, "
-                                "glTF or FBX file. A whole avatar you import can be worn, and a mirror shows "
-                                "you in it", "settings:appearance"],
-                 ["Voice", "Dictation: push-to-talk keys and buttons, your language, typing as you talk, wake word "
-                           "commands", "settings:voice"],
-                 "System",
-                 ["Game optimization", "Pausing for VR games: on or off, the controller gesture, what the desktop "
-                                       "does while paused", "settings:games"],
-                 ["Quick Settings", "The palm menu: which toggles it shows, and the CPU, GPU, memory and "
-                                    "temperature readouts", "settings:quick-settings"],
-                 ["Power", "Turning the displays off when the headset is unused, and staying awake on the charger",
-                  "settings:power"],
-                 ["Steam & notifications", "Where the desktop's notifications show, Steam's lock screen, and how apps "
-                                           "from the SteamVR dashboard open", "settings:steam"],
-                 ["Remote access", "See and use the Frametop desktop from another computer on your tailnet, over VNC",
+                 ["Pointer", "Pointer speed, dot size and distance, head follow, Travel mode, and Recenter",
+                  "settings:pointer"],
+                 ["Mouse buttons", "Assign extra mouse buttons to Frametop actions, profiles, or custom commands",
+                  "settings:buttons"],
+                 ["Controllers", "Assign VR controller buttons to actions outside games or inside them too",
+                  "settings:controllers"],
+                 ["Keyboard & shortcuts", "When the on-screen VR keyboard appears, keyboard layout, and custom shortcuts",
+                  "settings:keyboard"],
+                 ["Click-through panels", "Overlays the pointer passes straight through, like FPS monitors",
+                  "settings:ignore"],
+                 "Hands, eyes & voice",
+                 ["Hands", "When hand tracking runs, tracking model, and which hand gestures are enabled",
+                  "settings:hands"],
+                 ["Eye tracking", "Eye-controlled pointer, calibration, quick check, headset fit, and mouse controls",
+                  "settings:gaze"],
+                 ["Voice dictation", "Voice typing, push-to-talk keys, language, and hands-free wake words",
+                  "settings:voice"],
+                 ["Hands & avatar", "Choose how your virtual hands look, or import a custom 3D hand or full avatar",
+                  "settings:appearance"],
+                 "PCs & sharing",
+                 ["Remote displays", "Stream monitors or windows from another Windows, Linux, or Mac computer",
+                  "settings:remote-displays"],
+                 ["Remote PC shortcuts", "Choose which keyboard shortcuts go to a streamed PC instead of Frametop",
+                  "settings:remote-keys"],
+                 ["Frametop Together", "Share a virtual room, voice chat, and screens with other Steam Frames",
+                  "settings:together"],
+                 ["Remote access", "View and control your headset's desktop from another computer over Tailscale",
                   "settings:remote-access"],
-                 ["Frametop Together", "A room shared with other Steam Frames on your tailnet: open one or join "
-                                       "someone's, let people in, and choose which of your screens they see",
-                  "settings:together"]],
+                 "System",
+                 ["VR games", "Pause the desktop automatically when launching VR games to save performance",
+                  "settings:games"],
+                 ["Quick Settings", "Choose which toggles and system stats appear on your palm menu",
+                  "settings:quick-settings"],
+                 ["Power & startup", "Auto-start with SteamVR, screen sleep timer, and staying awake while charging",
+                  "settings:power"],
+                 ["Steam & notifications", "Notification forwarding, Steam PIN lock, and apps launched from SteamVR",
+                  "settings:steam"],
+                 ["Custom commands", "Save shell commands by name to run from buttons, frunner, or voice",
+                  "settings:commands"]],
         "actions": [], "clips": []})
 
     more = {"id": "more", "title": "And more", "icon": "help-about",
             "intro": "A few more things Frametop can do, each with its own settings.",
             "rows": [["Remote displays", "Another computer's monitors as Frametop screens (Frametop Settings, Remote displays)"],
-                     ["Displays off", "The headset's displays turn off when it's unused (Frametop Settings, Power)"]],
+                     ["Displays off", "The headset's displays turn off when it's unused (Frametop Settings, Power & startup)"]],
             "actions": [{"id": "settings:remote-displays", "text": "Remote displays", "icon": "network-workgroup"},
-                        {"id": "settings:power", "text": "Power", "icon": "preferences-system-power-management"}],
+                        {"id": "settings:power", "text": "Power & startup", "icon": "preferences-system-power-management"}],
             "clips": []}
     if f["voice"]:
         more["rows"].insert(0, ["Dictation: tap Right Ctrl, or hold the left d-pad down",
                                 "Speak, and it's typed where you type. Nothing leaves the headset"])
-        more["actions"].insert(0, {"id": "settings:voice", "text": "Voice", "icon": "audio-input-microphone"})
+        more["actions"].insert(0, {"id": "settings:voice", "text": "Voice dictation", "icon": "audio-input-microphone"})
     out.append(more)
     out.append({"id": "done", "title": "That's the tour", "icon": "checkmark",
                 "intro": "Frametop Tour stays in the app menu, frunner, and SteamVR's Launch a program list (Frametop → Help), for "

@@ -22,8 +22,8 @@ ColumnLayout {
 
     Ft.Hint {
         Layout.bottomMargin: Kirigami.Units.smallSpacing
-        text: list.usable ? "What your hands do on Frametop's screens. Each applies at once."
-                          : "These need Direct touch on (Hand input, above)."
+        text: list.usable ? "Customize individual gestures and screen interactions. Changes apply immediately."
+                          : "Turn on Direct touch above to customize these hand gestures."
     }
     Repeater {
         model: list.groups.length
@@ -70,11 +70,11 @@ ColumnLayout {
                         snapMode: Controls.Slider.SnapAlways
                         value: list.backend.spinDistance
                         sliderWidth: Kirigami.Units.gridUnit * 10
-                        shown: "comes " + value.toFixed(2) + " m out"
+                        shown: value.toFixed(2) + " m away"
                         reset: list.spinRange.default
                         resetText: "Default (" + list.spinRange.default + " m)"
-                        tip: "How far in front of you a brought screen comes (at least 0.9 m, behind "
-                             + "frunner's search). One you push or pull there comes back that far next time, until the reset button."
+                        tip: "How far in front of you a switched screen appears (at least 0.9 m so Frunner stays in front). "
+                             + "If you push or pull a screen closer or farther, it remembers that distance until reset."
                         onMoved: list.backend.setSpinDistance(value)
                     }
                 }

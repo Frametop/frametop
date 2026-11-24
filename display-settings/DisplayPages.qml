@@ -45,7 +45,7 @@ Item {
     Kirigami.PromptDialog {
         id: restartDialog
         title: "Restart the desktop?"
-        subtitle: "Every window on the desktop closes, this app too. It starts again with the current settings."
+        subtitle: "All open desktop windows (including Frametop Settings) will close and restart with your updated settings."
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {
@@ -70,7 +70,7 @@ Item {
         readonly property string name: nameField.text.trim().split(/\s+/).join(" ")
         readonly property bool taken: name !== oldName && names.indexOf(name) >= 0
         readonly property bool ok: name !== "" && !(mode === "rename" && taken)
-        title: mode === "save" ? "Save the arrangement" : "Rename " + oldName
+        title: mode === "save" ? "Save profile" : "Rename " + oldName
         standardButtons: Kirigami.Dialog.NoButton
 
         function openFor(m, text) {
@@ -93,7 +93,7 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 text: nameDialog.mode === "save"
-                      ? "Where the screens are now, with their sizes, curves, and pins, under this name:"
+                      ? "Save your current screen positions, sizes, curves, pins, and open apps under this name:"
                       : "New name:"
             }
             Controls.TextField {
@@ -105,8 +105,8 @@ Item {
             Controls.Label {
                 visible: nameDialog.taken
                 opacity: 0.7
-                text: nameDialog.mode === "save" ? "Replaces the saved layout with that name."
-                                                 : "There's already a layout with that name."
+                text: nameDialog.mode === "save" ? "This will overwrite the existing profile with that name."
+                                                 : "A profile with that name already exists."
             }
         }
         customFooterActions: [
@@ -128,7 +128,7 @@ Item {
         id: deleteDialog
         property string name: ""
         title: "Delete " + name + "?"
-        subtitle: "The screens stay where they are; only the saved layout goes."
+        subtitle: "Your current screens stay where they are — only the saved profile is removed."
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {
@@ -169,14 +169,14 @@ Item {
                     visible: spage.md
                     text: "Remote displays"
                     icon.name: "network-workgroup"
-                    tooltip: "Other computers' monitors as screens"
+                    tooltip: "Stream screens from your PC or Mac"
                     onTriggered: root.show("remote-displays")
                 },
                 Kirigami.Action {
                     visible: backend.desktopRunning
                     text: "Restart desktop"
                     icon.name: "view-refresh"
-                    tooltip: "Closes the desktop's windows (and this app) and starts it again"
+                    tooltip: "Closes all desktop windows (including Settings) and restarts the desktop"
                     onTriggered: restartDialog.open()
                 }
             ]
@@ -186,9 +186,9 @@ Item {
                 visible: backend.restartNeeded || !backend.desktopRunning
                 type: Kirigami.MessageType.Information
                 text: backend.restartNeeded
-                      ? (spage.md ? "Screens were added or removed. That applies when the desktop starts again; restarting closes its windows (and this app)."
-                                  : "The number of screens, resolution, or panel width changed. They apply when the desktop starts again; restarting closes its windows (and this app).")
-                      : "The desktop isn't running. These settings apply the next time it starts."
+                      ? (spage.md ? "Screens were added or removed. Restart the desktop to apply (restarting closes open desktop windows and Settings)."
+                                  : "Screen count, resolution, or panel width changed. Restart the desktop to apply (restarting closes open desktop windows and Settings).")
+                      : "The desktop isn't running yet. Your changes will apply the next time it starts."
                 actions: [
                     Kirigami.Action {
                         visible: backend.restartNeeded
@@ -212,13 +212,13 @@ Item {
                             Kirigami.Heading { level: 3; text: "Desktopless mode" }
                             Controls.Label {
                                 Layout.fillWidth: true
-                                text: "Every app window its own panel, without the screens. Meta+Shift+D does the same."
+                                text: "Float each open app as its own VR panel and hide virtual screens. Shortcut: Meta+Shift+D."
                                 opacity: 0.7
                                 wrapMode: Text.Wrap
                             }
                         }
                         Controls.Button {
-                            text: "Choose what's in it…"
+                            text: "Configure…"
                             icon.name: "preferences-system-windows"
                             onClicked: root.show("desktopless")
                         }
@@ -247,7 +247,7 @@ Item {
                                 Kirigami.Heading { level: 3; text: "Screen " + (card.modelData.index + 1) }
                                 Controls.Label {
                                     text: card.modelData.width + " × " + card.modelData.height
-                                          + (card.modelData.scale !== 1 ? ", works like " + card.modelData.effective : "")
+                                          + (card.modelData.scale !== 1 ? " (effective " + card.modelData.effective + ")" : "")
                                     opacity: 0.7
                                 }
                                 Item { Layout.fillWidth: true }
@@ -317,7 +317,7 @@ Item {
                                     }
                                 }
                                 Controls.ComboBox {
-                                    Kirigami.FormData.label: "Scale:"
+                                    Kirigami.FormData.label: "Text & UI scale:"
                                     model: backend.scales
                                     textRole: "text"
                                     valueRole: "value"
@@ -325,8 +325,8 @@ Item {
                                     onActivated: backend.setScale(card.modelData.index, currentValue)
                                 }
                                 Controls.Switch {
-                                    Kirigami.FormData.label: "Curved:"
-                                    text: "Bend around you"
+                                    Kirigami.FormData.label: "Curve:"
+                                    text: "Curve screen around you"
                                     checked: card.modelData.curved
                                     onToggled: backend.setCurved(card.modelData.index, checked)
                                 }
@@ -431,12 +431,12 @@ Item {
                     Kirigami.Separator {
                         visible: spage.md
                         Kirigami.FormData.isSection: true
-                        Kirigami.FormData.label: "Stereo wallpaper"
+                        Kirigami.FormData.label: "3D wallpaper"
                     }
                     Controls.Switch {
                         id: stereoSwitch
                         visible: spage.md
-                        Kirigami.FormData.label: "Picture per eye:"
+                        Kirigami.FormData.label: "3D depth wallpaper:"
                         text: checked ? "On" : "Off"
                         checked: backend.stereoWallpaper
                         enabled: backend.desktopRunning && backend.busy === "" && (checked || backend.stereoWallpaperReady)
@@ -445,23 +445,27 @@ Item {
                             checked = Qt.binding(() => backend.stereoWallpaper)
                         }
                     }
+                    Ft.Hint {
+                        visible: spage.md
+                        text: "Displays a different image to each eye on docked screens for a stereoscopic 3D background. Choose an image below before turning this on."
+                    }
                     RowLayout {
                         id: picsRow
                         visible: spage.md
-                        Kirigami.FormData.label: "Pictures:"
+                        Kirigami.FormData.label: "Wallpaper image:"
                         property string leftUrl: ""
                         Controls.Button {
-                            text: "Side-by-side picture…"
+                            text: "Side-by-side 3D image…"
                             enabled: backend.busy === ""
                             onClicked: sbsDialog.open()
                         }
                         Controls.Button {
-                            text: "Left and right…"
+                            text: "Separate left & right…"
                             enabled: backend.busy === ""
                             onClicked: leftDialog.open()
                         }
                         Controls.Label {
-                            text: backend.stereoWallpaperReady ? "picked" : "none yet"
+                            text: backend.stereoWallpaperReady ? "Ready" : "None chosen"
                             opacity: 0.7
                         }
                         FileDialog {
@@ -488,12 +492,11 @@ Item {
 
             footer: Ft.HelpFooter {
                 text: spage.md
-                      ? "Each screen is a real monitor of its own: any resolution, portrait by choosing a tall one. Resolution, "
-                        + "width, and curve apply at once. In VR: move a screen by the bar underneath, curve it with the round "
-                        + "button next to the bar, resize it by the tab on its bottom right corner; Save as profile… on the "
-                        + "Layout & profiles page keeps all of it."
-                      : "gamescope draws every screen at the same resolution, at most 1920 × 1080 worth of pixels. Portrait turns "
-                        + "a screen on its side. Rotation and scale apply at once; the rest when the desktop starts."
+                      ? "Each virtual screen can have its own resolution (pick a tall resolution for portrait). Resolution, width, "
+                        + "and curve apply immediately. In VR, drag the bar underneath a screen to move it, or drag a corner to resize it. "
+                        + "Save your setup anytime in Layout & profiles."
+                      : "In gamescope mode, all screens share one resolution (up to 1920 × 1080 pixels each). Rotation and scale apply "
+                        + "immediately; screen count and resolution apply after restarting the desktop."
             }
         }
     }
@@ -540,7 +543,7 @@ Item {
                 position: Kirigami.InlineMessage.Position.Header
                 visible: backend.busy !== ""
                 type: Kirigami.MessageType.Information
-                text: backend.busy + "… (the pointer is borrowed for a few seconds)"
+                text: backend.busy + "… (your pointer will pause for a few seconds)"
             }
 
             ColumnLayout {
@@ -587,12 +590,9 @@ Item {
                     Controls.Label {
                         visible: lpage.layout.mode === "custom"
                         Kirigami.FormData.label: ""
-                        text: lpage.named ? "Where the screens were when you saved it, and the apps that were open. Open "
-                                            + "profile puts the screens there and opens the apps. Save as profile updates "
-                                            + "it or saves a new one."
-                              : lpage.hasCustom ? "Where the screens were when you saved. Save as profile "
-                                                  + "names it. Pick a preset to edit."
-                              : "Nothing saved yet: place the screens by hand, open your apps, then Save as profile."
+                        text: lpage.named ? "Restores the saved screen positions and opens the profile's apps. Click Open profile to apply it, or Save as profile to update it."
+                              : lpage.hasCustom ? "Uses your last saved screen positions. Click Save as profile to give it a name, or choose a preset."
+                              : "No profile saved yet. Arrange your screens in VR, open the apps you want, then click Save as profile."
                         opacity: 0.7
                         wrapMode: Text.Wrap
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 20
@@ -616,7 +616,7 @@ Item {
                         }
                         Controls.Label {
                             visible: profileApps.windows.length === 0
-                            text: "None saved. Open the apps you want, place their windows, then Save as profile."
+                            text: "No apps saved in this profile yet. Open your apps, arrange their windows, then click Save as profile."
                             opacity: 0.7
                             wrapMode: Text.Wrap
                             Layout.maximumWidth: Kirigami.Units.gridUnit * 20
@@ -942,12 +942,10 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "The preview shows where everything is now, around where the screens were last arranged; a dashed "
-                          + "outline is where the layout puts a screen that's somewhere else now. "
-                          + "The layout goes around where you're facing when it's applied. Move screens by hand any time "
-                          + "(grab bar under each screen); to put them back: Meta+Shift+R in the desktop, the Reset "
-                          + "Screen Layout menu entry, Arrange now here, or a mouse button mapped to \"Reset desktop "
-                          + "screen layout\" in Frametop Settings → Buttons."
+                    text: "The diagram shows your current screens (dashed lines show where this layout would move them). "
+                          + "Layouts always center around whichever direction you're facing when applied. You can move screens "
+                          + "by hand anytime using their grab bars, and snap them back with Meta+Shift+R, Arrange now above, "
+                          + "or a shortcut in Mouse buttons."
                 }
             }
         }
@@ -957,7 +955,7 @@ Item {
     // (its own file: DesktoplessPage.qml)
     Component {
         id: desktoplessPage
-        DesktoplessPage { backend: root.backend }
+        DesktoplessPage { backend: root.backend; onOpenSection: name => root.show(name) }
     }
 
     // ---------------------------------------------------------------- Visibility
@@ -987,10 +985,10 @@ Item {
 
                     Ft.RadioChoices {
                         choices: [
-                            { value: "always", text: "Always", help: "Meta+Shift+H (or a key or button mapped to it) hides them and shows them again. During VR games, see below." },
-                            { value: "dashboard", text: "Only with the SteamVR dashboard open", help: "They come and go with the dashboard. Meta+Shift+H shows them anyway." },
-                            { value: "gesture", text: "While I look at my wrist", help: "They show while you look toward the controller below. Meta+Shift+H shows them anyway." },
-                            { value: "toggle", text: "Only when I show them", help: "Hidden until Meta+Shift+H (or a key or button mapped to it) shows them." }
+                            { value: "always", text: "Always visible", help: "Press Meta+Shift+H (or a mapped button) to hide or show screens anytime. See During VR games below." },
+                            { value: "dashboard", text: "Only when the SteamVR dashboard is open", help: "Screens appear and hide together with the SteamVR dashboard. Meta+Shift+H still toggles them anytime." },
+                            { value: "gesture", text: "When I glance at my wrist", help: "Screens appear while you look toward your chosen controller. Meta+Shift+H still toggles them anytime." },
+                            { value: "toggle", text: "Hidden until I toggle them", help: "Screens stay hidden until you press Meta+Shift+H or a mapped button." }
                         ]
                         value: vpage.v.mode
                         onChose: backend.setVisibility("mode", picked)
@@ -1025,28 +1023,34 @@ Item {
                     Ft.RadioChoices {
                         enabled: vpage.v.mode === "always"
                         choices: [
-                            { value: "hide", text: "Hide them unless the SteamVR dashboard is open", help: "The game has the view to itself; open the dashboard (or press Meta+Shift+H) to see the screens." },
-                            { value: "visible", text: "Keep them visible over the game", help: "They float over the game as they are outside it. Turn off Pause while a VR game runs in Frametop Settings (Game optimization), or Frametop pauses and hides them anyway." }
+                            { value: "hide", text: "Hide screens during VR games", help: "Keeps your game view clear; open the SteamVR dashboard (or press Meta+Shift+H) to view screens." },
+                            { value: "visible", text: "Keep screens visible over VR games", help: "Keeps your screens floating in front of VR games. Note: also turn off automatic pausing in VR games settings so the desktop stays active." }
                         ]
                         value: vpage.v.in_games || "hide"
                         onChose: backend.setVisibility("in_games", picked)
                     }
+                    Controls.Button {
+                        visible: vpage.v.mode === "always" && (vpage.v.in_games || "hide") === "visible"
+                        text: "Open VR games settings"
+                        icon.name: "applications-games"
+                        onClicked: root.show("games")
+                    }
                     Controls.Label {
                         visible: vpage.v.mode !== "always"
-                        text: "Applies when the screens show \"Always\"; the other choices above already keep them out of the way."
+                        text: "Only applies when screens are set to Always visible above."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         wrapMode: Text.Wrap
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     }
 
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controllers on the screens" }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Controller laser interaction" }
 
                     Ft.RadioChoices {
                         choices: [
-                            { value: "outside_games", text: "Except during VR games", help: "Over a VR game the screens stay up, but the controllers stay in the game. Use the 3D mouse, or open the SteamVR dashboard, to work the screens." },
-                            { value: "always", text: "Always", help: "Controllers' lasers work the screens whenever they're visible, even over a VR game (which then can't use the controllers)." },
-                            { value: "dashboard", text: "Only with the SteamVR dashboard open", help: "Otherwise only the 3D mouse works the screens. Also for flatscreen games, which don't count as VR games." }
+                            { value: "outside_games", text: "Outside VR games only (recommended)", help: "During a VR game, your controllers stay dedicated to the game even if screens are visible. Use your 3D mouse or open the SteamVR dashboard to interact with screens." },
+                            { value: "always", text: "Always", help: "Controller lasers can click screens whenever screens are visible, even over a VR game (which prevents the game from using the controllers while aiming at a screen)." },
+                            { value: "dashboard", text: "Only when the SteamVR dashboard is open", help: "Outside the dashboard, only your 3D mouse interacts with screens. Helpful when playing flatscreen games." }
                         ]
                         value: vpage.v.controllers || "outside_games"
                         onChose: backend.setVisibility("controllers", picked)
@@ -1072,7 +1076,7 @@ Item {
                         }
                     }
                     Controls.Label {
-                        text: "A hidden screen stays hidden whatever the choices above say, and Meta+Shift+H doesn't bring it back. Windows on it stay there; new ones that would open on it float instead."
+                        text: "Hidden screens stay off even when you press Meta+Shift+H. Existing windows remain on them, and new apps launched there will float into view instead."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         wrapMode: Text.Wrap
@@ -1111,9 +1115,9 @@ Item {
                         Kirigami.FormData.label: "Head pins:"
                         // SCREEN_PIN_LEVEL: 0, 1, 2 (the row is the value)
                         model: [
-                            "Ride on the headset",
-                            "Pin only follows horizontal movement",
-                            "Pin follows walking only, not turning"
+                            "Locked to view (HUD)",
+                            "Follow walking & turning, stay level",
+                            "Follow walking only (look around freely)"
                         ]
                         currentIndex: backend.pinMode
                         onActivated: {
@@ -1122,12 +1126,9 @@ Item {
                         }
                     }
                     Controls.Label {
-                        text: ["A screen on your head rides on the headset: it moves with every turn, look and tilt.",
-                               "A screen on your head turns and walks with you but stays level: looking up or down, "
-                               + "tilting your head, or crouching leaves it where it is.",
-                               "A screen on your head moves with you as you walk but doesn't turn: like a ball round "
-                               + "you, it keeps its height and faces the same way in the room, so turn your head to see "
-                               + "the ones beside or behind you."][Math.max(0, Math.min(2, backend.pinMode))]
+                        text: ["Moves directly with your headset every time you look or tilt your head, like a heads-up display.",
+                               "Turns and walks with you while staying level — looking up/down, tilting, or crouching keeps it steady.",
+                               "Follows you as you walk around the room, but stays facing the same direction so you can turn your head to look at side screens."][Math.max(0, Math.min(2, backend.pinMode))]
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
@@ -1143,30 +1144,33 @@ Item {
                         }
                         Controls.Label { text: Math.round(wrist.value) + "°" }
                     }
-                    RowLayout {
-                        Kirigami.FormData.label: "All screens:"
+                    Flow {
+                        Kirigami.FormData.label: "Pin all screens to:"
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                        spacing: Kirigami.Units.smallSpacing
                         Controls.Button {
-                            text: "Pin to left wrist"
+                            text: "Left wrist"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "left")
                         }
                         Controls.Button {
-                            text: "Pin to right wrist"
+                            text: "Right wrist"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "right")
                         }
                         Controls.Button {
-                            text: "Pin to head"
+                            text: "Head"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "head")
                         }
                         Controls.Button {
-                            text: "Pin to dashboard"
+                            text: "Dashboard"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "dashboard")
                         }
                         Controls.Button {
-                            text: "Unpin"
+                            text: "Unpin all"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "none")
                         }
@@ -1174,48 +1178,58 @@ Item {
 
                     // Dashboard tiles (dash_tiles.py; screens/tiling.h): ft-screens takes each live.
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Dashboard tiles" }
+                    Ft.Hint {
+                        text: "Anchor screens, apps, or remote displays to the SteamVR dashboard so they snap neatly into a curved workspace."
+                    }
                     Controls.Switch {
-                        Kirigami.FormData.label: "Stay visible:"
-                        text: "Anchored panels stay with the dashboard closed"
+                        Kirigami.FormData.label: "Keep open:"
+                        text: "Keep anchored panels visible after closing the dashboard"
                         checked: backend.dashTiles.stay
                         onToggled: backend.dashTiles.setStay(checked)
                     }
-                    Ft.Hint { text: "A long press on a panel's anchor button sets it the other way for that panel." }
+                    Ft.Hint { text: "Long-press a panel's anchor button to toggle this individually for one panel." }
                     Controls.Switch {
-                        Kirigami.FormData.label: "In the theater:"
-                        text: "Also over a game in SteamVR's theater"
+                        Kirigami.FormData.label: "In Theater mode:"
+                        text: "Keep visible over flatscreen games in SteamVR Theater"
                         enabled: backend.dashTiles.stay
                         checked: backend.dashTiles.stayTheater
                         onToggled: backend.dashTiles.setStayTheater(checked)
                     }
                     Controls.Switch {
                         Kirigami.FormData.label: "Look to focus:"
-                        text: "Meta+arrows move the app tile you look at"
+                        text: "Move the tile you're looking at with Meta+arrows"
                         checked: backend.dashTiles.lookFocus
                         onToggled: backend.dashTiles.setLookFocus(checked)
                     }
-                    Ft.Hint { text: "When no mouse or laser is on a panel." }
+                    Ft.Hint { text: "Applies when neither a mouse nor a controller laser is pointing at a panel." }
                     Controls.Switch {
                         Kirigami.FormData.label: "Dashboard apps:"
-                        text: "Open as Frametop panels"
+                        text: "Open flatscreen dashboard apps as Frametop panels"
                         checked: backend.dashTiles.gsApps
                         onToggled: backend.dashTiles.setGsApps(checked)
                     }
                     Controls.Switch {
-                        Kirigami.FormData.label: "Steam's window:"
-                        text: "Steam's page and menu are Frametop panels"
+                        Kirigami.FormData.label: "Steam windows:"
+                        text: "Show Steam's store and menu as Frametop panels"
                         checked: backend.dashTiles.steamWindows
                         onToggled: backend.dashTiles.setSteamWindows(checked)
                     }
                     Controls.Switch {
-                        Kirigami.FormData.label: "At Steam's bar:"
-                        text: "Middle panel just above Steam's bar"
+                        Kirigami.FormData.label: "Align with Steam bar:"
+                        text: "Place the center tile right above Steam's dashboard bar"
                         checked: backend.dashTiles.atBar
                         onToggled: backend.dashTiles.setAtBar(checked)
                     }
-                    Ft.Hint { text: "As far away as the bar is. Off: at the desk line and distance below." }
+                    Ft.Hint { text: "Matches the Steam bar's position and distance. Turn off to set a custom height and distance below." }
+
+                    Ft.Disclosure {
+                        id: tileLayout
+                        title: "Tile size, position & curve"
+                        summary: "panel size, desk width, distance, curvature"
+                    }
                     RowLayout {
-                        Kirigami.FormData.label: "Desk line:"
+                        visible: tileLayout.expanded
+                        Kirigami.FormData.label: "Vertical position:"
                         enabled: !backend.dashTiles.atBar
                         Controls.Slider {
                             id: tileDesk
@@ -1225,13 +1239,14 @@ Item {
                             onMoved: backend.dashTiles.setDeskDeg(value)
                         }
                         Controls.Label {
-                            text: Math.abs(Math.round(tileDesk.value)) + "° " + (tileDesk.value < 0 ? "below" : "above") + " your eyes"
+                            text: Math.abs(Math.round(tileDesk.value)) + "° " + (tileDesk.value < 0 ? "below" : "above") + " eye level"
                             visible: !backend.dashTiles.atBar   // (not where they are then)
                         }
                     }
-                    Ft.Hint { visible: backend.dashTiles.atBar; text: "Set by Steam's bar. Turn off At Steam's bar to change it." }
+                    Ft.Hint { visible: tileLayout.expanded && backend.dashTiles.atBar; text: "Locked to Steam's bar. Turn off Align with Steam bar above to adjust." }
                     RowLayout {
-                        Kirigami.FormData.label: "Panel size:"
+                        visible: tileLayout.expanded
+                        Kirigami.FormData.label: "Panel scale:"
                         Controls.Slider {
                             id: tileDensity
                             // (left smaller, right bigger: fewer pixels a degree)
@@ -1240,10 +1255,12 @@ Item {
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                             onMoved: backend.dashTiles.setPxPerDeg(-value)
                         }
-                        Controls.Label { text: Math.round(-tileDensity.value) + " pixels a degree" }
+                        Controls.Label { text: Math.round(-tileDensity.value) + " px/°" }
                     }
+                    Ft.Hint { visible: tileLayout.expanded; text: "Drag right for larger panels and text, or left to fit more on screen." }
                     RowLayout {
-                        Kirigami.FormData.label: "Desk width:"
+                        visible: tileLayout.expanded
+                        Kirigami.FormData.label: "Workspace width:"
                         Controls.Slider {
                             id: tileWall
                             from: 30; to: 300; stepSize: 5
@@ -1251,9 +1268,11 @@ Item {
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                             onMoved: backend.dashTiles.setWallDeg(value)
                         }
-                        Controls.Label { text: Math.round(tileWall.value) + "° round you, then panels stack" }
+                        Controls.Label { text: Math.round(tileWall.value) + "° wide" }
                     }
+                    Ft.Hint { visible: tileLayout.expanded; text: "Once tiles fill this horizontal span, new tiles stack into additional rows." }
                     RowLayout {
+                        visible: tileLayout.expanded
                         Kirigami.FormData.label: "Distance:"
                         enabled: !backend.dashTiles.atBar
                         Controls.Slider {
@@ -1264,13 +1283,14 @@ Item {
                             onMoved: backend.dashTiles.setRadius(value)
                         }
                         Controls.Label {
-                            text: tileRadius.value.toFixed(2) + " m to their corners"
+                            text: tileRadius.value.toFixed(2) + " m"
                             visible: !backend.dashTiles.atBar
                         }
                     }
-                    Ft.Hint { visible: backend.dashTiles.atBar; text: "Set by Steam's bar. Turn off At Steam's bar to change it." }
+                    Ft.Hint { visible: tileLayout.expanded && backend.dashTiles.atBar; text: "Locked to Steam's bar. Turn off Align with Steam bar above to adjust." }
                     RowLayout {
-                        Kirigami.FormData.label: centreCurveOwn.checked ? "Curve at the sides:" : "Curve:"
+                        visible: tileLayout.expanded
+                        Kirigami.FormData.label: centreCurveOwn.checked ? "Side curve:" : "Curve:"
                         // the arc's radius, its centre to the wall (DASH_TILE_CURVE_M; not set: 2 m past the
                         // wall's distance). At the distance or less it's round your head. (At Steam's bar
                         // the wall is about 1.4 m away, 0.3 m past the bar; its real distance is ft-screens'.)
@@ -1284,19 +1304,19 @@ Item {
                         }
                         Controls.Label {
                             text: tileCurve.value <= parent.wallM + 0.05 && !centreCurveOwn.checked
-                                  ? "Round you: every panel faces you"
-                                  : tileCurve.value.toFixed(1) + " m radius (smaller "
-                                    + (centreCurveOwn.checked ? "turns them to you more)" : "curves tighter)")
+                                  ? "Full wrap (faces you)"
+                                  : tileCurve.value.toFixed(1) + " m radius"
                         }
                     }
                     RowLayout {
+                        visible: tileLayout.expanded
                         // the centre display's column on an arc of its own (DASH_TILE_CENTRE_CURVE_M; off: 0,
                         // Curve's all round). Turned on, it starts where Curve is.
                         Kirigami.FormData.label: "Center curve:"
                         property real wallM: backend.dashTiles.atBar ? 1.4 : backend.dashTiles.radius
                         Controls.Switch {
                             id: centreCurveOwn
-                            text: "Its own"
+                            text: "Custom"
                             checked: backend.dashTiles.centreCurveRadius > 0
                             onToggled: backend.dashTiles.setCentreCurveRadius(checked ? tileCurve.value : 0)
                         }
@@ -1309,23 +1329,25 @@ Item {
                             onMoved: backend.dashTiles.setCentreCurveRadius(value)
                         }
                         Controls.Label {
-                            text: centreCurve.value <= parent.wallM + 0.05 ? "Round you"
-                                  : centreCurve.value.toFixed(1) + " m radius (bigger is flatter)"
+                            text: centreCurve.value <= parent.wallM + 0.05 ? "Faces you"
+                                  : centreCurve.value.toFixed(1) + " m"
                             visible: centreCurveOwn.checked
                         }
                     }
                     Ft.Hint {
+                        visible: tileLayout.expanded
                         text: centreCurveOwn.checked
-                              ? "For the center display and the panels over and under it. The panels beside it use Curve at the sides."
-                              : "Off: one smooth curve all round. On: the center display, and the panels over and under it, get their own."
+                              ? "Sets a separate curve for the center column while side panels use Side curve above."
+                              : "Turn on to give the center column a flatter or tighter curve than the side panels."
                     }
                     RowLayout {
+                        visible: tileLayout.expanded
                         // the rows over and under the center display's (DASH_TILE_HEIGHT_CURVE_M; off: 0, as the
                         // center's curve). Turned on, it starts where that is.
-                        Kirigami.FormData.label: "Height curve:"
+                        Kirigami.FormData.label: "Vertical tilt:"
                         Controls.Switch {
                             id: heightCurveOwn
-                            text: "Its own"
+                            text: "Custom"
                             checked: backend.dashTiles.heightCurveRadius > 0
                             onToggled: backend.dashTiles.setHeightCurveRadius(
                                            !checked ? 0 : centreCurveOwn.checked ? centreCurve.value : tileCurve.value)
@@ -1339,14 +1361,15 @@ Item {
                             onMoved: backend.dashTiles.setHeightCurveRadius(value)
                         }
                         Controls.Label {
-                            text: heightCurve.value.toFixed(1) + " m radius (smaller tilts rows to you more)"
+                            text: heightCurve.value.toFixed(1) + " m"
                             visible: heightCurveOwn.checked
                         }
                     }
                     Ft.Hint {
+                        visible: tileLayout.expanded
                         text: heightCurveOwn.checked
-                              ? "For the rows over and under the center display, at the sides too. A strong tilt makes those panels a little smaller."
-                              : "Off: the rows over and under follow the curves above."
+                              ? "Smaller values angle top and bottom rows more steeply toward you."
+                              : "Turn on to angle stacked top and bottom rows separately from the horizontal curve."
                     }
                 }
 
@@ -1360,33 +1383,17 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "Pin one screen: carry it by its bar and sweep its laser across your other controller. A "
-                          + "ring shows the target and a dot shows where the laser is; crossing the ring arms the pin (ring "
-                          + "and bar turn blue), crossing it again disarms it. Turn and place the screen the way you want, "
-                          + "then let go: it rides on that wrist at that size and distance, however far away. To adjust a "
-                          + "pinned screen, grab its bar, move it, and let go (it stays pinned); sweep across the ring to "
-                          + "take it off. It shows while you see its front within the angle above, and fades out beyond "
-                          + "it.\n\nPin a screen to your head: choose On your head above. It rides on the headset where it "
-                          + "is now, like a HUD, and shows whenever the screens do. Grab its bar to move it; it stays on "
-                          + "your head where you let go. Choosing a pin above keeps the screen where it is now, so place "
-                          + "it first. Save as profile… (Layout) keeps pins.\n\nAnchor a screen to the dashboard: choose On "
-                          + "the dashboard above, or press the anchor button under any screen, floating window or remote "
-                          + "display. Anchored panels stand on a desk round you like monitors of their own sizes, text the same "
-                          + "size on each. With At Steam's bar on, they stand just above Steam's bar, as far from you as it is, "
-                          + "centred over it (dragging the dashboard by its bar carries them); off, in front of you when the "
-                          + "dashboard opens, at the Desk line and Distance above. Either way they go either side of Steam's "
-                          + "page when it's in front. Once the desk is as wide as Desk width, a new panel goes on top of the lowest column. They "
-                          + "show only with the dashboard open, unless Stay visible is on (a "
-                          + "long press on the anchor button switches it for one panel). With the pointer or your gaze on "
-                          + "an app's tile (in the headset or a PC's), Meta+arrows or Meta+Shift+arrows move it between "
-                          + "columns and rows and Meta+Ctrl+arrows make it bigger or smaller; screens and remote displays "
-                          + "move by dragging. Meta+/ "
-                          + "lists every key. Drag a tile to reorder; pull it well away and it stays anchored where you let "
-                          + "go. Anchored before the dashboard has opened, a panel stays where it is until the dashboard "
-                          + "first opens. Each app, screen and remote display remembers whether it was anchored.\n\nWith "
-                          + "Dashboard apps on, a flatscreen app you start from the SteamVR dashboard opens as a Frametop "
-                          + "panel, anchored and staying visible the first time. Click it to type into it. Off, Steam "
-                          + "shows it on a panel of its own, as before."
+                    text: "Pin to a wrist: Grab a screen by its bar and sweep your controller laser across your other "
+                          + "controller's ring until the bar turns blue. Position the screen where you want it and release — "
+                          + "it will stay attached to that wrist and appear whenever you turn it toward you. Sweep across "
+                          + "the ring again to unpin.\n\n"
+                          + "Pin to your head: Choose On your head above to keep a screen moving with you (use Head pins "
+                          + "above to choose whether it locks to your view or stays level). Position the screen first, then "
+                          + "pin it. Saved profiles remember your pins.\n\n"
+                          + "Anchor to the dashboard: Choose On the dashboard above or click the anchor button underneath any "
+                          + "screen, floating app, or remote display. Anchored panels arrange themselves into an arc around "
+                          + "the SteamVR dashboard. Drag a tile to reorder it, or use Meta+arrows (and Meta+Ctrl+arrows to "
+                          + "resize) on focused app tiles. Press Meta+/ anytime to see all shortcuts."
                 }
 
             }
@@ -1409,7 +1416,7 @@ Item {
         id: powerPage
         Kirigami.ScrollablePage {
             id: ppage
-            title: "Power"
+            title: "Power & startup"
             property var p: backend.power
             // The timeout choices, plus a value set by hand in frametop.conf.
             property var offChoices: {
@@ -1426,7 +1433,7 @@ Item {
                 Kirigami.Action {
                     text: "Turn displays off now"
                     icon.name: "system-suspend"
-                    tooltip: "To try it: they come back on when the headset moves or any input is used"
+                    tooltip: "Test screen sleep now — move the headset or press any key to wake"
                     enabled: ppage.p.service && ppage.p.state === "on"
                     onTriggered: backend.displaysOffNow()
                 }
@@ -1436,8 +1443,7 @@ Item {
                 position: Kirigami.InlineMessage.Position.Header
                 visible: !ppage.p.service
                 type: Kirigami.MessageType.Warning
-                text: "The power service (frametop-power) isn't running, so the displays won't turn off on their own. "
-                      + "It starts with SteamVR once it's installed: power/run.sh install, or run ./install.sh again."
+                text: "Automatic display sleep isn't running yet. To enable it, re-run ./install.sh (or power/run.sh install) in a terminal."
             }
 
             ColumnLayout {
@@ -1446,10 +1452,10 @@ Item {
                 Kirigami.FormLayout {
                     Layout.fillWidth: true
 
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Displays" }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Headset display sleep" }
 
                     Controls.ComboBox {
-                        Kirigami.FormData.label: "Turn off when unused for:"
+                        Kirigami.FormData.label: "Turn displays off after:"
                         model: ppage.offChoices
                         textRole: "text"
                         valueRole: "value"
@@ -1457,10 +1463,9 @@ Item {
                         onActivated: backend.setDisplayOffMinutes(currentValue)
                     }
                     Controls.Label {
-                        text: "Unused means the headset and controllers haven't moved and no mouse, keyboard, or button "
-                              + "was used. This works even when the headset seems to be worn, like on a display mount "
-                              + "that covers its proximity sensor. Moving the headset or using any input turns the "
-                              + "displays back on. Taking the headset off still turns them off within seconds."
+                        text: "Turns off the headset screens when there's no movement or input — helpful if you set the headset "
+                              + "on a stand that triggers its face sensor. Move the headset or press any button to wake it immediately. "
+                              + "Taking the headset off normally still turns the displays off within seconds."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         wrapMode: Text.Wrap
@@ -1491,18 +1496,16 @@ Item {
                     }
                     Controls.Label {
                         text: backend.autostartInstalled
-                              ? "The desktop starts by itself whenever SteamVR starts. The Frame starts SteamVR when it "
-                                + "boots, so this includes boot, and it brings the desktop back after a SteamVR restart. "
-                                + "Closing the desktop keeps it closed until SteamVR starts again."
-                              : "The service that does this (frametop-autostart) isn't installed: run ./install.sh again, "
-                                + "or desktops.sh install."
+                              ? "Automatically launches your Frametop desktop whenever the headset boots or SteamVR restarts. "
+                                + "If you manually close the desktop, it stays closed until SteamVR starts again."
+                              : "Auto-start isn't installed yet. Re-run ./install.sh (or desktops.sh install) in a terminal to enable it."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         wrapMode: Text.Wrap
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
                     }
 
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Sleep" }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Headset sleep" }
 
                     Controls.Switch {
                         id: awake
@@ -1517,14 +1520,12 @@ Item {
                     }
                     Controls.Label {
                         text: !ppage.p.steam
-                              ? (ppage.p.steamBusy ? "Checking Steam's setting…" : "Couldn't reach Steam: " + ppage.p.steamError)
-                              : "Keeps the Frame awake and connected while it charges, for remote access, downloads, and "
-                                + "anything else running. This is Steam's own setting (Settings → Power → When Plugged In "
-                                + "and Idle), so the power button still puts the Frame to sleep. "
-                                + (ppage.p.acSleep > 0 ? "Now Steam puts it to sleep after " + root.duration(ppage.p.acSleep)
-                                                         + " without input, even while it charges. " : "")
-                                + "On battery, Steam's battery setting still applies ("
-                                + (ppage.p.batterySleep > 0 ? "sleep after " + root.duration(ppage.p.batterySleep) : "never sleep")
+                              ? (ppage.p.steamBusy ? "Checking Steam power setting…" : "Couldn't reach Steam: " + ppage.p.steamError)
+                              : "Keeps the headset awake while charging so remote access, downloads, and background apps stay connected "
+                                + "(mirrors Steam Settings → Power → When Plugged In and Idle). The power button still sleeps the headset anytime. "
+                                + (ppage.p.acSleep > 0 ? "Currently set to sleep after " + root.duration(ppage.p.acSleep) + " while charging. " : "")
+                                + "On battery, Steam's battery sleep timer still applies ("
+                                + (ppage.p.batterySleep > 0 ? "sleeps after " + root.duration(ppage.p.batterySleep) : "never sleeps")
                                 + ")."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
@@ -1537,9 +1538,8 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "With the displays off, the headset keeps tracking and drawing, so it can wake the moment "
-                          + "it moves. It still uses most of its power, so leave it on a charger that keeps up with it "
-                          + "in use."
+                    text: "Tip: When only the displays are off, the headset stays active so it wakes instantly. It still draws "
+                          + "significant power, so keep it plugged into a strong charger if leaving it idle."
                 }
             }
         }

@@ -134,7 +134,7 @@ Kirigami.ApplicationWindow {
                     width: parent.width - Kirigami.Units.gridUnit * 2
                     visible: list.count === 0
                     text: "No settings match"
-                    explanation: "Try another word, such as mouse, screen or gaze."
+                    explanation: "Try another word, such as mouse, screen, or eye tracking."
                 }
             }
 

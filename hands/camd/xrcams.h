@@ -79,6 +79,17 @@ typedef struct {
 /* Scan XRService's descriptors and the media graph. Needs root. */
 bool     xr_discover(xr_state_t *st, const char *process, char *err, size_t errn);
 unsigned xr_camera_stride(const xr_camera_t *c);
+/*
+ * A camera's own queues are the ones bound to it whose planes hold `need` bytes of image.
+ * Whether it has one, and (exact, when not NULL) whether VIDIOC_QUERYBUF bound one.
+ */
+bool     xr_camera_owns(const xr_state_t *st, const xr_camera_t *cam, size_t need, bool *exact);
+/*
+ * Whether to look for the camera's frames in this queue: its own queues when it has any. The
+ * two upper cameras share one 32-buffer run, bound to only one of them, so a camera without
+ * its own gets every queue that fits and belongs to a camera of the same model.
+ */
+bool     xr_group_serves(const xr_state_t *st, const xr_group_t *g, const xr_camera_t *cam, size_t need);
 void     xr_camera_layout(const xr_camera_t *c, xr_layout_t *l);
 const char *xr_fmt_name(xr_fmt_t f);
 void     xr_print(const xr_state_t *st, FILE *f);

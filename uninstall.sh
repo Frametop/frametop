@@ -293,7 +293,7 @@ main() {
 
   # Rebuilt by the desktop at each start, so nothing to keep.
   run rm -rf "$HOME/.local/share/frametop/apps" "$HOME/.local/share/kwin/decorations/kwin4_decoration_qml_frametop" \
-    "$HOME/.cache/frametop" "$HOME/.cache/frametop-framedrop"
+    "$HOME/.cache/frametop" "$HOME/.cache/frametop-framedrop" "$HOME/.cache/frametop-installer"
 
   local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-tiles.txt" "$HOME/.config/frametop-remote"
                   "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream"
@@ -340,6 +340,11 @@ main() {
       echo "distrobox stays in ~/.local/bin, for any other containers. To remove it too:"
       echo "  ~/dev/src/distrobox/uninstall --prefix ~/.local"
     fi
+  fi
+
+  if command -v flatpak >/dev/null && flatpak info io.github.frametop.Installer >/dev/null 2>&1; then
+    echo "The Frametop Installer app stays, so you can install Frametop again. To remove it too:"
+    echo "  flatpak uninstall io.github.frametop.Installer"
   fi
 
   step "Done"

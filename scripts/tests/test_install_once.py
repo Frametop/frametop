@@ -270,6 +270,17 @@ class InstallOnce(unittest.TestCase):
         self.assertEqual(sorted(set(calls)), ["-A bash -c true"], calls)
         self.assertIn("setup/bluetooth/install.sh", self.steps())
 
+    def test_bluetooth_that_cant_install_doesnt_fail_the_install(self):
+        # The last step: its sudo fails when the Frametop Installer's window closed, or "Skip that
+        # part" was picked there. Everything else is installed by then.
+        self.release()
+        code, out = self.run_install(args=["--yes", "--bluetooth"], tty=False, SUDO_ASKPASS="/bin/false",
+                                     FAKE_FAIL="setup/bluetooth/install.sh")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Bluetooth fixes: not installed (above). Try again later with: "
+                      "setup/bluetooth/install.sh install", out)
+        self.assertIn("== Done", out)
+
     def test_the_installer_app_leaves_out_gaze_mode(self):
         """The Frametop Installer's install: --yes with the parts it unticked, sudo through askpass."""
         self.release()

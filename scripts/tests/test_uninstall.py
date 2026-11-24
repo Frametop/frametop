@@ -53,6 +53,8 @@ class Uninstall(unittest.TestCase):
         for name, pattern in (
                 ("FrameDrop's cache, with the rebuilt caches",
                  r'run rm -rf [^\n]*\\\n[^\n#]*"\$HOME/\.cache/frametop-framedrop"'),
+                ("the Frametop Installer's scripts, log and state, with the rebuilt caches",
+                 r'run rm -rf [^\n]*\\\n[^\n#]*"\$HOME/\.cache/frametop-installer"'),
                 ("the trial's saved files, with the settings",
                  r'local settings=\([^)#]*"\$HOME/\.local/state/frametop-trial"\)'),
                 ("the gaze bench's runs, with the recordings",

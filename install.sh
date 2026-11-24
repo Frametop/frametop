@@ -268,7 +268,7 @@ if [ "$FRAME_RELEASE" = 1 ]; then
 fi
 
 do_gaze=0
-if [ "$gaze" = 1 ] && ask "Install gaze mode? The pointer goes where you look; you turn it on and calibrate it in Frametop Settings, on the Gaze page." y; then
+if [ "$gaze" = 1 ] && ask "Install gaze mode? The pointer goes where you look; you turn it on and calibrate it in Frametop Settings, on the Eye tracking page." y; then
   do_gaze=1
 fi
 
@@ -507,9 +507,9 @@ if [ "$do_tracker" = 1 ]; then
     fi
     tracker=$(on_frame "sed -n 's/^GAZE_TRACKER=\([a-z]*\).*/\1/p' ~/.config/frametop.conf | tail -1")
     if [ "$tracker" = steam ]; then
-      echo "installed; your settings keep SteamVR's eye tracker (pick Own tracker on the Gaze page to use ours)"
+      echo "installed; your settings keep SteamVR's eye tracker (pick Own tracker on the Eye tracking page to use ours)"
     else
-      echo "gaze mode uses our eye tracker: calibrate it once, with Calibrate on the Gaze page"
+      echo "gaze mode uses our eye tracker: calibrate it once, with Calibrate on the Eye tracking page"
     fi
   else
     echo "our eye tracker didn't install, so gaze mode uses SteamVR's. Try again with: gaze/tracker/install.sh"
@@ -543,7 +543,8 @@ fi
 
 step "13/13 Bluetooth fixes (optional; they let LE mice and keyboards like the Swiftpoint Z3 reconnect)"
 if [ "$do_bt" = 1 ]; then
-  "$root/setup/bluetooth/install.sh" install
+  "$root/setup/bluetooth/install.sh" install ||
+    echo "Bluetooth fixes: not installed (above). Try again later with: setup/bluetooth/install.sh install"
 else
   echo "$bt_skip"
 fi

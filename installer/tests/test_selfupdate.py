@@ -88,13 +88,22 @@ class Check(unittest.TestCase):
         self.assertIsNone(selfupdate.check("0.3.0-exp.26", github(gh_release("v0.3.0"), [])))   # no release has one
         self.assertIsNone(selfupdate.check("0.3.0", github(gh_release("v0.3.1", bundle=False), [])))
 
-    def test_its_files_come_from_the_release_s_own_downloads_whatever_github_s_answer_says(self):
+    def test_its_files_come_from_the_tagged_release_whatever_the_answer_says(self):
         for base in ("https://example.com/dl/", "https://github.com/evil/x/releases/download/",
                      f"{DL}v0.3.0-exp.27/../../../../evil/x/releases/download/", "http://github.com/Frametop/frametop/releases/download/"):
             rel = gh_release("v0.3.0-exp.27", base=base)
             update = selfupdate.check("0.3.0-exp.26", github(gh_release("v0.3.0"), [rel]))
             self.assertEqual((update.url, update.sums_url), (f"{DL}v0.3.0-exp.27/FrametopInstaller.flatpak",
                                                              f"{DL}v0.3.0-exp.27/SHA256SUMS"), base)
+
+    def test_a_pulled_build_is_offered_the_stable_release_of_its_number(self):
+        # 0.3.0-exp.28 was pulled, and the newest release left with an installer is 0.3.0. The
+        # numbers can't say 0.3.0 is the older one, so it's offered: back to the last good one.
+        gh = github(gh_release("v0.3.0"), [gh_release("v0.3.0-exp.28", draft=True), gh_release("v0.3.0")])
+        self.assertEqual(selfupdate.check("0.3.0-exp.28", gh).version, "0.3.0")
+        # ...but never the build before it, which the numbers do show is older
+        gh = github(gh_release("v0.3.0"), [gh_release("v0.3.0-exp.28", draft=True), gh_release("v0.3.0-exp.27")])
+        self.assertIsNone(selfupdate.check("0.3.0-exp.28", gh))
 
     def test_github_out_of_reach_raises(self):
         def get(url):

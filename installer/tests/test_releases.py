@@ -120,7 +120,7 @@ class Pick(unittest.TestCase):
 
 
 class Order(unittest.TestCase):
-    def test_a_channel_s_newest_is_newer_unless_the_numbers_say_its_older(self):
+    def test_the_newest_release_is_newer_unless_the_numbers_say_its_older(self):
         for line in (["0.3.0-exp.2", "0.3.0-exp.10", "0.3.0-exp.26", "0.3.1-exp.27", "0.4.0-exp.1"],   # builds
                      ["0.2.2", "0.3.0", "0.3.1", "0.10.0"],                                            # stable
                      ["0.2.2", "0.3.0-exp.26", "0.3.1", "0.4.0-exp.1", "0.10.0"]):                     # both

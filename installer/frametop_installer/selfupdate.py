@@ -74,9 +74,10 @@ def check(own, get=releases.fetch, experimental=False):
     """The Update newer than version own, or None. experimental: the Frametop installed here is
     an experimental one, so the installer follows those releases whatever its own version.
     Raises OSError or ValueError when GitHub can't be read."""
-    if releases.version_key(own) is None:
+    key = releases.version_key(own)
+    if key is None:
         return None     # a local build: nothing to compare with
-    channel = "experimental" if experimental or "-" in own else "stable"
+    channel = "experimental" if experimental or key[1] is not None else "stable"
     rel = releases.pick(channel, get, having=BUNDLE) or {}
     tag = str(rel.get("tag_name", ""))
     version = tag[1:] if tag.startswith("v") else ""

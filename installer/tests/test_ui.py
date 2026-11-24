@@ -236,9 +236,11 @@ class Updates(unittest.TestCase):
 
     def test_update_installs_it_where_this_one_is_and_opens_the_new_one(self):
         win, seen = self.window()
+        self.patch(self.selfupdate, install=lambda path, where: seen.append(("install", path, where, win.busy)))
         win.look_for_installer_update(lambda: seen.append(("then",)))
         seen[-1][2]["Update"]()
-        self.assertEqual(seen[-4:], [("download", "0.3.0-exp.27"), ("install", "/c/FrametopInstaller.flatpak", "system"),
+        self.assertEqual(seen[-4:], [("download", "0.3.0-exp.27"),
+                                     ("install", "/c/FrametopInstaller.flatpak", "system", True),   # busy meanwhile
                                      ("reopen",), ("quit",)])
         self.assertFalse(win.busy)
 

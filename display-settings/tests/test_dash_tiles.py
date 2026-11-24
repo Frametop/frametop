@@ -110,6 +110,15 @@ class DashTiles(unittest.TestCase):
                                       "handsetting DASH_TILE_PX_PER_DEG 60", "handsetting DASH_TILE_WALL_DEG 150"])
         self.assertEqual((self.t.deskDeg, self.t.radius, self.t.pxPerDeg, self.t.wallDeg), (-20, 2.25, 60, 150))
 
+    def test_centre_display_its_own_curve(self):
+        self.assertEqual(self.t.centreCurveRadius, 0)   # (one arc all round)
+        self.t.setCentreCurveRadius(5.5)
+        self.assertIn("DASH_TILE_CENTRE_CURVE_M=5.5", self.conf())
+        self.assertEqual(self.t.centreCurveRadius, 5.5)
+        self.t.setCentreCurveRadius(0)
+        self.assertEqual(self.t.centreCurveRadius, 0)
+        self.assertEqual(self.asked, ["handsetting DASH_TILE_CENTRE_CURVE_M 5.5", "handsetting DASH_TILE_CENTRE_CURVE_M 0"])
+
     def test_clamped_to_the_range(self):
         self.t.setRadius(9)
         self.t.setPxPerDeg(1)
@@ -153,7 +162,7 @@ class DashTiles(unittest.TestCase):
                   "DASH_TILE_WALL_DEG": "wallDeg"}
         for key, (default, _lo, _hi) in dash_tiles.NUMBERS.items():
             if key not in fields:
-                continue   # (DASH_TILE_CURVE_M: 0, not set, isn't a tiling::Params field)
+                continue   # (the two curves: 0, not set, isn't a tiling::Params field)
             with self.subTest(key=key):
                 m = re.search(r"double %s = ([\d.-]+);" % fields[key], src)
                 self.assertIsNotNone(m, key)

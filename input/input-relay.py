@@ -177,7 +177,9 @@ the relay tells ft-screens to open ("vrkeyboard show") or close ("vrkeyboard hid
 keyboard, depending on "vr_keyboard" in the rules file: "always", "no_keyboard" (the
 default: only while no pass-through keyboard is connected; a program's uinput keyboard
 doesn't count), "button" (only the keyboard_toggle action opens it), or "never"
-(keyboard_toggle does nothing either). With "vr_keyboard_persist" (the default), it stays
+(keyboard_toggle does nothing either). A remote display's host never says when a text field
+there takes focus, so ft-screens says "remoteclick" for a click on one, and the relay treats it
+as a text field gaining focus (once per display while typing stays there). With "vr_keyboard_persist" (the default), it stays
 open when the text field loses focus, until its close button, keyboard_toggle, or a layout reset
 (ft-layout reset) closes it.
 
@@ -1598,8 +1600,9 @@ class Relay:
             return False  # ft-screens not running, or behind: the joystick then
         return True
 
-    def text_field(self, focused):
-        """A text field on the desktop gained or lost keyboard focus (the input method)."""
+    def text_field(self, focused, what="text field focused"):
+        """A text field on the desktop gained or lost keyboard focus (the input method), or a
+        click on a remote display stood in for one (what says which, for the log)."""
         mode = self.vr_keyboard_mode()
         if not focused:
             if not self.rules.get("vr_keyboard_persist", True):
@@ -1617,7 +1620,7 @@ class Relay:
         # For bug reports (scripts/report.sh): once per decision, again after 30 s.
         now = time.monotonic()
         if why != self.text_field_said or now - self.text_field_said_at > 30:
-            log(f"text field focused: {why}")
+            log(f"{what}: {why}")
             self.text_field_said, self.text_field_said_at = why, now
 
     def do_action(self, action, value, now, source="mouse"):
@@ -2533,6 +2536,12 @@ class Relay:
             if words[2:] != ["renew"]:
                 self.text_field(words[1] == "1")
             return
+        if cmd == "remoteclick" and len(words) == 1:
+            # From ft-screens: a click on a remote display, whose host never says when a text
+            # field takes focus. It opens the keyboard, so only from this user.
+            if uid == os.getuid():
+                self.text_field(True, "click on a remote display")
+            return
         if cmd in ("hostdev", "hostev", "hostbye"):
             # A host's keyboard or mouse, from its ft-stream (see "Host devices"). Keys and
             # clicks, so only from this user.
@@ -2612,6 +2621,14 @@ class Relay:
             if (uid == os.getuid() and len(words) in (3, 6) and words[1] in ("left", "right")
                     and words[2] in KB_POKES and all(KB_COORD.fullmatch(w) for w in words[3:])):
                 self.kb_tell(now, "kb poke " + " ".join(words[1:]))
+            return
+        if cmd == "kbturn":
+            # From the pointer helper (unbound): a two-hand turn of Full Keyboard while a ray carries it
+            # by its handle, "kbturn begin", "kbturn move" and twelve numbers (the rigid move since the
+            # begin), "kbturn end", passed on as "kb turn ...". Only from this user.
+            if uid == os.getuid() and (words[1:] in (["begin"], ["end"]) or (
+                    len(words) == 14 and words[1] == "move" and all(KB_COORD.fullmatch(w) for w in words[2:]))):
+                self.kb_tell(now, "kb turn " + " ".join(words[1:]))
             return
         if cmd == "calpanel" and len(words) == 2:
             # From the pointer helper (see the top). Only from this user: it takes Enter.

@@ -114,10 +114,14 @@ struct Screen {
     Mat dragRel = Identity();                 // device -> screen, while moving
     double grabX = 0, grabY = 0;              // resize: the grab point relative to the corner
     bool dragFacing = false;                  // move: kept facing the head (a hand ray carries it: HandRay)
+    Mat dragTurn = Identity();                // ...turned from facing the head by this (a two-hand turn, vrturn.cpp)
+    bool turning = false;                     // a two-hand turn is on (vrturn.cpp): it places the panel, not the carry
+    Mat turnFrom = Identity();                // ...the panel's pose when it began
     // The resize handle (Controls()[kResizePart], "<prefix>.resize"): one overlay, at the corner a laser, the gaze
     // or a hand aims at (UpdateCorner; the bottom right otherwise), brighter the closer the aim, lit
     // while resizing. Any corner resizes, the opposite one staying put.
-    int cornerX = 1, cornerY = -1;            // +1 right, top
+    int cornerX = 1, cornerY = -1;            // +1 right, top; one of them 0: that edge (the glow style's)
+    double resizeAlong = 0;                   // an edge's: where along it the laser is (m from the middle), for its glow
     float cornerGlow = 0;                     // the aim's closeness, 0..1
     bool cornerLit = false;                   // its texture lit (resizing)
     long cornerUntil = 0;                     // aimed at until this tick (then back to the bottom right)
@@ -154,6 +158,7 @@ struct Screen {
     hoverhaptics::Gate barBuzz;
     uint64_t resizePaintedVersion = 0;
     int resizePaintedX = 0, resizePaintedY = 0;
+    double resizePaintedArm = 0, resizePaintedOut = 0, resizePaintedAlong = 0;   // (the glow style's hit area: PaintResizeMask)
     int64_t resizeAnnouncedMs = 0;
     overlayregion::Region resizeRegion;
     std::string resizeRegionMessage;
@@ -495,6 +500,8 @@ void SteamDashShutdown();
 void ToggleCurve(Screen &s);
 void LevelScreen(Screen &s, int index, const char *by);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev);
+bool HandRay(uint32_t d);   // a hand ray drives our pointer device d
+void TurnWord(const char *words, char *reply, int size);   // the pointer helper's "turn ..." (vrturn.cpp)
 bool RollClick(const Screen &s);   // a roll pressed and let go, not turned: a click (levels it)
 void TogglePinView(Screen &s, int index, const char *by);
 void PlaceInRoom(Screen &s, int index, const char *by);   // off the dashboard, the head or a wrist
@@ -511,6 +518,13 @@ std::string DeviceLabel(vr::TrackedDeviceIndex_t dev);
 // The panel Frametop's Gamepad mode drives now, -1 none. It stays shown while the dashboard is
 // diminished (SteamVR 2.19), which otherwise hides the dashboard's panels.
 int PadPanel();
+
+// ---------------------------------------------------------------- vrkbspot.cpp's
+
+// dev's laser is on Full Keyboard's panel, before `behind` (an overlay it may also be on). SteamVR's own
+// laser goes through it (its keys take the pointer helper's pokes, not mouse events), so the panel behind
+// still hears the device.
+bool LaserOnFullKeyboard(vr::TrackedDeviceIndex_t dev, vr::VROverlayHandle_t behind);
 
 }  // namespace ftvr
 

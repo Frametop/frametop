@@ -46,6 +46,82 @@ inline overlayregion::Region LegacyTarget(int sx, int sy) {
     const double outX = sx > 0 ? 0.5 : 0, inX = sx > 0 ? 0 : 0.5, outY = sy > 0 ? 0.5 : 0;
     return {{false, outX, 0, 0.5, 1}, {false, inX, outY, 0.5, 0.5}};   // (v up: sy +1 is the top)
 }
+// The glow style's hit area is the glow itself, outside the panel only (user, 2026-11-21: "the hitbox
+// on the outside corner of the display is too small and doesn't actually match the glow, the hitbox
+// should be the size of the glow but not be inside the display"): at a corner, the glow's L, `out`
+// deep past each edge and `arm` along it; at an edge (sx or sy 0: "if we approach an edge of a display
+// there should be a glow around where the pointer is that allows us to just increase the size on that
+// axis"), a band `out` deep along the whole edge. Panel metres: x right, y up, from its centre.
+inline double GlowArm(double width, double height) { return std::clamp(0.25 * std::min(width, height), 0.03, 0.10); }
+// A corner's glow, and so its hit area, is that much deeper and longer than an edge's band (user, 2026-11-21:
+// "make the grab corner glow a little bit larger so it's easier to grab").
+constexpr double kCornerGrow = 1.3;
+inline double CornerOut(double out) { return out * kCornerGrow; }
+inline double CornerArm(double arm) { return arm * kCornerGrow; }
+// cornerOut below: a corner's depth, when not CornerOut(out) (a tiled panel's, capped by the gap like its
+// edges': ft-screens' LegacyCorner); negative for CornerOut(out).
+inline double CornerDepth(double out, double cornerOut) { return cornerOut >= 0 ? cornerOut : CornerOut(out); }
+// The hit canvas's side, square, centred on the corner or the edge's middle.
+inline double GlowCanvas(int sx, int sy, double width, double height, double arm, double out, double cornerOut = -1) {
+    return sx && sy ? 2 * std::max(CornerArm(arm), CornerDepth(out, cornerOut)) : (sx ? height : width) + 2 * out;
+}
+inline overlayregion::Region GlowRegion(int sx, int sy, double width, double height, double arm, double out,
+                                        double cornerOut = -1) {
+    const double size = GlowCanvas(sx, sy, width, height, arm, out, cornerOut), cx = sx * width / 2, cy = sy * height / 2;
+    overlayregion::Region region;
+    auto rect = [&](double x0, double x1, double y0, double y1) {   // (panel metres, either order)
+        region.push_back({false, 0.5 + (std::min(x0, x1) - cx) / size, 0.5 + (std::min(y0, y1) - cy) / size,
+                          std::fabs(x1 - x0) / size, std::fabs(y1 - y0) / size});
+    };
+    const double w = width / 2, h = height / 2;
+    if (sx && sy) {
+        const double ca = CornerArm(arm), co = CornerDepth(out, cornerOut);
+        rect(sx * w, sx * (w + co), sy * (h - ca), sy * (h + co));
+        rect(sx * (w - ca), sx * (w + co), sy * h, sy * (h + co));
+    } else if (sx) {
+        rect(sx * w, sx * (w + out), -h, h);
+    } else {
+        rect(-w, w, sy * h, sy * (h + out));
+    }
+    return region;
+}
+// Whether panel point x, y is on a glow hit area, and which: a corner's first (its L, CornerOut deep, runs
+// CornerArm along each edge), else an edge's (`out` deep). Never on the panel itself.
+inline bool GlowHit(double width, double height, double arm, double out, double x, double y, int *sx, int *sy,
+                    double cornerOut = -1) {
+    const double ox = std::fabs(x) - width / 2, oy = std::fabs(y) - height / 2, ca = CornerArm(arm),
+                 co = CornerDepth(out, cornerOut);
+    const int ux = x < 0 ? -1 : 1, uy = y < 0 ? -1 : 1;
+    if ((ox >= 0 && ox <= co && oy >= -ca && oy <= co) || (oy >= 0 && oy <= co && ox >= -ca && ox <= co)) *sx = ux, *sy = uy;
+    else if (ox >= 0 && ox <= out && oy < 0) *sx = ux, *sy = 0;
+    else if (oy >= 0 && oy <= out && ox < 0) *sx = 0, *sy = uy;
+    else return false;
+    return true;
+}
+// Coming up to an edge from inside the panel, within half the band's depth of it: the nearest edge
+// and how close (0..kEdgeNear at the edge), a faint glow there before the pointer is off the panel.
+constexpr double kEdgeNear = 0.35;
+inline double EdgeNear(double width, double height, double out, double x, double y, int *sx, int *sy) {
+    const double ix = width / 2 - std::fabs(x), iy = height / 2 - std::fabs(y), reach = out / 2;
+    if (ix < 0 || iy < 0 || reach <= 0) return 0;
+    const bool side = ix <= iy;
+    const double d = side ? ix : iy;
+    if (d >= reach) return 0;
+    *sx = side ? (x < 0 ? -1 : 1) : 0, *sy = side ? 0 : (y < 0 ? -1 : 1);
+    return kEdgeNear * (1 - d / reach);
+}
+// A screen resized by one edge (its aspect kept): the edge grabbed goes to cu (sx) or cv (sy), the
+// opposite edge stays, the panel grows evenly about its middle the other way. Its new width, and its
+// centre's move (u, v), as ResizeFromCorner's.
+inline double ResizeFromEdge(double width, double aspect, int sx, int sy, double cu, double cv, double minW, double maxW,
+                             double *u, double *v) {
+    double w = width;
+    if (sx) w = sx * cu + width / 2;
+    else if (sy && aspect > 0) w = (sy * cv + aspect * width / 2) / aspect;
+    w = std::clamp(w, minW, maxW);
+    *u = sx * (w - width) / 2, *v = sy * aspect * (w - width) / 2;
+    return w;
+}
 inline double LegacyZone(double width, double height) { return std::clamp(0.2 * std::min(width, height), 0.05, 0.2); }
 inline double LegacyCloseness(double distance, double grip, double width, double height) {
     const double size = LegacySize(grip), zone = LegacyZone(width, height);

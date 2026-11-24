@@ -101,13 +101,28 @@ class TouchTest(unittest.TestCase):
         self.touch.poke(0.0, self.centre_words("right", "press"), self.GEOMETRY)
         self.touch.poke(0.1, self.centre_words("right", "up"), self.GEOMETRY)
         ops = [(op, f.get("phase")) for op, f in self.sent]
-        self.assertEqual(ops, [("pointer_mode", None), ("pointer", "move"), ("pointer", "down"), ("pointer", "up")])
+        self.assertEqual(ops, [("pointer_mode", None), ("pointer", "move"), ("pointer", "down"), ("pointer", "up"),
+                               ("pointer_mode", None)])
         self.assertEqual(self.sent[0][1], {"mode": "forwarded"})
         self.assertAlmostEqual(self.sent[2][1]["u"], 0.5, places=3)
+        self.assertEqual(self.sent[-1], ("pointer_mode", {"mode": "native"}))   # its X acts now
+
+    def test_a_hover_forwards_then_goes_native_when_idle(self):
+        self.touch.poke(0.0, self.centre_words("right", "hover"), self.GEOMETRY)
         self.touch.tick(0.5)
-        self.assertEqual(len(self.sent), 4)   # not yet idle
-        self.touch.tick(0.1 + 0.6)
+        self.assertEqual(self.sent[-1][0], "pointer")   # not yet idle
+        self.touch.tick(0.6)
         self.assertEqual(self.sent[-1], ("pointer_mode", {"mode": "native"}))
+
+    def test_a_release_stays_forwarded_while_the_other_hand_presses(self):
+        self.touch.poke(0.0, self.centre_words("left", "press"), self.GEOMETRY)
+        self.touch.poke(0.0, self.centre_words("right", "press"), self.GEOMETRY)
+        self.touch.poke(0.1, self.centre_words("right", "up"), self.GEOMETRY)
+        self.assertNotIn(("pointer_mode", {"mode": "native"}), self.sent)
+        self.touch.poke(0.2, self.centre_words("left", "up"), self.GEOMETRY)
+        self.assertEqual(self.sent[-1], ("pointer_mode", {"mode": "native"}))
+        self.touch.poke(0.3, self.centre_words("left", "press"), self.GEOMETRY)   # the next tap forwards again
+        self.assertIn(("pointer", {"hand": "left", "phase": "down", "u": 0.5, "v": 0.5}), self.sent[-3:])
 
     def test_a_stuck_press_is_cancelled(self):
         self.touch.poke(0.0, self.centre_words("left", "press"), self.GEOMETRY)
@@ -132,6 +147,96 @@ class TouchTest(unittest.TestCase):
         self.touch.poke(0.0, ["middle", "press", "0", "0", "0"], self.GEOMETRY)
         self.touch.poke(0.0, ["right", "press", "x", "0", "0"], self.GEOMETRY)
         self.assertEqual(self.sent, [])
+
+
+class HandleTest(unittest.TestCase):
+    PANEL = placement.spot("head", IDENTITY, 0.6, 0.25)
+    GEOMETRY = (PANEL, 0.6, 0.25, 0.772)   # the case ends 77% down
+
+    def setUp(self):
+        self.sent = []
+        self.touch = Touch(lambda op, **f: self.sent.append((op, f)))
+
+    def at(self, side, verb, local_x, local_y, along=0.0):
+        """A poke at a panel-local point (m), `along` off the panel's face."""
+        m = self.PANEL
+        p = [m[r][3] + m[r][0] * local_x + m[r][1] * local_y + m[r][2] * along for r in range(3)]
+        return [side, verb, *(f"{x:.4f}" for x in p)]
+
+    def test_the_strip_under_the_case_drags_the_panel_in_its_plane(self):
+        y = 0.25 * (0.5 - 0.9)   # v = 0.9: under the case
+        self.touch.poke(0.0, self.at("right", "hover", 0.0, y), self.GEOMETRY)
+        self.assertEqual(self.sent, [])   # not forwarded: the keyboard's line stays shown
+        self.touch.poke(0.1, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.poke(0.2, self.at("right", "move", 0.10, y + 0.05, along=0.03), self.GEOMETRY)
+        self.touch.poke(0.3, self.at("right", "up", 0.10, y + 0.05), self.GEOMETRY)
+        poses = [f["matrix"] for op, f in self.sent if op == "set_pose"]
+        self.assertEqual(len(poses), 2)
+        want = [self.PANEL[r][3] + self.PANEL[r][0] * 0.10 + self.PANEL[r][1] * 0.05 for r in range(3)]
+        for r in range(3):
+            self.assertAlmostEqual(poses[-1][r][3], want[r], places=3)   # off the face doesn't count
+            self.assertEqual(poses[-1][r][:3], self.PANEL[r][:3])        # it only slides
+        self.assertNotIn("pointer", [op for op, _ in self.sent])
+        self.touch.poke(0.4, self.at("right", "press", 0.0, 0.0), self.GEOMETRY)   # a key, after
+        self.assertEqual(self.sent[-1][1]["phase"], "down")
+
+    def test_a_two_hand_turn_turns_it_and_the_slide_goes_on_from_there(self):
+        y = 0.25 * (0.5 - 0.9)
+        self.touch.poke(0.0, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.turn(0.1, ["begin"])
+        c, s_ = math.cos(0.3), math.sin(0.3)
+        p = [self.PANEL[r][3] for r in range(3)]
+        # a yaw of 0.3 rad (about its own centre) and 5 cm up
+        rot = [[c, 0.0, s_], [0.0, 1.0, 0.0], [-s_, 0.0, c]]
+        t = [0.0, 0.05, 0.0]
+        move = ["move"] + [f"{v:.5f}" for r in range(3) for v in (*rot[r], t[r])]
+        self.touch.turn(0.2, move)
+        turned = [f["matrix"] for op, f in self.sent if op == "set_pose"][-1]
+        for r in range(3):
+            self.assertAlmostEqual(turned[r][3], p[r] + t[r], places=4)   # about its centre, then moved
+        self.assertAlmostEqual(turned[0][0], sum(rot[0][k] * self.PANEL[k][0] for k in range(3)), places=4)
+        n = len(self.sent)
+        self.touch.poke(0.25, self.at("right", "move", 0.2, y), self.GEOMETRY)   # the carry waits meanwhile
+        self.assertEqual(len(self.sent), n)
+        self.touch.turn(0.3, ["end"])
+        self.touch.poke(0.4, self.at("right", "move", 0.3, y), self.GEOMETRY)    # from here: no jump
+        after = [f["matrix"] for op, f in self.sent if op == "set_pose"][-1]
+        for r in range(3):
+            self.assertAlmostEqual(after[r][3], turned[r][3], places=4)
+
+    def test_a_turn_without_a_handle_drag_does_nothing(self):
+        self.touch.turn(0.0, ["begin"])
+        self.touch.turn(0.1, ["move"] + ["0"] * 12)
+        self.assertEqual(self.sent, [])
+
+    def test_a_hide_or_a_lost_up_ends_a_handle_drag(self):
+        y = 0.25 * (0.5 - 0.9)
+        self.touch.poke(0.0, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.hidden()
+        self.touch.turn(0.1, ["begin"])
+        self.touch.turn(0.2, ["move"] + ["1", "0", "0", "0", "0", "1", "0", "0", "0", "0", "1", "0.1"])
+        self.assertNotIn("set_pose", [op for op, _ in self.sent])
+        self.touch.poke(1.0, self.at("right", "press", 0.0, y), self.GEOMETRY)
+        self.touch.tick(1.0 + 3.0)   # its up never came
+        self.touch.turn(4.1, ["begin"])
+        self.touch.turn(4.2, ["move"] + ["1", "0", "0", "0", "0", "1", "0", "0", "0", "0", "1", "0.1"])
+        self.assertNotIn("set_pose", [op for op, _ in self.sent])
+
+    def test_a_press_just_past_the_edge_is_neither_a_key_nor_clamped_onto_one(self):
+        self.touch.poke(0.0, self.at("right", "press", 0.0, -0.125 - 0.01), self.GEOMETRY)   # 1 cm below
+        downs = [f for op, f in self.sent if op == "pointer" and f.get("phase") == "down"]
+        self.assertTrue(all(f["v"] > 1.0 for f in downs))
+        self.assertEqual(self.touch.drags, {})
+
+    def test_a_key_press_sliding_onto_the_strip_stays_the_keys(self):
+        self.touch.poke(0.0, self.at("left", "press", 0.0, 0.0), self.GEOMETRY)
+        self.touch.poke(0.1, self.at("left", "move", 0.0, 0.25 * (0.5 - 0.9)), self.GEOMETRY)
+        self.assertEqual(self.sent[-1][1].get("phase"), "move")
+        self.assertNotIn("set_pose", [op for op, _ in self.sent])
+
+    def test_without_the_case_bottom_there_is_no_handle(self):
+        self.touch.poke(0.0, self.at("right", "press", 0.0, 0.25 * (0.5 - 0.9)), self.GEOMETRY[:3])
+        self.assertEqual(self.sent[-1][1].get("phase"), "down")
 
 
 class RelayLinkTest(unittest.TestCase):

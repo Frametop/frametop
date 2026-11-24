@@ -114,6 +114,16 @@
 // below) on the page starts within SETTINGS_ORIGIN of the hand, not most of the way to the panel
 // behind, and only SteamVR's hit dot shows. Everywhere else nothing changes.
 //
+// SteamVR's system prompts (Setup Playspace and the like) are drawn by system.systemui, which
+// OpenVR reports as a floor-sized horizontal plane (2.4 km wide on the Frame): the ray met that
+// "floor" metres past the prompt and the laser started there, so the prompt took no clicks (user,
+// 2026-11-21: "I still can't use the frametop 3d mouse to interact with the setup play space
+// prompt"). It's left out of the hit test (kSystemUi); it stays shown after the prompt closes, so
+// it says nothing about a prompt being up. Off our panels in a VR game (rayToGame: SteamVR's laser
+// mode off, see "laser mode" in the main loop) the device is placed as on the Settings page: its
+// pose starts near the eye or the hand, as a controller's does, so SteamVR's own laser on a prompt
+// that has taken the input, and the game's on its world, both start in front of what they aim at.
+//
 // Panel edges: off a panel, the cursor stays on that panel's plane while it's within
 // POINTER_EDGE_REACH (0.3 m) of the last point it touched, instead of jumping to
 // the free sphere. A floating panel's resize margins and the window controls under it
@@ -588,6 +598,8 @@
 #include "handoff.h"
 #include "hanging.h"
 #include "handsin.h"
+#include "kbray.h"
+#include "twohand.h"
 #include "rayowner.h"
 #include "typing.h"
 #include "vrbuttons.h"
@@ -985,12 +997,15 @@ Vec3 LimitPitch(Vec3 d, double maxDeg) {
 
 // SteamVR Settings page (see the top): the laser starts this far from the eye, the dot is
 // drawn this far out, and the laser-catching dot sits this far out (metres).
+// SteamVR's system prompts' overlay (see "SteamVR's system prompts" at the top).
+constexpr const char *kSystemUi = "system.systemui";
 constexpr double SETTINGS_ORIGIN = 0.25, SETTINGS_DOT = 0.6, SETTINGS_CATCHER = 8.0;
 constexpr float kGoneWidthM = 1e-3f;   // a panel narrower: hidden (see "Scene-graph overlays" at the top)
 // A touch's grab hovers this long before it presses (a floating panel's grab bar comes up under the
 // laser), and after a release the laser holds still this long (see "Touch" at the top).
 constexpr auto kTouchHover = std::chrono::milliseconds(120), kTouchDrop = std::chrono::milliseconds(250);
 // The headset counts as off after SteamVR has said idle this long (see the main loop).
+constexpr auto kGameLaserHold = std::chrono::milliseconds(300);   // see "Laser mode on while..."
 constexpr auto HEADSET_OFF_AFTER = std::chrono::milliseconds(1500);
 // Gaze owns the pointer (see the top): a gaze this fresh takes it back, the hand this long away
 // from a panel, a controller this long after it let it go (without hand tracking's handoff),
@@ -1239,6 +1254,13 @@ struct Pointer {
     bool gazeMousePrecision = true;
     bool gazeMouseHeld = true;  // POINTER_GAZE_MOUSE_MOVE (see the top)
     std::string role = "treadmill";
+    std::string roleSent;   // the role the driver was last told (POINTER_ROLE, or a hand in a game)
+    // In a VR game the pointer is a hand: games bind only hands, and a treadmill gets nothing (user,
+    // 2026-11-21: "I can't interact with the game with the 3d mouse"). The right one, whatever
+    // POINTER_ROLE says, as ft_pointer_remapping.json binds only the right; outside games POINTER_ROLE
+    // again. (SteamVR takes a treadmill hint back at runtime; the driver gives a hand up while hidden,
+    // so a controller keeps its role then.)
+    std::string RoleNow() const { return !inGame || dashboardUp ? role : "right"; }
     double pickupScale = 1;  // POINTER_CONTROLLER_PICKUP: scales the controller-moved limits
     std::vector<std::string> ignore;  // POINTER_IGNORE (see ParseIgnore)
     float laserWidth = 0;
@@ -1255,6 +1277,7 @@ struct Pointer {
     std::vector<uint8_t> clear;
     vr::HmdMatrix34_t below{};
     bool laserModeShown = false;
+    Clock::time_point laserPanelAt{};   // the ray was last on a panel (or dragging one) then
     DotOverlay cursorDot, markerDot;  // the setters for `cursor` and `marker` (see "Unchanged frames" at the top)
     int in = -1;
     int out = -1;
@@ -1285,7 +1308,7 @@ struct Pointer {
     PoseSent posed;  // the last plain "pose" (devpose.h)
     // lastMouse: any mouse word from the relay (a release, its own pulses too: mayPoint's idle second);
     // lastUsed: a real use (a move, a press, a scroll step, a key at the gaze): last used wins (PickRayOwner).
-    Clock::time_point lastMouse{}, lastUsed{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, noWakeUntil{};
+    Clock::time_point lastMouse{}, lastUsed{}, lastRayPinch{}, claimAt{}, claimRelease{}, wokeAt{}, roleAt{}, noWakeUntil{};
     // Gaze owns the pointer (see the top): a controller last let it go then; a hand was last at a
     // panel then (ft-screens' near claim); the gaze last took it back then.
     Clock::time_point controllerTookAt{}, nearBusyAt{}, gazeWokeAt{};
@@ -1306,11 +1329,27 @@ struct Pointer {
     double tiltYaw = 0, tiltPitch = 0;
     double dragDistance = 0, lastDistance = 1.5;  // drag lock: distance from the anchor at the press
     double panelDepth = 0;  // the last panel hit's distance: the free sphere's radius (see the top)
-    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page (kept while dragging)
+    bool onVrSettings = false;  // the cursor is on the SteamVR Settings page, or the ray is a game's (kept while dragging)
+    bool rayToGame = false;     // in a VR game, off our panels: SteamVR's laser mode off (main loop)
     bool catcherHidesHit = false;  // the laser-catching dot hides SteamVR's hit dot (Settings page)
     Clock::time_point dropHoldUntil{};  // after a left release: keep the drag pose this long
     bool debug = false;
     std::string lastHit;
+    // The ray on Full Keyboard's panel, as fingertips' pokes to the relay (see kbray.h): it takes
+    // no SteamVR laser outside the dashboard.
+    kbray::Forward kbRay;
+    const char *kbSide() const { return fr.rayMode && raySide >= 0 ? rayown::SideName(raySide) : "right"; }
+    void kbSend(const std::string &lines) {
+        for (size_t at = 0; at < lines.size();) {
+            const size_t nl = std::min(lines.find('\n', at), lines.size());
+            if (nl > at) SendTo(out, FT_SOCK_RELAY, lines.substr(at, nl - at));
+            at = nl + 1;
+        }
+    }
+    // The two-hand turn (twohand.h): the other hand's pinch while a ray's press carries a panel turns it,
+    // to ft-screens ("turn") or, carrying Full Keyboard, to kbhost through the relay ("kbturn"). Each
+    // owner applies it only to a panel it is carrying by its bar or handle.
+    twohand::Session turning;
     // The ft-screens panel the left button was pressed on, and where it was then (see the top).
     std::string pressKey;
     vr::HmdMatrix34_t pressPose{};
@@ -1578,7 +1617,8 @@ struct Pointer {
         // Overlay handles and visibility weren't looked at while it was off (see "Idle" at the top).
         lastSlow = lastVisible = t - std::chrono::seconds(10);
         pass.valid = posed.valid = false;
-        SendTo(out, FT_SOCK_POINTER, "role " + role);  // POINTER_ROLE, before it takes it
+        roleSent = RoleNow();
+        SendTo(out, FT_SOCK_POINTER, "role " + roleSent);  // POINTER_ROLE (or a game's hand), before it takes it
         SendTo(out, FT_SOCK_POINTER, "show");
         claimPending = true;  // take the laser without clicking, once SteamVR has bound the device
         claimAt = t + std::chrono::milliseconds(300);
@@ -1722,6 +1762,12 @@ struct Pointer {
         pulseAt = Clock::now();
         heldButton = pressRight ? "b" : "trigger";
         pressRight = false;
+        std::string kb;
+        if (kbRay.Press(secsOf(Clock::now()), lastHit == kbray::kPanel && !onVrSettings && havePoint,
+                        {lastPoint.x, lastPoint.y, lastPoint.z}, kbSide(), &kb)) {
+            kbSend(kb);   // Full Keyboard's press, not SteamVR's laser's
+            return;
+        }
         SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 1");
     }
     auto releaseLeft() {
@@ -1729,7 +1775,9 @@ struct Pointer {
         tilting = false;
         // Hold the drag pose (tilt, frozen distance) while SteamVR finishes the drop.
         dropHoldUntil = Clock::now() + std::chrono::milliseconds(500);
-        SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 0");
+        std::string kb;
+        if (kbRay.Release(secsOf(Clock::now()), &kb)) kbSend(kb);
+        else SendTo(out, FT_SOCK_POINTER, "btn " + heldButton + " 0");
         // ft-screens releases a button held on its screens in KWin even when SteamVR hands
         // the release to some other overlay (its catcher usually gets it; this is the backstop).
         SendTo(out, FT_SOCK_SCREENS, "up");
@@ -2244,6 +2292,37 @@ struct Pointer {
         const double keep = gazeScrollGap + 0.01;
         return (sideGap[side][0] >= 0 && sideGap[side][0] < keep) || (sideGap[side][1] >= 0 && sideGap[side][1] < keep);
     }
+    // The two-hand turn (twohand.h, the state above): begun by the other hand's pinch, ended by either.
+    auto turnSend(const std::string &what) {
+        if (what.empty()) return;
+        if (turning.Keyboard()) SendTo(out, FT_SOCK_RELAY, "kbturn " + what);
+        else SendTo(out, FT_SOCK_SCREENS, "turn " + what);
+    }
+    auto beginTurn(int side) {
+        handUsed = fr.tnow;
+        turning.Begin(side, kbRay.Pressed());
+        pinchLog(side, 0, std::string("turns what the other hand's ray carries (") +
+                              (turning.Keyboard() ? "Full Keyboard" : "a panel") + "), while both pinches hold");
+    }
+    auto endTurn(const char *why) {
+        if (!turning.On()) return;
+        turnSend(turning.End());
+        if (debug) std::printf("two-hand turn ended: %s\n", why);
+    }
+    auto roomHand(int side) -> const hin::RoomHand * {
+        for (const hin::RoomHand &c : handsRoom.hands)
+            if (c.side == side) return &c;
+        return nullptr;
+    }
+    // Each new hands frame while turning: the move since the begin, from both hands' pinch points and palms.
+    auto steerTurn() {
+        if (!turning.On()) return;
+        if (hold.src != Src::Ray || !hold.pressed || hold.side == turning.Side()) return endTurn("the carry ended");
+        const hin::RoomHand *a = roomHand(hold.side), *b = roomHand(turning.Side());
+        if (!a || !b) return;
+        turnSend(turning.Step(handsRoom.capture_ns, {a->knuckle, a->palmNormal}, {b->knuckle, b->palmNormal}, dragDistance,
+                              anchor));
+    }
     // A ray pinch (see "Hand ray" at the top). side: the gesture's; rs: the ray's (the one that follows
     // the pinching hand). The aim is locked where the ray pointed just before the fingers began to
     // close (rayowner.h), and the dead zone counts from the ray now.
@@ -2312,6 +2391,7 @@ struct Pointer {
     }
     // A ray pinch ended (lost: by losing the hand, a grip, or the ray; why says which).
     auto endRayHold(bool lost, const char *why) {
+        endTurn(why);
         const int side = hold.side, kind = hold.rayKind;
         if (!lost && !hold.pressed && !hold.rayThree && (kind == 0 || !hold.scrolling)) {
             // a tap before its press went out (or a middle tap): it clicks once the press can go
@@ -2507,7 +2587,16 @@ struct Pointer {
         PlaceDots(const Vec3 &dir, const Vec3 &point, const Vec3 &sight, bool onPanel, bool onScene, bool typingQuiet);
     Hit nearest(Vec3 from, Vec3 d);
     bool OnVrSettingsPage(const Vec3 &from, const Vec3 &d);
+    void AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t);
     bool HitsAtOrigin(vr::VROverlayHandle_t h);
+    // Where the line from `from` along `d` (standing universe) meets overlay h, if it does.
+    bool Cast(vr::VROverlayHandle_t h, const Vec3 &from, const Vec3 &d, vr::VROverlayIntersectionResults_t *r) {
+        vr::VROverlayIntersectionParams_t params{};
+        params.vSource = {float(from.x), float(from.y), float(from.z)};
+        params.vDirection = {float(d.x), float(d.y), float(d.z)};
+        params.eOrigin = vr::TrackingUniverseStanding;
+        return overlay->ComputeOverlayIntersection(h, &params, r);
+    }
 };
 
 // Setup, once: the settings, SteamVR, the overlays and sockets.
@@ -3116,17 +3205,38 @@ void Pointer::OverlaysAndRole() {
         ++steamListSeq;
     }
 
-    // Laser mode on while the pointer is awake.
-    if (active != laserModeShown) {
-        laserModeShown = active;
-        if (active) overlay->ShowOverlay(laserMode);
+    if (active && !leftHeld && RoleNow() != roleSent) {
+        roleSent = RoleNow();
+        roleAt = fr.tnow;
+        SendTo(out, FT_SOCK_POINTER, "role " + roleSent);
+        if (debug) std::printf("role %s\n", roleSent.c_str());
+    }
+
+    // Laser mode on while the pointer is awake, except over a VR game's world: SteamVR's laser mouse
+    // takes the game's focus (OpenXR VISIBLE, no input), so there the pointer is the game's right
+    // controller instead (ft_pointer_remapping.json: its trigger and aim). Back on a panel it's
+    // forced on again, and kept for kGameLaserHold after leaving one so a ray along a panel's edge
+    // doesn't flip the game's focus every frame (user, 2026-11-21: "when in VR games the 3d mouse
+    // and hand tracking lasers don't interact at all").
+    // (A game's own OpenXR layers, its menus, are the game's: SteamVR's laser on them took its focus,
+    // which hid them, which let it go, five times a second.)
+    if (!lastHit.empty() && lastHit.rfind("openxr_", 0) != 0) laserPanelAt = fr.tnow;
+    const bool toGame = inGame && !dashboardUp && fr.tnow - laserPanelAt > kGameLaserHold;
+    rayToGame = active && toGame;
+    const bool laserOn = active && (leftHeld ? laserModeShown : !toGame);   // (a held press stays whoever's took it)
+    if (laserOn != laserModeShown) {
+        laserModeShown = laserOn;
+        if (laserOn) overlay->ShowOverlay(laserMode);
         else overlay->HideOverlay(laserMode);
-        if (debug) std::printf("laser mode %s\n", active ? "forced on" : "released");
+        if (debug)
+            std::printf("laser mode %s (ray on %s)\n", laserOn ? "forced on" : active ? "off: the game's" : "released",
+                        lastHit.empty() ? "-" : lastHit.c_str());
     }
 
     // Didn't get the hand role (a held controller keeps it): release, back off. Not as a treadmill,
-    // which has no controller role at all (see POINTER_ROLE at the top): its hint says so.
-    if (active && fr.tnow - wokeAt > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
+    // which has no controller role at all (see POINTER_ROLE at the top): its hint says so. A second
+    // after waking, or after a new role (a treadmill's on entering a game becomes the right hand's).
+    if (active && fr.tnow - std::max(wokeAt, roleAt) > std::chrono::seconds(1) && ours != vr::k_unTrackedDeviceIndexInvalid &&
         sys->GetControllerRoleForTrackedDeviceIndex(ours) == vr::TrackedControllerRole_Invalid &&
         sys->GetInt32TrackedDeviceProperty(ours, vr::Prop_ControllerRoleHint_Int32) !=
             vr::TrackedControllerRole_Treadmill) {
@@ -3481,12 +3591,8 @@ bool Pointer::FingerAtOverlay(const hin::RoomHand &hand) {
     const Vec3 tip = hand.pts[8], fd = Normalize(hand.pts[8] - hand.pts[7]), from = tip - fd * 0.2;
     for (const auto &[key, handle] : handles) {
         if (!visible[key] || sceneGraph[key]) continue;
-        vr::VROverlayIntersectionParams_t params{};
-        params.vSource = {float(from.x), float(from.y), float(from.z)};
-        params.vDirection = {float(fd.x), float(fd.y), float(fd.z)};
-        params.eOrigin = vr::TrackingUniverseStanding;
         vr::VROverlayIntersectionResults_t r{};
-        if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance < 0.25f)
+        if (Cast(handle, from, fd, &r) && r.fDistance < 0.25f)
             return true;
     }
     return false;
@@ -3766,6 +3872,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             const bool lost = g.flags & FH_PINCH_LOST;
             seenBegins[k][s] = g.begins, seenEnds[k][s] = g.ends;
             if (hold.second == s && hold.secondKind == k && ended) hold.second = -1;   // the two-hand press's other pinch let go
+            if (turning.Side() == s && k == 0 && ended) endTurn("its pinch let go");          // (the carry goes on)
             if (holdingKind(s, k) && ended) {   // the one held ended (another may have begun)
                 const int other = k == 0 ? 2 : k == 2 ? 0 : -1;
                 if (hold.gazeScroll && other >= 0 && (slots[other][s].flags & FH_PINCH_DOWN)) {
@@ -3797,6 +3904,13 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
             }
             if (!allowed) {
                 if (k != 1) pinchLog(s, k, "ignored (hands not allowed: a VR game, or the headset off)");
+                continue;
+            }
+            // The other hand's pinch while a ray's press carries something: a two-hand turn (twohand.h).
+            if (k == 0 && !turning.On() && hold.src == Src::Ray && hold.pressed && hold.side != s && hold.rayKind == 0 &&
+                !hold.rayThree) {
+                beginTurn(s);
+                if (!(g.flags & FH_PINCH_DOWN)) endTurn("a tap");
                 continue;
             }
             // Not by a hand typing holds back (see "Typing" at the top).
@@ -3844,6 +3958,7 @@ void Pointer::GestureEdges(const fh_pinch_t *const slots[3], bool allowed, bool 
 }
 
 void Pointer::SteerHolds() {
+    steerTurn();
     // The held gesture's hand moves the pointer: past the dead zone (a tap's jitter,
     // the pinch point shifting as the fingers close), then at the gain, from there.
     if (hold.src == Src::Hand) {
@@ -4223,7 +4338,9 @@ void Pointer::AimAndPose() {
     const bool onPanel = dragging || (t.best < 1e8 && !onScene);
     const Vec3 sight = Normalize(t.point - fr.eye);
     // the eye's line of sight to the cursor, or a hand's ray from the hand
-    if (!dragging && !reuse) onVrSettings = fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight);
+    if (!dragging && !reuse)
+        onVrSettings = (fr.rayMode ? OnVrSettingsPage(anchor, dir) : OnVrSettingsPage(fr.eye, sight)) ||
+                       (rayToGame && ((!onPanel && !onScene) || t.key.rfind("openxr_", 0) == 0));   // (a game's menu layer, or near one, is the game's)
     if (!reuse) pass = {!dragging, fr.tnow, visibleGen, yaw, pitch, anchor, fr.eye,
                         t.best, t.distance, t.key, t.scene, t.onEdge, t.occluded, t.point};
     if (onVrSettings != catcherHidesHit) {
@@ -4259,6 +4376,7 @@ void Pointer::AimAndPose() {
     const Vec3 eyeRaw = Position(R) + Rotate(R, RotateInverse(S, originStanding - fr.eye));
     lastPoint = t.point, lastOrigin = originStanding, lastAim = aimStanding;  // tilt starts from here
     havePoint = true;
+    AimKeyboard(dragging, onScene, dir, t);
     if (debug && fr.tnow - lastDebug > std::chrono::milliseconds(500)) {
         lastDebug = fr.tnow;
         if (systemPointer == vr::k_ulOverlayHandleInvalid) overlay->FindOverlay("system.pointer", &systemPointer);
@@ -4296,19 +4414,15 @@ bool Pointer::HitsAtOrigin(vr::VROverlayHandle_t h) {
     const Vec3 to = Position(t) - fr.eye;
     if (Length(to) < 0.1) return false;
     const Vec3 d = Normalize(to);
-    vr::VROverlayIntersectionParams_t params{};
-    params.vSource = {float(fr.eye.x), float(fr.eye.y), float(fr.eye.z)};
-    params.vDirection = {float(d.x), float(d.y), float(d.z)};
-    params.eOrigin = vr::TrackingUniverseStanding;
     vr::VROverlayIntersectionResults_t r{};
-    return overlay->ComputeOverlayIntersection(h, &params, &r) && std::fabs(r.fDistance - Length(to)) < 0.05;
+    return Cast(h, fr.eye, d, &r) && std::fabs(r.fDistance - Length(to)) < 0.05;
 }
 
 // Nearest visible overlay along a ray (frozen while dragging).
 Hit Pointer::nearest(Vec3 from, Vec3 d) {
     Hit h;
     for (const auto &[key, handle] : handles) {
-        if (!visible[key]) continue;
+        if (!visible[key] || key == kSystemUi) continue;   // (its plane is a floor: see the top)
         if (sceneGraph[key]) {
             // Plane test: overlay origin and its +Z normal, within sceneRadius of the origin.
             vr::ETrackingUniverseOrigin uo;
@@ -4323,12 +4437,8 @@ Hit Pointer::nearest(Vec3 from, Vec3 d) {
                 h.along = along, h.key = key, h.scene = true, h.point = at, h.normal = normal;
             continue;
         }
-        vr::VROverlayIntersectionParams_t params{};
-        params.vSource = {float(from.x), float(from.y), float(from.z)};
-        params.vDirection = {float(d.x), float(d.y), float(d.z)};
-        params.eOrigin = vr::TrackingUniverseStanding;
         vr::VROverlayIntersectionResults_t r{};
-        if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance > 0.05f &&
+        if (Cast(handle, from, d, &r) && r.fDistance > 0.05f &&
             r.fDistance < h.along) {
             // ComputeOverlayIntersection ignores the controller intersection mask.
             // Fail closed until ft-screens supplies the identical primitive union.
@@ -4390,12 +4500,8 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
             Hit h;
             for (const auto &[key, handle] : handles) {
                 if (!visible[key] || !FramePanel(key)) continue;
-                vr::VROverlayIntersectionParams_t params{};
-                params.vSource = {float(anchor.x), float(anchor.y), float(anchor.z)};
-                params.vDirection = {float(dir.x), float(dir.y), float(dir.z)};
-                params.eOrigin = vr::TrackingUniverseStanding;
                 vr::VROverlayIntersectionResults_t r{};
-                if (overlay->ComputeOverlayIntersection(handle, &params, &r) && r.fDistance > 0.05f &&
+                if (Cast(handle, anchor, dir, &r) && r.fDistance > 0.05f &&
                     r.fDistance < h.along)
                     h.along = r.fDistance, h.key = key;
             }
@@ -4430,6 +4536,31 @@ void Pointer::FindTarget(bool dragging, const Vec3 &dir, Pass &t) {
         }
         lastDistance = t.distance, lastHit = t.key;
     }
+}
+
+constexpr double kKbReach = 3.0;   // metres: a held press's furthest point on Full Keyboard's plane (AimKeyboard)
+void Pointer::AimKeyboard(bool dragging, bool onScene, const Vec3 &dir, const Pass &t) {
+    // Where the ray is on Full Keyboard's panel, if it is (see kbray.h). While its press is held the
+    // drag's frozen distance isn't the panel's, so the point is where the ray meets the panel's plane,
+    // past its edges too: a fast swing off its handle (a strip at the bottom edge) still drags it.
+    Vec3 p = t.point;
+    bool on = !dragging && !onScene && t.key == kbray::kPanel && !onVrSettings;
+    if (kbRay.Pressed()) {
+        on = false;
+        auto it = handles.find(kbray::kPanel);
+        vr::ETrackingUniverseOrigin uo;
+        vr::HmdMatrix34_t m{};
+        if (it != handles.end() && overlay->GetOverlayTransformAbsolute(it->second, &uo, &m) == vr::VROverlayError_None &&
+            uo == vr::TrackingUniverseStanding) {
+            const Vec3 n{m.m[0][2], m.m[1][2], m.m[2][2]}, c{m.m[0][3], m.m[1][3], m.m[2][3]};
+            const double across = Dot(dir, n), along = std::fabs(across) > 1e-6 ? Dot(c - anchor, n) / across : -1;
+            // (no further than kKbReach: a ray along the plane, a tilted panel's, would fling it far off)
+            if (along > 0) on = true, p = anchor + dir * std::min(along, kKbReach);
+        } else if (vr::VROverlayIntersectionResults_t r{}; it != handles.end() && Cast(it->second, anchor, dir, &r)) {
+            on = true, p = {r.vPoint.v[0], r.vPoint.v[1], r.vPoint.v[2]};   // (placed some other way: the panel itself)
+        }
+    }
+    kbSend(kbRay.Aim(secsOf(fr.tnow), on, {p.x, p.y, p.z}, kbSide()));
 }
 
 bool Pointer::OnVrSettingsPage(const Vec3 &from, const Vec3 &d) {

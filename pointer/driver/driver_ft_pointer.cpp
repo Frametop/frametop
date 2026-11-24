@@ -131,6 +131,10 @@ public:
         input->CreateBooleanComponent(c, "/input/system/click", &buttons_[3]);
         input->CreateBooleanComponent(c, "/input/joystick/click", &buttons_[4]);
         input->CreateBooleanComponent(c, "/input/a/click", &buttons_[5]);
+        // The trigger's pull too (0 or 1, with its click): VR games bind a controller's trigger as a
+        // trigger (pull), and ft_pointer_remapping.json hands them ours (user, 2026-11-21: "when in
+        // VR games the 3d mouse and hand tracking lasers don't interact at all").
+        input->CreateScalarComponent(c, "/input/trigger/value", &triggerValue_, VRScalarType_Absolute, VRScalarUnits_NormalizedOneSided);
         input->CreateScalarComponent(c, "/input/joystick/x", &scrollX_, VRScalarType_Absolute, VRScalarUnits_NormalizedTwoSided);
         input->CreateScalarComponent(c, "/input/joystick/y", &scrollY_, VRScalarType_Absolute, VRScalarUnits_NormalizedTwoSided);
 
@@ -209,8 +213,10 @@ public:
         // Inputs only when they change (and all of them the first time).
         auto input = VRDriverInput();
         for (int i = 0; i < kButtons; ++i)
-            if (!inputsSent_ || snapshot.buttons[i] != sentButtons_[i])
+            if (!inputsSent_ || snapshot.buttons[i] != sentButtons_[i]) {
                 input->UpdateBooleanComponent(buttons_[i], sentButtons_[i] = snapshot.buttons[i], 0);
+                if (i == 0) input->UpdateScalarComponent(triggerValue_, snapshot.buttons[0] ? 1.f : 0.f, 0);
+            }
         if (!inputsSent_ || snapshot.scrollX != sentScrollX_)
             input->UpdateScalarComponent(scrollX_, sentScrollX_ = snapshot.scrollX, 0);
         if (!inputsSent_ || snapshot.scrollY != sentScrollY_)
@@ -234,7 +240,7 @@ private:
     bool inputsSent_ = false, sentButtons_[kButtons] = {};
     float sentScrollX_ = 0.f, sentScrollY_ = 0.f;
     VRInputComponentHandle_t buttons_[kButtons] = {};
-    VRInputComponentHandle_t scrollX_ = 0, scrollY_ = 0;
+    VRInputComponentHandle_t scrollX_ = 0, scrollY_ = 0, triggerValue_ = 0;
 };
 
 class Provider : public IServerTrackedDeviceProvider {

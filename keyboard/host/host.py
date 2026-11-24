@@ -117,12 +117,12 @@ class Host:
         self.send("show", view="keyboard")
 
     def place(self, kind, pose):
-        _, width, height = self.geometry
+        width, height = self.geometry[1:3]
         self.send("set_pose", matrix=placement.spot(kind, pose, width, height))
 
     def hide(self):
         self.end_steam_field()
-        self.touch.native()
+        self.touch.hidden()
         self.send("hide", end_context=True)
         self.opened_for = None
         self.steam_asked_at = None
@@ -161,6 +161,8 @@ class Host:
                 self.hide()
         elif words[:1] == ["poke"] and self.visible:
             self.touch.poke(now, words[1:], self.geometry)
+        elif words[:1] == ["turn"] and self.visible:
+            self.touch.turn(now, words[1:])
 
     # ---- from Steam (steamhook)
     def on_steam(self, now, results):
@@ -216,7 +218,7 @@ class Host:
                 self.relay.hello(visible)
                 if not visible:  # the user's X, a lease or tracking loss: nothing holds it now
                     self.end_steam_field()
-                    self.touch.native()
+                    self.touch.hidden()
                     self.opened_for = None
                     self.route = self.context = None
                     self.sink = None
@@ -224,7 +226,11 @@ class Host:
             matrix, width, height = message.get("matrix"), message.get("width"), message.get("height")
             if (isinstance(matrix, list) and len(matrix) == 3 and isinstance(width, (int, float))
                     and isinstance(height, (int, float)) and width > 0 and height > 0):
-                self.geometry = (matrix, float(width), float(height))
+                case = message.get("keys_uv")   # the case, whose bottom edge tops the move handle
+                bottom = None
+                if isinstance(case, dict) and all(isinstance(case.get(k), (int, float)) for k in ("v", "height")):
+                    bottom = float(case["v"]) + float(case["height"])
+                self.geometry = (matrix, float(width), float(height), bottom)
                 if self.pending_spot:
                     self.place(*self.pending_spot)
                     self.pending_spot = None

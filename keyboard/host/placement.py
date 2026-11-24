@@ -4,15 +4,16 @@ Poses are OpenVR 3x4 row-major matrices in the standing universe (lists of 3 row
 
 - spot(): ft-screens says where to open it, "head M" (the headset's pose) or "dash M" (the
   bottom centre of Steam's page, or of Frametop's tile of it). Like Frametop's keyboard before
-  (keyboard/FRAMETOP.md): 0.70 m ahead and 0.35 m under the eyes, tilted 26.6 degrees to face
-  them, so a hand's laser reaches the bottom row; or just under Steam's page, tilted 50.
+  (keyboard/FRAMETOP.md): 0.70 m ahead and 0.45 m under the eyes, tilted 26.6 degrees to face
+  them, so a hand's laser reaches the bottom row; or 14 cm under Steam's page, tilted 50 (user,
+  2026-11-21: "the keyboard should open lower"; it was 0.35 m and 6 cm).
 - touch(): a fingertip's point (ft-screens' "kbpoke") on the panel as Full Keyboard last
   reported it ("geometry"), as the texture coordinates its forwarded pointer takes.
 """
 import math
 
-AHEAD, BELOW, TILT = 0.70, 0.35, 26.6
-DASH_TILT, DASH_FORWARD, DASH_GAP = 50.0, 0.24, 0.06
+AHEAD, BELOW, TILT = 0.70, 0.45, 26.6
+DASH_TILT, DASH_FORWARD, DASH_GAP = 50.0, 0.24, 0.14
 
 
 def matrix(words):

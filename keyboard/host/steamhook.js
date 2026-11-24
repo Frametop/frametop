@@ -25,6 +25,10 @@
         (e.tagName === "TEXTAREA" || e.tagName === "INPUT" &&
             ["text", "search", "password", "tel", "url"].includes(e.type) || e.isContentEditable === true);
     let lease = now() + leaseMs, take = false, session = null, nextId = 1, disposed = false;
+    // The field Full Keyboard last closed on while it kept its focus (the user's X): Steam asks
+    // again whenever its window takes focus back, and it stays shut until the user taps the field
+    // again or focus leaves it (user, 2026-11-21: "the keyboard does not hide when I press hide").
+    let dismissed = null;
     const events = [], undo = [], hooked = new WeakSet();
     const fresh = () => !disposed && now() < lease;
 
@@ -66,6 +70,25 @@
         }
         return true;
     }
+    function dismiss(s) {
+        const e = s.element, clear = () => undismiss();
+        const kinds = ["pointerdown", "mousedown", "touchstart"];
+        for (const kind of kinds) e.addEventListener(kind, clear, true);
+        dismissed = {element: e, document: s.document,
+            off: () => { for (const kind of kinds) e.removeEventListener(kind, clear, true); }};
+    }
+    function undismiss() {
+        if (!dismissed) return;
+        try { dismissed.off(); } catch (_) { /* gone with its window */ }
+        dismissed = null;
+    }
+    // Still shut: the field closed on still has its focus.
+    function shut(e) {
+        if (!dismissed) return false;
+        if (dismissed.element === e && dismissed.document.activeElement === e) return true;
+        undismiss();
+        return false;
+    }
     // A window whose overlay key isn't known yet is looked at again on the next poll.
     function adopt(manager) {
         if (hooked.has(manager)) return;
@@ -77,6 +100,7 @@
                 if (open && take && fresh()) {
                     const d = manager.m_ownerWindow?.document, e = d?.activeElement;
                     if (editable(e, d) && typeof d.execCommand === "function") {
+                        if (shut(e)) return undefined;  // neither keyboard: the user closed it here
                         if (session?.element !== e) {
                             end("moved");
                             session = {id: nextId++, manager, document: d, element: e};
@@ -166,6 +190,7 @@
         if (disposed) return;
         disposed = true;
         session = null;
+        undismiss();
         root.clearInterval(timer);
         for (const step of undo.reverse()) { try { step(); } catch (_) { /* gone with its window */ } }
         if (root[NAME]?.dispose === dispose) delete root[NAME];
@@ -183,6 +208,7 @@
             take = mayTake === true;
             rescan();
             holding();
+            if (dismissed && dismissed.document.activeElement !== dismissed.element) undismiss();
             return {events: events.splice(0), session: session?.id ?? null};
         },
         type(id, text) {
@@ -193,8 +219,15 @@
             if (!fresh() || session?.id !== id || !holding() || typeof name !== "string") return false;
             return press(name, Array.isArray(modifiers) ? modifiers : []);
         },
-        // Full Keyboard closed: the field keeps its focus, and a new show for it opens it again.
-        close(id) { if (session?.id === id) session = null; return true; },
+        // Full Keyboard closed: the field keeps its focus, and Steam's shows for it stay shut
+        // until the user taps it again (dismiss).
+        close(id) {
+            if (session?.id === id) {
+                try { undismiss(); dismiss(session); } catch (_) { dismissed = null; }
+                session = null;
+            }
+            return true;
+        },
     };
     return true;
 })

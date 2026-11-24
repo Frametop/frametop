@@ -18,7 +18,7 @@ enum Verb {
     Place, Width, CurveOnOff, Curve, Pin, Unpin, Get, Screens, Universe, Head, Reach,
     Visibility, Wrist, Gesture, GamepadPill, Concealed, ConcealReveal, HideShowToggle,
     Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
-    SteamvrList, Typing, CalPanel, Ray, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
+    SteamvrList, Typing, CalPanel, Ray, Turn, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
     WindowDrag, Pulled,
     Spin, Shift, ShiftBack,
@@ -67,7 +67,7 @@ inline Group GroupOf(Verb v) {
     case Visibility: case Wrist: case Gesture: case ConcealReveal: case HideShowToggle: case Pause: case InGames:
     case SteamvrMode: case Controllers:
         return VisibilityGroup;
-    case HandSetting: case SpinDistance: case Hands: case SteamvrList: case Typing: case CalPanel: case Ray:
+    case HandSetting: case SpinDistance: case Hands: case SteamvrList: case Typing: case CalPanel: case Ray: case Turn:
         return HelperWordGroup;
     case HandInput: case PalmMenu: case GrabThat:
         return HandFeatureGroup;
@@ -123,6 +123,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "typing %d %d", &c.tl, &c.tr) == 2) return Typing;
     if (std::sscanf(cmd, "calpanel %d", &c.calOn) == 1) return CalPanel;
     if (std::sscanf(cmd, "ray %d %d", &c.rl, &c.rr) == 2) return Ray;
+    if (!std::strncmp(cmd, "turn ", 5)) return c.rest = cmd + 5, Turn;   // the pointer helper's two-hand turn (vrturn.cpp)
     if (std::sscanf(cmd, "handinput %15s", c.word) == 1) return HandInput;
     if (std::sscanf(cmd, "palmmenu %15s", c.word) == 1) return PalmMenu;
     if (std::sscanf(cmd, "grabthat %15s", c.word) == 1) return GrabThat;

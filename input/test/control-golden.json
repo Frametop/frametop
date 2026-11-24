@@ -1391,6 +1391,53 @@
   "log": [],
   "raised": null
  },
+ "kbturn begin": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0,
+     "kb turn begin"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbturn begin",
+  "log": [],
+  "raised": null
+ },
+ "kbturn move": {
+  "calls": [
+   [
+    "kb_tell",
+    [
+     100.0,
+     "kb turn move 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "kbturn move 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5 0.5",
+  "log": [],
+  "raised": null
+ },
+ "kbturn move, short": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbturn move 1 2 3",
+  "log": [],
+  "raised": null
+ },
+ "kbturn, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "kbturn begin",
+  "log": [],
+  "raised": null,
+  "uid": "OTHER"
+ },
  "keyboard": {
   "calls": [
    [
@@ -2073,6 +2120,30 @@
   "log": [],
   "no_pointer": true,
   "raised": null
+ },
+ "remoteclick": {
+  "calls": [
+   [
+    "text_field",
+    [
+     true,
+     "click on a remote display"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "remoteclick",
+  "log": [],
+  "raised": null
+ },
+ "remoteclick, other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "remoteclick",
+  "log": [],
+  "raised": null,
+  "uid": "OTHER"
  },
  "textfield 0": {
   "calls": [

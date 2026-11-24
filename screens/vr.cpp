@@ -836,17 +836,35 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 // A canvas centered at the screen corner. Only its padded corner-stroke mask is
 // interactive; the window and its safety margin are excluded from every primitive.
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
-// The resize tab's side. A tiled panel's glow tab reaches no further than half the gap, so it never lies
-// over a neighbour's corner (at least 1 cm out, for a gap set very narrow).
-double LegacyCorner(const Screen &s, double size) {
-    return TileTiled(ScreenIndexOf(s)) ? std::min(size, std::max(TileGapM(), 0.02)) : size;
-}
+// The glow's depth past the panel, an edge's or a corner's (CornerOut, deeper). A tiled panel's reaches no
+// further than half the gap, so it never lies over a neighbour's own (at least 1 cm out, for a gap set very
+// narrow): the hit areas and the glow drawn.
+double TiledCap(const Screen &s) { return TileTiled(ScreenIndexOf(s)) ? std::max(TileGapM() / 2, 0.01) : 1e9; }
+double LegacyCorner(const Screen &s, double size) { return std::min(size, TiledCap(s)); }
+// The glow style's band past the panel's edge: the laser's glow's depth, and its hit area's
+// (resizecorner::GlowRegion); along each edge from a corner, GlowArm.
+double GlowOut(const Screen &s) { return LegacyCorner(s, resizecorner::LegacyGlowSize(s.grip)); }
+double CornerGlowOut(const Screen &s) { return LegacyCorner(s, resizecorner::CornerOut(resizecorner::LegacyGlowSize(s.grip))); }
+double GlowArm(const Screen &s) { return resizecorner::GlowArm(s.metres, s.heightMetres()); }
+// The handle's canvas for the corner or edge it's at (cornerX or cornerY 0: an edge's middle).
 double HandleSize(const Screen &s) {
-    return g_resizeCorner.sharp ? resizecorner::Canvas(g_resizeCorner) : LegacyCorner(s, resizecorner::LegacyTabSize(s.grip));
+    return g_resizeCorner.sharp ? resizecorner::Canvas(g_resizeCorner)
+                                : resizecorner::GlowCanvas(s.cornerX, s.cornerY, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s),
+                                                            CornerGlowOut(s));
 }
-// The laser's glow at a corner: the hit tab's size, but the glow style's stays smaller than its tab.
-double CornerGlowSize(const Screen &s) {
-    return g_resizeCorner.sharp ? HandleSize(s) : LegacyCorner(s, resizecorner::LegacyGlowSize(s.grip));
+// A corner's, wherever the handle is (an edge's is as long as the panel).
+double CornerHandleSize(const Screen &s) {
+    return g_resizeCorner.sharp ? HandleSize(s) : resizecorner::GlowCanvas(1, 1, s.metres, s.heightMetres(), GlowArm(s), GlowOut(s), CornerGlowOut(s));
+}
+// The laser's glow past an edge, and past a corner (larger: resizecorner::kCornerGrow): as deep as the
+// hit area it shows.
+double EdgeGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : GlowOut(s); }
+double CornerGlowSize(const Screen &s) { return g_resizeCorner.sharp ? HandleSize(s) : CornerGlowOut(s); }
+// An edge's handle bends with a curved panel (an overlay bends along its width: a side's band is only
+// its depth across); the sharp style's outline too.
+float HandleCurve(const Screen &s) {
+    const bool bends = g_resizeCorner.sharp || !s.cornerX || !s.cornerY;
+    return bends && s.curve > 0 ? float(std::clamp(HandleSize(s) / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f;
 }
 const overlayregion::Region &ResizeRegion(int sx, int sy) {
     static std::array<overlayregion::Region, 4> regions;
@@ -861,9 +879,24 @@ const overlayregion::Region &ResizeRegion(int sx, int sy) {
 }
 void SendPointer(const std::string &msg);
 void PaintResizeMask(Screen &s) {
-    if (s.handle == vr::k_ulOverlayHandleInvalid || (s.resizePaintedVersion == g_resizeVersion &&
-        s.resizePaintedX == s.cornerX && s.resizePaintedY == s.cornerY)) return;
-    const auto &region = ResizeRegion(s.cornerX, s.cornerY);
+    if (s.handle == vr::k_ulOverlayHandleInvalid) return;
+    const bool same = s.resizePaintedVersion == g_resizeVersion && s.resizePaintedX == s.cornerX && s.resizePaintedY == s.cornerY;
+    overlayregion::Region region;
+    const double arm = GlowArm(s), out = GlowOut(s), along = s.cornerX ? s.heightMetres() : s.metres;
+    if (g_resizeCorner.sharp) {
+        if (same) return;
+        region = ResizeRegion(s.cornerX, s.cornerY);
+    } else {
+        // The glow's hit area changes with the panel's size and distance: again when either is 4% off
+        // (not while it's dragged: the drag has the laser already).
+        const auto near = [](double a, double b) { return std::fabs(a - b) <= 0.04 * std::max(a, b); };
+        if (same && (s.drag != Drag::None || (near(arm, s.resizePaintedArm) && near(out, s.resizePaintedOut) &&
+                                              near(along, s.resizePaintedAlong))))
+            return;
+        region = resizecorner::GlowRegion(s.cornerX, s.cornerY, s.metres, s.heightMetres(), arm, out, CornerGlowOut(s));
+        vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(HandleSize(s)));
+        vr::VROverlay()->SetOverlayCurvature(s.handle, HandleCurve(s));
+    }
     const int pixels = HandlePixels();
     std::vector<vr::VROverlayIntersectionMaskPrimitive_t> mask;
     for (const auto &p : region) {
@@ -895,6 +928,7 @@ void PaintResizeMask(Screen &s) {
         s.resizeAnnouncedMs = NowMs();
     }
     s.resizePaintedVersion = g_resizeVersion, s.resizePaintedX = s.cornerX, s.resizePaintedY = s.cornerY;
+    s.resizePaintedArm = arm, s.resizePaintedOut = out, s.resizePaintedAlong = along;
 }
 // The bar row's line in from the panel's edge (barhit::Below's distance, the row clear of the edge by
 // a gap), on the edge the panel's bar is on (barside.h).
@@ -976,7 +1010,7 @@ void PlaceChrome(Screen &s) {
     vr::VROverlay()->SetOverlayMouseScale(s.bar, &barScale);
     PaintBar(s);
     vr::VROverlay()->SetOverlayWidthInMeters(s.handle, float(HandleSize(s)));
-    vr::VROverlay()->SetOverlayCurvature(s.handle, g_resizeCorner.sharp && s.curve > 0 ? float(std::clamp(HandleSize(s) / (2 * M_PI * s.curve), 0.0, 1.0)) : 0.f);
+    vr::VROverlay()->SetOverlayCurvature(s.handle, HandleCurve(s));
     PaintResizeMask(s);
     // Curved, the bar bends with the screen's bottom (or top) edge; standing down a side, it stays flat (an
     // overlay bends along its own width, which runs up and down there).
@@ -1431,17 +1465,40 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     const double zone = g_resizeCorner.sharp ? std::max(g_resizeCorner.reachCm / 100, HandleSize(s) * 1.42)
                                             : resizecorner::LegacyZone(W, H);
     int cx = s.cornerX, cy = s.cornerY;
-    double best = 0;
-    bool held = false;
+    double best = 0, along = s.resizeAlong;
+    bool held = false, onHit = false;
     const bool handGlow = g_handInput.params().edgeGlow;   // (hands have their own glow at the corner: UpdateHandGuides)
+    const bool glowStyle = !g_resizeCorner.sharp;
     if (s.drag == Drag::Resize && !(handGlow && IsHandHolder(s.dragDevice))) {
         best = 1, held = true;   // stays where it is, lit
+        Mat l;
+        double hu, hv;   // (an edge's glow goes along with the laser)
+        if (glowStyle && LaserPose(s.dragDevice, &l) && RayOnSurface(s, p, l, &hu, &hv)) along = s.cornerX ? hv : hu;
     } else if (s.drag == Drag::Resize) {
         best = 0;
     } else {
         for (const Mat &d : lasers) {
             double u, v;
             if (!RayOnSurface(s, p, d, &u, &v)) continue;
+            if (glowStyle) {   // the glow's hit area (corners, then edges), else coming up to a corner or an edge
+                // (the one it's at keeps it on a tie, so it doesn't flip between two)
+                auto consider = [&](double close, int x, int y, bool hit) {
+                    if (close <= best + (x == s.cornerX && y == s.cornerY ? -1e-3 : 1e-3)) return;
+                    best = close, cx = x, cy = y, onHit = hit, along = x && y ? 0 : x ? v : u;
+                };
+                int hx, hy;
+                if (resizecorner::GlowHit(W, H, GlowArm(s), GlowOut(s), u, v, &hx, &hy, CornerGlowOut(s)) && !(hx < 0 && gluedLeft)) {
+                    consider(1, hx, hy, true);
+                    continue;
+                }
+                for (int x : {1, -1})
+                    for (int y : {-1, 1})
+                        if (!(x < 0 && gluedLeft))
+                            consider(resizecorner::LegacyCloseness(std::hypot(u - x * W / 2, v - y * H / 2), s.grip, W, H), x, y, false);
+                if (const double e = resizecorner::EdgeNear(W, H, GlowOut(s), u, v, &hx, &hy); e > 0 && !(hx < 0 && gluedLeft))
+                    consider(e, hx, hy, false);
+                continue;
+            }
             for (int x : {1, -1})
                 for (int y : {-1, 1}) {
                     if (x < 0 && gluedLeft) continue;
@@ -1470,16 +1527,21 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     } else {
         cx = s.cornerX, cy = s.cornerY;   // lingering where it was
     }
-    // (not away from under a laser that's on it)
-    if ((cx != s.cornerX || cy != s.cornerY) && !s.hover[kResizePart]) {
+    // (not away from under a laser that's on it, unless onto another hit area under it: from an edge's
+    // band into its corner's)
+    if ((cx != s.cornerX || cy != s.cornerY) && (!s.hover[kResizePart] || onHit)) {
         s.cornerX = cx, s.cornerY = cy;
         PlaceChrome(s);
     }
+    if (cx == s.cornerX && cy == s.cornerY) s.resizeAlong = along;   // (not another one's, under a hover)
+    PaintResizeMask(s);   // (the glow's hit area as the panel's size and distance change)
     const float glow = float(best);
     const bool lit = held || s.drag == Drag::Resize;
     if (best > 0 && ((g_resizeCorner.sharp && s.hover[kResizePart]) || best > g_laserCornerNext.strength)) {
-        g_laserCornerNext.kind = handinput::Guide::Corner, g_laserCornerNext.panel = ScreenIndexOf(s);
+        const bool edge = !s.cornerX || !s.cornerY;   // (an edge's glow is where the laser is along it)
+        g_laserCornerNext.kind = edge ? handinput::Guide::Edge : handinput::Guide::Corner, g_laserCornerNext.panel = ScreenIndexOf(s);
         g_laserCornerNext.sx = s.cornerX, g_laserCornerNext.sy = s.cornerY, g_laserCornerNext.strength = best, g_laserCornerNext.selected = lit;
+        g_laserCornerNext.u = s.cornerY ? s.resizeAlong : 0, g_laserCornerNext.v = s.cornerX ? s.resizeAlong : 0;
     }
     if (lit != s.cornerLit && s.handle != vr::k_ulOverlayHandleInvalid) {
         s.cornerLit = lit;
@@ -1750,6 +1812,7 @@ void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     // centered facing the user since we have no way to tilt displays up and down without grabbing them"):
     // the ray places it, the wrist doesn't turn it. Controllers and the mouse carry it rigidly.
     s.dragFacing = mode == Drag::Move && HandRay(dev);
+    s.dragTurn = Identity(), s.turning = false;
     s.dragRel = Mul(Inverse(d), p);
     // Already in a ring when grabbed: that doesn't count as crossing it.
     s.onWrist = mode == Drag::Move ? WristOnLaser(s, d, p) : kNone;
@@ -1868,7 +1931,7 @@ void EndDrag(Screen &s) {
     s.dragDevice = kNone;
     s.barPressMs = -1;   // (a press still waiting on the bar: a command took over, it never moves)
     s.pushedMs = -1;
-    s.dragFacing = s.toggleCarry = s.layoutHeld = s.barCarry = false;
+    s.dragFacing = s.toggleCarry = s.layoutHeld = s.barCarry = s.turning = false;
     s.carryMode = 0;
     s.dockOn = -1;
     s.pinTarget = s.onWrist = kNone;
@@ -2109,9 +2172,11 @@ void UpdateGuides() {
 void ResizeFloat(Screen &s, double hx, double hy, double grabX, double grabY, int sx = 1, int sy = -1) {
     s.keepX = -sx, s.keepY = -sy;
     if (s.mpp <= 0 || s.cropW <= 0) return;
-    const int w = std::max(320, int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)));
-    const int h = std::max(200, int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)));
-    if (w == (s.stretchW > 0 ? s.stretchW : s.cropW) && h == (s.stretchW > 0 ? s.stretchH : s.cropH)) return;
+    const int nowW = s.stretchW > 0 ? s.stretchW : s.cropW, nowH = s.stretchW > 0 ? s.stretchH : s.cropH;
+    // (from an edge, sx or sy 0: the other axis as it is)
+    const int w = sx ? std::max(320, int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp))) : nowW;
+    const int h = sy ? std::max(200, int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp))) : nowH;
+    if (w == nowW && h == nowH) return;
     Stretch(s, w, h);
 }
 
@@ -2128,9 +2193,11 @@ void ResizeWindowPanel(Screen &s, double hx, double hy, double grabX, double gra
     // (and kMinWidth to 12 m wide at that density: ft-layout takes no other)
     const int minW = std::max(kWindowMinW, int(std::ceil(kMinWidth / s.mpp / 2)) * 2);
     const int maxW = std::max(minW, std::min(kWindowMaxW, int(12.0 / s.mpp) & ~1));
-    const int w = std::clamp(int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)), minW, maxW) & ~1;
-    const int h = std::clamp(int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)), kWindowMinH, kWindowMaxH) & ~1;
-    if (w == (s.stretchW > 0 ? s.stretchW : s.width) && h == (s.stretchW > 0 ? s.stretchH : s.height)) return;
+    const int nowW = s.stretchW > 0 ? s.stretchW : s.width, nowH = s.stretchW > 0 ? s.stretchH : s.height;
+    // (from an edge, sx or sy 0: the other axis as it is)
+    const int w = sx ? std::clamp(int(std::lround((sx * (hx - grabX) + s.metres / 2) / s.mpp)), minW, maxW) & ~1 : nowW;
+    const int h = sy ? std::clamp(int(std::lround((sy * (hy - grabY) + s.heightMetres() / 2) / s.mpp)), kWindowMinH, kWindowMaxH) & ~1 : nowH;
+    if (w == nowW && h == nowH) return;
     Stretch(s, w, h);
 }
 
@@ -2154,7 +2221,9 @@ void ResizeScreen(Screen &s, double cu, double cv) {
     if (!ScreenPose(s, &p)) return;
     const double a = s.width > 0 ? double(s.height) / s.width : 9.0 / 16;
     double u, v;
-    const double w = handinput::ResizeFromCorner(s.metres, a, s.cornerX, s.cornerY, cu, cv, kMinWidth, 12.0, &u, &v);
+    // (from an edge: that axis, the aspect kept, the other way evenly about its middle)
+    const double w = s.cornerX && s.cornerY ? handinput::ResizeFromCorner(s.metres, a, s.cornerX, s.cornerY, cu, cv, kMinWidth, 12.0, &u, &v)
+                                            : resizecorner::ResizeFromEdge(s.metres, a, s.cornerX, s.cornerY, cu, cv, kMinWidth, 12.0, &u, &v);
     if (std::fabs(w - s.metres) < 1e-5) return;
     const Mat moved = OnSurface(s, u, v, 0);
     s.metres = w;
@@ -2362,10 +2431,11 @@ void UpdateDrag(Screen &s, int index) {
     if (!DevicePose(s.dragDevice, &d)) return;
     if (s.toggleCarry) return UpdateToggleCarry(s);
     if (s.drag == Drag::Move) {
+        if (s.turning) return;   // the two hands place it (vrturn.cpp)
         Mat p = Mul(d, s.dragRel), head;
         if (s.dragFacing && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
             const double at[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
-            p = FacingPose(at, head);
+            p = Mul(FacingPose(at, head), s.dragTurn);
         }
         SetAbsolute(s, p);
         if (!s.layoutHeld) CheckWristAim(s, d, p);   // (the layout's carry arms no wrist pin)
@@ -2536,6 +2606,10 @@ void ReleaseHold(Screen &s) {
     if (!s.heldFloat) return;
     s.heldFloat = false;
     SetFloat(s, s.heldMpp, s.heldX, s.heldY, s.heldW, s.heldH, s.heldTitle);
+    // A tile laid out again at its new size, as the "float" answer that wasn't held does: SetFloat
+    // grew it from its kept corner, over its neighbour till a move retiled it (user, 2026-11-21: "when
+    // resizing there is a bit of overlap in the displays until you manually move the display you resized")
+    if (TileAnchored(ScreenIndexOf(s))) RetileDash();
 }
 
 void Unfloat(Screen &s) {
@@ -3200,7 +3274,7 @@ void UpdateAim() {
         const double m = s.grip * (g_tick < s.aimUntil ? 2.0 : 0.25), h = s.heightMetres();
         // The panel and its controls: the bar row inside its edge (barside.h), the resize tab off its corner.
         const double gap = std::max(s.chrome * 0.06, s.grip), reach = barhit::Width(s.chrome, g_barPaddingX) / 2 + gap * 2 + s.grip * 2;
-        const double hw = s.metres / 2 + HandleSize(s), hh = h / 2 + HandleSize(s);
+        const double hw = s.metres / 2 + CornerHandleSize(s), hh = h / 2 + CornerHandleSize(s);
         const barside::Box box = barside::Union({-hw, hw, -hh, hh},
             barside::Row(s.barSide, s.metres, h, BarIn(s), -reach, reach, std::max(s.grip, barhit::Height(s.chrome, g_barPaddingY) / 2)));
         for (const Mat &l : lasers) {
@@ -5482,17 +5556,21 @@ void UpdateHandGuides() {
         }
         const double W = s ? s->metres : sp->fit.width, H = s ? s->heightMetres() : sp->fit.height, curve = s ? s->curve : 0;
         double halo = std::round(softglow::Width(HeadDistance(p)) * 1000) / 1000;   // (by the mm: fewer textures)
+        if (s) halo = std::min(halo, TiledCap(*s));   // (a tile's glow stays off its neighbour: LegacyCorner)
         // its size and place on the panel
         double u = hg.g.u, v = hg.g.v, wm = 0, hm = 0, arm = 0, r = 0, edge = 1e9;
         int tw = 128, th = 128;
         bool curved = false;
         switch (hg.g.kind) {
-            case handinput::Guide::Corner:
+            case handinput::Guide::Corner: {
                 if (k == 2 && s) halo = std::max(halo, CornerGlowSize(*s));   // (the laser's: as wide as the handle it presses)
-                arm = std::clamp(0.25 * std::min(W, H), 0.03, 0.10);
+                arm = resizecorner::GlowArm(W, H);
+                if (k == 2 && s && !g_resizeCorner.sharp) arm = resizecorner::CornerArm(arm);   // (and as long)
                 u = hg.g.sx * W / 2, v = hg.g.sy * H / 2, wm = hm = 2 * std::max(arm, halo) * 1.05, curved = true;
                 break;
+            }
             case handinput::Guide::Edge: {
+                if (k == 2 && s) halo = std::max(halo, EdgeGlowSize(*s));   // (the laser's: as deep as its band)
                 const double along = hg.g.sy ? W : H;
                 arm = std::clamp(0.3 * along, 0.05, 0.16);
                 if (hg.g.sy) {
@@ -6625,7 +6703,9 @@ bool ft_vr_carry_wheel(int notches) {
 int ft_vr_mouse_panel(void) {
     if (!g_vr || g_paused || g_mouseScreen < 0) return -1;
     const auto it = g_screens.find(g_mouseScreen);
-    return it != g_screens.end() && it->second.visible ? g_mouseScreen : -1;
+    if (it == g_screens.end() || !it->second.visible) return -1;
+    if (LaserOnFullKeyboard(g_mouseDevice, it->second.overlay)) return -1;   // (typing on it: the panel behind keeps none)
+    return g_mouseScreen;
 }
 
 int ft_vr_mouse_screen(void) {
@@ -7829,11 +7909,12 @@ static void ReadoutCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd
                          DeviceLabel(s.dragDevice);
         std::snprintf(reply, size,
                       "ok dashboard=%d steam_front=%d mode=%s manual=%d lasers=%s game=%d paused=%d "
-                      "press=%#x by=%s on=%d catcher=%d drags=%s scene=%s",
+                      "press=%#x by=%s on=%d mouse=%d/%d catcher=%d drags=%s scene=%s",
                       vr::VROverlay()->IsDashboardVisible() ? 1 : 0, SteamInFront() ? 1 : 0,
                       ModeName(), g_manual ? 1 : 0,
                       LasersName(), g_gameRunning ? 1 : 0, g_paused ? 1 : 0, g_press.buttons,
-                      DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_catcherShown ? 1 : 0,
+                      DeviceLabel(g_press.device).c_str(), g_press.screen + 1, g_mouseScreen + 1,
+                      ft_vr_mouse_screen() + 1, g_catcherShown ? 1 : 0,
                       drags.empty() ? "-" : drags.c_str(), ftscene::Name(g_scene));
         return;
     }
@@ -8097,6 +8178,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
         std::snprintf(reply, size, "ok");
         return;
     }
+    case vrcmd::Turn: return TurnWord(parsed.rest, reply, size);
     default:
         std::snprintf(reply, size, "error unknown command");
     }

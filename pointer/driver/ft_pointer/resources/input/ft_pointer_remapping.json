@@ -1,0 +1,201 @@
+{
+	"to_controller_type": "ft_pointer",
+	"layouts": [
+		{
+			"priority": 100,
+			"from_controller_type": "frame_controller",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/trigger",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/a",
+					"to": "/user/hand/right/input/a"
+				},
+				{
+					"from": "/user/hand/right/input/b",
+					"to": "/user/hand/right/input/b"
+				},
+				{
+					"from": "/user/hand/right/input/x",
+					"to": "/user/hand/right/input/x"
+				},
+				{
+					"from": "/user/hand/right/input/thumbstick",
+					"to": "/user/hand/right/input/joystick"
+				}
+			]
+		},
+		{
+			"priority": 98,
+			"from_controller_type": "khr_generic_controller",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/trigger",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/primary",
+					"to": "/user/hand/right/input/a"
+				},
+				{
+					"from": "/user/hand/right/input/secondary",
+					"to": [
+						"/user/hand/right/input/b",
+						"/user/hand/right/input/x"
+					]
+				},
+				{
+					"from": "/user/hand/right/input/thumbstick",
+					"to": "/user/hand/right/input/joystick"
+				}
+			]
+		},
+		{
+			"priority": 95,
+			"from_controller_type": "oculus_touch",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/trigger",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/a",
+					"to": "/user/hand/right/input/a"
+				},
+				{
+					"from": "/user/hand/right/input/b",
+					"to": [
+						"/user/hand/right/input/b",
+						"/user/hand/right/input/x"
+					]
+				},
+				{
+					"from": "/user/hand/right/input/joystick",
+					"to": "/user/hand/right/input/joystick"
+				}
+			]
+		},
+		{
+			"priority": 93,
+			"from_controller_type": "pico_controller",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/trigger",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/a",
+					"to": "/user/hand/right/input/a"
+				},
+				{
+					"from": "/user/hand/right/input/b",
+					"to": [
+						"/user/hand/right/input/b",
+						"/user/hand/right/input/x"
+					]
+				},
+				{
+					"from": "/user/hand/right/input/joystick",
+					"to": "/user/hand/right/input/joystick"
+				}
+			]
+		},
+		{
+			"priority": 90,
+			"from_controller_type": "knuckles",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/trigger",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/a",
+					"to": "/user/hand/right/input/a"
+				},
+				{
+					"from": "/user/hand/right/input/b",
+					"to": [
+						"/user/hand/right/input/b",
+						"/user/hand/right/input/x"
+					]
+				},
+				{
+					"from": "/user/hand/right/input/thumbstick",
+					"to": "/user/hand/right/input/joystick"
+				}
+			]
+		},
+		{
+			"priority": 70,
+			"from_controller_type": "hand_interaction_ext",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/pinch_ext",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/aim_activate_ext",
+					"to": "/user/hand/right/input/trigger"
+				}
+			]
+		},
+		{
+			"priority": 20,
+			"from_controller_type": "vive_controller",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/trigger",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/application_menu",
+					"to": "/user/hand/right/input/a"
+				},
+				{
+					"from": "/user/hand/right/input/trackpad",
+					"to": "/user/hand/right/input/joystick"
+				}
+			]
+		},
+		{
+			"priority": 10,
+			"from_controller_type": "khr_simple_controller",
+			"simulate_controller_type": false,
+			"simulate_render_model": false,
+			"simulate_HMD": false,
+			"autoremappings": [
+				{
+					"from": "/user/hand/right/input/select",
+					"to": "/user/hand/right/input/trigger"
+				},
+				{
+					"from": "/user/hand/right/input/menu",
+					"to": "/user/hand/right/input/a"
+				}
+			]
+		}
+	]
+}

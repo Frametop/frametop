@@ -32,6 +32,9 @@ function makeDoc() {
 function makeField(doc, type = "text", tag = "INPUT") {
     return {tagName: tag, type, isConnected: true, ownerDocument: doc, disabled: false, readOnly: false, value: "",
         events: [], dispatchEvent(ev) { this.events.push(ev.type); return true; },
+        listeners: {}, addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); },
+        removeEventListener(t, fn) { this.listeners[t] = (this.listeners[t] || []).filter(f => f !== fn); },
+        tap() { for (const fn of [...(this.listeners.pointerdown || [])]) fn(); },
         form: {requestSubmit() { doc.commands.push("submit"); }}};
 }
 class Manager {
@@ -118,6 +121,28 @@ function open(element) {
     assert.ok(events[0].open, JSON.stringify(events));
     return events[0];
 }
+check("closed by the user: Steam's next shows for that field stay shut until it's tapped again", () => {
+    const field = makeField(doc);
+    const event = open(field);
+    api().close(event.open);
+    main.SetVirtualKeyboardShownInternal(true);   // the dashboard took focus back
+    assert.deepStrictEqual(api().poll(true).events, []);
+    assert.deepStrictEqual(main.shown, []);       // nor Steam's keyboard
+    field.tap();
+    main.SetVirtualKeyboardShownInternal(true);
+    const again = api().poll(true).events;
+    assert.ok(again.length === 1 && again[0].open, JSON.stringify(again));
+    api().close(again[0].open);
+    doc.activeElement = makeField(doc);           // focus left it: shut no more
+    api().poll(true);
+    doc.activeElement = field;
+    main.SetVirtualKeyboardShownInternal(true);
+    const third = api().poll(true).events;
+    assert.ok(third.length === 1 && third[0].open, JSON.stringify(third));
+    api().close(third[0].open);
+    doc.activeElement = null;
+    api().poll(true);
+});
 check("each field says what it's for", () => {
     const purposes = [["email", {inputMode: "email"}], ["url", {type: "url"}], ["search", {type: "search"}],
                       ["number", {type: "tel"}], ["number", {inputMode: "numeric"}], ["text", {type: "text"}]];

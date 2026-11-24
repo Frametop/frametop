@@ -34,8 +34,8 @@ bool ft_vr_remote_create(int i, const char *l, double m, bool *r) { (void)i, (vo
 static char g_named[256];   // the last ft_vr_remote_named: "INDEX HOST APP" (the index is the number - 1)
 void ft_vr_remote_named(int i, const char *h, const char *a) { snprintf(g_named, sizeof g_named, "%d %s %s", i, h, a); }
 
-static char g_scaled[64];   // the last ft_vr_remote_scale: "INDEX SCALE"
-void ft_vr_remote_scale(int i, double s) { snprintf(g_scaled, sizeof g_scaled, "%d %g", i, s); }
+static char g_scaled[64];   // the last ft_vr_remote_scale: "INDEX SCALE WxH"
+void ft_vr_remote_scale(int i, double s, int w, int h) { snprintf(g_scaled, sizeof g_scaled, "%d %g %dx%d", i, s, w, h); }
 
 static char g_log[PATH_MAX];
 
@@ -523,14 +523,17 @@ static bool apple_backend(void) {
     EXPECT(!strncmp(reply, "ok", 2));
     // A PC app window's scale, for its menu: the panel's only, 0 to 4.
     cmd("remote 101 scale 1.25");
-    EXPECT(!strcmp(g_scaled, "100 1.25"));
+    EXPECT(!strcmp(g_scaled, "100 1.25 0x0"));
+    cmd("remote 101 scale 1.25 1340x910");
+    EXPECT(!strcmp(g_scaled, "100 1.25 1340x910"));
     cmd("remote 101 scale 0");
-    EXPECT(!strcmp(g_scaled, "100 0"));
+    EXPECT(!strcmp(g_scaled, "100 0 0x0"));
     const char *bad[] = {"remote 101 scale", "remote 101 scale x", "remote 101 scale 5", "remote 101 scale -1",
-                         "remote 101 scale 1 2", "remote 101 scale nan", "remote 102 scale 1"};
+                         "remote 101 scale 1 2", "remote 101 scale nan", "remote 101 scale 1 10x", "remote 101 scale 1 10x10x",
+                         "remote 101 scale 1 -1x5", "remote 102 scale 1"};
     for (size_t i = 0; i < sizeof bad / sizeof *bad; ++i)
         EXPECT(ft_remote_command(bad[i], reply, sizeof reply) && !strncmp(reply, "error", 5));
-    EXPECT(!strcmp(g_scaled, "100 0"));
+    EXPECT(!strcmp(g_scaled, "100 0 0x0"));
     cmd("remote 101 stop");
     return true;
 }

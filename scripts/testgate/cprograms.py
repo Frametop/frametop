@@ -230,6 +230,7 @@ def items(root, env=os.environ):
         P("calibfile-test", "hands/tests/calibfile_test.cpp", "hands/track/calibfile.cpp",
           flags=f"{CXX2} -Wno-unused-parameter"),
         single("hands/tests/xrcams_test.c", GNU11, out="xrcams-test"),
+        single("hands/tests/camstart_test.c", GNU11, out="camstart-test"),
     ]
     # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled, against
     # the pinned OpenVR header power/build.sh fetches (no download in a test)

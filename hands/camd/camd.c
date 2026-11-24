@@ -2,7 +2,8 @@
  * ft-camd - publish the headset's IR camera frames to unprivileged trackers.
  *
  * Privileged only while it sets up:
- *   1. finds the mono tracking cameras and XRService's buffer queues (xrcams.c),
+ *   1. finds the mono tracking cameras and XRService's buffer queues (xrcams.c), once
+ *      XRService has opened all four (camstart.c: it opens them one after another),
  *   2. borrows those buffers read-only with pidfd_getfd,
  *   3. opens the v4l2_dqbuf tracepoint (tp.c).
  * Then it gives up its privileges for good, creates the frame ring in the
@@ -26,6 +27,7 @@
 #define _GNU_SOURCE
 
 #include "../../conf/ft_conf.h"
+#include "camstart.h"
 #include "fhring.h"
 #include "tp.h"
 #include "xrcams.h"
@@ -246,28 +248,9 @@ static cam_t *cam_by_minor(int64_t minor)
     return NULL;
 }
 
-static void model_of(const char *sensor, char *out, size_t n)
-{
-    char buf[64];
-
-    if (sscanf(sensor, "%63s", buf) != 1)
-        buf[0] = 0;
-
-    snprintf(out, n, "%s", buf);
-}
-
 /* ---------------------------------------------------------------- setup */
 
-static bool group_fits(const xr_group_t *g, const xr_camera_t *cam, size_t need)
-{
-    return g->planesize[1] == cam->planesize[1] && g->planesize[0] >= need;
-}
-
-/*
- * Candidate buffers for a camera: the queue bound to it. The two upper cameras
- * share one 32-buffer run, bound to only one of them, so a camera without its
- * own run also gets runs bound to cameras of the same model.
- */
+/* Candidate buffers for a camera: the queues xr_group_serves gives it (xrcams.h). */
 static void setup_camera(cam_t *c, xr_camera_t *cam, int pidfd)
 {
     memset(c, 0, sizeof(*c));
@@ -286,32 +269,16 @@ static void setup_camera(cam_t *c, xr_camera_t *cam, int pidfd)
     xr_slugify(cam->sensor, sensor, sizeof(sensor));
     snprintf(c->slug, sizeof(c->slug), "%.20s_video%d", sensor, cam->node);
 
-    bool own = false, exact = false;
-
-    for (int g = 0; g < xr.ngroups; g++)
-        if (xr.groups[g].cam == cam && group_fits(&xr.groups[g], cam, c->need))
-            own = true, exact = exact || xr.groups[g].exact;
+    bool exact = false;
+    bool own = xr_camera_owns(&xr, cam, c->need, &exact);
     c->exact = own && exact;
-
-    char model[16];
-    model_of(cam->sensor, model, sizeof(model));
 
     for (int g = 0; g < xr.ngroups; g++) {
 
         xr_group_t *grp = &xr.groups[g];
 
-        if (!group_fits(grp, cam, c->need))
+        if (!xr_group_serves(&xr, grp, cam, c->need))
             continue;
-
-        if (own && grp->cam != cam)
-            continue;
-
-        if (!own) {
-            char gm[16];
-            model_of(grp->cam ? grp->cam->sensor : grp->sensor, gm, sizeof(gm));
-            if (strcmp(gm, model))
-                continue;
-        }
 
         for (int b = 0; b < grp->nbufs && c->nslots < MAX_SLOTS; b++) {
 
@@ -1303,7 +1270,8 @@ int main(int argc, char **argv)
 
     char err[512];
 
-    if (!xr_discover(&xr, "XRService", err, sizeof(err)))
+    /* Not the moment XRService appears: once it has opened every tracking camera (camstart.h). */
+    if (!camstart_discover(&xr, "XRService", opt_sensor, err, sizeof(err)))
         die("%s", err);
 
     if (!tp_event_load(&ev_dqbuf, "v4l2", "v4l2_dqbuf", err, sizeof(err)))

@@ -17,7 +17,7 @@ LDLIBS    = $(NCNN)/lib/libncnn.a -ljsoncpp -fopenmp -lpthread
 # The standalone Hand Recorder's release build passes LDFLAGS=-static (it runs on the host).
 LDFLAGS  ?=
 
-CAMD  = camd/camd.c camd/tp.c camd/xrcams.c
+CAMD  = camd/camd.c camd/camstart.c camd/tp.c camd/xrcams.c
 TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp track/calibfile.cpp \
         track/npuheads.cpp track/npuclient.cpp track/npuserver.cpp track/npusession.cpp track/npulandmarks.cpp track/npurequests.cpp track/npudetector.cpp track/detrounds.cpp
 HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h include/fh_calib.h ../conf/ft_conf.h
@@ -25,7 +25,7 @@ HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestur
 all: build/ft-camd build/ft-hands
 tools: build/ft-handreplay build/ft-ringplay
 
-build/ft-camd: $(CAMD) camd/tp.h camd/xrcams.h camd/fhring.h ../conf/ft_conf.h
+build/ft-camd: $(CAMD) camd/camstart.h camd/tp.h camd/xrcams.h camd/fhring.h ../conf/ft_conf.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) -static -o $@ $(CAMD) -lm
 

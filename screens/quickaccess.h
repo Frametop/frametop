@@ -11,8 +11,9 @@
 // Reset Layout resets at once (ft-layout's reset counts 3-2-1 in front of you itself).
 //   Above the tiles, a header (user, 2026-11-19: "add to the palm menu a resource tracker ... a quick
 // settings menu that when clicked opens a small window that has toggle options"): CPU, GPU, memory,
-// temperature (sysstats.h) and the battery (battery.h) on the left, and on the right a button, kButton, that turns the card to its
-// Quick Settings page (quicksettings.h's toggles in the tiles' places, the button then Back).
+// temperature (sysstats.h) and the battery (battery.h) on the left, and on the right a button, kButton,
+// that turns the card to its Quick Settings page (quicksettings.h's toggles in the tiles' places, the
+// button then Back).
 //   Under the tiles, while gaze mode is on, one wide row: Quick Eye Calibrate, the gaze service's quick
 // check (user, 2026-11-22: "a quick eye calibrate option to the palm menu ... only an option if eye
 // tracking is on"). The card is kEyesH tall then, kH without it; a card's height in pixels follows from its

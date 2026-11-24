@@ -204,7 +204,7 @@ Hand tracking uses the headset's own cameras, with no controllers. The installer
 | Close both hands into fists near a screen | Resizes it (fists don't move screens) |
 | Hold both hands on a screen and pull them apart | Stretches it |
 | Hold an open hand out to a far screen, then make a fist and pull it back ("grab that") | Brings it to arm's reach |
-| Turn a hand palm up toward your face and look at it | Quick Access: poke a tile with your other hand, or click it with a laser (Steam Menu, Hide Screens, Reset Layout…, Spin Left, Spin Right, Dock Windows). Its top shows CPU, GPU, memory, the CPU cores' average temperature, and the battery with how fast it charges. Its Quick Settings button opens toggles (pick them in Frametop Settings, Quick Settings). A pinch by the palm's own hand opens the Steam menu |
+| Turn a hand palm up toward your face and look at it | Quick Access: poke a tile with your other hand, or click it with a laser (Steam Menu, Hide Screens, Reset Layout…, Spin Left, Spin Right, Dock Windows). Its top shows CPU, GPU, memory, the CPU's average temperature, and the battery with how fast it charges. Its Quick Settings button opens toggles (pick them in Frametop Settings, Quick Settings). A pinch by the palm's own hand opens the Steam menu |
 
 The Hands page of Frametop Settings sets when it runs (with Frametop, always with SteamVR, or off) and switches each hand interaction on or off, live. `ft-handsctl status` shows how it's doing. [hands/README.md](hands/README.md) has the details.
 

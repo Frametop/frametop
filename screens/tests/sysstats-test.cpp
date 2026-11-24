@@ -38,6 +38,8 @@ int main() {
     const double cores[] = {96, 80, 76, 72};
     check("the temperature is their average, not the hottest spot", CpuTemp(cores, 4) == 81 && CpuTemp(cores, 1) == 96);
     check("...unknown without any", CpuTemp(cores, 0) < -100);
+    const double bad[] = {0, 80, 90};
+    check("a sensor that reads nothing doesn't pull it down", CpuTemp(bad, 3) == 85 && CpuTemp(bad, 1) < -100);
 
     check("GPU: 5.5 ms of a 90 Hz frame's 11.1", std::fabs(GpuPercent(5.5, 90) - 49.5) < 1e-9);
     check("...more than a frame: 100", GpuPercent(20, 90) == 100);

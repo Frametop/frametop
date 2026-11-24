@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """scripts/update-check.py: what it says about the KWin effects the session turns off, KWin's EIS,
-the eye cameras' rate, and the tracking cameras' rate under the 60 fps hand tracking switch.
+the eye cameras' rate, the palm menu's readouts, and the tracking cameras' rate under the 60 fps hand
+tracking switch.
 
 KWin 6.2 has a blur and a contrast effect, each with a factory named in kwin_wayland. KWin 6.6
 (SteamOS 0.5.8) has no contrast effect of its own, which is not something to warn about; a
@@ -76,6 +77,44 @@ class KWinEis(unittest.TestCase):
                 state, _, detail = self.m.kwin_eis(path)
                 self.assertEqual(state, "warn")
                 self.assertIn("Zed", detail)
+
+
+class Readouts(unittest.TestCase):
+    """The palm menu's temperature and battery files, in a made-up /sys."""
+
+    def verdict(self, skip=(), core="cpu0-thermal"):
+        module = load()
+        said = []
+        module.report = lambda state, name, detail: said.append((state, detail))
+        with tempfile.TemporaryDirectory() as root:
+            files = {"power/cell/type": "Battery", "power/cell/capacity": "87", "power/cell/voltage_now": "8",
+                     "power/cell/current_avg": "1", "power/charger/type": "USB", "power/charger/online": "0",
+                     "power/pad/type": "Battery", "power/pad/scope": "Device", "power/pad/capacity": "5",
+                     "power/pad/voltage_now": "8", "power/pad/current_avg": "1", "power/pad/online": "1",
+                     "zones/thermal_zone0/type": core}
+            for name, value in files.items():
+                if name not in skip:
+                    path = Path(root, name)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(value + "\n")
+            module.check_readouts(root + "/power", root + "/zones")
+        return said[0]
+
+    def test_all_there_is_ok(self):
+        self.assertEqual(self.verdict()[0], "ok")
+
+    def test_each_one_missing_warns_and_a_pad_battery_does_not_stand_in(self):
+        for name, word in (("capacity", "battery capacity"), ("voltage_now", "battery voltage_now"),
+                           ("current_avg", "battery current_avg")):
+            state, detail = self.verdict(skip=("power/cell/" + name,))
+            self.assertEqual(state, "warn")
+            self.assertIn(word, detail)
+        self.assertIn("charger online", self.verdict(skip=("power/charger/online",))[1])
+
+    def test_the_cluster_zone_is_not_a_core(self):
+        state, detail = self.verdict(core="cpuss0-thermal")
+        self.assertEqual(state, "warn")
+        self.assertIn("CPU core", detail)
 
 
 class HandsRate(unittest.TestCase):

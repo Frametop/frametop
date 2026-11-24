@@ -18,6 +18,8 @@ namespace {
 
 constexpr int64_t kEveryMs = 1000;
 constexpr uint32_t kFrames = 30;
+// The battery's less often: the gauge is on I2C, 0.7 ms a file (measured 2026-11-24).
+constexpr int64_t kBatteryEveryMs = 2000;
 
 struct {
     int64_t readMs = -1;
@@ -27,6 +29,7 @@ struct {
     bool zonesFound = false;
     sysstats::Words words;
     battery::Reading battery;
+    int64_t batteryMs = -1;
 } g_stats;
 
 // A small file's text (up to `n` bytes), or empty.
@@ -65,31 +68,28 @@ double CpuC() {
     return sysstats::CpuTemp(cores.data(), int(cores.size()));
 }
 
-// The headset's battery and whether any charger of its own is online, each time from the folder: its
-// supplies' names are the drivers'.
-battery::Reading ReadBattery() {
+// Each time from the folder: the supplies' names are the drivers'.
+std::vector<battery::Supply> ReadSupplies() {
     const std::string root = "/sys/class/power_supply/";
-    battery::Reading r;
+    std::vector<battery::Supply> out;
     DIR *d = opendir(root.c_str());
-    if (!d) return r;
+    if (!d) return out;
     while (const dirent *e = readdir(d)) {
         if (e->d_name[0] == '.') continue;
         const std::string dir = root + e->d_name + "/";
         auto text = [&](const char *f) { return Slurp((dir + f).c_str(), 32); };
-        if (!battery::Headset(text("scope").c_str())) continue;
-        if (!battery::IsBattery(text("type").c_str())) {
-            r.plugged |= std::atoi(text("online").c_str()) == 1;
-            continue;
-        }
-        const std::string pct = text("capacity"), uv = text("voltage_now");
-        std::string ua = text("current_avg");
-        if (ua.empty()) ua = text("current_now");
-        if (!pct.empty()) r.percent = std::atoi(pct.c_str());
-        if (!uv.empty() && !ua.empty()) r.watts = battery::Watts(std::atof(uv.c_str()), std::atof(ua.c_str()));
-        r.full = text("status").compare(0, 4, "Full") == 0;
+        battery::Supply s;
+        s.scope = text("scope");
+        if (!battery::Headset(s.scope.c_str())) continue;
+        s.type = text("type");
+        if (battery::IsBattery(s.type.c_str()))
+            s.capacity = text("capacity"), s.microvolts = text("voltage_now"), s.average = text("current_avg"), s.now = text("current_now");
+        else
+            s.online = text("online");
+        out.push_back(s);
     }
     closedir(d);
-    return r;
+    return out;
 }
 
 double GpuNow() {
@@ -121,12 +121,14 @@ const sysstats::Words &SystemStats(int64_t nowMs) {
     sysstats::Words w = sysstats::Say(cpuPct, GpuNow(), used, total, CpuC());
     if (w.cpu.empty()) w.cpu = g_stats.words.cpu;   // (the first read has nothing to compare with)
     g_stats.words = w;
-    g_stats.battery = ReadBattery();
     return g_stats.words;
 }
 
 const battery::Reading &BatteryNow(int64_t nowMs) {
-    SystemStats(nowMs);
+    const int64_t ago = nowMs - g_stats.batteryMs;
+    if (g_stats.batteryMs >= 0 && ago >= 0 && ago < kBatteryEveryMs) return g_stats.battery;
+    g_stats.batteryMs = nowMs;
+    g_stats.battery = battery::From(ReadSupplies(), g_stats.battery.state);
     return g_stats.battery;
 }
 

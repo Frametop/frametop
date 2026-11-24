@@ -14,7 +14,15 @@ waits too, and starts here.
 
 L is ft_layout (its layout, its socket to ft-screens, its stream helpers), passed in.
 """
+import fcntl
+import os
+
 import ft_hostmonitors
+
+# One at a time, in the order ft-screens said them. Each is an ft-layout of its own, and "on" can
+# still be on its way to a PC (a slow network) when the headset is back on: without the wait, its
+# "monitors back" could land after "off" sent the plans, and the PC would end with no plan.
+LOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "frametop-remote-away.lock")
 
 
 def connected(L, layout):
@@ -69,8 +77,8 @@ def back(L):
 
 def command(L, args):
     """ft-layout remote away on|off."""
-    if args == ["on"]:
-        return away(L)
-    if args == ["off"]:
-        return back(L)
-    raise RuntimeError("remote away on|off")
+    if args not in (["on"], ["off"]):
+        raise RuntimeError("remote away on|off")
+    with open(LOCK, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return away(L) if args == ["on"] else back(L)

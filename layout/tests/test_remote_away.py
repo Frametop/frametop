@@ -9,6 +9,8 @@ import json
 import pathlib
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 LAYOUT = pathlib.Path(__file__).resolve().parents[1]
@@ -113,6 +115,26 @@ class Away(unittest.TestCase):
         self.m.save_layout(layout)
         self.m.remote_command(["away", "off"])
         self.assertEqual((self.synced, self.screens.asked), ([], []))
+
+    def test_back_waits_for_an_away_still_on_its_way(self):
+        # ft-screens starts each as its own ft-layout: the headset back on while "monitors back" is
+        # held up on its way to the PC. In turn, the PC ends with its plan, not without one.
+        ra = sys.modules["ft_remoteaway"]
+        self.addCleanup(setattr, ra, "LOCK", ra.LOCK)
+        ra.LOCK = str(pathlib.Path(self.tmp.name) / "away.lock")
+        events = []
+
+        def slow_put_back(hs, log, request=None):
+            time.sleep(0.4)
+            events.append("monitors back")
+        hm.put_back_all = slow_put_back
+        hm.sync_all = lambda hs, log, request=None: events.append("plans sent") or set()
+        away = threading.Thread(target=self.m.remote_command, args=(["away", "on"],))
+        away.start()
+        time.sleep(0.1)
+        self.m.remote_command(["away", "off"])
+        away.join()
+        self.assertEqual(events, ["monitors back", "plans sent"])
 
     def test_anything_else_is_the_usage(self):
         with self.assertRaisesRegex(RuntimeError, "remote away on\\|off"):

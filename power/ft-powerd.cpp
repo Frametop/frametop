@@ -491,7 +491,7 @@ int main() {
         }
     }
 
-    if (standby.Stop()) endStandby("stopping");
+    if (standby.Active()) endStandby("stopping");
     turnOn("stopping");
     std::printf("stopped (signal %d)\n", int(stopSignal));
     vr::VR_Shutdown();

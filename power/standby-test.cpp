@@ -81,15 +81,6 @@ int main() {
         CHECK(!s.Use(30 + Standby::kSettleSecs));
         CHECK(s.Start(331, true, false) == Standby::Begin::Ask);
     }
-    {  // Stopping while it holds: a "worn" to write; while idle: none.
-        Standby s;
-        CHECK(!s.Stop());
-        CHECK(s.Start(0, true, false) == Standby::Begin::Ask);
-        CHECK(s.Tick(6, true) == Standby::Step::Holds);
-        CHECK(s.Stop());
-        CHECK(!s.Active());
-        CHECK(!s.Stop());
-    }
     if (failed) return 1;
     std::printf("standby-test: ok\n");
     return 0;

@@ -991,14 +991,12 @@ class Backend(QObject):
 
     @Property("QVariantMap", notify=powerChanged)
     def power(self):
+        conf = ft_layout.read_conf()
         try:
-            off_min = float(ft_layout.read_conf().get("DISPLAY_OFF_MIN") or 0)
+            off_min = float(conf.get("DISPLAY_OFF_MIN") or 0)
         except ValueError:
             off_min = 0.0
-        try:    # as ft-powerd reads it: on unless it's a number that is 0
-            standby = float(ft_layout.read_conf().get("DISPLAY_OFF_STANDBY") or 1) != 0
-        except ValueError:
-            standby = True
+        standby = ft_conf.number(conf, "DISPLAY_OFF_STANDBY", 1) != 0    # as ft-powerd reads it
         state, unused, _ = self._powerd or ("", 0, 0)
         return {"offMinutes": off_min, "standby": standby,
                 "service": self._powerd is not None, "state": state, "unused": unused,

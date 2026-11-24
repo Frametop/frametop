@@ -87,13 +87,6 @@ public:
         return true;
     }
 
-    // ft-powerd is stopping. True: the caller writes "worn".
-    bool Stop() {
-        const bool was = phase_ != Phase::Idle;
-        phase_ = Phase::Idle;
-        return was;
-    }
-
 private:
     enum class Phase { Idle, Asked, Held };
     Phase phase_ = Phase::Idle;

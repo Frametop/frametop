@@ -81,7 +81,7 @@ void ApplyWall() {
 }
 // The wall the layout now is on (tilecurve.h): where each tile's azimuth and elevation are round you.
 tilecurve::Wall TileWall() {
-    return tilecurve::For(g_tiles.Last(), g_tiles.Centre(), g_tiles.params, g_tileSideM, g_tileHeightCurveM);
+    return tilecurve::For(g_tiles.Last(), g_tiles.WallCentre(), g_tiles.params, g_tileSideM, g_tileHeightCurveM);
 }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 int g_tileHold = -1;                      // ...the one a tiling key moved, until the 3D mouse is back on a panel or you look away
@@ -395,7 +395,7 @@ bool OffTheTiles(Screen &s, Off off) {
 void TileUnanchor(int i, const char *by) {
     auto it = g_screens.find(i);
     if (it == g_screens.end() || !g_tiles.Anchored(i)) return;
-    OffTheTiles(it->second, [&] { return g_tiles.Unanchor(i); });
+    OffTheTiles(it->second, [&] { return g_tiles.TakeOff(i); });
     RetileDash();
     RememberTiles();
     std::printf("%s: not anchored to the dashboard any more (%s)\n", TileLabel(i).c_str(), by);
@@ -431,6 +431,7 @@ void TileKnown(int i, const std::string &key) {
         g_tileKey.erase(was);
         g_tileRoom.erase(i);
         TileUnanchor(i, "another app on it");   // (left in the room, off the grid; nothing remembered for it)
+        g_tiles.Unanchor(i);                    // (nor the centre display's)
     }
     g_tileKey[i] = k;
     BarSideKnown(i, k);   // (its bar's edge is remembered by the same key)

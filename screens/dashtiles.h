@@ -118,9 +118,16 @@ public:
     }
     // Not anchored any more (or gone). False if it wasn't.
     bool Unanchor(int id) {
-        Forget(id);
-        nudge_.erase(id), arc_.erase(id);
+        arc_.erase(id);
         if (centre_ == id) centre_ = -1;
+        return TakeOff(id);
+    }
+    // Taken off by hand (the pin button, In the Room): anchored again, it's the centre display and
+    // curved as it was, unless you chose another since (user, 2026-11-23: an ultrawide pulled off
+    // and put back wasn't the centre any more: "off to my side on a reset and doesnt let me curve").
+    bool TakeOff(int id) {
+        Forget(id);
+        nudge_.erase(id);
         gaps_.Forget(id);
         marks_.Unmark(id);
         grid_.Remove(id);
@@ -288,6 +295,16 @@ public:
     }
     // The centre display as laid out last (-1: none), and whether it's curved round the arc now.
     int Centre() const { return centreNow_; }
+    // ...the one the wall's middle section is (tilecurve.h): it, or while it's hidden (no size) the shown
+    // one nearest straight ahead.
+    int WallCentre() const {
+        if (!absent.count(centreNow_)) return centreNow_;
+        int best = -1;
+        double off = INFINITY;
+        for (const tiling::Placed &p : last_.tiles)
+            if (!absent.count(p.id) && std::fabs(p.azDeg) < off - 1e-9) off = std::fabs(p.azDeg), best = p.id;
+        return best;
+    }
     bool ArcNow(int id) const { return id >= 0 && id == centreNow_ && arc_.count(id) && !absent.count(id); }
     bool Arc(int id) const { return arc_.count(id) != 0; }
     // The centre display's curve round the tiles' arc on or off (kept if another takes the centre:
@@ -320,8 +337,9 @@ public:
         return Changed(grid_.Scale(id, factor)) && (ByHand(id, mates), true);
     }
 
-    // Every tile packed into columns again (tilepack.h), sizes kept: a reset's (user, 2026-11-19:
-    // "Tiling looks way broken ... There's a massive gap in the middle").
+    // Every tile packed into columns again (tilepack.h), the centre display's in the middle (hidden
+    // now or not), sizes kept: a reset's (user, 2026-11-19: "Tiling looks way broken ... There's a
+    // massive gap in the middle").
     template <typename InfoOf>
     void Repack(InfoOf info) {
         std::vector<tilepack::Item> items;
@@ -334,7 +352,7 @@ public:
             }
         if (items.empty()) return;
         EndBatch();
-        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg, EyeFits, &params);
+        const std::vector<std::vector<int>> cols = tilepack::Pack(items, params.gapDeg, EyeFits, &params, CentreOf(info));
         std::map<int, tilepack::Item> byId;
         for (const tilepack::Item &it : items) byId[it.id] = it;
         grid_ = tilegrid::Grid{}, marks_.ClearStacked();   // (packed afresh: none on a stack for you now)
@@ -576,18 +594,19 @@ private:
         }
         return std::clamp(pan, -l.az1, -l.az0);
     }
-    // The centre display: the one chosen (TakeCentre, or remembered) while it's a tile, else Steam's
-    // window, else the widest (its own size, shown or not: one hidden keeps its place as the centre),
-    // of ones as wide the one nearest the middle column.
+    // The centre display: the one chosen (TakeCentre, or remembered) while it's a tile, else the
+    // widest (its own size, shown or not: one hidden keeps its place as the centre), of ones as wide
+    // the one nearest the middle column. Steam's window only when it's alone: gone with the dashboard
+    // closed, it's at the strip's end, so straight ahead it put all the others to one side (user, 2026-11-23).
     template <typename InfoOf>
     int CentreOf(InfoOf info) const {
         if (grid_.Has(centre_)) return centre_;
-        if (grid_.Has(steam)) return steam;
-        int best = -1;
+        int best = grid_.Has(steam) ? steam : -1;
         double widest = 0, off = 0;
         const double mid = (double(grid_.Cols().size()) - 1) / 2;
         for (size_t c = 0; c < grid_.Cols().size(); ++c)
             for (const tilegrid::Cell &cell : grid_.Cols()[c].cells) {
+                if (cell.id == steam) continue;
                 const double w = info(cell.id).widthM * cell.scale, o = std::fabs(double(c) - mid);
                 if (w > widest + 1e-6 || (w > widest - 1e-6 && o < off - 1e-9)) widest = w, off = o, best = cell.id;
             }

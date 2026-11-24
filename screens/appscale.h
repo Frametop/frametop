@@ -57,7 +57,8 @@ struct Asking {
     double scale = 1;
     Wheel wheel;
     int64_t askAt = -1;     // ms: ask for it then (-1: nothing to ask)
-    int64_t askedAt = -1;   // an ask is out since then
+    int64_t askedAt = -1;   // an ask is out since then, for `asked`
+    double asked = 1;
 
     void Pick(double to, int64_t now) {
         if (!Same(to, scale)) scale = to, askAt = now;
@@ -69,11 +70,13 @@ struct Asking {
     // True once when it's time to ask for `scale`.
     bool Due(int64_t now) {
         if (askAt < 0 || now < askAt || (askedAt >= 0 && now - askedAt < kAnswerMs)) return false;
-        askAt = -1, askedAt = now;
+        askAt = -1, askedAt = now, asked = scale;
         return true;
     }
-    // ft-layout said it: the PC's scale now.
-    void Said(double s) {
+    // ft-layout said it: the PC's scale now. What it says as a stream starts over may be from before the
+    // ask that's out; its answer is `answer`, or the scale asked for.
+    void Said(double s, bool answer) {
+        if (askedAt >= 0 && !answer && !Same(s, asked)) return;
         askedAt = -1;
         if (askAt < 0) scale = s;
     }

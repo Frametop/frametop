@@ -37,6 +37,7 @@ def window_app_title(app, opened=None):
     return re.sub(r"\.(desktop|lnk)$", "", app.rsplit("/", 1)[-1])
 WINDOW_DISTANCE = 1.1      # metres in front of you, a little below eye height
 WINDOW_PIXELS_PER_METRE = 1400
+WINDOW_METRES = (0.15, 12)        # its panel's width (ft-screens takes no other)
 WINDOW_RESIZE_MIN = (320, 240)    # a window panel resized by hand (the host's own floor)
 WINDOW_RESIZE_MAX = (3840, 2160)  # ... at most: the Frame's decoder, next to the other streams
 
@@ -253,9 +254,12 @@ def window_drop(layout, args):
 
 
 @contextlib.contextmanager
-def taking_turns():
-    """A resize or a scale at a time (a wheel's next step waits for the PC's answer to the last one)."""
-    with open(L.LOCK_PATH + ".window-size", "w") as lock:
+def taking_turns(word):
+    """A resize or a scale at a time on screen `word` (a wheel's next step waits for the PC's answer to
+    the last one)."""
+    if not word.isdecimal():
+        raise RuntimeError(f"window: {word!r} isn't a screen number")
+    with open(f"{L.LOCK_PATH}.window-{int(word)}", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
 
@@ -281,14 +285,15 @@ def window_resize(args):
         metres = float(args[2])
     except ValueError:
         metres = math.nan
-    if not (math.isfinite(metres) and 0.15 <= metres <= 12):
+    if not (math.isfinite(metres) and WINDOW_METRES[0] <= metres <= WINDOW_METRES[1]):
         raise RuntimeError(f"window resize: the width is 0.15 to 12 metres, not {args[2]!r}")
     w, h = (int(v) for v in args[1].lower().split("x"))
     w = min(max(w, WINDOW_RESIZE_MIN[0]), WINDOW_RESIZE_MAX[0])
     h = min(max(h, WINDOW_RESIZE_MIN[1]), WINDOW_RESIZE_MAX[1])
     w, h = d["size"] = list(L.stream_size(w, h))
     fit_scale(d)
-    d["metres"] = round(metres * d["size"][0] / w, 4)   # (a few pixels more or less: the same density)
+    # (a few pixels more or less: the same density)
+    d["metres"] = round(min(max(metres * d["size"][0] / w, WINDOW_METRES[0]), WINDOW_METRES[1]), 4)
     L.save_layout(layout)
     n = int(args[0])
     L.log(f"resized {d['id']} to {d['size'][0]}x{d['size'][1]}, {d['metres']} m wide")
@@ -329,11 +334,11 @@ def window_scale(args):
         scale = round(ft_windowscale.valid(answer.get("scale")) or d["scale"], 6)
         # The PC took its time: the layout as it is now, where a panel may have opened, or this one closed.
         layout = L.load_layout()
-        found = next(((h, e) for _, h, e in L.remote_displays(layout) if (e["id"], e["app"]) == (d["id"], d["app"])), None)
+        found = next(((k, h, e) for k, h, e in L.remote_displays(layout) if (e["id"], e["app"]) == (d["id"], d["app"])), None)
         if found is None:
             L.log(f"{d['id']}: closed meanwhile")
             return
-        host, d = found
+        n, host, d = found
         d["scale"] = scale
     ft_windowscale.keep(host, d.get("pc_app"), d["scale"])
     L.save_layout(layout)
@@ -350,9 +355,9 @@ def window_scale(args):
 
 
 def tell_scale(n, d):
-    """Panel n's scale to ft-screens, for its menu."""
+    """Panel n's scale to ft-screens, which asked for one, for its menu."""
     try:
-        L.screens_socket().ask(ft_windowscale.told(n, d))
+        L.screens_socket().ask(ft_windowscale.told(n, d, answer=True))
     except RuntimeError as e:
         L.log(f"screen {n}'s scale isn't in its menu: {e}")
 
@@ -474,11 +479,11 @@ def window_command(args):
         window_pull(L.load_layout(), args[1:])
         return
     if what == "resize" and len(args) == 4:
-        with taking_turns():
+        with taking_turns(args[1]):
             window_resize(args[1:])
         return
     if what == "scale" and len(args) == 3:
-        with taking_turns():
+        with taking_turns(args[1]):
             window_scale(args[1:])
         return
     if what == "close" and len(args) == 2:

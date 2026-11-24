@@ -141,9 +141,9 @@ class Command(test_windows.WindowTest):
         n = self.opened("--size", "1280x800")
         self.answers["/api/frametop/windows/resize"] = (200, {"status": True, "scale": 1.6})
         self.run_window("scale", n, "1.6")
-        self.assertEqual([c[2:] for c in self.api], [("POST", "/api/frametop/windows/resize", 
+        self.assertEqual([c[2:] for c in self.api], [("POST", "/api/frametop/windows/resize",
                                                      {"address": "0x55aa10", "width": 1280, "height": 800, "scale": 1.6})])
-        self.assertEqual(self.screens.asked, [f"remote {n} scale 1.6 1280x800"])   # (its stream goes on)
+        self.assertEqual(self.screens.asked, [f"remote {n} scale 1.6 1280x800 answer"])   # (its stream goes on)
         self.assertEqual((self.displays()[-1]["scale"], self.displays()[-1]["size"]), (1.6, [1280, 800]))
         self.assertEqual(self.m.load_layout()["hosts"][0]["windows"], {"port": 48989, "scales": {"foot": 1.6}})
 
@@ -163,7 +163,7 @@ class Command(test_windows.WindowTest):
         self.answers["/api/frametop/windows/resize"] = (400, {"error": "no window output for 0x55aa10"})
         with self.assertRaisesRegex(RuntimeError, "no window output"):
             self.run_window("scale", n, "2")
-        self.assertEqual((self.displays()[-1]["scale"], self.screens.asked), (1.0, [f"remote {n} scale 1"]))
+        self.assertEqual((self.displays()[-1]["scale"], self.screens.asked), (1.0, [f"remote {n} scale 1 answer"]))
         self.assertNotIn("scales", self.m.load_layout()["hosts"][0]["windows"])
 
     def test_a_bad_scale_asks_nothing(self):
@@ -188,6 +188,12 @@ class Command(test_windows.WindowTest):
         d = self.displays()[-1]
         self.assertEqual((d["size"], d["asked_size"], d["scale"], d["metres"]), ([1002, 702], [1000, 702], 1.5, 0.8016))
         self.assertIn(f"remote {n} scale 1.5 1002x702", self.screens.asked)   # (its stretch waits for that)
+
+    def test_a_small_panel_stays_wide_enough(self):
+        n = self.opened("--size", "1280x800")
+        self.run_window("scale", n, "1.5")
+        self.run_window("resize", n, "500x700", "0.15")
+        self.assertEqual((self.displays()[-1]["size"], self.displays()[-1]["metres"]), ([498, 702], 0.15))
 
     def test_a_corner_dragged_past_the_limits(self):
         n = self.opened("--size", "1280x800")
@@ -229,7 +235,7 @@ class Command(test_windows.WindowTest):
         request = self.w.ft_hostapi.post_json
 
         def checked(*args, **kw):
-            with open(self.m.LOCK_PATH + ".window-size", "w") as other:
+            with open(f"{self.m.LOCK_PATH}.window-{n}", "w") as other:
                 try:
                     fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:

@@ -54,6 +54,7 @@ struct Tile {
     int id = 0;
     double widthM = 1.6, heightM = 0.9;   // its size with its middle at the wall: natural, times its own
     int align = 0;              // its shelf against the column's left edge (-1), right (+1), or as Lean says (0)
+    bool row = false;           // starts a shelf, in a super wide display's column (tilewide.h)
 };
 
 struct Column {
@@ -114,6 +115,9 @@ struct Placed {
     bool below = false;                   // hanging under the desk line
     int lean = 0;                         // its shelf against its column's left edge (-1), right (+1), or centred
     bool narrow = false;                  // its shelf narrower than its column (so it can lean)
+    int shelf = 0;                        // its shelf, from the desk line out, on its side of it
+    bool starts = false;                  // it starts that shelf, as marked (Tile::row)
+    bool wide = false;                    // its column's super wide display (WideRow)
 };
 
 struct Layout {
@@ -176,10 +180,26 @@ struct Stacked {
     double inShelfDeg = 0;   // its middle from its shelf's
     double offDeg = 0;       // its middle from its column's, round you (Pack's lean)
     int align = 0;           // its shelf's (the first of its panels that says one: Tile::align)
+    int shelf = 0;           // its shelf, counted from the desk line out, on its side of it
     int lean = 0;            // the way its shelf leans (Pack's: its align, else its column's)
     bool below = false;      // under the desk line
 };
+// A super wide display (user, 2026-11-23): twice as wide as it's tall, or more, and this wide or
+// more as your eyes see it. Its column packs its shelves tighter (tilepack.h's kWideColumnDeg,
+// kSqueeze), and a drop over or under it goes on the shelf there (tilewide.h).
+constexpr double kWideAspect = 2, kWideDeg = 55;
+inline bool Wide(const Params &p, double widthM, double heightM) {
+    return heightM > 0 && widthM >= kWideAspect * heightM - 1e-9 && Deg(2 * std::atan2(widthM / 2, std::max(1e-6, p.radius - p.backM))) >= kWideDeg;
+}
+// A column's super wide display, its row (-1: its widest panel isn't one).
+inline int WideRow(const Column &c, const Params &p) {
+    int w = -1;
+    for (int r = 0; r < int(c.tiles.size()); ++r)
+        if (w < 0 || c.tiles[size_t(r)].widthM > c.tiles[size_t(w)].widthM) w = r;
+    return w >= 0 && Wide(p, c.tiles[size_t(w)].widthM, c.tiles[size_t(w)].heightM) ? w : -1;
+}
 inline std::vector<Stacked> Stack(const Column &c, const Params &p, double k) {
+    const bool wide = WideRow(c, p) >= 0;
     const int n = int(c.tiles.size()), b = c.Base();
     std::vector<Stacked> out(size_t(std::max(0, n)));
     std::vector<double> flat(out.size());
@@ -196,16 +216,35 @@ inline std::vector<Stacked> Stack(const Column &c, const Params &p, double k) {
     // one side: `order` its rows from the desk line out, `dir` +1 up, -1 down
     const auto side = [&](const std::vector<int> &order, int dir) {
         std::vector<double> w;
-        for (const int r : order) w.push_back(flat[size_t(r)]);
-        const std::vector<int> shelf = tilepack::Shelves(w, gap, widest);
+        std::vector<bool> starts;
+        for (const int r : order) w.push_back(flat[size_t(r)]), starts.push_back(wide && c.tiles[size_t(r)].row);
+        const std::vector<int> shelf = tilepack::Shelves(w, gap, widest, wide, starts);
         double el = p.deskDeg - (dir < 0 ? gap : 0);
         for (size_t i = 0; i < order.size();) {
             size_t j = i;
             while (j < order.size() && shelf[j] == shelf[i]) ++j;
+            // (a super wide display's: its panels as much smaller as it takes to stand across it, as
+            // wide as they are up there, kSqueeze at most; a pass changes how high they reach, the
+            // next one with that)
+            double small = 1;
+            for (int pass = 0; wide && pass < 4; ++pass) {
+                double sum = 0;
+                for (size_t m = i; m < j; ++m) {
+                    const Stacked &s = out[size_t(order[m])];
+                    const double h = Deg(2 * std::atan2(s.heightM / 2, p.radius));
+                    sum += SpanFor(p.radius, s.widthM, s.heightM, el + dir * h / 2);
+                }
+                const double fit = std::min(1.0, (widest - double(j - i - 1) * gap) / std::max(1e-9, sum));
+                const double q = std::max(fit, tilepack::kSqueeze / small);
+                if (j - i < 2 || q > 1 - 1e-6) break;
+                small *= q;
+                for (size_t m = i; m < j; ++m) out[size_t(order[m])].widthM *= q, out[size_t(order[m])].heightM *= q;
+            }
             double far = el, across = 0;
             int align = 0;
             for (size_t m = i; m < j; ++m) {
                 Stacked &s = out[size_t(order[m])];
+                s.shelf = shelf[m];
                 const double h = Deg(2 * std::atan2(s.heightM / 2, p.radius));
                 if (dir > 0) s.el0 = el, s.el1 = el + h, far = std::max(far, s.el1);
                 else s.el1 = el, s.el0 = el - h, far = std::min(far, s.el0);
@@ -304,6 +343,7 @@ inline std::vector<int> Lean(const std::vector<Column> &cols, const Params &p) {
         if (hi - lo < 1e-6) continue;
         const double d = centred.mid[c] - centred.width / 2;
         lean[c] = d < -1e-6 ? 1 : d > 1e-6 ? -1 : 0;
+        if (const int w = WideRow(cols[c], p); w >= 0 && w == cols[c].Base()) lean[c] = 0;   // (over or under a super wide display: its middle)
         uneven.push_back(c);
     }
     double best = Pack(cols, p, 1, 0, -1, lean).width;
@@ -376,6 +416,7 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int spli
     for (size_t c = 0; c < cols.size(); ++c) {
         const double mid = out.az0 + pk.mid[c];
         const std::vector<Stacked> &st = pk.stacks[c];
+        const int wideRow = WideRow(cols[c], p);
         for (size_t r = 0; r < st.size(); ++r) {
             Placed pl;
             pl.id = cols[c].tiles[r].id, pl.col = int(c), pl.row = int(r);
@@ -384,7 +425,8 @@ inline Layout Arrange(const std::vector<Column> &cols, const Params &p, int spli
             pl.az0 = pl.azDeg - st[r].spanDeg / 2, pl.az1 = pl.azDeg + st[r].spanDeg / 2;
             pl.elDeg = (pl.el0 + pl.el1) / 2;
             pl.widthM = st[r].widthM, pl.heightM = st[r].heightM;
-            pl.below = st[r].below, pl.lean = st[r].lean;
+            pl.below = st[r].below, pl.lean = st[r].lean, pl.shelf = st[r].shelf, pl.wide = int(r) == wideRow;
+            pl.starts = wideRow >= 0 && cols[c].tiles[r].row;
             double widest = 0;
             for (const Stacked &s : st) widest = std::max(widest, s.shelfDeg);
             pl.narrow = st[r].shelfDeg < widest - 1e-6;
@@ -421,111 +463,6 @@ inline void Direction(const double pt[3], double *azDeg, double *elDeg) {
     const double flat = std::hypot(pt[0], pt[2]);
     *azDeg = Deg(std::atan2(pt[0], -pt[2]));
     *elDeg = Deg(std::atan2(pt[1], flat));
-}
-
-// Where a dragged tile let go at (az, el) goes: into a column at a row, a new column at an index, or
-// off the grid (torn off: it stays anchored where it is). A drop on a column's middle half stacks it
-// there, above or below the panel it's on (under the desk line: hanging under it), leaning to the
-// side of the column it was let go on; on its outer quarters, or a gap, a new column that side.
-//
-// Let go in the space over its own column's top, already the top: it goes up, a neighbouring column's
-// top panel in under it (Lift; user, 2026-11-20: dragged up into an empty space "it just pulls the
-// display back down to where it was before instead of pulling displays from the right or left to
-// fill in the gap and put the display up higher").
-//
-// Mostly (three quarters of it) over a column's top or under the desk line, there are no quarters:
-// it goes into the column whose panel is nearest, on top or hanging under, the others making room
-// (user, 2026-11-20: "If I drag a display to an empty space in the row below it should attach it to
-// the closest anchor and push some things slightly to the side"). Under the desk, its own column
-// doesn't count when nothing of it stands over the desk without it. `self`: the dragged panel (its
-// own place is in `l`), which also moves the margins out to its edges.
-struct Drop {
-    enum Kind { Into, NewColumn, TearOff, Lift } kind = TearOff;
-    int col = 0, row = 0;   // Into: the column and the row it takes; NewColumn: the index it takes
-    bool below = false;     // Into: under the desk line
-    int align = 0;          // Into: the side of the column it leans against (tilegrid.h's Cell::align); Lift: the side to pull from first
-    bool over = false;      // Into: let go over every panel in the column
-    bool leftOfSlot = false;   // NewColumn: let go left of Steam's slot (at the split: which side it goes)
-};
-constexpr double kTearMarginDeg = 10;   // this far past the strip, under the desk or over the tallest column: torn off
-
-inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, double el, int self = -1) {
-    Drop d;
-    if (cols.empty()) return d.kind = Drop::NewColumn, d.col = 0, d;
-    az = WrapNear(az, (l.az0 + l.az1) / 2);
-    double half = 0;   // the dragged panel's half height, and its column
-    int own = -1;
-    for (const Placed &p : l.tiles)
-        if (p.id == self) half = (p.el1 - p.el0) / 2, own = p.col;
-    if (az < l.az0 - kTearMarginDeg || az > l.az1 + kTearMarginDeg || el < l.el0 - kTearMarginDeg - half ||
-        el > l.el1 + kTearMarginDeg + half)
-        return d;
-    d.leftOfSlot = l.split >= 0 && az < l.slotAz;
-    if (az < l.az0) return d.kind = Drop::NewColumn, d.col = 0, d;
-    if (az > l.az1) return d.kind = Drop::NewColumn, d.col = int(cols.size()), d;
-    // the column it's over: nearest round you, then up (packed columns can share an azimuth)
-    const auto gap = [&](const Placed &p, double *dAz, double *dEl) {
-        *dAz = az < p.az0 ? p.az0 - az : az > p.az1 ? az - p.az1 : 0;
-        *dEl = el < p.el0 ? p.el0 - el : el > p.el1 ? el - p.el1 : 0;
-    };
-    // (a column with nothing shown, laid out at no size: Board::absent's, never aimed at)
-    const auto ghost = [&](int col) {
-        for (const Tile &t : cols[size_t(col)].tiles)
-            if (t.widthM > 0 || t.heightM > 0) return false;
-        return true;
-    };
-    const auto over = [&](int skipCol) {
-        int col = -1;
-        double bAz = 1e9, bEl = 1e9, dAz, dEl;
-        for (const Placed &p : l.tiles) {
-            if (p.col == skipCol || ghost(p.col)) continue;
-            gap(p, &dAz, &dEl);
-            if (dAz < bAz - 1e-9 || (dAz < bAz + 1e-9 && dEl < bEl)) bAz = dAz, bEl = dEl, col = p.col;
-        }
-        return col;
-    };
-    const auto topOf = [&](int col) {
-        double t = -1e9;
-        for (const Placed &p : l.tiles)
-            if (p.col == col) t = std::max(t, p.el1);
-        return t;
-    };
-    const double past = half / 2;   // (three quarters of it past an edge)
-    int c = over(-1);
-    if (c < 0) return d;
-    const bool under = el < l.deskDeg - past;
-    if (under && c == own) {   // (its own column, standing on nothing without it: the nearest other one)
-        bool stands = false;
-        for (const Placed &p : l.tiles) stands = stands || (p.col == own && p.id != self && !p.below);
-        if (!stands && over(own) >= 0) c = over(own);
-    }
-    if (!under && el <= topOf(c) + past) {   // beside a panel: the nearest one's column, its outer quarters a new one
-        double best = 1e9, a0 = 0, a1 = 0, dAz, dEl;
-        for (const Placed &p : l.tiles) {
-            if (ghost(p.col)) continue;
-            gap(p, &dAz, &dEl);
-            if (dAz + dEl < best) best = dAz + dEl, c = p.col, a0 = p.az0, a1 = p.az1;
-        }
-        const double u = (az - a0) / std::max(1e-6, a1 - a0);
-        if (u < 0.25) return d.kind = Drop::NewColumn, d.col = c, d;
-        if (u > 0.75) return d.kind = Drop::NewColumn, d.col = c + 1, d;
-    }
-    double c0 = 1e9, c1 = -1e9;
-    for (const Placed &p : l.tiles)
-        if (p.col == c) c0 = std::min(c0, p.az0), c1 = std::max(c1, p.az1);
-    const double top = topOf(c);
-    const int n = int(cols[c].tiles.size()), b = cols[c].Base();
-    d.kind = Drop::Into, d.col = c, d.below = el < l.deskDeg;
-    d.row = d.below ? n : b + 1;   // (the lowest under the desk line, or the new base)
-    for (const Placed &p : l.tiles) {
-        if (p.col != c || p.below != d.below) continue;
-        if (el >= (p.el0 + p.el1) / 2) {   // above this one's middle: before it (rows go top down)
-            d.row = std::min(d.row, p.row);
-        }
-    }
-    d.align = az < (c0 + c1) / 2 ? -1 : 1;
-    d.over = !d.below && el > top;
-    return d;
 }
 
 }  // namespace tiling

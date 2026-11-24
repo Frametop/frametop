@@ -7,9 +7,13 @@
 #include "slotsplit.h"
 #include "tilegrid.h"
 #include "tileview.h"
+#include "tilewide.h"
 #include "tiling.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace dashtiles {
 
@@ -57,11 +61,78 @@ inline bool Hang(tilegrid::Grid &g, const View &v, int id) {
     }
     return false;
 }
+// Over or under a super wide display (tilewide.h; the display itself moves as any panel): Left and
+// Right trade places with the panel beside it on its shelf (none there: as anywhere), Up and Down go
+// to the shelf that way, past the display too; past the last one, a shelf of its own (alone on it
+// already: nothing). `changed`: what it came to. False: not one of these.
+inline bool RoundWide(tilegrid::Grid &g, const View &v, int id, Key k, bool *changed) {
+    const tilegrid::Where w = g.Find(id);
+    const tiling::Placed *p = v.PlacedOf(id);
+    const int wideId = w.ok() ? v.WideId(w.col) : -1;
+    const tiling::Placed *wide = v.PlacedOf(wideId);
+    if (!p || !wide || wideId == id || !v.LaidOut(w.col)) return false;
+    const auto shelves = tiling::WideShelves(v.last, w.col, -1);
+    *changed = false;
+    if (k == Key::Left || k == Key::Right) {
+        const tiling::Placed *next = nullptr;
+        for (const auto &s : shelves)
+            for (const tiling::Placed *q : s)
+                if (q->below == p->below && q->shelf == p->shelf && q->id != id && (q->azDeg > p->azDeg) == (k == Key::Right) &&
+                    (!next || std::fabs(q->azDeg - p->azDeg) < std::fabs(next->azDeg - p->azDeg)))
+                    next = q;
+        return next && (*changed = g.Swap(id, next->id));
+    }
+    const bool up = k == Key::Up;
+    const std::vector<const tiling::Placed *> *to = nullptr;   // (the nearest shelf that way, on its side of the display)
+    const bool over = p->elDeg > wide->elDeg;
+    for (const auto &s : shelves) {
+        const double el = s[0]->elDeg;
+        if ((s[0]->below == p->below && s[0]->shelf == p->shelf) || (el > p->elDeg) != up || (el > wide->elDeg) != over) continue;
+        if (!to || std::fabs(el - p->elDeg) < std::fabs((*to)[0]->elDeg - p->elDeg)) to = &s;
+    }
+    const auto mate = [&](const tiling::Placed &q) { return q.col == p->col && q.id != id && q.below == p->below && q.shelf == p->shelf; };
+    if (!to && over == up) {   // (the last one out: one further, if it leaves one there)
+        if (std::none_of(v.last.tiles.begin(), v.last.tiles.end(), mate)) return true;
+    }
+    const double az = p->azDeg;
+    tiling::WideSpot s;
+    if (to) s = tiling::OnShelf(*to, az);
+    else s = tiling::SpotOnWide(v.last, *wide, int(g.Cols()[size_t(w.col)].cells.size()), az,
+                                over == up ? (up ? 1e9 : -1e9) : up ? wide->el1 : wide->el0, 0, id);
+    if (w.row < s.row) --s.row;   // (it goes first)
+    const double scale = g.CellOf(id)->scale;
+    g.Insert(id, w.col, s.row, false, scale, false, s.below);
+    g.SetAlign(id, s.align), g.SetRow(id, s.own), g.SetRow(s.before, false);
+    return *changed = true;
+}
+// Into the next column, a super wide display's: over it (`up`) or under it, at the near end of the
+// shelf that's there (`side` -1 or +1: that way only; 0: the left one first). False when there's
+// none, or it doesn't fit.
+inline bool OntoWide(tilegrid::Grid &g, const View &v, int id, bool up, int side = 0) {
+    const tilegrid::Where w = g.Find(id);
+    const tiling::Placed *p = v.PlacedOf(id);
+    if (!w.ok() || !p) return false;
+    const bool alone = v.Alone(id);
+    for (const int dir : {-1, +1}) {
+        if (side != 0 && dir != side) continue;
+        const int c = v.Neighbour(w.col, dir);
+        const tiling::Placed *wide = c < 0 || !v.LaidOut(c) ? nullptr : v.PlacedOf(v.WideId(c));
+        if (!wide || !v.Pullable(wide->id) || p->az1 - p->az0 > wide->az1 - wide->az0 || !v.FitsRound(c, id, !up)) continue;
+        const tiling::WideSpot s =
+            tiling::SpotOnWide(v.last, *wide, int(g.Cols()[size_t(c)].cells.size()), dir < 0 ? 1e9 : -1e9, up ? wide->el1 : wide->el0, 0, id);
+        const double scale = g.CellOf(id)->scale;
+        g.Insert(id, alone && c > w.col ? c - 1 : c, s.row, false, scale, false, s.below);   // (alone: its own column goes)
+        return g.SetAlign(id, 0), g.SetRow(id, false), true;
+    }
+    return false;
+}
 // Key `k` on tiled panel `id`. Meta+Ctrl+Right or Up: bigger; Left or Down: smaller (its natural
 // shape kept). *moved: the panel the others keep their places round (it, or the one Lift pulled
 // in). False when nothing changed.
 inline bool Press(tilegrid::Grid &g, slotsplit::Policy &slot, const View &v, int id, Key k, int *moved) {
     *moved = id;
+    bool changed = false;
+    if (k <= Key::Down && RoundWide(g, v, id, k, &changed)) return changed;
     switch (k) {
         case Key::Left:
         case Key::Right: {
@@ -69,10 +140,11 @@ inline bool Press(tilegrid::Grid &g, slotsplit::Policy &slot, const View &v, int
             // 2026-11-19: "a 600 pixel wide display that I can either set on the right, or the left")
             const int dir = k == Key::Left ? -1 : +1;
             if (const tiling::Placed *p = v.PlacedOf(id); p && p->narrow && p->lean != dir) return g.SetAlign(id, dir);
+            if (const tiling::Placed *p = v.PlacedOf(id); p && !v.Alone(id) && OntoWide(g, v, id, !p->below, dir)) return true;
             return slot.Move(g, id, [&] { return g.MoveSide(id, dir, slot.Key()); });
         }
-        case Key::Up: return g.MoveUpDown(id, -1) || (v.Alone(id) && Lift(g, v, id, -1, moved));
-        case Key::Down: return g.MoveUpDown(id, +1) || (v.Alone(id) && Hang(g, v, id));
+        case Key::Up: return g.MoveUpDown(id, -1) || (v.Alone(id) && (OntoWide(g, v, id, true) || Lift(g, v, id, -1, moved)));
+        case Key::Down: return g.MoveUpDown(id, +1) || (v.Alone(id) && (OntoWide(g, v, id, false) || Hang(g, v, id)));
         case Key::Wider:
         case Key::Taller: return g.Scale(id, tilegrid::kStep);
         case Key::Narrower:

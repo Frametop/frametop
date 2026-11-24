@@ -259,7 +259,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             else GsToTheater(i);
             break;
         case Item::Reset: DoReset(i, "its bar's menu"); break;   // (ft-layout's reset counts 3-2-1 in front of you first)
-        case Item::ScaleStep: SetAppScale(i, r.percent / 100.0, "its bar's menu"); break;
+        case Item::ScaleStep: SetAppScale(i, r.percent / 100.0); break;
         case Item::Edge: SetBarSide(i, r.side, "its bar's menu"); break;
         default: break;
     }

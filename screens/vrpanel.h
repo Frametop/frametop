@@ -294,7 +294,6 @@ int ControllerHolds(vr::TrackedDeviceIndex_t dev);   // a button down on it: 1, 
 vr::EVROverlayError PinShow(vr::VROverlayHandle_t overlay);
 void SendRelay(const std::string &msg);
 void RunLayout(const std::vector<std::string> &args);   // `ft-layout ARGS` in the background
-bool IsWindowPanel(const Screen &s);   // a PC app window's panel
 bool GazeModeOn();   // the pointer helper says gaze mode is on (vrgazemode.cpp; asks every 2 s, call it each tick)
 void AnnounceOverlay(const char *key);
 void SendDashpatch(const std::string &msg);   // to ft-dashpatch (@ft_dashpatch)
@@ -322,6 +321,7 @@ int PictureH(const Screen &s);
 bool IsWindowPanel(const Screen &s);   // a PC app window's panel (DEE-345)
 void Stretch(Screen &s, int w, int h);
 void SendStretch(Screen &s);
+bool FarStretching(const Screen &s);   // two hands pull its corners
 const dashanchor::Anchor &Dash();   // Steam's bar's frame, read each tick (dashboard pins ride on it)
 Mat DashFrame();
 bool GuessDash(const Mat &head);   // before the bar's first read: its frame guessed from the head (the tiles ride on it)
@@ -454,7 +454,8 @@ bool BarMenuHasHands(int i);
 void UpdateBarMenu();    // each tick: it follows its panel; a fingertip through a row presses it
 // A PC app window's scale (vrappscale.cpp): 0 for a panel that has none.
 double AppScale(int i);
-void SetAppScale(int i, double scale, const char *by);
+void SetAppScale(int i, double scale);
+void ForgetAppScale(int i);   // its panel went
 void UpdateAppScale();   // each tick: Meta+scroll's, once the wheel rests
 int TypingPanel();       // the panel typing goes to (compositor.c's keys_update), -1 Steam
 void UpdateVoice();      // each tick: dictation's notice (vrvoice.cpp)

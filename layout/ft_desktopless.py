@@ -204,7 +204,7 @@ def open_windows(sock, eye, heading, seen, extra=()):
         windows = [w for w in answer.get("windows") or [] if isinstance(w, dict)
                    and W.WINDOW_ADDRESS.fullmatch(str(w.get("address", "")))]
         W.window_prune(layout, host, windows)
-        out = {d["app"][7:] for d in host.get("displays", []) if d.get("window")}
+        out = {W.address_of(d) for d in host.get("displays", []) if d.get("window")}
         mine = seen.setdefault(name, set())
         mine &= {w.get("address") for w in windows}  # (closed ones: their addresses come back new)
         mine |= out  # (out already: sent back later, it stays on the PC too)
@@ -619,7 +619,7 @@ def start_apps(layout, sock, room, name, places, want, seen):
                     continue
                 if not got_panel(layout, sock, host, d):
                     return
-                seen.setdefault(host_name(host), set()).add(d["app"][7:])
+                seen.setdefault(host_name(host), set()).add(W.address_of(d))
                 n = next((m for m, _, e in L.remote_displays(layout) if e is d), None)
                 try:
                     if n is not None:

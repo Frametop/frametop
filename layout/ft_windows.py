@@ -6,6 +6,8 @@ back. Each opened window becomes a remote display of that host (ft_layout's), st
 own client from the host's pool. ft_layout keeps the layout, the screens and the streams; this
 module only speaks to the host's windows API and turns its answers into those displays.
 """
+import contextlib
+import fcntl
 import json
 import math
 import re
@@ -40,6 +42,11 @@ WINDOW_RESIZE_MAX = (3840, 2160)  # ... at most: the Frame's decoder, next to th
 
 
 WINDOW_ADDRESS = re.compile(r"0x[0-9a-fA-F]{1,16}")   # a window as the host names it
+
+
+def address_of(d):
+    """The window a panel shows, as its PC names it."""
+    return d["app"][len("window:"):]
 
 
 def number(value, default, low, high):
@@ -178,7 +185,7 @@ def window_close(layout, host, d):
     window_forget(layout, host, d)
     try:
         window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
-                   {"address": d["app"][7:]})
+                   {"address": address_of(d)})
         L.log(f"closed {d['id']}: the window is back on {host.get('name') or host['address']}")
     except RuntimeError as e:
         if "no window output" in str(e):  # closed on the PC, or back after the grace period
@@ -194,9 +201,9 @@ def window_prune(layout, host, windows):
     one left off by an older build kept the window from being opened or pulled again
     (Daenon, 2026-11-07: Brave wouldn't pull off oma7's display, GrokBot would)."""
     have = {w.get("address") for w in windows}
-    for d in [d for d in host.get("displays", []) if d.get("window") and (d["app"][7:] not in have or d.get("off"))]:
+    for d in [d for d in host.get("displays", []) if d.get("window") and (address_of(d) not in have or d.get("off"))]:
         window_forget(layout, host, d)
-        why = "it was disconnected" if d["app"][7:] in have else "its window closed"
+        why = "it was disconnected" if address_of(d) in have else "its window closed"
         L.log(f"forgot {d['id']}: {why} on {host.get('name') or host['address']}")
 
 
@@ -235,7 +242,7 @@ def window_drop(layout, args):
     window_forget(layout, host, d)
     try:
         window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/release",
-                   {"address": d["app"][7:], "monitor": monitor, "x": u, "y": v, "grab_x": fx, "grab_y": fy})
+                   {"address": address_of(d), "monitor": monitor, "x": u, "y": v, "grab_x": fx, "grab_y": fy})
         L.log(f"dropped {d['id']} onto {monitor} at {u:.2f},{v:.2f}")
     except RuntimeError as e:
         if "no window output" in str(e):
@@ -245,10 +252,26 @@ def window_drop(layout, args):
             raise
 
 
-def window_resize(layout, args):
+@contextlib.contextmanager
+def taking_turns():
+    """A resize or a scale at a time (a wheel's next step waits for the PC's answer to the last one)."""
+    with open(L.LOCK_PATH + ".window-size", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def fit_scale(d):
+    """A window panel given a size: the nearest that takes its scale, if it has one."""
+    scale = ft_windowscale.valid(d.get("scale"))
+    if scale:
+        ft_windowscale.shape(d, tuple(d["size"]), scale, WINDOW_RESIZE_MIN, WINDOW_RESIZE_MAX)
+
+
+def window_resize(args):
     """A window panel's corner dragged (user, 2026-11-07: "resize and change aspect ratio"): the
     window on the PC gets that many pixels, and the stream starts over at that size. ft-stream
     asks for the window at the panel's size on every start, which resizes the host's output."""
+    layout = L.load_layout()
     host, d = numbered(layout, args[0], "resize")
     if not d.get("window"):
         raise RuntimeError(f"window resize: {d['id']} isn't a window")
@@ -263,11 +286,9 @@ def window_resize(layout, args):
     w, h = (int(v) for v in args[1].lower().split("x"))
     w = min(max(w, WINDOW_RESIZE_MIN[0]), WINDOW_RESIZE_MAX[0])
     h = min(max(h, WINDOW_RESIZE_MIN[1]), WINDOW_RESIZE_MAX[1])
-    d["size"] = list(L.stream_size(w, h))
-    scale = ft_windowscale.valid(d.get("scale"))
-    if scale:
-        ft_windowscale.shape(d, d["size"], scale, WINDOW_RESIZE_MIN, WINDOW_RESIZE_MAX)
-    d["metres"] = round(metres, 4)
+    w, h = d["size"] = list(L.stream_size(w, h))
+    fit_scale(d)
+    d["metres"] = round(metres * d["size"][0] / w, 4)   # (a few pixels more or less: the same density)
     L.save_layout(layout)
     n = int(args[0])
     L.log(f"resized {d['id']} to {d['size'][0]}x{d['size'][1]}, {d['metres']} m wide")
@@ -279,10 +300,11 @@ def window_resize(layout, args):
         L.log(f"saved; not applied now: {e}")
 
 
-def window_scale(layout, args):
+def window_scale(args):
     """A window panel's scale (its bar's menu, Meta+scroll): the PC draws the app at it in the same
     pixels, so the stream goes on. Where the panel's size doesn't take that scale, the size moves a
     few pixels and the stream starts over. Kept for the app's next window on that PC."""
+    layout = L.load_layout()
     host, d = numbered(layout, args[0], "scale")
     now = ft_windowscale.valid(d.get("scale")) if d.get("window") else None
     if not now:
@@ -295,22 +317,31 @@ def window_scale(layout, args):
         raise RuntimeError(f"window scale: a scale is {ft_windowscale.LIMITS[0]:g} to {ft_windowscale.LIMITS[1]:g}, not {args[1]!r}")
     n, before = int(args[0]), list(d["size"])
     ft_windowscale.shape(d, tuple(d.get("asked_size") or before), scale, WINDOW_RESIZE_MIN, WINDOW_RESIZE_MAX)
-    same = d["size"] == before
-    if same and not d.get("off"):
+    live = d["size"] == before and not d.get("off")
+    if live:
         try:
+            # (with its size: a stream still starting over at it has the PC at the last one)
             answer = window_api(host, int(d.get("port") or 0), "POST", "/api/frametop/windows/resize",
-                                {"address": d["app"][7:], "scale": d["scale"]})
+                                {"address": address_of(d), "width": before[0], "height": before[1], "scale": d["scale"]})
         except RuntimeError:
-            tell_scale(n, now)   # (its menu goes back to what the PC has)
+            tell_scale(n, {"scale": now})   # (its menu goes back to what the PC has)
             raise
-        d["scale"] = round(ft_windowscale.valid(answer.get("scale")) or d["scale"], 6)
+        scale = round(ft_windowscale.valid(answer.get("scale")) or d["scale"], 6)
+        # The PC took its time: the layout as it is now, where a panel may have opened, or this one closed.
+        layout = L.load_layout()
+        found = next(((h, e) for _, h, e in L.remote_displays(layout) if (e["id"], e["app"]) == (d["id"], d["app"])), None)
+        if found is None:
+            L.log(f"{d['id']}: closed meanwhile")
+            return
+        host, d = found
+        d["scale"] = scale
     ft_windowscale.keep(host, d.get("pc_app"), d["scale"])
     L.save_layout(layout)
-    L.log(f"{d['id']}: scale {d['scale'] * 100:.0f}%" + ("" if same else f" at {d['size'][0]}x{d['size'][1]}"))
+    L.log(f"{d['id']}: scale {d['scale'] * 100:.0f}%" + ("" if d["size"] == before else f" at {d['size'][0]}x{d['size'][1]}"))
     if d.get("off"):
         return
-    if same:
-        tell_scale(n, d["scale"])
+    if live:
+        tell_scale(n, d)
         return
     try:
         L.start_remote(L.screens_socket(), n, host, d)   # (its size changed: ft-stream opens it with both)
@@ -318,10 +349,10 @@ def window_scale(layout, args):
         L.log(f"saved; not applied now: {e}")
 
 
-def tell_scale(n, scale):
+def tell_scale(n, d):
     """Panel n's scale to ft-screens, for its menu."""
     try:
-        L.screens_socket().ask(f"remote {n} scale {scale:g}")
+        L.screens_socket().ask(ft_windowscale.told(n, d))
     except RuntimeError as e:
         L.log(f"screen {n}'s scale isn't in its menu: {e}")
 
@@ -377,7 +408,7 @@ def window_command(args):
             return
         answer = window_api(host, port, "GET", "/api/frametop/windows")
         window_prune(layout, host, answer.get("windows", []))
-        panels = {d["app"][7:]: d["id"] for d in host.get("displays", []) if d.get("window")}
+        panels = {address_of(d): d["id"] for d in host.get("displays", []) if d.get("window")}
         if answer.get("locked"):
             print(f"{host['name']} is locked: window panels stay black until it's unlocked")
         for w in answer.get("windows", []):
@@ -393,7 +424,7 @@ def window_command(args):
         apps = window_api(host, port, "GET", "/api/frametop/windows/apps").get("apps", [])
         answer = window_api(host, port, "GET", "/api/frametop/windows")
         window_prune(layout, host, answer.get("windows", []))
-        panels = {d["app"][7:]: (n, d["id"]) for n, h, d in L.remote_displays(layout) if h is host and d.get("window")}
+        panels = {address_of(d): (n, d["id"]) for n, h, d in L.remote_displays(layout) if h is host and d.get("window")}
         windows = []
         for w in answer.get("windows", []):
             n, panel = panels.get(w.get("address"), (None, None))
@@ -443,10 +474,12 @@ def window_command(args):
         window_pull(L.load_layout(), args[1:])
         return
     if what == "resize" and len(args) == 4:
-        window_resize(L.load_layout(), args[1:])
+        with taking_turns():
+            window_resize(args[1:])
         return
     if what == "scale" and len(args) == 3:
-        window_scale(L.load_layout(), args[1:])
+        with taking_turns():
+            window_scale(args[1:])
         return
     if what == "close" and len(args) == 2:
         layout = L.load_layout()

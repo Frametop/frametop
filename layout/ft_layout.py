@@ -222,6 +222,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import layout_geometry  # noqa: E402  (where the screens go, as pure math)
 import host_input  # noqa: E402  (a host's "input": which of its keyboard and mouse it lends)
 import ft_remotekeys  # noqa: E402  (a Mac display's kb_layout and keymap, for ft-appless)
+import ft_windowscale  # noqa: E402  (a PC app window's scale)
 from layout_geometry import (  # noqa: E402, F401  (re-exported: ft_floatd and the tests use them here)
     chain as _chain,
     cross,
@@ -1099,7 +1100,7 @@ def start_remote(sock, n, host, d):
         sock.ask(f"{'conceal' if d.get('hidden') else 'reveal'} {n}")
     if d.get("window"):
         try:
-            sock.ask(f"remote {n} scale {float(d.get('scale') or 0):g}")  # (its menu's; 0: its PC takes none)
+            sock.ask(ft_windowscale.told(n, d))
         except RuntimeError as e:
             log(f"remote display {d['id']}: {e}")  # an ft-screens from before scales
     return reply
@@ -1633,8 +1634,14 @@ def remote_command(args):
         n, host, d = find_display(layout, args[1])
         for kv in args[2:]:
             k, _, v = kv.partition("=")
+            if d.get("window") and k in ("mode", "scale"):
+                raise RuntimeError("remote set: a window's scale is ft-layout window scale N SCALE" if k == "scale" else
+                                   "remote set: a window has no monitor of its own to put in a mode")
             if k == "size" and re.fullmatch(r"\d+x\d+", v.lower()):
                 d["size"] = list(stream_size(*(int(x) for x in v.lower().split("x"))))
+                if d.get("window"):
+                    import ft_windows   # (its own module: the host's windows API)
+                    ft_windows.fit_scale(d)
             elif k in ("fps", "bitrate") and v.isdigit():
                 d[k] = int(v)
             elif k == "label" and v:

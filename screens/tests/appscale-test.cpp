@@ -23,6 +23,32 @@ int main() {
     check("a smooth wheel's parts add up", w.Add(0.4) == 0 && w.Add(0.4) == 0 && w.Add(0.4) == 1);
     check("a turn back starts over", w.Add(-0.9) == 0 && w.Add(-0.2) == -1);
     check("labels", appscale::Label(appscale::Percent(5.0 / 3)) == "167%" && appscale::Label(100) == "100%");
+    using appscale::Asking;
+    {
+        Asking a;
+        a.Scroll(1, 1000);
+        check("a scroll shows at once, and asks once it rests", appscale::Same(a.scale, 1.25) && !a.Due(1219) && a.Due(1220) && !a.Due(1221));
+        a.Scroll(1, 1300);
+        a.Scroll(1, 1400);
+        check("the next waits for the answer", !a.Due(1700));
+        a.Said(1.25);
+        check("an answer doesn't take back a newer one", appscale::Same(a.scale, 1.6) && a.Due(1700) && appscale::Same(a.scale, 1.6));
+        a.Said(1.5);   // (the PC has another)
+        check("its own answer is the PC's", appscale::Same(a.scale, 1.5) && !a.Due(9000));
+    }
+    {
+        Asking a;
+        a.Pick(2, 1000);
+        check("a pick asks now", a.Due(1000));
+        a.Pick(2, 1100);
+        check("the same again asks nothing", !a.Due(1100));
+        a.Pick(1, 1200);
+        check("no answer: the next goes after 30 s", !a.Due(30999) && a.Due(31000));
+        a.Said(1);
+        a.Scroll(0.4, 40000);
+        check("part of a notch asks nothing", !a.Due(50000));
+    }
+    check("a size a scale moved is near the one asked for", appscale::Near(1340, 910, 1336, 910) && !appscale::Near(1354, 910, 1336, 910));
     if (failed) std::printf("%d failed\n", failed);
     return failed != 0;
 }

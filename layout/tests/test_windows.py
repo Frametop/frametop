@@ -22,6 +22,7 @@ def load_layout_module(tmp):
     spec.loader.exec_module(module)
     module.CONF_PATH = str(tmp / "frametop.conf")  # none: the screens backend
     module.LAYOUT_PATH = str(tmp / "layout.json")
+    module.LOCK_PATH = str(tmp / "layout.lock")
     sys.path.insert(0, str(HERE))
     import ft_windows
     windows = importlib.reload(ft_windows)
@@ -347,9 +348,9 @@ class Windows(WindowTest):
         self.run_window("resize", str(d["screen"]), "1601x903", "1.25")
         d = next(d for d in self.displays() if d.get("window"))
         self.assertEqual((d["size"], d["metres"]), ([1600, 902], 1.25))   # (even: hosts' encoders)
-        self.assertTrue(told[-2].startswith(f"remote {d['screen']} start {d['client']} 192.0.2.30:48989 window:0x55aa10 1600x902 "),
-                        told[-2])
-        self.assertEqual(told[-1], f"remote {d['screen']} scale 0")   # (this PC takes none)
+        start = next(t for t in told if t.startswith(f"remote {d['screen']} start "))
+        self.assertTrue(start.startswith(f"remote {d['screen']} start {d['client']} 192.0.2.30:48989 window:0x55aa10 1600x902 "), start)
+        self.assertIn(f"remote {d['screen']} scale 0", told)   # (this PC takes none)
         self.assertEqual(said, [f"resized {d['id']} to 1600x902, 1.25 m wide"])
 
     def test_resize_keeps_to_the_limits(self):

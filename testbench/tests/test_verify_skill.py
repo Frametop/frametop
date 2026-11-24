@@ -203,6 +203,14 @@ class VerifySkillTests(unittest.TestCase):
         self.assertFalse(self.v.LOCK.exists())
         self.assertTrue((run / 'baseline.json').exists() and (run / 'cleanup.json').exists())
 
+    def test_cleanup_ends_a_standby_the_run_left(self):
+        self.run_main('launch', 'standby')
+        run = json.loads(self.v.LOCK.read_text())['run']
+        self.answers[('ft_powerd', 'status')] = 'ok standby 5 300'
+        code, out = self.run_main('cleanup', run)
+        self.assertEqual((code, 'power' in json.loads(out)['steps']), (0, True))
+        self.assertLess(self.log.index(('ask', 'ft_powerd', 'on')), self.log.index(('bench', 'release')))
+
     def test_cleanup_leaves_displays_off_that_were_off_and_reports_leftovers(self):
         self.replies[('power', 'status')] = {'ok': True, 'displays': 'off'}
         self.run_main('launch', 'dark')

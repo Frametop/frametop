@@ -991,12 +991,12 @@ class Backend(QObject):
 
     @Property("QVariantMap", notify=powerChanged)
     def power(self):
-        try:
-            off_min = float(ft_layout.read_conf().get("DISPLAY_OFF_MIN") or 0)
-        except ValueError:
-            off_min = 0.0
+        conf = ft_layout.read_conf()    # both as ft-powerd reads them
+        off_min = ft_conf.number(conf, "DISPLAY_OFF_MIN", 0)
+        standby = ft_conf.number(conf, "DISPLAY_OFF_STANDBY", 1) != 0
         state, unused, _ = self._powerd or ("", 0, 0)
-        return {"offMinutes": off_min, "service": self._powerd is not None, "state": state, "unused": unused,
+        return {"offMinutes": off_min, "standby": standby,
+                "service": self._powerd is not None, "state": state, "unused": unused,
                 "steam": self._steam is not None, "steamBusy": self._steam_busy, "steamError": self._steam_error,
                 "acSleep": self._steam["ac"] if self._steam else -1,
                 "batterySleep": self._steam["battery"] if self._steam else -1}
@@ -1007,6 +1007,12 @@ class Backend(QObject):
         write_conf_value("DISPLAY_OFF_MIN", f"{max(0.0, minutes):g}")
         self.powerChanged.emit()
 
+    @Slot(bool)
+    def setDisplayOffStandby(self, on):
+        """Whether displays off also asks SteamVR for its standby (ft-powerd re-reads within 2 s)."""
+        write_conf_value("DISPLAY_OFF_STANDBY", "1" if on else "0")
+        self.powerChanged.emit()
+
     @Slot()
     def displaysOffNow(self):
         self._ipc.ask(FT_POWERD, "off", then=self._displays_off, timeout=0.5)
@@ -1015,6 +1021,17 @@ class Backend(QObject):
         reply = reply or "error the power service isn't running"
         if not reply.startswith("ok"):
             self.message.emit(f"Couldn't turn the displays off: {reply.split(' ', 1)[-1]}", True)
+        self._check_powerd()
+
+    @Slot()
+    def displaysOnNow(self):
+        """For remote desktop: its keys and pointer aren't input devices of the Frame's, so
+        ft-powerd can't see them being used."""
+        self._ipc.ask(FT_POWERD, "on", then=self._displays_on, timeout=0.5)
+
+    def _displays_on(self, reply):
+        if not (reply or "").startswith("ok"):
+            self.message.emit("Couldn't turn the displays on: the power service didn't answer", True)
         self._check_powerd()
 
     def _steam_call(self, what, fn):

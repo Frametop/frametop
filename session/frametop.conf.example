@@ -217,6 +217,7 @@ POINTER_GAZE_HAND_RAY=0    # hands in gaze mode: 0 = no hand ray, your eyes aim 
 POINTER_GAZE_PINCH_DEADZONE=4 # hands in gaze mode: degrees (seen from the eye; about 3 cm at arm's length) a held pinch moves before it nudges the pointer; held still for POINTER_GAZE_HOLD it's a press, to drag
 POINTER_GAZE_PINCH_GAIN=0.3   # hands in gaze mode: past that, the pointer moves this times the pinching hand's angle (low, for small corrections)
 DISPLAY_OFF_MIN=0  # minutes without use before frametop-power turns the displays off, even if the headset seems worn (0 = never)
+DISPLAY_OFF_STANDBY=1  # displays off by that timeout or the Power tab's Turn displays off now: 1 = SteamVR's standby too a few seconds later, as if the headset came off (tracking, cameras and drawing pause, about a third of the power; a key, a mouse, a headset button, the Power tab's Turn displays on or putting it on wakes it; movement only until tracking pauses) | 0 = only the backlight, tracking stays on
 DISPLAY_MOVE_MM=5  # displays off: the headset or a controller moving this far (mm) within 10 s counts as use
 DISPLAY_MOVE_DEG=0.5 # displays off: or turning this far (degrees) within 10 s
 LAYOUT_GRAB_OFFSET=0.075   # arranging screens: where the floating window's grab bar is, in metres below the screen

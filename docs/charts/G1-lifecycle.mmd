@@ -93,6 +93,8 @@ stateDiagram-v2
     [*] --> x0
     x1: Dark by ft-powerd, brightness saved to powerd-brightness
     x2: Dark by SteamVR standby
+    x3: Dark by ft-powerd, and standby asked for (DISPLAY_OFF_STANDBY=1): "worn 0" to the ft_pointer driver, powerd-standby left
+    x4: That standby holds: SteamVR has the headset as off, and pauses tracking and the cameras 5 s after the write
   }
   state "Other groups" as og {
     o2: G2 Desktop and panels
@@ -160,7 +162,12 @@ stateDiagram-v2
   w3 --> w5: 5 s off: standby, the helper says away at once
   w5 --> w4: you put it back on
   w4 --> w0: 1 s: ft-powerd says worn again
-  x0 --> x1: away for DISPLAY_OFF_MIN (default 0 = never)
+  x0 --> x1: unused for DISPLAY_OFF_MIN (default 0 = never), no standby to be had (off, the testbench fakes a wearer, or SteamVR left the last one by itself)
+  x0 --> x3: unused for DISPLAY_OFF_MIN, DISPLAY_OFF_STANDBY=1
+  x3 --> x4: SteamVR has the headset as off (within 1 s, ft-powerd's away 1 s more)
+  x3 --> x1: still worn after 15 s: "worn 1" back, the backlight alone
+  x3 --> x0: a key, a button, a mouse, movement or "on": "worn 1"
+  x4 --> x0: a key, a button, a mouse, movement until tracking pauses, "on", ft-powerd stopping or starting again after a kill: "worn 1"; or SteamVR wakes by itself (the sensor changed, the testbench fakes a wearer)
   x1 --> x0: you use it, the headset goes on, or ft-powerd stops (turnOn)
   x0 --> x2: standby (headset off 5 s)
   x2 --> x0: you put the headset on
@@ -213,6 +220,8 @@ stateDiagram-v2
   class x0 blue
   class x1 orange
   class x2 orange
+  class x3 yellow
+  class x4 orange
   class o2 xgroup
   class o3 xgroup
   class o4 xgroup

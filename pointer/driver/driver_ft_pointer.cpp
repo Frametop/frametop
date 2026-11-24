@@ -16,6 +16,10 @@
 //                                controller used beside the pointer needs the pointer on the
 //                                other hand, or on no hand at all. Treadmill is no hand: its
 //                                bindings are under /user/treadmill (docs/design.md, "Treadmill role")
+//   worn <0|1>                   not about the pointer: tells SteamVR the headset came off (0:
+//                                its standby follows 5 s later) or went on (1). One write each;
+//                                the headset's own driver writes over it when its sensor changes.
+//                                ft-powerd sends it (worn.h, power/standby.h)
 //
 // The device starts disconnected, so it never holds a hand role at boot (holding
 // the right hand while SteamVR started left the Steam UI stuck loading). It
@@ -30,6 +34,7 @@
 // /user/treadmill only when the device is added. Only a hand role switches to OptOut while hidden.
 // A treadmill moves SteamVR's windows by their grab bars only with pointer/dashpatch in.
 #include "../../conf/ftsock.h"
+#include "worn.h"
 
 #include <openvr_driver.h>
 
@@ -254,6 +259,7 @@ public:
     const char *const *GetInterfaceVersions() override { return k_InterfaceVersions; }
     void RunFrame() override {
         if (device_) device_->RunFrame();
+        worn_.RunFrame();
     }
     bool ShouldBlockStandbyMode() override { return false; }
     void EnterStandby() override {}
@@ -285,6 +291,10 @@ private:
         char name[32];
         float f[7];
         int v = 0, role = 0, button = -1;
+        if (std::sscanf(cmd, "worn %d", &v) == 1) {
+            worn_.Ask(v != 0);  // its own state: the device's lock isn't needed
+            return;
+        }
         if (std::sscanf(cmd, "posq %f %f %f %f %f %f %f", &f[0], &f[1], &f[2], &f[3], &f[4], &f[5], &f[6]) == 7) {
             kind = kPosq;
         } else if (std::sscanf(cmd, "pose %f %f %f %f %f", &f[0], &f[1], &f[2], &f[3], &f[4]) == 5) {
@@ -346,6 +356,7 @@ private:
 
     State state_;
     PointerDevice *device_ = nullptr;
+    ft_pointer::HeadsetWorn worn_;
     std::thread listener_;
     std::atomic<bool> running_{false};
     int sock_ = -1;

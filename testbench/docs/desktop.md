@@ -20,7 +20,7 @@ the headset, and turn the displays back on (`power on`) if you turned them off.
 ./frame-testbench pointer measure KEY           # a visible overlay's centre, size and axes
 ./frame-testbench pointer show|hide|recenter    # the 3D mouse's cursor
 
-./frame-testbench power status                  # displays on, off or away; idle and timeout seconds
+./frame-testbench power status                  # displays on, off, standby or away; idle and timeout seconds
 ./frame-testbench power off|on
 ```
 
@@ -50,7 +50,8 @@ The MCP tools are `keyboard_keys`, `keyboard_type`, `mouse_move`, `mouse_click`,
   `measure` needs a head pose too, and finds only an overlay in view of the head: a hidden one,
   one behind, or the pointer's own cursor says "panel not visible".
 - **ft-powerd** (`@ft_powerd`): `status` reads; `on` and `off` turn the headset displays on or off,
-  as the Power tab does. `away` is SteamVR's standby.
+  as the Power tab does. `away` is SteamVR's standby because nobody wears the headset; `standby`
+  is the one ft-powerd asked for (`DISPLAY_OFF_STANDBY`), which `on` ends.
 
 All are abstract datagram sockets: nothing listens on the network. The relay takes keys, clicks
 and text only from this user.

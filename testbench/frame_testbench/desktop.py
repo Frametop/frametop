@@ -306,7 +306,8 @@ def measure(overlay):
 
 
 def power(command):
-    """ft-powerd's status (displays on, off or away: SteamVR's standby), or the displays on or off."""
+    """ft-powerd's status (displays on, off, standby: SteamVR's standby that ft-powerd asked for, or
+    away: SteamVR's standby because the headset came off), or the displays on or off."""
     if command not in POWER_COMMANDS:
         raise ValueError(f'power command is one of {", ".join(POWER_COMMANDS)}')
     with Datagrams() as link:

@@ -77,7 +77,11 @@ PACKAGES = {
                            "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
                            "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
                            "Steam field (keyboard/host/steamhook.js: VirtualKeyboardManager."
-                           "SetVirtualKeyboardShownInternal, execCommand), and its lasers and fingertips press keys",
+                           "SetVirtualKeyboardShownInternal, execCommand), and its lasers and fingertips press keys; "
+                           "displays off with tracking paused (DISPLAY_OFF_STANDBY=1): with SteamVR taking the headset "
+                           "as worn, the Power tab's Turn displays off now logs \"0 - entering standby\" in "
+                           "vrserver.txt within 10 s, and a key wakes it (the ft_pointer driver's write to the "
+                           "headset's /proximity, pointer/driver/worn.h)",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "
             "its scale a minute after the desktop starts (KWin's support information shows it; "
             "kscreen-doctor shows 1 from 6.6); every screen comes back "

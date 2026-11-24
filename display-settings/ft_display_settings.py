@@ -995,8 +995,13 @@ class Backend(QObject):
             off_min = float(ft_layout.read_conf().get("DISPLAY_OFF_MIN") or 0)
         except ValueError:
             off_min = 0.0
+        try:    # as ft-powerd reads it: on unless it's a number that is 0
+            standby = float(ft_layout.read_conf().get("DISPLAY_OFF_STANDBY") or 1) != 0
+        except ValueError:
+            standby = True
         state, unused, _ = self._powerd or ("", 0, 0)
-        return {"offMinutes": off_min, "service": self._powerd is not None, "state": state, "unused": unused,
+        return {"offMinutes": off_min, "standby": standby,
+                "service": self._powerd is not None, "state": state, "unused": unused,
                 "steam": self._steam is not None, "steamBusy": self._steam_busy, "steamError": self._steam_error,
                 "acSleep": self._steam["ac"] if self._steam else -1,
                 "batterySleep": self._steam["battery"] if self._steam else -1}
@@ -1005,6 +1010,12 @@ class Backend(QObject):
     def setDisplayOffMinutes(self, minutes):
         """ft-powerd re-reads frametop.conf within 2 s."""
         write_conf_value("DISPLAY_OFF_MIN", f"{max(0.0, minutes):g}")
+        self.powerChanged.emit()
+
+    @Slot(bool)
+    def setDisplayOffStandby(self, on):
+        """Whether displays off also asks SteamVR for its standby (ft-powerd re-reads within 2 s)."""
+        write_conf_value("DISPLAY_OFF_STANDBY", "1" if on else "0")
         self.powerChanged.emit()
 
     @Slot()

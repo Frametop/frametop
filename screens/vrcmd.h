@@ -157,9 +157,10 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::strcmp(cmd, "tiles") == 0) return Tiles;
     if (!std::strcmp(cmd, "tiles clear") || !std::strcmp(cmd, "tiles gaps") || !std::strcmp(cmd, "tiles recentre") ||
         ((!std::strncmp(cmd, "tiles set", 9) || !std::strncmp(cmd, "tiles add", 9)) && (!cmd[9] || cmd[9] == ' ')) ||
-        (!std::strncmp(cmd, "tiles centre", 12) && (!cmd[12] || cmd[12] == ' ')) || !std::strncmp(cmd, "tiles arc ", 10))
+        (!std::strncmp(cmd, "tiles centre", 12) && (!cmd[12] || cmd[12] == ' ')) || !std::strncmp(cmd, "tiles arc ", 10) ||
+        (!std::strncmp(cmd, "tiles remember", 14) && (!cmd[14] || cmd[14] == ' ')))
         return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..." ("add": more of the same set);
-                                          // "centre [N]", "arc N": the centre display (vrtiles.cpp)
+                                          // "centre [N]", "arc N": the centre display; "remember [KEY STATE]": a profile's (vrtiles.cpp)
     if (std::sscanf(cmd, "tile %15s", c.word) == 1) return Tile;
     if (std::sscanf(cmd, "floatapp %d %127s", &c.n, c.appId) == 2) return FloatApp;
     if (std::sscanf(cmd, "barside %d %15s", &c.n, c.word) == 2) return BarSide;

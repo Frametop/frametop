@@ -134,6 +134,8 @@ int main() {
     { Cmd t; check("tiles centre: the rest after it", Parse("tiles centre 3", t) == Tiles && t.rest && !std::strcmp(t.rest, "centre 3")); }
     { Cmd t; check("tiles centre alone", Parse("tiles centre", t) == Tiles && t.rest && !std::strcmp(t.rest, "centre")); }
     { Cmd t; check("tiles arc: the rest after it", Parse("tiles arc 3", t) == Tiles && t.rest && !std::strcmp(t.rest, "arc 3")); }
+    { Cmd t; check("tiles remember: the rest after it", Parse("tiles remember screen:1 tile 0 0 0 1 1.000", t) == Tiles && t.rest && !std::strcmp(t.rest, "remember screen:1 tile 0 0 0 1 1.000")); }
+    { Cmd t; check("tiles remember alone", Parse("tiles remember", t) == Tiles && t.rest && !std::strcmp(t.rest, "remember")); }
     check("tiles: not tiles centrex", V("tiles centrex") == Tile);
     { Cmd t; check("tiles alone: no rest", Parse("tiles", t) == Tiles && !t.rest); }
     check("tiles: not a tile key, nor tilesx", V("tilesx") == Tile && V("tiles setx") == Tile);

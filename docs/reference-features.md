@@ -6,19 +6,33 @@ These sections were split out of [reference.md](reference.md) to keep it readabl
 
 SteamVR turns the displays off a few seconds after the headset's proximity sensor says it came off. A stand or display mount that covers the sensor makes the headset seem worn, so its displays stay on, and Steam, which then counts someone as present, never puts it to sleep either.
 
-`power/ft-powerd` goes by use instead. It runs in the `dev` container as `frametop-power.service` and starts with SteamVR. Once the headset has gone unused for `DISPLAY_OFF_MIN` minutes (0, the default, is never), it turns the displays' backlight off, and it turns it back on at the next use. Use is any of these:
+`power/ft-powerd` goes by use instead. It runs in the `dev` container as `frametop-power.service` and starts with SteamVR. Once the headset has gone unused for `DISPLAY_OFF_MIN` minutes (0, the default, is never), it turns the displays off, and it turns them back on at the next use. Use is any of these:
 
 - The headset, a Frame controller, or the 3D mouse's virtual controller moving more than `DISPLAY_MOVE_MM` (5 mm) or turning more than `DISPLAY_MOVE_DEG` (0.5 degrees) within 10 seconds.
 - A key, button, or mouse motion on any input device on the host, including the headset's own buttons and the input relay's virtual mouse and keyboard.
 - The headset going back on after SteamVR's own standby, or something else turning the backlight back on.
 
-While SteamVR has the headset in standby, SteamVR owns the displays and ft-powerd waits, unless they are still lit 10 seconds into the standby: then ft-powerd turns them off, whatever `DISPLAY_OFF_MIN` says. On SteamOS 0.5.9 SteamVR can light them during its standby without leaving it (another device waking), and they then stayed lit with nothing drawn on them. The backlight is `/sys/class/backlight/ae94000.dsi.0/brightness`, the same file SteamVR's driver writes for standby. With the backlight off, tracking and rendering keep running, which lets the displays wake the moment the headset moves, but the headset still uses most of its power. ft-powerd puts the backlight back when it stops, and if it was killed with the displays off, the next start does (the value is kept in `~/.cache/frametop/powerd-brightness` meanwhile).
+While SteamVR has the headset in standby, SteamVR owns the displays and ft-powerd waits, unless they are still lit 10 seconds into the standby: then ft-powerd turns them off, whatever `DISPLAY_OFF_MIN` says. On SteamOS 0.5.9 SteamVR can light them during its standby without leaving it (another device waking), and they then stayed lit with nothing drawn on them. The backlight is `/sys/class/backlight/ae94000.dsi.0/brightness`, the same file SteamVR's driver writes for standby. With only the backlight off, tracking and rendering keep running, which lets the displays wake the moment the headset moves, but the headset still uses most of its power. ft-powerd puts the backlight back when it stops, and if it was killed with the displays off, the next start does (the value is kept in `~/.cache/frametop/powerd-brightness` meanwhile).
+
+So with `DISPLAY_OFF_STANDBY=1` (the default; the Power tab's Pause tracking too) ft-powerd asks SteamVR for its own standby first, and the backlight is the fallback. It sends `worn 0` to the `ft_pointer` driver, which writes "not worn" to the headset's proximity input once (`pointer/driver/worn.h`). SteamVR then acts as if the headset came off: 5 seconds later it turns the displays off and pauses tracking, the cameras and the compositor. The headset drew about 5 W that way, against 14 to 18 W in use. The desktop, the services and remote access keep running. What ends it:
+
+- A key, button, or mouse motion on an input device, or `power/run.sh on`: ft-powerd sends `worn 1`.
+- The proximity sensor changing (the headset picked up or put on): the headset's own driver writes the input again and SteamVR wakes by itself.
+- The testbench faking a wearer (`worn on`).
+
+Movement doesn't end it, because the poses aren't valid in standby. ft-powerd uses the backlight alone, as with `DISPLAY_OFF_STANDBY=0`, in these cases (`power/standby.h`):
+
+- SteamVR hasn't gone into standby 15 seconds after the write (an older driver still loaded, or no driver).
+- SteamVR left the last standby by itself and nobody has used the headset since. Standby wouldn't hold the next time either, and lit displays every `DISPLAY_OFF_MIN` minutes are worse than tracking left on.
+- The testbench is faking a wearer, since its tests need SteamVR awake.
+
+`~/.cache/frametop/powerd-standby` exists while a standby that ft-powerd asked for is under way. ft-powerd ends the standby when it stops, and the next start ends one that a killed run left behind.
 
 Stay awake while plugged in is Steam's own setting, When Plugged In and Idle → Sleep after (`system_idle_suspend_ac_sec`), set to Never. Frametop Settings changes it the way Steam's Settings → Power page does, through Steam's UI on its debugging port (`display-settings/steam_settings.py`), and keeps the value from before in `STEAM_SLEEP_AC_BEFORE` to put back when the switch goes off. The power button still puts the Frame to sleep, and Steam's battery setting still applies.
 
 ```
 power/build.sh && power/run.sh install
-power/run.sh status        # "ok on|off|away <seconds unused> <timeout seconds>"
+power/run.sh status        # "ok on|off|standby|away <seconds unused> <timeout seconds>"
 power/run.sh off | on      # the displays off now, or back on
 power/run.sh log
 ```

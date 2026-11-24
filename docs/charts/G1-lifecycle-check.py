@@ -14,7 +14,7 @@ CONFIGS = {
                   'HandsOffWhilePaused', 'HandsFollowDesktop', 'DesktopMatchesPause', 'GazeBackAfterResume',
                   'ClosedDesktopComesBack', 'NoStuckGamePause'],
     'PauseClose': None, 'PauseCloseNoAuto': None, 'PauseNoCrash': None, 'PauseLossy': None,
-    'Presence': ['WornAgreesSoon', 'DarkHasOwner', 'AwayReleasesPointer'],
+    'Presence': ['WornAgreesSoon', 'DarkHasOwner', 'StandbyHasOwner', 'StandbyFileIsFresh', 'AwayReleasesPointer'],
     'Joint': None,
 }
 ALL = CONFIGS['PauseHide'] + CONFIGS['Presence']

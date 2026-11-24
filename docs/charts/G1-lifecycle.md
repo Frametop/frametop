@@ -3,7 +3,7 @@
 The group's notes, from [the charts' README](README.md): what the chart and the model cover, their configs, and what's held by tests instead.
 
 
-Covers SteamVR and the units that start and stop with it, the desktop session, the input relay's pause for VR games (auto, gesture, key, resume when the game ends, the state file across relay restarts), the pointer helper's worn answer, and ft-powerd's display power.
+Covers SteamVR and the units that start and stop with it, the desktop session, the input relay's pause for VR games (auto, gesture, key, resume when the game ends, the state file across relay restarts), the pointer helper's worn answer, and ft-powerd's display power, with the standby it asks SteamVR for (`DISPLAY_OFF_STANDBY`).
 
 Model: `G1-lifecycle.tla` (module `G1Lifecycle`). `check.py` copies it under the module's name for TLC. `G1-lifecycle.cfg` is the same as `PauseHide`, for running TLC by hand.
 
@@ -32,6 +32,8 @@ Results with the fixes (`93cbf29`): every rule holds in every config, 66 runs. S
 With L7's fix, ft-screens out of step with the relay is a transient, like a restarting unit: its next report (`ScreensReport`) corrects it, and `Quiet` waits for that report. So in G1, DesktopMatchesPause no longer catches a lost datagram on its own. G2's liveness rule HiddenComesBack carries that check.
 
 The chart (`G1-lifecycle.mmd`, `.svg`) still draws L1 to L7 red. It is due a redraw.
+
+Forced standby (2026-11-24): the model has the proximity sensor (`near`) apart from the level SteamVR has (`lvl`), because ft-powerd can now write that level through the `ft_pointer` driver, and ft-powerd's `Standby` with its file `powerd-standby`. Two rules came with it, in `Presence` (417 states) and `Joint` (32,770): StandbyHasOwner (a standby ft-powerd asked for is one a key will end: ft-powerd runs and knows, or its file tells the next start) and StandbyFileIsFresh (the file is there only while a standby is under way or its ft-powerd was killed). Both hold, with the three older presence rules. The `.mmd` has the new states (x3, x4); the `.svg` and the preview don't yet.
 
 Fixed bugs:
 

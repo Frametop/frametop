@@ -16,16 +16,24 @@
 // moves that much in 10 s now and then. The headset, the Frame controllers, trackers, and
 // the 3D mouse's virtual controller count; the last moves only when the mouse or the gaze
 // moves it.
-// Input: every /dev/input device with keys or relative axes (mice, keyboards, the headset's
-// buttons, the relay's virtual devices), read without grabbing and rescanned every few
-// seconds for new ones. Keyboards the relay grabs for the desktop aren't seen, but typing
-// in the headset moves it anyway.
+// Input: every /dev/input device with keys or relative axes (inputs.h).
 //
 // The displays: /sys/class/backlight/ae94000.dsi.0/brightness, the file SteamVR's own driver
 // writes for standby ("cv: Set displays off" in vrserver.txt); 0 turns both panels'
 // backlights off. The value from before goes back when they wake. The GPU keeps rendering
 // and tracking keeps running, which is why they can wake the moment the headset moves, but
 // it also means this saves the panels' power and light, not the whole headset's.
+//
+// So with DISPLAY_OFF_STANDBY=1 (the default) the backlight is the fallback, and SteamVR's own
+// standby comes first: ft-powerd has the ft_pointer driver tell SteamVR the headset came off
+// ("worn 0" on @ft_pointer, pointer/driver/worn.h). SteamVR then turns the displays off itself
+// 5 s later and pauses tracking, the cameras and the compositor: about 5 W instead of 17, with
+// the desktop, the services and remote access all still up. It ends with a key, a button or a
+// mouse ("worn 1"), with "on", when the proximity sensor changes (the headset is picked up or
+// put on: SteamVR wakes by itself), or when the testbench fakes a wearer. Movement can't end
+// it: the poses aren't valid in standby. standby.h has the rules and when the backlight is
+// used after all. ~/.cache/frametop/powerd-standby is there while a standby ft-powerd asked for
+// is under way, so the next start ends one that a crash left behind.
 // If something else turns the backlight back on while it's off (SteamVR leaving standby,
 // the brightness setting), that counts as use. While SteamVR has the headset in standby
 // (taken off), SteamVR owns the displays and ft-powerd waits, unless they are still lit
@@ -39,17 +47,20 @@
 // a stop while they're off doesn't leave them dark: the next start puts it back.
 //
 // Control (datagrams on @ft_powerd; the reply goes to the sender's address):
-//   status -> "ok on|off|away <seconds since use> <timeout seconds, 0 = never>"
-//             (away: SteamVR has the headset in standby)
+//   status -> "ok on|off|standby|away <seconds since use> <timeout seconds, 0 = never>"
+//             (standby: SteamVR's standby, asked for by ft-powerd; away: SteamVR's standby
+//             because the headset came off)
 //   off    -> "ok": the displays off now, to try it (for 2 s nothing counts as use)
 //   on     -> "ok": back on
 // Settings (~/.config/frametop.conf, re-read when the file changes): DISPLAY_OFF_MIN (0 =
 // never, the default; displays SteamVR's standby leaves lit go off either way),
-// DISPLAY_MOVE_MM (5), DISPLAY_MOVE_DEG (0.5).
+// DISPLAY_OFF_STANDBY (1), DISPLAY_MOVE_MM (5), DISPLAY_MOVE_DEG (0.5).
 #include <openvr.h>
 
 #include "../conf/ftsock.h"
 #include "../conf/ft_conf.h"
+#include "inputs.h"
+#include "standby.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -64,11 +75,7 @@
 #include <string>
 #include <vector>
 
-#include <dirent.h>
-#include <fcntl.h>
-#include <linux/input.h>
 #include <poll.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -76,6 +83,10 @@
 
 namespace {
 
+using ft_power::DrainInputs;
+using ft_power::InputDev;
+using ft_power::ScanInputs;
+using ft_power::Standby;
 using Clock = std::chrono::steady_clock;
 
 const char *kBacklight = "/sys/class/backlight/ae94000.dsi.0/brightness";
@@ -87,6 +98,34 @@ std::string Home() {
 
 std::string ConfPath() { return Home() + "/.config/frametop.conf"; }
 std::string SavedPath() { return Home() + "/.cache/frametop/powerd-brightness"; }
+std::string StandbyPath() { return Home() + "/.cache/frametop/powerd-standby"; }
+
+void MakeCacheDir() {
+    mkdir((Home() + "/.cache").c_str(), 0755);
+    mkdir((Home() + "/.cache/frametop").c_str(), 0755);
+}
+
+// Has the ft_pointer driver tell SteamVR the headset is worn or not (pointer/driver/worn.h).
+// False: nobody is listening (SteamVR without the driver).
+bool AskWorn(int sock, bool worn) {
+    sockaddr_un addr;
+    const socklen_t len = ft_sock_addr(FT_SOCK_POINTER, &addr);
+    const char *cmd = worn ? "worn 1" : "worn 0";
+    return sendto(sock, cmd, std::strlen(cmd), MSG_DONTWAIT, reinterpret_cast<sockaddr *>(&addr), len) >= 0;
+}
+
+// The testbench keeps this file while it fakes a wearer (testbench/README.md): in the runtime
+// dir, or in the session's when ours is a nested desktop's.
+bool TestbenchFakesWorn() {
+    const char *xdg = std::getenv("XDG_RUNTIME_DIR");
+    for (const std::string &dir : {std::string(xdg ? xdg : ""), "/run/user/" + std::to_string(getuid())})
+        if (!dir.empty() && access((dir + "/frametop-fake-worn.json").c_str(), F_OK) == 0) return true;
+    return false;
+}
+
+double Secs(std::chrono::steady_clock::time_point t) {
+    return std::chrono::duration<double>(t.time_since_epoch()).count();
+}
 
 std::map<std::string, std::string> ReadConfig() { return ft_conf::Read(ConfPath()); }
 
@@ -105,76 +144,6 @@ bool WriteInt(const std::string &path, int v) {
     out << v << "\n";
     out.flush();
     return bool(out);
-}
-
-// --- input devices ---------------------------------------------------------------------
-
-struct InputDev {
-    int fd;  // -1: not open (no keys or relative axes, or it stopped reading)
-    std::string name;
-    bool ignored;  // no keys or relative axes: not opened again
-};
-
-bool HasBit(const unsigned long *bits, int bit) {
-    return bits[bit / (8 * sizeof(long))] & (1UL << (bit % (8 * sizeof(long))));
-}
-
-// Opens /dev/input/event* nodes we don't have open yet that have keys or relative axes.
-void ScanInputs(std::map<std::string, InputDev> &devs) {
-    DIR *dir = opendir("/dev/input");
-    if (!dir) return;
-    while (dirent *e = readdir(dir)) {
-        if (std::strncmp(e->d_name, "event", 5) != 0) continue;
-        const std::string path = std::string("/dev/input/") + e->d_name;
-        const auto known = devs.find(path);
-        if (known != devs.end() && (known->second.fd >= 0 || known->second.ignored)) continue;
-        const int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) continue;
-        unsigned long ev[(EV_MAX + 8 * sizeof(long)) / (8 * sizeof(long))] = {};
-        char name[128] = "?";
-        ioctl(fd, EVIOCGNAME(sizeof name), name);
-        if (ioctl(fd, EVIOCGBIT(0, sizeof ev), ev) < 0 || !(HasBit(ev, EV_KEY) || HasBit(ev, EV_REL))) {
-            close(fd);
-            devs[path] = {-1, name, true};
-            continue;
-        }
-        devs[path] = {fd, name, false};
-        std::printf("watching %s (%s)\n", path.c_str(), name);
-    }
-    closedir(dir);
-    // Forget nodes that went away, so a new device reusing the number gets opened.
-    for (auto it = devs.begin(); it != devs.end();) {
-        if (access(it->first.c_str(), F_OK) != 0) {
-            if (it->second.fd >= 0) close(it->second.fd);
-            it = devs.erase(it);
-        } else {
-            ++it;
-        }
-    }
-    std::fflush(stdout);
-}
-
-// Reads everything waiting; returns the name of a device that sent a key or relative
-// motion, or "".
-std::string DrainInputs(std::map<std::string, InputDev> &devs) {
-    std::string used;
-    input_event evs[64];
-    for (auto &[path, d] : devs) {
-        if (d.fd < 0) continue;
-        while (true) {
-            const ssize_t n = read(d.fd, evs, sizeof evs);
-            if (n <= 0) {
-                if (n < 0 && errno != EAGAIN) {  // unplugged: the next scan forgets it or opens it again
-                    close(d.fd);
-                    d.fd = -1;
-                }
-                break;
-            }
-            for (size_t i = 0; i < size_t(n) / sizeof(input_event); ++i)
-                if (evs[i].type == EV_KEY || evs[i].type == EV_REL) used = d.name;
-        }
-    }
-    return used;
 }
 
 // --- poses ---------------------------------------------------------------------------------
@@ -240,7 +209,15 @@ int main() {
     }
     vr::IVRSystem *sys = vr::VRSystem();
 
+    // End a standby that a run which was killed asked for: nothing else would on a key or a button.
+    if (access(StandbyPath().c_str(), F_OK) == 0) {
+        AskWorn(ctl, true);
+        std::remove(StandbyPath().c_str());
+        std::printf("standby ended (asked for by an earlier run)\n");
+    }
+
     double offAfter = 0, moveMetres = 0.005, moveDegrees = 0.5;
+    bool standbyWanted = true;
     timespec confTime{};
     auto loadConfig = [&](bool force) {
         struct stat st{};
@@ -252,9 +229,12 @@ int main() {
         offAfter = std::max(0.0, ConfDouble(conf, "DISPLAY_OFF_MIN", 0)) * 60;
         moveMetres = std::max(0.001, ConfDouble(conf, "DISPLAY_MOVE_MM", 5) / 1000);
         moveDegrees = std::max(0.05, ConfDouble(conf, "DISPLAY_MOVE_DEG", 0.5));
-        if (force || was != offAfter)
-            std::printf("displays off after %s; moving means %.1f mm or %.2f deg\n",
+        const bool wasWanted = standbyWanted;
+        standbyWanted = ConfDouble(conf, "DISPLAY_OFF_STANDBY", 1) != 0;
+        if (force || was != offAfter || wasWanted != standbyWanted)
+            std::printf("displays off after %s, %s; moving means %.1f mm or %.2f deg\n",
                         offAfter > 0 ? (std::to_string(int(offAfter)) + " s without use").c_str() : "never (DISPLAY_OFF_MIN=0)",
+                        standbyWanted ? "with SteamVR's standby" : "backlight only (DISPLAY_OFF_STANDBY=0)",
                         moveMetres * 1000, moveDegrees);
     };
     loadConfig(true);
@@ -273,12 +253,12 @@ int main() {
     auto awayAt = now;     // when SteamVR's standby began, or the last use during it
     bool off = false, away = false, wasDark = false;
     int restore = 0;  // the brightness to put back
+    Standby standby;  // SteamVR's standby, when ft-powerd asked for it
 
     auto turnOff = [&](const char *why) {
         const int b = ReadInt(kBacklight, -1);
         if (b <= 0) return;  // already dark (SteamVR standby) or unreadable
-        mkdir((Home() + "/.cache").c_str(), 0755);
-        mkdir((Home() + "/.cache/frametop").c_str(), 0755);
+        MakeCacheDir();
         WriteInt(SavedPath(), b);
         if (!WriteInt(kBacklight, 0)) {
             std::printf("couldn't write %s\n", kBacklight);
@@ -295,6 +275,43 @@ int main() {
         if (ReadInt(kBacklight, -1) == 0) WriteInt(kBacklight, restore);
         std::remove(SavedPath().c_str());
         std::printf("displays on: %s\n", why.c_str());
+    };
+    // The displays are due to go dark: SteamVR's standby if it can be had, or else the backlight.
+    // True: one of the two is under way.
+    auto darken = [&](const char *why) {
+        if (standby.Active()) return true;
+        if (!away) {
+            switch (standby.Start(Secs(now), standbyWanted, TestbenchFakesWorn())) {
+            case Standby::Begin::Ask:
+                // The file first: a kill between the two still leaves the next start a standby to end.
+                MakeCacheDir();
+                WriteInt(StandbyPath(), 1);
+                if (AskWorn(ctl, false)) {
+                    std::printf("standby asked for: %s\n", why);
+                    return true;
+                }
+                std::remove(StandbyPath().c_str());
+                standby.Abort();
+                std::printf("no standby: the ft_pointer driver isn't listening\n");
+                break;
+            case Standby::Begin::Testing:
+                std::printf("no standby: the testbench fakes a wearer\n");
+                break;
+            case Standby::Begin::Unheld:
+                std::printf("no standby: SteamVR left the last one by itself and nobody has used the headset since\n");
+                break;
+            case Standby::Begin::Disabled:
+            case Standby::Begin::Busy:
+                break;
+            }
+        }
+        turnOff(why);
+        return off;
+    };
+    auto endStandby = [&](const std::string &why) {
+        AskWorn(ctl, true);
+        std::remove(StandbyPath().c_str());
+        std::printf("standby ended: %s\n", why.c_str());
     };
 
     // SteamVR is asked every 100 ms (events, the activity level, poses: IPC calls to
@@ -313,9 +330,13 @@ int main() {
         now = Clock::now();
         const bool grace = now < graceUntil;
         std::string use;  // why this tick counts as use
+        bool person = false;  // use only a person causes (input, movement): it ends a standby we asked for
 
         const std::string dev = DrainInputs(inputs);
-        if (!dev.empty() && !grace) use = "input from " + dev;
+        if (!dev.empty() && !grace) {
+            use = "input from " + dev;
+            person = true;
+        }
         if (now - lastScan > std::chrono::seconds(3)) {
             ScanInputs(inputs);
             lastScan = now;
@@ -357,6 +378,22 @@ int main() {
                 std::printf("SteamVR: headset %s\n", away ? "off (SteamVR's standby has the displays)" : "on");
                 if (!away) use = "headset on again";
             }
+            switch (standby.Tick(Secs(now), away)) {
+            case Standby::Step::Holds:
+                std::printf("standby: SteamVR took it (tracking and cameras paused)\n");
+                break;
+            case Standby::Step::Failed:
+                endStandby("SteamVR didn't take it");
+                turnOff("the backlight instead");
+                if (!off) lastUse = now;  // couldn't: try again after another timeout, not every tick
+                break;
+            case Standby::Step::Woke:
+                std::remove(StandbyPath().c_str());
+                std::printf("standby: SteamVR left it by itself\n");
+                break;
+            case Standby::Step::None:
+                break;
+            }
 
             // Raw poses: recentering or a new play area doesn't move anything.
             sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseRawAndUncalibrated, 0, poses, vr::k_unMaxTrackedDeviceCount);
@@ -378,6 +415,7 @@ int main() {
                 Distance(anchors[i], p.mDeviceToAbsoluteTracking, metres, degrees);
                 if (metres > moveMetres || degrees > moveDegrees) {
                     SetAnchor(anchors[i], p.mDeviceToAbsoluteTracking, now);
+                    person = true;
                     if (use.empty()) {
                         char why[96];
                         std::snprintf(why, sizeof why, "%s %u moved %.1f mm, %.2f deg",
@@ -410,17 +448,17 @@ int main() {
                 if (!off) awayAt = now;  // couldn't: try again in 10 s, not every tick
             }
         }
+        if (person && standby.Use(Secs(now))) endStandby(use);
         if (!use.empty()) {
             lastUse = now;
             awayAt = now;  // use during SteamVR's standby: its 10 s start again
             turnOn(use);
         }
-        if (!off && !away && offAfter > 0 && now - lastUse >= std::chrono::duration<double>(offAfter)) {
+        if (!off && !away && !standby.Active() && offAfter > 0 && now - lastUse >= std::chrono::duration<double>(offAfter)) {
             char why[64];
             if (offAfter >= 60) std::snprintf(why, sizeof why, "%g min without use", offAfter / 60);
             else std::snprintf(why, sizeof why, "%.0f s without use", offAfter);
-            turnOff(why);
-            if (!off) lastUse = now;  // couldn't: try again after another timeout, not every tick
+            if (!darken(why)) lastUse = now;  // couldn't: try again after another timeout, not every tick
         }
 
         // Control socket.
@@ -434,15 +472,15 @@ int main() {
             while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == ' ')) cmd.pop_back();
             if (cmd == "status") {
                 char s[96];
-                std::snprintf(s, sizeof s, "ok %s %.0f %.0f", off ? "off" : away ? "away" : "on",
+                std::snprintf(s, sizeof s, "ok %s %.0f %.0f", standby.Holding() ? "standby" : off ? "off" : away ? "away" : "on",
                               std::chrono::duration<double>(now - lastUse).count(), offAfter);
                 reply = s;
             } else if (cmd == "off") {
                 graceUntil = now + std::chrono::seconds(2);
-                turnOff("asked to");
-                if (!off) reply = "error the displays are already off, or the backlight can't be written";
+                if (!darken("asked to")) reply = "error the displays are already off, or the backlight can't be written";
             } else if (cmd == "on") {
                 lastUse = now;
+                if (standby.Use(Secs(now))) endStandby("asked to");
                 turnOn("asked to");
             } else {
                 reply = "error unknown command: " + cmd;
@@ -453,6 +491,7 @@ int main() {
         }
     }
 
+    if (standby.Active()) endStandby("stopping");
     turnOn("stopping");
     std::printf("stopped (signal %d)\n", int(stopSignal));
     vr::VR_Shutdown();

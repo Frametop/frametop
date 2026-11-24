@@ -167,6 +167,7 @@ def items(root, env=os.environ):
         if rel not in pointer:
             out.append(single(rel, CXX, cflags="-I."))
     out += [
+        single("power/standby-test.cpp", CXX),   # ft-powerd's forced standby (power/standby.h)
         single("stream/test/hostinput-test.cpp", CXX, cflags="-Istream"),
         single("stream/test/clipboard-test.cpp", CXX, cflags="-Istream"),
         single("stream/test/audio-clock-test.cpp", CXX),

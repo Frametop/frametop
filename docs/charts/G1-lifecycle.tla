@@ -13,7 +13,8 @@
 \*    3D mouse and the helper's virtual controller, and gamepad mode;
 \*  - presence (WornPart): the headset's activity level, the pointer helper's worn answer
 \*    (pointer/helper/ft-pointer.cpp, HEADSET_OFF_AFTER 1.5 s), ft-powerd's away (power/ft-powerd.cpp,
-\*    1 s), and the displays (DISPLAY_OFF_MIN, SteamVR's standby, powerd-brightness).
+\*    1 s), and the displays (DISPLAY_OFF_MIN, SteamVR's standby, powerd-brightness), with the
+\*    standby ft-powerd asks SteamVR for (DISPLAY_OFF_STANDBY, power/standby.h, powerd-standby).
 \* Time in the worn half goes in steps: t = 0 under 1 s since the level changed, 1 from 1 s to
 \* 1.5 s, 2 from 1.5 s to 5 s, 3 from 5 s (SteamVR's standby).
 \*
@@ -31,6 +32,7 @@ CONSTANTS
     Crashes,        \* the relay, ft-gazed and ft-powerd can die and come back
     Lossy,          \* the relay's "pause off" to ft-screens can be lost (a full socket: EAGAIN)
     OffMin,         \* DISPLAY_OFF_MIN > 0
+    Standby,        \* DISPLAY_OFF_STANDBY=1: unused, ft-powerd asks SteamVR for its standby
     MaxJobs         \* the worker's queue, bounded for TLC (CONSTRAINT JobsBound)
 
 VARIABLES
@@ -56,7 +58,8 @@ VARIABLES
     spaused,  \* ft-screens' g_paused
     told,     \* the relay has seen this ft-screens (screens_seen) since either started
     lost,     \* the pause closed the desktop and nothing has started it since (cleared when SteamVR stops)
-    lvl,      \* the headset's activity level: "on" | "off" (idle, standby)
+    lvl,      \* the headset's activity level, as SteamVR has it: "on" | "off" (idle, standby). It follows
+              \* the sensor, or the last "worn" ft-powerd had the ft_pointer driver write
     t,        \* time since lvl last changed, in steps (above)
     hOff0,    \* the helper started with the headset off ("idle at the start: off already")
     powerd,   \* frametop-power (ft-powerd): "down" | "up"
@@ -64,14 +67,17 @@ VARIABLES
     pFresh,   \* ft-powerd started less than a second ago
     disp,     \* the displays: "on" | "darkPd" (ft-powerd's timeout) | "darkSvr" (SteamVR's standby)
     saved,    \* ~/.cache/frametop/powerd-brightness exists
-    pdOff     \* ft-powerd's off flag
+    pdOff,    \* ft-powerd's off flag
+    near,     \* the proximity sensor has something in front of it: a face, or a mount
+    stby,     \* ft-powerd's Standby: "none" | "asked" ("not worn" written) | "held" (SteamVR took it)
+    mark      \* ~/.cache/frametop/powerd-standby exists
 
 svrVars == <<svr, helper, gaze, hands, game>>
 pauseVars == <<paused, ends, due, spaused, pad, ptr, ractive, mouse, jobs, file>>
-wornVars == <<lvl, t, hOff0, powerd, pAway, pFresh, disp, saved, pdOff>>
+wornVars == <<lvl, t, hOff0, powerd, pAway, pFresh, disp, saved, pdOff, near, stby, mark>>
 vars == <<svr, helper, gaze, hands, game, relay, paused, ends, rgame, due, mouse, ractive, ptr, pad,
           jobs, stU, stD, file, desk, spaused, told, lost, lvl, t, hOff0, powerd, pAway, pFresh, disp,
-          saved, pdOff>>
+          saved, pdOff, near, stby, mark>>
 
 Units == {"gaze", "hands"}
 FileOf(p, e, u, d) == [paused |-> p, ends |-> e, units |-> u, desk |-> d]
@@ -91,6 +97,7 @@ Init ==
     /\ desk = "down" /\ spaused = FALSE /\ told = FALSE /\ lost = FALSE
     /\ lvl = "on" /\ t = 1 /\ hOff0 = FALSE /\ powerd = "down" /\ pAway = FALSE /\ pFresh = FALSE
     /\ disp = "on" /\ saved = FALSE /\ pdOff = FALSE
+    /\ near = TRUE /\ stby = "none" /\ mark = FALSE
 
 \* ---- The relay's pause() and resume() (game_pause.py GamePause), in one step each ----
 \* pause(): ends_with_game = game and pause_auto; tell_screens(True); the relay's part
@@ -178,16 +185,21 @@ YouEndGamepad ==
 \* ---- SteamVR and its units ----
 \* steamvr.service starts: the units it wants start with it (frametop-pointer, frametop-gaze,
 \* frametop-power; frametop-autostart, which starts the desktop with AUTOSTART=1). Hand tracking
-\* isn't wanted by it with HANDS_MODE=frametop. ft-powerd first puts back a brightness it left off.
+\* isn't wanted by it with HANDS_MODE=frametop. ft-powerd first puts back a brightness it left off,
+\* and ends a standby whose file a killed run left: it writes "worn", whatever the sensor says.
 SteamVRStarts ==
     /\ svr = "down" /\ svr' = "up" /\ helper' = "starting" /\ gaze' = "up"
     /\ desk' = IF AutoStart /\ desk = "down" THEN "starting" ELSE desk
     /\ powerd' = "up" /\ pAway' = FALSE /\ pFresh' = TRUE /\ pdOff' = FALSE /\ saved' = FALSE
     /\ disp' = IF saved /\ disp = "darkPd" THEN "on" ELSE disp
-    /\ UNCHANGED <<hands, game, relay, rgame, stU, stD, spaused, told, lost, pauseVars, lvl, t, hOff0>>
+    /\ lvl' = (IF mark THEN "on" ELSE lvl)
+    /\ t' = (IF mark /\ lvl = "off" THEN 0 ELSE t)
+    /\ stby' = "none" /\ mark' = FALSE
+    /\ UNCHANGED <<hands, game, relay, rgame, stU, stD, spaused, told, lost, pauseVars, hOff0, near>>
 
 \* SteamVR stops (or restarts, or crashes): PartOf stops its units; ft-screens ends on VREvent_Quit,
-\* so the desktop goes; ft-powerd turns the displays back on as it stops.
+\* so the desktop goes; ft-powerd turns the displays back on as it stops, and ends its standby.
+\* The next vrserver has the level from the sensor again.
 SteamVRStops ==
     /\ svr = "up" /\ svr' = "down"
     /\ helper' = "down" /\ gaze' = "down" /\ hands' = "down" /\ game' = FALSE
@@ -196,7 +208,9 @@ SteamVRStops ==
     /\ powerd' = "down" /\ pAway' = FALSE /\ pFresh' = FALSE /\ pdOff' = FALSE
     /\ disp' = IF powerd = "up" /\ pdOff THEN "on" ELSE disp
     /\ saved' = IF powerd = "up" /\ pdOff THEN FALSE ELSE saved
-    /\ UNCHANGED <<relay, rgame, stU, stD, paused, ends, due, ractive, mouse, jobs, file, lvl, t, hOff0>>
+    /\ lvl' = (IF near THEN "on" ELSE "off") /\ t' = IF lvl' = lvl THEN t ELSE 0
+    /\ stby' = "none" /\ mark' = IF powerd = "up" THEN FALSE ELSE mark
+    /\ UNCHANGED <<relay, rgame, stU, stD, paused, ends, due, ractive, mouse, jobs, file, hOff0, near>>
 
 \* The helper is up and says "vrhello": the relay sends the mapped buttons, and while paused it
 \* queues "enforce" (stop the units SteamVR just started). A relay that's down misses it.
@@ -205,7 +219,7 @@ HelperHello ==
     /\ jobs' = IF relay = "up" /\ paused THEN Append(jobs, "enforce") ELSE jobs
     /\ UNCHANGED <<svr, gaze, hands, game, relay, rgame, stU, stD, desk, spaused, told, lost,
                    paused, ends, due, pad, ptr, ractive, mouse, file, lvl, t, powerd, pAway,
-                   pFresh, disp, saved, pdOff>>
+                   pFresh, disp, saved, pdOff, near, stby, mark>>
 
 \* The helper's "vrgame 1|0" (on a change and every 5 s) reaches the relay: game_state(). Only a
 \* change does anything there. A game starting pauses (pause_auto) and ends gamepad mode; a game
@@ -350,66 +364,125 @@ ScreensReport ==
                    ractive, mouse, jobs, file, wornVars>>
 
 \* ---- Presence: the headset and the displays ----
+\* Off the head or the mount: the headset's driver writes "not worn" from its sensor.
 YouTakeHeadsetOff ==
-    /\ WornPart /\ lvl = "on" /\ lvl' = "off" /\ t' = 0
+    /\ WornPart /\ near /\ near' = FALSE /\ lvl' = "off" /\ t' = IF lvl = "on" THEN 0 ELSE t
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, hOff0, powerd,
-                   pAway, pFresh, disp, saved, pdOff>>
+                   pAway, pFresh, disp, saved, pdOff, stby, mark>>
 
-\* Putting it on ends SteamVR's standby, which lights the displays it turned off.
+\* Putting it on (or back on the mount) ends SteamVR's standby, which lights the displays it
+\* turned off.
 YouPutHeadsetOn ==
-    /\ WornPart /\ lvl = "off" /\ lvl' = "on" /\ t' = 0 /\ hOff0' = FALSE
+    /\ WornPart /\ ~near /\ near' = TRUE /\ lvl' = "on" /\ t' = IF lvl = "off" THEN 0 ELSE t
+    /\ hOff0' = FALSE
     /\ disp' = IF disp = "darkSvr" THEN "on" ELSE disp
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, powerd, pAway,
-                   pFresh, saved, pdOff>>
+                   pFresh, saved, pdOff, stby, mark>>
+
+\* The headset's driver reports its sensor again 15-20 s after SteamVR wakes: a "worn" that
+\* ft-powerd wrote with nothing at the sensor ends.
+DriverCorrectsWorn ==
+    /\ WornPart /\ lvl = "on" /\ ~near /\ lvl' = "off" /\ t' = 0
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, hOff0, powerd,
+                   pAway, pFresh, disp, saved, pdOff, near, stby, mark>>
+
+\* Something says "worn" during a standby ft-powerd asked for, with the sensor unchanged: the
+\* testbench faking a wearer, or the headset's driver repeating its sensor (not seen in an hour
+\* of standby, and not ruled out on a mount).
+WornSaidAgain ==
+    /\ WornPart /\ lvl = "off" /\ near /\ lvl' = "on" /\ t' = 0 /\ hOff0' = FALSE
+    /\ disp' = IF disp = "darkSvr" THEN "on" ELSE disp
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, powerd, pAway,
+                   pFresh, saved, pdOff, near, stby, mark>>
 
 \* Time passes. The helper's answer follows the level (it releases the pointer once away);
 \* ft-powerd's away flips once the level has disagreed with it for a second (and the headset
 \* back on counts as use: the displays it turned off come on); 5 s off is SteamVR's standby.
+\* ft-powerd's Standby follows its away: asked becomes held, and a held one that SteamVR left
+\* by itself is over (Step::Woke: the file goes).
 TimePasses ==
     /\ WornPart
     /\ LET t2 == IF lvl = "on" THEN Min(t + 1, 1) ELSE Min(t + 1, 3)
            awayNow == lvl = "off"
            flip == powerd = "up" /\ awayNow # pAway /\ (t2 >= 1 \/ pFresh)
            wake == flip /\ ~awayNow /\ pdOff
-       IN /\ (t2 # t \/ pFresh)
+           away2 == IF flip THEN awayNow ELSE pAway
+           took == powerd = "up" /\ stby = "asked" /\ away2
+           woke == powerd = "up" /\ stby = "held" /\ ~away2
+       IN /\ (t2 # t \/ pFresh \/ took \/ woke)
           /\ t' = t2
-          /\ pAway' = IF flip THEN awayNow ELSE pAway
+          /\ pAway' = away2
           /\ pFresh' = FALSE
           /\ ptr' = IF helper = "up" /\ ~WornAt(t2) THEN FALSE ELSE ptr
           /\ disp' = IF wake THEN "on"
                      ELSE IF awayNow /\ t2 = 3 /\ svr = "up" /\ disp = "on" THEN "darkSvr" ELSE disp
           /\ saved' = IF wake THEN FALSE ELSE saved
           /\ pdOff' = IF wake THEN FALSE ELSE pdOff
+          /\ stby' = IF took THEN "held" ELSE IF woke THEN "none" ELSE stby
+          /\ mark' = IF woke THEN FALSE ELSE mark
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, paused, ends, due, spaused,
-                   pad, ractive, mouse, jobs, file, lvl, hOff0, powerd>>
+                   pad, ractive, mouse, jobs, file, lvl, hOff0, powerd, near>>
 
-\* DISPLAY_OFF_MIN without use: ft-powerd saves the brightness, then writes 0.
+\* DISPLAY_OFF_MIN without use: ft-powerd saves the brightness, then writes 0. With
+\* DISPLAY_OFF_STANDBY=1 this is what's left when the standby can't be had (the testbench fakes
+\* a wearer, or SteamVR left the last standby by itself and nobody used the headset since).
 PowerdTimesOut ==
-    /\ WornPart /\ OffMin /\ powerd = "up" /\ ~pAway /\ disp = "on"
+    /\ WornPart /\ OffMin /\ powerd = "up" /\ ~pAway /\ disp = "on" /\ stby = "none"
     /\ disp' = "darkPd" /\ saved' = TRUE /\ pdOff' = TRUE
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, lvl, t, hOff0,
-                   powerd, pAway, pFresh>>
+                   powerd, pAway, pFresh, near, stby, mark>>
 
-\* Movement or input: ft-powerd turns the displays back on.
+\* DISPLAY_OFF_MIN without use, DISPLAY_OFF_STANDBY=1: ft-powerd leaves powerd-standby, then has
+\* the ft_pointer driver write "not worn" (pointer/driver/worn.h). SteamVR does the rest.
+PowerdAsksStandby ==
+    /\ WornPart /\ OffMin /\ Standby /\ powerd = "up" /\ ~pAway /\ disp = "on" /\ stby = "none"
+    /\ stby' = "asked" /\ mark' = TRUE /\ lvl' = "off" /\ t' = IF lvl = "on" THEN 0 ELSE t
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, hOff0, powerd,
+                   pAway, pFresh, disp, saved, pdOff, near>>
+
+\* SteamVR didn't go away within 15 s of the write (time isn't counted here: any moment before
+\* ft-powerd's away): ft-powerd writes "worn" back and turns the backlight off instead.
+PowerdGivesUp ==
+    /\ WornPart /\ powerd = "up" /\ stby = "asked" /\ ~pAway
+    /\ stby' = "none" /\ mark' = FALSE /\ lvl' = "on" /\ t' = IF lvl = "off" THEN 0 ELSE t
+    /\ hOff0' = FALSE
+    /\ disp' = IF disp = "on" THEN "darkPd" ELSE disp
+    /\ saved' = IF disp = "on" THEN TRUE ELSE saved
+    /\ pdOff' = IF disp = "on" THEN TRUE ELSE pdOff
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, powerd, pAway,
+                   pFresh, near>>
+
+\* Input (and movement, while tracking runs): ft-powerd turns the displays back on, and ends a
+\* standby it asked for by writing "worn", which SteamVR wakes on.
 YouUseIt ==
-    /\ WornPart /\ powerd = "up" /\ pdOff
-    /\ disp' = "on" /\ saved' = FALSE /\ pdOff' = FALSE
-    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, lvl, t, hOff0,
-                   powerd, pAway, pFresh>>
+    /\ WornPart /\ powerd = "up" /\ (pdOff \/ stby # "none")
+    /\ disp' = IF pdOff \/ disp = "darkSvr" THEN "on" ELSE disp
+    /\ saved' = (IF pdOff THEN FALSE ELSE saved)
+    /\ pdOff' = FALSE
+    /\ lvl' = IF stby # "none" THEN "on" ELSE lvl
+    /\ t' = IF stby # "none" /\ lvl = "off" THEN 0 ELSE t
+    /\ hOff0' = IF stby # "none" THEN FALSE ELSE hOff0
+    /\ stby' = "none" /\ mark' = IF stby # "none" THEN FALSE ELSE mark
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, powerd, pAway,
+                   pFresh, near>>
 
-\* ft-powerd is killed (no chance to turn the displays on); Restart=on-failure brings it back,
-\* and it puts back the brightness it saved.
+\* ft-powerd is killed (no chance to turn the displays on or end its standby); Restart=on-failure
+\* brings it back, and it puts back the brightness it saved and ends the standby its file names.
 PowerdDies ==
     /\ Crashes /\ WornPart /\ powerd = "up" /\ powerd' = "down" /\ pdOff' = FALSE /\ pAway' = FALSE
-    /\ pFresh' = FALSE
+    /\ pFresh' = FALSE /\ stby' = "none"
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, lvl, t, hOff0,
-                   disp, saved>>
+                   disp, saved, near, mark>>
 
 PowerdRestarts ==
     /\ powerd = "down" /\ svr = "up" /\ powerd' = "up" /\ pAway' = FALSE /\ pFresh' = TRUE
-    /\ disp' = IF saved /\ disp = "darkPd" THEN "on" ELSE disp
+    /\ disp' = IF (saved /\ disp = "darkPd") \/ (mark /\ disp = "darkSvr") THEN "on" ELSE disp
     /\ saved' = FALSE
-    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, lvl, t, hOff0, pdOff>>
+    /\ lvl' = (IF mark THEN "on" ELSE lvl)
+    /\ t' = (IF mark /\ lvl = "off" THEN 0 ELSE t)
+    /\ hOff0' = IF mark THEN FALSE ELSE hOff0
+    /\ stby' = "none" /\ mark' = FALSE
+    /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, pdOff, near>>
 
 Next ==
     \/ YouToggle \/ YouStartGame \/ YouEndGame \/ YouStartDesktop \/ YouStopDesktop
@@ -417,7 +490,8 @@ Next ==
     \/ SteamVRStarts \/ SteamVRStops \/ HelperHello \/ HelperSaysGame \/ GameGoesStale
     \/ ResumeDelayPasses \/ GazeDies \/ GazeRestarts \/ RelayDies \/ RelayStarts
     \/ WorkerPauses \/ WorkerEnforces \/ WorkerResumes \/ DesktopUp \/ RelaySeesScreens \/ ScreensReport
-    \/ YouTakeHeadsetOff \/ YouPutHeadsetOn \/ TimePasses \/ PowerdTimesOut \/ YouUseIt
+    \/ YouTakeHeadsetOff \/ YouPutHeadsetOn \/ DriverCorrectsWorn \/ WornSaidAgain \/ TimePasses
+    \/ PowerdTimesOut \/ PowerdAsksStandby \/ PowerdGivesUp \/ YouUseIt
     \/ PowerdDies \/ PowerdRestarts
 
 Spec == Init /\ [][Next]_vars
@@ -431,6 +505,7 @@ TypeOK ==
     /\ relay \in {"down", "up"} /\ stU \subseteq Units /\ stD \in {"none", "hidden", "closed"}
     /\ desk \in {"down", "starting", "up"} /\ lvl \in {"on", "off"} /\ t \in 0..3
     /\ disp \in {"on", "darkPd", "darkSvr"} /\ powerd \in {"down", "up"}
+    /\ near \in BOOLEAN /\ stby \in {"none", "asked", "held"} /\ mark \in BOOLEAN
     /\ \A i \in 1..Len(jobs) : jobs[i] \in {"pause", "resume", "enforce"}
 
 \* Nothing is on its way: the relay runs with an empty queue, the helper said hello, the desktop
@@ -468,6 +543,11 @@ NoStuckGamePause == Quiet /\ paused /\ ends => game
 WornAgreesSoon == helper = "up" /\ powerd = "up" /\ HelperWorn = pAway => t < 2 \/ pFresh
 \* Displays ft-powerd turned off are ones it will turn on: it runs and knows, or the saved file says.
 DarkHasOwner == disp = "darkPd" => (powerd = "up" /\ pdOff) \/ saved
+\* A standby ft-powerd asked for (SteamVR has the headset off with the sensor covered) is one a key
+\* will end: ft-powerd runs and knows, or its file tells the next start.
+StandbyHasOwner == svr = "up" /\ lvl = "off" /\ near => (powerd = "up" /\ stby # "none") \/ mark
+\* The file is there only while a standby is under way or its ft-powerd was killed.
+StandbyFileIsFresh == powerd = "up" /\ mark => stby # "none"
 \* Away (by the helper), the virtual controller is let go.
 AwayReleasesPointer == helper = "up" /\ ~HelperWorn => ~ptr
 ====

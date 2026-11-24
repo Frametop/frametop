@@ -1426,7 +1426,8 @@ Item {
                 Kirigami.Action {
                     text: "Turn displays off now"
                     icon.name: "system-suspend"
-                    tooltip: "To try it: they come back on when the headset moves or any input is used"
+                    tooltip: ppage.p.standby ? "To try it: any key, mouse or headset button turns them back on"
+                                             : "To try it: they come back on when the headset moves or any input is used"
                     enabled: ppage.p.service && ppage.p.state === "on"
                     onTriggered: backend.displaysOffNow()
                 }
@@ -1459,8 +1460,32 @@ Item {
                     Controls.Label {
                         text: "Unused means the headset and controllers haven't moved and no mouse, keyboard, or button "
                               + "was used. This works even when the headset seems to be worn, like on a display mount "
-                              + "that covers its proximity sensor. Moving the headset or using any input turns the "
-                              + "displays back on. Taking the headset off still turns them off within seconds."
+                              + "that covers its proximity sensor. "
+                              + (ppage.p.standby ? "" : "Moving the headset or using any input turns the displays back on. ")
+                              + "Taking the headset off still turns them off within seconds."
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        wrapMode: Text.Wrap
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+                    }
+                    Controls.Switch {
+                        Kirigami.FormData.label: "With the displays off:"
+                        text: "Pause tracking too"
+                        checked: ppage.p.standby
+                        onToggled: {
+                            backend.setDisplayOffStandby(checked)
+                            checked = Qt.binding(() => ppage.p.standby)
+                        }
+                    }
+                    Controls.Label {
+                        text: ppage.p.standby
+                              ? "The headset goes into SteamVR's standby, as if you had taken it off: tracking, the "
+                                + "cameras and drawing pause, and it uses about a third of the power. The desktop, "
+                                + "services and remote access keep running. Any key, mouse or headset button wakes it, "
+                                + "and so does putting it on once its proximity sensor notices. Moving it doesn't, "
+                                + "because tracking is paused."
+                              : "Only the displays turn off. The headset keeps tracking and drawing, so it wakes the "
+                                + "moment it moves, but it still uses most of its power."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         wrapMode: Text.Wrap
@@ -1469,7 +1494,9 @@ Item {
                     Controls.Label {
                         Kirigami.FormData.label: "Now:"
                         visible: ppage.p.service
-                        text: ppage.p.state === "off" ? "Off. Move the headset or use any input to turn them on."
+                        text: ppage.p.state === "standby" ? "Off, with tracking paused. Use any key, mouse or headset "
+                                                            + "button, or put the headset on, to wake it."
+                              : ppage.p.state === "off" ? "Off. Move the headset or use any input to turn them on."
                               : ppage.p.state === "away" ? "Off. SteamVR turned them off because the headset isn't being worn."
                               : ppage.p.offMinutes > 0
                                 ? "On, unused for " + (ppage.p.unused < 60 ? Math.floor(ppage.p.unused) + " s"
@@ -1537,9 +1564,12 @@ Item {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     opacity: 0.7
-                    text: "With the displays off, the headset keeps tracking and drawing, so it can wake the moment "
-                          + "it moves. It still uses most of its power, so leave it on a charger that keeps up with it "
-                          + "in use."
+                    text: ppage.p.standby
+                          ? "If SteamVR doesn't take the standby, only the displays turn off and the headset keeps "
+                            + "tracking. Leave it on a charger that keeps up with it in use."
+                          : "With the displays off, the headset keeps tracking and drawing, so it can wake the moment "
+                            + "it moves. It still uses most of its power, so leave it on a charger that keeps up with it "
+                            + "in use."
                 }
             }
         }

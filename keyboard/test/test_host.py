@@ -320,6 +320,30 @@ class HostTest(unittest.TestCase):
         self.host.on_relay(1.1, ["show"])
         self.assertEqual(self.ops(), ["sink", "context", "recenter", "show"])
 
+    def test_a_show_before_the_keyboard_is_ready_waits_for_it(self):
+        """DEE-379: a keyboard started again by Open/close keyboard is shown as soon as the relay
+        hears ft-kbhost, before the keyboard process said ready; it refused that show (no_hello)."""
+        keyboard = FakeKeyboard()
+        host = Host(keyboard, FakeRelay(), FakeSteam(), lambda: True, clock=lambda: 0.0)
+        host.on_relay(0.0, ["1", "1", "0"])
+        host.on_relay(0.0, ["show", "head", *POSE_WORDS])
+        self.assertEqual(keyboard.sent, [])                      # nothing it would refuse
+        host.on_keyboard(0.5, {"event": "ready"})
+        self.assertEqual([op for op, _ in keyboard.sent], ["sink", "context", "show"])
+        host.on_keyboard(0.6, GEOMETRY)
+        self.assertEqual(keyboard.sent[-1][0], "set_pose")       # ...where ft-screens said
+        keyboard.sent.clear()
+        host.on_keyboard(5.0, {"event": "ready"})                # an update's successor: not shown again
+        self.assertEqual(keyboard.sent, [])
+
+    def test_a_hide_before_it_is_ready_drops_that_show(self):
+        keyboard = FakeKeyboard()
+        host = Host(keyboard, FakeRelay(), FakeSteam(), lambda: True, clock=lambda: 0.0)
+        host.on_relay(0.0, ["show"])
+        host.on_relay(0.1, ["hide"])
+        host.on_keyboard(0.5, {"event": "ready"})
+        self.assertEqual(keyboard.sent, [])
+
 
 if __name__ == "__main__":
     unittest.main()

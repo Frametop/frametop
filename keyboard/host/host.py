@@ -36,6 +36,8 @@ class Host:
         self.visible = False
         self.geometry = None          # (matrix, width, height)
         self.pending_spot = None      # (kind, pose) to place once geometry is known
+        self.ready = False            # a keyboard process has said ready (it refuses requests before)
+        self.early_show = None        # (kind, pose) of a show asked for before that: sent once it's ready
         self.desktop = self.surface = self.take = False
         self.steam_field = None       # {"id", "purpose"} while a Steam field holds it
         self.steam_asked_at = None
@@ -96,6 +98,11 @@ class Host:
     def show(self, now, kind=None, pose=None):
         if not self.pin_ok:
             return
+        if not self.ready:
+            # The keyboard is still starting (the relay heard our hello and opened it at once: a
+            # keyboard brought back after a quit, input/kb_revive.py). It would refuse this: no_hello.
+            self.early_show = (kind, pose)
+            return
         self.opened_for = "steam" if self.steam_field is not None else "frametop"
         self.steam_asked_at = None
         self.update_route(now)
@@ -149,6 +156,7 @@ class Host:
             if self.visible:
                 self.update_route(now)   # what it shows types where it would without the field
         elif words == ["hide"]:
+            self.early_show = None
             if self.visible or self.opened_for:
                 self.hide()
         elif words[:1] == ["poke"] and self.visible:
@@ -199,6 +207,10 @@ class Host:
             self.geometry = self.pending_spot = None
             self.echoes.clear()
             self.touch.reset()
+            self.ready = True
+            if self.early_show:
+                spot, self.early_show = self.early_show, None
+                self.show(now, *spot)
         elif event == "visibility":
             visible = message.get("visible") is True
             if visible != self.visible:

@@ -77,6 +77,8 @@ The source keeps the `fh_` names and magic strings of frame-hands, the project i
 
 XRService owns the headset cameras. ft-camd borrows its DMA-BUFs read-only with `pidfd_getfd`, the same way FrameEyeCameraFeed does. It never touches XRService's V4L2 descriptors. `discovery` in `camd/xrcams.c` is adapted from FrameEyeCameraFeed (MIT, see `camd/LICENSE.FrameEyeCameraFeed`).
 
+XRService opens the four tracking cameras one after another as it starts: the side pair, the upper pair a moment later, then their buffer queues. ft-camd waits for all four before it attaches, up to 10 seconds (`camd/camstart.c`), and then goes on with what's there. Before, a ft-camd started in that moment (the desktop autostarting with SteamVR at boot) ran with two cameras, and the Hands page said "only 2 of 4 tracking cameras running" until hand tracking was turned off and on.
+
 Polling buffers for changes can catch a frame while the camera is still writing it. Instead, ft-camd listens to the `v4l2:v4l2_dqbuf` tracepoint, which fires when XRService takes a buffer. It gives the buffer index, the sequence number and the capture timestamp. ft-camd learns which DMA-BUF holds each V4L2 index by watching which buffer changes at each dequeue:
 
 - Right after XRService allocates its buffers, the mapping is allocation order.

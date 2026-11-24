@@ -915,6 +915,52 @@ static void build_groups(xr_state_t *st)
         }
 }
 
+static bool group_fits(const xr_group_t *g, const xr_camera_t *cam, size_t need)
+{
+    return g->planesize[1] == cam->planesize[1] && g->planesize[0] >= need;
+}
+
+/* The first word of a sensor's name: its model ("og01a1b 4-0036" -> "og01a1b"). */
+static void sensor_model(const char *sensor, char *out, size_t n)
+{
+    char buf[64];
+
+    if (sscanf(sensor, "%63s", buf) != 1)
+        buf[0] = 0;
+
+    snprintf(out, n, "%s", buf);
+}
+
+bool xr_camera_owns(const xr_state_t *st, const xr_camera_t *cam, size_t need, bool *exact)
+{
+    bool own = false, bound = false;
+
+    for (int g = 0; g < st->ngroups; g++)
+        if (st->groups[g].cam == cam && group_fits(&st->groups[g], cam, need))
+            own = true, bound = bound || st->groups[g].exact;
+
+    if (exact)
+        *exact = bound;
+
+    return own;
+}
+
+bool xr_group_serves(const xr_state_t *st, const xr_group_t *g, const xr_camera_t *cam, size_t need)
+{
+    if (!group_fits(g, cam, need))
+        return false;
+
+    if (xr_camera_owns(st, cam, need, NULL))
+        return g->cam == cam;
+
+    char model[16], theirs[16];
+
+    sensor_model(cam->sensor, model, sizeof(model));
+    sensor_model(g->cam ? g->cam->sensor : g->sensor, theirs, sizeof(theirs));
+
+    return !strcmp(model, theirs);
+}
+
 bool xr_discover(xr_state_t *st, const char *process, char *err, size_t errn)
 {
     memset(st, 0, sizeof(*st));

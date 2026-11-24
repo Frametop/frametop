@@ -32,8 +32,10 @@ def rows(table, bindings, name, label):
 
 
 def releases(pressed, bindings):
-    """Whether the relay takes pressed as release_keys: that combination, or it with more
-    modifiers held (one may be stuck too; the relay's release_combo)."""
+    """Whether the relay takes pressed as release_keys: bound to it, or a combination bound to
+    it with more modifiers held (one may be stuck too; the relay's release_combo)."""
+    if bindings.get(pressed) == RELEASE_KEYS:
+        return True
     *mods, key = pressed.split("+")
     for combo, action in bindings.items():
         *held, last = combo.split("+")
@@ -73,10 +75,13 @@ class RemoteKeys(QObject):
 
     rules(): the input rules as they read now. edit(change): change them under the file's lock
     and tell the relay (Backend._edit_rules); it returns not_saved when that failed, having said
-    why. Whoever made this calls refresh() when the rules change, after an edit from here too. capture(then, dropped) takes the next key combination pressed on any keyboard, and
+    why. capture(then, dropped) takes the next key combination pressed on any keyboard, and
     cancel() gives that up. bindings(rules) is Frametop's own key combinations, name(combo) and
     label(action) say them, sendable(combo) is the relay's limit on keys it taps, and
-    say(text, is_error) shows a line in the window."""
+    say(text, is_error) shows a line in the window.
+
+    Whoever made this calls refresh() whenever the rules change, after an edit from here too:
+    that's what tells the page."""
     changed = Signal()
     draftChanged = Signal()
 

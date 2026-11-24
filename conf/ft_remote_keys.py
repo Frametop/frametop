@@ -8,10 +8,11 @@ frunner. The rules' "remote_key_bindings" names the combinations that go to the 
 
 pressed is what you press, written as in key_bindings: evdev codes joined by "+", modifiers first
 and in rising order, left-hand codes for either side ("42+125+57": Meta+Shift+Space), or one
-modifier alone for a tap ("125": a Meta tap; a right-hand code is that key's own). sent is what
-the computer gets: the same combination (it's typed there as it is, and held as long as you hold
-it), or another one, which is tapped there once ("125+57": Meta+Space, so Meta+Shift+Space on the
-Frame opens the computer's launcher while Meta+Space stays frunner's).
+modifier alone for a tap ("125": a Meta tap, either side's; a right-hand code is that key's own,
+and an entry for the left code leaves a right-hand key that key_bindings binds on its own). sent
+is what the computer gets: the same combination (it's typed there as it is, and held as long as
+you hold it), or another one, which is tapped there once ("125+57": Meta+Space, so
+Meta+Shift+Space on the Frame opens the computer's launcher while Meta+Space stays frunner's).
 
 The input relay (input/input-relay.py) acts on the table and Frametop Settings' Remote display
 keys page (input-settings/remote_keys.py) edits it; both read it here, so they agree on what a

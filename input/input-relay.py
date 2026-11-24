@@ -105,7 +105,9 @@ desktop has the keys (ft-screens' sixth "keyboard" word; pc_keys). One sent as i
 Frametop's then: it's typed through, so Super+Space opens the computer's launcher, not frunner.
 One sent as another combination is tapped there once, as a keys: action is, on the press (a lone
 modifier's tap: on its release); Meta+Shift+Space can send the computer Meta+Space while
-Meta+Space stays frunner's. pressed needn't be a key combination of Frametop's. Every other combination stays Frametop's there: Meta+J
+Meta+Space stays frunner's. pressed needn't be a key combination of Frametop's. A modifier's tap
+("29": a Ctrl tap) is either side's, but not a right-hand key's that has an entry or a binding of
+its own ("97": Right Ctrl, dictation's). Every other combination stays Frametop's there: Meta+J
 still clicks where you look. A rules file without the table gets ft_remote_keys.DEFAULT, Frametop's
 default Meta combinations but the gaze clicks, each as itself. release_keys never goes to the
 computer, whatever the table says: it's the way out of stuck keys.

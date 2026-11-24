@@ -76,6 +76,11 @@ class Logic(unittest.TestCase):
         self.assertIn("always stays Frametop's", remote_keys.problem("29+42+56+125+1", "125+57", bound, sendable, name))
         for other in ("29+42+1", "29+42+56+57", "1", "125+57"):
             self.assertFalse(remote_keys.releases(other, bound), other)
+        # A key or a tap bound to it on its own is the relay's too.
+        alone = {"88": "release_keys", "29": "release_keys"}
+        self.assertTrue(remote_keys.releases("88", alone))
+        self.assertIn("always stays Frametop's", remote_keys.problem("29", "29", alone, sendable, name))
+        self.assertFalse(remote_keys.releases("125+88", alone))
 
     def test_the_first_change_keeps_the_defaults(self):
         rules = {}
@@ -305,6 +310,8 @@ class Page(unittest.TestCase):
         self.assertEqual((add.property("enabled"), problem.property("visible")), (False, True))
         QMetaObject.invokeMethod(press_, "clicked")
         press(b, META, SHIFT, SPACE)
+        settle()
+        self.assertTrue(send.property("enabled"), "other keys can be set once there are keys you press")
         QMetaObject.invokeMethod(send, "clicked")
         settle()
         self.assertEqual((b.remoteKeys.capturing, press_.property("enabled")), ("sent", False))

@@ -10,6 +10,7 @@
 #include "vrpanel.h"
 #include "centreglow.h"
 #include "overlaytex.h"
+#include "tilecurve.h"
 #include "tiling.h"
 
 #include <algorithm>
@@ -56,7 +57,14 @@ constexpr double kFocusBackM = 2.0;
 // around them"): the arc's radius, its centre to the wall, metres; at the wall's distance or less the
 // arc is round your head. 0, not set: kFocusBackM behind your eyes, whatever the wall's distance.
 double g_tileCurveM = 0;
-double BackFor(double wallM) { return g_tileCurveM > 0 ? std::max(0.0, g_tileCurveM - wallM) : kFocusBackM; }
+// DASH_TILE_CENTRE_CURVE_M: the centre display's column on an arc of its own radius, the arc above
+// its sides' then (tilecurve.h). 0: one arc all round.
+double g_tileCentreCurveM = 0;
+double BackFor(double wallM) {
+    const double curve = g_tileCentreCurveM > 0 ? g_tileCentreCurveM : g_tileCurveM;
+    return curve > 0 ? std::max(0.0, curve - wallM) : kFocusBackM;
+}
+double g_tileSideM = 0;                   // the sides' radius now (ApplyWall; 0: one arc)
 tiling::Eyes g_tileEyes;                  // the gaps' and the desk's width (the wall and the desk line: Wall's)
 double g_tileFit = 0;                     // DASH_TILE_FIT: 1, the tiles fitted by size with no columns (tilefit.h)
 void ApplyWall() {
@@ -68,7 +76,10 @@ void ApplyWall() {
         for (int r = 0; r < 3; ++r) g_tileGroupRel.m[r][3] += float(g_tileGroupRel.m[r][2] * moved);
     tiling::FromEyes(g_tileEyes, back, &g_tiles.params);
     g_tiles.params.fit = g_tileFit >= 0.5;
+    g_tileSideM = !(g_tileCentreCurveM > 0) ? 0 : g_tileCurveM > 0 ? g_tileCurveM : w.radius + kFocusBackM;
 }
+// The wall's sides in the layout now (tilecurve.h): what puts a tile's azimuth where it is round you.
+tilecurve::Sides TileSides() { return tilecurve::For(g_tiles.Last(), g_tiles.Centre(), g_tiles.params, g_tileSideM); }
 int g_tileFocus = -1;                     // the panel the tiling keys act on (UpdateTileFocus)
 int g_tileHold = -1;                      // ...the one a tiling key moved, until the 3D mouse is back on a panel or you look away
 int64_t g_tileHoldMs = 0;
@@ -221,6 +232,7 @@ void RetileDash() {
     FlattenTiles();
     if (!g_tileGroupSet || !Dash().Framed()) return;
     const auto &l = g_tiles.Arrange(TileInfo);
+    const tilecurve::Sides sides = TileSides();
     for (const tiling::Placed &p : l.tiles) {
         auto it = g_screens.find(p.id);
         if (g_tiles.absent.count(p.id) || it == g_screens.end() || it->second.overlay == vr::k_ulOverlayHandleInvalid) continue;
@@ -237,7 +249,7 @@ void RetileDash() {
             SetWidth(s, width);
         }
         double m[3][4];
-        tiling::Pose(p.azDeg, p.elDeg, dist, m);
+        tilecurve::Place(sides, p, dist, m);
         // (the right of the tile: what's glued to it goes left of it, steamglue.h; the tile is flat)
         for (int r = 0; r < 3; ++r) m[r][3] += m[r][0] * p.widthM * (1 - share) / 2;
         PinIn(s, kDashboard, Mul(g_tileGroupRel, ToMat(m)), levelpin::Rigid);
@@ -304,7 +316,7 @@ bool Regroup(bool atHead = false) {
 }  // namespace
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
-std::array<TileSetting, 7> TileSettings() {
+std::array<TileSetting, 8> TileSettings() {
     // (the desk and the wall while they aren't at Steam's bar, DASH_TILE_AT_BAR, which keeps to their ranges)
     static_assert(dashtiles::kDeskMinDeg == -40 && dashtiles::kDeskMaxDeg == 20 && dashtiles::kWallMinM == 0.8 &&
                   dashtiles::kWallMaxM == 6, "AtBar's ranges are DASH_TILE_DESK_DEG's and DASH_TILE_RADIUS's");
@@ -314,7 +326,8 @@ std::array<TileSetting, 7> TileSettings() {
              {"DASH_TILE_GAP_DEG", &g_tileEyes.gapDeg, 0, 10},   // between tiles, round you and up
              {"DASH_TILE_WALL_DEG", &g_tileEyes.wallDeg, 30, 300},   // the desk's width before panels stack
              {"DASH_TILE_FIT", &g_tileFit, 0, 1},   // 1: fitted by size, no columns (tilefit.h)
-             {"DASH_TILE_CURVE_M", &g_tileCurveM, 0, 12}}};   // the arc's radius (0: kFocusBackM behind your eyes)   // 1: fitted by size, no columns (tilefit.h)
+             {"DASH_TILE_CURVE_M", &g_tileCurveM, 0, 12},   // the arc's radius (0: kFocusBackM behind your eyes)
+             {"DASH_TILE_CENTRE_CURVE_M", &g_tileCentreCurveM, 0, 12}}};   // the centre display's own (0: the arc's)
 }
 // One of them live: false if it isn't one, or out of its range. The tiles go round again.
 bool SetTileSetting(const char *name, double value) {
@@ -502,7 +515,7 @@ void TileGlowTarget(int *on, bool *hot) {
         const Mat q = Mul(toGroup, p);
         const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
         double az, el;
-        tiling::Direction(pt, &az, &el);
+        tilecurve::Direction(TileSides(), pt, &az, &el);
         if (OverCentre(id, az, el)) return (void)(*on = id, *hot = true);
     }
     if (vr::VROverlay()->IsDashboardVisible()) *on = c;
@@ -529,7 +542,7 @@ void TileDrop(Screen &s, int i) {
     const Mat q = Mul(Inverse(Mul(DashFrame(), g_tileGroupRel)), p);
     const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
     double az, el;
-    tiling::Direction(pt, &az, &el);
+    tilecurve::Direction(TileSides(), pt, &az, &el);
     if (OverCentre(i, az, el)) {   // (right on the centre display: it takes its place, the two trade)
         const int was = g_tiles.Centre();
         g_tiles.TakeCentre(i);
@@ -739,6 +752,7 @@ void TileGaps(char *reply, int size) {
     if (!g_tileGroupSet) return (void)std::snprintf(reply, size, "error no tiles placed yet");
     const tiling::Layout &l = g_tiles.Last();
     const Mat toGroup = Inverse(Mul(DashFrame(), g_tileGroupRel));
+    const tilecurve::Sides sides = TileSides();
     struct Seen {
         int id, col, row;
         double az0, az1, el0, el1, curve;
@@ -756,7 +770,7 @@ void TileGaps(char *reply, int size) {
                     const Mat at = Mul(toGroup, Mul(at0, OnSurface(e, e.metres * (i / 16.0 - 0.5), e.heightMetres() * (j / 2.0 - 0.5), 0)));
                     const double pt[3] = {at.m[0][3], at.m[1][3], at.m[2][3]};
                     double az, el;
-                    tiling::Direction(pt, &az, &el);
+                    tilecurve::Direction(sides, pt, &az, &el);
                     az = tiling::WrapNear(az, p.azDeg);
                     v.az0 = std::min(v.az0, az), v.az1 = std::max(v.az1, az), v.el0 = std::min(v.el0, el), v.el1 = std::max(v.el1, el);
                 }

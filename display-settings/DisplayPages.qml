@@ -1270,7 +1270,7 @@ Item {
                     }
                     Ft.Hint { visible: backend.dashTiles.atBar; text: "Set by Steam's bar. Turn off At Steam's bar to change it." }
                     RowLayout {
-                        Kirigami.FormData.label: "Curve:"
+                        Kirigami.FormData.label: centreCurveOwn.checked ? "Curve at the sides:" : "Curve:"
                         // the arc's radius, its centre to the wall (DASH_TILE_CURVE_M; not set: 2 m past the
                         // wall's distance). At the distance or less it's round your head. (At Steam's bar
                         // the wall is about 1.4 m away, 0.3 m past the bar; its real distance is ft-screens'.)
@@ -1283,10 +1283,41 @@ Item {
                             onMoved: backend.dashTiles.setCurveRadius(value)
                         }
                         Controls.Label {
-                            text: tileCurve.value <= parent.wallM + 0.05
+                            text: tileCurve.value <= parent.wallM + 0.05 && !centreCurveOwn.checked
                                   ? "Round you: every panel faces you"
-                                  : tileCurve.value.toFixed(1) + " m radius (smaller curves tighter)"
+                                  : tileCurve.value.toFixed(1) + " m radius (smaller "
+                                    + (centreCurveOwn.checked ? "turns them to you more)" : "curves tighter)")
                         }
+                    }
+                    RowLayout {
+                        // the centre display's column on an arc of its own (DASH_TILE_CENTRE_CURVE_M; off: 0,
+                        // Curve's all round). Turned on, it starts where Curve is.
+                        Kirigami.FormData.label: "Center curve:"
+                        property real wallM: backend.dashTiles.atBar ? 1.4 : backend.dashTiles.radius
+                        Controls.Switch {
+                            id: centreCurveOwn
+                            text: "Its own"
+                            checked: backend.dashTiles.centreCurveRadius > 0
+                            onToggled: backend.dashTiles.setCentreCurveRadius(checked ? tileCurve.value : 0)
+                        }
+                        Controls.Slider {
+                            id: centreCurve
+                            from: 0.8; to: 12; stepSize: 0.1
+                            visible: centreCurveOwn.checked
+                            value: backend.dashTiles.centreCurveRadius > 0 ? backend.dashTiles.centreCurveRadius : tileCurve.value
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                            onMoved: backend.dashTiles.setCentreCurveRadius(value)
+                        }
+                        Controls.Label {
+                            text: centreCurve.value <= parent.wallM + 0.05 ? "Round you"
+                                  : centreCurve.value.toFixed(1) + " m radius (bigger is flatter)"
+                            visible: centreCurveOwn.checked
+                        }
+                    }
+                    Ft.Hint {
+                        text: centreCurveOwn.checked
+                              ? "For the center display and the panels over and under it. The panels beside it use Curve at the sides."
+                              : "Off: one smooth curve all round. On: the center display, and the panels over and under it, get their own."
                     }
                 }
 

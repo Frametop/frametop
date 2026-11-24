@@ -35,6 +35,8 @@ INSTALLED_AS = {"hands/rec/ft-handrec.desktop": "frametop-handrec.desktop",
                 "gaze/bench/ft-gazebench.desktop": "frametop-gazebench.desktop"}
 # Entries that stay in Steam's list: the Frametop menu itself and the launcher's Desktop.
 STAY = {"menu/ft-menu.desktop", "session/deckard-nested-desktop.desktop"}
+# Entries no Frametop installer puts on the Frame: the Frametop Installer's own ships in its Flatpak.
+NOT_INSTALLED = {"installer/flatpak/io.github.frametop.Installer.desktop"}
 
 
 def keys(path):
@@ -56,7 +58,8 @@ class Templates(unittest.TestCase):
         found = {str(p.relative_to(REPO)) for p in REPO.glob("**/*.desktop")
                  if not {".worktrees", "build", "node_modules"} & set(p.relative_to(REPO).parts)
                  and "test" not in p.relative_to(REPO).parts}
-        self.assertEqual(found - STAY - set(TEMPLATES), set(), "a new menu entry: give it a submenu here")
+        self.assertEqual(found - STAY - NOT_INSTALLED - set(TEMPLATES), set(),
+                         "a new menu entry: give it a submenu here")
         self.assertEqual(set(TEMPLATES) - found, set())
 
     def test_they_leave_steams_list_only(self):

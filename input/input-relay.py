@@ -362,6 +362,7 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
     KEY_LIST_RUNNABLE,
+    MODIFIERS,
     QUICK_SETTINGS_ACTIONS,
     TILE_ACTIONS,
     TILE_FOCUS_ACTIONS,
@@ -413,8 +414,6 @@ ACTIONS = ("left", "right", "middle", "back", "scroll_up", "scroll_down", "dashb
 VOICE = "\0frametop_voice"
 VOICE_UNIT = os.path.expanduser("~/.config/systemd/user/frametop-voice.service")
 KEY_F24 = 194  # sent to the desktop with a Meta combination (see the top)
-# Key combinations ("key_bindings"): modifiers, each side's code folded into the left one's.
-MODIFIERS = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
 KEY_LEFTSHIFT = 42
 KEY_RIGHTALT = 100  # AltGr: the third level of most layouts
 
@@ -1951,15 +1950,7 @@ class Relay:
             log(f"key combination {pc[0]}: the PC's (its desktop has the keys)")
             return  # the PC's own tap (Windows' Start menu on Meta), with no F24 in between
         if pc:
-            # Another combination for the PC. The modifier is still down there: an F24 before it
-            # comes up for the keys, and one after it goes down again, so neither is a tap there.
-            self.to_screens(KEY_F24, 1)
-            self.to_screens(KEY_F24, 0)
-            self.tap_keys(keys_codes(pc[1]), now)
-            self.to_screens(KEY_F24, 1)
-            self.to_screens(KEY_F24, 0)
-            log(f"key combination {pc[0]}: the PC's, as {pc[1]}")
-            return
+            combo, action = pc  # another combination for the PC, tapped as a keys: action is
         if action is None or action == "dictate_hold":
             return  # nothing, or hold to talk (key_binding), which started on the press
         # The desktop gets a key in between before the release goes there, so the tap isn't one
@@ -1969,6 +1960,11 @@ class Relay:
         if self.lease.current or not needs_pointer(action):
             self.do_action(action, 1, now, "keyboard")
             self.do_action(action, 0, now, "keyboard")
+        if pc:
+            # The PC's keys lifted the modifier there and put it down again: a key in between
+            # once more, so that second press isn't a tap there either.
+            self.to_screens(KEY_F24, 1)
+            self.to_screens(KEY_F24, 0)
         log(f"key combination {combo}: {action}")
 
     def to_screens(self, code, value, button=False):

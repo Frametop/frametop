@@ -19,12 +19,10 @@ file means. Standard library only, and nothing here reads a file.
 """
 from types import MappingProxyType
 
-from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS, TILE_ACTIONS
+from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS, MODIFIERS, TILE_ACTIONS
 
 RULES_KEY = "remote_key_bindings"
 META = 125
-# Modifiers, each side's code folded into the left one's, as the relay and Input Settings fold them.
-MODIFIERS = MappingProxyType({29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125})
 KEY_MAX = 256  # BTN_MISC: keys are below it
 
 # What a rules file without the table gets: Frametop's default Meta combinations go to the

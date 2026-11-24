@@ -106,14 +106,8 @@ class RemoteKeys(QObject):
 
     @Property(str, notify=draftChanged)
     def sentLabel(self):
-        """What the computer gets for the new entry, in words ("" until there is a pressed side)."""
-        if not self._pressed:
-            return ""
-        return self._name(self._sent) if self._sent else "The same keys"
-
-    @Property(bool, notify=draftChanged)
-    def sendsOther(self):
-        return bool(self._sent)
+        """The other keys the computer gets for the new entry, in words ("": the same keys)."""
+        return self._name(self._sent) if self._sent else ""
 
     @Property(str, notify=draftChanged)
     def problem(self):

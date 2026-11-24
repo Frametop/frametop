@@ -92,7 +92,7 @@ Kirigami.ScrollablePage {
                 onClicked: page.keys.capturing === "sent" ? page.keys.cancelCapture() : page.keys.capture("sent")
             }
             Controls.ToolButton {
-                visible: page.keys.sendsOther
+                visible: page.keys.sentLabel !== ""
                 icon.name: "edit-clear"
                 display: Controls.AbstractButton.IconOnly
                 text: "The same keys"

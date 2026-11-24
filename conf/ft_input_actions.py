@@ -20,6 +20,10 @@ GAZE_ACTIONS = ("gaze_toggle", "gaze_precision", "gaze_drag", "gaze_left", "gaze
 # Frametop Voice's dictation actions.
 VOICE_ACTIONS = ("dictate", "dictate_hold")
 
+# Key combinations ("key_bindings", "remote_key_bindings"): modifiers, each side's evdev code
+# folded into the left one's.
+MODIFIERS = MappingProxyType({29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125})
+
 # Key combinations a rules file without "key_bindings" gets: a Meta tap opens Steam's menu, Meta+J
 # and Meta+K click at the gaze (free on the Frametop desktop, and apps don't use Meta),
 # Meta+Shift+F floats a window, and Meta+Alt+Tab and Meta+Alt+Shift+Tab spin the panels around

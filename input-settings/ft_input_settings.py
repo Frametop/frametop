@@ -82,7 +82,7 @@ import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
 # GAZE_ACTIONS: gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md).
 # DEFAULT_KEY_BINDINGS: what a rules file without "key_bindings" gets, as the relay reads it.
-from ft_input_actions import ACTION_LABELS, DEFAULT_KEY_BINDINGS, GAZE_ACTIONS  # noqa: E402  (the rules file's vocabulary)
+from ft_input_actions import ACTION_LABELS, DEFAULT_KEY_BINDINGS, GAZE_ACTIONS, MODIFIERS  # noqa: E402  (the rules file's vocabulary)
 # This folder's own modules (pack/pyside-runtime.py loads this file by its path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import input_rules  # noqa: E402  (the rules file and frametop.conf)
@@ -366,7 +366,7 @@ GAZE_SETTINGS = [
 GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, release to click",
               "direct": "Click right away where the pointer is"}
 # Key combinations ("key_bindings" in the rules): modifiers, either side folded into the left code.
-MODIFIER_CODES = {29: 29, 97: 29, 42: 42, 54: 42, 56: 56, 100: 56, 125: 125, 126: 125}
+MODIFIER_CODES = MODIFIERS
 MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
 # A tap of a right-hand modifier is bound by its own code: that key alone (the relay's modifier_tap).
 RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}

@@ -119,10 +119,10 @@ class Backend(unittest.TestCase):
         self.assertEqual((self.keys.capturing, self.sent[-1]), ("pressed", "watch 60"))
         self.press(META, SHIFT, SPACE)
         self.assertEqual((self.keys.capturing, self.keys.pressed, self.keys.pressedLabel, self.keys.sentLabel),
-                         ("", "42+125+57", "Shift+Meta+Space", "The same keys"))
+                         ("", "42+125+57", "Shift+Meta+Space", ""))
         self.keys.capture("sent")
         self.press(META, SPACE)
-        self.assertEqual((self.keys.sentLabel, self.keys.sendsOther, self.keys.problem), ("Meta+Space", True, ""))
+        self.assertEqual((self.keys.sentLabel, self.keys.problem), ("Meta+Space", ""))
         self.keys.add()
         self.assertEqual(self.rules()["remote_key_bindings"]["42+125+57"], "125+57")
         self.assertEqual(self.rules()["remote_key_bindings"]["125+57"], "125+57", "the defaults are kept")
@@ -148,12 +148,12 @@ class Backend(unittest.TestCase):
         self.press(META, SPACE)
         self.keys.capture("sent")
         self.press(CTRL, SPACE)
-        self.assertTrue(self.keys.sendsOther)
+        self.assertEqual(self.keys.sentLabel, "Ctrl+Space")
         self.keys.sendSame()
-        self.assertEqual((self.keys.sendsOther, self.keys.sentLabel), (False, "The same keys"))
+        self.assertEqual(self.keys.sentLabel, "")
         self.keys.capture("sent")
         self.press(META, SPACE)
-        self.assertFalse(self.keys.sendsOther, "the pressed keys captured as the sent ones are the same keys")
+        self.assertEqual(self.keys.sentLabel, "", "the pressed keys captured as the sent ones are the same keys")
 
     def test_release_keys_and_volume_keys_are_refused(self):
         before = self.rules()

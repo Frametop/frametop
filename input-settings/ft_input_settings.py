@@ -1818,7 +1818,7 @@ class Backend(QObject):
             rules["key_bindings"] = {c: action if a in VOICE_ACTIONS else a for c, a in bound.items()}
         result = self._edit_rules(change)
         if result is input_rules.UNCHANGED:
-            self.message.emit("Dictation has no keys: add one on the Keyboard page", True)
+            self.message.emit("Dictation has no keys: add one on the Keyboard & shortcuts page", True)
             return
         if result is NOT_SAVED:
             return

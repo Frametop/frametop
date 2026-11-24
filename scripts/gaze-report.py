@@ -12,7 +12,7 @@ It prints:
     ft-gaze knows, and its log, with repeated lines folded
   - our eye tracker: its shared files, its calibration, and ft-eyes' own status
   - the gaze service's status, the pointer helper's gaze mode, and a live check: unless
-    --no-wake, an idle gaze service is woken for about 20 s (as the Gaze page of Frametop
+    --no-wake, an idle gaze service is woken for about 20 s (as the Eye tracking page of Frametop
     Input Settings does), to see whether ft-gaze starts and samples come in
   - the last checks and calibrations, with why dots weren't taken
   - the gaze settings and the buttons and keys mapped to gaze actions
@@ -391,7 +391,7 @@ def check_own(repo, tracker, setting, installed):
         return
     if tracker == "own" and not installed:
         find("Eye tracker is Own tracker (GAZE_TRACKER=own), but ours isn't installed: run gaze/tracker/install.sh "
-             "(asks for sudo), or pick SteamVR on the Gaze page")
+             "(asks for sudo), or pick SteamVR on the Eye tracking page")
     eg = run("systemctl", "is-active", "frametop-eyegrab")[1]
     if tracker == "own" and installed and eg != "active":
         find(f"Our tracker's frame grabber (frametop-eyegrab) is {eg}: run gaze/tracker/install.sh again")
@@ -478,15 +478,15 @@ def check_service(props, wake):
     show_status(st)
     checks = st.get("checks") or {}
     if checks.get("problem"):
-        find(f"The Gaze page says: {checks['problem']}")
+        find(f"The Eye tracking page says: {checks['problem']}")
     elif checks.get("calibrated") is False:
-        find("The eye tracker in use has no calibration: Calibrate on the Gaze page of Frametop Settings")
+        find("The eye tracker in use has no calibration: Calibrate on the Eye tracking page of Frametop Settings")
     if checks.get("panel") is False:
         find("The calibration panel (ft-gazepanel) isn't running, so no check or calibration can show: "
              "see the log below (gaze/build.sh builds it)")
     if st.get("tracker") == "steam" and st.get("kind") == "source":
         find("SteamVR's tracker is used without a per-eye calibration (an old one, or none): Calibrate on the "
-             "Gaze page")
+             "Eye tracking page")
     if st.get("tracker_setting") == "auto" and st.get("tracker") == "steam" and not st.get("own_installed"):
         say("note: GAZE_TRACKER=auto uses SteamVR's tracker, since ours isn't installed")
     n = st.get("samples") or 0
@@ -495,7 +495,7 @@ def check_service(props, wake):
             share = (st.get(f"lost_{side}") or 0) / n
             if share > LOST_SHARE:
                 find(f"The tracker lost your {side} eye in {share:.0%} of {n} samples since the gaze service "
-                     "started: Check headset fit on the Gaze page (or glasses, or the headset's position)")
+                     "started: Check headset fit on the Eye tracking page (or glasses, or the headset's position)")
 
     if not wake:
         return worn, st

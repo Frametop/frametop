@@ -165,7 +165,7 @@ class RulesFile(unittest.TestCase):
         self.path.write_text('{"key_bindings": {"125": "screens_toggle"}}')
         self.b.setDictationKeyMode("dictate_hold")
         self.assertEqual(self.path.read_text(), '{"key_bindings": {"125": "screens_toggle"}}')
-        self.assertEqual(self.said, [("Dictation has no keys: add one on the Keyboard page", True)])
+        self.assertEqual(self.said, [("Dictation has no keys: add one on the Keyboard & shortcuts page", True)])
         self.assertEqual(self.sent, [])
 
 

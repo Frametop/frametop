@@ -40,7 +40,7 @@ class DesktopCursor(unittest.TestCase):
             self.assertEqual(kwin_env("DESKTOP_CURSOR=" + value), "unset", value)
 
     def test_the_cursor_is_set_before_kwin_starts(self):
-        self.assertLess(SCRIPT.index(SWITCH), SCRIPT.index("startplasma-wayland"))
+        self.assertLess(SCRIPT.index(SWITCH), SCRIPT.index("\ndbus-run-session startplasma-wayland"))
 
 
 if __name__ == "__main__":

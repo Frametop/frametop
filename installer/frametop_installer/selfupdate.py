@@ -3,9 +3,10 @@ this one.
 
 The installer ships as a Flatpak bundle on each release (FrametopInstaller.flatpak). A bundle
 has no repository behind it, so neither flatpak update nor Discover ever finds a newer one. So
-the installer looks itself: it follows the channel it came from (an experimental release's
-follows the newest release of any kind, a stable release's follows GitHub's latest), and a
-release whose version is newer than its own (VERSION, written by flatpak/build.sh) is an update.
+the installer looks itself. One that came from an experimental release, or that finds an
+experimental Frametop installed, follows the newest release of any kind; any other follows
+GitHub's latest, the stable releases. That release is an update when its version is newer than
+the installer's own (VERSION, written by flatpak/build.sh).
 
 Updating downloads that release's bundle into ~/.cache/frametop-installer/update, checks it
 against the release's SHA256SUMS, and has the host's flatpak install it where this one is
@@ -24,7 +25,6 @@ from pathlib import Path
 
 from . import host, releases
 
-APP_ID = "io.github.frametop.Installer"
 BUNDLE = "FrametopInstaller.flatpak"
 SUMS = "SHA256SUMS"
 DOWNLOADS = f"https://github.com/{releases.SLUG}/releases/download/"
@@ -70,23 +70,21 @@ def installation(info="/.flatpak-info", home=host.HOME):
     return "system"
 
 
-def check(own, get=releases.fetch):
-    """The Update newer than version own, or None. Raises OSError or ValueError when GitHub
-    can't be read."""
+def check(own, get=releases.fetch, experimental=False):
+    """The Update newer than version own, or None. experimental: the Frametop installed here is
+    an experimental one, so the installer follows those releases whatever its own version.
+    Raises OSError or ValueError when GitHub can't be read."""
     if releases.version_key(own) is None:
         return None     # a local build: nothing to compare with
-    channel = "experimental" if "-" in own else "stable"
-    rel = releases.pick(channel, get, having=BUNDLE)
-    if not rel:
-        return None
+    channel = "experimental" if experimental or "-" in own else "stable"
+    rel = releases.pick(channel, get, having=BUNDLE) or {}
     tag = str(rel.get("tag_name", ""))
     version = tag[1:] if tag.startswith("v") else ""
-    if not releases.newer(version, own):
-        return None
-    urls = [(releases.asset(rel, name) or {}).get("browser_download_url") for name in (BUNDLE, SUMS)]
-    if not all(isinstance(u, str) and u.startswith(DOWNLOADS) for u in urls):
-        return None     # no checksums to check it against, or files from somewhere else
-    return Update(version, urls[0], urls[1])
+    if not releases.newer(version, own) or not releases.asset(rel, SUMS):
+        return None     # nothing newer, or no checksums to check it against
+    # The files' addresses come from the tag, which newer() found to be a plain version: not
+    # from the addresses GitHub's answer gives, so they can only be this release's own files.
+    return Update(version, f"{DOWNLOADS}{tag}/{BUNDLE}", f"{DOWNLOADS}{tag}/{SUMS}")
 
 
 def fetch_file(url, limit, timeout=60):
@@ -119,6 +117,7 @@ def download(update, folder=None, get=fetch_file):
         raise UpdateError(f"couldn't download it ({e})") from e
     if hashlib.sha256(data).hexdigest() != want:
         raise UpdateError("the download doesn't match its checksum")
+    tmp = None
     try:
         folder.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=folder, prefix=f".{BUNDLE}.")
@@ -126,6 +125,8 @@ def download(update, folder=None, get=fetch_file):
             f.write(data)
         os.replace(tmp, folder / BUNDLE)
     except OSError as e:
+        if tmp:
+            Path(tmp).unlink(missing_ok=True)
         raise UpdateError(f"couldn't save it in {folder} ({e})") from e
     return folder / BUNDLE
 
@@ -144,13 +145,13 @@ def install(path, where, run=host.run):
         raise UpdateError(said[-1] if said else f"flatpak install failed ({code})")
 
 
-def reopen(argv=(), popen=subprocess.Popen):
+def reopen(popen=subprocess.Popen):
     """Start the version installed now, a moment from now: by then this window has quit and
     given up the app's name, which a second window would otherwise hand its start to. Returns
     False when it couldn't."""
     try:
-        popen(["flatpak-spawn", "--latest-version", "sh", "-c", 'sleep 1; exec frametop-installer "$@"',
-               "sh", *argv], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        popen(["flatpak-spawn", "--latest-version", "sh", "-c", "sleep 1; exec frametop-installer"],
+              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
               start_new_session=True)
         return True
     except OSError:

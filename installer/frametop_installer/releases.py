@@ -8,8 +8,9 @@ The SteamOS check follows install-release.sh's check_release: Frametop's newest 
 (pack/steamos.json on main) when it can be fetched, else the release's own. install-release.sh
 still checks again when it installs, and stays the one that refuses a broken build.
 
-It also puts release versions in order (newer), for "a newer Frametop is out" and for the
-installer's own update (selfupdate.py), which picks its release here too.
+It also says when a channel's newest release is newer than a version (newer), for the version
+page's line about the installed Frametop (installed_note) and for the installer's own update
+(selfupdate.py), which picks its release here too.
 """
 import json
 import re
@@ -26,7 +27,7 @@ TABLE_URL = f"{RAW}/main/pack/steamos.json"
 UA = "frametop-installer"
 VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}")
 COMMIT = re.compile(r"[0-9a-f]{7,40}")
-_RELEASED = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-exp\.(\d+))?")
+_RELEASED = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:-exp\.([0-9]+))?")
 
 
 def fetch(url, timeout=20):
@@ -48,18 +49,28 @@ def memo(get=fetch):
 
 
 def version_key(version):
-    """Where a release's version stands among releases, or None for a version no release has (a
-    local build's): 0.3.0-exp.2 < 0.3.0-exp.10 < 0.3.0 < 0.3.1-exp.1."""
+    """((major, minor, patch), the experimental build's number or None) of a release's version,
+    or None for a version no release has (a local build's)."""
     m = _RELEASED.fullmatch(str(version))
     if not m:
         return None
-    return int(m[1]), int(m[2]), int(m[3]), m[4] is None, int(m[4] or 0)
+    return (int(m[1]), int(m[2]), int(m[3])), (int(m[4]) if m[4] else None)
 
 
-def newer(a, b):
-    """Is release version a newer than b? No when either isn't a release's version."""
-    ka, kb = version_key(a), version_key(b)
-    return ka is not None and kb is not None and ka > kb
+def newer(newest, have):
+    """Is newest, the newest release of a channel, newer than version have? Yes, unless they're
+    the same, either isn't a release's version, or the numbers say newest is the older one: a
+    lower X.Y.Z, or the same X.Y.Z and a lower experimental build. An experimental build and
+    the stable release of the same X.Y.Z can't be told apart by number (0.3.0-exp.23 came before
+    0.3.0, 0.3.0-exp.24 after it), so there the channel's newest is taken as the newer."""
+    a, b = version_key(newest), version_key(have)
+    if a is None or b is None or a == b:
+        return False
+    if a[0] != b[0]:
+        return a[0] > b[0]
+    if a[1] is not None and b[1] is not None:
+        return a[1] > b[1]
+    return True
 
 
 def fetch_json(url, get=fetch):
@@ -189,6 +200,21 @@ def newest_table(get=fetch):
         return table if isinstance(table, dict) else None
     except Exception:  # offline, cut short (http.client.IncompleteRead), or not JSON: no table
         return None
+
+
+def installed_note(version, channel, found):
+    """(the version page's title, its line about the installed Frametop, is it news) for the
+    Frametop installed now, against the newest release of its channel in found (lookup_both's)."""
+    newest = found.get(channel)
+    name = f"Frametop {version}" + (f" ({channel})" if channel else "")
+    if isinstance(newest, Release) and newer(newest.version, version):
+        return ("Update Frametop", f"Frametop {newest.version} is out. You have {version}. Updating replaces "
+                                   "it and keeps your settings.", True)
+    if isinstance(newest, Release) and newest.version == version:
+        return ("Install Frametop", f"You have {name}, the newest {channel} release. Installing it again, or "
+                                    "the other version, keeps your settings.", False)
+    return ("Install Frametop", f"Installed now: {name}. Installing replaces it with the version you pick, "
+                                "and keeps your settings.", False)
 
 
 def lookup_both(build, get=fetch):

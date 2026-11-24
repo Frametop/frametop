@@ -27,7 +27,7 @@ from . import host, job, options, releases  # noqa: E402
 from .askpass import Helper  # noqa: E402
 from .password_pages import PasswordPages  # noqa: E402
 from .progress_page import ProgressPage  # noqa: E402
-from .update_page import UpdatePage, installed_note  # noqa: E402
+from .update_page import UpdatePage  # noqa: E402
 from .widgets import boxed_list, button, check_row, in_thread, label, vbox  # noqa: E402
 
 APP_ID = "io.github.frametop.Installer"
@@ -49,8 +49,7 @@ class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
         self.helper = None
         self.keypads = []
         self.busy = False
-        self.update_declined = False    # Not now, on the offer of a newer installer
-        self.get = releases.memo()      # GitHub's answers, asked once per look
+        self.get = releases.memo()      # GitHub's answers, each asked for once per look
         self.osr = releases.os_release()
 
         header = Gtk.HeaderBar()
@@ -58,7 +57,7 @@ class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vhomogeneous=False)
         outer = vbox(spacing=0)
         if dry_run:
-            banner = label("Test run: nothing is downloaded or installed, and your password isn't checked.",
+            banner = label("Test run: Frametop isn't downloaded or installed, and your password isn't checked.",
                            css=("warning",), xalign=0.5, margin_top=6, margin_bottom=6)
             outer.append(banner)
         scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, child=self.stack)
@@ -130,13 +129,10 @@ class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
                                      "Frametop installs on a Steam Frame (SteamOS, VR variant).")
         self.page("loading", Gtk.Spinner(spinning=True, height_request=48),
                   label("Looking up the newest Frametop releases on GitHub...", css=("title-3",), xalign=0.5))
-        build, get = self.osr.get("BUILD_ID", ""), self.get
+        # This look shares the answers the look for a newer installer got; the next asks afresh.
+        build, get, self.get = self.osr.get("BUILD_ID", ""), self.get, releases.memo()
         in_thread(lambda: (releases.lookup_both(build, get), host.installed()), self.versions_found,
                   self.went_wrong)
-
-    def look_again(self):
-        self.get = releases.memo()
-        self.show_versions()
 
     def versions_found(self, found):
         self.releases, (inst_version, inst_channel) = found
@@ -169,14 +165,14 @@ class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
         prefer = "experimental" if inst_channel == "experimental" else "stable"
         if usable:
             self.choice[prefer if prefer in usable else usable[0]].set_active(True)
-        title, note, news = installed_note(inst_version, inst_channel, self.releases)
+        title, note, news = releases.installed_note(inst_version, inst_channel, self.releases)
         widgets = [label(title, css=("title-1",)), intro, lb]
         if inst_version:
             widgets.insert(1 if news else 3, label(note, css=("heading",) if news else ("dim-label",)))
         if not usable:
             widgets.append(label("Neither version can be installed right now. Check the headset's "
                                  "internet connection, then try again.", css=("error",)))
-            buttons = [button("Try again", self.look_again, css=("suggested-action",))]
+            buttons = [button("Try again", self.show_versions, css=("suggested-action",))]
         else:
             buttons = [button("Next", self.version_picked, css=("suggested-action",))]
         self.page("version", *widgets, buttons=buttons)

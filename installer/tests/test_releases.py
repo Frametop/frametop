@@ -120,15 +120,48 @@ class Pick(unittest.TestCase):
 
 
 class Order(unittest.TestCase):
-    def test_releases_in_order(self):
-        line = ["0.2.2", "0.3.0-exp.2", "0.3.0-exp.10", "0.3.0-exp.26", "0.3.0", "0.3.1-exp.1", "0.3.1", "0.10.0"]
-        for older, newer in zip(line, line[1:]):
-            self.assertTrue(releases.newer(newer, older), (newer, older))
-            self.assertFalse(releases.newer(older, newer), (older, newer))
-        self.assertFalse(releases.newer("0.3.0", "0.3.0"))
+    def test_a_channel_s_newest_is_newer_unless_the_numbers_say_its_older(self):
+        for line in (["0.3.0-exp.2", "0.3.0-exp.10", "0.3.0-exp.26", "0.3.1-exp.27", "0.4.0-exp.1"],   # builds
+                     ["0.2.2", "0.3.0", "0.3.1", "0.10.0"],                                            # stable
+                     ["0.2.2", "0.3.0-exp.26", "0.3.1", "0.4.0-exp.1", "0.10.0"]):                     # both
+            for older, newer in zip(line, line[1:]):
+                self.assertTrue(releases.newer(newer, older), (newer, older))
+                self.assertFalse(releases.newer(older, newer), (older, newer))
+        for same in ("0.3.0", "0.3.0-exp.26"):
+            self.assertFalse(releases.newer(same, same))
+
+    def test_a_build_and_the_stable_release_of_its_number_go_by_which_is_newest(self):
+        # The tags as they are: v0.3.0-exp.23 (1 Nov), v0.3.0 (4 Nov), v0.3.0-exp.24 (15 Nov). The
+        # number doesn't say which side of 0.3.0 a build is on, so the channel's newest is newer.
+        self.assertTrue(releases.newer("0.3.0", "0.3.0-exp.23"))
+        self.assertTrue(releases.newer("0.3.0-exp.24", "0.3.0"))
+
+    def test_the_line_about_the_installed_frametop(self):
+        def release(channel, version):
+            return releases.Release(channel, version, f"v{version}", "abc1234", 1, "tested", "")
+        found = {"stable": release("stable", "0.3.0"), "experimental": release("experimental", "0.3.0-exp.27")}
+        title, note, news = releases.installed_note("0.3.0-exp.26", "experimental", found)
+        self.assertEqual((title, news), ("Update Frametop", True))
+        self.assertIn("Frametop 0.3.0-exp.27 is out. You have 0.3.0-exp.26.", note)
+        # 0.3.0 taken from the experimental channel, before the builds that followed it
+        self.assertTrue(releases.installed_note("0.3.0", "experimental", found)[2])
+        title, note, news = releases.installed_note("0.3.0-exp.27", "experimental", found)
+        self.assertEqual((title, news), ("Install Frametop", False))
+        self.assertIn("the newest experimental release", note)
+        # stable's newest isn't news to a stable install that has it, a pulled release's install
+        # isn't told the one before it "is out", and nothing is news to a local build
+        self.assertFalse(releases.installed_note("0.3.0", "stable", found)[2])
+        self.assertFalse(releases.installed_note("0.3.0-exp.28", "experimental", found)[2])
+        title, note, news = releases.installed_note("0.3.0-local.077e678", "experimental", found)
+        self.assertEqual((title, news), ("Install Frametop", False))
+        self.assertIn("Installed now: Frametop 0.3.0-local.077e678 (experimental)", note)
+        self.assertEqual(releases.installed_note("", "", found)[::2], ("Install Frametop", False))
+        found["experimental"] = LookupError("couldn't reach GitHub")
+        self.assertFalse(releases.installed_note("0.3.0-exp.26", "experimental", found)[2])
 
     def test_a_version_no_release_has_is_never_newer_or_older(self):
-        for odd in ("", "dev", "0.3.0-local.077e678", "v0.3.0", "0.3.0-exp.26-3-g37558dea", "0.3", "0.3.0-rc1"):
+        for odd in ("", "dev", "0.3.0-local.077e678", "v0.3.0", "0.3.0-exp.26-3-g37558dea", "0.3", "0.3.0-rc1",
+                    "\u0660.\u0664.\u0660", "0.3.0-exp."):
             self.assertFalse(releases.newer(odd, "0.1.0"), odd)
             self.assertFalse(releases.newer("9.9.9", odd), odd)
 

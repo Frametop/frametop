@@ -1,42 +1,26 @@
-"""What the window says about updates. When it opens it looks for a newer Frametop Installer,
-offers it, installs it and opens the new one (selfupdate.py does the work). And the version page
-says when a newer Frametop than the installed one is out (installed_note)."""
+"""The installer's own update: when the window opens it looks for a newer Frametop Installer,
+offers it, installs it and opens the new one (selfupdate.py does the work)."""
 import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
-from . import releases, selfupdate  # noqa: E402
+from . import host, selfupdate  # noqa: E402
 from .widgets import button, in_thread, label  # noqa: E402
 
 
-def installed_note(version, channel, found):
-    """(the version page's title, its line about the installed Frametop, is it news) for the
-    Frametop installed now, against the newest release of its channel."""
-    newest = found.get(channel)
-    name = f"Frametop {version}" + (f" ({channel})" if channel else "")
-    if isinstance(newest, releases.Release) and releases.newer(newest.version, version):
-        return ("Update Frametop", f"Frametop {newest.version} is out. You have {version}. Updating replaces "
-                                   "it and keeps your settings.", True)
-    if isinstance(newest, releases.Release) and newest.version == version:
-        return ("Install Frametop", f"You have {name}, the newest {channel} release. Installing it again, or "
-                                    "the other version, keeps your settings.", False)
-    return ("Install Frametop", f"Installed now: {name}. Installing replaces it with the version you pick, "
-                                "and keeps your settings.", False)
-
-
 class UpdatePage:
-    """Mixed into the Window: uses its page(), get, dry_run, busy and its application."""
+    """Mixed into the Window: uses its page(), get, dry_run, busy, close() and its application."""
 
     def look_for_installer_update(self, then):
         """Go on with then(), after offering a newer installer if there is one. Nothing stops
         then(): no newer one, a local build, GitHub out of reach, or Not now."""
         own = selfupdate.own_version()
-        if self.update_declined or not own:
+        if not own:
             return then()
         self.page("loading", Gtk.Spinner(spinning=True, height_request=48),
                   label("Looking for a newer Frametop Installer...", css=("title-3",), xalign=0.5))
-        in_thread(lambda: selfupdate.check(own, self.get),
+        in_thread(lambda: selfupdate.check(own, self.get, host.installed()[1] == "experimental"),
                   lambda update: self.show_installer_update(update, own, then) if update else then(),
                   lambda error: then())
 
@@ -55,12 +39,8 @@ class UpdatePage:
             widgets.append(label(f"The update didn't install: {error}. You can go on with this version, or "
                                  "download FrametopInstaller.flatpak from Frametop's releases page and open "
                                  "it.", css=("error",)))
-
-        def not_now():
-            self.update_declined = True
-            then()
         self.page("update", *widgets,
-                  buttons=[button("Not now", not_now),
+                  buttons=[button("Not now", then),
                            button("Try again" if error else "Update", lambda: self.update_installer(update, own, then),
                                   css=("suggested-action",))])
 
@@ -81,7 +61,6 @@ class UpdatePage:
         def done(_):
             self.busy = False
             if dry_run:
-                self.update_declined = True
                 return then()
             if selfupdate.reopen():
                 return self.get_application().quit()

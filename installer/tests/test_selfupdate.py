@@ -6,13 +6,14 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "installer"))
 from frametop_installer import releases, selfupdate  # noqa: E402
 
 API = releases.API
-DL = selfupdate.DOWNLOADS
+DL = "https://github.com/Frametop/frametop/releases/download/"   # the one place its files may come from
 BUNDLE = b"a flatpak bundle"
 SUM = hashlib.sha256(BUNDLE).hexdigest()
 
@@ -47,6 +48,16 @@ class Check(unittest.TestCase):
         gh = github(gh_release("v0.3.1"), [gh_release("v0.3.1"), gh_release("v0.3.0-exp.27")])
         self.assertEqual(selfupdate.check("0.3.0-exp.27", gh).version, "0.3.1")   # the stable after it
 
+    def test_a_stable_installer_follows_them_too_with_an_experimental_frametop(self):
+        # An experimental installer that took a stable release's bundle is a stable one from then
+        # on. It goes on getting the experimental releases' installers as long as the Frametop
+        # installed is experimental. (Experimental builds after a stable release keep its number,
+        # as 0.3.0-exp.24 came after 0.3.0: the newest release listed is the newer.)
+        gh = github(gh_release("v0.3.1"), [gh_release("v0.3.1-exp.28"), gh_release("v0.3.1")])
+        self.assertEqual(selfupdate.check("0.3.1", gh, experimental=True).version, "0.3.1-exp.28")
+        self.assertIsNone(selfupdate.check("0.3.1", gh))
+        self.assertIsNone(selfupdate.check("0.3.1", github(gh_release("v0.3.1"), [gh_release("v0.3.1")]), True))
+
     def test_a_stable_installer_stays_on_stable_releases(self):
         gh = github(gh_release("v0.3.1"), [gh_release("v0.4.0-exp.1"), gh_release("v0.3.1")])
         self.assertEqual(selfupdate.check("0.3.0", gh).version, "0.3.1")
@@ -70,9 +81,20 @@ class Check(unittest.TestCase):
 
     def test_a_release_it_cant_check_is_no_update(self):
         for odd in (gh_release("v0.3.0-exp.27", sums=False),                         # nothing to check it against
-                    gh_release("v0.3.0-exp.27", base="https://example.com/dl/"),     # files from somewhere else
-                    gh_release("0.3.0-exp.27"), gh_release("v../../x")):             # not a release's tag
+                    gh_release("0.3.0-exp.27"), gh_release("v../../x"),              # not a release's tag
+                    gh_release("v0.3.0-exp.27/../../../../evil/x/releases/download/v1"),
+                    gh_release("v\u0660.\u0664.\u0660")):                            # (digits, but not 0-9)
             self.assertIsNone(selfupdate.check("0.3.0-exp.26", github(gh_release("v0.3.0"), [odd])), odd["tag_name"])
+        self.assertIsNone(selfupdate.check("0.3.0-exp.26", github(gh_release("v0.3.0"), [])))   # no release has one
+        self.assertIsNone(selfupdate.check("0.3.0", github(gh_release("v0.3.1", bundle=False), [])))
+
+    def test_its_files_come_from_the_release_s_own_downloads_whatever_github_s_answer_says(self):
+        for base in ("https://example.com/dl/", "https://github.com/evil/x/releases/download/",
+                     f"{DL}v0.3.0-exp.27/../../../../evil/x/releases/download/", "http://github.com/Frametop/frametop/releases/download/"):
+            rel = gh_release("v0.3.0-exp.27", base=base)
+            update = selfupdate.check("0.3.0-exp.26", github(gh_release("v0.3.0"), [rel]))
+            self.assertEqual((update.url, update.sums_url), (f"{DL}v0.3.0-exp.27/FrametopInstaller.flatpak",
+                                                             f"{DL}v0.3.0-exp.27/SHA256SUMS"), base)
 
     def test_github_out_of_reach_raises(self):
         def get(url):
@@ -114,6 +136,43 @@ class Download(unittest.TestCase):
                      f"{SUM}  other/FrametopInstaller.flatpak\n"):
             with tempfile.TemporaryDirectory() as d, self.assertRaisesRegex(selfupdate.UpdateError, "doesn't list"):
                 selfupdate.download(self.UPDATE, d, self.get(sums))
+
+    def test_a_checksum_in_capitals_is_the_same_checksum(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = selfupdate.download(self.UPDATE, d, self.get(f"{SUM.upper()}  FrametopInstaller.flatpak\n"))
+            self.assertEqual(path.read_bytes(), BUNDLE)
+
+    def test_one_it_cant_save_says_so_and_leaves_nothing_behind(self):
+        sums = f"{SUM}  FrametopInstaller.flatpak\n"
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(selfupdate.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(selfupdate.UpdateError, "couldn't save it in .* \\(disk full\\)"):
+                selfupdate.download(self.UPDATE, d, self.get(sums))
+            self.assertEqual(list(pathlib.Path(d).iterdir()), [])
+
+    def test_a_download_far_too_big_is_given_up(self):
+        class Answer:
+            def __init__(self, data):
+                self.data, self.asked = data, []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n):
+                self.asked.append(n)
+                return self.data[:n]
+        for data, fits in ((b"x" * 10, True), (b"x" * 11, False), (b"x" * 5000, False)):
+            answer = Answer(data)
+            with mock.patch.object(selfupdate.urllib.request, "urlopen", return_value=answer) as urlopen:
+                if fits:
+                    self.assertEqual(selfupdate.fetch_file(f"{DL}v1/x", 10), data)
+                else:
+                    with self.assertRaisesRegex(selfupdate.UpdateError, "far bigger"):
+                        selfupdate.fetch_file(f"{DL}v1/x", 10)
+            self.assertEqual(answer.asked, [11])                      # never more than the limit is read
+            self.assertEqual(urlopen.call_args[0][0].full_url, f"{DL}v1/x")
 
     def test_a_download_that_fails_says_so(self):
         def get(url, limit):

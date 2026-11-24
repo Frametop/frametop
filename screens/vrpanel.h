@@ -202,7 +202,7 @@ struct Screen {
     // point on it, panel-local) carryDist from the eye, facing the head, turned by carryTurn. carryMode 1
     // (Ctrl held): it moves in carryPlane's plane; 2 (Alt held): it turns about its centre, at carryAt.
     bool toggleCarry = false;
-    bool layoutHeld = false;      // carried by its layout button: the room's panels go with it (LayoutGrabStart)
+    bool layoutHeld = false;      // Move All Windows is held from its menu: every panel goes with it (vrlayoutgrab.cpp)
     int carryMode = 0;
     double carryDist = 0, carryAt[3] = {};
     double carryEye[3] = {};      // the sphere's centre (no modifier): the eyes when the carry or this mode began
@@ -365,6 +365,10 @@ void SetTileLookFocus(bool on);   // DASH_TILE_LOOK: the tiling keys act on the 
 bool TileStays(const Screen &s, int i);   // shown with the dashboard closed
 void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (tileframe.h's AtBar), else as set
 void RetileDash();
+bool TileGroup(Mat *out);             // the tiles' group frame in the room (false: the dashboard has no place yet)
+void TileGroupTo(const Mat &world);   // ...there now, and everything on the dashboard with it
+// Moved there by hand (Move All Windows) and let go, the head at `head` (null: not moved): it stays (tilekeep.h).
+void TileGroupPut(const Mat *head);
 void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
 void TileInRoom(int i, const char *by);   // Placement's In the Room: off the tiles, its app (a window's) kept in the room
@@ -426,6 +430,22 @@ void LoadBarSides();
 void BarSideKnown(int i, const std::string &key);   // its key now: its remembered edge, if any
 void BarSideGone(int i);
 bool SetBarSide(int i, barside::Side side, const char *by);   // false: no such panel
+
+// ---------------------------------------------------------------- vrlayoutgrab.cpp's
+
+void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev);   // Move All Windows held from panel `index`
+void UpdateLayoutGrab();   // each tick: every panel it moves where the laser has them; let go, it ends
+bool LayoutCarrying();     // it's on
+bool LayoutMoves(int i);   // ...and moves that panel
+void LayoutShifted();      // the room's panels were moved under it (ShiftRoom)
+
+// ---------------------------------------------------------------- vr.cpp's, for the layout's carry
+
+void ArrangeDesktopSoon();   // KWin's outputs follow where the screens are, in a moment
+void SpinForget(int i);      // out of the lazy susan's turn, where it is
+bool HeldElsewhere(const Screen &s, int i);
+bool StepOnItsWay(Screen &s, int i, const Mat &step);
+void StepPlaces(const Mat &step);
 
 // ---------------------------------------------------------------- vrbarhold.cpp's
 
@@ -499,7 +519,6 @@ bool RollClick(const Screen &s);   // a roll pressed and let go, not turned: a c
 void TogglePinView(Screen &s, int index, const char *by);
 void PlaceInRoom(Screen &s, int index, const char *by);   // off the dashboard, the head or a wrist
 void PaintBar(Screen &s);   // its bar's texture: blue while armed to dock or its menu is open
-void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev);
 void SendFloat(const std::string &msg);   // to ft-floatd
 bool HandsFrame();   // hand input had a new hands frame this tick
 bool IndexTipIn(int side, const Mat &frame, double out[3]);   // that hand's index fingertip in `frame`'s coordinates, if it's seen

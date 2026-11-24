@@ -20,8 +20,8 @@
 //   - a pin button left of that: pins the screen to your head as it is now, so it stays fixed in
 //     view (as "pin <screen> head" does), or back in the room where it is then. Blue while pinned.
 //     A reset ends it: the layout places every screen again, as its profile has it (TogglePinView).
-//   - a layout button left of that: held by a laser, the screen is carried as by its bar and every
-//     other panel in the room goes with it, in one piece and level (LayoutGrabStart, layoutgrab.h).
+//   - Move All Windows, a row of its bar's menu: held by a laser, the panel and every other one, in
+//     the room or on the dashboard, go with the laser in one piece and level (vrlayoutgrab.cpp).
 //   The controls are translucent, like SteamVR's own, and brighten under a laser. They
 //   are invisible until a laser (a controller's, or the 3D mouse's) lands on or passes very close to
 //   one of them (UpdateControls).
@@ -149,7 +149,6 @@
 #include "gslink.h"
 #include "posemath.h"
 #include "roomshift.h"
-#include "layoutgrab.h"
 #include "../conf/ftsock.h"
 #include "vrcmd.h"
 #include "windowdrag.h"
@@ -1965,14 +1964,14 @@ void FaceAfterResize(Screen &s, int index) {
 
 // Let go: pin to the armed wrist, as the screen is now (a floating window carried onto a screen: docked there).
 void FinishDrag(Screen &s, int index) {
-    const bool moved = s.drag == Drag::Move, resized = s.drag == Drag::Resize;
+    const bool moved = s.drag == Drag::Move, resized = s.drag == Drag::Resize, all = s.layoutHeld;
     const vr::TrackedDeviceIndex_t target = s.pinTarget;
     const int dockOn = s.dockOn;
     EndDrag(s);
     if (resized && TileTiled(index)) return TileResized(s, index);
     if (resized) FaceAfterResize(s, index);
     Mat p;
-    if (!moved) return;
+    if (!moved || (all && TileAnchored(index))) return;   // (Move All Windows: a tile's back in its place, the tiles' where they went)
     // (a tile or a satellite rides on the dashboard: carried and let go there, it's a drop on the grid)
     if (TileAnchored(index) && (target == kNone || target == kDashboard) && dockOn < 0) return TileDrop(s, index);
     if (TileAnchored(index)) TileUnanchor(index, "carried onto a wrist, the head or a screen");
@@ -2069,7 +2068,7 @@ void UpdateGuides() {
     const Screen *carried = nullptr;
     Mat d, p, head;
     for (auto &[i, s] : g_screens)
-        if (s.drag == Drag::Move && DevicePose(s.dragDevice, &d) && ScreenPose(s, &p)) {
+        if (s.drag == Drag::Move && !s.layoutHeld && DevicePose(s.dragDevice, &d) && ScreenPose(s, &p)) {
             carried = &s;
             break;
         }
@@ -2362,13 +2361,14 @@ void UpdateDrag(Screen &s, int index) {
     if (!DevicePose(s.dragDevice, &d)) return;
     if (s.toggleCarry) return UpdateToggleCarry(s);
     if (s.drag == Drag::Move) {
+        if (s.layoutHeld) return;   // (UpdateLayoutGrab places it, with the others; it arms no wrist pin)
         Mat p = Mul(d, s.dragRel), head;
         if (s.dragFacing && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) {
             const double at[3] = {p.m[0][3], p.m[1][3], p.m[2][3]};
             p = FacingPose(at, head);
         }
         SetAbsolute(s, p);
-        if (!s.layoutHeld) CheckWristAim(s, d, p);   // (the layout's carry arms no wrist pin)
+        CheckWristAim(s, d, p);
         return;
     }
     if (s.drag == Drag::Roll) {
@@ -4861,7 +4861,8 @@ void UpdateDockAims() {
         Mat p, l;
         const char *app = s.remote ? ft_remote_app(i) : nullptr, *host = s.remote ? ft_remote_host(i) : nullptr;
         const bool window = app && host && !std::strncmp(app, "window:", 7);
-        if ((!s.floating && !window) || s.drag != Drag::Move || g_floatDockDistance <= 0 || !s.visible || !ScreenPose(s, &p))
+        if ((!s.floating && !window) || s.drag != Drag::Move || s.layoutHeld || g_floatDockDistance <= 0 || !s.visible ||
+            !ScreenPose(s, &p))
             continue;
         double u = 0, v = 0, held = 0;
         if (LaserPose(s.dragDevice, &l)) {
@@ -4997,9 +4998,6 @@ struct CarryFollow {
     bool lockOnly = false;        // Space held: only the carried panel (and the cursor) follow (CarrySpaceHold)
 } g_carryFollow;
 
-// A layout button's carry (LayoutGrabStart): the screen it carries and the others that go with it.
-layoutgrab::Grab<Mat> g_layoutGrab;
-
 // The border on the panel the 3D mouse carries (carry_toggle; user, 2026-11-01: "a glowing aqua border
 // with a small air gap between it and the window ... pulse an outward-expanding translucent version of
 // the border every 5 seconds"): softglow::CarryTexture, and from the pick-up on, every kCarryPulseMs,
@@ -5102,9 +5100,9 @@ bool CarryAllHas(int panel) { return g_carryFollow.on && g_carryFollow.rel.count
 
 void UpdateCarryGlow() {
     const int64_t now = NowMs();
-    // (fuchsia too on what a layout button's carry moves, its own screen as well: LayoutGrabStart)
+    // (fuchsia too on what Move All Windows moves, the panel it's held from as well: vrlayoutgrab.cpp)
     auto want = [](int i, const Screen &s, bool other) {
-        return s.visible && (other ? !s.toggleCarry && (CarryAllHas(i) || g_layoutGrab.Moves(i)) : s.toggleCarry);
+        return s.visible && (other ? !s.toggleCarry && (CarryAllHas(i) || LayoutMoves(i)) : s.toggleCarry);
     };
     // a slot on that shouldn't be any more lets go (fuchsia on the panel carried now: gone at once)
     for (CarryGlow &g : g_carryGlow) {
@@ -5832,41 +5830,6 @@ void UpdateSteamInFront() {
     std::printf("Steam %s\n", front ? "in front (the Steam menu or Steam's keyboard)" : "out of the way");
 }
 
-// ---------------------------------------------------------------- the layout's carry (Move All Screens)
-// The layout button, the outermost left of a screen's bar (user, 2026-11-14: "when you grab it, it
-// grabs your entire Frametop layout and moves it ... interactable with the laser pinch underneath a
-// display, and not just with a key binding": carry_toggle's carry-all, the 3D mouse's, was the only way
-// to move the room's panels together). Held by a laser, its screen is carried as by its bar, and every
-// other panel in the room (not pinned; shown or not) keeps its place in a level frame at that screen
-// (layoutgrab.h): the layout turns about you, rises and comes nearer with it in one piece, and nothing
-// in it tilts. The front slot's home and a stopped remote display's place are in the layout too. The
-// panels it moves wear carry-all's fuchsia border (UpdateCarryGlow). One held otherwise meanwhile stays
-// where that has it; the carried screen arms no wrist pin. It ends when the button is let go.
-bool LayoutFrame(const Screen &s, Mat *out) {
-    Mat p, head;
-    return ScreenPose(s, &p) && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) && layoutgrab::Frame(p, head, out);
-}
-
-void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
-    if (g_layoutGrab.on()) return;
-    for (const auto &[i, o] : g_screens)
-        if (o.toggleCarry) return;   // (the 3D mouse's carry has the room)
-    StartDrag(s, Drag::Move, dev);
-    Mat f;
-    if (s.drag != Drag::Move) return;
-    if (!LayoutFrame(s, &f)) return (void)std::printf("screen %d: its layout button: carried alone (it's above or below you)\n", index + 1);
-    g_layoutGrab.Begin(index, f);
-    for (auto &[i, o] : g_screens) {
-        Mat p;
-        if (i == index || o.pinned != kNone || !ScreenPose(o, &p)) continue;
-        g_layoutGrab.Take(i, p);
-        g_spin.base.erase(i);   // (turning: it goes on from where the layout leaves it)
-    }
-    s.layoutHeld = true;
-    ApplyAlpha(s);
-    std::printf("screen %d: its layout button: %zu other panel(s) go with it\n", index + 1, g_layoutGrab.rel.size());
-}
-
 }  // namespace ftvr
 
 extern "C" {
@@ -6575,7 +6538,7 @@ static void CarryUndoAll() {
 // its ray is on (user, 2026-11-01: "if the carried panel ends up behind another panel, scroll events no
 // longer reach it ... the interruption happens when the panel in front blocks the pointer"): true if it
 // did.
-// A bar's carry the same (the laser may be off its bar: the carry starts where the hand is when it's held),
+// A bar's carry and Move All Windows' the same (the laser may be off its bar: the carry starts where the hand is when it's held),
 // and a bar's press still waiting: the wheel makes it a move at once.
 // (a sideways-only notch is taken but starts nothing: a waiting press stays a tap)
 static bool CarryWheel(vr::TrackedDeviceIndex_t dev, double notches) {
@@ -6586,7 +6549,7 @@ static bool CarryWheel(vr::TrackedDeviceIndex_t dev, double notches) {
             if (notches != 0) BarCarry(s, "the wheel");
         }
     for (auto &[i, s] : g_screens)
-        if ((s.toggleCarry || (s.barCarry && s.drag == Drag::Move)) && s.dragDevice == dev) return Push(s, notches), true;
+        if ((s.toggleCarry || ((s.barCarry || s.layoutHeld) && s.drag == Drag::Move)) && s.dragDevice == dev) return Push(s, notches), true;
     return waits;
 }
 extern "C++" bool ftvr::CarryScroll(const vr::VREvent_t &ev) {
@@ -7166,10 +7129,7 @@ void ShiftRoom(const roomshift::Shift &by, char *reply, int size) {
     if (g_front.panel >= 0) g_front.home = Mul(j, g_front.home);
     for (auto &[i, k] : g_parked)
         if (k.pinned == kNone) k.pose = Mul(j, k.pose);
-    // (a layout button's carry meanwhile: what goes with it goes on from where this put it)
-    for (auto &[i, rel] : g_layoutGrab.rel)
-        if (const auto it = g_screens.find(i); it != g_screens.end() && it->second.drag == Drag::None)
-            g_layoutGrab.Take(i, it->second.pose);
+    LayoutShifted();   // (Move All Windows meanwhile)
     g_shifted = roomshift::Then(g_shifted, by);
     if (moved) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are now
     std::snprintf(reply, size, "ok %d", moved);
@@ -7185,52 +7145,25 @@ void ShiftCommand(vrcmd::Verb verb, const vrcmd::Cmd &c, char *reply, int size) 
     ShiftRoom({c.x, c.z, c.yaw * M_PI / 180}, reply, size);
 }
 
+// ---------------------------------------------------------------- for the layout's carry (vrlayoutgrab.cpp)
 
-void LayoutGrabEnd() {
-    bool screens = false;
-    for (const auto &[i, rel] : g_layoutGrab.rel) {
-        const auto it = g_screens.find(i);
-        if (it != g_screens.end() && it->second.Desktop()) screens = true;
-    }
-    if (screens) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are
-    std::printf("screen %d: its layout button let go: the layout stays there\n", g_layoutGrab.panel + 1);
-    g_layoutGrab.End();
+void SpinForget(int i) { g_spin.base.erase(i); }
+// Another laser, its title bar or a hand has it.
+bool HeldElsewhere(const Screen &s, int i) { return s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i); }
+// On its way somewhere, its way moves by `step` too (as a universe's jump moves it, FollowUniverse): true if it was.
+bool StepOnItsWay(Screen &s, int i, const Mat &step) {
+    const auto m = g_grabMoves.find(i);
+    if (m == g_grabMoves.end()) return false;
+    GrabMove &move = m->second;
+    move.from = Mul(step, move.from), move.to = Mul(step, move.to), move.lastSet = Mul(step, move.lastSet);
+    SetAbsolute(s, Mul(step, s.pose), move.universe);
+    return true;
 }
-
-void UpdateLayoutGrab() {
-    layoutgrab::Grab<Mat> &g = g_layoutGrab;
-    if (!g.on()) return;
-    const auto c = g_screens.find(g.panel);
-    if (c == g_screens.end() || !c->second.layoutHeld) return LayoutGrabEnd();
-    Mat f;
-    if (!LayoutFrame(c->second, &f)) return g.Lose();
-    const Mat step = g.Turn(f);
-    for (auto it = g.rel.begin(); it != g.rel.end();) {
-        const auto sit = g_screens.find(it->first);
-        if (sit == g_screens.end() || sit->second.pinned != kNone) {
-            it = g.rel.erase(it);
-            continue;
-        }
-        const int i = it->first;
-        Screen &o = sit->second;
-        const auto m = g_grabMoves.find(i);
-        Mat p;
-        if (o.drag != Drag::None || o.titleCarry || g_handInput.heldByHand(i)) {
-            if (ScreenPose(o, &p)) g.Take(i, p);
-        } else if (m != g_grabMoves.end()) {
-            // on its way somewhere: its way moves with the layout (as a universe's jump moves it, FollowUniverse)
-            GrabMove &move = m->second;
-            move.from = Mul(step, move.from), move.to = Mul(step, move.to), move.lastSet = Mul(step, move.lastSet);
-            SetAbsolute(o, Mul(step, o.pose), move.universe);
-            g.Take(i, o.pose);
-        } else {
-            SetAbsolute(o, g.Pose(i));
-        }
-        ++it;
-    }
+// The places in the room no panel is in now: the front slot's home, a stopped remote display's.
+void StepPlaces(const Mat &step) {
     if (g_front.panel >= 0) {
         g_front.home = Mul(step, g_front.home);
-        if (g.rel.count(g_front.panel)) g_front.to = Mul(step, g_front.to);
+        if (LayoutMoves(g_front.panel)) g_front.to = Mul(step, g_front.to);
     }
     for (auto &[i, k] : g_parked)
         if (k.pinned == kNone) k.pose = Mul(step, k.pose);
@@ -7544,7 +7477,7 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
         else if (ev.eventType == vr::VREvent_MouseButtonUp && !CarryClick(ev)) ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
     }
     if (g_press.upAt >= 0 && g_tick >= g_press.upAt) ReleaseAway(BTN_LEFT, handle, data);
-    UpdateLayoutGrab();   // (after the carried screen's own move, above)
+    UpdateLayoutGrab();   // (after the panels' own moves, above)
     PollPill(handle, data);
     PollBarMenu(handle, data);
     PollResetAsk(handle, data);

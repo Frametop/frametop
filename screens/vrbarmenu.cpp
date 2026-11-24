@@ -3,13 +3,13 @@
 // Option C design draws it (user, 2026-11-19: "Use that as the design"; barmenuart.h, menulayout.h).
 //   A tap on the bar (vr.cpp's BarTap), a poke on it, or `barside N menu` opens the main page: quick tiles
 // on top (Curved, Rotate; a floating window's To Desktop and Close), then Placement, a PC app window's Scale
-// (vrappscale.cpp), View in Theater, Move All Screens, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
+// (vrappscale.cpp), View in Theater, Move All Windows, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
 // Keep in View, Tiled (the one it is checked) and Stay Shown while it's on the dashboard.
 // A right click on the bar, as before, or `barside N edges` opens the edges page: Bottom, Top, Left,
 // Right (the panel's own checked), and View in Theater where the panel has it. Bar Position goes there
 // with Back first. It opens over the panel beside the bar at the spot clicked, toward its middle
 // (barside::MenuAt), a row lit under a laser, the 3D mouse or a fingertip near it; its bar goes blue.
-//   A click on a row does it and closes the menu; Rotate and Move All Screens are held (a press starts
+//   A click on a row does it and closes the menu; Rotate and Move All Windows are held (a press starts
 // the roll or the layout's carry, the release ends it; Rotate let go without turning levels the panel,
 // as the roll button's click did). A fingertip coming through a row presses it (tiptap.h): Rotate levels.
 // It closes on its own after kMenuIdleMs with nothing on it, when its panel hides, or on another tap on
@@ -56,7 +56,7 @@ struct {
     int hover = -1;            // the row under a laser, -1 none
     int handHover = -1;        // ...under a fingertip near it
     int64_t openedMs = -1, usedMs = -1;   // opened; opened, or a laser moved on it, then
-    vr::TrackedDeviceIndex_t holding = kNone;   // a held row's device (Rotate, Move All Screens) till it's let go
+    vr::TrackedDeviceIndex_t holding = kNone;   // a held row's device (Rotate, Move All Windows) till it's let go
     tiptap::Tap tip[2];        // each index tip's way through it
     tiptap::Tap beside[2];     // ...and through its panel beside it (a tap there closes it)
     std::string drawn;         // what its texture shows
@@ -108,6 +108,7 @@ panelmenu::Kind KindOf(const Screen &s, int i) {
     k.theater = i == SteamDashIndex() || GsCanTheater(i);
     k.anchored = TileAnchored(i);
     k.scales = AppScale(i) > 0;
+    k.rides = s.pinned != kNone && s.pinned != kDashboard;
     return k;
 }
 
@@ -234,7 +235,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             if (s.drag == Drag::Roll) g_menu.holding = dev, g_menu.hover = row;   // (lit while held, the laser anywhere)
             return;
         case Item::MoveAll:
-            if (dev == kNone) return (void)std::printf("screen %d: Move All Screens is a laser's hold\n", i + 1);
+            if (dev == kNone) return (void)std::printf("screen %d: Move All Windows is a laser's hold\n", i + 1);
             LayoutGrabStart(s, i, dev);
             if (s.drag == Drag::Move) g_menu.holding = dev, g_menu.hover = row;   // (lit while held, the laser anywhere)
             return;

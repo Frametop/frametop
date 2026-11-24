@@ -113,7 +113,7 @@ inline std::vector<uint8_t> Base(const std::vector<RowLook> &rows, const menulay
 }
 
 // `base` (Base of the same rows) with row `lit` lit under a laser or a fingertip (-1 none), `pressed`
-// while it's held (Rotate, Move All Screens), its corners rounded: only that row is drawn again.
+// while it's held (Rotate, Move All Windows), its corners rounded: only that row is drawn again.
 inline std::vector<uint8_t> Lit(const std::vector<uint8_t> &base, const std::vector<RowLook> &rows, const menulayout::Layout &l,
                                 int lit, bool pressed) {
     const int W = l.w, H = l.h;

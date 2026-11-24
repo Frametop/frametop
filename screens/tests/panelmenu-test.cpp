@@ -35,11 +35,16 @@ int main() {
           dp.size() == 4 && dp[0].item == Item::Back && dp[1].item == Item::InRoom && dp[2].item == Item::KeepInView &&
               dp[3].item == Item::OnDashboard);
     check("a desktop screen: no window or theater rows", !has(d, Item::Dock) && !has(d, Item::Close) && !has(d, Item::Theater));
-    check("a floating window: to desktop and close tiles, not the layout's rows",
-          has(f, Item::Dock) && has(f, Item::Close) && !has(fp, Item::KeepInView) && !has(f, Item::MoveAll) && !has(f, Item::Reset));
-    check("a Steam game: View in Theater, no layout or window rows",
-          has(g, Item::Theater) && !has(g, Item::Dock) && !has(g, Item::Reset) && !has(gp, Item::KeepInView));
-    check("Steam's tile: View in Theater and the layout's rows", has(st, Item::Theater) && has(st, Item::Reset));
+    check("a floating window: to desktop and close tiles, move all, no reset",
+          has(f, Item::Dock) && has(f, Item::Close) && !has(fp, Item::KeepInView) && has(f, Item::MoveAll) && !has(f, Item::Reset));
+    check("a Steam game: View in Theater and move all, no reset or window rows",
+          has(g, Item::Theater) && has(g, Item::MoveAll) && !has(g, Item::Dock) && !has(g, Item::Reset) && !has(gp, Item::KeepInView));
+    check("Steam's tile: View in Theater and the layout's rows", has(st, Item::Theater) && has(st, Item::MoveAll) && has(st, Item::Reset));
+    panelmenu::Kind onHead, tile = floating;
+    onHead.rides = true, tile.anchored = true;
+    check("pinned to the head or a wrist: no move all, the rest as ever",
+          !has(panelmenu::Main(onHead), Item::MoveAll) && panelmenu::Main(onHead).size() + 1 == d.size());
+    check("a window tiled on the dashboard: move all", has(panelmenu::Main(tile), Item::MoveAll));
     check("not anchored: no Stay Shown", !has(dp, Item::StayShown));
     panelmenu::Kind anchored;
     anchored.anchored = true;

@@ -24,7 +24,7 @@ enum class Item {
     KeepInView,    // placement: pinned to the head (desktop screens and remote displays)
     OnDashboard,   // placement: anchored to the SteamVR dashboard
     StayShown,     // ...and shown with the dashboard closed too (checked when on, while anchored)
-    MoveAll,       // held: carry every screen, as they stand (desktop screens and remote displays)
+    MoveAll,       // held: carry every panel, in the room and on the dashboard, as they stand (not from one on the head or a wrist)
     Theater,       // View in Theater (Steam's tile, a Steam game's panel)
     BarPosition,   // the edges page (its value: the bar's edge)
     Reset,         // reset the layout (asks first)
@@ -50,13 +50,14 @@ struct Kind {
     bool theater = false;    // View in Theater offered
     bool anchored = false;   // on the dashboard now
     bool scales = false;     // a PC app window's panel whose PC takes a scale for it
+    bool rides = false;      // pinned to the head or a wrist: it goes with that, not with the others
 };
 
-// Desktop screens and remote displays have the layout's own rows (in view, move all, reset).
+// Desktop screens and remote displays have the layout's own rows (in view, reset).
 inline bool LayoutRows(const Kind &k) { return !k.floating && !k.gsapp; }
 
 // The pages (user, 2026-11-19: the Option C design): Main's quick tiles on top, then its list (Placement,
-// View in Theater, Move All Screens, Bar Position, Reset Layout); Placement's and the edges' choices;
+// View in Theater, Move All Windows, Bar Position, Reset Layout); Placement's and the edges' choices;
 // a PC app window's scales.
 enum class Page { Main, Placement, Edges, Scale };
 
@@ -71,7 +72,7 @@ inline std::vector<Row> Main(const Kind &k) {
     r.push_back({Item::Placement});
     if (k.scales) r.push_back({Item::Scale});
     if (k.theater) r.push_back({Item::Theater});
-    if (LayoutRows(k)) r.push_back({Item::MoveAll});
+    if (!k.rides) r.push_back({Item::MoveAll});
     r.push_back({Item::BarPosition});
     if (LayoutRows(k)) r.push_back({Item::Reset});
     return r;
@@ -123,7 +124,7 @@ inline std::string Label(const Row &r) {
         case Item::KeepInView: return "Keep in View";
         case Item::OnDashboard: return "Tiled";
         case Item::StayShown: return "Stay Shown";
-        case Item::MoveAll: return "Move All Screens";
+        case Item::MoveAll: return "Move All Windows";
         case Item::Theater: return "View in Theater";
         case Item::BarPosition: return "Bar Position";
         case Item::Reset: return "Reset Layout";

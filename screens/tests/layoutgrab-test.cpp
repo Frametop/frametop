@@ -1,5 +1,5 @@
-// The layout grab's rules (screens/layoutgrab.h): the level frame at the carried screen, and the other
-// panels' places in it as it goes round the head, up, nearer, and through ticks without a frame.
+// The layout carry's rules (screens/layoutgrab.h): the level frame at the carried point, and the panels'
+// places in it as it goes round the head, up, nearer, and over the head, where the set only slides.
 #include "../layoutgrab.h"
 
 #include <cmath>
@@ -36,11 +36,6 @@ static M around(const M &head, double yawDeg, double dist, double up = 0) {
     const double at[3] = {head.m[0][3] - std::sin(a) * dist, head.m[1][3] + up, head.m[2][3] - std::cos(a) * dist};
     return FacingPose(at, head);
 }
-static M frameOf(const M &carried, const M &head) {
-    M f{};
-    check("  (a frame)", Frame(carried, head, &f));
-    return f;
-}
 
 static void frames() {
     const M head = headAt(0.3, 1.6, -0.2);
@@ -73,35 +68,40 @@ static void moves() {
     const M centre = around(head, 0, 2), left = around(head, 55, 2.2), right = around(head, -55, 2.2), low = around(head, 10, 1.2, -0.5);
     Grab<M> g;
     check("no grab at first", !g.on() && !g.Moves(0));
-    g.Begin(0, frameOf(centre, head));
-    g.Take(1, left), g.Take(2, right), g.Take(3, low);
-    check("on, and it moves the carried screen and the others", g.on() && g.Moves(0) && g.Moves(1) && g.Moves(3) && !g.Moves(7));
+    g.Begin(0, centre, head);
+    g.Take(0, centre), g.Take(1, left), g.Take(2, right), g.Take(3, low);
+    check("on, and it moves the held screen and the others", g.on() && g.Moves(0) && g.Moves(1) && g.Moves(3) && !g.Moves(7));
     check("nothing moved yet: each is where it was", same(g.Pose(1), left) && same(g.Pose(2), right) && same(g.Pose(3), low));
 
     // the carried screen goes a quarter turn round the head
-    M step = g.Turn(frameOf(around(head, 90, 2), head));
+    M step = g.Move(around(head, 90, 2), head);
     check("round the head: the others go round it too", same(g.Pose(1), around(head, 145, 2.2)) && same(g.Pose(2), around(head, 35, 2.2)));
     check("...as far from the head as they were", near(apart(g.Pose(3), head), apart(low, head)));
+    check("...and the held one with them, facing the head", same(g.Pose(0), around(head, 90, 2)));
     check("...and the tick's step is that turn", same(Mul(step, left), g.Pose(1)) && same(Mul(step, low), g.Pose(3)));
 
     // back, then up 0.4 m: all of it rises, nothing tilts
-    g.Turn(frameOf(centre, head));
+    g.Move(centre, head);
     check("back again: exactly where they were", same(g.Pose(1), left) && same(g.Pose(2), right) && same(g.Pose(3), low));
-    g.Turn(frameOf(around(head, 0, 2, 0.4), head));
+    const M twisted = Mul(around(head, 0, 2, 0.4), PanelPose<M>(0, 0, 0, 25, -30, 40));
+    g.Move(twisted, head);
     M up = left;
     up.m[1][3] += 0.4f;
     check("the carried screen up 0.4 m: the others up 0.4 m, turned as they were", same(g.Pose(1), up));
+    M upCentre = centre;
+    upCentre.m[1][3] += 0.4f;
+    check("...and the held one too, level whatever the hand does", same(g.Pose(0), upCentre));
 
     // nearer by 0.5 m: the layout comes 0.5 m the same way
-    g.Turn(frameOf(around(head, 0, 1.5), head));
+    g.Move(around(head, 0, 1.5), head);
     M nearer = right;
     nearer.m[2][3] += 0.5f;
     check("the carried screen 0.5 m nearer: the others 0.5 m that way", same(g.Pose(2), nearer));
 
     // the head walks a metre to the side with the carried screen held as far ahead of it
     const M walked = headAt(1, 1.6, 0);
-    g.Turn(frameOf(centre, head));
-    g.Turn(frameOf(around(walked, 0, 2), walked));
+    g.Move(centre, head);
+    g.Move(around(walked, 0, 2), walked);
     check("the wearer walks with it: the layout is round them there", same(g.Pose(1), around(walked, 55, 2.2)));
 
     g.End();
@@ -111,43 +111,72 @@ static void moves() {
 static void heldMeanwhile() {
     const M head = headAt(0, 1.6, 0);
     Grab<M> g;
-    g.Begin(0, frameOf(around(head, 0, 2), head));
+    g.Begin(0, around(head, 0, 2), head);
     g.Take(1, around(head, 50, 2));
-    g.Turn(frameOf(around(head, 30, 2), head));
+    g.Move(around(head, 30, 2), head);
     // another laser took panel 1 and put it somewhere else: it goes on from there
     const M put = around(head, -120, 1.1, 0.2);
     g.Take(1, put);
     check("taken again where another hand put it", same(g.Pose(1), put));
-    g.Turn(frameOf(around(head, 50, 2), head));
+    g.Move(around(head, 50, 2), head);
     check("...and it goes on from there", same(g.Pose(1), around(head, -100, 1.1, 0.2)));
 }
 
-static void lost() {
+// Straight above the head nothing says which way to turn: the set slides with the point, then goes on
+// from how it stands.
+static void overhead() {
     const M head = headAt(0, 1.6, 0);
+    const M panel = around(head, 0, 1), other = around(head, 50, 2);
     Grab<M> g;
-    g.Begin(0, frameOf(around(head, 0, 2), head));
-    g.Take(1, around(head, 50, 2));
-    g.Turn(frameOf(around(head, 20, 2), head));
-    const M before = g.Pose(1);
-    // the carried screen goes over the head and comes down behind it: no frame on the way
-    g.Lose();
-    check("a tick without a frame: the others stay", same(g.Pose(1), before));
-    M step = g.Turn(frameOf(around(head, 170, 2), head));
-    check("the frame is back somewhere else: nothing jumps", same(g.Pose(1), before) && same(step, Identity<M>()));
-    g.Turn(frameOf(around(head, 180, 2), head));
-    check("...and the layout goes on from where it stayed", same(g.Pose(1), around(head, 80, 2)));
+    g.Begin(0, panel, head);
+    g.Take(0, panel), g.Take(1, other);
+    const M before = g.Pose(1), heldBefore = g.Pose(0);
+    const M above = Translation<M>(0.1, 2.6, -0.05), past = Translation<M>(0.1, 2.6, 0.1);   // (over the head, and past it)
+    M step = g.Move(above, head);
+    M slid = before, heldSlid = heldBefore;
+    for (int k = 0; k < 3; ++k) slid.m[k][3] += above.m[k][3] - panel.m[k][3], heldSlid.m[k][3] += above.m[k][3] - panel.m[k][3];
+    check("over the head: the set slides there, turned as it was", same(g.Pose(1), slid) && same(g.Pose(0), heldSlid));
+    check("...and that's the tick's step", same(Mul(step, before), slid));
+    g.Move(past, head);
+    // down behind: it slides on that tick, then turns from how it stands
+    const M was = g.Pose(1);
+    const M behind = around(head, 180, 1.5);
+    g.Move(behind, head);
+    M on = was;
+    for (int k = 0; k < 3; ++k) on.m[k][3] += behind.m[k][3] - past.m[k][3];
+    check("down behind it: nothing spins", same(g.Pose(1), on, 1e-3));
+    const M at = g.Pose(0);
+    check("...the held one still at the laser", near(at.m[0][3], behind.m[0][3]) && near(at.m[1][3], behind.m[1][3]) && near(at.m[2][3], behind.m[2][3]));
+    const M now = g.Pose(1);
+    step = g.Move(around(head, 190, 1.5), head);
+    check("...and it turns about the head again from there", same(Mul(step, now), g.Pose(1), 1e-3) && std::fabs(apart(now, head) - apart(g.Pose(1), head)) < 1e-3);
+}
+
+// Held from a panel over the head (lying down): it starts there, and slides.
+static void startsOverhead() {
+    const M head = headAt(0.2, 0.6, 0.1);
+    const M ceiling = Translation<M>(0.2, 2.1, 0.1), other = around(head, 20, 1.5, 1.0);
+    Grab<M> g;
+    g.Begin(4, ceiling, head);
+    g.Take(4, ceiling), g.Take(5, other);
+    check("started over the head: on, nothing moved", g.on() && same(g.Pose(4), ceiling) && same(g.Pose(5), other));
+    M there = ceiling;
+    there.m[0][3] += 0.2f;
+    g.Move(there, head);
+    M moved = other;
+    moved.m[0][3] += 0.2f;
+    check("...and it slides", same(g.Pose(4), there) && same(g.Pose(5), moved));
 }
 
 static void noDrift() {
     const M head = headAt(0.1, 1.5, 0.4);
     const M start = around(head, 0, 2), other = around(head, -70, 2.5, 0.3);
     Grab<M> g;
-    g.Begin(0, frameOf(start, head));
+    g.Begin(0, start, head);
     g.Take(1, other);
-    M f{};
     for (int k = 1; k <= 5000; ++k)   // about a minute of ticks, all over the room
-        if (Frame(around(head, 0.37 * k, 1.2 + 0.8 * std::sin(k * 0.01), 0.5 * std::sin(k * 0.013)), head, &f)) g.Turn(f);
-    g.Turn(frameOf(start, head));
+        g.Move(around(head, 0.37 * k, 1.2 + 0.8 * std::sin(k * 0.01), 0.5 * std::sin(k * 0.013)), head);
+    g.Move(start, head);
     check("5000 ticks round the room and back: where it was, to a tenth of a millimetre", same(g.Pose(1), other));
 }
 
@@ -155,7 +184,8 @@ int main() {
     frames();
     moves();
     heldMeanwhile();
-    lost();
+    overhead();
+    startsOverhead();
     noDrift();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;

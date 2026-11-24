@@ -583,6 +583,14 @@ void TestFreedButOverTheKeys() {
     w.hands[0].busy = false;
     w.Run(0.1, 0.05);
     CHECK(w.ty.Why(1, w.t) != nullptr, "...let go, keys coming: held back");
+    // the other hand lost by the cameras while it held the pinch: no chord is known to be held
+    // (it stayed "busy" until it was forgotten, minutes for a hand parked at the desk; council, 2026-11-24)
+    w.hands[0].busy = true;
+    w.Run(0.1, 0.05);
+    CHECK(w.ty.Why(1, w.t) == nullptr, "the other hand pinching again: free");
+    w.hands[0] = Unseen();
+    w.Run(0.2, 0.05);
+    CHECK(w.ty.Why(1, w.t) != nullptr, "...lost mid-pinch, keys coming: held back");
 }
 
 int main() {

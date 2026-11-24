@@ -158,7 +158,7 @@ public:
             Side &s = side_[k];
             const Hand &h = hands[k];
             if (!h.seen) {
-                s.zone = false;
+                s.zone = s.busy = false;   // (nothing it held is known to be held still)
                 s.deskSince = kNever;  // the model's 0.3 s start over when it's seen again
                 if ((s.parked || s.free) && t - s.seen > (s.parked ? std::max(p_.keep, p_.forget) : p_.forget)) {
                     if (s.parked) log.push_back(std::string("typing: ") + Name(k) + " hand forgotten (unseen)");

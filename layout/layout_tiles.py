@@ -52,6 +52,19 @@ def commands(saved, panels):
     return out
 
 
-def restore(ask, saved, panels):
-    """Puts a profile's tiles back. Returns ft-screens' replies."""
+def remember_commands(saved, keys):
+    """The commands that tell ft-screens' tile memory a profile's tiles (`keys`: {a profile's key:
+    the memory's}), for a display that connects later: first one alone, a profile's put back now."""
+    lines = [f"tiles remember {keys[key]} {state}" for key, state in saved if key in keys]
+    return ["tiles remember"] + [line for line in lines if len(line) <= MAX_COMMAND]
+
+
+def restore(ask, saved, panels, keys=None):
+    """Puts a profile's tiles back. Returns ft-screens' replies to the sets. (An ft-screens older
+    than `tiles remember` refuses that one: the tiles connected now still go back.)"""
+    try:
+        for command in remember_commands(saved, keys or {}):
+            ask(command)
+    except RuntimeError:
+        pass
     return [ask(c) for c in commands(saved, panels)]

@@ -72,6 +72,62 @@ class Window(unittest.TestCase):
         self.assertEqual(began, [((None, "0.3.0", "", ["--yes"], False), {"dry_run": True})])
         self.assertFalse(win.dry_run)   # Change choices after it installs for real
 
+    def begun(self, win_dry_run=False, ready=True, **kw):
+        """Window.begin with a password on a stand-in window: (the helper's arguments, what job.start
+        got, the messages shown)."""
+        ui, made, started, shown = self.ui, [], [], []
+
+        class FakeHelper:
+            def __init__(self, *a):
+                made.append(a)
+            give = close = lambda self, *a: None
+            wait_ready = lambda self: ready   # noqa: E731
+        saved = ui.Helper, ui.in_thread, ui.Gtk, ui.label, ui.host.stage, ui.job.start
+        ui.Helper, ui.in_thread = FakeHelper, lambda work, done, failed: done(work())
+        ui.Gtk, ui.label = types.SimpleNamespace(Spinner=lambda **k: None), lambda *a, **k: None
+        ui.host.stage = lambda: None
+        ui.job.start = lambda *a, **k: started.append((a, k)) or ""
+        try:
+            win = types.SimpleNamespace(dry_run=win_dry_run, helper=None, page=lambda *a, **k: None,
+                                        ask_again="ask_again", helper_gone="helper_gone",
+                                        forget_password=lambda: None, show_progress=lambda: shown.append("progress"),
+                                        show_message=lambda *a: shown.append(a))
+            ui.Window.begin(win, "pw", "0.3.0", "stable", ["--yes"], False, **kw)
+        finally:
+            ui.Helper, ui.in_thread, ui.Gtk, ui.label, ui.host.stage, ui.job.start = saved
+        return made, started, shown
+
+    def test_an_install_hears_when_its_password_helper_goes(self):
+        made, started, shown = self.begun()
+        self.assertEqual(made, [("ask_again", "helper_gone")])
+        self.assertEqual((len(started), shown), (1, ["progress"]))
+
+    def test_no_install_starts_before_its_password_helper_listens(self):
+        made, started, shown = self.begun(ready=False)
+        self.assertEqual(started, [])
+        self.assertEqual(shown[0][0], "The install didn't start")
+        self.assertIn("password helper", shown[0][1])
+
+    def test_install_again_of_a_test_run_starts_a_test_run(self):
+        made, started, shown = self.begun(win_dry_run=False, dry_run=True)
+        self.assertIs(started[0][1]["dry_run"], True)
+        made, started, shown = self.begun(win_dry_run=True)   # (and a test window's installs are test runs)
+        self.assertIs(started[0][1]["dry_run"], True)
+
+    def test_a_password_helper_that_stops_is_said_where_its_seen(self):
+        class Seen:
+            visible = None
+
+            def set_visible(self, on):
+                self.visible = on
+        closed, logged = [], []
+        page = types.SimpleNamespace(helper=types.SimpleNamespace(close=lambda: closed.append(True)), finished=False,
+                                     state={"sudo": True}, ask_box=Seen(), helper_note=Seen(), add_log=logged.extend,
+                                     stack=types.SimpleNamespace(get_visible_child_name=lambda: "progress"))
+        self.ui.ProgressPage.helper_gone(page)
+        self.assertEqual((closed, page.helper), ([True], None))
+        self.assertEqual((page.ask_box.visible, page.helper_note.visible), (False, True))   # not only in Details
+
     def test_the_end_of_the_log_is_read_before_it_finishes(self):
         from frametop_installer import job
         with tempfile.TemporaryDirectory() as d:

@@ -46,6 +46,7 @@ def start(version, channel, flags, restart, askpass, dry_run=False):
         return ("FrameDrop is installing Frametop. Let it finish, then open Frametop Installer "
                 "again.")
     host.stage()
+    was = [(f, f.read_bytes() if f.is_file() else None) for f in (STATE, RESULT)]
     host.run(["systemctl", "--user", "stop", f"{UNIT}.service"], timeout=30)
     host.run(["systemctl", "--user", "reset-failed", f"{UNIT}.service"], timeout=10)
     RESULT.unlink(missing_ok=True)
@@ -64,7 +65,9 @@ def start(version, channel, flags, restart, askpass, dry_run=False):
     code, _, err = host.run(cmd, timeout=30)
     if code == 0:
         return ""
-    STATE.unlink(missing_ok=True)   # nothing started: the next open starts fresh, not on "unfinished"
+    if code != 124:   # nothing started: the next open finds what the last install left, not a new
+        for f, old in was:   # "unfinished" one. (Timed out, it may have started: its state stays.)
+            f.unlink(missing_ok=True) if old is None else f.write_bytes(old)
     return err.decode("utf-8", "replace").strip() or f"systemd-run failed ({code})"
 
 

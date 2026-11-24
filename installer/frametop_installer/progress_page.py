@@ -50,6 +50,9 @@ class ProgressPage:
         self.keypads = []
         self.ask_entry, ask_field = password_field("Your SteamOS password, for the next step", self.answer_ask,
                                                    self.keypads)
+        self.helper_note = label("The password helper stopped. If the install still needs your password, close "
+                                 "this window and open Frametop Installer again. Otherwise it skips the parts "
+                                 "that need it.", css=("warning",), visible=False)
         self.ask_error = label("", css=("error",), visible=False)
         self.ask_box = vbox(spacing=8, visible=False)
         for w in (label("The install needs your password for its next step.", css=("heading",)), ask_field,
@@ -60,8 +63,8 @@ class ProgressPage:
         btns.append(button("OK", self.answer_ask, css=("suggested-action",)))
         self.done_buttons = Gtk.Box(spacing=10, halign=Gtk.Align.END)
         self.done_buttons.append(button("Close", self.close))
-        self.page("progress", self.status, self.step, self.bar, self.download, self.note, self.ask_box,
-                  expander, self.done_buttons)
+        self.page("progress", self.status, self.step, self.bar, self.download, self.note, self.helper_note,
+                  self.ask_box, expander, self.done_buttons)
         if state.get("sudo") and self.helper is None:
             try:
                 self.helper = Helper(self.ask_again, self.helper_gone)
@@ -81,8 +84,8 @@ class ProgressPage:
             self.helper = None
         if self.stack.get_visible_child_name() == "progress" and not self.finished and self.state.get("sudo"):
             self.ask_box.set_visible(False)
-            self.add_log(["(the password helper stopped. If the install still needs your password, close this "
-                          "window and open Frametop Installer again; otherwise it skips those parts)"])
+            self.helper_note.set_visible(True)
+            self.add_log(["(the password helper stopped)"])
 
     def ask_again(self):
         if self.password and self.helper:
@@ -173,6 +176,7 @@ class ProgressPage:
             self.helper.close()
             self.helper = None
         self.ask_box.set_visible(False)
+        self.helper_note.set_visible(False)
         self.note.set_visible(where != "done")
         state = dict(self.state or {})
         state["seen"] = True

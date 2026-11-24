@@ -87,6 +87,27 @@ class Start(Temp):
         self.assertIn("Failed to start", job.start("0.3.0", "stable", ["--yes"], False, False))
         self.assertEqual(job.where_things_are(job.load_state(), "inactive", job.result()), "new")
 
+    def test_an_install_that_didnt_start_leaves_the_last_ones_state(self):
+        self.cache.mkdir(parents=True)
+        job.save_state({"version": "0.2.0", "flags": ["--yes", "--voice"], "sudo": True})
+        job.RESULT.write_text("0\n")
+
+        def fake_run(argv, input=None, timeout=60):
+            return (1, b"", b"Failed to start transient service unit\n") if argv[0] == "systemd-run" else (0, b"", b"")
+        host.run = fake_run
+        self.assertIn("Failed to start", job.start("0.3.0", "stable", ["--yes"], False, False))
+        self.assertEqual(job.load_state()["version"], "0.2.0")
+        self.assertEqual(job.result(), 0)
+
+    def test_a_start_that_timed_out_may_have_started(self):
+        def fake_run(argv, input=None, timeout=60):
+            return (124, b"", b"timed out") if argv[0] == "systemd-run" else (0, b"", b"")
+        host.run = fake_run
+        self.assertEqual(job.start("0.3.0", "stable", ["--yes"], False, True), "timed out")
+        state = job.load_state()   # (the window that opens next finds the running install, and answers its sudo)
+        self.assertEqual((state["version"], state["sudo"]), ("0.3.0", True))
+
+
 
 class SetPassword(Temp):
     def test_the_helper_is_on_the_host_before_it_runs(self):

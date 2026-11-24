@@ -3,9 +3,9 @@
 
 A Kirigami (QML) app with Python backends. It runs in the dev container. A sidebar lists the
 sections by group, with a search field; each section is one page from one area:
-  - input: Devices, Buttons, Controllers, Keyboard, Commands, Pointer, Ignored panels,
-    Bluetooth, Gaze, Hands, Voice and Game optimization (input-settings/: ft_input_settings.py
-    and InputPages.qml)
+  - input: Devices, Buttons, Controllers, Keyboard, Remote display keys, Commands, Pointer,
+    Ignored panels, Bluetooth, Gaze, Hands, Voice and Game optimization (input-settings/:
+    ft_input_settings.py, InputPages.qml and the page files beside it)
   - display: Screens, Layout, Visibility & pins, Grab bars & corners, Steam & notifications and
     Power (display-settings/: ft_display_settings.py, DisplayPages.qml and the page files beside it)
 Controls the pages share (a slider with its value, dim help text, a group that opens) are in

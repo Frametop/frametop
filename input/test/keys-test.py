@@ -129,6 +129,7 @@ bindings = {"now": None}  # the rules' key_bindings; None: the relay's defaults
 devices = {"roles": {}, "buttons": {}, "controller": {}}  # the rules' roles, per-device "buttons", controller_buttons
 vr_keyboard = {"mode": None, "steam": None}  # the rules' vr_keyboard and steam_fields_keyboard; None: the default
 meta_tap = {"on": None}  # the rules' meta_tap (Meta taps do their binding); None: not in the file
+remote_keys = {"now": None}  # the rules' remote_key_bindings (a PC's combinations); None: not in the file
 MOUSE_ID = "usb:0003:0004:test mouse"  # the fake mouse's id (Node.id)
 
 
@@ -143,6 +144,8 @@ def read_rules(path=None):
         rules["steam_fields_keyboard"] = vr_keyboard["steam"]
     if meta_tap["on"] is not None:
         rules["meta_tap"] = meta_tap["on"]
+    if remote_keys["now"] is not None:
+        rules["remote_key_bindings"] = dict(remote_keys["now"])
     return rules
 
 
@@ -830,6 +833,64 @@ def tests():
     key(SHIFT, 0); key(ALT, 0); key(CTRL, 0); key(META, 0)
     check("PC has the keys: Ctrl+Alt+Shift+Esc with Meta held still lets every key go",
           [m for m in typed() if m == "keys release"], ["keys release"])
+    # Which combinations are the PC's is the rules' "remote_key_bindings" (ft_remote_keys). A file
+    # without it gets Frametop's default Meta combinations but the gaze clicks (above: Meta+Space
+    # and a Meta tap), so Meta+J still clicks where you look on a remote display.
+    check("PC has the keys: Meta+J is still Frametop's gaze click, J isn't typed there",
+          meta(J), ["key 125 1"] + F24 + ["key 125 0"])
+
+    def pc_table(table):
+        remote_keys["now"] = table
+        use(bindings["now"])
+        to_relay("keyboard desktop 1 0 1 1")
+        time.sleep(0.05)
+        frunner_got()
+        typed()
+
+    # A table of its own: only what it names is the PC's. One sent as another combination is
+    # tapped there on the press, with the modifiers the PC holds up meanwhile.
+    pc_table({"42+125+57": "125+57"})
+    got = meta(SPACE)
+    check("own table without Meta+Space: it's frunner's on the PC too",
+          (frunner_got(), f"key {SPACE} 1" in got), (["toggle keyboard"], False))
+    check("Meta+Shift+Space sent as Meta+Space: the PC gets Meta+Space alone, Shift back after",
+          meta(SHIFT, SPACE),
+          ["key 125 1", f"key {SHIFT} 1", "key 125 0", f"key {SHIFT} 0", "key 125 1", f"key {SPACE} 1",
+           f"key {SPACE} 0", "key 125 0", f"key {SHIFT} 1", f"key {SHIFT} 0"])
+    check("it isn't frunner's, and Meta+J stays the gaze click", (frunner_got(), meta(J)),
+          ([], ["key 125 1"] + F24 + ["key 125 0"]))
+    menus = len(lines(steam_log))
+    check("own table without the Meta tap: it's the Steam menu on the PC too",
+          (meta(), len(lines(steam_log))), (["key 125 1"] + F24 + ["key 125 0"], menus + 1))
+    to_relay("keyboard desktop 1 0 1 0")
+    time.sleep(0.05)
+    check("off the PC: Meta+Shift+Space is typed as it is (no binding of Frametop's)",
+          meta(SHIFT, SPACE), ["key 125 1", f"key {SHIFT} 1", f"key {SPACE} 1", f"key {SPACE} 0",
+                               f"key {SHIFT} 0", "key 125 0"])
+    # A tap sent as another combination: the modifier is down on the PC, so an F24 either side.
+    menus = len(lines(steam_log))
+    pc_table({"125": "29+57"})
+    check("a Meta tap sent as Ctrl+Space: tapped there, no Meta tap of the PC's, no Steam menu",
+          (meta(), len(lines(steam_log))),
+          (["key 125 1"] + F24 + ["key 125 0", f"key {CTRL} 1", f"key {SPACE} 1", f"key {SPACE} 0",
+                                  f"key {CTRL} 0", "key 125 1"] + F24 + ["key 125 0"], menus))
+    # Entries the relay can't use are left out; the way out of stuck keys is never the PC's.
+    pc_table({"125+57": "115", "57+125": "125+57", "29+42+56+1": "29+42+56+1"})
+    meta(SPACE)
+    check("a sent side with a volume key, and a pressed side out of order: not entries", frunner_got(), ["toggle keyboard"])
+    key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(1, 1); key(1, 0); key(SHIFT, 0); key(ALT, 0); key(CTRL, 0)
+    check("release_keys in the table: it still lets every key go, Esc isn't typed there",
+          [m for m in typed() if m in ("keys release", "key 1 1")], ["keys release"])
+    # No key combinations of Frametop's at all: the PC's table still works.
+    remote_keys["now"] = {"42+125+57": "125+57"}
+    use({})
+    to_relay("keyboard desktop 1 0 1 1")
+    time.sleep(0.05)
+    typed()
+    check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space",
+          [m for m in meta(SHIFT, SPACE) if m.split()[1] == str(SPACE)], [f"key {SPACE} 1", f"key {SPACE} 0"])
+    remote_keys["now"] = None
+    use(None)
     to_relay("keyboard desktop 1 0 1 0")
     time.sleep(0.05)
     meta(SPACE)

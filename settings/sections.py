@@ -38,6 +38,8 @@ SECTIONS = [
     ("controllers", "input", "Input", "Controllers", "input-gamepad", "controller button map trigger grip"),
     ("keyboard", "input", "Input", "Keyboard", "input-keyboard-virtual",
      "shortcut key combination modifier meta tap layout full keyboard"),
+    ("remote-keys", "input", "Input", "Remote display keys", "preferences-desktop-keyboard-shortcut",
+     "remote display pc mac computer shortcut key combination pass through send super meta launcher"),
     ("commands", "input", "Input", "Commands", "utilities-terminal", "shell command alias run"),
     ("pointer", "input", "Input", "Pointer", "transform-move",
      "speed dot size distance cursor travel mode laser"),

@@ -99,6 +99,17 @@ sent on start, reload, and when the helper says "vrhello"), and only while no ga
 unless "controller_in_games" is true in the rules file (then a mapped button no longer
 reaches games; see pointer/helper/vrbuttons.h).
 
+A remote display's computer gets the key combinations the rules give it ("remote_key_bindings":
+{pressed: sent}, conf/ft_remote_keys.py; Frametop Settings' Remote display keys page) while its
+desktop has the keys (ft-screens' sixth "keyboard" word; pc_keys). One sent as itself isn't
+Frametop's then: it's typed through, so Super+Space opens the computer's launcher, not frunner.
+One sent as another combination is tapped there once on the press, as a keys: action is
+(Meta+Shift+Space can send the computer Meta+Space while Meta+Space stays frunner's); pressed
+needn't be a key combination of Frametop's. Every other combination stays Frametop's there: Meta+J
+still clicks where you look. A rules file without the table gets ft_remote_keys.DEFAULT, Frametop's
+default Meta combinations but the gaze clicks, each as itself. release_keys never goes to the
+computer, whatever the table says: it's the way out of stuck keys.
+
 Gamepad mode (input/vrpad.py) makes the Frame controllers one Xbox pad for a Frametop panel, through
 SteamVR's own Gamepad mode: ft-screens' "Enter Gamepad Mode" pill above the panel typing goes to
 (with the Steam menu open) has ft-dashpatch give SteamVR's input focus to ft-screens' hidden
@@ -360,6 +371,7 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     VR_BUTTONS,
     renamed_actions,
 )
+import ft_remote_keys  # noqa: E402  (the key combinations a remote display's computer gets)
 
 # Linux input constants (include/uapi/linux/input-event-codes.h, input.h, uinput.h). The event
 # record and the ioctl numbers are ft_evdev's (shared with vrpad.py); the codes are here.
@@ -767,6 +779,7 @@ def read_rules(path=RULES_PATH):
     """{"devices": {id: {"role", "name"}}, "buttons": {id: {"<code>": action}},
     "controller_buttons": {"<hand>/<button>": action}, "controller_in_games": bool,
     "key_bindings": {"<code>+<code>...": action}, "meta_tap": bool,
+    "remote_key_bindings": {"<pressed combination>": "<sent combination>"} (ft_remote_keys),
     "vr_keyboard": one of VR_KEYBOARD_MODES, "vr_keyboard_persist": bool,
     "steam_fields_keyboard": one of STEAM_FIELDS_KEYBOARDS}."""
     try:
@@ -1432,6 +1445,7 @@ class Relay:
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
         self.pc_word = "0"  # ft-screens' "keyboard" sixth word: a PC's desktop has the keys (pc_keys)
+        self.remote_keys = {}  # the rules' "remote_key_bindings" (ft_remote_keys): pressed -> sent
         self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1" or "2": the tiling keys are its until then
         self.tile_focus_app = False  # ...1: an app's tile (every tiling key); 2: a display's (the nudges)
         self.text_field_said, self.text_field_said_at = None, 0.0  # text_field's last log line, and when
@@ -1506,6 +1520,7 @@ class Relay:
             rules = read_rules("")   # the defaults (no file there)
             self.pause.configure(rules)
         self.rules = rules
+        self.remote_keys = ft_remote_keys.read(rules, lambda sent: keys_codes(KEYS + sent) is not None)
         self.pc_game.configure(rules)
         self.lease.configure(pointer_on, sensitivity, idle, wake_counts, self.pause.paused)
         self.gamepad.sound_on = self.pause.settings["sound"]
@@ -1773,7 +1788,7 @@ class Relay:
                 self.held.tap = mod if not self.held.modifiers and not self.held.combos else None
                 self.held.tap_code = code
                 if (self.held.tap is not None and self.held.talk_code is None and self.tap_action(mod, code)[1] == "dictate_hold"
-                        and not (mod == MODIFIERS[KEY_LEFTMETA] and self.pc_keys(now))):
+                        and not self.pc_tap(mod, code, now)):
                     # Hold to talk: dictation starts on the press, not the release. The desktop
                     # doesn't get the press (cancel_talk sends it after all for a shortcut), so
                     # live text is typed there while it's held. Steam and games read the keyboard
@@ -1840,19 +1855,34 @@ class Relay:
         return True
 
     def pc_keys(self, now):
-        """Whether Meta and its combinations are a PC's now: typing goes to a remote display's
-        desktop, and the 3D mouse is on it ("1"), or was last and sleeps ("2"). Super+Space there
-        opens the PC's launcher, not frunner; the 3D mouse moved off it gives Meta back. (Asleep:
-        not active; the lease's Pointer stays while pointer mode is on.)"""
+        """Whether a PC's desktop has the keys now: typing goes to a remote display's desktop, and
+        the 3D mouse is on it ("1"), or was last and sleeps ("2"). The combinations in
+        "remote_key_bindings" are the PC's then (pc_combo); the 3D mouse moved off it gives them
+        back. (Asleep: not active; the lease's Pointer stays while pointer mode is on.)"""
         asleep = not (self.lease.current and self.lease.current.active)
         return now < self.desktop_until and (self.pc_word == "1" or (self.pc_word == "2" and asleep))
+
+    def pc_combo(self, combo, now):
+        """A combination that is a PC's now ("remote_key_bindings", ft_remote_keys; its desktop has
+        the keys): (combo, None) when the PC gets it as it is, typed through, or (combo, action)
+        with the "keys:" action that taps the combination it gets instead. None: it's Frametop's."""
+        sent = self.remote_keys.get(combo) if self.pc_keys(now) else None
+        if sent is None:
+            return None
+        return combo, None if sent == combo else KEYS + sent
+
+    def pc_tap(self, mod, code, now):
+        """A lone modifier's tap that is a PC's now, as pc_combo gives it, or None. A right-hand
+        key's own entry ("97": Right Ctrl) comes before the folded one, as in tap_action."""
+        own = str(code) if code != mod and str(code) in self.remote_keys else str(mod)
+        return self.pc_combo(own, now)
 
     def combo_for(self, code):
         """The key combination a key's press completes with the modifiers held, and its action:
         (combo, action), the action None when it does nothing now."""
-        if not self.rules["key_bindings"]:
-            return None, None
         combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
+        if not self.rules["key_bindings"]:
+            return self.pc_combo(combo, time.monotonic()) or (None, None)
         action = self.rules["key_bindings"].get(combo)
         focused = time.monotonic() < self.tile_focus_until
         tile = focused and self.tile_focus_app
@@ -1860,6 +1890,12 @@ class Relay:
             action = APP_TILE_KEY_BINDINGS.get(combo)  # Meta+arrows alone on an app's tile
         if not known_action(action):
             combo, action = self.release_combo(code) or (combo, action)
+        # A PC's desktop has the keys and the rules give it this combination: its own, or another
+        # one tapped there. It comes before Frametop's action, a tile's keys too (the rules say
+        # so by name), but never before the way out of stuck keys (hazards.md).
+        pc = None if action == "release_keys" else self.pc_combo(combo, time.monotonic())
+        if pc:
+            return pc
         if not known_action(action) or action in ("key", "none") or (self.pause.paused and not works_paused(action)):
             return combo, None
         if action in TILE_NUDGE_ACTIONS:
@@ -1868,8 +1904,6 @@ class Relay:
             # An app's tile has the focus: ft-screens' key, on a PC's app window too (its desktop
             # may have the keys). None has: the desktop's key (KWin's, or a PC's).
             return combo, action if tile else None
-        if action != "release_keys" and MODIFIERS[KEY_LEFTMETA] in self.held.modifiers and self.pc_keys(time.monotonic()):
-            return combo, None  # a PC's desktop has the keys: its Meta combination (not the way out of stuck keys: hazards.md)
         return combo, action
 
     def release_combo(self, code):
@@ -1912,11 +1946,22 @@ class Relay:
     def modifier_tap(self, mod, code, now):
         """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap)."""
         combo, action = self.tap_action(mod, code)
+        pc = None if action == "release_keys" else self.pc_tap(mod, code, now)
+        if pc and pc[1] is None:
+            log(f"key combination {pc[0]}: the PC's (its desktop has the keys)")
+            return  # the PC's own tap (Windows' Start menu on Meta), with no F24 in between
+        if pc:
+            # Another combination for the PC. The modifier is still down there: an F24 before it
+            # comes up for the keys, and one after it goes down again, so neither is a tap there.
+            self.to_screens(KEY_F24, 1)
+            self.to_screens(KEY_F24, 0)
+            self.tap_keys(keys_codes(pc[1]), now)
+            self.to_screens(KEY_F24, 1)
+            self.to_screens(KEY_F24, 0)
+            log(f"key combination {pc[0]}: the PC's, as {pc[1]}")
+            return
         if action is None or action == "dictate_hold":
             return  # nothing, or hold to talk (key_binding), which started on the press
-        if mod == MODIFIERS[KEY_LEFTMETA] and self.pc_keys(now):
-            log(f"key combination {combo}: the PC's (its desktop has the keys)")
-            return  # the PC's own Meta tap (Windows' Start menu), with no F24 in between
         # The desktop gets a key in between before the release goes there, so the tap isn't one
         # there too: a Meta tap would open Plasma's launcher.
         self.to_screens(KEY_F24, 1)

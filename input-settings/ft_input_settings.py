@@ -102,6 +102,7 @@ sys.path.insert(0, os.path.join(REPO, "commands"))
 import ft_commands  # noqa: E402  (your commands: standard library only)
 import input_commands  # noqa: E402  (the Commands page's logic)
 import travel_mode  # noqa: E402  (SteamVR's travel mode, through vrcmd)
+import remote_keys  # noqa: E402  (the Remote display keys page)
 import desktop_layout  # noqa: E402  (the desktop's keyboard layout, in its kxkbrc)
 import catalog as model_catalog  # noqa: E402
 # How the pickers tag each entry: by status, and builtins by what they are.
@@ -552,6 +553,14 @@ class Backend(QObject):
         self._relay_ok = False
         self._capture_vr = False
         self._capture_combo = ""  # the action a key combination is being captured for
+        self._capture_then = None  # what gets the key combination being captured (capture_combo)
+        self._capture_dropped = None  # told when another capture takes its place
+        self._remote_keys = remote_keys.RemoteKeys(
+            rules=lambda: read_json(RULES_PATH), edit=self._edit_rules, not_saved=NOT_SAVED,
+            capture=self.capture_combo, cancel=self.cancel_combo_capture, bindings=key_bindings,
+            name=self.comboName, label=action_label, sendable=lambda combo: is_keys(KEYS + combo),
+            say=self.message.emit, parent=self)
+        self.mappingsChanged.connect(self._remote_keys.refresh)
         self._combo_mods = set()
         self._combo_tap = None  # a modifier pressed alone, nothing since: released, it's a tap
         self._combo_tap_code = None  # that modifier's key as it is (Right Ctrl: 97)
@@ -692,7 +701,7 @@ class Backend(QObject):
                     self._capture_vr = False
                     self._send("vrcapture 0")
                     self.capturedController.emit(msg["code"], CONTROLLER_BUTTONS[msg["code"]])
-            elif t == "event" and self._capture_combo and msg.get("type") == "key":
+            elif t == "event" and self._capture_then and msg.get("type") == "key":
                 self.activity.emit(msg["id"])
                 code, value = int(msg["code"]), msg["value"]
                 if code in MODIFIER_CODES:
@@ -1622,23 +1631,47 @@ class Backend(QObject):
     @Slot(str)
     def startShortcutCapture(self, action):
         if shortcut_mappable(action):
+            self.capture_combo(lambda combo: self._save_shortcut(combo, action))
             self._capture_combo = action
-            self._combo_mods = set()
-            self._combo_tap = None
-            self._send("watch 60")
             self.shortcutCaptureChanged.emit()
 
     @Slot()
     def cancelShortcutCapture(self):
+        self.cancel_combo_capture()
+
+    @Property(QObject, constant=True)
+    def remoteKeys(self):
+        """The Remote display keys page's object (remote_keys.py)."""
+        return self._remote_keys
+
+    def capture_combo(self, then, dropped=None):
+        """Take the next key combination pressed on any keyboard, as the relay would read it
+        (a lone modifier's tap too), and call then(combo). One capture at a time: an earlier
+        one that hasn't had its keys is given up, and its dropped() says so."""
+        earlier, self._capture_dropped = self._capture_dropped, dropped
+        if self._capture_then and earlier:
+            earlier()
+        self._capture_then = then
+        self._capture_combo = ""
+        self._combo_mods = set()
+        self._combo_tap = None
+        self._send("watch 60")
+        self.shortcutCaptureChanged.emit()
+
+    def cancel_combo_capture(self):
+        self._capture_then, self._capture_dropped = None, None
         self._capture_combo = ""
         self.shortcutCaptureChanged.emit()
 
     def _end_shortcut_capture(self, combo):
-        self._save_shortcut(combo, self._capture_combo)
+        then = self._capture_then
+        self._capture_then, self._capture_dropped = None, None
         self._capture_combo = ""
         self._combo_mods = set()
         self._combo_tap = None
         self.shortcutCaptureChanged.emit()
+        if then:
+            then(combo)
 
     def _save_shortcut(self, combo, action):
         if self._edit_rules(lambda rules: rules.update(key_bindings=dict(key_bindings(rules), **{combo: action}))) \

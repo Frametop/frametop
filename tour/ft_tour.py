@@ -419,6 +419,8 @@ def pages(f, keys):
                   "settings:controllers"],
                  ["Keyboard", "When Frametop's VR keyboard shows, and your key combinations and modifier taps",
                   "settings:keyboard"],
+                 ["Remote display keys", "The key combinations a remote display's computer gets while you type on "
+                                         "it, as they are or as other keys", "settings:remote-keys"],
                  ["Commands", "Your own shell commands by name: run them from a button, frunner, your voice, or a "
                               "terminal alias", "settings:commands"],
                  ["Pointer", "The dot's speed, size, and distance, head follow, and Recenter. Changes apply live",

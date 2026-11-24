@@ -18,8 +18,9 @@ Item {
     // The page for a section of the app, by name; null for a name that isn't one of these.
     function page(name) {
         return ({ devices: devicesPage, buttons: buttonsPage, controllers: controllersPage, games: gamesPage,
-                  keyboard: keyboardPage, commands: commandsPage, voice: voicePage, pointer: pointerPage,
-                  ignore: ignorePage, gaze: gazePage, hands: handsPage, bluetooth: bluetoothPage })[name] || null
+                  keyboard: keyboardPage, "remote-keys": remoteKeysPage, commands: commandsPage, voice: voicePage,
+                  pointer: pointerPage, ignore: ignorePage, gaze: gazePage, hands: handsPage,
+                  bluetooth: bluetoothPage })[name] || null
     }
 
     // Why SteamVR has no ft_pointer driver, and how to get it back. Clicks, scrolling and mapped
@@ -2157,6 +2158,13 @@ Item {
                       + "aliases live in ~/.config/frametop/aliases.sh, which one line in ~/.bashrc reads."
             }
         }
+    }
+
+    // ---------------------------------------------------------------- Remote display keys
+    // (RemoteKeysPage.qml, a file of its own)
+    Component {
+        id: remoteKeysPage
+        RemoteKeysPage { backend: root.backend }
     }
 
     // ---------------------------------------------------------------- Bluetooth

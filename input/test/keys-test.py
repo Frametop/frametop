@@ -1434,7 +1434,26 @@ def tests():
         sock.sendto(text.encode(), f"\0{tag}_relay")
         time.sleep(0.1)
 
+    # No Full Keyboard running (quit from its panel): Open/close keyboard starts it, and it opens.
     typed(), emitted()
+    LOG.clear()
+    to_relay("action keyboard_toggle")
+    to_relay("action keyboard_toggle")
+    time.sleep(0.1)
+    check("keyboard_toggle with no Full Keyboard: its unit is started, once for two quick presses",
+          (len(KB_STARTS), [m for m in typed() if m.startswith("vrkeyboard")]), (1, []))
+    check("...logged", [m for m in LOG if m.startswith("keyboard_toggle")],
+          ["keyboard_toggle: Full Keyboard isn't running (quit from its panel?): starting it"])
+    from_kb("kbhello 0")
+    check("...and its hello opens it, after ft-screens heard it's there",
+          [m for m in typed() if m.startswith(("fullkb", "vrkeyboard"))], ["fullkb 0", "vrkeyboard show"])
+    from_kb("kbhello 0")
+    check("...once", [m for m in typed() if m.startswith("vrkeyboard")], [])
+    to_relay("action keyboard_toggle")
+    time.sleep(0.1)
+    check("keyboard_toggle with Full Keyboard there: ft-screens' toggle, no start",
+          (len(KB_STARTS), [m for m in typed() if m.startswith("vrkeyboard")]), (1, ["vrkeyboard toggle"]))
+    heard()
     from_kb("kbhello 0")
     check("Full Keyboard's hello: the word back (Steam, nothing shown)", heard(), ["kb 0 0 0"])
     check("...and ft-screens hears it's there", [m for m in typed() if m.startswith("fullkb")], ["fullkb 0"])
@@ -1760,12 +1779,14 @@ def tests():
 
 
 RELAYS = []  # the relay main() makes, for the tests that set its state
+KB_STARTS = []  # the times the relay started the keyboard's unit (kb_revive): never the real one here
 _relay_init = relay.Relay.__init__
 
 
 def _keep_relay(self, *a, **kw):
     RELAYS.append(self)
     _relay_init(self, *a, **kw)
+    self.kb_revive = relay.kb_revive.KeyboardRevive(start=lambda: KB_STARTS.append(1))
 
 
 relay.Relay.__init__ = _keep_relay

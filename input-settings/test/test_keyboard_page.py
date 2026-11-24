@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "input-settings"))
 sys.path.insert(0, str(ROOT / "settings"))
 import ft_input_settings as fis  # noqa: E402
 import ft_settings  # noqa: E402  (Frametop Settings, the window these pages are in)
-from PySide6.QtCore import QObject  # noqa: E402
+from PySide6.QtCore import QMetaObject, QObject  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
@@ -34,7 +34,7 @@ def node(device, name, kinds, role, uinput=False):
 
 
 class Page(unittest.TestCase):
-    def open_page(self, nodes, rules=None):
+    def open_page(self, nodes, rules=None, relay=False):
         """The Keyboard page with these relay nodes: (the hint's text or None if hidden, the
         "Keyboards connected" text, the page's QML warnings)."""
         app = QGuiApplication.instance() or QGuiApplication([])
@@ -44,7 +44,9 @@ class Page(unittest.TestCase):
                 f.write(rules)
             self.addCleanup(os.remove, fis.RULES_PATH)
         b = fis.Backend()
-        b._send = lambda text, to=fis.RELAY: True
+        self.sent = []  # what the page sent the relay
+        b._send = lambda text, to=fis.RELAY: self.sent.append(text) or True
+        b._relay_ok = relay
         b.notifier.setEnabled(False)  # a relay running here answers with its own devices
         b._nodes = nodes
         errors = []
@@ -59,7 +61,8 @@ class Page(unittest.TestCase):
         while time.monotonic() < deadline:
             app.processEvents()
             time.sleep(0.01)
-        root = engine.rootObjects()[0]
+        root = self.root = engine.rootObjects()[0]
+        self.engine = engine  # kept: the page lives as long as it
         hint, counted = root.findChild(QObject, "keyedPointers"), root.findChild(QObject, "keyboardsConnected")
         self.assertIsNotNone(hint, "the Keyboard page didn't open")
         self.assertIsNotNone(root.findChild(QObject, "steamFieldsKeyboard"), "no Steam text fields setting (issue 102)")
@@ -104,6 +107,24 @@ class Page(unittest.TestCase):
             rules='{"devices": {"bt:1": {"role": "combo"}}}')
         self.assertIsNone(hint)
         self.assertEqual(counted, "Pad Keys")
+
+    def test_its_button_sends_the_open_close_action(self):
+        """DEE-379: a keyboard quit from its panel had no way back. The button sends the relay's
+        Open/close keyboard action, which starts it again (input/kb_revive.py)."""
+        _, _, warnings = self.open_page([], relay=True)
+        self.assertEqual(warnings, [])
+        button = self.root.findChild(QObject, "toggleVrKeyboard")
+        self.assertIsNotNone(button, "no Open or close the keyboard button")
+        self.assertTrue(button.property("enabled"))
+        self.sent.clear()
+        QMetaObject.invokeMethod(button, "clicked")
+        self.assertEqual(self.sent, ["action keyboard_toggle"])
+
+    def test_its_button_is_off_without_the_relay_or_with_the_keyboard_set_to_never(self):
+        self.open_page([])
+        self.assertFalse(self.root.findChild(QObject, "toggleVrKeyboard").property("enabled"))
+        self.open_page([], rules='{"vr_keyboard": "never"}', relay=True)
+        self.assertFalse(self.root.findChild(QObject, "toggleVrKeyboard").property("enabled"))
 
 
 if __name__ == "__main__":

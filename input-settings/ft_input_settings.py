@@ -82,7 +82,14 @@ import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
 import ft_store  # noqa: E402  (Frametop's JSON files, read and written safely)
 # GAZE_ACTIONS: gaze mode is a mouse and keyboard feature (docs/gaze-controllers.md).
 # DEFAULT_KEY_BINDINGS: what a rules file without "key_bindings" gets, as the relay reads it.
-from ft_input_actions import ACTION_LABELS, DEFAULT_KEY_BINDINGS, GAZE_ACTIONS, MODIFIERS  # noqa: E402  (the rules file's vocabulary)
+from ft_input_actions import (  # noqa: E402  (the rules file's vocabulary)
+    ACTION_LABELS,
+    DEFAULT_KEY_BINDINGS,
+    GAZE_ACTIONS,
+    KEYS,
+    MODIFIERS,
+    keys_codes,
+)
 # This folder's own modules (pack/pyside-runtime.py loads this file by its path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import input_rules  # noqa: E402  (the rules file and frametop.conf)
@@ -285,12 +292,9 @@ COMMAND = "command:"
 # "run:NAME": the relay runs your command NAME (the Commands page; buttons, controllers and key
 # combinations alike).
 RUN = input_commands.RUN
-# "keys:125+32": the relay taps that key combination where typing goes (Meta+D here; evdev codes
-# as in key_bindings). Set in the rules file by hand for now. The relay's limits (keys_codes): up
-# to 6 keys below 256, none of its KEYS_REFUSED (volume, power, sleep, wake, suspend).
-KEYS = "keys:"
-KEYS_MAX = 6
-KEYS_REFUSED = {113, 114, 115, 116, 142, 143, 205}
+# "keys:125+32" (ft_input_actions' KEYS): the relay taps that key combination where typing goes
+# (Meta+D here; evdev codes as in key_bindings). Set in the rules file by hand for now; the
+# Remote display keys page writes its own. ft_input_actions' keys_codes has the limits.
 # ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
 # runs in a container, where the checkout's path may not be the host's.
 HOST_FT_CMD = ft_commands.CLI_LINK
@@ -333,9 +337,7 @@ def is_run(a):
 
 def is_keys(a):
     """A "keys:" action the relay takes."""
-    parts = a[len(KEYS):].split("+") if a.startswith(KEYS) else []
-    return 0 < len(parts) <= KEYS_MAX and all(p.isascii() and p.isdecimal() and 0 < int(p) < 256
-                                              and int(p) not in KEYS_REFUSED for p in parts)
+    return keys_codes(a) is not None
 
 
 def mapped_keys(rules):

@@ -14,6 +14,7 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 import ft_remote_keys  # noqa: E402  (the table's meaning and its defaults)
+from ft_input_actions import MODIFIERS, release_combo  # noqa: E402
 
 RELEASE_KEYS = "release_keys"
 
@@ -32,16 +33,17 @@ def rows(table, bindings, name, label):
 
 
 def releases(pressed, bindings):
-    """Whether the relay takes pressed as release_keys: bound to it, or a combination bound to
-    it with more modifiers held (one may be stuck too; the relay's release_combo)."""
-    if bindings.get(pressed) == RELEASE_KEYS:
-        return True
+    """Whether the relay takes pressed (a combination pressed_ok takes) as release_keys, the way
+    it reads bindings: a key or modifier alone by its own binding, a right-hand modifier with
+    none of its own by the left one's, and a combination by its own binding, or with none, as a
+    release_keys combination with more modifiers held (one may be stuck too). (The relay does that
+    last for a binding it doesn't know as well, which only a file written by hand has.)"""
     *mods, key = pressed.split("+")
-    for combo, action in bindings.items():
-        *held, last = combo.split("+")
-        if action == RELEASE_KEYS and held and last == key and set(held) <= set(mods):
-            return True
-    return False
+    if not mods and pressed not in bindings:
+        pressed = str(MODIFIERS.get(int(key), key))
+    if pressed in bindings:
+        return bindings[pressed] == RELEASE_KEYS
+    return release_combo(bindings, mods, key) is not None
 
 
 def problem(pressed, sent, bindings, sendable, name):

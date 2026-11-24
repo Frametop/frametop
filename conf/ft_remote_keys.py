@@ -20,11 +20,10 @@ file means. Standard library only, and nothing here reads a file.
 """
 from types import MappingProxyType
 
-from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS, MODIFIERS, TILE_ACTIONS
+from ft_input_actions import DEFAULT_KEY_BINDINGS, GAZE_ACTIONS, MODIFIERS, TILE_ACTIONS, combo_codes
 
 RULES_KEY = "remote_key_bindings"
 META = 125
-KEY_MAX = 256  # BTN_MISC: keys are below it
 
 # What a rules file without the table gets: Frametop's default Meta combinations go to the
 # computer, as every Meta combination did before the table existed (so Super+Space opens the
@@ -36,19 +35,10 @@ DEFAULT = MappingProxyType({combo: combo for combo, action in DEFAULT_KEY_BINDIN
                             and action not in TILE_ACTIONS})
 
 
-def codes(combo):
-    """A combination's key codes, in its order, or None if it isn't codes joined by "+"."""
-    parts = combo.split("+") if isinstance(combo, str) else []
-    # (three digits at most, checked first: a hand-written file's number can be too long for int)
-    if not parts or not all(len(p) <= 3 and p.isascii() and p.isdecimal() and 0 < int(p) < KEY_MAX for p in parts):
-        return None
-    return [int(p) for p in parts]
-
-
 def pressed_ok(combo):
     """Whether the relay can ever see combo pressed: one key or modifier alone, or folded
     modifiers in rising order and then one key that isn't a modifier."""
-    keys = codes(combo)
+    keys = combo_codes(combo)
     if keys is None:
         return False
     *mods, last = keys
@@ -66,4 +56,4 @@ def read(rules, sendable):
     if not isinstance(table, dict):
         return dict(DEFAULT)
     return {pressed: sent for pressed, sent in table.items()
-            if pressed_ok(pressed) and (sent == pressed or (codes(sent) is not None and sendable(sent)))}
+            if pressed_ok(pressed) and (sent == pressed or (combo_codes(sent) is not None and sendable(sent)))}

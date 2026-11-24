@@ -14,6 +14,15 @@ Item {
     // Another page of the app, by its name (settings/ft_settings.py, SECTIONS).
     function show(name) { window.showSection(name) }
     function showPassiveNotification(text, duration) { window.showPassiveNotification(text, duration) }
+    // Another section opened: the page left gives up the key combination it was waiting for (the
+    // Keyboard page's, the Remote display keys page's), so the next keys pressed aren't taken for it.
+    Connections {
+        target: root.window
+        function onCurrentChanged() {
+            if (backend.capturingShortcut) backend.cancelShortcutCapture()
+            backend.remoteKeys.cancelCapture()
+        }
+    }
 
     // The page for a section of the app, by name; null for a name that isn't one of these.
     function page(name) {

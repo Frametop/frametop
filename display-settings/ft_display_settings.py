@@ -1025,9 +1025,14 @@ class Backend(QObject):
 
     @Slot()
     def displaysOnNow(self):
-        """For a pointer that isn't an input device of the Frame's (remote desktop): those are
-        the only ones ft-powerd can't see being used."""
-        self._ipc.ask(FT_POWERD, "on", then=lambda _reply: self._check_powerd(), timeout=0.5)
+        """For remote desktop: its keys and pointer aren't input devices of the Frame's, so
+        ft-powerd can't see them being used."""
+        self._ipc.ask(FT_POWERD, "on", then=self._displays_on, timeout=0.5)
+
+    def _displays_on(self, reply):
+        if not (reply or "").startswith("ok"):
+            self.message.emit("Couldn't turn the displays on: the power service didn't answer", True)
+        self._check_powerd()
 
     def _steam_call(self, what, fn):
         """Runs fn, which talks to Steam (up to a few seconds), off the UI thread, then reads

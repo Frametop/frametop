@@ -69,7 +69,7 @@ VARIABLES
     saved,    \* ~/.cache/frametop/powerd-brightness exists
     pdOff,    \* ft-powerd's off flag
     near,     \* the proximity sensor has something in front of it: a face, or a mount
-    stby,     \* ft-powerd's Standby: "none" | "asked" ("not worn" written) | "held" (SteamVR took it)
+    stby,     \* ft-powerd's Standby: "none" | "asked" ("not worn" written) | "held" (SteamVR has the headset as off)
     mark      \* ~/.cache/frametop/powerd-standby exists
 
 svrVars == <<svr, helper, gaze, hands, game>>
@@ -448,11 +448,8 @@ PowerdGivesUp ==
     /\ WornPart /\ powerd = "up" /\ stby = "asked" /\ ~pAway
     /\ stby' = "none" /\ mark' = FALSE /\ lvl' = "on" /\ t' = IF lvl = "off" THEN 0 ELSE t
     /\ hOff0' = FALSE
-    /\ disp' = IF disp = "on" THEN "darkPd" ELSE disp
-    /\ saved' = IF disp = "on" THEN TRUE ELSE saved
-    /\ pdOff' = IF disp = "on" THEN TRUE ELSE pdOff
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, powerd, pAway,
-                   pFresh, near>>
+                   pFresh, near, disp, saved, pdOff>>
 
 \* Input (and movement, while tracking runs): ft-powerd turns the displays back on, and ends a
 \* standby it asked for by writing "worn", which SteamVR wakes on.

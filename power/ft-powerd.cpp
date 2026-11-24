@@ -47,7 +47,7 @@
 //   status -> "ok on|off|standby|away <seconds since use> <timeout seconds, 0 = never>"
 //             (off: the backlight is off and tracking runs; standby: SteamVR's standby, asked
 //             for by ft-powerd, has paused tracking; away: SteamVR's standby because the
-//             headset came off)
+//             headset came off, whoever has the backlight off)
 //   off    -> "ok": the displays off now, to try it (for 2 s nothing counts as use); also
 //             "ok" while a standby ft-powerd asked for is under way
 //   on     -> "ok": back on
@@ -285,16 +285,18 @@ int main() {
             case Standby::Begin::Ask:
                 // The file first: a kill between the two still leaves the next start a standby to end.
                 MakeCacheDir();
-                if (WriteInt(StandbyPath(), 1) && AskWorn(ctl, false)) {
+                if (!WriteInt(StandbyPath(), 1)) {
+                    std::printf("no standby: %s can't be written\n", StandbyPath().c_str());
+                } else if (AskWorn(ctl, false)) {
                     // The backlight too, now: SteamVR's standby only darkens them 5 s later.
                     std::printf("standby asked for: %s\n", why);
                     turnOff(why);
                     return true;
+                } else {
+                    std::remove(StandbyPath().c_str());
+                    std::printf("no standby: the ft_pointer driver isn't listening\n");
                 }
-                std::remove(StandbyPath().c_str());
                 standby.Abort();
-                std::printf("no standby: the ft_pointer driver isn't listening, or %s can't be written\n",
-                            StandbyPath().c_str());
                 break;
             case Standby::Begin::Testing:
                 std::printf("no standby: the testbench fakes a wearer\n");
@@ -386,9 +388,10 @@ int main() {
                 std::printf("standby: SteamVR has the headset as off\n");
                 break;
             case Standby::Step::Failed:
+                // The backlight has been off since the ask, and stays off. Lit since (the
+                // brightness setting) is someone's doing: not dark again before the next timeout.
                 endStandby("SteamVR didn't take it");
-                turnOff("the backlight instead");
-                if (!off) lastUse = now;  // couldn't: try again after another timeout, not every tick
+                if (!off) lastUse = now;  // or it couldn't be written: no new ask every tick
                 break;
             case Standby::Step::Woke:
                 std::remove(StandbyPath().c_str());
@@ -480,8 +483,13 @@ int main() {
             while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == ' ')) cmd.pop_back();
             if (cmd == "status") {
                 char s[96];
-                std::snprintf(s, sizeof s, "ok %s %.0f %.0f", standby.Holding() && paused ? "standby" : off ? "off" : away ? "away" : "on",
-                              std::chrono::duration<double>(now - lastUse).count(), offAfter);
+                // SteamVR's own standby comes before a backlight ft-powerd turned off in it:
+                // tracking is paused there, and "off" says it runs.
+                const char *state = standby.Holding() && paused ? "standby"
+                                    : away && !standby.Active() ? "away"
+                                    : off ? "off" : away ? "away" : "on";
+                std::snprintf(s, sizeof s, "ok %s %.0f %.0f", state, std::chrono::duration<double>(now - lastUse).count(),
+                              offAfter);
                 reply = s;
             } else if (cmd == "off") {
                 graceUntil = now + std::chrono::seconds(2);

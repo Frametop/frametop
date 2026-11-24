@@ -32,7 +32,7 @@ int main() {
         CHECK(s.Tick(5002, false) == Standby::Step::None);  // SteamVR waking after our write isn't "by itself"
         CHECK(s.Start(6000, true, false) == Standby::Begin::Ask);
     }
-    {  // Use before SteamVR took it: still a "worn" to write.
+    {  // Use before SteamVR has the headset as off: still a "worn" to write.
         Standby s;
         CHECK(s.Start(0, true, false) == Standby::Begin::Ask);
         CHECK(s.Use(2));

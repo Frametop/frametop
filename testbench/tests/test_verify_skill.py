@@ -209,7 +209,7 @@ class VerifySkillTests(unittest.TestCase):
         self.answers[('ft_powerd', 'status')] = 'ok standby 5 300'
         code, out = self.run_main('cleanup', run)
         self.assertEqual((code, 'power' in json.loads(out)['steps']), (0, True))
-        self.assertIn(('ask', 'ft_powerd', 'on'), self.log)
+        self.assertLess(self.log.index(('ask', 'ft_powerd', 'on')), self.log.index(('bench', 'release')))
 
     def test_cleanup_leaves_displays_off_that_were_off_and_reports_leftovers(self):
         self.replies[('power', 'status')] = {'ok': True, 'displays': 'off'}

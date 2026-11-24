@@ -365,8 +365,8 @@ GAZE_SETTINGS = [
 # In gaze mode, what the mouse's left button does (POINTER_GAZE_MOUSE).
 GAZE_MOUSE = {"precision": "Gaze precision: hold to steer with the mouse, release to click",
               "direct": "Click right away where the pointer is"}
-# Key combinations ("key_bindings" in the rules): modifiers, either side folded into the left code.
-MODIFIER_CODES = MODIFIERS
+# Key combinations ("key_bindings" in the rules): modifiers, either side folded into the left code
+# (ft_input_actions' MODIFIERS).
 MODIFIER_NAMES = {29: "Ctrl", 42: "Shift", 56: "Alt", 125: "Meta"}
 # A tap of a right-hand modifier is bound by its own code: that key alone (the relay's modifier_tap).
 RIGHT_MODIFIER_NAMES = {97: "Right Ctrl", 54: "Right Shift", 100: "Right Alt", 126: "Right Meta"}
@@ -704,8 +704,8 @@ class Backend(QObject):
             elif t == "event" and self._capture_then and msg.get("type") == "key":
                 self.activity.emit(msg["id"])
                 code, value = int(msg["code"]), msg["value"]
-                if code in MODIFIER_CODES:
-                    mod = MODIFIER_CODES[code]
+                if code in MODIFIERS:
+                    mod = MODIFIERS[code]
                     if value == 1:
                         self._combo_tap = None if self._combo_mods else mod
                         self._combo_tap_code = code

@@ -38,7 +38,8 @@ DEFAULT = MappingProxyType({combo: combo for combo, action in DEFAULT_KEY_BINDIN
 def codes(combo):
     """A combination's key codes, in its order, or None if it isn't codes joined by "+"."""
     parts = combo.split("+") if isinstance(combo, str) else []
-    if not parts or not all(p.isascii() and p.isdecimal() and 0 < int(p) < KEY_MAX for p in parts):
+    # (three digits at most, checked first: a hand-written file's number can be too long for int)
+    if not parts or not all(len(p) <= 3 and p.isascii() and p.isdecimal() and 0 < int(p) < KEY_MAX for p in parts):
         return None
     return [int(p) for p in parts]
 
@@ -58,10 +59,10 @@ def pressed_ok(combo):
 def read(rules, sendable):
     """The rules' table as {pressed: sent}, or DEFAULT's when the rules have none of their own (an
     empty one counts as its own). An entry the relay couldn't use is left out: a pressed side it
-    never sees, or a sent side that isn't the pressed one and that sendable(sent) refuses (the
-    relay's limits for keys it taps)."""
+    never sees, or a sent side that isn't the pressed one and isn't key codes, or that
+    sendable(sent) refuses (the relay's limits for keys it taps)."""
     table = rules.get(RULES_KEY) if isinstance(rules, dict) else None
     if not isinstance(table, dict):
         return dict(DEFAULT)
     return {pressed: sent for pressed, sent in table.items()
-            if pressed_ok(pressed) and isinstance(sent, str) and (sent == pressed or sendable(sent))}
+            if pressed_ok(pressed) and (sent == pressed or (codes(sent) is not None and sendable(sent)))}

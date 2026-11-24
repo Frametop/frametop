@@ -839,9 +839,9 @@ def tests():
     check("PC has the keys: Meta+J is still Frametop's gaze click, J isn't typed there",
           meta(J), ["key 125 1"] + F24 + ["key 125 0"])
 
-    def pc_table(table):
+    def pc_table(table, key_bindings=None):
         remote_keys["now"] = table
-        use(bindings["now"])
+        use(key_bindings)
         to_relay("keyboard desktop 1 0 1 1")
         time.sleep(0.05)
         frunner_got()
@@ -859,6 +859,7 @@ def tests():
            f"key {SPACE} 0", "key 125 0", f"key {SHIFT} 1", f"key {SHIFT} 0"])
     check("it isn't frunner's, and Meta+J stays the gaze click", (frunner_got(), meta(J)),
           ([], ["key 125 1"] + F24 + ["key 125 0"]))
+    to_relay("keyboard desktop 1 0 1 1")  # (ft-screens renews it; the checks above took a while)
     menus = len(lines(steam_log))
     check("own table without the Meta tap: it's the Steam menu on the PC too",
           (meta(), len(lines(steam_log))), (["key 125 1"] + F24 + ["key 125 0"], menus + 1))
@@ -887,8 +888,61 @@ def tests():
     to_relay("keyboard desktop 1 0 1 1")
     time.sleep(0.05)
     typed()
-    check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space",
-          [m for m in meta(SHIFT, SPACE) if m.split()[1] == str(SPACE)], [f"key {SPACE} 1", f"key {SPACE} 0"])
+    check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space, Shift up meanwhile",
+          meta(SHIFT, SPACE),
+          ["key 125 1", f"key {SHIFT} 1", "key 125 0", f"key {SHIFT} 0", "key 125 1", f"key {SPACE} 1",
+           f"key {SPACE} 0", "key 125 0", f"key {SHIFT} 1", f"key {SHIFT} 0"])
+    # A combination of the user's own that the PC gets as it is: held there as long as it's held.
+    pc_table({"29+125+30": "29+125+30"})
+    key(META, 1); key(CTRL, 1); key(A, 1); key(A, 2)
+    check("Ctrl+Meta+A listed as itself: down on the PC while held (its repeats are the PC's own)", typed(),
+          ["key 125 1", f"key {CTRL} 1", f"key {A} 1"])
+    key(A, 0); key(CTRL, 0); key(META, 0)
+    check("...and up when let go", typed(), [f"key {A} 0", f"key {CTRL} 0", "key 125 0"])
+    # An entry comes before a tile's keys (the rules name it), which are ft-screens' otherwise.
+    pc_table({"42+125+105": "42+125+105"})
+    to_relay("tilefocus 1")
+    time.sleep(0.05)
+    got = [meta(SHIFT, LEFT), meta(LEFT)]
+    check("a tile focused on the PC: the listed Meta+Shift+Left is the PC's, Meta+Left still moves the tile",
+          ([m for g in got for m in g if m.startswith("tile ")], [f"key {LEFT} 1" in g for g in got]),
+          (["tile left"], [True, False]))
+    to_relay("tilefocus 0")
+    # Paused, typing isn't the desktop's (a "keyboard desktop" doesn't count then), so no PC has
+    # the keys and the table rests: nothing is tapped for a combination, it's typed as it is.
+    pc_table({"42+125+57": "125+57"}, {"125+57": "frunner"})
+    pause("on")
+    to_relay("keyboard desktop 1 0 1 1")
+    time.sleep(0.05)
+    typed()
+    check("paused: Meta+Shift+Space is typed as it is, nothing sent in its place",
+          (meta(SHIFT, SPACE), frunner_got()),
+          (["key 125 1", f"key {SHIFT} 1", f"key {SPACE} 1", f"key {SPACE} 0", f"key {SHIFT} 0", "key 125 0"], []))
+    pause("off")
+    # Hold to talk on a modifier: the PC's key if the table lists its tap, Frametop's otherwise.
+    pc_table({"125": "125"}, {"125": "dictate_hold"})
+    dictation()
+    check("Meta bound to dictate_hold, its tap listed for the PC: no dictation, the PC's Meta tap",
+          (meta(), dictation()), (["key 125 1", "key 125 0"], []))
+    pc_table({}, {"125": "dictate_hold"})
+    key(META, 1)
+    check("...not listed: dictation starts on the press on the PC too", dictation(), ["start keyboard"])
+    key(META, 0)
+    check("...and stops on the release", dictation(), ["stop keyboard"])
+    # A right-hand modifier's tap: its own entry comes before the folded one, and so does its own
+    # binding of Frametop's (an entry for a Ctrl tap leaves Right Ctrl's dictation).
+    pc_table({"97": "97"}, {"29": "dictate"})
+    key(RCTRL, 1); key(RCTRL, 0)
+    check("Right Ctrl's own entry: its tap is the PC's, though a Ctrl tap is dictation", dictation(), [])
+    key(CTRL, 1); key(CTRL, 0)
+    check("...and Left Ctrl's still is dictation", dictation(), ["toggle keyboard"])
+    pc_table({"29": "29"}, {"97": "dictate"})
+    key(RCTRL, 1); key(RCTRL, 0)
+    check("a Ctrl tap listed, Right Ctrl bound on its own: Right Ctrl is still dictation", dictation(), ["toggle keyboard"])
+    pc_table({"29": "29"}, {"29": "dictate"})
+    key(RCTRL, 1); key(RCTRL, 0); key(CTRL, 1); key(CTRL, 0)
+    check("a Ctrl tap listed, bound by its left code: either side's tap is the PC's", dictation(), [])
+    typed()
     remote_keys["now"] = None
     use(None)
     to_relay("keyboard desktop 1 0 1 0")

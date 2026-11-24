@@ -103,9 +103,9 @@ A remote display's computer gets the key combinations the rules give it ("remote
 {pressed: sent}, conf/ft_remote_keys.py; Frametop Settings' Remote display keys page) while its
 desktop has the keys (ft-screens' sixth "keyboard" word; pc_keys). One sent as itself isn't
 Frametop's then: it's typed through, so Super+Space opens the computer's launcher, not frunner.
-One sent as another combination is tapped there once on the press, as a keys: action is
-(Meta+Shift+Space can send the computer Meta+Space while Meta+Space stays frunner's); pressed
-needn't be a key combination of Frametop's. Every other combination stays Frametop's there: Meta+J
+One sent as another combination is tapped there once, as a keys: action is, on the press (a lone
+modifier's tap: on its release); Meta+Shift+Space can send the computer Meta+Space while
+Meta+Space stays frunner's. pressed needn't be a key combination of Frametop's. Every other combination stays Frametop's there: Meta+J
 still clicks where you look. A rules file without the table gets ft_remote_keys.DEFAULT, Frametop's
 default Meta combinations but the gaze clicks, each as itself. release_keys never goes to the
 computer, whatever the table says: it's the way out of stuck keys.
@@ -1872,8 +1872,13 @@ class Relay:
 
     def pc_tap(self, mod, code, now):
         """A lone modifier's tap that is a PC's now, as pc_combo gives it, or None. A right-hand
-        key's own entry ("97": Right Ctrl) comes before the folded one, as in tap_action."""
-        own = str(code) if code != mod and str(code) in self.remote_keys else str(mod)
+        key's own entry ("97": Right Ctrl) comes before the folded one, as in tap_action, and so
+        does its own binding of Frametop's: an entry for a Ctrl tap leaves Right Ctrl's dictation."""
+        own = str(code)
+        if code != mod and own not in self.remote_keys:
+            if own in self.rules["key_bindings"]:
+                return None
+            own = str(mod)
         return self.pc_combo(own, now)
 
     def combo_for(self, code):

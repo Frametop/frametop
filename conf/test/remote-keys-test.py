@@ -62,6 +62,16 @@ class Read(unittest.TestCase):
         self.assertEqual(rk.read({"remote_key_bindings": table}, sendable),
                          {"125+57": "125+57", "42+125+57": "125+57"})
 
+    def test_a_number_too_long_to_read_is_no_key(self):
+        # (int() refuses a decimal string past 4300 digits: a hand-written file mustn't stop the relay)
+        huge = "1" * 5000
+        asked = []
+        table = {huge: "57", "125+" + huge: "125+57", "125+57": huge, "125+36": "125+" + huge, "42+125+57": "125+57"}
+        self.assertEqual(rk.read({"remote_key_bindings": table}, lambda sent: asked.append(sent) or True),
+                         {"42+125+57": "125+57"})
+        self.assertEqual(asked, ["125+57"], "a sent side that isn't key codes isn't asked about")
+        self.assertFalse(rk.pressed_ok(huge))
+
     def test_a_combination_sent_as_itself_isnt_asked_about(self):
         self.assertEqual(rk.read({"remote_key_bindings": {"125+115": "125+115"}}, lambda combo: False),
                          {"125+115": "125+115"})

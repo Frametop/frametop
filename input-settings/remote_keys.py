@@ -31,11 +31,22 @@ def rows(table, bindings, name, label):
     return out
 
 
+def releases(pressed, bindings):
+    """Whether the relay takes pressed as release_keys: that combination, or it with more
+    modifiers held (one may be stuck too; the relay's release_combo)."""
+    *mods, key = pressed.split("+")
+    for combo, action in bindings.items():
+        *held, last = combo.split("+")
+        if action == RELEASE_KEYS and held and last == key and set(held) <= set(mods):
+            return True
+    return False
+
+
 def problem(pressed, sent, bindings, sendable, name):
     """Why pressed can't go to the computer as sent ("" when it can)."""
     if not ft_remote_keys.pressed_ok(pressed):
         return "That isn't a key combination a keyboard can press."
-    if bindings.get(pressed) == RELEASE_KEYS:
+    if releases(pressed, bindings):
         return f"{name(pressed)} lets go of every key, for one stuck on the computer too: it always stays Frametop's."
     if sent != pressed and not sendable(sent):
         return f"{name(sent)} can't be sent: volume, power and sleep keys stay on the headset."
@@ -62,7 +73,7 @@ class RemoteKeys(QObject):
 
     rules(): the input rules as they read now. edit(change): change them under the file's lock
     and tell the relay (Backend._edit_rules); it returns not_saved when that failed, having said
-    why. capture(then, dropped) takes the next key combination pressed on any keyboard, and
+    why. Whoever made this calls refresh() when the rules change, after an edit from here too. capture(then, dropped) takes the next key combination pressed on any keyboard, and
     cancel() gives that up. bindings(rules) is Frametop's own key combinations, name(combo) and
     label(action) say them, sendable(combo) is the relay's limit on keys it taps, and
     say(text, is_error) shows a line in the window."""
@@ -79,8 +90,10 @@ class RemoteKeys(QObject):
         self._capturing = ""  # "pressed" or "sent" while that side is being captured
 
     def refresh(self):
-        """The rules changed elsewhere (a combination bound on the Keyboard page): read them again."""
+        """The rules changed, here or elsewhere (a combination bound on the Keyboard page): the
+        list and what's wrong with the new entry are read again."""
         self.changed.emit()
+        self.draftChanged.emit()
 
     @Property("QVariantList", notify=changed)
     def rows(self):
@@ -122,16 +135,18 @@ class RemoteKeys(QObject):
         """Take the next key combination pressed as the new entry's "pressed" or "sent" side."""
         if side not in ("pressed", "sent"):
             return
-        self._capturing = side
-        self.draftChanged.emit()
         self._capture(lambda combo: self._captured(side, combo), self._capture_dropped)
+        self._capturing = side  # (after: taking a capture drops this page's earlier one, which clears it)
+        self.draftChanged.emit()
 
     def _captured(self, side, combo):
         self._capturing = ""
         if side == "pressed":
             self._pressed = combo
         else:
-            self._sent = "" if combo == self._pressed else combo
+            self._sent = combo
+        if self._sent == self._pressed:
+            self._sent = ""  # the same keys
         self.draftChanged.emit()
 
     def _capture_dropped(self):
@@ -159,7 +174,6 @@ class RemoteKeys(QObject):
             return
         self._pressed, self._sent = "", ""
         self.draftChanged.emit()
-        self.changed.emit()
         self._say(f"{self._name(pressed)} goes to the computer" + ("" if sent == pressed else f" as {self._name(sent)}"),
                   False)
 
@@ -167,7 +181,6 @@ class RemoteKeys(QObject):
     def remove(self, pressed):
         if self._edit(lambda rules: drop(rules, pressed, self._sendable)) is self._not_saved:
             return
-        self.changed.emit()
         self._say(f"{self._name(pressed)} stays Frametop's on a remote display", False)
 
     @Slot()
@@ -175,5 +188,4 @@ class RemoteKeys(QObject):
         """Back to the defaults: the rules lose their own table."""
         if self._edit(lambda rules: rules.pop(ft_remote_keys.RULES_KEY, None)) is self._not_saved:
             return
-        self.changed.emit()
         self._say("Remote display keys: back to the defaults", False)

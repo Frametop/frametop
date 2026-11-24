@@ -120,9 +120,9 @@ Kirigami.ScrollablePage {
 
     footer: Ft.HelpFooter {
         text: "This applies while the 3D mouse is on a remote display and you type there. Keys the computer gets as "
-              + "they are stay down as long as you hold them. Other keys are tapped once when you press yours, so "
-              + "Meta+Shift+Space can open the computer's launcher (Meta+Space there) while Meta+Space stays "
-              + "frunner's. A combination Frametop does nothing with reaches the computer anyway; list it only to "
+              + "they are stay down as long as you hold them. Other keys are tapped once when you press yours (a "
+              + "modifier's tap: when you let it go), so Meta+Shift+Space can open the computer's launcher "
+              + "(Meta+Space there) while Meta+Space stays frunner's. A combination Frametop does nothing with reaches the computer anyway; list it only to "
               + "send other keys. Hold the modifiers (Ctrl, Alt, Shift, Meta), then press the key, or tap one "
               + "modifier on its own. Ctrl+Alt+Shift+Esc always stays Frametop's: it lets go of every key, for one "
               + "stuck on the computer too. Frametop's own combinations are on the Keyboard page."

@@ -7,6 +7,7 @@ Kirigami too; the image's python3).
 Run: python3 input-settings/test/test_remote_keys.py"""
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -23,7 +24,7 @@ import ft_input_settings as fis  # noqa: E402
 import ft_remote_keys  # noqa: E402  (ft_input_settings put conf/ on the path)
 import ft_settings  # noqa: E402  (Frametop Settings, the window the page is in)
 import remote_keys  # noqa: E402
-from PySide6.QtCore import QObject  # noqa: E402
+from PySide6.QtCore import QMetaObject, QObject  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
@@ -37,6 +38,16 @@ def name(combo):
 
 def sendable(combo):
     return str(VOLUME_UP) not in combo.split("+")
+
+
+def press(backend, *codes):
+    """A combination pressed and let go, as the relay's watch events to a Backend."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as relay:
+        for value, order in ((1, codes), (0, codes[::-1])):
+            for code in order:
+                event = {"t": "event", "type": "key", "id": "usb:test", "code": code, "value": value}
+                relay.sendto(json.dumps(event).encode(), backend.sock.getsockname())
+    backend._read()
 
 
 class Logic(unittest.TestCase):
@@ -57,6 +68,14 @@ class Logic(unittest.TestCase):
         self.assertIn("always stays Frametop's", remote_keys.problem("29+42+56+1", "29+42+56+1", bound, sendable, name))
         self.assertIn("can't be sent", remote_keys.problem("125+57", "125+115", bound, sendable, name))
         self.assertNotEqual(remote_keys.problem("57+125", "125+57", bound, sendable, name), "")
+
+    def test_release_keys_with_more_modifiers_held_is_refused_too(self):
+        # The relay lets go of every key for Ctrl+Alt+Shift+Esc with Meta held as well (one may be stuck).
+        bound = {"29+42+56+1": "release_keys", "125+57": "frunner"}
+        self.assertTrue(remote_keys.releases("29+42+56+125+1", bound))
+        self.assertIn("always stays Frametop's", remote_keys.problem("29+42+56+125+1", "125+57", bound, sendable, name))
+        for other in ("29+42+1", "29+42+56+57", "1", "125+57"):
+            self.assertFalse(remote_keys.releases(other, bound), other)
 
     def test_the_first_change_keeps_the_defaults(self):
         rules = {}
@@ -99,13 +118,7 @@ class Backend(unittest.TestCase):
             return json.load(f)
 
     def press(self, *codes):
-        """A combination pressed and let go, as the relay's watch events."""
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as relay:
-            for value, order in ((1, codes), (0, codes[::-1])):
-                for code in order:
-                    event = {"t": "event", "type": "key", "id": "usb:test", "code": code, "value": value}
-                    relay.sendto(json.dumps(event).encode(), self.b.sock.getsockname())
-        self.b._read()
+        press(self.b, *codes)
 
     def test_the_list_starts_as_the_defaults(self):
         self.assertTrue(self.keys.isDefault)
@@ -154,6 +167,39 @@ class Backend(unittest.TestCase):
         self.keys.capture("sent")
         self.press(META, SPACE)
         self.assertEqual(self.keys.sentLabel, "", "the pressed keys captured as the sent ones are the same keys")
+
+    def test_the_pressed_keys_set_again_as_the_other_ones_are_the_same_keys(self):
+        self.keys.capture("pressed")
+        self.press(META, SHIFT, SPACE)
+        self.keys.capture("sent")
+        self.press(META, SPACE)
+        self.keys.capture("pressed")
+        self.press(META, SPACE)
+        self.assertEqual((self.keys.pressed, self.keys.sentLabel), ("125+57", ""))
+
+    def test_one_side_captured_over_the_other(self):
+        self.keys.capture("pressed")
+        self.keys.capture("sent")
+        self.assertEqual(self.keys.capturing, "sent")
+        self.press(META, SPACE)
+        self.assertEqual((self.keys.capturing, self.keys.pressed, self.keys.sentLabel), ("", "", "Meta+Space"))
+
+    def test_a_binding_changed_elsewhere_changes_whats_wrong_with_the_new_entry(self):
+        self.keys.capture("pressed")
+        self.press(META, SPACE)
+        self.assertEqual(self.keys.problem, "")
+        seen = []
+        self.keys.draftChanged.connect(lambda: seen.append(1))
+        self.b._edit_rules(lambda rules: rules["key_bindings"].update({"125+57": "release_keys"}))
+        self.assertTrue(seen)
+        self.assertIn("always stays Frametop's", self.keys.problem)
+
+    def test_a_change_is_told_once(self):
+        seen = []
+        self.keys.changed.connect(lambda: seen.append(1))
+        self.keys.remove("125+57")
+        self.keys.reset()
+        self.assertEqual(len(seen), 2)
 
     def test_release_keys_and_volume_keys_are_refused(self):
         before = self.rules()
@@ -207,6 +253,15 @@ class Backend(unittest.TestCase):
 
 
 class Page(unittest.TestCase):
+    def test_everything_the_page_asks_its_object_for_is_there(self):
+        # Qt says nothing when a binding names something the object lost (test_qml_backend.py
+        # checks "backend.X"; this page reads "page.keys.X", the Backend's remoteKeys).
+        qml = (ROOT / "input-settings" / "RemoteKeysPage.qml").read_text()
+        asked = set(re.findall(r"\bpage\.keys\.(\w+)", qml))
+        self.assertGreaterEqual(asked, {"rows", "capture", "add", "remove", "reset", "problem"})
+        self.assertEqual(sorted(n for n in asked if not hasattr(remote_keys.RemoteKeys, n)), [])
+        self.assertTrue(hasattr(fis.Backend, "remoteKeys"))
+
     def test_it_opens_and_shows_the_list(self):
         app = QGuiApplication.instance() or QGuiApplication([])
         os.makedirs(os.path.dirname(fis.RULES_PATH), exist_ok=True)
@@ -238,6 +293,29 @@ class Page(unittest.TestCase):
         b.remoteKeys.reset()
         settle()
         self.assertFalse(none.property("visible"), "the defaults are listed")
+        # The new entry's buttons: the keys you press, other keys for the computer, then Add.
+        press_, send, problem = (root.findChild(QObject, n) for n in ("remoteKeysPress", "remoteKeysSend",
+                                                                      "remoteKeysProblem"))
+        self.assertIsNotNone(root.findChild(QObject, "remoteKeysIntro"))
+        QMetaObject.invokeMethod(press_, "clicked")
+        settle()
+        self.assertEqual((b.remoteKeys.capturing, send.property("enabled")), ("pressed", False))
+        press(b, CTRL, ALT, SHIFT, ESC)
+        settle()
+        self.assertEqual((add.property("enabled"), problem.property("visible")), (False, True))
+        QMetaObject.invokeMethod(press_, "clicked")
+        press(b, META, SHIFT, SPACE)
+        QMetaObject.invokeMethod(send, "clicked")
+        settle()
+        self.assertEqual((b.remoteKeys.capturing, press_.property("enabled")), ("sent", False))
+        press(b, META, SPACE)
+        settle()
+        self.assertEqual((add.property("enabled"), problem.property("visible")), (True, False))
+        QMetaObject.invokeMethod(add, "clicked")
+        settle()
+        with open(fis.RULES_PATH) as f:
+            self.assertEqual(json.load(f)["remote_key_bindings"].get("42+125+57"), "125+57")
+        self.assertFalse(add.property("enabled"), "added: the new entry is empty again")
         mine = [e for e in errors if "RemoteKeysPage.qml" in e and "not placed in the graphics scene" not in e]
         self.assertEqual(mine, [])
 

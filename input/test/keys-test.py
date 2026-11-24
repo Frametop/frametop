@@ -667,6 +667,23 @@ def tests():
     key(A, 1); key(A, 0); key(ALT, 0); key(CTRL, 0)
     check("...still held, then a key that's typed: the desktop gets them back first, and their releases",
           typed(), ["key 29 1", "key 56 1", f"key {A} 1", f"key {A} 0", "key 56 0", "key 29 0"])
+    key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(T, 1); key(T, 0); typed()
+    key(A, 1); key(A, 0); key(ALT, 0); key(CTRL, 0)
+    check("...a second tap that has one of them (Ctrl+T) in between: both still come back for the key",
+          typed(), ["key 29 1", "key 56 1", f"key {A} 1", f"key {A} 0", "key 56 0", "key 29 0"])
+    key(CTRL, 1); key(RCTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(ALT, 0); key(RCTRL, 0); typed()
+    HELD[kb_r].discard(CTRL)  # the keyboard lets go of Left Ctrl, and its release never comes
+    time.sleep(1.2)  # the relay's once-a-second check (reconcile_desktop_keys)
+    key(A, 1); key(A, 0)
+    check("...one whose release never comes is forgotten: the next key is typed without it", typed(),
+          [f"key {A} 1", f"key {A} 0"])
+    key(CTRL, 1, ms_w); typed(), emitted()
+    to_relay("vrbtn right/b 1"); to_relay("vrbtn right/b 0")
+    time.sleep(0.1)
+    check("a mouse's Ctrl held, the controller's keys: action: Ctrl comes up for the tap", typed(), ["key 29 0"] + meta_d)
+    key(CTRL, 0, ms_w); typed(), emitted()
+    key(A, 1); key(A, 0)
+    check("...and once the mouse lets go of it, the next key is typed without it", typed(), [f"key {A} 1", f"key {A} 0"])
     key(CTRL, 1); key(ALT, 1); key(F, 1); key(F, 0); key(ALT, 0); key(CTRL, 0)
     check("a volume key in keys: makes it no action: the combination is typed", typed(),
           ["key 29 1", "key 56 1", "key 33 1", "key 33 0", "key 56 0", "key 29 0"])

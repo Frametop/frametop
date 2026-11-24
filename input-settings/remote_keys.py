@@ -36,7 +36,8 @@ def releases(pressed, bindings):
     """Whether the relay takes pressed (a combination pressed_ok takes) as release_keys, the way
     it reads bindings: a key or modifier alone by its own binding, a right-hand modifier with
     none of its own by the left one's, and a combination by its own binding, or with none, as a
-    release_keys combination with more modifiers held (one may be stuck too)."""
+    release_keys combination with more modifiers held (one may be stuck too). (The relay does that
+    last for a binding it doesn't know as well, which only a file written by hand has.)"""
     *mods, key = pressed.split("+")
     if not mods and pressed not in bindings:
         pressed = str(MODIFIERS.get(int(key), key))

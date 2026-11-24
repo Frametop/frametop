@@ -1751,6 +1751,7 @@ class Relay:
         held = sorted(c for c in self.held.desktop if c in MODIFIERS) if desktop else []
         lift = [c for c in held if c not in codes]
         own = self.typed_down() if lift else ()
+        lifted = set(self.held.lifted)  # (kept: one an earlier tap lifted that this one taps is still held)
         for code in lift:
             self.to_screens(code, 0)
         for value, order in ((1, codes), (0, codes[::-1])):
@@ -1761,7 +1762,8 @@ class Relay:
             if code in own:
                 self.to_screens(code, 1)
             else:
-                self.held.lifted.add(code)
+                lifted.add(code)
+        self.held.lifted = lifted
         log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):
@@ -1984,7 +1986,9 @@ class Relay:
                 return  # ft-screens not running
             (self.held.desktop.add if value else self.held.desktop.discard)(code)
             if not value:
-                self.held.lifted.discard(code)  # (its release, by a way that isn't key_binding: a mouse's key)
+                # Any release ends a "keys:" tap's mark, a mouse's key's too, which key_binding never
+                # sees: a mark left behind would put the modifier down again with nobody holding it.
+                self.held.lifted.discard(code)
 
     def type_text(self, text, quiet=False):
         """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
@@ -2207,7 +2211,7 @@ class Relay:
         its device vanishes with it held (release_held only lets go of it here) or a release
         goes astray: on 2026-10-01, after a calibration, Meta stayed down in KWin, so typing
         opened the overview and clicks on the desktop did other things."""
-        if not self.held.desktop and not self.held.meta and not self.held.modifiers:
+        if not self.held.desktop and not self.held.meta and not self.held.modifiers and not self.held.lifted:
             return
         down = self.physically_down()
         for code in sorted(self.held.desktop - down - self.typed_down()):

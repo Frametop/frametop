@@ -293,8 +293,8 @@ COMMAND = "command:"
 # combinations alike).
 RUN = input_commands.RUN
 # "keys:125+32" (ft_input_actions' KEYS): the relay taps that key combination where typing goes
-# (Meta+D here; evdev codes as in key_bindings). Set in the rules file by hand for now, but for
-# the Remote display keys page's. ft_input_actions' keys_codes has the limits.
+# (Meta+D here; evdev codes as in key_bindings). Set in the rules file by hand for now; the
+# Remote display keys page writes its own. ft_input_actions' keys_codes has the limits.
 # ft-cmd on the host: the relay links it there at its start (ft_commands.refresh), and this app
 # runs in a container, where the checkout's path may not be the host's.
 HOST_FT_CMD = ft_commands.CLI_LINK

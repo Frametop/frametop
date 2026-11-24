@@ -136,7 +136,7 @@ struct Screen {
     vr::TrackedDeviceIndex_t barPressDevice = kNone;
     Mat barPressFrom{};                       // the device's laser then
     double barPressAlong = 0;                 // where along the bar (m from its middle): a tap's menu opens there
-    bool barCarry = false;                    // the move under way began on the bar (the catcher takes its release)
+    bool barCarry = false;                    // the move under way began on the bar or its menu's Move All Windows (the catcher takes its release)
     unsigned handHover = 0;                   // ...a hand's pinch point is near them (bit k: control k)
     bool lasers = true;                       // MakeOverlaysInteractiveIfVisible is set
     float controls = 0;                       // the controls' fade, 0 (hidden) .. 1
@@ -367,7 +367,7 @@ void SetTileAtBar(bool on);   // DASH_TILE_AT_BAR: the wall at Steam's bar (tile
 void RetileDash();
 bool TileGroup(Mat *out);             // the tiles' group frame in the room (false: the dashboard has no place yet)
 void TileGroupTo(const Mat &world);   // ...there now, and everything on the dashboard with it
-// Moved there by hand (Move All Windows) and let go, the head at `head` (null: not moved): it stays (tilekeep.h).
+// Moved there by hand (Move All Windows) and let go, the head at `head` (null: no telling, so it comes round you): it stays (tilekeep.h).
 void TileGroupPut(const Mat *head);
 void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
@@ -438,6 +438,7 @@ void UpdateLayoutGrab();   // each tick: every panel it moves where the laser ha
 bool LayoutCarrying();     // it's on
 bool LayoutMoves(int i);   // ...and moves that panel
 void LayoutShifted();      // the room's panels were moved under it (ShiftRoom)
+void LayoutLetGo(const char *why);   // let go where it is, if it's on (paused, a reset, a panel it moves placed by a command)
 
 // ---------------------------------------------------------------- vr.cpp's, for the layout's carry
 

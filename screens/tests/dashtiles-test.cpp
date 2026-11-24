@@ -193,6 +193,17 @@ int main() {
         const double steady = b.PanDeg();
         b.Arrange(desk);
         check("pan: arranged again unchanged: still", near(b.PanDeg(), steady, 1e-9));
+        {   // the only one showing hides (Steam's page with the dashboard closed) and comes back: where it was
+            dashtiles::Board d;
+            d.Anchor(1, -1, dashtiles::Stay::Default), d.Anchor(2, -1, dashtiles::Stay::Default);
+            d.absent = {1};
+            d.Arrange(desk), d.Recentre(2), d.Arrange(desk);
+            const double was = d.PlacedOf(2)->azDeg, turned = d.PanDeg();
+            d.absent = {1, 2}, d.Arrange(desk);
+            check("pan: nothing shows: turned as it was", near(d.PanDeg(), turned, 1e-9));
+            d.absent = {1}, d.Arrange(desk);
+            check("pan: the only one showing hid and came back: where it was", near(d.PlacedOf(2)->azDeg, was, 0.5));
+        }
         b.Recentre();
         b.Arrange(desk);
         check("pan: recentred: the centre display straight ahead (moves left it off to one side)",

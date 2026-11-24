@@ -600,6 +600,7 @@ private:
                     if (!std::isnan(movedAz_)) alone = tiling::WrapNear(movedAz_ - p.azDeg, 0);
                     continue;
                 }
+                if (absent.count(p.id)) continue;   // (no width: it has no place to keep, only its column's edge)
                 for (const tiling::Placed &q : last_.tiles)
                     if (q.id == p.id) {
                         auto [it, added] = vote.try_emplace(p.col, -1.0, 0.0);
@@ -612,6 +613,7 @@ private:
                 std::sort(want.begin(), want.end());   // the middle of two, both sides make room)
                 pan = (want[(n - 1) / 2] + want[n / 2]) / 2;
             } else if (!std::isnan(alone)) pan = alone;
+            else if (l.az1 - l.az0 < 1e-6) return pan;   // (nothing shows: turned as it was, for when something does again)
         }
         return std::clamp(pan, -l.az1, -l.az0);
     }

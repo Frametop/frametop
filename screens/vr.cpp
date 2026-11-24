@@ -1729,6 +1729,7 @@ void BeginResizeFacing(Screen &s, const Mat &p) {
 bool HandRay(uint32_t d);
 void StartDrag(Screen &s, Drag mode, vr::TrackedDeviceIndex_t dev) {
     if (mode == Drag::Resize && s.glueTo >= 0) return;   // (sized by what it's glued to: UpdateCorner)
+    if (s.layoutHeld) return;   // (Move All Windows has it till it's let go: another laser on its corner or bar)
     Mat d, p;
     if (dev == kNone || !DevicePose(dev, &d) || !ScreenPose(s, &p)) {
         std::printf("screen %d: %s not started: no pose for the %s or the screen\n", ScreenIndexOf(s) + 1,
@@ -6549,7 +6550,7 @@ static bool CarryWheel(vr::TrackedDeviceIndex_t dev, double notches) {
             if (notches != 0) BarCarry(s, "the wheel");
         }
     for (auto &[i, s] : g_screens)
-        if ((s.toggleCarry || ((s.barCarry || s.layoutHeld) && s.drag == Drag::Move)) && s.dragDevice == dev) return Push(s, notches), true;
+        if ((s.toggleCarry || (s.barCarry && s.drag == Drag::Move)) && s.dragDevice == dev) return Push(s, notches), true;
     return waits;
 }
 extern "C++" bool ftvr::CarryScroll(const vr::VREvent_t &ev) {
@@ -7575,6 +7576,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         // An anchored panel's place is the dashboard tiles' ("anchor N off" first): a profile or a reset
         // placing every screen leaves it where it is.
         if (TileAnchored(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");
+        if (LayoutMoves(n - 1)) LayoutLetGo("a panel placed by a command");
         EndDrag(*s);
         g_spin.base.erase(n - 1);
         s->dashWait = false;
@@ -7679,6 +7681,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         Mat m{};
         for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = r[k];
         if (TileAnchored(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");   // (as place)
+        if (LayoutMoves(n - 1)) LayoutLetGo("a panel placed by a command");
         EndDrag(*s);
         g_spin.base.erase(n - 1);
         s->dashWait = false;
@@ -7840,6 +7843,7 @@ static void VisibilityCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
                 std::printf("%s\n", on ? "paused for a VR game: everything hidden, KWin slowed down" : "resumed");
             if (on && !g_paused) {   // a carry doesn't go on through a game (the helper would keep the laser)
                 CarryLetGo("paused");
+                LayoutLetGo("paused");
                 CarryFollowEnd();
                 g_carryPending.panel = -1;   // a "carry take" from just before doesn't start after the game
                 if (g_carryTurnOn) SendPointer("carry turn off"), g_carryTurnOn = false;

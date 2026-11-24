@@ -168,6 +168,20 @@ static void startsOverhead() {
     check("...and it slides", same(g.Pose(4), there) && same(g.Pose(5), moved));
 }
 
+// The poses lost a while mid-carry (a universe's jump is one such).
+static void posesLost() {
+    const M head = headAt(0, 1.6, 0);
+    Grab<M> g;
+    g.Begin(1, around(head, 0, 2), head);
+    g.Take(1, around(head, 0, 2)), g.Take(2, around(head, 40, 2));
+    g.Lose();
+    const M step = g.Move(around(head, -30, 2), head);
+    check("poses back after a loss: what's on its way stays on it (that went with the poses)", same(step, Identity<M>()));
+    check("...and the set is at the hand", same(g.Pose(1), around(head, -30, 2)) && same(g.Pose(2), around(head, 10, 2)));
+    const M next = g.Move(around(head, -40, 2), head);
+    check("...the next step is the hand's again", same(Mul(next, around(head, -30, 2)), around(head, -40, 2)));
+}
+
 static void noDrift() {
     const M head = headAt(0.1, 1.5, 0.4);
     const M start = around(head, 0, 2), other = around(head, -70, 2.5, 0.3);
@@ -186,6 +200,7 @@ int main() {
     heldMeanwhile();
     overhead();
     startsOverhead();
+    posesLost();
     noDrift();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;

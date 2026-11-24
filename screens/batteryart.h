@@ -31,7 +31,7 @@ inline void Draw(std::vector<uint8_t> &px, int w, int h, int x0, int cy, const b
     const int in = kEdge + kGap, fill = FillWidth(r.percent);
     if (fill > 0)
         ftvr::FillRect(px, w, h, x0 + in, y0 + in, x0 + in + fill, y0 + kH - in,
-                       battery::Low(r) ? red : battery::Charging(battery::Of(r)) ? green : ink);
+                       battery::Low(r) ? red : battery::Charging(r.state) ? green : ink);
 }
 
 }  // namespace batteryart

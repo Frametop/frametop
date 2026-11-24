@@ -64,14 +64,17 @@ inline bool CoreZone(const char *type) {
     return type && std::strncmp(type, "cpu", 3) == 0 && type[3] >= '0' && type[3] <= '9';
 }
 
-// The CPU's temperature from its cores' sensors: their average, -1000 with none. Not the hottest (user,
+// The CPU's temperature: its core sensors' average (a core has one to three), those that read a
+// temperature; -1000 with none. Not the hottest (user,
 // 2026-11-24: "we might be using a deceptive temp sensor, the headset doesn't appear to be throttling but
 // is showing high 90"): that's one spot of one core, 10 C up or down within a second, and the chip's own
 // limiter holds it at 95 for next to no speed while the other cores are near 80.
 inline double CpuTemp(const double *cores, int n) {
     double sum = 0;
-    for (int i = 0; i < n; ++i) sum += cores[i];
-    return n > 0 ? sum / n : -1000;
+    int read = 0;
+    for (int i = 0; i < n; ++i)
+        if (cores[i] > 0) sum += cores[i], ++read;
+    return read ? sum / read : -1000;
 }
 
 // The card's four readouts (empty: not known yet, shown as a dash).

@@ -408,7 +408,7 @@ void DestroyQuickAccess();
 // The palm card's readouts (sysstats.h), read again when a second has passed; ForgetStats when it hides,
 // so the next show's CPU is over a fresh second.
 const sysstats::Words &SystemStats(int64_t nowMs);
-// ...and its battery line (battery.h), read with them.
+// ...and its battery line (battery.h), read every other second.
 const battery::Reading &BatteryNow(int64_t nowMs);
 void ForgetStats();
 

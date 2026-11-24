@@ -184,6 +184,7 @@ void DrawBattery(const battery::Reading &r, int cx, int cy) {
 bool DrawHead() {
     using namespace quickaccess;
     std::string a, b;
+    battery::Reading bat;
     if (g_card.settings) {
         a = "Quick Settings";
         b = g_card.toggles.empty() ? "Pick them in Frametop Settings" : "";
@@ -192,8 +193,8 @@ bool DrawHead() {
         auto or_dash = [](const std::string &s, const char *name) { return s.empty() ? std::string(name) + " \xe2\x80\x93" : s; };
         a = or_dash(w.cpu, "CPU") + "    " + or_dash(w.gpu, "GPU");
         b = or_dash(w.mem, "Mem") + "    " + (w.temp.empty() ? std::string("\xe2\x80\x93 \xc2\xb0" "C") : w.temp);
+        bat = BatteryNow(NowMs());
     }
-    const battery::Reading &bat = BatteryNow(NowMs());
     const std::string text = a + "\n" + b + (g_card.settings ? "" : "\n" + battery::Say(bat));
     if (text == g_card.head) return false;
     int x0, y0, x1, y1;

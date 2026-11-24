@@ -255,7 +255,7 @@ def check_readouts(supplies="/sys/class/power_supply", zones="/sys/class/thermal
         ("battery capacity", any(text(d + "/capacity") for d in batteries)),
         ("battery voltage_now", any(text(d + "/voltage_now") for d in batteries)),
         ("battery current_avg", any(text(d + "/current_avg") for d in batteries)),
-        ("charger online", any(text(d + "/online") for d in own if d not in batteries)),
+        ("charger online", any(text(d + "/online").isdigit() for d in own if d not in batteries)),
     ) if not there]
     if missing:
         report("warn", "palm menu readouts", f"no {', no '.join(missing)}: it shows a dash or a wrong state")

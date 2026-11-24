@@ -68,18 +68,22 @@ def remember_commands(saved, keys):
 def restore(ask, saved, panels, keys=None):
     """Puts a profile's tiles back. Returns ft-screens' replies to the sets. (An ft-screens older
     than `tiles remember` refuses that one: the tiles connected now still go back. A tile it
-    refuses doesn't stop the ones after it.)"""
+    refuses doesn't stop the ones after it. One it doesn't answer ends what's told to its memory;
+    the sets are still tried, and say so themselves if it's gone.)"""
     first, *tiles = remember_commands(saved, keys or {})
-    if _refused(ask, first):
-        tiles = []
-    for command in tiles:
-        _refused(ask, command)
+    try:
+        if _refused(ask, first):
+            tiles = []
+        for command in tiles:
+            _refused(ask, command)
+    except RuntimeError:   # (no answer, raised on by _refused)
+        pass
     return [ask(c) for c in commands(saved, panels)]
 
 
 def _refused(ask, command):
     """Asks ft-screens one thing; whether it refused it. No answer at all (ask's own kind of
-    RuntimeError, ft_layout's NoAnswer) isn't a refusal: it's raised on, so a restore doesn't wait
+    RuntimeError, ft_layout's NoAnswer) isn't a refusal: it's raised on, so restore doesn't wait
     out every tile of an ft-screens that hangs."""
     try:
         ask(command)

@@ -89,20 +89,25 @@ class Pure(unittest.TestCase):
         layout_tiles.restore(ask, [["screen:1", TILE], ["screen:2", SAT]], {}, keys)
         self.assertIn(f"tiles remember screen:2 {SAT}", asked)
 
-    def test_no_answer_stops_it_at_the_first_wait(self):
+    def test_no_answer_ends_the_memory_part_and_the_sets_still_go(self):
         class NoAnswer(RuntimeError):   # (ft_layout's: nobody there, after a 10 s wait)
             pass
         asked = []
 
         def ask(text):
             asked.append(text)
-            if len(asked) > 1:
+            if len(asked) == 2:   # (one stall, a SteamVR hitch: it answers again after)
                 raise NoAnswer("ft-screens didn't answer")
-            return "ok"
+            return "ok 1 set" if text.startswith("tiles set") else "ok"
         keys = {f"screen:{i}": f"screen:{i}" for i in range(8)}
-        with self.assertRaises(NoAnswer):
-            layout_tiles.restore(ask, [[k, TILE] for k in keys], {}, keys)
-        self.assertEqual(len(asked), 2)
+        replies = layout_tiles.restore(ask, [[k, TILE] for k in keys], {1: "screen:1"}, keys)
+        self.assertEqual(asked, ["tiles remember", f"tiles remember screen:0 {TILE}", f"tiles set 1 {TILE}"])
+        self.assertEqual(replies, ["ok 1 set"])
+
+        def gone(text):
+            raise NoAnswer("ft-screens didn't answer")
+        with self.assertRaises(NoAnswer):   # (not there at all: the sets say so)
+            layout_tiles.restore(gone, [["screen:1", TILE]], {1: "screen:1"}, keys)
 
     def test_older_ft_screens_still_takes_the_set(self):
         asked = []

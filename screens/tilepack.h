@@ -144,8 +144,9 @@ inline Fill FillOf(const std::vector<Item> &deskUp, double gapDeg, double widest
 // right with the widest in the middle and the rest alternately right and left of it. Widest first,
 // each goes where it adds the least height (beside others on a shelf: maybe none), then on the
 // lowest column, among those it fits; else a column of its own. One with no size (not shown) gets
-// a column of its own: those come last, so they're at the ends.
-inline std::vector<std::vector<int>> Pack(std::vector<Item> items, double gapDeg, Fits fits = AsIs, const void *ctx = nullptr) {
+// a column of its own: those come last, so they're at the ends. `centre`'s column is the middle one
+// whatever it is (dashtiles.h's centre display; -1: none).
+inline std::vector<std::vector<int>> Pack(std::vector<Item> items, double gapDeg, Fits fits = AsIs, const void *ctx = nullptr, int centre = -1) {
     std::stable_sort(items.begin(), items.end(), [](const Item &a, const Item &b) { return a.wDeg > b.wDeg; });
     struct Col {
         Fill fill;
@@ -168,6 +169,8 @@ inline std::vector<std::vector<int>> Pack(std::vector<Item> items, double gapDeg
         Put(&c.fill, it, gapDeg);
         c.ids.push_back(it.id);
     }
+    const auto mid = std::find_if(cols.begin(), cols.end(), [&](const Col &c) { return std::find(c.ids.begin(), c.ids.end(), centre) != c.ids.end(); });
+    if (mid != cols.end()) std::rotate(cols.begin(), mid, mid + 1);
     std::deque<std::vector<int>> out;
     for (size_t k = 0; k < cols.size(); ++k) {
         if (k % 2 == 1) out.push_back(std::move(cols[k].ids));

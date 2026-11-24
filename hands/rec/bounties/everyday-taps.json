@@ -1,0 +1,461 @@
+{
+ "version": 1,
+ "name": "everyday-taps",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Everyday taps",
+  "seconds": 8,
+  "text": "Windows will appear in front of you. Do what each one asks, as you would on a real one: they don't move or click, the cameras record your hands.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "everyday-taps",
+   "title": "Everyday taps",
+   "kind": "scene",
+   "intro": "Taps at the distance you normally hold your hands, about 40 cm out: pointing, with your palm toward you, and with the hand low by your lap. Nothing happens when you tap: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "ray-right",
+     "hands": "right",
+     "text": "Right hand up in front of your chest, palm away, elbow bent, about 40 cm from your eyes.|Point it at each lit button. Cyan: tap thumb to index. Purple: thumb to middle fingertip.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "ray-left",
+     "hands": "left",
+     "text": "Left hand up in front of your chest, palm away, elbow bent, about 40 cm from your eyes.|Cyan: tap thumb to index. Purple: thumb to middle fingertip.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "palm-in-right",
+     "hands": "right",
+     "text": "Turn your right hand palm toward you, fingers up, about 40 cm out, as if looking at your nails.|Keep it there and tap when a button lights. Cyan: thumb to index. Purple: thumb to middle.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "palm-in-left",
+     "hands": "left",
+     "text": "Left hand now, palm toward you, fingers up, about 40 cm out.|Cyan: thumb to index. Purple: thumb to middle.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      }
+     }
+    },
+    {
+     "id": "lap-right",
+     "hands": "right",
+     "text": "Right hand low by your lap, palm down and relaxed, as with gaze: look at the lit button and tap there.|Cyan: thumb to index. Purple: thumb to middle.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "lap-left",
+     "hands": "left",
+     "text": "Left hand low by your lap, palm down and relaxed: look at the lit button and tap there.|Cyan: thumb to index. Purple: thumb to middle.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.6,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      },
+      "lit_s": 1.1
+     }
+    },
+    {
+     "id": "holds-right",
+     "hands": "right",
+     "text": "Right hand up and pointing again. Where a button says hold, keep the fingertips together for about a second,|as when you drag: cyan with the index, purple with the middle finger. The others are plain taps.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.8,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "hold": 1,
+       "middle-hold": 1
+      },
+      "lit_s": 1.3
+     }
+    },
+    {
+     "id": "holds-left",
+     "hands": "left",
+     "text": "Left hand pointing. Hold: fingertips together for about a second, cyan with the index,|purple with the middle finger. The others are plain taps.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.8,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "hold": 1,
+       "middle-hold": 1
+      },
+      "lit_s": 1.3
+     }
+    },
+    {
+     "id": "stop-short-right",
+     "hands": "right",
+     "text": "Right hand, palm toward you again. Cyan: tap thumb to index. Purple: thumb to middle.|Orange with a cross: bring thumb and index about 1 cm apart and stop there, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 2
+      }
+     }
+    },
+    {
+     "id": "stop-short-left",
+     "hands": "left",
+     "text": "Left hand, palm toward you. Cyan: tap. Purple: middle tap.|Orange with a cross: stop about 1 cm short, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        -0.3,
+        -0.05,
+        -1.0
+       ],
+       "size": [
+        0.6,
+        0.4
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 2
+      }
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands up, about 40 cm out, however is comfortable. Each lit button says L or R:|tap with that hand, cyan thumb to index, purple thumb to middle.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    },
+    {
+     "id": "free",
+     "hands": "any",
+     "text": "Your own pace: tap as you do every day, index and middle, as often as you like.|Turn the hand as you go: palm away, on its side, palm toward you, low by your lap.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 4,
+      "seconds": 16,
+      "mix": {
+       "tap": 1,
+       "middle": 1
+      },
+      "lit_s": 4,
+      "says": {
+       "tap": "Your own pace: tap thumb to index as often as you like",
+       "middle": "Your own pace: tap thumb to middle as often as you like"
+      }
+     },
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "fingertips",
+   "title": "Every fingertip",
+   "requires": [],
+   "go": "Go",
+   "intro": "Last: your thumb on every fingertip, with no window. Open your hand between touches.",
+   "prompts": [
+    {
+     "text": "Hand up about 40 cm out, palm toward you. Touch your thumb to each fingertip in turn:|index, middle, ring, little, and back. Open the hand wide between touches.",
+     "seconds": 14,
+     "hands": "any",
+     "pose": "pinch-tap",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "text": "Only the ring and little fingers now: thumb to ring, thumb to little, about a second each,|while you slowly turn the hand: palm toward you, on its side, back toward you.",
+     "seconds": 14,
+     "hands": "any",
+     "pose": "turn-in-out",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -54,13 +54,16 @@ class ShippedTest(unittest.TestCase):
         board = bounties.load(session.BOARD_PATH)
         self.assertIsNotNone(board, "bounties.json doesn't validate")
         ids = [b["id"] for b in board["bounties"]]
-        self.assertEqual(ids, ["single-fingers", "finger-play", "hands-together", "desk-work", "close-up", "near-misses",
-                               "three-finger", "fists", "sideways-hands", "pokes", "middle-taps", "index-taps",
-                               "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
+        self.assertEqual(ids, ["everyday-taps", "single-fingers", "finger-play", "desk-work", "daylight-everyday-taps",
+                               "near-misses", "three-finger", "hands-together", "close-up", "fists", "sideways-hands",
+                               "pokes", "middle-taps", "index-taps", "hand-gestures", "daylight-taps", "pinches",
+                               "card-grabs"])
         high = [b["id"] for b in board["bounties"] if b["priority"] == "high"]
-        self.assertEqual(high, ["single-fingers", "finger-play", "hands-together", "desk-work"])
+        self.assertEqual(high, ["everyday-taps", "single-fingers", "finger-play", "desk-work"])
         normal = [b["id"] for b in board["bounties"] if b["priority"] == "normal"]
-        self.assertEqual(normal, ["close-up", "near-misses", "three-finger", "fists", "sideways-hands"])
+        self.assertEqual(normal, ["daylight-everyday-taps", "near-misses", "three-finger", "hands-together"])
+        scripts = {b["id"]: b["script"] for b in board["bounties"]}
+        self.assertEqual(scripts["daylight-everyday-taps"], "everyday-taps")   # one round, asked for twice
         for b in board["bounties"]:
             self.assertTrue(session.have_bounty_script(b["script"]), b["script"])
 
@@ -92,7 +95,8 @@ class ShippedTest(unittest.TestCase):
                         self.assertNotEqual(a["lit"], "none", p["id"])
             want = {"index-taps": "tap", "middle-taps": "middle", "pinches": "pinch", "card-grabs": "card",
                     "pokes": "poke", "hand-gestures": "sweep", "close-up": "poke", "sideways-hands": "pinch",
-                    "near-misses": "nogo", "three-finger": "tri", "fists": "fist"}[b["script"]]
+                    "near-misses": "nogo", "three-finger": "tri", "fists": "fist",
+                    "everyday-taps": "middle"}[b["script"]]
             self.assertIn(want, gestures)
             self.assertIn("nogo", gestures, "%s: no near misses" % b["id"])
 
@@ -227,6 +231,37 @@ class ShippedTest(unittest.TestCase):
         gestures, wins = round_of("fists")
         self.assertLessEqual({"fist", "pinch", "card", "touch", "nogo"}, set(gestures))
         self.assertGreater(gestures.count("fist"), len(gestures) / 2)
+
+    def test_everyday_taps(self):
+        """The round of 2026-11-24 (user: train for hands at their normal distance; registering taps and finger
+        shapes matters more than close hands): index and middle taps with every window at pointing distance, none
+        close to the face, in the three postures the steps name (pointing, palm toward you, low by the lap), for
+        each hand; holds and near misses among them; then a thumb touch on every fingertip with no window. It
+        uses only gestures recorders already have, so the dataset can carry it to them."""
+        script = session.load_script(session.bounty_script("everyday-taps"))
+        self.assertEqual(session.check_round("everyday-taps", json.loads(json.dumps(script))), script)
+        counts = {}
+        for seed in range(8):   # the mixes are drawn: every gesture over a few sessions, not in each one
+            plan, skipped = session.build_plan(script, {}, seed=seed)
+            self.assertEqual(skipped, [])
+            for p in plan[1]["prompts"]:
+                self.assertTrue(all(-w["at"][2] >= 0.9 for w in p["scene"]["windows"]), p["id"])
+                for a in p["scene"]["acts"]:
+                    counts[a["gesture"]] = counts.get(a["gesture"], 0) + 1
+        self.assertLessEqual({"tap", "middle", "hold", "middle-hold", "nogo"}, set(counts))
+        self.assertGreater(counts["middle"] + counts["middle-hold"], counts["tap"] / 2, "middle taps as a real share")
+        self.assertLess(counts["nogo"], counts["tap"] + counts["middle"], "taps outnumber the near misses")
+        steps = {p["id"].split("/")[1]: p for p in plan[1]["prompts"]}
+        for posture, words in (("ray", "palm away"), ("palm-in", "toward you"), ("lap", "by your lap")):
+            for side in ("right", "left"):
+                p = steps["%s-%s" % (posture, side)]
+                self.assertEqual(p["hands"], side)
+                self.assertIn(words, p["text"].lower(), p["id"])
+        self.assertTrue(all("40 cm" in steps[k]["text"] for k in ("ray-right", "ray-left", "palm-in-right", "palm-in-left")))
+        tips = plan[2]["prompts"]
+        self.assertEqual([p["distance"] for p in tips], ["mid", "mid"])
+        self.assertTrue(all(f in tips[0]["text"] for f in ("index", "middle", "ring", "little")))
+        self.assertLessEqual(session.plan_seconds(script, plan, worst=True), 5 * 60)
 
     def test_shipped_rounds_pass_the_fetched_check(self):
         """Each shipped round would pass check_round if it came from the dataset (the check doesn't

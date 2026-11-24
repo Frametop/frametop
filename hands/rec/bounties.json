@@ -1,7 +1,15 @@
 {
  "schema": 1,
- "updated": "2026-11-17",
+ "updated": "2026-11-24",
  "bounties": [
+  {
+   "id": "everyday-taps",
+   "title": "Everyday taps",
+   "blurb": "Thumb to index and thumb to middle taps where you normally hold your hands, about 40 cm out: pointing at a window, with your palm toward you and with the hand low by your lap, with holds, near misses and a thumb touch on every fingertip. These are the taps you make all day. The tracker still misses them most with the palm toward you and with the middle finger.",
+   "minutes": 5,
+   "priority": "high",
+   "script": "everyday-taps"
+  },
   {
    "id": "single-fingers",
    "title": "One finger at a time",
@@ -19,14 +27,6 @@
    "script": "finger-play"
   },
   {
-   "id": "hands-together",
-   "title": "Hands touching and crossing",
-   "blurb": "Fingertips touching, fingers laced, counting on the other hand, wrists crossed and one hand passing in front of the other, then windows used with your arms crossed. Two hands touching are where the tracker mixes up whose finger is whose.",
-   "minutes": 5,
-   "priority": "high",
-   "script": "hands-together"
-  },
-  {
    "id": "desk-work",
    "title": "Desk work",
    "blurb": "Type, use the mouse and switch between them at your own desk, look up at a window and back down, and reach up from the mouse to tap. This teaches Frametop when your hands are on the keyboard and mouse, so a resting hand stops taking the pointer from the mouse.",
@@ -35,12 +35,12 @@
    "script": "desk-work"
   },
   {
-   "id": "close-up",
-   "title": "Close-up hands",
-   "blurb": "Pokes, taps and pinches on windows very close to you, about a forearm's length from your eyes: the hand near your face, low in front of your chest and out to the side. Up close is where hand tracking loses the most fingers today.",
-   "minutes": 4,
+   "id": "daylight-everyday-taps",
+   "title": "Everyday taps in daylight",
+   "blurb": "The everyday taps round in a room lit by daylight: by day, curtains open, no lamps needed. The cameras see infrared, sunlight is what they find hardest, and almost every recording so far was made indoors away from it.",
+   "minutes": 5,
    "priority": "normal",
-   "script": "close-up"
+   "script": "everyday-taps"
   },
   {
    "id": "near-misses",
@@ -59,11 +59,27 @@
    "script": "three-finger"
   },
   {
+   "id": "hands-together",
+   "title": "Hands touching and crossing",
+   "blurb": "Fingertips touching, fingers laced, counting on the other hand, wrists crossed and one hand passing in front of the other, then windows used with your arms crossed. Two hands touching are where the tracker mixes up whose finger is whose.",
+   "minutes": 5,
+   "priority": "normal",
+   "script": "hands-together"
+  },
+  {
+   "id": "close-up",
+   "title": "Close-up hands",
+   "blurb": "Pokes, taps and pinches on windows very close to you, about a forearm's length from your eyes: the hand near your face, low in front of your chest and out to the side. Up close is where hand tracking loses the most fingers today.",
+   "minutes": 4,
+   "priority": "retired",
+   "script": "close-up"
+  },
+  {
    "id": "fists",
    "title": "Fists",
    "blurb": "Close your fist on a window, carry it and open your hand to let go: slowly, quickly, with each hand and both, and against pinches and card grabs. Fists closing and opening are still jumpy.",
    "minutes": 4,
-   "priority": "normal",
+   "priority": "retired",
    "script": "fists"
   },
   {
@@ -71,7 +87,7 @@
    "title": "Sideways hands",
    "blurb": "Pinch, drag and tap windows at arm's length with your hand on its side, thumb on top, as for a handshake, plus lazy susan sweeps. A hand on its edge is the hardest for the cameras to judge for distance.",
    "minutes": 4,
-   "priority": "normal",
+   "priority": "retired",
    "script": "sideways-hands"
   },
   {

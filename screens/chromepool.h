@@ -25,7 +25,7 @@ constexpr int kSets = 4;   // two controllers, the 3D mouse and a hand at differ
 
 struct Panel {
     int screen = -1;
-    bool busy = false;       // dragged, hovered, carried by its layout button: keeps its set
+    bool busy = false;       // dragged, hovered, held by Move All Windows: keeps its set
     bool wants = false;      // something is near it (or it's busy)
     bool fading = false;     // its controls are still showing, fading out
     int64_t nearAt = 0;      // when something last came near: the latest goes first

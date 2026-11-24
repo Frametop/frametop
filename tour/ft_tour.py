@@ -162,8 +162,8 @@ def pages(f, keys):
                  ["Drag the roll button sideways, or scroll on it", "Rolls the screen; it snaps level near straight"],
                  ["Click the pin button (left of the reset button)", "Keeps the screen fixed in view as you turn your head. "
                                                                      "Click again, or reset the layout, to leave it in the room"],
-                 ["Hold the layout button (left of the pin button) and move",
-                  "Carries every screen and window in the room together, as they stand"],
+                 ["Hold Move All Windows in the bar's menu and move",
+                  "Carries every screen and window together, tiled or in the room, as they stand"],
                  "Getting back",
                  ["The reset button (left of the bar), or Meta+Shift+R", "Puts every screen back in its layout"],
                  ["Meta+Shift+H", "Hides or shows all screens"]],

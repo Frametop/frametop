@@ -11,6 +11,7 @@
 #include "centreglow.h"
 #include "overlaytex.h"
 #include "tilecurve.h"
+#include "tilekeep.h"
 #include "tiling.h"
 
 #include <algorithm>
@@ -37,6 +38,10 @@ bool g_tileGroupSet = false;              // ...since the dashboard was first se
 bool g_tileRegroup = true;                // the dashboard opened: the group goes to where it is now
 bool g_tileReset = false;                 // "tiles recentre" (ft-layout's reset): the group in front of your head now
 bool g_dashWasUp = false;
+Mat g_tileWorld = Identity();             // the group frame in the room, last tick (the dashboard's moves as it opens)
+tilekeep::Put g_tilePut;                  // put there by hand (Move All Windows): an opening leaves it
+int64_t g_tilePutHoldMs = 0;              // ...till then, whatever the bar does as it settles (KeepPut)
+constexpr int64_t kPutHoldMs = 1000;
 bool g_tileStayTheater = false;           // DASH_TILE_STAY_THEATER: staying ones stay over a game in SteamVR's theater too
 // The wall: at Steam's bar (DASH_TILE_AT_BAR, tileframe.h's AtBar), or where DASH_TILE_RADIUS and
 // DASH_TILE_DESK_DEG put it; which one the group has now (the last Regroup's: the bar may not be placed).
@@ -269,6 +274,21 @@ void RetileDash() {
 }
 
 namespace {
+// Steam's menu over its bar a slot in the strip, for the group frame now (`g`) and the bar: its middle
+// round you and its width (0: none), set on the tiles.
+void ReserveSlot(const double g[3][4], double *barAz, double *slot) {
+    const Mat bar = DashFrame();
+    const double b[3] = {bar.m[0][3], bar.m[1][3], bar.m[2][3]}, barW = DashWidth();
+    // (at the bar, Steam's page over it, just in front of the tiles: the slot as wide as the page, or they'd show behind it)
+    const double slotW = g_tileWallAtBar ? std::max(barW, SteamPageWidth()) : barW;
+    if (Dash().guessed || !dashtiles::SteamSlot(g, b, slotW, barAz, slot)) *slot = 0;
+    // Steam's window a tile itself (STEAM_DASH_PANEL), its menu glued to it: no slot kept (it isn't
+    // tiled yet when the dashboard opens, so not Tiled(steam): that kept a slot's gap in the strip)
+    if (SteamDashIndex() >= 0) *slot = 0;
+    g_tiles.params.reserveAzDeg = *barAz, g_tiles.params.reserveDeg = *slot;
+    g_tiles.SlotMoved();
+}
+
 // The group to where the dashboard is now, in front of your head, with Steam's menu a slot in it
 // when the strip reaches it (the split kept for where it opened: Board::SlotMoved): false without a head pose.
 // atHead: round where you face, not at Steam's bar (a reset: the bar is where the dashboard last opened).
@@ -288,17 +308,9 @@ bool Regroup(bool atHead = false) {
     g_tileWallKeepBar = atHead && g_tileAtBar && g_tileWallBarKnown;
     ApplyWall();
     for (int r = 0; r < 3; ++r) g[r][3] += g[r][2] * g_tiles.params.backM;   // (the arc's centre behind your eyes: its +Z)
-    const double barW = DashWidth();
-    // (at the bar, Steam's page over it, just in front of the tiles: the slot as wide as the page, or they'd show behind it)
-    const double slotW = g_tileWallAtBar ? std::max(barW, SteamPageWidth()) : barW;
     double barAz = 0, slot = 0;
-    if (Dash().guessed || !dashtiles::SteamSlot(g, b, slotW, &barAz, &slot)) slot = 0;
+    ReserveSlot(g, &barAz, &slot);
     const int steam = SteamDashIndex();
-    // Steam's window a tile itself (STEAM_DASH_PANEL), its menu glued to it: no slot kept (it isn't
-    // tiled yet when the dashboard opens, so not Tiled(steam): that kept a slot's gap in the strip)
-    if (steam >= 0) slot = 0;
-    g_tiles.params.reserveAzDeg = barAz, g_tiles.params.reserveDeg = slot;
-    g_tiles.SlotMoved();
     // the strip centred again (moves since kept it where it was), its middle straight ahead, Steam's
     // page too (user, 2026-11-19: "the tiling doesn't keep itself centered"; Steam's page over the bar
     // put the strip all off to one side)
@@ -306,18 +318,57 @@ bool Regroup(bool atHead = false) {
     g_tiles.Recentre(-1);
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
+    g_tilePut.on = false;
     RetileDash();
     const tiling::Layout &l = g_tiles.Last();
     // (the facing in the room, 0 its -Z, right positive; the bar from there)
     std::printf("dashboard tiles: round the head at %.2f %.2f %.2f, facing %.0f degrees; Steam's bar %.0f degrees "
                 "round, %.2f m wide, its slot %.0f degrees (0: none), %d columns left of it (-1: the strip doesn't reach it); "
                 "the wall %.2f m away %s%s, the desk %.0f degrees up, the tallest column to %.0f, the strip %.0f..%.0f\n",
-                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, barW, slot, l.split,
+                h[0], h[1], h[2], tiling::Deg(std::atan2(-g[0][2], g[2][2])), barAz, DashWidth(), slot, l.split,
                 g_tiles.params.radius, g_tileWallAtBar ? "(at Steam's bar)" : g_tileWallKeepBar ? "(as at Steam's bar)" : "(as set)",
                 g_tileSteamOverBar ? ", Steam's page over the bar" : "", l.el0, l.el1, l.az0, l.az1);
     return true;
 }
+// The dashboard opened by tiles put by hand, with you still there (tilekeep.h): they stay, only Steam's
+// menu a slot in them where it is now. False: they come round you (Regroup).
+bool KeepPut() {
+    Mat head;
+    if (!g_tilePut.on || !g_tileGroupSet || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ||
+        !g_tilePut.Holds(head, g_tileWorld, g_tiles.params.radius))
+        return false;
+    TileGroupTo(g_tileWorld);
+    g_tilePutHoldMs = NowMs() + kPutHoldMs;
+    double g[3][4], barAz = 0, slot = 0;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) g[r][c] = g_tileWorld.m[r][c];
+    ReserveSlot(g, &barAz, &slot);
+    const int steam = SteamDashIndex();
+    g_tileSteamOverBar = steam >= 0 && g_tiles.Tiled(steam);   // (nothing more to wait for: UpdateDashTiles)
+    RetileDash();
+    std::printf("dashboard tiles: left where they were put (Move All Windows); Steam's slot %.0f degrees at %.0f\n", slot, barAz);
+    return true;
+}
 }  // namespace
+
+// The whole board moved by hand (vrlayoutgrab.cpp): the group frame there, in the room, and everything
+// on the dashboard as it stood on it (nothing arranged again till it's let go).
+bool TileGroup(Mat *out) {
+    if (!Dash().Framed()) return false;
+    *out = Mul(DashFrame(), g_tileGroupRel);
+    return true;
+}
+void TileGroupTo(const Mat &world) {
+    const Mat rel = Mul(Inverse(DashFrame()), world), moved = Mul(rel, Inverse(g_tileGroupRel));
+    g_tileGroupRel = rel;
+    for (auto &[i, s] : g_screens)
+        if (s.pinned == kDashboard && s.drag == Drag::None) PinIn(s, kDashboard, Mul(moved, s.pinRel), levelpin::Rigid);
+}
+void TileGroupPut(const Mat *head) {
+    RetileDash();
+    Mat group;
+    if (head && g_tileGroupSet && !g_tiles.Ids().empty() && TileGroup(&group)) g_tilePut.At(*head, group);
+}
 
 // The DASH_TILE_* numbers in frametop.conf (vrpanel.h's TileSetting).
 std::array<TileSetting, 9> TileSettings() {
@@ -358,6 +409,7 @@ void SetTileStayTheater(bool on) { g_tileStayTheater = on; }
 void SetTileAtBar(bool on) {
     if (on == g_tileAtBar) return;
     g_tileAtBar = on;
+    g_tilePut.on = false;
     g_tileRegroup = true;   // (at once while the dashboard is open, else when it opens)
 }
 namespace {
@@ -517,7 +569,7 @@ void TileGlowTarget(int *on, bool *hot) {
     for (const int id : g_tiles.Ids()) {
         const auto it = g_screens.find(id);
         Mat p;
-        if (id == c || it == g_screens.end() || it->second.drag != Drag::Move || !ScreenPose(it->second, &p)) continue;
+        if (id == c || it == g_screens.end() || it->second.drag != Drag::Move || it->second.layoutHeld || !ScreenPose(it->second, &p)) continue;
         const Mat q = Mul(toGroup, p);
         const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
         double az, el;
@@ -700,7 +752,7 @@ void GuessTiles(bool up) {
     const bool valid = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
     const bool back = valid && g_guessHeadLost >= kGuessAgainTicks;
     g_guessHeadLost = valid ? -1 : g_guessHeadLost + 1;
-    if (!valid || up || Dash().ever || g_tiles.Ids().empty() || TileDragging()) return;
+    if (!valid || up || Dash().ever || g_tiles.Ids().empty() || TileDragging() || LayoutCarrying()) return;
     if (Dash().guessed && !back) return;
     if (GuessDash(head)) Regroup(true);
 }
@@ -730,11 +782,14 @@ void UpdateDashTiles() {
     // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
     if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
     GuessTiles(up);
-    if (g_tileRegroup && Dash().ever && fresh && !g_tiles.Ids().empty() && Regroup()) g_tileRegroup = false;
+    // (not under Move All Windows: once it's let go)
+    const bool place = !LayoutCarrying() && !g_tiles.Ids().empty();
+    if (g_tilePut.on && place && NowMs() < g_tilePutHoldMs && Dash().Framed()) TileGroupTo(g_tileWorld);
+    if (g_tileRegroup && Dash().ever && fresh && place && (KeepPut() || Regroup())) g_tileRegroup = false;
     // (a reset: now, the dashboard open or not, round where you face: SteamVR doesn't move its bar while
     // the dashboard is open, so at the bar a reset after turning did nothing; ft-layout leaves the tiled
     // panels to this. The next opening puts them at the bar again, which SteamVR opens in front of you.)
-    if (g_tileReset && (g_tiles.Ids().empty() || (Dash().Framed() && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
+    if (g_tileReset && !LayoutCarrying() && (g_tiles.Ids().empty() || (Dash().Framed() && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
     const bool settling = !g_tilesStopping && !TileDragging();
     if (settling && g_tiles.FillGap(NowMs())) {
         RetileDash();
@@ -746,6 +801,7 @@ void UpdateDashTiles() {
         RememberTiles();
         std::printf("tiles: a panel too tall for its stack, once its size was known: a column of its own\n");
     }
+    g_tileWorld = Mul(DashFrame(), g_tileGroupRel);
     UpdateTileFocus();
 }
 

@@ -126,7 +126,7 @@ def add_bindings(path, name, combos, keys, what, setting):
     laid_out = json.dumps(rules, indent=2)
     if not text.startswith(laid_out) or text[len(laid_out):].strip():
         return True, (f"key combinations: {path} isn't laid out as Frametop Settings writes it, so it's "
-                      f"left as it is: add {keys} ({setting}) on its Keyboard page")
+                      f"left as it is: add {keys} ({setting}) on its Keyboard & shortcuts page")
     if not mode & 0o200:
         return True, f"key combinations: {path} is read-only, so it's left as it is: {keys} wasn't added"
     rules["key_bindings"] = {**missing, **bindings}

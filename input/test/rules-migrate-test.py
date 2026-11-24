@@ -307,7 +307,7 @@ try:
         rm.main(rules, state)
     check("laid out by hand: left as it is", read(rules), before)
     check("...the note says what to add, and where",
-          any("add Ctrl+Alt+Shift+Esc (Release all keys) on its Keyboard page" in line
+          any("add Ctrl+Alt+Shift+Esc (Release all keys) on its Keyboard & shortcuts page" in line
               for line in out.getvalue().splitlines()), True)
 
     # Meta+Shift+D (desktopless mode), with the changes before it, as an install of its day ran them.

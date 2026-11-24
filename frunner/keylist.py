@@ -2,7 +2,7 @@
 input relay's rules (~/.config/frametop-input.json, docs/frunner.md), as list items. Typing
 filters them as any search does. Enter on one the relay can run from here
 (ft_input_actions.KEY_LIST_RUNNABLE: Frametop's menu actions and the dashboard tiling keys) does
-it; any other says which keys to press. The first item opens Frametop Settings' Keyboard page,
+it; any other says which keys to press. The first item opens Frametop Settings' Keyboard & shortcuts page,
 where they're bound. Standard library only, no GLib, so its test runs anywhere.
 """
 import json
@@ -48,7 +48,7 @@ def items(table):
     """The list's items, the Rebind one first, then each binding by its action's name: what it does,
     then its keys. Kind "keybind"; data: {"combo", "keys", "action", "runnable"}. Pass-through and
     do-nothing bindings aren't listed."""
-    out = [spotsearch.Item("keybind", REBIND_KEY, "Rebind keys in Frametop Settings", "Keyboard page",
+    out = [spotsearch.Item("keybind", REBIND_KEY, "Rebind keys in Frametop Settings", "Keyboard & shortcuts page",
                            ("rebind", "settings", "shortcut", "change"), "",
                            {"combo": "", "keys": "", "action": "", "runnable": False})]
     rows = []

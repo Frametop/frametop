@@ -30,7 +30,7 @@ directions: look at each one.
           calibration turns gaze mode off (POINTER_GAZE=0); turning it on again reopens it.
           Why gaze mode can't work yet goes in the status ("problem"), for Input Settings.
 
-  fit     the headset fit check (on "fitcheck", Check headset fit on the Gaze page): live, a
+  fit     the headset fit check (on "fitcheck", Check headset fit on the Eye tracking page): live, a
           card per eye (tracked or lost, the tracker's signal, how much of the last 10 s it was
           seen) and hints, from the gaze probe's Headset fit (gaze/fitcheck.py), while you
           adjust the headset. A left click, Enter, a pinch or Meta+J runs its guided check (dots, then looks
@@ -1331,7 +1331,7 @@ class Checks:
             self.to_panel(f"text Calibration failed: only {c['captured']} of {n} dots. Try again from Frametop Settings")
             if main:
                 fit = main in c["fit_reasons"]
-                self.note(f"Most dots: {main}" + (". Check headset fit on the Gaze page" if fit else ""))
+                self.note(f"Most dots: {main}" + (". Check headset fit on the Eye tracking page" if fit else ""))
             self.to_panel("dot 0 0 off")
             c["done_at"] = time.monotonic() + (8.0 if main else 3.0)  # time to read why
             c["closing"] = True

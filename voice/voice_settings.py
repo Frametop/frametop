@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frametop Voice's settings, shared by ft-voiced, Frametop Settings (its Voice page), and
+"""Frametop Voice's settings, shared by ft-voiced, Frametop Settings (its Voice dictation page), and
 the installer. Standard library only: the installer runs it with the host's python3.
 
 ~/.config/frametop-voice.json (written by Frametop Settings):
@@ -69,7 +69,7 @@ WHISPER_MODELS = {
     "large-v3-turbo": ("ggml-large-v3-turbo-q5_0.bin", 574, "all"),
 }
 MULTILINGUAL_DEFAULT = "small"
-# Languages to dictate in, by whisper's codes (it knows about 100; these are on the Voice page).
+# Languages to dictate in, by whisper's codes (it knows about 100; these are on the Voice dictation page).
 LANGUAGES = {"en": "English", "auto": "Detect it", "de": "Deutsch", "fr": "Fran\u00e7ais", "es": "Espa\u00f1ol",
              "it": "Italiano", "pt": "Portugu\u00eas", "nl": "Nederlands", "pl": "Polski",
              "cs": "\u010ce\u0161tina", "sv": "Svenska", "da": "Dansk", "no": "Norsk", "fi": "Suomi",
@@ -190,7 +190,7 @@ def from_frame_voice(old):
         if f"{side}/{name}" in VR_BUTTONS:
             buttons.append(f"{side}/{name}")
         else:
-            notes.append(f"controller button {b!r}: not a Frame controller button by side; set it on the Voice page")
+            notes.append(f"controller button {b!r}: not a Frame controller button by side; set it on the Voice dictation page")
     if "controller" in old:
         new["controller"] = buttons
     action = "dictate_hold" if old.get("keyboard_mode") == "hold" else "dictate"
@@ -199,8 +199,8 @@ def from_frame_voice(old):
         if name in KEY_CODES:
             bindings[str(KEY_CODES[name])] = action
         else:
-            notes.append(f"push-to-talk {name}: set it on Frametop Settings' Keyboard page "
-                         "(mouse buttons: Buttons page)")
+            notes.append(f"push-to-talk {name}: set it on Frametop Settings' Keyboard & shortcuts page "
+                         "(mouse buttons: Mouse buttons page)")
     return new, bindings, notes
 
 

@@ -153,7 +153,7 @@ HAND_INTERACTIONS = [
     ("HANDS_GRAB_ROTATE", True, "1", "Moving & resizing screens", "Rotate screens with your wrist",
      "Tilts and rotates a grabbed screen naturally as you twist your wrist."),
     ("HANDS_CARD_PINCH", True, "1", "Moving & resizing screens", "Pinch screen edge like a card",
-     "Pinch any screen edge with two or more fingers to pick up and move it."),
+     "Pinch a screen's edge with your index and middle fingers together (or all your fingertips) to pick it up and move it."),
     ("HANDS_FIST_GRAB", True, "1", "Moving & resizing screens", "Fist grab & resize",
      "Make a fist on a screen to hold it, or use two fists to resize it."),
     ("HANDS_FIST_PAIR", True, "1", "Moving & resizing screens", "Two-fist quick resize",
@@ -183,7 +183,8 @@ HAND_INTERACTIONS = [
     ("SCREEN_SPIN_BRING", True, "1", "Screen gestures", "Bring switched screen right in front of you",
      "Pulls the next screen directly in front of you at reading size and focuses it for typing. Off: rotates all screens around you instead."),
     ("HANDS_PALM_MENU", True, "1", "Screen gestures", "Palm Quick Settings menu",
-     "Hold your palm toward your face (away from screens) to open Quick Settings tiles you can tap with your other hand."),
+     "Hold your palm toward your face (away from screens) to open Quick Settings tiles you can tap with your other hand. "
+     "A plain pinch with that hand opens the Steam menu."),
     ("HANDS_TARGET_GLOW", True, "1", "Visual feedback", "Highlight distant grab target",
      "Shows a soft white glow around the screen you're about to pull closer."),
     ("HANDS_EDGE_GLOW", True, "1", "Visual feedback", "Highlight grab edges & corners",
@@ -207,7 +208,8 @@ HAND_INTERACTIONS = [
     ("POINTER_RAY_READY", True, "6", "Hand pointer ray", "Show ray only when ready to pinch",
      "Only shows the hand ray once your thumb and index finger come within 6 cm of each other."),
     ("POINTER_RAY_RAISED", False, "30", "Hand pointer ray", "Hide ray when hand is lowered",
-     "Hides the ray when your hand drops more than 30 cm below eye level. Hands typing on a keyboard never trigger rays."),
+     "Shows the ray while your hand is within 30 cm below eye level, and hides it once it drops past 40 cm. "
+     "Hands typing on a keyboard never trigger rays."),
     ("POINTER_RAY_FORWARD", False, "25", "Hand pointer ray", "Hide ray when hand is close to body",
      "Only shows the ray when your hand is held at least 25 cm in front of your face."),
     ("POINTER_RAY_FIST_CURL", True, "1.1", "Hand pointer ray", "Hide ray & block clicks in a fist",

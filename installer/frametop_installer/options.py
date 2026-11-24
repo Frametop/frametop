@@ -34,7 +34,7 @@ PARTS = (
          "Records your hands for Frametop's open hand dataset, which trains hand tracking. Nothing "
          "leaves the headset until you press Upload.", off="--no-hand-recorder", sudo=True, needs="hands"),
     Part("gaze", "Gaze mode (experimental)",
-         "The pointer goes where you look. Turn it on and calibrate it on the Gaze page of Frametop "
+         "The pointer goes where you look. Turn it on and calibrate it on the Eye tracking page of Frametop "
          "Settings.", off="--no-gaze"),
     Part("eye_tracker", "Our own eye tracker for gaze mode",
          "More accurate than SteamVR's. Its frame grabber is a small system service.",

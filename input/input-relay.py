@@ -183,7 +183,9 @@ open when the text field loses focus, until its close button, keyboard_toggle, o
 
 Full Keyboard (TaiKeid's release, hosted by keyboard/host/ft-kbhost; keyboard/FRAMETOP.md) is
 that keyboard. While it isn't running, nothing opens (ft-screens' old panel was removed in the
-2026-10-31 cleanup). ft-kbhost says "kbhello OPEN" on the control socket every second, only taken
+2026-10-31 cleanup), but keyboard_toggle starts it again and opens it once it's there
+(kb_revive.py: a keyboard quit from its own panel stays closed for text fields, not for someone
+asking for it). ft-kbhost says "kbhello OPEN" on the control socket every second, only taken
 from this user, and gets "kb DESKTOP SURFACE STEAM" back: whether its typing goes through the
 relay (to the Frametop desktop, or to Native Desktop while that has gamescope's focus),
 whether the screens show with Frametop not paused (it may show over them with the dashboard
@@ -322,6 +324,7 @@ import time
 import unicodedata
 
 import game_pause
+import kb_revive
 import pc_game
 import magicmouse
 from gamescope_focus import GamescopeFocus  # Native Desktop's focus, for its typing
@@ -1459,6 +1462,7 @@ class Relay:
         self.held = HeldKeys()
         self.typing = Typing()
         self.kb = FullKeyboardLink()
+        self.kb_revive = kb_revive.KeyboardRevive()  # keyboard_toggle with no keyboard running starts it
 
         self.nodes = {}  # fd -> Node
         self.magic = magicmouse.MagicMice(log)  # Magic Mouse 2 hidraw, surface -> wheel
@@ -1639,7 +1643,10 @@ class Relay:
             return
         if action == "keyboard_toggle":
             if value == 1 and self.vr_keyboard_mode() != "never":
-                self.vr_keyboard("toggle")
+                if self.kb.addr is not None:
+                    self.vr_keyboard("toggle")
+                elif self.kb_revive.ask(now):
+                    log("keyboard_toggle: Full Keyboard isn't running (quit from its panel?): starting it")
         elif action.startswith(PROFILE):
             if value == 1:
                 # Runs a few seconds and borrows the pointer, like layout_reset.
@@ -2553,6 +2560,9 @@ class Relay:
                 if self.kb.addr is not None:
                     self.kb_gone("restarted")
                 log("Full Keyboard connected")
+                asked_for = self.kb_revive.take(now)
+            else:
+                asked_for = False
             self.kb.addr, self.kb.until, self.kb.said = addr, now + 3.0, None
             self.kb_tell(now)
             opened = "1" if len(words) > 1 and words[1] == "1" else "0"
@@ -2560,6 +2570,8 @@ class Relay:
                 self.screens_sock.sendto(f"fullkb {opened}".encode(), SCREENS)
             except OSError:
                 pass  # ft-screens not running
+            if asked_for and opened == "0":
+                self.vr_keyboard("show")  # the keyboard_toggle that started it (after "fullkb": ft-screens knows it's there)
             return
         if cmd in ("kbkey", "kbtext"):
             # Full Keyboard's typing, while it was told it goes to the desktop: "kbkey CODE

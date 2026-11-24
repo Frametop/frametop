@@ -9,7 +9,8 @@ relay as Frametop's keyboard always has (relaylink.py), opens it for Steam's own
 (steamhook.py), and decides the rest (host.py). frametop-keyboard.service runs it with SteamVR.
 
 Exits 3 when the user quit the keyboard from its panel, and 4 when its release doesn't speak
-hosted protocol 1 (the service then leaves it closed until SteamVR starts again); 1 when the
+hosted protocol 1 (the service then leaves it closed until SteamVR starts again, or the relay's
+Open/close keyboard action starts it: input/kb_revive.py); 1 when the
 keyboard failed or this end closed it (the service starts both again), 0 on SIGTERM.
 """
 import argparse

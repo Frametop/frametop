@@ -17,7 +17,8 @@ EnvironmentFile=-/usr/share/deckard/mesavars.sh
 # hosted mode. A standalone copy that's running is asked to quit by the keyboard itself.
 ExecStart=/usr/bin/python3 -I @REPO@/keyboard/host/ft-kbhost
 # Quitting it from its own panel exits with 3, and a release without hosted protocol 1 with 4:
-# either way it stays closed until SteamVR starts again.
+# either way it stays closed until SteamVR starts again, or until the relay's Open/close keyboard
+# action starts it (input/kb_revive.py).
 SuccessExitStatus=3
 RestartPreventExitStatus=3 4
 Restart=on-failure

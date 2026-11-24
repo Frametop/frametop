@@ -66,8 +66,11 @@ flatpak build-finish "$app" --command=frametop-installer \
   --talk-name=org.freedesktop.Flatpak --filesystem=~/.cache/frametop-installer:create
 
 stamp=$(git -C "$root" log -1 --format=%cI 2>/dev/null || date -u +%FT%TZ)
-flatpak build-export --arch="$arch" --timestamp="$stamp" --subject="Frametop Installer $version ($commit)" \
-  "$repo" "$app" stable
+# --disable-sandbox: build-export checks the icon in a bwrap sandbox, which CI's runner (Ubuntu
+# 24.04, where AppArmor keeps bwrap from making its namespace) and containers refuse: "is not a
+# valid icon: bwrap: Creating new namespace failed". The icon is this repo's own file.
+flatpak build-export --disable-sandbox --arch="$arch" --timestamp="$stamp" \
+  --subject="Frametop Installer $version ($commit)" "$repo" "$app" stable
 flatpak build-bundle --arch="$arch" --runtime-repo="$FLATHUB" "$repo" "$bundle" "$ID" stable
 (cd "$out" && sha256sum FrametopInstaller.flatpak >FrametopInstaller.flatpak.sha256)
 echo "Built $bundle ($version, $arch): $(du -h "$bundle" | cut -f1)"

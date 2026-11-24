@@ -166,8 +166,8 @@ stateDiagram-v2
   x0 --> x3: unused for DISPLAY_OFF_MIN, DISPLAY_OFF_STANDBY=1
   x3 --> x4: SteamVR has the headset as off (within 1 s, ft-powerd's away 1 s more)
   x3 --> x1: still worn after 15 s: "worn 1" back, the backlight alone
-  x3 --> x0: a key, a button, a mouse or "on": "worn 1"
-  x4 --> x0: a key, a button, a mouse, "on", ft-powerd stopping or starting again after a kill: "worn 1"; or SteamVR wakes by itself (the sensor changed, the testbench fakes a wearer)
+  x3 --> x0: a key, a button, a mouse, movement or "on": "worn 1"
+  x4 --> x0: a key, a button, a mouse, movement until tracking pauses, "on", ft-powerd stopping or starting again after a kill: "worn 1"; or SteamVR wakes by itself (the sensor changed, the testbench fakes a wearer)
   x1 --> x0: you use it, the headset goes on, or ft-powerd stops (turnOn)
   x0 --> x2: standby (headset off 5 s)
   x2 --> x0: you put the headset on

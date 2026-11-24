@@ -43,7 +43,6 @@ no flag and which the headset's own driver undoes 15-25 s later:
 
 The fake wake restarts tracking, and the pose settling can count as movement in the seconds
 before tracking pauses (`standby ended: headset 0 moved ...`): wait for `away` and start over.
-`~/.local/state/verify/frametop/standby-tracking/drive.py` on the Frame runs all of it.
 
 ## Gotchas
 

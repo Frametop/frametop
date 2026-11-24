@@ -1570,7 +1570,7 @@ Item {
                     wrapMode: Text.Wrap
                     opacity: 0.7
                     text: ppage.p.standby
-                          ? "If SteamVR doesn't go into standby (Now says Off, not tracking paused), only the "
+                          ? "If SteamVR doesn't go into standby (Now stays at Off without tracking paused), only the "
                             + "displays are off and the headset keeps tracking. Leave it on a charger that keeps up "
                             + "with it in use."
                           : "With the displays off, the headset keeps tracking and drawing, so it can wake the moment "

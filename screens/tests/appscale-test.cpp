@@ -31,9 +31,9 @@ int main() {
         a.Scroll(1, 1300);
         a.Scroll(1, 1400);
         check("the next waits for the answer", !a.Due(1700));
-        a.Said(1.25);
+        a.Said(1.25, true);
         check("an answer doesn't take back a newer one", appscale::Same(a.scale, 1.6) && a.Due(1700) && appscale::Same(a.scale, 1.6));
-        a.Said(1.5);   // (the PC has another)
+        a.Said(1.5, true);   // (the PC has another)
         check("its own answer is the PC's", appscale::Same(a.scale, 1.5) && !a.Due(9000));
     }
     {
@@ -44,9 +44,21 @@ int main() {
         check("the same again asks nothing", !a.Due(1100));
         a.Pick(1, 1200);
         check("no answer: the next goes after 30 s", !a.Due(30999) && a.Due(31000));
-        a.Said(1);
+        a.Said(1, false);   // (its stream starts over at it)
         a.Scroll(0.4, 40000);
         check("part of a notch asks nothing", !a.Due(50000));
+    }
+    {
+        Asking a;
+        a.Scroll(1, 1000);
+        a.Due(1220);
+        a.Said(1, false);   // (a stream starting over meanwhile, from before the ask)
+        a.Scroll(1, 1300);
+        check("what's said of before the ask isn't its answer", appscale::Same(a.scale, 1.5) && !a.Due(1600));
+        a.Said(1, true);
+        check("a refused ask lets the next go", a.Due(1600) && appscale::Same(a.asked, 1.5));
+        a.Said(1, true);
+        check("... and the last one refused goes back", appscale::Same(a.scale, 1) && !a.Due(9000));
     }
     check("a size a scale moved is near the one asked for", appscale::Near(1340, 910, 1336, 910) && !appscale::Near(1354, 910, 1336, 910));
     if (failed) std::printf("%d failed\n", failed);

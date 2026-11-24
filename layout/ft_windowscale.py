@@ -87,13 +87,14 @@ def shape(d, size, scale, low, high):
         d.pop("asked_size", None)
 
 
-def told(n, d):
+def told(n, d, answer=False):
     """What ft-screens hears of panel n's scale, for its menu: 0 for none (its PC takes none), and the
-    size that takes it, which may be a few pixels from the one its corner was dragged to."""
+    size that takes it, which may be a few pixels from the one its corner was dragged to. `answer`: to
+    the scale ft-screens asked for."""
     scale = valid(d.get("scale"))
     if not scale:
         return f"remote {n} scale 0"
-    return f"remote {n} scale {scale:g}" + (" {}x{}".format(*d["size"]) if d.get("size") else "")
+    return f"remote {n} scale {scale:g}" + (" {}x{}".format(*d["size"]) if d.get("size") else "") + (" answer" if answer else "")
 
 
 def opening(host, answer, app, size, low, high):

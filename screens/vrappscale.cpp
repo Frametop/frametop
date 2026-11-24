@@ -65,9 +65,9 @@ using namespace ftvr;
 
 extern "C" {
 
-void ft_vr_remote_scale(int index, double scale, int width, int height) {
+void ft_vr_remote_scale(int index, double scale, int width, int height, bool answer) {
     if (scale <= 0) return ForgetAppScale(index);
-    g_apps[index].Said(scale);
+    g_apps[index].Said(scale, answer);
     if (width > 0) TakeSize(index, width, height);
 }
 

@@ -1,6 +1,8 @@
 """A PC app window's scale, without a headset or a PC: where it starts, the panel size it takes, and
 `ft-layout window scale`."""
+import fcntl
 import pathlib
+import re
 import sys
 import unittest
 
@@ -38,6 +40,24 @@ class Fit(unittest.TestCase):
         self.assertEqual(self.fits((1278, 802), 1.758333)[1], 1.75)   # 211/120
 
 
+    def test_a_size_past_the_limits_stays_there(self):
+        for size in ((5120, 1440), (300, 220)):
+            (w, h), scale = self.fits(size, 1.5)
+            self.assertEqual(scale, 1.5)
+            self.assertLessEqual(max(abs(w - size[0]), abs(h - size[1])), S.NUDGE)
+
+    def test_the_menus_steps_are_these(self):
+        text = (HERE.parents[1] / "screens" / "appscale.h").read_text()
+        percents = re.search(r"kPercents\[\] = \{([^}]*)\}", text).group(1)
+        self.assertEqual([int(p) / 100 for p in percents.split(",")], list(S.STEPS))
+        self.assertEqual(int(re.search(r"kNudge = (\d+)", text).group(1)), S.NUDGE)
+
+    def test_what_ft_screens_hears(self):
+        self.assertEqual(S.told(101, {"scale": 1.5, "size": [1278, 798]}), "remote 101 scale 1.5 1278x798")
+        for bad in (None, "x", 9, True):   # (a layout file edited by hand)
+            self.assertEqual(S.told(101, {"scale": bad, "size": [1278, 798]}), "remote 101 scale 0")
+
+
 class Start(unittest.TestCase):
     def host(self, *displays, **windows):
         return {"name": "pc", "windows": {"port": 1, **windows}, "displays": list(displays)}
@@ -66,6 +86,12 @@ class Start(unittest.TestCase):
         self.assertEqual(list(h["windows"]["scales"])[-1], "app1")
         S.keep(h, "", 2.0)   # (a window with no app: nothing to keep it by)
         self.assertEqual(len(h["windows"]["scales"]), S.REMEMBERED)
+
+    def test_nothing_kept_for_a_pc_without_one(self):
+        for windows in (None, "on", 1):
+            h = {"name": "pc", "windows": windows}
+            S.keep(h, "a", 2.0)
+            self.assertEqual(h["windows"], windows)
 
 
 class Screens:
@@ -115,8 +141,9 @@ class Command(test_windows.WindowTest):
         n = self.opened("--size", "1280x800")
         self.answers["/api/frametop/windows/resize"] = (200, {"status": True, "scale": 1.6})
         self.run_window("scale", n, "1.6")
-        self.assertEqual([c[2:] for c in self.api], [("POST", "/api/frametop/windows/resize", {"address": "0x55aa10", "scale": 1.6})])
-        self.assertEqual(self.screens.asked, [f"remote {n} scale 1.6"])   # (its stream goes on)
+        self.assertEqual([c[2:] for c in self.api], [("POST", "/api/frametop/windows/resize",
+                                                     {"address": "0x55aa10", "width": 1280, "height": 800, "scale": 1.6})])
+        self.assertEqual(self.screens.asked, [f"remote {n} scale 1.6 1280x800 answer"])   # (its stream goes on)
         self.assertEqual((self.displays()[-1]["scale"], self.displays()[-1]["size"]), (1.6, [1280, 800]))
         self.assertEqual(self.m.load_layout()["hosts"][0]["windows"], {"port": 48989, "scales": {"foot": 1.6}})
 
@@ -126,7 +153,7 @@ class Command(test_windows.WindowTest):
         self.assertEqual(self.api, [])   # (ft-stream's open sends both)
         self.assertEqual((self.displays()[-1]["size"], self.displays()[-1]["scale"]), ([1278, 798], 1.5))
         self.assertRegex(self.screens.asked[0], rf"^remote {n} start .* window:0x55aa10 1278x798 ")
-        self.assertEqual(self.screens.asked[-1], f"remote {n} scale 1.5")
+        self.assertIn(f"remote {n} scale 1.5 1278x798", self.screens.asked)
         self.run_window("scale", n, "1")   # ... and back to the size it was given, not one nudged from 1278
         self.assertEqual(self.displays()[-1]["size"], [1280, 800])
         self.assertNotIn("asked_size", self.displays()[-1])
@@ -136,7 +163,7 @@ class Command(test_windows.WindowTest):
         self.answers["/api/frametop/windows/resize"] = (400, {"error": "no window output for 0x55aa10"})
         with self.assertRaisesRegex(RuntimeError, "no window output"):
             self.run_window("scale", n, "2")
-        self.assertEqual((self.displays()[-1]["scale"], self.screens.asked), (1.0, [f"remote {n} scale 1"]))
+        self.assertEqual((self.displays()[-1]["scale"], self.screens.asked), (1.0, [f"remote {n} scale 1 answer"]))
         self.assertNotIn("scales", self.m.load_layout()["hosts"][0]["windows"])
 
     def test_a_bad_scale_asks_nothing(self):
@@ -158,6 +185,83 @@ class Command(test_windows.WindowTest):
         n = self.opened("--size", "1280x800")
         self.run_window("scale", n, "1.5")
         self.run_window("resize", n, "1000x702", "0.8")
+        d = self.displays()[-1]
+        self.assertEqual((d["size"], d["asked_size"], d["scale"], d["metres"]), ([1002, 702], [1000, 702], 1.5, 0.8016))
+        self.assertIn(f"remote {n} scale 1.5 1002x702", self.screens.asked)   # (its stretch waits for that)
+
+    def test_a_small_panel_stays_wide_enough(self):
+        n = self.opened("--size", "1280x800")
+        self.run_window("scale", n, "1.5")
+        self.run_window("resize", n, "500x700", "0.15")
+        self.assertEqual((self.displays()[-1]["size"], self.displays()[-1]["metres"]), ([498, 702], 0.15))
+
+    def test_a_corner_dragged_past_the_limits(self):
+        n = self.opened("--size", "1280x800")
+        self.run_window("scale", n, "1.5")
+        self.run_window("resize", n, "9000x100", "2")
+        d = self.displays()[-1]
+        self.assertEqual((d["size"], d["scale"]), ([3840, 240], 1.5))   # (which take it)
+
+    def test_the_layout_changed_while_the_pc_took_its_time(self):
+        n = self.opened("--size", "1280x800")
+        request = self.w.ft_hostapi.post_json
+
+        def slow(address, path, body, **kw):   # (another window's panel opens meanwhile)
+            layout = self.m.load_layout()
+            layout["hosts"][0]["displays"].append({"id": "other", "client": "c", "app": "window:0x9", "window": True, "size": [800, 600]})
+            self.m.save_layout(layout)
+            return request(address, path, body, **kw)
+
+        self.w.ft_hostapi.post_json = slow
+        self.run_window("scale", n, "1.6")
+        self.assertEqual([(d["id"], d.get("scale")) for d in self.displays()[1:]], [("oma7-window-55aa10", 1.6), ("other", None)])
+
+    def test_closed_while_the_pc_took_its_time(self):
+        n = self.opened("--size", "1280x800")
+        request = self.w.ft_hostapi.post_json
+
+        def slow(address, path, body, **kw):
+            layout = self.m.load_layout()
+            del layout["hosts"][0]["displays"][1:]
+            self.m.save_layout(layout)
+            return request(address, path, body, **kw)
+
+        self.w.ft_hostapi.post_json = slow
+        self.run_window("scale", n, "1.6")
+        self.assertEqual(([d["id"] for d in self.displays()], self.screens.asked), (["oma7-dp-2"], []))   # (it stays closed)
+
+    def test_one_at_a_time(self):
+        n, held = self.opened("--size", "1280x800"), []
+        request = self.w.ft_hostapi.post_json
+
+        def checked(*args, **kw):
+            with open(f"{self.m.LOCK_PATH}.window-{n}", "w") as other:
+                try:
+                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    held.append(True)
+            return request(*args, **kw)
+
+        self.w.ft_hostapi.post_json = checked
+        self.run_window("scale", n, "1.6")
+        self.assertEqual(held, [True])
+
+    def test_a_pulled_window_starts_at_its_scale(self):
+        layout = self.m.load_layout()
+        layout["hosts"][0]["windows"]["scales"] = {"foot": 1.25}
+        n = next(n for n, _, d in self.m.remote_displays(layout) if d["app"] == "display:DP-2")
+        self.m.save_layout(layout)
+        self.answers["/api/frametop/windows/at"] = (200, {"address": "0x55aa10", "class": "foot", "title": "t", "width": 1000, "height": 600, "grab": [0.5, 0.5]})
+        self.run_window("pull", str(n), "0.5", "0.5")
+        self.assertEqual((self.displays()[-1]["scale"], self.displays()[-1]["pc_app"]), (1.25, "foot"))
+
+    def test_remote_set_leaves_a_windows_scale_to_this(self):
+        n = self.opened("--size", "1280x800")
+        self.run_window("scale", n, "1.5")
+        for kv in ("scale=2", "scale=own", "mode=own"):
+            with self.assertRaisesRegex(RuntimeError, "a window"):
+                self.m.remote_command(["set", "oma7-window-55aa10", kv])
+        self.m.remote_command(["set", "oma7-window-55aa10", "size=1000x702"])
         d = self.displays()[-1]
         self.assertEqual((d["size"], d["asked_size"], d["scale"]), ([1002, 702], [1000, 702], 1.5))
 

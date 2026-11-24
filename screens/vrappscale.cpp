@@ -13,52 +13,50 @@
 namespace ftvr {
 namespace {
 
-// A spin of the wheel is one change on the PC: the last step, once it rests this long.
-constexpr int64_t kRestMs = 220;
+std::map<int, appscale::Asking> g_apps;
 
-struct App {
-    double scale = 1;       // what the menu says: the PC's, or the one asked for
-    appscale::Wheel wheel;
-    int64_t askAt = -1;     // ms: ask for it then (-1: nothing to ask)
-};
-std::map<int, App> g_apps;
-
-App *AppAt(int i) {
+appscale::Asking *AppAt(int i) {
     const auto it = g_apps.find(i);
     const auto s = g_screens.find(i);
     return it != g_apps.end() && s != g_screens.end() && IsWindowPanel(s->second) ? &it->second : nullptr;
 }
 
-void Ask(int i, App &a) {
-    a.askAt = -1;
-    char scale[16];
-    std::snprintf(scale, sizeof scale, "%.4f", a.scale);
-    RunLayout({"window", "scale", std::to_string(i + 1), scale});
+// The size that takes its scale: a corner dragged to one a few pixels off waits for a picture that size,
+// not the one dragged to, or for none if it's the one it shows.
+void TakeSize(int i, int w, int h) {
+    const auto it = g_screens.find(i);
+    if (it == g_screens.end() || !IsWindowPanel(it->second)) return;
+    Screen &s = it->second;
+    if (s.stretchW <= 0 || s.drag == Drag::Resize || FarStretching(s)) return;   // (not resized, or still being)
+    if (!appscale::Near(w, h, s.stretchW, s.stretchH)) return;   // (said of an earlier size)
+    if (w == s.width && h == s.height) Stretch(s, 0, 0);
+    else if (w != s.stretchW || h != s.stretchH) Stretch(s, w, h);
+    else return;
+    if (TileAnchored(i)) RetileDash();
 }
 
 }  // namespace
 
 double AppScale(int i) {
-    const App *a = AppAt(i);
+    const auto *a = AppAt(i);
     return a ? a->scale : 0;
 }
 
-void SetAppScale(int i, double scale, const char *by) {
-    App *a = AppAt(i);
-    if (!a || appscale::Same(a->scale, scale)) return;
-    std::printf("screen %d: scale %d%% (%s)\n", i + 1, appscale::Percent(scale), by);
-    a->scale = scale;
-    Ask(i, *a);
+void SetAppScale(int i, double scale) {
+    if (auto *a = AppAt(i)) a->Pick(scale, NowMs());
 }
+
+void ForgetAppScale(int i) { g_apps.erase(i); }
 
 void UpdateAppScale() {
     const int64_t now = NowMs();
-    for (auto &[i, a] : g_apps)
-        if (a.askAt >= 0 && now >= a.askAt) {
-            if (!AppAt(i)) { a.askAt = -1; continue; }   // (its panel went meanwhile)
-            std::printf("screen %d: scale %d%% (Meta+scroll)\n", i + 1, appscale::Percent(a.scale));
-            Ask(i, a);
-        }
+    for (auto &[i, a] : g_apps) {
+        if (!AppAt(i) || !a.Due(now)) continue;
+        std::printf("screen %d: scale %d%%\n", i + 1, appscale::Percent(a.scale));
+        char scale[16];
+        std::snprintf(scale, sizeof scale, "%.4f", a.scale);
+        RunLayout({"window", "scale", std::to_string(i + 1), scale});
+    }
 }
 
 }  // namespace ftvr
@@ -67,17 +65,17 @@ using namespace ftvr;
 
 extern "C" {
 
-void ft_vr_remote_scale(int index, double scale) {
-    if (scale > 0) g_apps[index] = App{scale};
-    else g_apps.erase(index);
+void ft_vr_remote_scale(int index, double scale, int width, int height, bool answer) {
+    if (scale <= 0) return ForgetAppScale(index);
+    g_apps[index].Said(scale, answer);
+    if (width > 0) TakeSize(index, width, height);
 }
 
 bool ft_vr_app_scale_wheel(int index, double dy) {
-    App *a = g_meta && dy != 0 ? AppAt(index) : nullptr;
+    auto *a = g_meta && dy != 0 ? AppAt(index) : nullptr;
     if (!a) return false;
     SendRelay("notap");   // (Meta was held for this: its release opens no menu)
-    const double to = appscale::Step(a->scale, a->wheel.Add(-dy));
-    if (!appscale::Same(to, a->scale)) a->scale = to, a->askAt = NowMs() + kRestMs;
+    a->Scroll(-dy, NowMs());
     return true;
 }
 

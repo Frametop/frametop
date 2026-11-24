@@ -81,8 +81,9 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
 // What the remote screen shows (its host and app, each time they're set): its dashboard tile's
 // memory key. Another display on the same panel is another key.
 void ft_vr_remote_named(int index, const char *host, const char *app);
-// A PC app window's scale, as ft-layout says it (remote.c's "remote N scale"); 0: its PC takes none.
-void ft_vr_remote_scale(int index, double scale);
+// A PC app window's scale, as ft-layout says it (remote.c's "remote N scale"); 0: its PC takes none. With
+// the size its stream has or will have for it (0 x 0: not said); `answer`: to the scale asked for here.
+void ft_vr_remote_scale(int index, double scale, int width, int height, bool answer);
 // The wheel over a remote screen (notches, as FT_SCROLL's dy): true if Meta is held and it's a PC app
 // window's whose PC takes a scale (vrappscale.cpp): it steps that, and the PC doesn't hear the wheel.
 bool ft_vr_app_scale_wheel(int index, double dy);

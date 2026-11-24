@@ -4,12 +4,14 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <string>
 
 namespace appscale {
 
 constexpr int kPercents[] = {100, 125, 150, 160, 175, 200, 225, 250};
-constexpr double kLeast = 0.5, kMost = 4.0;   // what a PC takes (layout/ft_windowscale.py)
+constexpr int kNudge = 16;   // pixels a side moves at most to take a scale (layout/ft_windowscale.py)
 
 inline int Percent(double scale) { return int(std::lround(scale * 100)); }
 inline std::string Label(int percent) { return std::to_string(percent) + "%"; }
@@ -44,5 +46,45 @@ struct Wheel {
         return whole;
     }
 };
+
+// A panel's scale as its menu says it, and what's asked of ft-layout for it. A spin of the wheel is one
+// change on the PC: the last step, once it rests. One ask is out at a time, so they come in order, and an
+// answer never takes back a scale picked since.
+struct Asking {
+    static constexpr int64_t kRestMs = 220;
+    static constexpr int64_t kAnswerMs = 30000;   // an ask with no answer (ft-layout waits 25 s for the PC)
+
+    double scale = 1;
+    Wheel wheel;
+    int64_t askAt = -1;     // ms: ask for it then (-1: nothing to ask)
+    int64_t askedAt = -1;   // an ask is out since then, for `asked`
+    double asked = 1;
+
+    void Pick(double to, int64_t now) {
+        if (!Same(to, scale)) scale = to, askAt = now;
+    }
+    void Scroll(double notches, int64_t now) {
+        const double to = Step(scale, wheel.Add(notches));
+        if (!Same(to, scale)) scale = to, askAt = now + kRestMs;
+    }
+    // True once when it's time to ask for `scale`.
+    bool Due(int64_t now) {
+        if (askAt < 0 || now < askAt || (askedAt >= 0 && now - askedAt < kAnswerMs)) return false;
+        askAt = -1, askedAt = now, asked = scale;
+        return true;
+    }
+    // ft-layout said it: the PC's scale now. What it says as a stream starts over may be from before the
+    // ask that's out; its answer is `answer`, or the scale asked for.
+    void Said(double s, bool answer) {
+        if (askedAt >= 0 && !answer && !Same(s, asked)) return;
+        askedAt = -1;
+        if (askAt < 0) scale = s;
+    }
+};
+
+// A size that takes a scale, for one asked for (a corner dragged to it): a few pixels from it.
+inline bool Near(int w, int h, int askedW, int askedH) {
+    return std::abs(w - askedW) <= kNudge && std::abs(h - askedH) <= kNudge;
+}
 
 }  // namespace appscale

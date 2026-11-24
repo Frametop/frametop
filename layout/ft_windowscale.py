@@ -9,9 +9,9 @@ import math
 
 import ft_hostmonitors
 
-STEPS = (1.0, 1.25, 1.5, 1.6, 1.75, 2.0, 2.25, 2.5)   # (screens/appscale.h offers these)
+STEPS = (1.0, 1.25, 1.5, 1.6, 1.75, 2.0, 2.25, 2.5)   # (screens/appscale.h's kPercents)
 LIMITS = (0.5, 4.0)   # what a PC takes
-NUDGE = 16            # how far a side may move to take a scale, in pixels
+NUDGE = 16            # how far a side may move to take a scale, in pixels (appscale.h's kNudge)
 REMEMBERED = 100      # apps a PC's entry keeps
 
 
@@ -35,7 +35,9 @@ def _side(pixels, scale, low, high):
 def fitted(size, scale, low, high):
     """(size, scale): the size nearest `size` that the scale fits (Hyprland takes one only if the
     output's size divided by it is whole), and the scale in Hyprland's own steps of a 120th. A scale
-    no size nearby fits becomes the nearest step that one does."""
+    no size nearby fits becomes the nearest step that one does. A size past the limits (one opened
+    bigger, or smaller) stays past them."""
+    low, high = [min(lo, int(v)) for lo, v in zip(low, size)], [max(hi, int(v)) for hi, v in zip(high, size)]
     exact = round(scale * 120) / 120
     for s in [exact] + sorted(STEPS, key=lambda step: abs(step - scale)):
         w, h = (_side(int(v), s, lo, hi) for v, lo, hi in zip(size, low, high))
@@ -83,6 +85,16 @@ def shape(d, size, scale, low, high):
         d["asked_size"] = list(size)
     else:
         d.pop("asked_size", None)
+
+
+def told(n, d, answer=False):
+    """What ft-screens hears of panel n's scale, for its menu: 0 for none (its PC takes none), and the
+    size that takes it, which may be a few pixels from the one its corner was dragged to. `answer`: to
+    the scale ft-screens asked for."""
+    scale = valid(d.get("scale"))
+    if not scale:
+        return f"remote {n} scale 0"
+    return f"remote {n} scale {scale:g}" + (" {}x{}".format(*d["size"]) if d.get("size") else "") + (" answer" if answer else "")
 
 
 def opening(host, answer, app, size, low, high):

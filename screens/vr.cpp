@@ -2503,8 +2503,6 @@ void DropFloatPanel(Screen &s) {
     std::fill(std::begin(s.hover), std::end(s.hover), false);
 }
 
-bool FarStretching(const Screen &s);
-
 constexpr int64_t kHoldSettleMs = 60;   // a held panel waits this long after a "float" for the window's new frame
 
 void SetFloat(Screen &s, double mpp, int x, int y, int w, int h, int title) {
@@ -6968,6 +6966,7 @@ void ft_vr_screen_destroy(int index) {
     if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.tileCurve > 0 ? s.tileCurve : s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe,
                                                         s.dashWait, s.dashHasRel, s.dashRel};
     TileGone(index);
+    ForgetAppScale(index);
     g_chromePool.Release(index);
     ReturnChrome(it->second);
     for (auto o : it->second.All())
@@ -7279,7 +7278,8 @@ void ft_vr_poll(void (*handle)(const struct ft_event *, void *), void *data) {
             g_mouseScreen = -1;
             g_press.buttons = 0;
             g_ctrl = g_alt = false;
-            for (uint32_t code : {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTSHIFT, KEY_RIGHTSHIFT})
+            for (uint32_t code : {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+                                  KEY_LEFTMETA, KEY_RIGHTMETA})
                 ft_vr_key(code, 0);
             g_handInput = handinput::HandInput(g_handInput.params());
             g_palm = palmmenu::PalmMenu(g_palm.params());

@@ -29,12 +29,12 @@ class Window(unittest.TestCase):
         self.ui = ui
 
     def test_pages_dont_shadow_gtk(self):
-        for mixin in (self.ui.PasswordPages, self.ui.ProgressPage):
+        for mixin in (self.ui.PasswordPages, self.ui.ProgressPage, self.ui.UpdatePage):
             clash = [n for n in vars(mixin) if not n.startswith("__") and hasattr(Gtk.ApplicationWindow, n)]
             self.assertEqual(clash, [], f"{mixin.__name__} shadows {clash}")
 
     def test_every_self_call_resolves(self):
-        for name in ("ui.py", "password_pages.py", "progress_page.py"):
+        for name in ("ui.py", "password_pages.py", "progress_page.py", "update_page.py"):
             tree = ast.parse((PKG / name).read_text())
             called = {n.func.attr for n in ast.walk(tree)
                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
@@ -151,6 +151,139 @@ class Window(unittest.TestCase):
                 self.assertEqual(ended, [("failed", 1)])
             finally:
                 job.LOG, job.RESULT = saved
+
+
+@unittest.skipUnless(Gtk, "no GTK 4 bindings here")
+class Updates(unittest.TestCase):
+    """What opening the window says about updates: a newer Frametop, and a newer installer."""
+
+    def setUp(self):
+        from frametop_installer import releases, selfupdate, ui, update_page
+        self.ui, self.releases, self.selfupdate, self.page = ui, releases, selfupdate, update_page
+        self.update = selfupdate.Update("0.3.0-exp.27", "https://x/FrametopInstaller.flatpak", "https://x/SHA256SUMS")
+
+    def release(self, channel, version):
+        return self.releases.Release(channel, version, f"v{version}", "abc1234", 1, "tested", "")
+
+    def test_a_newer_frametop_than_the_installed_one_is_said_first(self):
+        found = {"stable": self.release("stable", "0.3.0"), "experimental": self.release("experimental", "0.3.0-exp.27")}
+        title, note, news = self.page.installed_note("0.3.0-exp.26", "experimental", found)
+        self.assertEqual((title, news), ("Update Frametop", True))
+        self.assertIn("Frametop 0.3.0-exp.27 is out. You have 0.3.0-exp.26.", note)
+        title, note, news = self.page.installed_note("0.3.0-exp.27", "experimental", found)
+        self.assertEqual((title, news), ("Install Frametop", False))
+        self.assertIn("the newest experimental release", note)
+        # stable's newest isn't news to an experimental install, and nothing is to a local build
+        self.assertFalse(self.page.installed_note("0.3.0", "stable", found)[2])
+        title, note, news = self.page.installed_note("0.3.0-local.077e678", "experimental", found)
+        self.assertEqual((title, news), ("Install Frametop", False))
+        self.assertIn("Installed now: Frametop 0.3.0-local.077e678 (experimental)", note)
+        found["experimental"] = LookupError("couldn't reach GitHub")
+        self.assertFalse(self.page.installed_note("0.3.0-exp.26", "experimental", found)[2])
+
+    def window(self, own="0.3.0-exp.26", check=None, where="system", install=None, reopened=True, **kw):
+        """A stand-in window with the installer's own update faked: (the window, what it showed)."""
+        seen, page, su = [], self.page, self.selfupdate
+        saved = (page.in_thread, page.Gtk, page.label, page.button, su.own_version, su.check, su.installation,
+                 su.download, su.install, su.reopen)
+
+        def put_back():
+            (page.in_thread, page.Gtk, page.label, page.button, su.own_version, su.check, su.installation,
+             su.download, su.install, su.reopen) = saved
+        self.addCleanup(put_back)
+
+        def in_thread(work, done, failed):
+            try:
+                r = work()
+            except Exception as e:
+                return failed(e)
+            done(r)
+        page.in_thread, page.Gtk = in_thread, types.SimpleNamespace(Spinner=lambda **k: None)
+        page.label = lambda text="", **k: text
+        page.button = lambda text, on_click, **k: (text, on_click)
+        su.own_version = lambda: own
+        su.check = check or (lambda own, get: self.update)
+        su.installation = lambda: where
+        su.download = lambda update: seen.append(("download", update.version)) or "/c/FrametopInstaller.flatpak"
+        su.install = install or (lambda path, where: seen.append(("install", path, where)))
+        su.reopen = lambda: seen.append(("reopen",)) or reopened
+        win = types.SimpleNamespace(update_declined=False, get="get", dry_run=False, busy=False, close="close",
+                                    page=lambda name, *w, buttons=(): seen.append((name, w, dict(buttons))),
+                                    get_application=lambda: types.SimpleNamespace(quit=lambda: seen.append(("quit",))))
+        for name in ("look_for_installer_update", "show_installer_update", "update_installer"):
+            setattr(win, name, types.MethodType(getattr(self.ui.UpdatePage, name), win))
+        for k, v in kw.items():
+            setattr(win, k, v)
+        return win, seen
+
+    def test_a_newer_installer_is_offered_before_anything_else(self):
+        win, seen = self.window()
+        win.look_for_installer_update(lambda: seen.append(("then",)))
+        name, widgets, buttons = seen[-1]
+        self.assertEqual((name, list(buttons)), ("update", ["Not now", "Update"]))
+        self.assertIn("This is Frametop Installer 0.3.0-exp.26. Version 0.3.0-exp.27 is out.", widgets[1])
+        self.assertTrue(any("asks for your password" in w for w in widgets))   # installed for every user
+        self.assertNotIn(("then",), seen)
+        buttons["Not now"]()
+        self.assertEqual(seen[-1], ("then",))
+        win.look_for_installer_update(lambda: seen.append(("then again",)))    # ...and isn't offered twice
+        self.assertEqual(seen[-1], ("then again",))
+
+    def test_for_this_user_alone_it_doesnt_mention_a_password(self):
+        win, seen = self.window(where="user")
+        win.look_for_installer_update(lambda: None)
+        self.assertFalse(any("password" in w for w in seen[-1][1]))
+
+    def test_nothing_newer_or_no_answer_goes_straight_on(self):
+        def offline(own, get):
+            raise OSError("offline")
+        for check in (lambda own, get: None, offline):
+            win, seen = self.window(check=check)
+            win.look_for_installer_update(lambda: seen.append(("then",)))
+            self.assertEqual([s[0] for s in seen], ["loading", "then"])
+        win, seen = self.window(own="")   # run from the repo: it doesn't even ask
+        win.look_for_installer_update(lambda: seen.append(("then",)))
+        self.assertEqual(seen, [("then",)])
+
+    def test_update_installs_it_where_this_one_is_and_opens_the_new_one(self):
+        win, seen = self.window()
+        win.look_for_installer_update(lambda: seen.append(("then",)))
+        seen[-1][2]["Update"]()
+        self.assertEqual(seen[-4:], [("download", "0.3.0-exp.27"), ("install", "/c/FrametopInstaller.flatpak", "system"),
+                                     ("reopen",), ("quit",)])
+        self.assertFalse(win.busy)
+
+    def test_an_update_that_fails_says_why_and_lets_you_go_on(self):
+        def refused(path, where):
+            raise self.selfupdate.UpdateError("Not authorized")
+        win, seen = self.window(install=refused)
+        win.look_for_installer_update(lambda: seen.append(("then",)))
+        seen[-1][2]["Update"]()
+        name, widgets, buttons = seen[-1]
+        self.assertEqual((name, list(buttons)), ("update", ["Not now", "Try again"]))
+        self.assertTrue(any("The update didn't install: Not authorized." in w for w in widgets))
+        self.assertNotIn(("reopen",), seen)
+        buttons["Not now"]()
+        self.assertEqual(seen[-1], ("then",))
+
+    def test_one_that_cant_open_itself_says_to_open_it(self):
+        win, seen = self.window(reopened=False)
+        win.look_for_installer_update(lambda: None)
+        seen[-1][2]["Update"]()
+        self.assertEqual(seen[-1][1][0], "Frametop Installer 0.3.0-exp.27 is installed")
+        self.assertNotIn(("quit",), seen)
+
+    def test_a_test_run_downloads_and_checks_it_but_installs_nothing(self):
+        win, seen = self.window(dry_run=True)
+        win.look_for_installer_update(lambda: seen.append(("then",)))
+        seen[-1][2]["Update"]()
+        self.assertEqual(seen[-2:], [("download", "0.3.0-exp.27"), ("then",)])
+        self.assertFalse(any(s[0] in ("install", "reopen", "quit") for s in seen))
+
+    def test_an_install_under_way_isnt_interrupted_for_it(self):
+        # the look for a newer installer comes after "running" went to the progress page
+        src = (PKG / "ui.py").read_text()
+        self.assertLess(src.index('if where == "running":'), src.index("self.look_for_installer_update(go_on)"))
 
 
 @unittest.skipUnless(Gtk, "no GTK 4 bindings here")

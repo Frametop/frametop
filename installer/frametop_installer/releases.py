@@ -7,6 +7,9 @@ anything big downloads.
 The SteamOS check follows install-release.sh's check_release: Frametop's newest table
 (pack/steamos.json on main) when it can be fetched, else the release's own. install-release.sh
 still checks again when it installs, and stays the one that refuses a broken build.
+
+It also puts release versions in order (newer), for "a newer Frametop is out" and for the
+installer's own update (selfupdate.py), which picks its release here too.
 """
 import json
 import re
@@ -23,12 +26,40 @@ TABLE_URL = f"{RAW}/main/pack/steamos.json"
 UA = "frametop-installer"
 VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}")
 COMMIT = re.compile(r"[0-9a-f]{7,40}")
+_RELEASED = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-exp\.(\d+))?")
 
 
 def fetch(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+def memo(get=fetch):
+    """get, keeping each URL's answer: the look for a newer installer and the lookup of the two
+    releases read the same lists, and GitHub counts requests. An error isn't kept."""
+    kept = {}
+
+    def cached(url):
+        if url not in kept:
+            kept[url] = get(url)
+        return kept[url]
+    return cached
+
+
+def version_key(version):
+    """Where a release's version stands among releases, or None for a version no release has (a
+    local build's): 0.3.0-exp.2 < 0.3.0-exp.10 < 0.3.0 < 0.3.1-exp.1."""
+    m = _RELEASED.fullmatch(str(version))
+    if not m:
+        return None
+    return int(m[1]), int(m[2]), int(m[3]), m[4] is None, int(m[4] or 0)
+
+
+def newer(a, b):
+    """Is release version a newer than b? No when either isn't a release's version."""
+    ka, kb = version_key(a), version_key(b)
+    return ka is not None and kb is not None and ka > kb
 
 
 def fetch_json(url, get=fetch):
@@ -99,21 +130,22 @@ def steamos_status(release_json, table, build):
     return "untested", "tested on SteamOS " + ", ".join(versions)
 
 
-def _asset(rel, name):
+def asset(rel, name):
     for a in rel.get("assets", []) or []:
         if isinstance(a, dict) and a.get("name") == name:
             return a
     return None
 
 
-def pick(channel, get=fetch):
+def pick(channel, get=fetch, having="Frametop.zip"):
     """The GitHub release for a channel, as get.sh picks it: stable is GitHub's latest (the
-    newest that isn't a prerelease), experimental the newest of any with a Frametop.zip."""
+    newest that isn't a prerelease), experimental the newest of any with a Frametop.zip (or
+    with the file named in having)."""
     if channel == "stable":
         rel = fetch_json(f"{API}/releases/latest", get)
-        return rel if _asset(rel, "Frametop.zip") and not rel.get("draft") else None
+        return rel if asset(rel, having) and not rel.get("draft") else None
     for rel in fetch_json(f"{API}/releases?per_page=30", get):  # newest first
-        if isinstance(rel, dict) and not rel.get("draft") and _asset(rel, "Frametop.zip"):
+        if isinstance(rel, dict) and not rel.get("draft") and asset(rel, having):
             return rel
     return None
 
@@ -126,7 +158,7 @@ def lookup(channel, build, table=None, get=fetch):
         raise LookupError(f"couldn't reach GitHub ({e})") from e
     if not rel:
         raise LookupError(f"there's no {channel} release of Frametop on GitHub yet")
-    info = _asset(rel, "frametop-release.json")
+    info = asset(rel, "frametop-release.json")
     if not info:
         raise LookupError(f"{rel.get('tag_name', 'the release')} has no frametop-release.json")
     try:
@@ -147,7 +179,7 @@ def lookup(channel, build, table=None, get=fetch):
             script = None
     status, note = steamos_status(rj, table, build)
     return Release(channel=channel, version=version, tag=rel["tag_name"], commit=commit,
-                   zip_size=int(_asset(rel, "Frametop.zip").get("size") or 0), status=status, note=note,
+                   zip_size=int(asset(rel, "Frametop.zip").get("size") or 0), status=status, note=note,
                    supported=options.supported_options(rj, script), prerelease=bool(rel.get("prerelease")))
 
 

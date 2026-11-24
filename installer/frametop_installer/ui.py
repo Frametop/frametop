@@ -5,6 +5,9 @@ all ticked), your password if a part needs it (or setting one, as SteamOS starts
 the install's progress, which follows the install's service until it ends. Opened while an
 install runs, it goes straight to the progress; opened after one stopped without finishing (the
 headset restarted or crashed), it offers to run the same install again.
+
+Opening it also looks for updates: a newer Frametop Installer is offered first (update_page.py),
+and the version page says when a newer Frametop than the installed one is out.
 """
 import os
 import sys
@@ -24,6 +27,7 @@ from . import host, job, options, releases  # noqa: E402
 from .askpass import Helper  # noqa: E402
 from .password_pages import PasswordPages  # noqa: E402
 from .progress_page import ProgressPage  # noqa: E402
+from .update_page import UpdatePage, installed_note  # noqa: E402
 from .widgets import boxed_list, button, check_row, in_thread, label, vbox  # noqa: E402
 
 APP_ID = "io.github.frametop.Installer"
@@ -32,7 +36,7 @@ CHANNEL_DETAIL = {"stable": "From main: tested releases.",
                   "experimental": "From experimental: the newest features, less tested."}
 
 
-class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
+class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
     def __init__(self, app, dry_run=False):
         super().__init__(application=app, title="Frametop Installer")
         self.set_default_size(980, 820)
@@ -45,6 +49,8 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
         self.helper = None
         self.keypads = []
         self.busy = False
+        self.update_declined = False    # Not now, on the offer of a newer installer
+        self.get = releases.memo()      # GitHub's answers, asked once per look
         self.osr = releases.os_release()
 
         header = Gtk.HeaderBar()
@@ -101,10 +107,13 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
                                          "Another install of Frametop is running (from FrameDrop). Let it "
                                          "finish, then open Frametop Installer again.")
             if where == "running":
-                return self.show_progress(reattach=True)
-            if where in ("unfinished", "failed", "done"):
-                return self.show_resume(where, state, rc)
-            self.show_versions()
+                return self.show_progress(reattach=True)   # (an install isn't interrupted for an update)
+
+            def go_on():
+                if where in ("unfinished", "failed", "done"):
+                    return self.show_resume(where, state, rc)
+                self.show_versions()
+            self.look_for_installer_update(go_on)
         in_thread(work, done, self.went_wrong)
 
     def show_message(self, title, text):
@@ -121,9 +130,13 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
                                      "Frametop installs on a Steam Frame (SteamOS, VR variant).")
         self.page("loading", Gtk.Spinner(spinning=True, height_request=48),
                   label("Looking up the newest Frametop releases on GitHub...", css=("title-3",), xalign=0.5))
-        build = self.osr.get("BUILD_ID", "")
-        in_thread(lambda: (releases.lookup_both(build), host.installed()), self.versions_found,
+        build, get = self.osr.get("BUILD_ID", ""), self.get
+        in_thread(lambda: (releases.lookup_both(build, get), host.installed()), self.versions_found,
                   self.went_wrong)
+
+    def look_again(self):
+        self.get = releases.memo()
+        self.show_versions()
 
     def versions_found(self, found):
         self.releases, (inst_version, inst_channel) = found
@@ -156,16 +169,14 @@ class Window(PasswordPages, ProgressPage, Gtk.ApplicationWindow):
         prefer = "experimental" if inst_channel == "experimental" else "stable"
         if usable:
             self.choice[prefer if prefer in usable else usable[0]].set_active(True)
-        widgets = [label("Install Frametop", css=("title-1",)), intro, lb]
+        title, note, news = installed_note(inst_version, inst_channel, self.releases)
+        widgets = [label(title, css=("title-1",)), intro, lb]
         if inst_version:
-            widgets.append(label(f"Installed now: Frametop {inst_version}"
-                                 + (f" ({inst_channel})" if inst_channel else "")
-                                 + ". Installing replaces it with the version you pick, and keeps your "
-                                   "settings.", css=("dim-label",)))
+            widgets.insert(1 if news else 3, label(note, css=("heading",) if news else ("dim-label",)))
         if not usable:
             widgets.append(label("Neither version can be installed right now. Check the headset's "
                                  "internet connection, then try again.", css=("error",)))
-            buttons = [button("Try again", self.show_versions, css=("suggested-action",))]
+            buttons = [button("Try again", self.look_again, css=("suggested-action",))]
         else:
             buttons = [button("Next", self.version_picked, css=("suggested-action",))]
         self.page("version", *widgets, buttons=buttons)

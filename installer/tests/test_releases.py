@@ -119,6 +119,31 @@ class Pick(unittest.TestCase):
         self.assertEqual((found["stable"].status, found["stable"].note), ("untested", "tested on SteamOS 0.5.9"))
 
 
+class Order(unittest.TestCase):
+    def test_releases_in_order(self):
+        line = ["0.2.2", "0.3.0-exp.2", "0.3.0-exp.10", "0.3.0-exp.26", "0.3.0", "0.3.1-exp.1", "0.3.1", "0.10.0"]
+        for older, newer in zip(line, line[1:]):
+            self.assertTrue(releases.newer(newer, older), (newer, older))
+            self.assertFalse(releases.newer(older, newer), (older, newer))
+        self.assertFalse(releases.newer("0.3.0", "0.3.0"))
+
+    def test_a_version_no_release_has_is_never_newer_or_older(self):
+        for odd in ("", "dev", "0.3.0-local.077e678", "v0.3.0", "0.3.0-exp.26-3-g37558dea", "0.3", "0.3.0-rc1"):
+            self.assertFalse(releases.newer(odd, "0.1.0"), odd)
+            self.assertFalse(releases.newer("9.9.9", odd), odd)
+
+    def test_one_look_asks_github_once(self):
+        gh = github()
+        get = releases.memo(gh)
+        releases.lookup_both("B1", get=get)
+        releases.pick("experimental", get, having="frametop-release.json")
+        self.assertEqual(len(gh.asked), len(set(gh.asked)))
+        with self.assertRaises(OSError):
+            get("https://nowhere")
+        gh.answers["https://nowhere"] = b"now it answers"   # an error isn't kept
+        self.assertEqual(get("https://nowhere"), b"now it answers")
+
+
 class SteamOS(unittest.TestCase):
     """steamos_status against the real check_release, on the same files."""
 

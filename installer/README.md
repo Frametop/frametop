@@ -10,6 +10,17 @@ A window that installs Frametop on a Steam Frame without a terminal. It ships as
 4. It runs `get.sh --release --version V --yes` plus the options the picks turn into, as a transient systemd user service, `frametop-installer`, so the install doesn't depend on the window. Its output goes to `~/.cache/frametop-installer/install.log`; the window reads the steps (`== N/13 ...`) and curl's download meter from it for the progress bar.
 5. When the install ends, `run-install.sh` writes its exit status to `~/.cache/frametop-installer/result`, and then, if "Restart SteamVR when it's done" was kept, restarts SteamVR.
 
+## Updates
+
+Each time the window opens, it looks for two things on GitHub:
+
+- **A newer Frametop Installer.** A Flatpak bundle has no repository behind it, so neither `flatpak update` nor Discover ever finds a newer one. The installer looks itself (`selfupdate.py`). It follows the channel it came from: one from an experimental release follows the newest public release of any kind that has a `FrametopInstaller.flatpak`, and one from a stable release follows GitHub's latest release only. A release whose version is newer than its own (`VERSION` in the bundle, written by `flatpak/build.sh`) is an update, and the window offers it before anything else, with Update and Not now. It never goes back to an older version, and a build with a version no release has (a local build, or the app run from the repo) doesn't look at all.
+- **A newer Frametop than the installed one.** The version page's title becomes "Update Frametop" and says which version is out and which you have, when the newest release on the installed version's channel is newer. Updating is the same install as always, over the old one.
+
+Update downloads the release's bundle into `~/.cache/frametop-installer/update`, checks it against the release's `SHA256SUMS`, and has the host's `flatpak install --bundle` put it where this one is installed. Both files have to come from Frametop's release downloads on github.com, and a release without `SHA256SUMS` isn't offered. This is the trust an install of Frametop already has: the same releases, over HTTPS. The checksum catches a broken download, not a changed release. Installed for every user of the headset (which is how Discover installs a bundle), flatpak asks for your password through the desktop's own prompt, as it did the first time; installed for this user alone, it doesn't ask. The running window keeps the old files until it closes, so it starts the new version (`flatpak-spawn --latest-version`) and quits. If that fails, it says to open the installer again.
+
+Nothing here blocks an install. With no answer from GitHub, or after Not now, the window goes on as before, and a failed update says why and lets you go on with the version you have. An install that's running isn't interrupted for an update: the window goes straight to its progress. With `--dry-run`, Update downloads and checks the bundle but doesn't install it.
+
 ## Restarts and crashes
 
 The install's choices are saved in `~/.cache/frametop-installer/state.json` when it starts. On opening, the window checks the service, that file, and the result:
@@ -38,15 +49,15 @@ The Flatpak's permissions (`flatpak/build.sh`):
 | Permission | Why |
 | --- | --- |
 | `--talk-name=org.freedesktop.Flatpak` | `flatpak-spawn --host`: the install itself, `systemctl --user`, `sudo -v`, `passwd`. This is a full escape from the sandbox, which an installer of user services, a SteamVR driver and root-owned files needs. Flathub would review it. |
-| `--filesystem=~/.cache/frametop-installer:create` | The host scripts it copies there (`bin/`), the log, the state, the result |
-| `--share=network` | GitHub's API and `raw.githubusercontent.com`, for the lookup |
+| `--filesystem=~/.cache/frametop-installer:create` | The host scripts it copies there (`bin/`), the log, the state, the result, and a downloaded update (`update/`) |
+| `--share=network` | GitHub's API and `raw.githubusercontent.com`, for the lookup, and the release's bundle and `SHA256SUMS` for the installer's own update |
 | `--socket=wayland`, `--socket=fallback-x11`, `--device=dri`, `--share=ipc` | The window |
 
-Host commands run with `LD_PRELOAD` and `LD_LIBRARY_PATH` unset, and with the host's `PATH`, `HOME` and `XDG_RUNTIME_DIR`.
+Starting the new version after an update needs no permission of its own: `flatpak-spawn --latest-version` goes through the Flatpak portal every app can use. Host commands run with `LD_PRELOAD` and `LD_LIBRARY_PATH` unset, and with the host's `PATH`, `HOME` and `XDG_RUNTIME_DIR`.
 
 ## Files
 
-- `frametop_installer/`: the app (Python, GTK 4, libadwaita when present). `options.py` holds the parts and what each release can leave out, `releases.py` the lookup, `host.py` the host commands, and `job.py` the service, its state and the progress. The window is `ui.py` (the version, parts and resume pages), with `password_pages.py` and `progress_page.py` mixed into it, `askpass.py` for its end of the askpass socket, and `widgets.py` for the small GTK pieces.
+- `frametop_installer/`: the app (Python, GTK 4, libadwaita when present). `options.py` holds the parts and what each release can leave out, `releases.py` the lookup and the order of versions, `selfupdate.py` the installer's own update, `host.py` the host commands, and `job.py` the service, its state and the progress. The window is `ui.py` (the version, parts and resume pages), with `password_pages.py`, `progress_page.py` and `update_page.py` mixed into it, `askpass.py` for its end of the askpass socket, and `widgets.py` for the small GTK pieces.
 - `host/`: what runs on the host. `helper.py` (askpass socket, `passwd`), `askpass`, `run-install.sh` (result, then the SteamVR restart), and `fake-install.sh` for test runs.
 - `flatpak/`: the launcher, desktop entry, AppStream metadata, icon, and `build.sh`.
 - `tests/`: offline tests, in `just test` through `scripts/testgate/python-suites.txt`.

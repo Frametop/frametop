@@ -81,7 +81,7 @@
     {
      "id": "ray-left",
      "hands": "left",
-     "text": "Left hand up in front of your chest, palm away, elbow bent, about 40 cm from your eyes.|Cyan: tap thumb to index. Purple: thumb to middle fingertip.",
+     "text": "Left hand up in front of your chest, palm away, elbow bent, about 40 cm from your eyes.|Point it at each lit button. Cyan: tap thumb to index. Purple: thumb to middle fingertip.",
      "windows": [
       {
        "id": "a",
@@ -110,7 +110,7 @@
     {
      "id": "palm-in-right",
      "hands": "right",
-     "text": "Turn your right hand palm toward you, fingers up, about 40 cm out, as if looking at your nails.|Keep it there and tap when a button lights. Cyan: thumb to index. Purple: thumb to middle.",
+     "text": "Turn your right hand palm toward you, fingers up, about 40 cm out: you see your palm, not the back of the hand.|Keep it there and tap when a button lights. Cyan: thumb to index. Purple: thumb to middle.",
      "windows": [
       {
        "id": "a",
@@ -168,7 +168,7 @@
     {
      "id": "lap-right",
      "hands": "right",
-     "text": "Right hand low by your lap, palm down and relaxed, as with gaze: look at the lit button and tap there.|Cyan: thumb to index. Purple: thumb to middle.",
+     "text": "Right hand low by your lap, palm down and relaxed. Look at the lit button and tap where the hand is.|Cyan: thumb to index. Purple: thumb to middle.",
      "windows": [
       {
        "id": "a",
@@ -191,14 +191,13 @@
       "mix": {
        "tap": 1,
        "middle": 1
-      },
-      "lit_s": 1.1
+      }
      }
     },
     {
      "id": "lap-left",
      "hands": "left",
-     "text": "Left hand low by your lap, palm down and relaxed: look at the lit button and tap there.|Cyan: thumb to index. Purple: thumb to middle.",
+     "text": "Left hand low by your lap, palm down and relaxed. Look at the lit button and tap where the hand is.|Cyan: thumb to index. Purple: thumb to middle.",
      "windows": [
       {
        "id": "a",
@@ -221,8 +220,7 @@
       "mix": {
        "tap": 1,
        "middle": 1
-      },
-      "lit_s": 1.1
+      }
      }
     },
     {
@@ -250,10 +248,10 @@
       "seconds": 14,
       "mix": {
        "tap": 1,
+       "middle": 1,
        "hold": 1,
        "middle-hold": 1
-      },
-      "lit_s": 1.3
+      }
      }
     },
     {
@@ -281,10 +279,10 @@
       "seconds": 14,
       "mix": {
        "tap": 1,
+       "middle": 1,
        "hold": 1,
        "middle-hold": 1
-      },
-      "lit_s": 1.3
+      }
      }
     },
     {
@@ -350,7 +348,7 @@
     {
      "id": "both-hands",
      "hands": "both",
-     "text": "Both hands up, about 40 cm out, however is comfortable. Each lit button says L or R:|tap with that hand, cyan thumb to index, purple thumb to middle.",
+     "text": "Both hands up, about 40 cm out, however feels comfortable. Each lit button says L or R:|tap with that hand, cyan thumb to index, purple thumb to middle.",
      "windows": [
       {
        "id": "a",
@@ -430,10 +428,11 @@
    "intro": "Last: your thumb on every fingertip, with no window. Open your hand between touches.",
    "prompts": [
     {
+     "id": "fingertips/each",
      "text": "Hand up about 40 cm out, palm toward you. Touch your thumb to each fingertip in turn:|index, middle, ring, little, and back. Open the hand wide between touches.",
      "seconds": 14,
      "hands": "any",
-     "pose": "pinch-tap",
+     "pose": "flat",
      "distance": "mid",
      "switch": [
       {
@@ -443,6 +442,7 @@
      ]
     },
     {
+     "id": "fingertips/ring-little",
      "text": "Only the ring and little fingers now: thumb to ring, thumb to little, about a second each,|while you slowly turn the hand: palm toward you, on its side, back toward you.",
      "seconds": 14,
      "hands": "any",

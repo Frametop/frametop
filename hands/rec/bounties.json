@@ -5,7 +5,7 @@
   {
    "id": "everyday-taps",
    "title": "Everyday taps",
-   "blurb": "Thumb to index and thumb to middle taps where you normally hold your hands, about 40 cm out: pointing at a window, with your palm toward you and with the hand low by your lap, with holds, near misses and a thumb touch on every fingertip. These are the taps you make all day. The tracker still misses them most with the palm toward you and with the middle finger.",
+   "blurb": "Thumb to index and thumb to middle taps where you normally hold your hands, about 40 cm out: pointing, palm toward you and low by your lap, then your thumb on every fingertip. The tracker still misses these most with the palm toward you and with the middle finger.",
    "minutes": 5,
    "priority": "high",
    "script": "everyday-taps"

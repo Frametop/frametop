@@ -1676,6 +1676,9 @@ int main() {
               dashtiles::Parse("tile 0 1 2 0 1.000", &st) && !st.centre && !st.arc && st.nudgeDeg == 0 &&
                   dashtiles::Parse("tile 0 1 2 0 1.000 dr centre arc nudge=-3.0", &st) && st.below && st.centre && st.arc &&
                   near(st.nudgeDeg, -3) && dashtiles::Text(st) == "tile 0 1 2 0 1.000 dr centre arc nudge=-3.0");
+        check("state: a shelf of its own in the text",
+              dashtiles::Parse("tile 0 1 2 0 1.000 dc row", &st) && st.ownRow && !st.arc && dashtiles::Text(st) == "tile 0 1 2 0 1.000 dc row" &&
+                  !dashtiles::Parse("tile 0 1 2 0 1.000 dc row row", &st));
         b.Unanchor(1);
         b.Arrange(wide);
         check("centre: the chosen one gone: the widest again", b.Centre() == 2);

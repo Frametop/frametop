@@ -187,7 +187,7 @@ def items(root, env=os.environ):
         P("eyegrab-late-test", "gaze/tracker/tests/eyegrab-late-test.c", cc="gcc",
           flags="-std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread"),
     ]
-    for name in ("trackwatch", "levelpin", "dashanchor", "tiling", "dashtiles", "centreglow", "barside", "panelmenu", "menulayout",
+    for name in ("trackwatch", "levelpin", "dashanchor", "tiling", "dashtiles", "tilewide", "centreglow", "barside", "panelmenu", "menulayout",
                  # palm Quick Access (quickaccess.h): its tiles, where a tip or laser lands, Reset's ask,
                  # its Quick Settings toggles (quicksettings.h); and its readouts (sysstats.h)
                  "quickaccess", "sysstats"):

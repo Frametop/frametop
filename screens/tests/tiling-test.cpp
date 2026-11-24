@@ -4,6 +4,7 @@
 // (or a column past kMaxTopDeg) shrinks to fit, drops land where they're let go, and the keys move
 // and size panels as Omarchy's do.
 #include "../tilefit.h"
+#include "../tiledrop.h"
 #include "../tiling.h"
 #include "../tilegrid.h"
 
@@ -189,9 +190,10 @@ int main() {
         check("packed: past a short middle column, the high wide ones keep a gap", apart(f, p.gapDeg) && tight(f, p.gapDeg) &&
                                                                                        f.tiles[3].az0 >= f.tiles[0].az1 + p.gapDeg - 1e-9);
         check("packed: still centred, no corner overlap", near(f.az0, -f.az1) && cornersInColumns(f));
-        // a drop on the wide one's overhang, above the short neighbour: that wide one's column
+        // a drop on the wide one's overhang, above the short neighbour: that wide one's column (over
+        // it, not a new one: tilewide.h)
         const auto d = tiling::DropAt(l, cols, (wide.az1 + shortOne.az0) / 2 + 1, wide.elDeg);
-        check("packed: a drop on an overhang goes by the panel there", d.kind == tiling::Drop::NewColumn && d.col == 1);
+        check("packed: a drop on an overhang goes by the panel there", d.kind == tiling::Drop::Into && d.col == 0 && d.row == 0 && !d.below);
         const auto under = tiling::DropAt(l, cols, shortOne.azDeg, shortOne.elDeg);
         check("packed: ...and under it, the short one's column", under.kind == tiling::Drop::Into && under.col == 1);
     }

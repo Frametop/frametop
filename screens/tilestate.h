@@ -5,8 +5,10 @@
 // l, c or r, the way it leans; left out: "uc") or "sat STAY" and the satellite's 12 numbers. STAY: 0 as DASH_TILE_STAY says, 1 shown with the dashboard closed, 2 hidden then (any
 // other number is 1, as it was when STAY was a yes or no: its 0 was "no", the default then). A tile's
 // line may end with any of "centre" (the centre display you chose), "arc" (curved round the tiles'
-// arc while it's the centre) and "nudge=DEG" (moved up, or down when negative, on its own). Parse takes any whitespace between the words and nothing else, and the sphere's older
-// "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" (its scale taken as the size, the rest dropped).
+// arc while it's the centre), "row" (it starts a shelf of its own: tilewide.h) and "nudge=DEG"
+// (moved up, or down when negative, on its own). Parse takes any whitespace between the words and
+// nothing else, and the sphere's older "tile STAY COL ROW ALONE WEIGHT SCALE WIDTH" (its scale taken
+// as the size, the rest dropped).
 // Header only, no OpenVR, so its test runs anywhere (screens/tests/dashtiles-test.cpp).
 #pragma once
 
@@ -40,6 +42,7 @@ struct State {
     bool room = false;      // off: put in the room on purpose (a window stays there next time: TileWhenKnown)
     bool centre = false;    // the centre display, chosen (a drop onto the one before: Board::TakeCentre)
     bool arc = false;       // ...curved round the tiles' arc while it's the centre
+    bool ownRow = false;    // starts a shelf (tilegrid.h's Cell::row)
     double nudgeDeg = 0;    // moved up (down: negative) on its own, degrees (Key::NudgeUp, NudgeDown)
 
     // A tile with a place on the grid (else it goes where a new one would).
@@ -84,17 +87,18 @@ inline bool Parse(const std::string &text, State *out) {
     if (w[0] == "off" && w.size() == 1) return *out = s, true;
     if (w[0] == "room" && w.size() == 1) return s.room = true, *out = s, true;
     // (a tile's flags at its end, each once: taken off before its words are counted)
-    bool centre = false, arc = false, nudged = false;
+    bool centre = false, arc = false, row = false, nudged = false;
     if (w[0] == "tile")
         while (w.size() > 6) {
             const std::string &f = w.back();
             if (f == "centre" && !centre) centre = true;
             else if (f == "arc" && !arc) arc = true;
+            else if (f == "row" && !row) row = true;
             else if (f.compare(0, 6, "nudge=") == 0 && !nudged && detail::Num(f.substr(6), &s.nudgeDeg) && std::fabs(s.nudgeDeg) <= 90) nudged = true;
             else break;
             w.pop_back();
         }
-    s.centre = centre, s.arc = arc;
+    s.centre = centre, s.arc = arc, s.ownRow = row;
     if (w[0] == "tile" && (w.size() == 6 || w.size() == 7 || w.size() == 8)) {
         double old = 0;   // (the old form's weight and width)
         const bool ok = w.size() != 8 ? detail::Num(w[5], &s.scale)
@@ -134,7 +138,8 @@ inline std::string Text(const State &s) {
             return "tile " + std::to_string(StayNumber(s.stay)) + " " + std::to_string(s.col) + " " + std::to_string(s.row) + " " +
                    std::to_string(s.alone ? 1 : 0) + num(" %.3f", s.scale) +
                    (s.below || s.align ? std::string(" ") + (s.below ? 'd' : 'u') + (s.align < 0 ? 'l' : s.align > 0 ? 'r' : 'c') : "") +
-                   (s.centre ? " centre" : "") + (s.arc ? " arc" : "") + (std::fabs(s.nudgeDeg) >= 0.05 ? num(" nudge=%.1f", s.nudgeDeg) : "");
+                   (s.centre ? " centre" : "") + (s.arc ? " arc" : "") + (s.ownRow ? " row" : "") +
+                   (std::fabs(s.nudgeDeg) >= 0.05 ? num(" nudge=%.1f", s.nudgeDeg) : "");
         case State::Kind::Sat: {
             std::string t = "sat " + std::to_string(StayNumber(s.stay));
             for (int r = 0; r < 3; ++r)

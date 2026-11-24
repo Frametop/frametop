@@ -48,6 +48,7 @@ struct Cell {
     int id = 0;
     double scale = 1;   // its size, times its natural one
     int align = 0;      // -1 against its column's left edge, +1 its right, 0 as the tiling chooses
+    bool row = false;   // starts a shelf, though there's room on the one before (round a super wide display: tilewide.h)
 };
 struct Col {
     std::vector<Cell> cells;
@@ -106,7 +107,7 @@ public:
         const int n = int(cols_.size());
         if (from == to || from < 0 || to < 0 || from >= n || to >= n || cols_[size_t(from)].cells.empty()) return false;
         Cell cell = cols_[size_t(from)].cells.front();
-        cell.align = 0;
+        cell.align = 0, cell.row = false;
         const bool gone = cols_[size_t(from)].cells.size() == 1;
         Take(cell.id);
         if (gone && from < to) --to;
@@ -119,7 +120,7 @@ public:
         const Where w = Find(id);
         if (!w.ok() || col == w.col || col < 0 || col >= int(cols_.size())) return false;
         Cell cell = cols_[size_t(w.col)].cells[size_t(w.row)];
-        cell.align = 0;
+        cell.align = 0, cell.row = false;
         const bool gone = cols_[size_t(w.col)].cells.size() == 1;
         Take(id);
         if (gone && w.col < col) --col;
@@ -152,7 +153,7 @@ public:
             return true;
         }
         Cell cell = col.cells[w.row];
-        cell.align = 0;   // (its new column's own way)
+        cell.align = 0, cell.row = false;   // (its new column's own way)
         const bool below = col.Below(w.row);
         const int fromBase = w.row - col.base;   // (rows from the desk line: negative above)
         Erase(col, w.row);
@@ -197,6 +198,10 @@ public:
         if (a == align) return false;
         a = align;
         return true;
+    }
+    // Starts a shelf of its own or not (Cell::row).
+    void SetRow(int id, bool on) {
+        if (const Where w = Find(id); w.ok()) cols_[w.col].cells[w.row].row = on;
     }
     // Its size `factor` times. False when nothing changed.
     bool Scale(int id, double factor) {

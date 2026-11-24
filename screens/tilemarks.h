@@ -1,6 +1,6 @@
 // Which dashboard tiles Board::Settle (dashtiles.h) still checks, and why (council, 2026-11-20):
 // one put on a stack before its size was known (unsized), and one put on a stack for you (stacked:
-// Anchor's OnTopOf, FillGap), so one coming back to that stack is checked too. A panel you put into
+// Anchor's RoomFor, FillGap), so one coming back to that stack is checked too. A panel you put into
 // a stack by hand makes that stack yours (ByHand says which marks go for each edit). Header only,
 // no OpenVR, so its test (tests/dashtiles-test.cpp) runs anywhere.
 #pragma once

@@ -32,8 +32,12 @@ int main() {
     check("more available than there is: unknown", !ParseMem("MemTotal: 100 kB\nMemAvailable: 200 kB\n", &used, &total));
     check("nothing", !ParseMem(nullptr, &used, &total) && !ParseMem("", &used, &total));
 
-    check("the CPU's zones count", CpuZone("cpuss-0") && CpuZone("cpu0-top") && CpuZone("cpu7-bottom\n"));
-    check("others don't", !CpuZone("gpuss-0") && !CpuZone("battery") && !CpuZone("") && !CpuZone(nullptr));
+    check("the cores' zones count", CoreZone("cpu0-thermal") && CoreZone("cpu2-top-thermal") && CoreZone("cpu7-bottom-thermal\n"));
+    check("others don't", !CoreZone("cpuss0-thermal") && !CoreZone("gpuss-0-thermal") && !CoreZone("battery") && !CoreZone("") &&
+                              !CoreZone("cpu") && !CoreZone(nullptr));
+    const double cores[] = {96, 80, 76, 72};
+    check("the temperature is their average, not the hottest spot", CpuTemp(cores, 4) == 81 && CpuTemp(cores, 1) == 96);
+    check("...unknown without any", CpuTemp(cores, 0) < -100);
 
     check("GPU: 5.5 ms of a 90 Hz frame's 11.1", std::fabs(GpuPercent(5.5, 90) - 49.5) < 1e-9);
     check("...more than a frame: 100", GpuPercent(20, 90) == 100);

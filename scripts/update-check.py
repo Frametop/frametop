@@ -239,6 +239,30 @@ def check_versions(versions):
 
 # --- the host, without SteamVR
 
+def check_readouts(supplies="/sys/class/power_supply", zones="/sys/class/thermal"):
+    """What the palm menu's temperature and battery lines read (screens/vrstats.cpp)."""
+    def text(path):
+        try:
+            with open(path) as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
+    own = [d for d in glob.glob(supplies + "/*") if text(d + "/scope") != "Device"]
+    batteries = [d for d in own if text(d + "/type") == "Battery"]
+    missing = [what for what, there in (
+        ("CPU core thermal zone", any(re.match(r"cpu\d", text(z)) for z in glob.glob(zones + "/thermal_zone*/type"))),
+        ("battery capacity", any(text(d + "/capacity") for d in batteries)),
+        ("battery voltage_now", any(text(d + "/voltage_now") for d in batteries)),
+        ("battery current_avg", any(text(d + "/current_avg") for d in batteries)),
+        ("charger online", any(text(d + "/online") for d in own if d not in batteries)),
+    ) if not there]
+    if missing:
+        report("warn", "palm menu readouts", f"no {', no '.join(missing)}: it shows a dash or a wrong state")
+    else:
+        report("ok", "palm menu readouts", "the core temperatures, battery and charger can be read")
+
+
 def check_host():
     needed = [
         ("/usr/bin/kwin_wayland_wrapper", "FAIL", "the desktop can't start KWin"),
@@ -1198,6 +1222,7 @@ def main():
     versions = current_versions()
     check_versions(versions)
     check_host()
+    check_readouts()
     check_root_files()
     check_chaperone()
     steamvr_up = run("pgrep", "-x", "vrserver")[0] == 0

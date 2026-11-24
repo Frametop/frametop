@@ -1,0 +1,261 @@
+{
+ "version": 1,
+ "name": "thumbs",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Thumbs",
+  "seconds": 8,
+  "text": "Steps without windows come first: do what each one says with your thumb while the cameras record your hands. Then windows will appear in front of you: they don't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "thumbs",
+   "title": "Thumbs",
+   "intro": "Only your thumb moves in most of these steps, mostly with your palm up at chest height, as if carrying something flat on it. Keep the fingers as still as you can. There's no wrong way: what helps is the thumb going as far as it can, every way it can.",
+   "prompts": [
+    {
+     "id": "thumbs/right-up",
+     "hands": "right",
+     "position": "chest",
+     "distance": "mid",
+     "seconds": 16,
+     "text": "Right hand out in front at chest height, palm up, as if carrying a plate, about 40 cm out.|Move only the thumb: out to the side as far as it goes, then across the palm to the base of the little finger.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "only the thumb's tip",
+       "text": "Right hand still palm up at chest height.|Bend and straighten only the tip of the thumb, the rest of it still."
+      }
+     ]
+    },
+    {
+     "id": "thumbs/left-up",
+     "hands": "left",
+     "position": "chest",
+     "distance": "mid",
+     "seconds": 16,
+     "text": "Left hand out in front at chest height, palm up, as if carrying a plate, about 40 cm out.|Move only the thumb: out to the side as far as it goes, then across the palm to the base of the little finger.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "only the thumb's tip",
+       "text": "Left hand still palm up at chest height.|Bend and straighten only the tip of the thumb, the rest of it still."
+      }
+     ]
+    },
+    {
+     "id": "thumbs/circles",
+     "hands": "any",
+     "seconds": 16,
+     "text": "Palm up at chest height, about 40 cm out. Draw big slow circles with the thumb, one way and then the other,|the fingers staying flat.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "thumbs/touches",
+     "hands": "any",
+     "seconds": 16,
+     "text": "Palm up. Touch the thumb to the base of each finger, index to little finger, then to each fingertip,|opening the thumb wide between touches.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "thumbs/tuck",
+     "hands": "any",
+     "seconds": 16,
+     "text": "Palm up. Fold the thumb flat across the palm and close the fingers over it, then open, thumb out wide.|Then a loose fist with the thumb outside, lying over the fingers.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "thumbs/palm-in",
+     "hands": "any",
+     "pose": "flat",
+     "seconds": 14,
+     "text": "Now palm toward you, fingers up. Thumb out to the side, then folded across the palm,|then behind the hand where you can't see it, and back.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "thumbs/on-top",
+     "hands": "any",
+     "pose": "thumbs-up",
+     "seconds": 16,
+     "text": "Hand on its side, thumb on top, as for a thumbs up. Bend and straighten the thumb, as if pressing a button on a remote,|then tilt it left and right, as on a thumbstick.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "thumbs/both",
+     "hands": "both",
+     "seconds": 16,
+     "text": "Both hands side by side, palms up, about 40 cm out. Move both thumbs, each a different way:|one circling while the other bends, never the same on both.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "palms down",
+       "text": "Both hands side by side, palms down now. Keep both thumbs moving, each a different way:|out to the side, under the palm, up and down."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "palm-up-taps",
+   "title": "Palm-up taps",
+   "kind": "scene",
+   "intro": "A window in front of you. Keep your palm up and tap when a button lights. Nothing happens when you tap: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "right",
+     "hands": "right",
+     "text": "Right hand out in front, palm up, about 40 cm out. Cyan: tap thumb to index. Purple: thumb to middle.|Orange with a cross: stop about 1 cm short, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 1
+      }
+     }
+    },
+    {
+     "id": "left",
+     "hands": "left",
+     "text": "Left hand out in front, palm up, about 40 cm out. Cyan: tap thumb to index. Purple: thumb to middle.|Orange with a cross: stop about 1 cm short, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 1
+      }
+     }
+    },
+    {
+     "id": "both-hands",
+     "hands": "both",
+     "text": "Both hands out in front, palms up. Each lit button says L or R: tap with that hand.|Cyan thumb to index, purple thumb to middle, orange with a cross stop short.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

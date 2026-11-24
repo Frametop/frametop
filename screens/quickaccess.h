@@ -10,8 +10,8 @@
 // only; while Frametop is paused for a VR game only Steam Menu works, and the rest dim: WorksPaused);
 // Reset Layout resets at once (ft-layout's reset counts 3-2-1 in front of you itself).
 //   Above the tiles, a header (user, 2026-11-19: "add to the palm menu a resource tracker ... a quick
-// settings menu that when clicked opens a small window that has toggle options"): CPU, GPU, memory and
-// temperature (sysstats.h) on the left, and on the right a button, kButton, that turns the card to its
+// settings menu that when clicked opens a small window that has toggle options"): CPU, GPU, memory,
+// temperature (sysstats.h) and the battery (battery.h) on the left, and on the right a button, kButton, that turns the card to its
 // Quick Settings page (quicksettings.h's toggles in the tiles' places, the button then Back).
 //   Under the tiles, while gaze mode is on, one wide row: Quick Eye Calibrate, the gaze service's quick
 // check (user, 2026-11-22: "a quick eye calibrate option to the palm menu ... only an option if eye
@@ -68,7 +68,7 @@ constexpr double kPokeAt = 0.014, kPokeOut = 0.019, kPokeSide = 0.03;
 
 // The card in pixels: a header kHead tall, then kCols x kRows tiles of kTile, kGap apart and kPad in
 // from its edge.
-constexpr int kTile = 150, kGap = 12, kPad = 16, kHead = 84;
+constexpr int kTile = 150, kGap = 12, kPad = 16, kHead = 112;
 constexpr int kTop = kPad + kHead + kGap;   // the first row of tiles
 constexpr int kW = 2 * kPad + kCols * kTile + (kCols - 1) * kGap;
 constexpr int kH = kTop + kPad + kRows * kTile + (kRows - 1) * kGap;

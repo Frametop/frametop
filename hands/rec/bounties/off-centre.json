@@ -1,0 +1,263 @@
+{
+ "version": 1,
+ "name": "off-centre",
+ "record_hz": 30,
+ "intro_s": 4,
+ "between_s": 3,
+ "welcome": {
+  "title": "Hands off-centre",
+  "seconds": 8,
+  "text": "Steps without windows come first: do what each one says with your fingers while the cameras record your hands. Then windows will appear in front of you: they don't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+ },
+ "done": {
+  "title": "All done",
+  "seconds": 6,
+  "text": "Thank you! This recording session will close. Continue in the application.|Review your recordings in the Hand recorder window."
+ },
+ "stopped": {
+  "title": "Stopped",
+  "seconds": 4,
+  "text": "What was recorded so far is saved. Review it in the Hand recorder window."
+ },
+ "sections": [
+  {
+   "id": "hand-size",
+   "title": "Hand size",
+   "requires": [],
+   "go": "Hold",
+   "quick": true,
+   "intro": "First, your hand size: both hands up about 40 cm out, still.",
+   "prompts": [
+    {
+     "text": "Both hands about 40 cm out, still|Palms toward you",
+     "seconds": 6,
+     "hands": "both",
+     "distance": "mid",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "backs toward you",
+       "text": "Both hands about 40 cm out, still|Backs toward you"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "edges",
+   "title": "Hands off-centre",
+   "intro": "Look straight ahead and keep your head still through each step. Only your hand goes to the side, up or down, so the cameras see it near the edge of their view and not in the middle. Keep the fingers moving the whole time. If the panel says it can't see your hand, carry on: here that is expected.",
+   "prompts": [
+    {
+     "id": "edges/right-out",
+     "hands": "right",
+     "position": "right",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Look straight ahead. Right hand far out to your right, at the edge of what you can see, palm toward you.|Bend each finger down and back up, one at a time, thumb to little finger.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "little finger to thumb"
+      }
+     ]
+    },
+    {
+     "id": "edges/left-out",
+     "hands": "left",
+     "position": "left",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Look straight ahead. Left hand far out to your left, at the edge of what you can see, palm toward you.|Bend each finger down and back up, one at a time, thumb to little finger.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "little finger to thumb"
+      }
+     ]
+    },
+    {
+     "id": "edges/high",
+     "hands": "any",
+     "position": "up",
+     "pose": "flat",
+     "seconds": 16,
+     "text": "Still looking straight ahead: one hand up high, at the top edge of what you can see.|One finger at a time, down and back up.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "edges/low",
+     "hands": "any",
+     "position": "down",
+     "pose": "open",
+     "seconds": 16,
+     "text": "One hand low, in front of your stomach, at the bottom edge of what you can see without looking down.|Count on your fingers, raising and dropping them one at a time.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "edges/across",
+     "hands": "any",
+     "seconds": 16,
+     "text": "Reach across your body: the right hand out at your left side, at the edge of what you can see.|Play an invisible piano there, each finger pressing on its own.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the left hand out at your right side",
+       "text": "Now the other way: the left hand out at your right side, at the edge of what you can see.|Play an invisible piano there, each finger pressing on its own."
+      }
+     ]
+    },
+    {
+     "id": "edges/corners",
+     "hands": "any",
+     "pose": "open",
+     "seconds": 16,
+     "text": "One hand to an upper corner of what you can see, then down to the lower corner on the same side,|opening, closing and pointing as it goes.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "edges/leaving",
+     "hands": "any",
+     "seconds": 16,
+     "text": "Move one hand slowly out past the edge of what you can see until only the fingertips are left, fingers wiggling,|and bring it back in. A side first, then the top or the bottom.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "the other hand"
+      }
+     ]
+    },
+    {
+     "id": "edges/both",
+     "hands": "both",
+     "seconds": 16,
+     "text": "Both hands far apart, one at each side edge of what you can see, palms toward you.|Move a different finger on each hand at the same time.",
+     "switch": [
+      {
+       "at": 0.5,
+       "to": "one hand high, the other low",
+       "text": "Now one hand at the top edge of what you can see and the other at the bottom edge.|Keep moving a different finger on each hand."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "edge-taps",
+   "title": "Taps off to the side",
+   "kind": "scene",
+   "intro": "A window straight ahead. Keep looking at it with your head still: your hand stays out at the side and taps there when a button lights. Nothing happens when you tap: the cameras record your hand.",
+   "prompts": [
+    {
+     "id": "right-out",
+     "hands": "right",
+     "text": "Keep looking at the window. Right hand far out to your right, at the edge of what you can see. Cyan: tap thumb to index. Purple: thumb to middle.|Orange with a cross: stop about 1 cm short, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 1
+      }
+     }
+    },
+    {
+     "id": "left-out",
+     "hands": "left",
+     "text": "Keep looking at the window. Left hand far out to your left, at the edge of what you can see. Cyan: tap thumb to index. Purple: thumb to middle.|Orange with a cross: stop about 1 cm short, without touching.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 1.5,
+      "seconds": 12,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 1
+      }
+     }
+    },
+    {
+     "id": "both-low",
+     "hands": "both",
+     "text": "Both hands low, in front of your stomach, below the window. Each lit button says L or R: tap with that hand.|Cyan thumb to index, purple thumb to middle, orange with a cross stop short.",
+     "windows": [
+      {
+       "id": "a",
+       "at": [
+        0,
+        -0.05,
+        -1.1
+       ],
+       "size": [
+        0.7,
+        0.45
+       ],
+       "look": "grid:3x3"
+      }
+     ],
+     "acts": {
+      "gen": "buttons",
+      "every_s": 2.4,
+      "seconds": 14,
+      "mix": {
+       "tap": 1,
+       "middle": 1,
+       "nogo": 1
+      },
+      "hands": [
+       "left",
+       "right"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

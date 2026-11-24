@@ -35,6 +35,30 @@
    "script": "desk-work"
   },
   {
+   "id": "thumbs",
+   "title": "Thumbs",
+   "blurb": "Your thumb moving on its own, mostly with your palm up: out to the side, across the palm, in circles, onto each finger, tucked into a fist and out again, then taps with the palm up. Palm toward the cameras is the side of the hand the recordings show least.",
+   "minutes": 5,
+   "priority": "normal",
+   "script": "thumbs"
+  },
+  {
+   "id": "off-centre",
+   "title": "Hands off-centre",
+   "blurb": "Fingers moving while you look straight ahead and your hand stays far out to the side, up high or down low, at the edge of what you can see, then taps out there, so the cameras see hands near the edge of their view and not only in the middle.",
+   "minutes": 5,
+   "priority": "normal",
+   "script": "off-centre"
+  },
+  {
+   "id": "moving-background",
+   "title": "In front of something moving",
+   "blurb": "You need a running fan, or a TV or monitor playing a video or game with nothing private on it. Hold and move your hands in front of it, then tap on a window with it behind, so the tracker learns a hand from what moves behind it. Say fan or screen in the notes.",
+   "minutes": 5,
+   "priority": "normal",
+   "script": "moving-background"
+  },
+  {
    "id": "daylight-everyday-taps",
    "title": "Everyday taps in daylight",
    "blurb": "The everyday taps round in a room lit by daylight: by day, curtains open, no lamps needed. The cameras see infrared, sunlight is what they find hardest, and almost every recording so far was made indoors away from it.",

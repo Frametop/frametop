@@ -44,7 +44,8 @@ def step(p, seed="x"):
 
 
 # Rounds whose plain steps come before the scene, as their labels come from the steps (DESIGN.md, "Bounties").
-PLAIN_FIRST = ("desk-work", "single-fingers", "finger-play", "hands-together")
+PLAIN_FIRST = ("desk-work", "single-fingers", "finger-play", "hands-together",
+               "thumbs", "off-centre", "moving-background")   # the last three: test_requested_rounds.py
 
 
 class ShippedTest(unittest.TestCase):
@@ -54,14 +55,15 @@ class ShippedTest(unittest.TestCase):
         board = bounties.load(session.BOARD_PATH)
         self.assertIsNotNone(board, "bounties.json doesn't validate")
         ids = [b["id"] for b in board["bounties"]]
-        self.assertEqual(ids, ["everyday-taps", "single-fingers", "finger-play", "desk-work", "daylight-everyday-taps",
-                               "near-misses", "three-finger", "hands-together", "close-up", "fists", "sideways-hands",
-                               "pokes", "middle-taps", "index-taps", "hand-gestures", "daylight-taps", "pinches",
-                               "card-grabs"])
+        self.assertEqual(ids, ["everyday-taps", "single-fingers", "finger-play", "desk-work", "thumbs", "off-centre",
+                               "moving-background", "daylight-everyday-taps", "near-misses", "three-finger",
+                               "hands-together", "close-up", "fists", "sideways-hands", "pokes", "middle-taps",
+                               "index-taps", "hand-gestures", "daylight-taps", "pinches", "card-grabs"])
         high = [b["id"] for b in board["bounties"] if b["priority"] == "high"]
         self.assertEqual(high, ["everyday-taps", "single-fingers", "finger-play", "desk-work"])
         normal = [b["id"] for b in board["bounties"] if b["priority"] == "normal"]
-        self.assertEqual(normal, ["daylight-everyday-taps", "near-misses", "three-finger", "hands-together"])
+        self.assertEqual(normal, ["thumbs", "off-centre", "moving-background", "daylight-everyday-taps", "near-misses",
+                                  "three-finger", "hands-together"])
         scripts = {b["id"]: b["script"] for b in board["bounties"]}
         self.assertEqual(scripts["daylight-everyday-taps"], "everyday-taps")   # one round, asked for twice
         for b in board["bounties"]:
@@ -73,7 +75,7 @@ class ShippedTest(unittest.TestCase):
         every act's gesture and lit part valid (build_plan raises otherwise)."""
         board = bounties.load(session.BOARD_PATH)
         for b in board["bounties"]:
-            if b["script"] in PLAIN_FIRST:   # their own shape: test_desk_work, test_finger_rounds
+            if b["script"] in PLAIN_FIRST:   # their own shape, and their own tests
                 continue
             script = session.load_script(session.bounty_script(b["script"]))
             self.assertEqual(script.get("record_hz"), 30, b["id"])

@@ -232,6 +232,10 @@ public:
         gaps_.Filled({g.key, other, g.stayed, pick.side});
         return true;
     }
+    // The centre display the profile in use saved, by its memory's key (empty: none): while it's the
+    // centre, a panel that comes back remembered as the centre doesn't take it (user, 2026-11-23:
+    // "profile saved choices should take priority"), and it takes it when it comes back itself.
+    std::string profileCentre;
     int steam = -1;   // Steam's window (vrtiles.cpp): never pulled into another column (View::Pullable)
 
     // A panel put on a stack before its size was known (Anchor's guess for one with no picture yet,
@@ -321,7 +325,7 @@ public:
         if (!grid_.Has(id) || (id == centreNow_ && id == centre_)) return false;
         EndBatch();
         if (centreNow_ >= 0 && centreNow_ != id) grid_.Swap(id, centreNow_);
-        centre_ = id, centreNow_ = id;
+        centre_ = id, centreNow_ = id, centreOfProfile_ = false;
         moved_ = -1, movedAz_ = NAN;
         Recentre();   // (it straight ahead)
         return true;
@@ -479,7 +483,8 @@ public:
         s.stay = st.stay;
         if (st.nudgeDeg != 0) nudge_[id] = std::clamp(st.nudgeDeg, -kNudgeMaxDeg, kNudgeMaxDeg);
         if (st.arc) arc_.insert(id);
-        if (st.centre) centre_ = id;
+        const bool ofProfile = !profileCentre.empty() && key == profileCentre;
+        if (st.centre && (ofProfile || !centreOfProfile_ || !grid_.Has(centre_))) centre_ = id, centreOfProfile_ = ofProfile;
         if (st.kind == State::Kind::Sat) return grid_.Add(id, focused);   // (no satellites in tiled mode: on the grid)
         if (!st.Placed()) return grid_.Add(id, focused);
         int col = st.col;   // (back in the stack it left: the panel pulled into its gap goes back first)
@@ -536,6 +541,8 @@ public:
             if (s.Placed()) s.col = cols.at(s.col);
             Restore(id, s, -1);
         }
+        for (const auto &[id, s] : good)
+            if (s.centre) centre_ = id, centreOfProfile_ = true;
         if (!after)
             for (const tilegrid::Col &c : rest.Cols()) AppendColumn(grid_, c);
         batch_.Start(std::move(good), after ? Batch::Mode::After : Batch::Mode::First);   // (after: Restore forgets)
@@ -613,6 +620,7 @@ private:
         return best;
     }
     int centre_ = -1;             // the centre display chosen (-1: none: CentreOf's default)
+    bool centreOfProfile_ = false;   // ...by the profile in use (profileCentre)
     int centreNow_ = -1;          // ...the one laid out last
     std::set<int> arc_;           // curved round the arc while the centre
     std::map<int, double> nudge_; // moved up (down: negative), degrees

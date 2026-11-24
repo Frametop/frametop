@@ -7,7 +7,7 @@ A profile is a named layout that also opens apps. It holds:
 - where each screen goes, with its size in metres, curve, roll, and pin (what a named layout held before profiles);
 - which screens show and which are hidden;
 - the apps, one entry per window: on a screen at a place and size, or floating at a pose, size, and scale;
-- which screens and remote displays are anchored to the dashboard, and where each sits on the tiles ([design.md](design.md#dashboard-tiles)), by what each panel is, so a remote display that comes back under another number keeps its tile. Floating windows aren't in it: each app remembers its own;
+- which screens and remote displays are anchored to the dashboard, and where each sits on the tiles ([design.md](design.md#dashboard-tiles)), by what each panel is, so a remote display that comes back under another number keeps its tile. A remote display that connects later goes to its place in the profile too, and the profile's center display comes before one an app remembers. Floating windows aren't in it: each app remembers its own;
 - the remote displays connected when it was saved, each with its place and whether it's hidden ([remote-displays.md](remote-displays.md)). Opening the profile connects them, if their computer answers, and puts them back. Like its apps, it leaves other displays connected.
 - whether desktopless mode was on, and where each PC app's window panel was ([desktopless.md](desktopless.md)). Opening a desktopless profile turns the mode on, and starts its PC apps that aren't open on their PC. Opening one saved with the mode off turns it off. A profile saved before desktopless mode leaves the mode as it is.
 

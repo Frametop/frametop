@@ -54,28 +54,41 @@ class RequestedRoundsTest(unittest.TestCase):
 
     def test_moving_background(self):
         """Hands in front of a fan or a screen that moves: the welcome and the steps' introduction say what
-        to find and where to put it, and every step, the taps on the window too, keeps the hand in front of
-        it. Still hands, moving hands, fingers, taps and shapes are all asked for."""
+        to find, that a screen must show nothing private (the checklist's "no screens in view" is ticked
+        just before), and where to put it; the welcome says what to do with neither. Every step, the taps on
+        the window too, keeps the hand in front of it. Still hands (palm, then back), moving hands, fingers,
+        taps and shapes are all asked for."""
         script, steps, scene = self.round("moving-background", ["right", "left", "both-hands"])
         for text in (script["welcome"]["text"], script["sections"][1]["intro"]):
-            self.assertTrue(all(w in text for w in ("fan", "TV", "monitor")), text)
+            self.assertTrue(all(w in text for w in ("fan", "TV", "monitor", "nothing private")), text)
+        self.assertIn("With neither, stop here", script["welcome"]["text"])
         self.assertIn("behind your hands", script["sections"][1]["intro"])
-        self.assertIn("behind the window", script["sections"][2]["intro"])
+        self.assertIn("The steps call it the moving thing", script["sections"][1]["intro"])
+        self.assertIn("Keep facing the moving thing", script["sections"][2]["intro"])
         for p in list(steps.values()) + list(scene.values()):
             self.assertRegex(p["text"], r"moving thing|in front of it", p["id"])
         self.assertEqual(list(steps), ["right-still", "left-still", "across", "fingers", "taps", "shapes", "edge", "both"])
-        self.assertTrue(all("still" in steps[k]["text"].lower() for k in ("right-still", "left-still")))
+        for k in ("right-still", "left-still"):   # the words on the panel change with the hand
+            self.assertIn("palm toward you", steps[k]["text"])
+            self.assertIn("Hold it still", steps[k]["text"])
+            self.assertEqual(steps[k]["switch"][0]["text"], steps[k]["text"].replace("palm", "back of the hand"))
         self.assertEqual(steps["taps"]["pose"], "pinch-tap")
 
     def test_thumbs(self):
         """The thumb on its own, palm up especially: every plain step is about the thumb, most have the palm
-        up (each hand alone first, both hands last), one has the palm toward you and one the hand on its side;
-        the taps on the window are made palm up."""
+        up (each hand alone first, at chest height where the cameras see the palm; both hands last, turning
+        palms down halfway), one has the palm toward you and one the hand on its side; the taps on the window
+        are made palm up."""
         script, steps, scene = self.round("thumbs", ["right", "left", "both-hands"])
         self.assertTrue(all("thumb" in p["text"].lower() for p in steps.values()))
         up = [k for k, p in steps.items() if re.search(r"palms? up", p["text"], re.I)]
         self.assertEqual(up, ["right-up", "left-up", "circles", "touches", "tuck", "both"])
-        self.assertGreater(len(up), len(steps) / 2)
+        for k in ("right-up", "left-up"):
+            self.assertEqual(steps[k]["position"], "chest")
+            self.assertIn("chest height", steps[k]["text"])
+            self.assertIn("palm up", steps[k]["switch"][0]["text"])
+        self.assertIn("palms down", steps["both"]["switch"][0]["text"])
+        self.assertIn("on its side", steps["on-top"]["text"])
         self.assertIn("palm toward you", steps["palm-in"]["text"])
         self.assertEqual(steps["on-top"]["pose"], "thumbs-up")
         self.assertTrue(all(re.search(r"palms? up", p["text"]) for p in scene.values()))
@@ -84,10 +97,11 @@ class RequestedRoundsTest(unittest.TestCase):
     def test_off_centre(self):
         """Fingers moving with the hand away from the middle of the cameras' view: the head stays still and the
         hand goes right, left, high and low (the panel's diagram shows where), across the body, to the corners
-        and out past the edge. In the scene the window is straight ahead and the hand is what is off to the
-        side."""
+        and out past the edge, and the introduction says to carry on when the panel can't see the hand. In the
+        scene the window is straight ahead, the eyes stay on it and the hand is what is off to the side."""
         script, steps, scene = self.round("off-centre", ["right-out", "left-out", "both-low"])
         self.assertIn("keep your head still", script["sections"][1]["intro"])
+        self.assertIn("can't see your hand, carry on", script["sections"][1]["intro"])
         where = {k: (p["hands"], p["position"]) for k, p in steps.items() if p["position"]}
         self.assertEqual(where, {"right-out": ("right", "right"), "left-out": ("left", "left"),
                                  "high": ("any", "up"), "low": ("any", "down")})
@@ -99,8 +113,11 @@ class RequestedRoundsTest(unittest.TestCase):
         self.assertEqual(list(steps), ["right-out", "left-out", "high", "low", "across", "corners", "leaving", "both"])
         for p in scene.values():
             self.assertTrue(all(abs(w["at"][0]) <= 0.05 for w in p["scene"]["windows"]), p["id"])
-        self.assertIn("far out to your right", scene["right-out"]["text"])
-        self.assertIn("far out to your left", scene["left-out"]["text"])
+        for side in ("right", "left"):
+            self.assertIn("Keep looking at the window", scene[side + "-out"]["text"])
+            self.assertIn("far out to your " + side, scene[side + "-out"]["text"])
+        self.assertIn("top edge", steps["both"]["switch"][0]["text"])
+        self.assertIn("left hand out at your right", steps["across"]["switch"][0]["text"])
         self.assertIn("low", scene["both-low"]["text"])
         self.assertIn("head still", script["sections"][2]["intro"])
 

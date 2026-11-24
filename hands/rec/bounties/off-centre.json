@@ -46,7 +46,7 @@
   {
    "id": "edges",
    "title": "Hands off-centre",
-   "intro": "Look straight ahead and keep your head still through each step. Only your hand goes to the side, up or down, so the cameras see it near the edge of their view and not in the middle. Keep the fingers moving the whole time.",
+   "intro": "Look straight ahead and keep your head still through each step. Only your hand goes to the side, up or down, so the cameras see it near the edge of their view and not in the middle. Keep the fingers moving the whole time. If the panel says it can't see your hand, carry on: here that is expected.",
    "prompts": [
     {
      "id": "edges/right-out",
@@ -82,7 +82,7 @@
      "position": "up",
      "pose": "flat",
      "seconds": 16,
-     "text": "Still looking straight ahead: one hand up high, above your forehead, at the top edge of what you can see.|One finger at a time, down and back up.",
+     "text": "Still looking straight ahead: one hand up high, at the top edge of what you can see.|One finger at a time, down and back up.",
      "switch": [
       {
        "at": 0.5,
@@ -112,7 +112,8 @@
      "switch": [
       {
        "at": 0.5,
-       "to": "the left hand out at your right side"
+       "to": "the left hand out at your right side",
+       "text": "Now the other way: the left hand out at your right side, at the edge of what you can see.|Play an invisible piano there, each finger pressing on its own."
       }
      ]
     },
@@ -149,7 +150,8 @@
      "switch": [
       {
        "at": 0.5,
-       "to": "one hand high, the other low"
+       "to": "one hand high, the other low",
+       "text": "Now one hand at the top edge of what you can see and the other at the bottom edge.|Keep moving a different finger on each hand."
       }
      ]
     }

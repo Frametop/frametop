@@ -75,7 +75,7 @@ class ShippedTest(unittest.TestCase):
         every act's gesture and lit part valid (build_plan raises otherwise)."""
         board = bounties.load(session.BOARD_PATH)
         for b in board["bounties"]:
-            if b["script"] in PLAIN_FIRST:   # their own shape: test_desk_work, test_finger_rounds
+            if b["script"] in PLAIN_FIRST:   # their own shape, and their own tests
                 continue
             script = session.load_script(session.bounty_script(b["script"]))
             self.assertEqual(script.get("record_hz"), 30, b["id"])

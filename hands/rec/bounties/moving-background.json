@@ -7,7 +7,7 @@
  "welcome": {
   "title": "In front of something moving",
   "seconds": 8,
-  "text": "For this round you need something that moves behind your hands: a running fan, or a TV or monitor playing something fast. Steps without windows come first, then windows will appear in front of you: they don't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
+  "text": "For this round you need something that moves behind your hands: a running fan, or a TV or monitor playing a video or a game with nothing private on it. With neither, stop here and pick another round. Steps without windows come first, then a window will appear: it doesn't move or click.|Press the button on the right side of the headset to start each step. Pressed while recording, it pauses."
  },
  "done": {
   "title": "All done",
@@ -46,7 +46,7 @@
   {
    "id": "moving",
    "title": "In front of something moving",
-   "intro": "Face a running fan, or a TV or monitor playing something fast (a video, a game, a page scrolling), one to two metres away. Keep it behind your hands for the whole round: the cameras should see your hand with the movement behind it.",
+   "intro": "Face a running fan, out of reach, or a TV or monitor playing something fast with nothing private on it (a video or a game), one to two metres away. The steps call it the moving thing. Keep it behind your hands for the whole round: the cameras should see your hand with the movement behind it.",
    "prompts": [
     {
      "id": "moving/right-still",
@@ -58,7 +58,8 @@
      "switch": [
       {
        "at": 0.5,
-       "to": "the back toward you"
+       "to": "the back toward you",
+       "text": "Right hand up between you and the moving thing, about 40 cm out, back of the hand toward you, fingers spread.|Hold it still."
       }
      ]
     },
@@ -72,7 +73,8 @@
      "switch": [
       {
        "at": 0.5,
-       "to": "the back toward you"
+       "to": "the back toward you",
+       "text": "Left hand up between you and the moving thing, about 40 cm out, back of the hand toward you, fingers spread.|Hold it still."
       }
      ]
     },
@@ -159,7 +161,7 @@
    "id": "moving-taps",
    "title": "Taps in front of it",
    "kind": "scene",
-   "intro": "A window in front of you. Turn so the moving thing is behind the window, then tap as each button says. Nothing happens when you tap: the cameras record your hand.",
+   "intro": "Keep facing the moving thing: a window will appear in front of it. Tap as each button says. Nothing happens when you tap: the cameras record your hand.",
    "prompts": [
     {
      "id": "right",

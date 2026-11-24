@@ -82,7 +82,7 @@ int main() {
     check("a desktop screen's right click: just the edges", panelmenu::Edges(desktop, false).size() == 4);
     check("edge rows differ by their side", !(panelmenu::Row{Item::Edge, barside::Side::Top} == panelmenu::Row{Item::Edge, barside::Side::Left}));
     for (const auto &rows : {d, f, g, st, dp, fp, gp, fromMain, fromRight})
-        for (const auto &r : rows) check("every row has a label", *panelmenu::Label(r) != 0);
+        for (const auto &r : rows) check("every row has a label", !panelmenu::Label(r).empty());
 
     check("rotate and move all are held, the rest clicked", panelmenu::Held(Item::Rotate) && panelmenu::Held(Item::MoveAll) &&
           !panelmenu::Held(Item::Curve) && !panelmenu::Held(Item::Reset) && !panelmenu::Held(Item::BarPosition));
@@ -90,6 +90,19 @@ int main() {
           !panelmenu::Toggle(Item::Reset));
     check("the choices", panelmenu::Choice(Item::InRoom) && panelmenu::Choice(Item::KeepInView) && panelmenu::Choice(Item::OnDashboard) &&
           panelmenu::Choice(Item::Edge) && !panelmenu::Choice(Item::Curve) && !panelmenu::Choice(Item::StayShown));
+    // A PC app window whose PC takes a scale: the row under Placement, and its page.
+    auto app = game;
+    app.scales = true;
+    const auto a = panelmenu::Main(app);
+    size_t scaleAt = a.size();
+    for (size_t k = 0; k < a.size(); ++k) if (a[k].item == Item::Scale) scaleAt = k;
+    check("Scale right after Placement", scaleAt < a.size() && a[scaleAt - 1].item == Item::Placement && a.size() == g.size() + 1);
+    const auto sp = panelmenu::Rows(panelmenu::Page::Scale, app, true);
+    check("its page: Back, then the steps, 100% first", sp.size() == 9 && sp[0].item == Item::Back &&
+          panelmenu::Label(sp[1]) == "100%" && panelmenu::Label(sp[8]) == "250%");
+    check("its caption is over the first step only", panelmenu::Caption(sp, 1) && !panelmenu::Caption(sp, 2));
+    check("steps differ by their percent", !(sp[1] == sp[2]) && panelmenu::Choice(sp[1].item) && panelmenu::Opens(Item::Scale));
+    check("a PC that stopped taking scales: the main page", panelmenu::Rows(panelmenu::Page::Scale, game, true) == panelmenu::Main(game));
     check("placement and bar position open pages", panelmenu::Opens(Item::Placement) && panelmenu::Opens(Item::BarPosition) &&
           !panelmenu::Opens(Item::Reset));
 

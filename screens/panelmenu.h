@@ -5,9 +5,11 @@
 // vrbarmenu.cpp draws the rows and does what they say; vr.cpp tells a tap on the bar from a hold.
 #pragma once
 
+#include "appscale.h"
 #include "barside.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace panelmenu {
@@ -28,12 +30,17 @@ enum class Item {
     Reset,         // reset the layout (asks first)
     Back,          // a page back to the main one
     Edge,          // the bar on that edge (Row::side)
+    Scale,         // a PC app window's scale page (its value: the scale)
+    ScaleStep,     // that scale (Row::percent)
 };
 
 struct Row {
     Item item;
     barside::Side side = barside::Side::Bottom;   // an Edge row's
-    bool operator==(const Row &o) const { return item == o.item && (item != Item::Edge || side == o.side); }
+    int percent = 100;                            // a ScaleStep row's
+    bool operator==(const Row &o) const {
+        return item == o.item && (item != Item::Edge || side == o.side) && (item != Item::ScaleStep || percent == o.percent);
+    }
 };
 
 // What the panel is, for the rows it gets.
@@ -42,24 +49,27 @@ struct Kind {
     bool gsapp = false;      // a gamescope app's panel
     bool theater = false;    // View in Theater offered
     bool anchored = false;   // on the dashboard now
+    bool scales = false;     // a PC app window's panel whose PC takes a scale for it
 };
 
 // Desktop screens and remote displays have the layout's own rows (in view, move all, reset).
 inline bool LayoutRows(const Kind &k) { return !k.floating && !k.gsapp; }
 
 // The pages (user, 2026-11-19: the Option C design): Main's quick tiles on top, then its list (Placement,
-// View in Theater, Move All Screens, Bar Position, Reset Layout); Placement's and the edges' choices.
-enum class Page { Main, Placement, Edges };
+// View in Theater, Move All Screens, Bar Position, Reset Layout); Placement's and the edges' choices;
+// a PC app window's scales.
+enum class Page { Main, Placement, Edges, Scale };
 
 // Quick tiles: the toggles and actions flipped often, in a strip across the top of the main page.
 inline bool Tile(Item i) { return i == Item::Curve || i == Item::Rotate || i == Item::Dock || i == Item::Close; }
 
 inline std::vector<Row> Main(const Kind &k) {
     std::vector<Row> r;  // (reserved, then pushed: GCC 16's -O2 -Warray-bounds misreads growing an initializer list)
-    r.reserve(10);
+    r.reserve(11);
     r.push_back({Item::Curve}), r.push_back({Item::Rotate});
     if (k.floating) r.push_back({Item::Dock}), r.push_back({Item::Close});
     r.push_back({Item::Placement});
+    if (k.scales) r.push_back({Item::Scale});
     if (k.theater) r.push_back({Item::Theater});
     if (LayoutRows(k)) r.push_back({Item::MoveAll});
     r.push_back({Item::BarPosition});
@@ -89,11 +99,20 @@ inline std::vector<Row> Edges(const Kind &k, bool back) {
     return r;
 }
 
+// A PC app window's scales.
+inline std::vector<Row> Scales() {
+    std::vector<Row> r;
+    r.push_back({Item::Back});
+    for (int p : appscale::kPercents) r.push_back({Item::ScaleStep, barside::Side::Bottom, p});
+    return r;
+}
+
 inline std::vector<Row> Rows(Page p, const Kind &k, bool back) {
+    if (p == Page::Scale) return k.scales ? Scales() : Main(k);
     return p == Page::Placement ? Placement(k) : p == Page::Edges ? Edges(k, back) : Main(k);
 }
 
-inline const char *Label(const Row &r) {
+inline std::string Label(const Row &r) {
     switch (r.item) {
         case Item::Curve: return "Curved";
         case Item::Rotate: return "Rotate";
@@ -110,18 +129,20 @@ inline const char *Label(const Row &r) {
         case Item::Reset: return "Reset Layout";
         case Item::Back: return "Back";
         case Item::Edge: return barside::Label(r.side);
+        case Item::Scale: return "Scale";
+        case Item::ScaleStep: return appscale::Label(r.percent);
     }
     return "";
 }
 
 // One of a page's choices: the one picked gets a check.
 inline bool Choice(Item i) {
-    return i == Item::InRoom || i == Item::KeepInView || i == Item::OnDashboard || i == Item::Edge;
+    return i == Item::InRoom || i == Item::KeepInView || i == Item::OnDashboard || i == Item::Edge || i == Item::ScaleStep;
 }
 // On or off (Curved's tile blue, Stay Shown checked).
 inline bool Toggle(Item i) { return i == Item::Curve || i == Item::StayShown; }
 // It opens a page (a chevron at its right).
-inline bool Opens(Item i) { return i == Item::Placement || i == Item::BarPosition; }
+inline bool Opens(Item i) { return i == Item::Placement || i == Item::BarPosition || i == Item::Scale; }
 
 // Pressed and held, not clicked: these start on the press and end on the release, as their buttons did.
 inline bool Held(Item i) { return i == Item::Rotate || i == Item::MoveAll; }
@@ -138,6 +159,7 @@ inline const char *Caption(const std::vector<Row> &rows, size_t at) {
     if (at >= rows.size()) return nullptr;
     const Item i = rows[at].item, before = at > 0 ? rows[at - 1].item : Item::Back;
     if (i == Item::InRoom) return "Placement";
+    if (i == Item::ScaleStep && before != Item::ScaleStep) return "Scale";
     if (i == Item::Edge && before != Item::Edge) return "Controls Position";
     return nullptr;
 }

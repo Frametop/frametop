@@ -194,11 +194,12 @@ def open_windows(sock, eye, heading, seen, extra=()):
     for _, _, d in L.remote_displays(layout):
         if d.get("window") and places.get(d.get("key")):
             places[d["key"]].pop(0)  # (that place is taken: a second window of the app goes to the next)
-    todo = []
+    todo, lists = [], {}
     for name, answer in answers:
         if name not in hosts:
             continue
         host, port = hosts[name]
+        lists[name] = answer
         # (a host's answer, checked as ft_windows checks it: a window it can't name isn't one)
         windows = [w for w in answer.get("windows") or [] if isinstance(w, dict)
                    and W.WINDOW_ADDRESS.fullmatch(str(w.get("address", "")))]
@@ -219,9 +220,10 @@ def open_windows(sock, eye, heading, seen, extra=()):
     for host, port, w in todo:
         size = W.window_size({}, (int(W.number(w.get("width") or None, W.WINDOW_SIZE[0], 1, W.WINDOW_MAX[0])),
                                   int(W.number(w.get("height") or None, W.WINDOW_SIZE[1], 1, W.WINDOW_MAX[1]))))
+        size, scaled = W.window_opening(host, lists[host_name(host)], W.ft_windowscale.app_of(w), size)
         saved = places.get(app_key(host, w)) or []
         pose = saved.pop(0) if saved else None
-        new.append((host, port, w, size, pose))
+        new.append((host, port, w, size, pose, scaled))
         if pose is None:
             fan.append(len(new) - 1)
     def metres(size):  # a new window panel's size in VR (window_add's width)
@@ -236,8 +238,8 @@ def open_windows(sock, eye, heading, seen, extra=()):
     fanned = dict(zip(fan, poses[len(extra):]))
     room = room_anchor(sock, layout) if len(fanned) < len(new) else None
     opened = 0
-    for k, (host, port, w, size, saved) in enumerate(new):
-        fields = {"key": app_key(host, w)}
+    for k, (host, port, w, size, saved, scaled) in enumerate(new):
+        fields = {"key": app_key(host, w), **scaled}
         if saved:
             fields["metres"] = saved.get("metres")
         fields.update({k2: v for k2, v in (saved or fanned[k]).items() if k2 in ("pos", "face", "roll")})
@@ -592,11 +594,11 @@ def launch_missing(name):
 def start_apps(layout, sock, room, name, places, want, seen):
     for host, port in pulled_hosts(layout):
         try:
-            windows = W.window_api(host, port, "GET", "/api/frametop/windows").get("windows", [])
+            answer = W.window_api(host, port, "GET", "/api/frametop/windows")
         except RuntimeError:
             continue  # not on: its apps start with the profile next time
         have = {}
-        for w in windows:
+        for w in answer.get("windows", []):
             have[app_key(host, w)] = have.get(app_key(host, w), 0) + 1
         for key, count in want.items():
             if not key.startswith(host_name(host) + "|"):
@@ -606,12 +608,11 @@ def start_apps(layout, sock, room, name, places, want, seen):
                     L.log(f"desktopless: no panel free for {key}")
                     return
                 app = key.split("|", 1)[1]
-                size = W.WINDOW_SIZE
+                size, scaled = W.window_opening(host, answer, app, W.WINDOW_SIZE)
                 try:
-                    opened = W.window_api(host, port, "POST", "/api/frametop/windows/open",
-                                          {"app": app, "width": size[0], "height": size[1]})
+                    opened = W.window_launch(host, port, app, size, scaled)
                     d = W.window_add(layout, host, port, opened.get("address", ""), W.window_app_title(app, opened), size,
-                                     fields={"key": key, "metres": pose.get("metres"),
+                                     fields={**scaled, "key": key, "metres": pose.get("metres"),
                                              **{k: pose[k] for k in ("pos", "face", "roll") if k in pose}})
                 except RuntimeError as e:
                     L.log(f"desktopless: {key}: {e}")

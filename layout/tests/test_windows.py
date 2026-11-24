@@ -35,7 +35,8 @@ WINDOWS = {"windows": [
 ], "outputs": []}
 
 
-class Windows(unittest.TestCase):
+class WindowTest(unittest.TestCase):
+    """The fakes, and one PC with a display (test_windowscale.py uses them too)."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.m, self.w = load_layout_module(pathlib.Path(self.tmp.name))
@@ -78,6 +79,8 @@ class Windows(unittest.TestCase):
         with open(self.m.LAYOUT_PATH) as f:
             return json.load(f)["hosts"][0]["displays"]
 
+
+class Windows(WindowTest):
     def test_list_says_when_the_host_is_locked(self):
         self.assertNotIn("locked", self.run_window("list", "oma7"))
         self.answers["/api/frametop/windows"] = (200, dict(WINDOWS, locked=True))
@@ -344,8 +347,9 @@ class Windows(unittest.TestCase):
         self.run_window("resize", str(d["screen"]), "1601x903", "1.25")
         d = next(d for d in self.displays() if d.get("window"))
         self.assertEqual((d["size"], d["metres"]), ([1600, 902], 1.25))   # (even: hosts' encoders)
-        self.assertTrue(told[-1].startswith(f"remote {d['screen']} start {d['client']} 192.0.2.30:48989 window:0x55aa10 1600x902 "),
-                        told[-1])
+        self.assertTrue(told[-2].startswith(f"remote {d['screen']} start {d['client']} 192.0.2.30:48989 window:0x55aa10 1600x902 "),
+                        told[-2])
+        self.assertEqual(told[-1], f"remote {d['screen']} scale 0")   # (this PC takes none)
         self.assertEqual(said, [f"resized {d['id']} to 1600x902, 1.25 m wide"])
 
     def test_resize_keeps_to_the_limits(self):

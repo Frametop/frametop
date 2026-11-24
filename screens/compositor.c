@@ -730,6 +730,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
             set_key_remote(s, e->screen);
             s->keys_clicked = true;
         }
+        if (e->type == FT_SCROLL && ft_vr_app_scale_wheel(e->screen, e->dy)) return;
         ft_remote_event(e);
         return;
     }

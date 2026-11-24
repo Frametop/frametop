@@ -173,6 +173,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      window panel N's window gets WxH pixels and the panel
                                      METRES wide: its stream starts over at that size (ft-screens,
                                      a corner dragged)
+  ft-layout window scale N SCALE     window panel N's window is drawn at that scale (1.5: 150%) in the
+                                     same pixels, kept for its app's next window (ft-screens, its
+                                     bar's menu and Meta+scroll)
   ft-layout streams start|stop       streams only: the connected remote displays without the
                                      desktop (ft-screens with no KWin or Plasma); stop ends
                                      only that, never a running desktop
@@ -1094,6 +1097,11 @@ def start_remote(sock, n, host, d):
         # Back as it was, hidden or not as it was then: one shown or hidden while disconnected
         # (only saved, with no panel to tell) gets that now. utrack's fix (issue 81's branch).
         sock.ask(f"{'conceal' if d.get('hidden') else 'reveal'} {n}")
+    if d.get("window"):
+        try:
+            sock.ask(f"remote {n} scale {float(d.get('scale') or 0):g}")  # (its menu's; 0: its PC takes none)
+        except RuntimeError as e:
+            log(f"remote display {d['id']}: {e}")  # an ft-screens from before scales
     return reply
 
 
@@ -1392,7 +1400,8 @@ def remote_command(args):
                 if v == "off":
                     host.pop("windows", None)  # its window panels stay until closed
                 else:
-                    host["windows"] = {"port": int(v)}  # its Frametop windows instance (ft-layout window)
+                    kept = host["windows"] if isinstance(host.get("windows"), dict) else {}  # (its apps' scales)
+                    host["windows"] = {**kept, "port": int(v)}  # its Frametop windows instance (ft-layout window)
             elif k == "monitors" and v in ("on", "off"):
                 monitors = host["monitors"] = v == "on"  # its monitors follow its display panels (ft_hostmonitors)
                 host.pop("monitors_release", None)

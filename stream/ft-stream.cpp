@@ -877,11 +877,28 @@ int LayoutPort(const std::string &host, const std::string &id) {
     return 0;
 }
 
-// --app window:ADDRESS: the host puts the window on an output of its own, width x height.
+// A window panel's scale on its PC (ft-layout's "scale", for a PC that takes one): 0 without one.
+double LayoutScale(const std::string &host, const std::string &id) {
+    const nlohmann::json layout = Layout();
+    if (layout.is_null()) return 0;
+    for (const auto &h : layout["hosts"]) {
+        if (!h.is_object() || h.value("address", "") != host || !h.contains("displays") || !h["displays"].is_array())
+            continue;
+        for (const auto &d : h["displays"])
+            if (d.is_object() && d.value("client", "") == id && d.value("window", false) && d.contains("scale") &&
+                d["scale"].is_number())
+                return d["scale"].get<double>();
+    }
+    return 0;
+}
+
+// --app window:ADDRESS: the host puts the window on an output of its own, width x height (at that
+// scale, if not 0).
 // The HTTP status (400 when the window isn't there), with the output's name or the host's why.
-long OpenWindow(WebApi &api, const std::string &address, int width, int height, std::string *output,
-                std::string *why) {
-    const nlohmann::json body = {{"address", address}, {"width", width}, {"height", height}};
+long OpenWindow(WebApi &api, const std::string &address, int width, int height, double scale,
+                std::string *output, std::string *why) {
+    nlohmann::json body = {{"address", address}, {"width", width}, {"height", height}};
+    if (scale > 0) body["scale"] = scale;
     nlohmann::json r;
     const long code = api.Call("POST", "/api/frametop/windows/open", &body, &r);
     if (code == 200 && r.is_object() && r.contains("output") && r["output"].is_string()) {
@@ -1224,7 +1241,7 @@ int main(int argc, char **argv) {
             // The host's Web UI where the stream goes too (the dongle's address on route dongle).
             if (route != host) api.base = "https://" + route + api.base.substr(api.base.rfind(':'));
             std::string output, why;
-            const long code = OpenWindow(api, app.substr(7), width, height, &output, &why);
+            const long code = OpenWindow(api, app.substr(7), width, height, LayoutScale(host, id), &output, &why);
             if (code != 200) {
                 std::fprintf(stderr, "window %s: %ld %s\n", app.c_str() + 7, code, why.c_str());
                 // Only a window that's gone waits as long as a missing app does ("lost 404"):

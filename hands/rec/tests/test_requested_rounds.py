@@ -62,6 +62,7 @@ class RequestedRoundsTest(unittest.TestCase):
         for text in (script["welcome"]["text"], script["sections"][1]["intro"]):
             self.assertTrue(all(w in text for w in ("fan", "TV", "monitor", "nothing private")), text)
         self.assertIn("With neither, stop here", script["welcome"]["text"])
+        self.assertIn("out of reach (a fan is best)", script["sections"][1]["intro"])
         self.assertIn("behind your hands", script["sections"][1]["intro"])
         self.assertIn("The steps call it the moving thing", script["sections"][1]["intro"])
         self.assertIn("Keep facing the moving thing", script["sections"][2]["intro"])
@@ -87,6 +88,8 @@ class RequestedRoundsTest(unittest.TestCase):
             self.assertEqual(steps[k]["position"], "chest")
             self.assertIn("chest height", steps[k]["text"])
             self.assertIn("palm up", steps[k]["switch"][0]["text"])
+        self.assertIn("chest height", script["sections"][1]["intro"])
+        self.assertIn("chest height", steps["circles"]["text"])
         self.assertIn("palms down", steps["both"]["switch"][0]["text"])
         self.assertIn("on its side", steps["on-top"]["text"])
         self.assertIn("palm toward you", steps["palm-in"]["text"])
@@ -101,7 +104,9 @@ class RequestedRoundsTest(unittest.TestCase):
         scene the window is straight ahead, the eyes stay on it and the hand is what is off to the side."""
         script, steps, scene = self.round("off-centre", ["right-out", "left-out", "both-low"])
         self.assertIn("keep your head still", script["sections"][1]["intro"])
-        self.assertIn("can't see your hand, carry on", script["sections"][1]["intro"])
+        for sec in script["sections"][1:]:   # the hand is lost at the edges: the note isn't a reason to bring it back
+            self.assertIn("can't see your hand, carry on", sec["intro"], sec["id"])
+        self.assertNotIn("forehead", steps["high"]["text"])   # above it the cameras may not see the hand at all
         where = {k: (p["hands"], p["position"]) for k, p in steps.items() if p["position"]}
         self.assertEqual(where, {"right-out": ("right", "right"), "left-out": ("left", "left"),
                                  "high": ("any", "up"), "low": ("any", "down")})

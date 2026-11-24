@@ -64,6 +64,24 @@ class Pure(unittest.TestCase):
         self.assertEqual(layout_tiles.commands([["remote:gone", TILE]], {1: "screen:1"}), ["tiles set 1 off"])
         self.assertEqual(layout_tiles.commands([], {}), [])
 
+    def test_remembered_by_the_memorys_keys(self):
+        keys = {"screen:1": "screen:1", "remote:tv": "remote:10.0.0.2/Desktop"}
+        saved = [["remote:tv", TILE + " centre"], ["remote:gone", TILE], ["screen:1", SAT]]
+        self.assertEqual(layout_tiles.remember_commands(saved, keys),
+                         ["tiles remember", f"tiles remember remote:10.0.0.2/Desktop {TILE} centre",
+                          f"tiles remember screen:1 {SAT}"])
+
+    def test_older_ft_screens_still_takes_the_set(self):
+        asked = []
+
+        def ask(text):
+            asked.append(text)
+            if text.startswith("tiles remember"):
+                raise RuntimeError("error")
+            return "ok 1 set"
+        self.assertEqual(layout_tiles.restore(ask, [["screen:1", TILE]], {1: "screen:1"}, {"screen:1": "screen:1"}), ["ok 1 set"])
+        self.assertEqual(asked, ["tiles remember", f"tiles set 1 {TILE}"])
+
     def test_long_lists_split_to_fit(self):
         saved = [[f"screen:{i}", SAT] for i in range(1, 13)]
         cmds = layout_tiles.commands(saved, {i: f"screen:{i}" for i in range(1, 13)})
@@ -104,7 +122,16 @@ class Profiles(unittest.TestCase):
         self.m.screens_socket = lambda: fake
         layout = {"screens": [{}, {}], "profiles": {"Work": {"tiles": [["screen:2", TILE], ["junk"]]}}}
         self.m.use_tiles(layout, "Work")
-        self.assertEqual(fake.asked, [f"tiles set 1 off; 2 {TILE}"])
+        self.assertEqual(fake.asked, ["tiles remember", f"tiles remember screen:2 {TILE}", f"tiles set 1 off; 2 {TILE}"])
+
+    def test_a_remote_display_off_now_is_remembered(self):
+        fake = Fake()
+        self.m.screens_socket = lambda: fake
+        self.m.display_target = lambda h, d: h["address"]
+        layout = {"screens": [{}], "profiles": {"Work": {"tiles": [["remote:pc", f"{TILE} centre"]]}},
+                  "hosts": [{"address": "10.0.0.2", "displays": [{"id": "pc", "app": "display:DP-1", "off": True}]}]}
+        self.m.use_tiles(layout, "Work")
+        self.assertIn(f"tiles remember remote:10.0.0.2/display:DP-1 {TILE} centre", fake.asked)
 
     def test_profile_from_before_the_tiles_leaves_them(self):
         fake = Fake()

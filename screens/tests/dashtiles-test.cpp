@@ -1702,6 +1702,30 @@ int main() {
         b.Arrange(wide);
         check("centre: ...another panel with its number: not the centre, flat", b.Centre() == 2 && !b.Arc(1));
     }
+    {   // the profile's centre first (user, 2026-11-23: "profile saved choices should take priority")
+        const auto same = [](int) { return dashtiles::Info{1.6, 0.9}; };
+        dashtiles::Board b;
+        for (int id : {1, 2, 3}) b.Anchor(id, -1, dashtiles::Stay::Default);
+        b.profileCentre = "remote:pc";
+        b.RestoreAll({{1, "tile 0 0 0 1 1.000 uc centre arc"}, {2, "tile 0 1 0 1 1.000"}});
+        b.Arrange(same);
+        check("profile: its centre", b.Centre() == 1 && b.ArcNow(1));
+        b.Restore(3, "tile 0 2 0 1 1.000 uc centre", -1, "app:x");
+        b.Arrange(same);
+        check("profile: ...an app back, remembered as the centre, doesn't take it", b.Centre() == 1);
+        const std::string line = b.Remember(1);
+        b.Leave(1, 0, "remote:pc");
+        b.Restore(3, "tile 0 2 0 1 1.000 uc centre", -1, "app:x");
+        b.Arrange(same);
+        check("profile: ...gone: the app's, meanwhile", b.Centre() == 3);
+        b.Restore(1, line, -1, "remote:pc");
+        b.Arrange(same);
+        check("profile: ...back: the centre again, curved", b.Centre() == 1 && b.ArcNow(1));
+        b.Restore(3, "tile 0 2 0 1 1.000 uc centre", -1, "app:x");
+        b.Arrange(same);
+        check("profile: ...and still not the app's", b.Centre() == 1);
+        check("profile: ...a drop on it, by hand: that one", b.TakeCentre(2) && (b.Arrange(same), b.Centre() == 2));
+    }
     {   // a reset with the dashboard closed (Steam's window hidden), then it opens (user, 2026-11-23:
         // "off to my side on a reset"): the ultrawide stays straight ahead, columns on both sides of it
         const auto mine = [](int id) {

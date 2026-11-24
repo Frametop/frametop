@@ -1853,6 +1853,16 @@ def tile_panels(layout):
     return panels
 
 
+def tile_memory_keys(layout):
+    """{a profile's tile key: ft-screens' tile memory's} for the desktop's screens and every remote
+    display, connected or not (screens/vr.cpp's TileKnown names them by what is streamed)."""
+    keys = {f"screen:{i + 1}": f"screen:{i + 1}" for i in range(native_count(layout))}
+    for _, h, d in remote_displays(layout):
+        if d.get("id") and d.get("app") and h.get("address"):
+            keys[f"remote:{d['id']}"] = f"remote:{display_target(h, d)}/{d['app']}"
+    return keys
+
+
 def capture_tiles(layout, profile, name):
     """The screens anchored to the dashboard now, and where they tile, into a profile (kept as
     they were if ft-screens doesn't answer, or is older than the tiles)."""
@@ -1874,7 +1884,7 @@ def use_tiles(layout, name):
     import layout_tiles
     saved = [t for t in saved if isinstance(t, list) and len(t) == 2 and all(isinstance(v, str) for v in t)]
     try:
-        for reply in layout_tiles.restore(screens_socket().ask, saved, tile_panels(layout)):
+        for reply in layout_tiles.restore(screens_socket().ask, saved, tile_panels(layout), tile_memory_keys(layout)):
             if ", " in reply:   # "ok N set, M not": ones it couldn't place
                 log(f"dashboard tiles: {reply[3:]}")
     except RuntimeError as e:

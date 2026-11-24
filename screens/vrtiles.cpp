@@ -903,6 +903,20 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             for (const int id : g_tiles.Ids()) TileUnanchor(id, "tiles clear");
             return (void)std::snprintf(reply, size, "ok");
         }
+        // "remember": a profile's put back now (no centre of it known yet); "remember KEY STATE": a tile
+        // of it, by its memory's key, for when its display comes later (the headset off, its PC asleep).
+        if (!std::strncmp(parsed.rest, "remember", 8)) {
+            const std::string line = parsed.rest + 8;
+            const size_t k0 = line.find_first_not_of(' '), k1 = line.find(' ', k0), v0 = line.find_first_not_of(' ', k1);
+            if (k0 == std::string::npos) return g_tiles.profileCentre.clear(), (void)std::snprintf(reply, size, "ok");
+            dashtiles::State st;
+            if (k0 == 0 || v0 == std::string::npos || !dashtiles::Parse(line.substr(v0), &st))
+                return (void)std::snprintf(reply, size, "error tiles remember KEY STATE");
+            const std::string key = line.substr(k0, k1 - k0);
+            if (st.centre) g_tiles.profileCentre = key;
+            if (g_tileMemory.Set(key, line.substr(v0))) SaveTileMemory();
+            return (void)std::snprintf(reply, size, "ok");
+        }
         // "set N STATE; N STATE...": each as Remember gave it, in the order given (by column and
         // row); the tiles it doesn't name go after its columns. "add ...": more of the same set
         // (layout_tiles.py splits a long one, sent at once): the whole set is put back again with

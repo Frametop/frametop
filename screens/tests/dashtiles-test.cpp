@@ -1715,7 +1715,7 @@ int main() {
             const std::string before = cells(n);
             const tiling::Placed one = *n.PlacedOf(1), three = *n.PlacedOf(3);
             const tiling::Drop top = n.DropFor(2, one.azDeg, one.el1 - 1, small);
-            onto = onto && top.kind == tiling::Drop::Into && top.col == 0 && !top.below;
+            onto = onto && top.kind == tiling::Drop::Into && top.col == 0 && top.row == 0 && !top.below;
             const double az = n.PlacedOf(2)->azDeg;
             n.Drop(2, n.DropFor(2, az, three.elDeg, small), az);
             n.Arrange(small);

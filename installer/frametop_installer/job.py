@@ -41,12 +41,13 @@ def install_args(version, flags, dry_run=False):
 
 
 def start(version, channel, flags, restart, askpass, dry_run=False):
-    """Start the install's service. Returns "" or what went wrong."""
+    """Start the install's service. Returns "" or why it didn't start. ("" too when systemd-run
+    took too long to say: the install may be running, and the progress page finds out.)"""
     if unit_state(FRAMEDROP_UNIT) == "activating":
         return ("FrameDrop is installing Frametop. Let it finish, then open Frametop Installer "
                 "again.")
     host.stage()
-    was = [(f, f.read_bytes() if f.is_file() else None) for f in (STATE, RESULT)]
+    was = [(f, f.read_bytes() if f.is_file() else None) for f in (STATE, RESULT, LOG)]
     host.run(["systemctl", "--user", "stop", f"{UNIT}.service"], timeout=30)
     host.run(["systemctl", "--user", "reset-failed", f"{UNIT}.service"], timeout=10)
     RESULT.unlink(missing_ok=True)
@@ -63,11 +64,10 @@ def start(version, channel, flags, restart, askpass, dry_run=False):
     cmd += ["/usr/bin/bash", str(host.BIN / "run-install.sh"), str(host.CACHE),
             "1" if restart and not dry_run else "0", "--", *install_args(version, flags, dry_run)]
     code, _, err = host.run(cmd, timeout=30)
-    if code == 0:
+    if code in (0, 124):   # (124, host.run's timeout: it may have started, so its state stays)
         return ""
-    if code != 124:   # nothing started: the next open finds what the last install left, not a new
-        for f, old in was:   # "unfinished" one. (Timed out, it may have started: its state stays.)
-            f.unlink(missing_ok=True) if old is None else f.write_bytes(old)
+    for f, old in was:   # nothing started: the next open finds what the last install left (its
+        f.unlink(missing_ok=True) if old is None else f.write_bytes(old)   # log too), not a new "unfinished" one
     return err.decode("utf-8", "replace").strip() or f"systemd-run failed ({code})"
 
 

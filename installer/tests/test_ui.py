@@ -127,6 +127,8 @@ class Window(unittest.TestCase):
         self.ui.ProgressPage.helper_gone(page)
         self.assertEqual((closed, page.helper), ([True], None))
         self.assertEqual((page.ask_box.visible, page.helper_note.visible), (False, True))   # not only in Details
+        self.assertRegex((PKG / "progress_page.py").read_text(),   # ...and it's on the page
+                         r'self\.page\("progress",[^)]*self\.helper_note')
 
     def test_the_end_of_the_log_is_read_before_it_finishes(self):
         from frametop_installer import job

@@ -66,6 +66,7 @@ class Desktopless(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.m, self.d = load_modules(pathlib.Path(self.tmp.name))
         self.api, self.floats = [], []
+        self.scaling = False   # (the PC takes a scale for its windows)
         self.windows = [window("0x10", "slack", 3, app="slack.desktop"),
                         window("0x20", "brave", 1, shown=True, app="brave.desktop"),
                         window("0x30", "foot", 0, shown=True),
@@ -75,7 +76,7 @@ class Desktopless(unittest.TestCase):
         def fake_request(address, method, path, body=None, timeout=2.0, port=0, **kw):
             self.api.append((method, path, body))
             if path == "/api/frametop/windows" and method == "GET":
-                return 200, {"windows": self.windows, "outputs": [], "locked": False}
+                return 200, {"windows": self.windows, "outputs": [], "locked": False, "scaling": self.scaling}
             if path == "/api/frametop/windows/open":
                 return 200, {"address": "0x99", "output": "FT-W1"}
             return 200, {"status": True}
@@ -264,6 +265,29 @@ class Desktopless(unittest.TestCase):
         gimp = next(d for d in self.panels() if d["app"] == "window:0x99")
         self.assertEqual((gimp["key"], gimp["pos"], gimp["metres"]), ("oma7|gimp.desktop", [1.0, 0.2, -0.8], 1.5))
         self.assertIn("0x99", self.d.read_seen()["oma7"])   # (the watcher leaves it alone)
+
+    def test_its_windows_come_out_at_their_apps_scale(self):
+        self.scaling = True
+        layout = self.m.load_layout()
+        layout["hosts"][0]["displays"][0]["scale"] = 1.6
+        layout["hosts"][0]["windows"]["scales"] = {"foot": 1.25}
+        self.m.save_layout(layout)
+        self.d.command(["on"])
+        self.assertEqual({d["key"]: (d["scale"], d["pc_app"]) for d in self.panels()},
+                         {"oma7|slack.desktop": (1.6, "slack.desktop"), "oma7|brave.desktop": (1.6, "brave.desktop"),
+                          "oma7|foot": (1.25, "foot")})
+
+    def test_a_profiles_app_starts_at_its_scale(self):
+        self.scaling = True
+        place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}
+        self.profile("Work", desktopless={"on": True, "places": {"oma7|gimp.desktop": [place]}})
+        layout = self.m.load_layout()
+        layout["hosts"][0]["windows"]["scales"] = {"gimp.desktop": 2.0}
+        self.d.use_profile(layout, "Work")
+        self.m.save_layout(layout)
+        self.d.resume("Work", mode="on")
+        body = next(b for m, p, b in self.api if p == "/api/frametop/windows/open")
+        self.assertEqual((body["app"], body["scale"]), ("gimp.desktop", 2.0))
 
     def test_a_windows_pcs_start_menu_apps_start_too(self):
         place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}

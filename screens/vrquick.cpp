@@ -6,12 +6,13 @@
 // as it does for a laser on it (not the mouse's or gaze's cursor, which sits on whatever you look at).
 //   The palm hand's own pinch holds the card still where it was, lights Steam Menu, and moves what's lit
 // as the pinch moves across it (quickaccess::Drag); its release does that tile (PinchRelease).
-//   Its header shows CPU, GPU, memory and temperature (vrstats.cpp) and the Quick Settings button, which
+//   Its header shows CPU, GPU, memory, temperature and the battery (vrstats.cpp) and the Quick Settings button, which
 // turns the card to its toggles (quicksettings.h: those QUICK_SETTINGS in frametop.conf picks, read as
 // it opens) with Back in the button's place; hidden, it's on its first page again.
 //   With gaze mode on (vrgazemode.cpp, read as it shows), a wide Quick Eye Calibrate row sits under the
 // tiles on both pages: the gaze service's quick check (the input relay's gaze_quickcal).
 #include "vrpanel.h"
+#include "batteryart.h"
 #include "label.h"
 #include "overlaytex.h"
 #include "palmmenu.h"
@@ -32,6 +33,7 @@ using quickaccess::Tile;
 constexpr const char *kKey = "frametop.quickaccess";
 constexpr int64_t kLaserKeepMs = 500;   // a laser on it keeps it (engaged) this long after it last moved there
 constexpr int kText = 28, kStatsText = 24;
+constexpr uint8_t kCardBg[4] = {24, 24, 30, 230};
 using quickaccess::kButton;
 using quickaccess::kEyeCal;
 using quickaccess::kSlots;
@@ -122,8 +124,7 @@ void MakeBoxes(std::vector<uint8_t> (&out)[kStyles], int x0, int y0, int w, int 
 void MakeImages() {
     using namespace quickaccess;
     g_card.bg.assign(size_t(kW) * H() * 4, 0);
-    const uint8_t bg[4] = {24, 24, 30, 230};
-    FillRound(g_card.bg, kW, H(), 0, 0, kW, H(), 24, bg);
+    FillRound(g_card.bg, kW, H(), 0, 0, kW, H(), 24, kCardBg);
     g_card.px = g_card.bg;
     int x0, y0, x1, y1;
     Box(0, &x0, &y0, &x1, &y1);   // (every tile's box has the same card under it)
@@ -167,7 +168,18 @@ bool Idle(int i) {
     return i >= 0 && i < quickaccess::kTiles && !quickaccess::WorksPaused(quickaccess::kSpecs[i].tile);
 }
 
-// The header's left: the readouts, two lines (on the Quick Settings page, its title), into g_card.px
+// The battery's line in the header's left, its picture and words together centred on (cx, cy).
+void DrawBattery(const battery::Reading &r, int cx, int cy) {
+    using namespace quickaccess;
+    const uint8_t ink[3] = {225, 225, 232};
+    const std::string words = battery::Say(r);
+    if (words.empty()) return (void)label::Draw(g_card.px.data(), kW, H(), "Battery \xe2\x80\x93", kStatsText, cx, cy, 255, ink);
+    const int gap = 10, text = label::Width(words.c_str(), kStatsText), x0 = cx - (batteryart::kW + gap + text) / 2;
+    batteryart::Draw(g_card.px, kW, H(), x0, cy, r, kCardBg);
+    label::Draw(g_card.px.data(), kW, H(), words.c_str(), kStatsText, x0 + batteryart::kW + gap + text / 2, cy, 255, ink);
+}
+
+// The header's left: the readouts, three lines (on the Quick Settings page, its title), into g_card.px
 // when they changed. Whether it drew.
 bool DrawHead() {
     using namespace quickaccess;
@@ -181,7 +193,8 @@ bool DrawHead() {
         a = or_dash(w.cpu, "CPU") + "    " + or_dash(w.gpu, "GPU");
         b = or_dash(w.mem, "Mem") + "    " + (w.temp.empty() ? std::string("\xe2\x80\x93 \xc2\xb0" "C") : w.temp);
     }
-    const std::string text = a + "\n" + b;
+    const battery::Reading &bat = BatteryNow(NowMs());
+    const std::string text = a + "\n" + b + (g_card.settings ? "" : "\n" + battery::Say(bat));
     if (text == g_card.head) return false;
     int x0, y0, x1, y1;
     StatsBox(&x0, &y0, &x1, &y1);
@@ -191,9 +204,14 @@ bool DrawHead() {
     const int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, size = g_card.settings && b.empty() ? kText : kStatsText;
     if (b.empty()) {
         label::Draw(g_card.px.data(), kW, H(), a.c_str(), size, cx, cy, 255, ink);
+    } else if (!g_card.settings) {
+        const int line = size * 14 / 10;
+        label::Draw(g_card.px.data(), kW, H(), a.c_str(), size, cx, cy - line, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), b.c_str(), size, cx, cy, 255, ink);
+        DrawBattery(bat, cx, cy + line);
     } else {
         label::Draw(g_card.px.data(), kW, H(), a.c_str(), size, cx, cy - size * 7 / 10, 255, ink);
-        label::Draw(g_card.px.data(), kW, H(), b.c_str(), g_card.settings ? 20 : size, cx, cy + size * 7 / 10, 255, ink);
+        label::Draw(g_card.px.data(), kW, H(), b.c_str(), 20, cx, cy + size * 7 / 10, 255, ink);
     }
     g_card.head = text;
     return true;

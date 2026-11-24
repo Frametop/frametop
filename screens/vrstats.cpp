@@ -1,11 +1,15 @@
 // The palm card's readouts (sysstats.h): read at most once a second, and only while the card asks
-// (it shows). CPU from /proc/stat, memory from /proc/meminfo, the hottest CPU thermal zone, and the GPU's
-// share of each frame from SteamVR's frame timing (the last kFrames frames' render time, compositor and
-// app, against the display's frame: the Frame's GPU has no busy counter to read).
+// (it shows). CPU from /proc/stat, memory from /proc/meminfo, the CPU cores' thermal zones, the battery and
+// charger (battery.h) from /sys/class/power_supply, and the GPU's share of each frame from SteamVR's frame
+// timing (the last kFrames frames' render time, compositor and app, against the display's frame: the
+// Frame's GPU has no busy counter to read).
 #include "vrpanel.h"
 #include "sysstats.h"
 
+#include <dirent.h>
+
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -22,6 +26,7 @@ struct {
     std::vector<std::string> zones;   // the CPU's thermal zones' temp files
     bool zonesFound = false;
     sysstats::Words words;
+    battery::Reading battery;
 } g_stats;
 
 // A small file's text (up to `n` bytes), or empty.
@@ -44,22 +49,47 @@ void FindZones() {
             if (i > 0) break;   // (zones are numbered from 0 with no holes)
             continue;
         }
-        if (!sysstats::CpuZone(type.c_str())) continue;
+        if (!sysstats::CoreZone(type.c_str())) continue;
         std::snprintf(path, sizeof path, "/sys/class/thermal/thermal_zone%d/temp", i);
         g_stats.zones.push_back(path);
     }
 }
 
-double HottestC() {
+double CpuC() {
     if (!g_stats.zonesFound) FindZones();
-    double hot = -1000;
+    std::vector<double> cores;
     for (const std::string &z : g_stats.zones) {
         const std::string t = Slurp(z.c_str(), 16);
-        if (t.empty()) continue;
-        const double c = std::atof(t.c_str()) / 1000.0;
-        if (c > hot) hot = c;
+        if (!t.empty()) cores.push_back(std::atof(t.c_str()) / 1000.0);
     }
-    return hot;
+    return sysstats::CpuTemp(cores.data(), int(cores.size()));
+}
+
+// The headset's battery and whether any charger of its own is online, each time from the folder: its
+// supplies' names are the drivers'.
+battery::Reading ReadBattery() {
+    const std::string root = "/sys/class/power_supply/";
+    battery::Reading r;
+    DIR *d = opendir(root.c_str());
+    if (!d) return r;
+    while (const dirent *e = readdir(d)) {
+        if (e->d_name[0] == '.') continue;
+        const std::string dir = root + e->d_name + "/";
+        auto text = [&](const char *f) { return Slurp((dir + f).c_str(), 32); };
+        if (!battery::Headset(text("scope").c_str())) continue;
+        if (!battery::IsBattery(text("type").c_str())) {
+            r.plugged |= std::atoi(text("online").c_str()) == 1;
+            continue;
+        }
+        const std::string pct = text("capacity"), uv = text("voltage_now");
+        std::string ua = text("current_avg");
+        if (ua.empty()) ua = text("current_now");
+        if (!pct.empty()) r.percent = std::atoi(pct.c_str());
+        if (!uv.empty() && !ua.empty()) r.watts = battery::Watts(std::atof(uv.c_str()), std::atof(ua.c_str()));
+        r.full = text("status").compare(0, 4, "Full") == 0;
+    }
+    closedir(d);
+    return r;
 }
 
 double GpuNow() {
@@ -88,10 +118,16 @@ const sysstats::Words &SystemStats(int64_t nowMs) {
     }
     double used = 0, total = 0;
     if (!sysstats::ParseMem(Slurp("/proc/meminfo", 4096).c_str(), &used, &total)) total = 0;
-    sysstats::Words w = sysstats::Say(cpuPct, GpuNow(), used, total, HottestC());
+    sysstats::Words w = sysstats::Say(cpuPct, GpuNow(), used, total, CpuC());
     if (w.cpu.empty()) w.cpu = g_stats.words.cpu;   // (the first read has nothing to compare with)
     g_stats.words = w;
+    g_stats.battery = ReadBattery();
     return g_stats.words;
+}
+
+const battery::Reading &BatteryNow(int64_t nowMs) {
+    SystemStats(nowMs);
+    return g_stats.battery;
 }
 
 void ForgetStats() { g_stats.readMs = -1, g_stats.haveCpu = false; }

@@ -6,6 +6,7 @@
 #include "vr.h"
 #include "barhit.h"
 #include "barside.h"
+#include "battery.h"
 #include "dashanchor.h"
 #include "dashtiles.h"
 #include "fillround.h"
@@ -407,6 +408,8 @@ void DestroyQuickAccess();
 // The palm card's readouts (sysstats.h), read again when a second has passed; ForgetStats when it hides,
 // so the next show's CPU is over a fresh second.
 const sysstats::Words &SystemStats(int64_t nowMs);
+// ...and its battery line (battery.h), read with them.
+const battery::Reading &BatteryNow(int64_t nowMs);
 void ForgetStats();
 
 // ---------------------------------------------------------------- vrresetask.cpp's

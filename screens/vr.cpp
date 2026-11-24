@@ -7576,7 +7576,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         // An anchored panel's place is the dashboard tiles' ("anchor N off" first): a profile or a reset
         // placing every screen leaves it where it is.
         if (TileAnchored(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");
-        if (LayoutMoves(n - 1)) LayoutLetGo("a panel placed by a command");
+        LayoutPlaced(n - 1);
         EndDrag(*s);
         g_spin.base.erase(n - 1);
         s->dashWait = false;
@@ -7681,7 +7681,7 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         Mat m{};
         for (int k = 0; k < 12; ++k) m.m[k / 4][k % 4] = r[k];
         if (TileAnchored(n - 1)) return (void)std::snprintf(reply, size, "ok anchored");   // (as place)
-        if (LayoutMoves(n - 1)) LayoutLetGo("a panel placed by a command");
+        LayoutPlaced(n - 1);
         EndDrag(*s);
         g_spin.base.erase(n - 1);
         s->dashWait = false;

@@ -438,7 +438,8 @@ void UpdateLayoutGrab();   // each tick: every panel it moves where the laser ha
 bool LayoutCarrying();     // it's on
 bool LayoutMoves(int i);   // ...and moves that panel
 void LayoutShifted();      // the room's panels were moved under it (ShiftRoom)
-void LayoutLetGo(const char *why);   // let go where it is, if it's on (paused, a reset, a panel it moves placed by a command)
+void LayoutLetGo(const char *why);   // let go where it is, if it's on (paused, a reset, the held panel placed by a command)
+void LayoutPlaced(int i);  // a command places panel i
 
 // ---------------------------------------------------------------- vr.cpp's, for the layout's carry
 

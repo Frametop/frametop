@@ -54,6 +54,7 @@ struct Grab {
     }
     void End() { panel = -1, rel.clear(), slid = lost = false; }
     void Lose() { lost = true; }
+    void Drop(int i) { rel.erase(i); }   // (it stays where it is)
     void Take(int i, const M &pose) { rel[i] = posemath::Mul(posemath::Inverse(frame), pose); }
     M Pose(int i) const { return posemath::Mul(frame, rel.at(i)); }
     // The carried point is at `at` now: the set turned with it about the head, or only slid. Returns how

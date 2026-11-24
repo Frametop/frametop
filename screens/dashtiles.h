@@ -38,6 +38,7 @@
 #include "tilememory.h"
 #include "tilepack.h"
 #include "tilefit.h"
+#include "turnkeep.h"
 #include "tilestate.h"
 #include "tileview.h"
 #include "tiledrop.h"
@@ -440,7 +441,8 @@ public:
         }
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
         centreNow_ = CentreOf(info);
-        pan_ = l.split >= 0 || params.fit ? 0 : Pan(l);   // (fitted: always round the middle)
+        const bool turns = l.split < 0 && !params.fit;   // (fitted: always round the middle)
+        pan_ = turns ? turns_.Keep(l, recentre_ || moved_ >= 0, [&] { return Pan(l); }) : 0;
         if (pan_ != 0) tiling::Turn(&l, pan_);
         ShowNudges(&l);
         moved_ = -1, recentre_ = false;
@@ -600,7 +602,6 @@ private:
                     if (!std::isnan(movedAz_)) alone = tiling::WrapNear(movedAz_ - p.azDeg, 0);
                     continue;
                 }
-                if (absent.count(p.id)) continue;   // (no width: it has no place to keep, only its column's edge)
                 for (const tiling::Placed &q : last_.tiles)
                     if (q.id == p.id) {
                         auto [it, added] = vote.try_emplace(p.col, -1.0, 0.0);
@@ -613,7 +614,6 @@ private:
                 std::sort(want.begin(), want.end());   // the middle of two, both sides make room)
                 pan = (want[(n - 1) / 2] + want[n / 2]) / 2;
             } else if (!std::isnan(alone)) pan = alone;
-            else if (l.az1 - l.az0 < 1e-6) return pan;   // (nothing shows: turned as it was, for when something does again)
         }
         return std::clamp(pan, -l.az1, -l.az0);
     }
@@ -641,6 +641,7 @@ private:
     std::set<int> arc_;           // curved round the arc while the centre
     std::map<int, double> nudge_; // moved up (down: negative), degrees
     double pan_ = 0;              // the strip turned this far from centred
+    turnkeep::Turns turns_;       // ...as each thing showing, hiding and showing again had it
     bool recentre_ = false;
     int centreOn_ = -1;
     int moved_ = -1;              // the panel just moved (the next Arrange's), and where it was let go (NAN: by a key, or not said)

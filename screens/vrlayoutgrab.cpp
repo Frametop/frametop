@@ -116,6 +116,13 @@ void LayoutLetGo(const char *why) {
     LayoutGrabEnd();
 }
 
+// A command places panel `i` (a room's answer, a window that starts to float): the rest goes on without
+// it; the held one lets go.
+void LayoutPlaced(int i) {
+    if (i == g_layoutGrab.panel) LayoutLetGo("the panel held was placed by a command");
+    else g_layoutGrab.Drop(i);
+}
+
 // The room was shifted under it (ShiftRoom): what goes with it goes on from where that put it.
 void LayoutShifted() {
     for (const auto &[i, s] : g_screens)

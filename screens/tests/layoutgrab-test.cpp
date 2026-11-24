@@ -182,6 +182,18 @@ static void posesLost() {
     check("...the next step is the hand's again", same(Mul(next, around(head, -30, 2)), around(head, -40, 2)));
 }
 
+// A command places one of the set: it's out of it, and the rest goes on.
+static void dropped() {
+    const M head = headAt(0, 1.6, 0);
+    Grab<M> g;
+    g.Begin(1, around(head, 0, 2), head);
+    g.Take(1, around(head, 0, 2)), g.Take(2, around(head, 40, 2)), g.Take(3, around(head, 80, 2));
+    g.Drop(2), g.Drop(9);
+    g.Move(around(head, -30, 2), head);
+    check("one dropped isn't moved any more", !g.Moves(2));
+    check("...and the rest goes on", g.on() && same(g.Pose(1), around(head, -30, 2)) && same(g.Pose(3), around(head, 50, 2)));
+}
+
 static void noDrift() {
     const M head = headAt(0.1, 1.5, 0.4);
     const M start = around(head, 0, 2), other = around(head, -70, 2.5, 0.3);
@@ -201,6 +213,7 @@ int main() {
     overhead();
     startsOverhead();
     posesLost();
+    dropped();
     noDrift();
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;

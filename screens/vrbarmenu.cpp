@@ -395,7 +395,15 @@ void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data) {
                    (ev.data.mouse.button == vr::VRMouseButton_Left || ev.data.mouse.button == vr::VRMouseButton_Right)) {
             if (g_menu.panel < 0) continue;
             g_menu.usedMs = NowMs();
-            PressRow(menulayout::At(g_menu.layout, ev.data.mouse.x, ev.data.mouse.y), ev.trackedDeviceIndex, DeviceLabel(ev.trackedDeviceIndex).c_str());
+            const int row = menulayout::At(g_menu.layout, ev.data.mouse.x, ev.data.mouse.y);
+            const bool moveAll = row >= 0 && row < int(g_menu.rows.size()) && g_menu.rows[size_t(row)].item == panelmenu::Item::MoveAll;
+            if (moveAll) {
+                if (ev.data.mouse.button != vr::VRMouseButton_Left) continue;   // (the release catcher's is the left one)
+                // (a window's press by this laser still held: its release was lost; a claimed one, BarClaims,
+                // never gets to the ReleaseAwayBy below, so KWin would keep the button, as with the bar's own)
+                ReleaseAwayBy(ev.trackedDeviceIndex, ev.data.mouse.button, handle, data);
+            }
+            PressRow(row, ev.trackedDeviceIndex, DeviceLabel(ev.trackedDeviceIndex).c_str());
         } else if (ev.eventType == vr::VREvent_MouseButtonUp) {
             const vr::TrackedDeviceIndex_t dev = ev.trackedDeviceIndex;
             const int panel = g_menu.panel;

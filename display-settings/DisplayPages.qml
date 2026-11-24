@@ -1424,12 +1424,14 @@ Item {
 
             actions: [
                 Kirigami.Action {
-                    text: "Turn displays off now"
-                    icon.name: "system-suspend"
-                    tooltip: ppage.p.standby ? "To try it: any key, mouse or headset button turns them back on"
-                                             : "To try it: they come back on when the headset moves or any input is used"
-                    enabled: ppage.p.service && ppage.p.state === "on"
-                    onTriggered: backend.displaysOffNow()
+                    readonly property bool dark: ppage.p.state === "off" || ppage.p.state === "standby"
+                    text: dark ? "Turn displays on" : "Turn displays off now"
+                    icon.name: dark ? "video-display" : "system-suspend"
+                    tooltip: dark ? "Wakes the headset, as a key or button on it would"
+                             : ppage.p.standby ? "To try it: any key, mouse or headset button turns them back on"
+                             : "To try it: they come back on when the headset moves or any input is used"
+                    enabled: ppage.p.service && ppage.p.state !== "away"
+                    onTriggered: dark ? backend.displaysOnNow() : backend.displaysOffNow()
                 }
             ]
 
@@ -1479,11 +1481,12 @@ Item {
                     }
                     Controls.Label {
                         text: ppage.p.standby
-                              ? "The headset goes into SteamVR's standby, as if you had taken it off: tracking, the "
-                                + "cameras and drawing pause, and it uses about a third of the power. The desktop, "
-                                + "services and remote access keep running. Any key, mouse or headset button wakes it, "
-                                + "and so does putting it on once its proximity sensor notices. Moving it doesn't, "
-                                + "because tracking is paused."
+                              ? "A few seconds after the displays, the headset goes into SteamVR's standby, as if "
+                                + "you had taken it off: tracking, the cameras and drawing pause, and it uses about a "
+                                + "third of the power. The desktop, services and remote access keep running. Any key, "
+                                + "mouse or headset button wakes it, and so does putting it on once its proximity "
+                                + "sensor notices. Moving it doesn't, because tracking is paused. Steam can put a "
+                                + "headset in standby to sleep: turn on Stay awake below to keep it reachable."
                               : "Only the displays turn off. The headset keeps tracking and drawing, so it wakes the "
                                 + "moment it moves, but it still uses most of its power."
                         opacity: 0.7
@@ -1496,7 +1499,9 @@ Item {
                         visible: ppage.p.service
                         text: ppage.p.state === "standby" ? "Off, with tracking paused. Use any key, mouse or headset "
                                                             + "button, or put the headset on, to wake it."
-                              : ppage.p.state === "off" ? "Off. Move the headset or use any input to turn them on."
+                              : ppage.p.state === "off" ? (ppage.p.standby
+                                    ? "Off. Tracking still runs: move the headset or use any input to turn them on."
+                                    : "Off. Move the headset or use any input to turn them on.")
                               : ppage.p.state === "away" ? "Off. SteamVR turned them off because the headset isn't being worn."
                               : ppage.p.offMinutes > 0
                                 ? "On, unused for " + (ppage.p.unused < 60 ? Math.floor(ppage.p.unused) + " s"
@@ -1565,8 +1570,9 @@ Item {
                     wrapMode: Text.Wrap
                     opacity: 0.7
                     text: ppage.p.standby
-                          ? "If SteamVR doesn't take the standby, only the displays turn off and the headset keeps "
-                            + "tracking. Leave it on a charger that keeps up with it in use."
+                          ? "If SteamVR doesn't go into standby (Now says Off, not tracking paused), only the "
+                            + "displays are off and the headset keeps tracking. Leave it on a charger that keeps up "
+                            + "with it in use."
                           : "With the displays off, the headset keeps tracking and drawing, so it can wake the moment "
                             + "it moves. It still uses most of its power, so leave it on a charger that keeps up with it "
                             + "in use."

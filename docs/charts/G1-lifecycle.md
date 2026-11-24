@@ -23,17 +23,17 @@ Results at `78e93b1`:
 | GazeBackAfterResume | A resume starts gaze again | Breaks with crashes (L5) |
 | ClosedDesktopComesBack | A desktop the pause closed comes back on resume | Breaks in PauseClose and PauseCloseNoAuto (L5) |
 | NoStuckGamePause | A pause that waits for the game's end ends | Breaks with crashes (L6) |
-| WornAgreesSoon, DarkHasOwner, AwayReleasesPointer | Worn readers agree within 1.5 s, dark displays have an owner, away lets go of the pointer | Hold (Presence 162 states, Joint 34,942) |
+| WornAgreesSoon, DarkHasOwner, AwayReleasesPointer | Worn readers agree within 1.5 s, dark displays have an owner, away lets go of the pointer | Hold (Presence 162 states then, Joint 34,942) |
 
 States per run: 27,172 (PauseHide) to 34,942 (Joint).
 
-Results with the fixes (`93cbf29`): every rule holds in every config, 66 runs. States per run: 1,856 (PauseLossy) to 32,770 (Joint); Presence is unchanged at 162. The model now describes the fixed code. To see the old breaks, check out `f85dff9` and run its copy of the model.
+Results with the fixes (`93cbf29`): every rule holds in every config, 66 runs. States per run: 1,856 (PauseLossy) to 32,770 (Joint); Presence was unchanged at 162 (more since the forced standby, below). The model now describes the fixed code. To see the old breaks, check out `f85dff9` and run its copy of the model.
 
 With L7's fix, ft-screens out of step with the relay is a transient, like a restarting unit: its next report (`ScreensReport`) corrects it, and `Quiet` waits for that report. So in G1, DesktopMatchesPause no longer catches a lost datagram on its own. G2's liveness rule HiddenComesBack carries that check.
 
 The chart (`G1-lifecycle.mmd`, `.svg`) still draws L1 to L7 red. It is due a redraw.
 
-Forced standby (2026-11-24): the model has the proximity sensor (`near`) apart from the level SteamVR has (`lvl`), because ft-powerd can now write that level through the `ft_pointer` driver, and ft-powerd's `Standby` with its file `powerd-standby`. Two rules came with it, in `Presence` (417 states) and `Joint` (32,770): StandbyHasOwner (a standby ft-powerd asked for is one a key will end: ft-powerd runs and knows, or its file tells the next start) and StandbyFileIsFresh (the file is there only while a standby is under way or its ft-powerd was killed). Both hold, with the three older presence rules. The `.mmd` has the new states (x3, x4); the `.svg` and the preview don't yet.
+Forced standby (2026-11-24): the model has the proximity sensor (`near`) apart from the level SteamVR has (`lvl`), because ft-powerd can now write that level through the `ft_pointer` driver, and ft-powerd's `Standby` with its file `powerd-standby`. Two rules came with it, in `Presence` (325 states) and `Joint` (32,770): StandbyHasOwner (a standby ft-powerd asked for is one a key will end: ft-powerd runs and knows, or its file tells the next start) and StandbyFileIsFresh (the file is there only while a standby is under way or its ft-powerd was killed). Both hold, with the three older presence rules. The `.mmd` has the new states (x3, x4); the `.svg` and the preview don't yet.
 
 Fixed bugs:
 

@@ -397,8 +397,9 @@ def create_server(config: Config, *, runner=run_cli):
 
     @server.tool()
     async def display_power(state: Literal['status', 'on', 'off']) -> CallToolResult:
-        """ft-powerd: the headset displays' state (on, off, or away: SteamVR's standby), or turn
-        them off or back on."""
+        """ft-powerd: the headset displays' state (on; off; standby: off with tracking paused,
+        asked for by ft-powerd; away: SteamVR's standby because nobody wears the headset), or
+        turn them off or back on."""
         return await execute(['power', state])
 
     @server.tool()

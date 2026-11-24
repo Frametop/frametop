@@ -233,8 +233,9 @@ def items(root, env=os.environ):
         single("hands/tests/xrcams_test.c", GNU11, out="xrcams-test"),
         single("hands/tests/camstart_test.c", GNU11, out="camstart-test"),
     ]
-    # ft-powerd has no test; it talks to SteamVR and the display, so it's only compiled, against
-    # the pinned OpenVR header power/build.sh fetches (no download in a test)
+    # ft-powerd itself has no test (its standby rules do: power/standby-test.cpp); it talks to
+    # SteamVR and the display, so it's only compiled, against the pinned OpenVR header
+    # power/build.sh fetches (no download in a test)
     if has("power/build/include/openvr.h"):
         out.append(P("ft-powerd", "power/ft-powerd.cpp", flags="-std=c++17 -Wall -Werror -Wno-unused-parameter",
                      cflags="-Ipower/build/include", test="power/ft-powerd.cpp (compiles)", syntax=True))

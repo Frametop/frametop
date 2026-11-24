@@ -1,5 +1,5 @@
 // ft-powerd's forced standby: when the displays are due to go dark and SteamVR still has the
-// headset as worn, ask SteamVR for its standby instead of only turning the backlight off.
+// headset as worn, ask SteamVR for its standby as well as turning the backlight off.
 //
 // Why: the backlight alone leaves tracking, the cameras and the compositor running (about 17 W on
 // a stand that covers the proximity sensor). SteamVR's standby pauses them (about 5 W) and keeps
@@ -9,10 +9,13 @@
 //
 // The rules:
 // - One "not worn" per attempt, and only to a SteamVR that has the headset as worn. If SteamVR
-//   hasn't gone away kAnswerSecs later, the attempt failed (an older driver, or the headset's
-//   driver said "worn" again): the caller writes "worn" back and uses the backlight.
-// - While it holds, any use (a key, a button, a mouse, "on") ends it: the caller writes "worn".
-//   Movement can't: tracking is paused.
+//   still has it as worn kAnswerSecs later, the attempt failed (an older driver that doesn't
+//   know the command): the caller writes "worn" back and the backlight is all there is.
+// - It holds once SteamVR has the headset as off, which is within a second or two. SteamVR's
+//   standby proper (tracking paused) follows 5 s after the write, unless something keeps SteamVR
+//   awake; the caller tells the two apart by the activity level.
+// - Any use (a key, a button, a mouse, "on") ends it: the caller writes "worn". Movement does
+//   too in the seconds before tracking pauses, and can't after.
 // - SteamVR waking by itself ends it too (the sensor changed: the headset was picked up, or the
 //   testbench faked a wearer). If nobody then uses the headset before the displays are due to go
 //   dark again, the wake wasn't a person, and standby wouldn't hold next time either: until the
@@ -25,7 +28,7 @@ namespace ft_power {
 
 class Standby {
 public:
-    static constexpr double kAnswerSecs = 15;  // SteamVR's own delay is 5 s, ft-powerd's away adds 1
+    static constexpr double kAnswerSecs = 15;  // measured: idle 1 s after the write, plus ft-powerd's 1 s
     static constexpr double kSettleSecs = 15;
 
     enum class Begin {
@@ -42,7 +45,7 @@ public:
     bool Holding() const { return phase_ == Phase::Held; }
 
     // The displays are due to go dark and SteamVR has the headset as worn. Ask: the caller writes
-    // "not worn" (and calls Abort() if it couldn't). Anything else: the caller uses the backlight.
+    // "not worn" (and calls Abort() if it couldn't). Anything else: only the backlight.
     Begin Start(double now, bool enabled, bool testing) {
         if (phase_ != Phase::Idle) return Begin::Busy;
         if (!enabled) return Begin::Disabled;
@@ -57,8 +60,8 @@ public:
     void Abort() { phase_ = Phase::Idle; }
 
     // With every reading of whether SteamVR has the headset as away.
-    //   Holds:  SteamVR took it, once.
-    //   Failed: it didn't in time. The caller writes "worn" and uses the backlight.
+    //   Holds:  SteamVR has the headset as off, once.
+    //   Failed: it didn't in time. The caller writes "worn" back.
     //   Woke:   SteamVR left the standby by itself. Nothing to write.
     Step Tick(double now, bool away) {
         if (phase_ == Phase::Asked) {

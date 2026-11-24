@@ -705,9 +705,8 @@ int main() {
         check("absent: the screen hidden, the strip closes up to the windows", span() < whole - 20);
         b.Repack(sized);
         const tilegrid::Where screen = b.Grid().Find(1);
-        check("absent: a repack: the screen a column of its own at an end, the windows in others",
-              screen.ok() && b.Grid().Cols()[size_t(screen.col)].cells.size() == 1 &&
-                  (screen.col == 0 || screen.col == int(b.Grid().Cols().size()) - 1));
+        check("absent: a repack: the screen a column of its own, the windows in others",
+              screen.ok() && b.Grid().Cols()[size_t(screen.col)].cells.size() == 1 && b.Grid().Cols().size() > 1);
         b.absent.clear();
         check("absent: shown again, at its size beside them", span() > whole);
     }
@@ -1641,9 +1640,13 @@ int main() {
         e.Arrange(desk);
         check("centre: four as wide: one of the middle two straight ahead, not the seam",
               (e.Centre() == 2 || e.Centre() == 3) && near(e.PlacedOf(e.Centre())->azDeg, 0, 1e-9));
-        e.steam = 4;
+        e.steam = 2;
         e.Arrange(desk);
-        check("centre: Steam's window when it's a tile", e.Centre() == 4);
+        check("centre: never Steam's window beside others", e.Centre() == 3);
+        dashtiles::Board alone;
+        alone.Anchor(2, -1, dashtiles::Stay::Default), alone.steam = 2;
+        alone.Arrange(desk);
+        check("centre: ...alone, it is", alone.Centre() == 2);
         const tilegrid::Where was1 = b.Grid().Find(1), was2 = b.Grid().Find(2);
         check("centre: taken by a drop on it: the two trade places", b.TakeCentre(1) && b.Grid().Find(1).col == was2.col &&
                                                                          b.Grid().Find(2).col == was1.col);
@@ -1679,9 +1682,56 @@ int main() {
         check("state: a shelf of its own in the text",
               dashtiles::Parse("tile 0 1 2 0 1.000 dc row", &st) && st.ownRow && !st.arc && dashtiles::Text(st) == "tile 0 1 2 0 1.000 dc row" &&
                   !dashtiles::Parse("tile 0 1 2 0 1.000 dc row row", &st));
+        b.TakeOff(1);
+        b.Arrange(wide);
+        check("centre: the chosen one taken off: the widest meanwhile, flat", b.Centre() == 2 && !b.ArcNow(1) && !b.ArcNow(2));
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Arrange(wide);
+        check("centre: ...put back: the centre again, curved, straight ahead", b.Centre() == 1 && b.ArcNow(1) && near(b.PlacedOf(1)->azDeg, 0, 1e-9));
+        b.TakeOff(1);
+        b.Arrange(wide);
+        b.TakeCentre(3);
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Arrange(wide);
+        check("centre: ...another chosen meanwhile: that one", b.Centre() == 3 && !b.ArcNow(1));
+        b.TakeCentre(1);
         b.Unanchor(1);
         b.Arrange(wide);
         check("centre: the chosen one gone: the widest again", b.Centre() == 2);
+        b.Anchor(1, -1, dashtiles::Stay::Default);
+        b.Arrange(wide);
+        check("centre: ...another panel with its number: not the centre, flat", b.Centre() == 2 && !b.Arc(1));
+    }
+    {   // a reset with the dashboard closed (Steam's window hidden), then it opens (user, 2026-11-23:
+        // "off to my side on a reset"): the ultrawide stays straight ahead, columns on both sides of it
+        const auto mine = [](int id) {
+            return id == 101 ? dashtiles::Info{3.4, 0.96} : id == 190 ? dashtiles::Info{1.9, 1.2} : dashtiles::Info{1.6, 2.4};   // (too tall to stack)
+        };
+        dashtiles::Board b;
+        b.steam = 190;
+        for (int id : {2, 3, 101, 5, 6, 190}) b.Anchor(id, -1, dashtiles::Stay::Default);
+        b.absent = {190};
+        b.Repack(mine);
+        b.Arrange(mine);
+        check("reset: the ultrawide the centre, straight ahead", b.Centre() == 101 && near(b.PlacedOf(101)->azDeg, 0, 1e-9));
+        check("reset: ...it can be curved", b.ToggleArc(101) && b.ArcNow(101));
+        b.absent.clear();
+        b.Recentre();
+        b.Arrange(mine);
+        check("reset: ...the dashboard open: still it, curved", b.Centre() == 101 && b.ArcNow(101) && near(b.PlacedOf(101)->azDeg, 0, 1e-9));
+        check("reset: ...the strip on both sides of you", b.Last().az0 < -30 && b.Last().az1 > 30);
+        b.TakeCentre(190);
+        b.absent = {190};
+        b.Repack(mine);
+        b.Arrange(mine);
+        check("reset: ...Steam's window chosen, hidden: the wall's middle one that's shown", b.Centre() == 190 && b.WallCentre() >= 0 && b.WallCentre() != 190);
+        const int col = b.Grid().Find(190).col;
+        check("reset: ...its column in the middle", col > 0 && col < int(b.Grid().Cols().size()) - 1);
+        b.absent.clear();
+        b.Recentre();
+        b.Arrange(mine);
+        check("reset: ...shown: straight ahead, the strip on both sides", near(b.PlacedOf(190)->azDeg, 0, 1e-9) && b.Last().az0 < -30 &&
+                                                                              b.Last().az1 > 30 && b.WallCentre() == 190);
     }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;

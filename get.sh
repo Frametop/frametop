@@ -26,8 +26,8 @@
 #   --zip FILE|URL  with --release: this Frametop.zip instead of GitHub's newest (a URL needs
 #                   the release's SHA256SUMS beside it, as GitHub's releases have)
 #   --any-steamos   with --release: install even on a SteamOS build the release breaks on
-#   --yes, --no-voice, --no-hands, --no-eye-tracker, --no-keyboard, --no-together, --together,
-#   --no-bluetooth, --bluetooth
+#   --yes, --no-voice, --no-hands, --no-hand-recorder, --no-gaze, --no-eye-tracker,
+#   --no-eye-recorder, --no-keyboard, --no-together, --together, --no-bluetooth, --bluetooth
 #                   passed to install.sh (--yes also answers this script's questions: the version
 #                   already there, or stable)
 set -euo pipefail
@@ -35,12 +35,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 usage: get.sh [--stable | --experimental | --branch NAME] [--dir DIR] [--clone-only] [--yes]
-              [--no-voice] [--no-hands] [--no-eye-tracker] [--no-keyboard] [--no-together | --together]
-              [--no-bluetooth | --bluetooth]
+              [--no-voice] [--no-hands] [--no-gaze] [--no-eye-tracker] [--no-keyboard]
+              [--no-together | --together] [--no-bluetooth | --bluetooth]
        get.sh --release [--stable | --experimental | --version V | --zip FILE|URL]
               [--any-steamos] [--dir DIR] [--clone-only] [--yes] [--no-voice] [--no-hands]
-              [--no-eye-tracker] [--no-keyboard] [--no-together | --together]
-              [--no-bluetooth | --bluetooth]
+              [--no-hand-recorder] [--no-gaze] [--no-eye-tracker] [--no-eye-recorder]
+              [--no-keyboard] [--no-together | --together] [--no-bluetooth | --bluetooth]
 piped: curl -fsSL https://frametop.github.io/frametop/get.sh | bash -s -- [options]
 EOF
 }
@@ -170,7 +170,8 @@ main() {
       --version) want=${2:?--version needs a version}; shift ;;
       --any-steamos) any=1 ;;
       --yes) yes=1; pass+=("$1") ;;
-      --no-bluetooth|--bluetooth|--no-eye-tracker|--no-voice|--no-hands|--no-keyboard|--no-together|--together) pass+=("$1") ;;
+      --no-bluetooth|--bluetooth|--no-gaze|--no-eye-tracker|--no-voice|--no-hands|--no-keyboard|--no-together|--together) pass+=("$1") ;;
+      --no-hand-recorder|--no-eye-recorder) pass+=("$1") ;;  # install.sh takes them; only a release offers the recorders
       -h|--help) usage; return 0 ;;
       *) echo "unknown option: $1" >&2; usage >&2; return 2 ;;
     esac

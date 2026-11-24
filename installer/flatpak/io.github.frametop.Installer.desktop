@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Frametop Installer
+GenericName=Install Frametop
+Comment=Install or update Frametop on your Steam Frame, without a terminal
+Exec=frametop-installer
+Icon=io.github.frametop.Installer
+Terminal=false
+Categories=System;Settings;
+Keywords=Frametop;Steam Frame;VR;desktop;install;update;
+StartupNotify=true

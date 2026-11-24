@@ -21,16 +21,22 @@
 # A release whose folder has fast-installed files is refused until scripts/fast-install undo.
 #
 # Usage: install-release.sh [--yes] [--any-steamos] [--unpack-only] [--dir DIR]
-#                           [--no-voice] [--no-hands] [--no-hand-recorder] [--no-eye-tracker]
-#                           [--no-eye-recorder] [--no-keyboard] [--no-together | --together]
-#                           [--no-bluetooth | --bluetooth]
+#                           [--no-voice] [--no-hands] [--no-hand-recorder] [--no-gaze]
+#                           [--no-eye-tracker] [--no-eye-recorder] [--no-keyboard]
+#                           [--no-together | --together] [--no-bluetooth | --bluetooth]
+#        install-release.sh --list-options
 #   --unpack-only  stop after step 2 and the copy: don't run install.sh
 #   --dir DIR      where the releases go (default ~/.local/share/frametop/releases)
+#   --list-options  print the options it passes to install.sh, one a line, and stop: the
+#                  Frametop Installer reads them from frametop-release.json (pack/release-info.py)
 # The rest go to install.sh. FRAMETOP_STEAMOS_TABLE names another table to fetch (a URL), or
 # "none" to use only the release's. Exit status 3: the image file is damaged.
 set -euo pipefail
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# The options that go on to install.sh: the one list both the parsing and --list-options use.
+INSTALL_OPTIONS=(--no-voice --no-hands --no-hand-recorder --no-gaze --no-eye-tracker --no-eye-recorder
+  --no-keyboard --no-together --together --no-bluetooth --bluetooth)
 TABLE_URL=${FRAMETOP_STEAMOS_TABLE:-https://raw.githubusercontent.com/Frametop/frametop/main/pack/steamos.json}
 
 # check_release RELEASE_JSON TABLE_JSON BUILD_ID: is the release usable, and is it for this
@@ -116,9 +122,13 @@ main() {
       --any-steamos) any=1 ;;
       --unpack-only) unpack_only=1 ;;
       --dir) base=${2:?--dir needs a folder}; shift ;;
-      --no-voice|--no-hands|--no-hand-recorder|--no-eye-tracker|--no-eye-recorder|--no-keyboard|--no-together|--together|--no-bluetooth|--bluetooth) pass+=("$1") ;;
-      -h|--help) sed -n '2,27p' "$0"; return 0 ;;
-      *) echo "unknown option: $1" >&2; return 2 ;;
+      --list-options) printf '%s\n' "${INSTALL_OPTIONS[@]}"; return 0 ;;
+      -h|--help) sed -n '2,33p' "$0"; return 0 ;;
+      *)
+        local o known=0
+        for o in "${INSTALL_OPTIONS[@]}"; do [ "$1" = "$o" ] && known=1; done
+        [ "$known" = 1 ] || { echo "unknown option: $1" >&2; return 2; }
+        pass+=("$1") ;;
     esac
     shift
   done

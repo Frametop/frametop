@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Write frametop-release.json, for a release's Frametop.zip (framedrop/build.sh --image):
 the version, the commit, the channel, the image file's sha256, the image's ID (its config's
-digest: podman's ID for it once loaded), and the SteamOS table, pack/steamos.json.
-pack/install-release.sh reads it.
+digest: podman's ID for it once loaded), the SteamOS table, pack/steamos.json, and the options
+install-release.sh takes for install.sh (its --list-options). pack/install-release.sh reads it,
+and the Frametop Installer (installer/) reads the options before it downloads the zip, to offer
+only the parts that release can leave out.
 
   pack/release-info.py --image-file frametop-image.tar --version 0.3.0 --commit SHA \\
       [--channel stable|experimental] > frametop-release.json
@@ -14,6 +16,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -43,6 +46,15 @@ def sha256(path):
     return h.hexdigest()
 
 
+def install_options():
+    """The options install-release.sh passes on to install.sh, from its --list-options."""
+    out = subprocess.run(["bash", str(HERE / "install-release.sh"), "--list-options"],
+                         capture_output=True, text=True, check=True).stdout.split()
+    if not out or not all(re.fullmatch(r"--[a-z][a-z-]*", o) for o in out):
+        raise SystemExit(f"install-release.sh --list-options printed something else: {out!r}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--image-file", required=True, type=Path)
@@ -63,6 +75,7 @@ def main():
         "channel": a.channel or ("experimental" if "-" in a.version else "stable"),
         "image": {"file": a.image_file.name, "sha256": sha256(a.image_file), "id": image_id(a.image_file)},
         "steamos": {"tested": table.get("tested", []), "broken": table.get("broken", [])},
+        "install_options": install_options(),
     }, sys.stdout, indent=2)
     print()
 

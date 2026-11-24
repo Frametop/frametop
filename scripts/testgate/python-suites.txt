@@ -30,6 +30,7 @@ float/test/*.py
 display-settings/tests/*.py
 pointer/tests/*.py
 remote-displays/test/*.py
+installer/tests/test_*.py
 scripts/tests/test_app_imports.py
 scripts/tests/test_uninstall.py
 scripts/tests/test_get.py

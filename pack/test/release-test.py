@@ -78,6 +78,10 @@ check("release-info.py writes it", code, 0)
 rel = json.loads(out)
 check("with the image file's sha256 and the image's ID", (rel["image"]["sha256"], rel["image"]["id"]), (SHA, ID))
 check("a version without a \"-\" is stable", rel["channel"], "stable")
+check("with the options install-release.sh passes on (the Frametop Installer reads them)",
+      rel["install_options"], subprocess.run(["bash", os.path.join(REPO, "pack", "install-release.sh"),
+                                              "--list-options"], capture_output=True, text=True).stdout.split())
+check("gaze mode is one it can leave out", "--no-gaze" in rel["install_options"], True)
 check("an experimental one", json.loads(info("0.3.0-exp.1", {"tested": tested})[1])["channel"], "experimental")
 check("release-info.py refuses a malformed version", info("../0.3", {"tested": tested})[0], 2)
 two = os.path.join(TMP, "two.tar")

@@ -48,7 +48,7 @@ int main() {
     check("not anchored: no Stay Shown", !has(dp, Item::StayShown));
     panelmenu::Kind anchored;
     anchored.anchored = true;
-    check("anchored: Stay Shown, right after On Dashboard, a rule above it", [&] {
+    check("anchored: Stay Shown, right after Tiled, a rule above it", [&] {
         const auto a = panelmenu::Placement(anchored);
         const auto on = std::find(a.begin(), a.end(), panelmenu::Row{Item::OnDashboard});
         return on != a.end() && on + 1 != a.end() && (on + 1)->item == Item::StayShown && panelmenu::RuleAbove(a, size_t(on + 1 - a.begin()));

@@ -19,11 +19,9 @@ namespace turnkeep {
 constexpr size_t kMost = 32;   // the newest so many
 
 struct Turns {
-    // The turn for `l`, laid out centred: as it had last, else `turn`'s. `anew`: a panel was moved or
-    // the strip is to be centred, so what it had before doesn't count.
+    // The turn for `l`, laid out centred: as it had last, else `turn`'s.
     template <typename F>
-    double Keep(const tiling::Layout &l, bool anew, F turn) {
-        if (anew) kept_.clear();
+    double Keep(const tiling::Layout &l, F turn) {
         const auto it = std::find_if(kept_.begin(), kept_.end(), [&](const auto &k) { return Same(k.first, l.tiles); });
         if (it != kept_.end()) return it->second;
         const double deg = turn();

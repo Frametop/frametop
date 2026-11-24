@@ -184,6 +184,47 @@ KEY_NAMES = MappingProxyType({
 def combo_name(combo):
     """A key_bindings combination as people read it: "29+125+106" -> "Ctrl+Meta+Right"."""
     parts = combo.split("+") if isinstance(combo, str) else []
-    if not parts or not all(p.isascii() and p.isdecimal() for p in parts):
+    # (three digits at most, checked first: a hand-written file's number can be too long for int)
+    if not parts or not all(len(p) <= 3 and p.isascii() and p.isdecimal() for p in parts):
         return str(combo)
     return "+".join(KEY_NAMES.get(int(p), f"code {p}") for p in parts)
+
+
+# A "keys:" action taps a key combination where typing goes ("keys:125+32": Meta+D; evdev codes
+# as in key_bindings, KEYS_MAX of them at most). Never one of KEYS_REFUSED: the volume keys, which
+# are the headset's, and power, sleep, wake and suspend, which logind may act on from the relay's
+# virtual keyboard.
+KEYS = "keys:"
+KEYS_MAX = 6
+KEYS_REFUSED = frozenset({113, 114, 115, 116, 142, 143, 205})
+KEY_LIMIT = 256  # BTN_MISC: keys are below it
+
+
+def combo_codes(combo):
+    """A combination's key codes, in its order ("29+125+106": [29, 125, 106]), or None if it
+    isn't key codes joined by "+"."""
+    parts = combo.split("+") if isinstance(combo, str) else []
+    # (three digits at most, checked first, as in combo_name)
+    if not parts or not all(len(p) <= 3 and p.isascii() and p.isdecimal() and 0 < int(p) < KEY_LIMIT for p in parts):
+        return None
+    return [int(p) for p in parts]
+
+
+def keys_codes(action):
+    """The key codes a "keys:" action taps, in order, or None if it isn't one the relay takes."""
+    codes = combo_codes(action[len(KEYS):]) if isinstance(action, str) and action.startswith(KEYS) else None
+    if codes is None or len(codes) > KEYS_MAX or KEYS_REFUSED.intersection(codes):
+        return None
+    return codes
+
+
+def release_combo(bindings, held, key):
+    """The release_keys combination in bindings ({combo: action}) that key completes with the
+    modifiers in held down (folded codes), with more of them down too: one may be the stuck
+    one. None if there's none."""
+    held = {str(m) for m in held}
+    for combo, action in bindings.items():
+        *mods, last = combo.split("+")
+        if action == "release_keys" and mods and last == str(key) and held.issuperset(mods):
+            return combo
+    return None

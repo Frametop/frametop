@@ -635,8 +635,9 @@ def tests():
     # combination: all down in order, then up, on the press; the release sends nothing.
     D = 32
     check("keys: specs", [relay.keys_codes(a) for a in ("keys:125+32", "keys:", "keys:115", "keys:256",
-                                                        "keys:1+2+3+4+5+6+7", "keys:a", "keys:１", "run:x", "keys:116")],
-          [[125, 32], None, None, None, None, None, None, None, None])
+                                                        "keys:1+2+3+4+5+6+7", "keys:a", "keys:１", "run:x", "keys:116",
+                                                        "keys:" + "9" * 5000)],
+          [[125, 32], None, None, None, None, None, None, None, None, None])
     devices["controller"] = {"right/b": "keys:125+32"}
     use({"29+56+32": "keys:125+32", "29+56+33": "keys:115", "29+56+20": "keys:29+20"})
     to_relay("keyboard desktop")
@@ -655,12 +656,17 @@ def tests():
     typed()
     to_relay("keyboard desktop")
     key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); key(ALT, 0); key(CTRL, 0)
-    check("keys: on a key combination on the desktop: its held modifiers come up around the tap", typed(),
-          ["key 29 1", "key 56 1", "key 29 0", "key 56 0"] + meta_d + ["key 29 1", "key 56 1", "key 56 0", "key 29 0"])
+    check("keys: on a key combination on the desktop: its held modifiers come up for the tap, and stay up "
+          "(put down again, each would be let go as a tap of its own: Alt's opens a menu)", typed(),
+          ["key 29 1", "key 56 1", "key 29 0", "key 56 0"] + meta_d)
     T = 20
     key(CTRL, 1); key(ALT, 1); key(T, 1); key(T, 0); key(ALT, 0); key(CTRL, 0)
     check("...one the action has too stays down: Ctrl+T, Ctrl held throughout", typed(),
-          ["key 29 1", "key 56 1", "key 56 0", "key 20 1", "key 20 0", "key 56 1", "key 56 0", "key 29 0"])
+          ["key 29 1", "key 56 1", "key 56 0", "key 20 1", "key 20 0", "key 29 0"])
+    key(CTRL, 1); key(ALT, 1); key(D, 1); key(D, 0); typed()
+    key(A, 1); key(A, 0); key(ALT, 0); key(CTRL, 0)
+    check("...still held, then a key that's typed: the desktop gets them back first, and their releases",
+          typed(), ["key 29 1", "key 56 1", f"key {A} 1", f"key {A} 0", "key 56 0", "key 29 0"])
     key(CTRL, 1); key(ALT, 1); key(F, 1); key(F, 0); key(ALT, 0); key(CTRL, 0)
     check("a volume key in keys: makes it no action: the combination is typed", typed(),
           ["key 29 1", "key 56 1", "key 33 1", "key 33 0", "key 56 0", "key 29 0"])
@@ -853,10 +859,15 @@ def tests():
     got = meta(SPACE)
     check("own table without Meta+Space: it's frunner's on the PC too",
           (frunner_got(), f"key {SPACE} 1" in got), (["toggle keyboard"], False))
-    check("Meta+Shift+Space sent as Meta+Space: the PC gets Meta+Space alone, Shift back after",
+    check("Meta+Shift+Space sent as Meta+Space: the PC gets Meta+Space alone, and no Shift tap after",
           meta(SHIFT, SPACE),
           ["key 125 1", f"key {SHIFT} 1", "key 125 0", f"key {SHIFT} 0", "key 125 1", f"key {SPACE} 1",
-           f"key {SPACE} 0", "key 125 0", f"key {SHIFT} 1", f"key {SHIFT} 0"])
+           f"key {SPACE} 0", "key 125 0"])
+    key(META, 1); key(SHIFT, 1); key(SPACE, 1); key(SPACE, 0); typed()
+    key(A, 1); key(A, 0); key(SHIFT, 0); key(META, 0)
+    check("...Meta and Shift still held, then A: the PC gets them back first, so it's Meta+Shift+A there",
+          typed(), [f"key {SHIFT} 1", "key 125 1", f"key {A} 1", f"key {A} 0", f"key {SHIFT} 0", "key 125 0"])
+    frunner_got()
     check("it isn't frunner's, and Meta+J stays the gaze click", (frunner_got(), meta(J)),
           ([], ["key 125 1"] + F24 + ["key 125 0"]))
     to_relay("keyboard desktop 1 0 1 1")  # (ft-screens renews it; the checks above took a while)
@@ -868,13 +879,14 @@ def tests():
     check("off the PC: Meta+Shift+Space is typed as it is (no binding of Frametop's)",
           meta(SHIFT, SPACE), ["key 125 1", f"key {SHIFT} 1", f"key {SPACE} 1", f"key {SPACE} 0",
                                f"key {SHIFT} 0", "key 125 0"])
-    # A tap sent as another combination: the modifier is down on the PC, so an F24 either side.
+    # A tap sent as another combination: the modifier is down on the PC, so an F24 before it comes
+    # up there for the other keys. Its real release is dropped.
     menus = len(lines(steam_log))
     pc_table({"125": "29+57"})
     check("a Meta tap sent as Ctrl+Space: tapped there, no Meta tap of the PC's, no Steam menu",
           (meta(), len(lines(steam_log))),
           (["key 125 1"] + F24 + ["key 125 0", f"key {CTRL} 1", f"key {SPACE} 1", f"key {SPACE} 0",
-                                  f"key {CTRL} 0", "key 125 1"] + F24 + ["key 125 0"], menus))
+                                  f"key {CTRL} 0"], menus))
     # Entries the relay can't use are left out; the way out of stuck keys is never the PC's.
     pc_table({"125+57": "115", "57+125": "125+57", "29+42+56+1": "29+42+56+1"})
     meta(SPACE)
@@ -891,7 +903,7 @@ def tests():
     check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space, Shift up meanwhile",
           meta(SHIFT, SPACE),
           ["key 125 1", f"key {SHIFT} 1", "key 125 0", f"key {SHIFT} 0", "key 125 1", f"key {SPACE} 1",
-           f"key {SPACE} 0", "key 125 0", f"key {SHIFT} 1", f"key {SHIFT} 0"])
+           f"key {SPACE} 0", "key 125 0"])
     # A combination of the user's own that the PC gets as it is: held there as long as it's held.
     pc_table({}, {"29+125+30": "frunner"})
     got = meta(CTRL, A)

@@ -24,9 +24,13 @@ import ft_input_settings as fis  # noqa: E402
 import ft_remote_keys  # noqa: E402  (ft_input_settings put conf/ on the path)
 import ft_settings  # noqa: E402  (Frametop Settings, the window the page is in)
 import remote_keys  # noqa: E402
-from PySide6.QtCore import QMetaObject, QObject  # noqa: E402
+from PySide6.QtCore import Q_ARG, QMetaObject, QObject  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+
+# Nothing a Backend says reaches a relay running here, from its first lines on: its "watch" would
+# have that relay send the keys typed on the real keyboards meanwhile, in among press()'s.
+fis.Backend._send = lambda self, text, to=fis.RELAY: True
 
 META, SHIFT, CTRL, ALT, SPACE, J, ESC, VOLUME_UP = 125, 42, 29, 56, 57, 36, 1, 115
 NAMES = {"125": "Meta tap", "125+57": "Meta+Space", "42+125+57": "Meta+Shift+Space", "125+36": "Meta+J"}
@@ -81,6 +85,12 @@ class Logic(unittest.TestCase):
         self.assertTrue(remote_keys.releases("88", alone))
         self.assertIn("always stays Frametop's", remote_keys.problem("29", "29", alone, sendable, name))
         self.assertFalse(remote_keys.releases("125+88", alone))
+        # A right-hand modifier's tap is the left one's binding unless it has its own, as the relay reads it.
+        self.assertTrue(remote_keys.releases("97", alone))
+        self.assertFalse(remote_keys.releases("97", {**alone, "97": "dictate"}))
+        self.assertFalse(remote_keys.releases("29", {"97": "release_keys"}))
+        # A combination with a binding of its own isn't release_keys with more modifiers held.
+        self.assertFalse(remote_keys.releases("29+42+56+125+1", {**bound, "29+42+56+125+1": "frunner"}))
 
     def test_the_first_change_keeps_the_defaults(self):
         rules = {}
@@ -267,7 +277,9 @@ class Page(unittest.TestCase):
         self.assertEqual(sorted(n for n in asked if not hasattr(remote_keys.RemoteKeys, n)), [])
         self.assertTrue(hasattr(fis.Backend, "remoteKeys"))
 
-    def test_it_opens_and_shows_the_list(self):
+    def opened(self):
+        """Frametop Settings on the page, the rules with an empty list of their own: the Backend,
+        the window, the QML warnings so far, and settle() to let the window catch up."""
         app = QGuiApplication.instance() or QGuiApplication([])
         os.makedirs(os.path.dirname(fis.RULES_PATH), exist_ok=True)
         with open(fis.RULES_PATH, "w") as f:
@@ -281,6 +293,7 @@ class Page(unittest.TestCase):
         engine.warnings.connect(lambda ws: errors.extend(w.toString() for w in ws))
         settings = ft_settings.Settings(start="remote-keys", backends={"input": b})
         ft_settings.load(engine, settings)
+        self.kept = engine, settings  # (the window is the engine's, and reads the sections from settings)
         if not engine.rootObjects():
             self.skipTest("Frametop Settings didn't load here (no Kirigami?): " + "; ".join(errors[:3]))
 
@@ -290,7 +303,29 @@ class Page(unittest.TestCase):
                 app.processEvents()
                 time.sleep(0.01)
         settle()
-        root = engine.rootObjects()[0]
+        return b, engine.rootObjects()[0], errors, settle
+
+    def test_leaving_a_page_gives_up_its_capture(self):
+        b, root, errors, settle = self.opened()
+        QMetaObject.invokeMethod(root.findChild(QObject, "remoteKeysPress"), "clicked")
+        settle()
+        self.assertEqual(b.remoteKeys.capturing, "pressed")
+        QMetaObject.invokeMethod(root, "showSection", Q_ARG("QVariant", "keyboard"))
+        settle()
+        self.assertEqual((root.property("current"), b.remoteKeys.capturing, b._capture_then), ("keyboard", "", None))
+        # The Keyboard page's own, too.
+        b.startShortcutCapture("float_toggle")
+        QMetaObject.invokeMethod(root, "showSection", Q_ARG("QVariant", "remote-keys"))
+        settle()
+        self.assertEqual((root.property("current"), b.capturingShortcut, b._capture_then), ("remote-keys", False, None))
+        press(b, META, SHIFT, J)
+        self.assertNotIn("42+125+36", fis.read_json(fis.RULES_PATH).get("key_bindings", {}),
+                         "a capture given up still took the keys")
+        mine = [e for e in errors if "not placed in the graphics scene" not in e]
+        self.assertEqual(mine, [])
+
+    def test_it_opens_and_shows_the_list(self):
+        b, root, errors, settle = self.opened()
         none, add = root.findChild(QObject, "remoteKeysNone"), root.findChild(QObject, "remoteKeysAdd")
         self.assertIsNotNone(none, "the Remote display keys page didn't open")
         self.assertTrue(none.property("visible"), "an empty list of its own says so")

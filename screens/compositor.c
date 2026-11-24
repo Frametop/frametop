@@ -803,9 +803,10 @@ static void keys_update(struct server *s) {
     // The fifth word: the 3D mouse's laser is on a panel, so its wheel comes here ("wheel").
     const bool wheel = ft_vr_mouse_screen() >= 0;
     // The sixth: a remote screen has the typing, with the 3D mouse on it (1), or on no panel since
-    // it was (2: the relay takes that for the PC's while the 3D mouse sleeps). Then Meta and its
-    // combinations are the PC's (Super+Space opens its launcher, not frunner): input-relay.py's
-    // pc_keys. The 3D mouse on another panel, or awake off every panel, gives them back.
+    // it was (2: the relay takes that for the PC's while the 3D mouse sleeps). Then the key
+    // combinations in the rules' "remote_key_bindings" are the PC's (Super+Space opens its
+    // launcher, not frunner; the gaze clicks stay ours): input-relay.py's pc_keys. The 3D mouse on
+    // another panel, or awake off every panel, gives them back.
     const int mouse = ft_vr_mouse_panel();
     if (mouse >= 0) s->mouse_last = mouse;
     const bool remote = desktop && !spot_open(s) && !ft_vr_app_typing() && s->key_remote >= 0 &&

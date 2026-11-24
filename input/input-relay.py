@@ -59,7 +59,7 @@ transient systemd user unit, output to the journal; docs/commands.md), command:C
 sh -c (on the host, as this service: its environment, output to its log, and COMMAND_PATH, so
 ft-layout, ft-float, ft-steam, ft-voice and ft-room need no path), keys:CODES = tap that key combination
 where typing goes, all its keys down in order, then up, on the press ("keys:125+32" is Meta+D:
-evdev codes as in key_bindings, at most KEYS_MAX; a desktop shortcut from a controller button),
+evdev codes as in key_bindings, at most ft_input_actions' KEYS_MAX; a desktop shortcut from a controller button),
 key = pass through as a key, none).
 
 Frame controller buttons can be mapped too ("controller_buttons": {"right/a": action} in the
@@ -364,6 +364,7 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
     KEY_LIST_RUNNABLE,
+    KEYS,
     MODIFIERS,
     QUICK_SETTINGS_ACTIONS,
     TILE_ACTIONS,
@@ -372,6 +373,8 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     VOICE_ACTIONS,
     VOICE_KEY_BINDINGS,
     VR_BUTTONS,
+    keys_codes,
+    release_combo,
     renamed_actions,
 )
 import ft_remote_keys  # noqa: E402  (the key combinations a remote display's computer gets)
@@ -498,26 +501,11 @@ FRUNNER = "\0ft_frunner"
 PROFILE = "profile:"  # "profile:NAME": switch to that profile (doesn't need pointer mode either)
 COMMAND = "command:"  # "command:CMD": run CMD (nor does this)
 RUN = "run:"  # "run:NAME": run your command NAME (ft_commands; nor does this)
-KEYS = "keys:"  # "keys:125+32": tap that key combination where typing goes (nor does this)
-KEYS_MAX = 6  # keys in one "keys:" action at most
-# Never in a "keys:" action: the volume keys (see the top) and power, sleep, wake and suspend,
-# which logind may act on from the virtual keyboard. Input Settings' is_keys has the same list.
-KEYS_REFUSED = {KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, 116, 142, 143, 205}
+# "keys:125+32": tap that key combination where typing goes (nor does this). KEYS and keys_codes,
+# with the keys it never taps (the volume keys, see the top, among them), are ft_input_actions'.
 # close_app taps these where typing goes: Alt+F4 closes the window with the keyboard focus on the
 # Frametop desktop (KWin), on a PC's desktop and in Steam's session, so it closes what you type in.
 CLOSE_APP_KEYS = (56, 62)
-
-
-def keys_codes(a):
-    """The key codes a "keys:" action presses, in order (evdev codes below BTN_MISC joined by "+",
-    as in key_bindings), or None if it isn't one or has a key from KEYS_REFUSED."""
-    if not isinstance(a, str) or not a.startswith(KEYS):
-        return None
-    parts = a[len(KEYS):].split("+")
-    if not 0 < len(parts) <= KEYS_MAX or not all(p.isascii() and p.isdecimal() and 0 < int(p) < BTN_MISC
-                                                 and int(p) not in KEYS_REFUSED for p in parts):
-        return None
-    return [int(p) for p in parts]
 
 
 def known_action(a):
@@ -1367,6 +1355,7 @@ class HeldKeys:
         self.talk_hidden = False  # its press kept from the desktop, so the text typed meanwhile isn't a shortcut
         self.meta = set()  # the Meta keys held, as they are (KEY_LEFTMETA, KEY_RIGHTMETA)
         self.meta_hidden = set()  # held Meta keys the desktop was told came up (a combination; key_binding)
+        self.lifted = set()  # held modifiers the desktop was told came up for a "keys:" action's tap (tap_keys)
         self.combos = {}  # key code -> the action its combination started (released with it)
         self.cal = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
         self.desktop = set()  # keys the desktop was told went down and not yet up (to_screens)
@@ -1376,6 +1365,7 @@ class HeldKeys:
         for code in [c for c in self.meta if c not in down]:
             self.meta.discard(code)
             self.meta_hidden.discard(code)
+        self.lifted.intersection_update(down)
         self.modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
 
 
@@ -1741,22 +1731,24 @@ class Relay:
         """A "keys:" action: its keys go down in order and come up in reverse, at once, where typing
         goes (the desktop's screens, else the virtual keyboard for Steam). Down and up together,
         so a release that never comes (a controller gone) can't leave a key held. Modifiers the
-        desktop holds (the key combination that did this) come up there first and go down again
-        after, and one the action has too is left as it is, so the desktop gets the action's keys
-        alone. Steam reads the keyboards itself, so there it sees the held ones too."""
+        desktop holds (the key combination that did this) come up there first, and one the action
+        has too is left as it is, so the desktop gets the action's keys alone. The ones that came
+        up stay up there (held.lifted): put down again at once, each would be let go with no key
+        in between, a tap of its own there (Alt's opens a window's menu). key_binding puts them
+        down again before the next key that's typed, and drops their real release. Steam reads
+        the keyboards itself, so there it sees the held ones too."""
         if not codes:
             return
         desktop = now < self.desktop_until
         held = sorted(c for c in self.held.desktop if c in MODIFIERS) if desktop else []
-        lift = [c for c in held if c not in codes]
-        for code in lift:
-            self.to_screens(code, 0)
+        for code in held:
+            if code not in codes:
+                self.to_screens(code, 0)
+                self.held.lifted.add(code)
         for value, order in ((1, codes), (0, codes[::-1])):
             for code in order:
                 if code not in held:
                     self.type_key(code, value, desktop)
-        for code in lift:
-            self.to_screens(code, 1)
         log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):
@@ -1819,6 +1811,9 @@ class Relay:
             if value == 0 and self.held.tap == mod:
                 self.held.tap = None
                 self.modifier_tap(mod, self.held.tap_code, now)
+            if value == 0 and code in self.held.lifted:
+                self.held.lifted.discard(code)
+                return True  # the desktop already had it come up (tap_keys)
             return hide
         if value == 0 and code in self.held.combos:
             action = self.held.combos.pop(code)
@@ -1826,13 +1821,15 @@ class Relay:
                 self.do_action(action, 0, now, "keyboard")
             return True
         combo, action = self.combo_for(code) if value == 1 else (None, None)
-        if value == 1 and action is None and self.held.meta_hidden:
-            # Another key while Meta is still held after a combination: the desktop gets Meta
-            # back first, so Meta+that key still works there. Not for one that's a combination
-            # too (H again with Meta+Shift held): Meta stays up there, with nothing sent.
-            for c in sorted(self.held.meta_hidden):
+        if value == 1 and action is None and (self.held.meta_hidden or self.held.lifted):
+            # Another key while Meta is still held after a combination, or a modifier a "keys:"
+            # action's tap lifted: the desktop gets them back first, so Meta+that key still works
+            # there. Not for one that's a combination too (H again with Meta+Shift held): they
+            # stay up there, with nothing sent.
+            for c in sorted(self.held.meta_hidden | self.held.lifted):
                 self.to_screens(c, 1)
             self.held.meta_hidden.clear()
+            self.held.lifted.clear()
         if action is None:
             return value == 2 and code in self.held.combos
         self.held.combos[code] = action
@@ -1895,7 +1892,10 @@ class Relay:
         if action is None and tile:
             action = APP_TILE_KEY_BINDINGS.get(combo)  # Meta+arrows alone on an app's tile
         if not known_action(action):
-            combo, action = self.release_combo(code) or (combo, action)
+            # (release_keys with more modifiers held than its combination has: one may be stuck here too)
+            stuck = release_combo(self.rules["key_bindings"], self.held.modifiers, code)
+            if stuck:
+                combo, action = stuck, "release_keys"
         # A PC's desktop has the keys and the rules give it this combination: its own, or another
         # one tapped there. It comes before Frametop's action, a tile's keys too (the rules say
         # so by name), but never before the way out of stuck keys (hazards.md).
@@ -1911,18 +1911,6 @@ class Relay:
             # may have the keys). None has: the desktop's key (KWin's, or a PC's).
             return combo, action if tile else None
         return combo, action
-
-    def release_combo(self, code):
-        """A release_keys combination this key completes with the modifiers held, more of them
-        too (one may be stuck here as well): (combo, "release_keys"), or None."""
-        for combo, action in self.rules["key_bindings"].items():
-            if action != "release_keys":
-                continue
-            *mods, last = combo.split("+")
-            if mods and last == str(code) and all(m.isdecimal() for m in mods) \
-                    and {int(m) for m in mods} <= self.held.modifiers:
-                return combo, action
-        return None
 
     def tap_action(self, mod, code):
         """A lone modifier's combination and action, (combo, None) when it does nothing now. A
@@ -1967,11 +1955,6 @@ class Relay:
         if self.lease.current or not needs_pointer(action):
             self.do_action(action, 1, now, "keyboard")
             self.do_action(action, 0, now, "keyboard")
-        if pc:
-            # The PC's keys lifted the modifier there and put it down again: a key in between
-            # once more, so that second press isn't a tap there either.
-            self.to_screens(KEY_F24, 1)
-            self.to_screens(KEY_F24, 0)
         log(f"key combination {combo}: {action}")
 
     def to_screens(self, code, value, button=False):

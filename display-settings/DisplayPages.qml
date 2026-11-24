@@ -1319,6 +1319,35 @@ Item {
                               ? "For the center display and the panels over and under it. The panels beside it use Curve at the sides."
                               : "Off: one smooth curve all round. On: the center display, and the panels over and under it, get their own."
                     }
+                    RowLayout {
+                        // the rows over and under the center display's (DASH_TILE_HEIGHT_CURVE_M; off: 0, as the
+                        // center's curve). Turned on, it starts where that is.
+                        Kirigami.FormData.label: "Height curve:"
+                        Controls.Switch {
+                            id: heightCurveOwn
+                            text: "Its own"
+                            checked: backend.dashTiles.heightCurveRadius > 0
+                            onToggled: backend.dashTiles.setHeightCurveRadius(
+                                           !checked ? 0 : centreCurveOwn.checked ? centreCurve.value : tileCurve.value)
+                        }
+                        Controls.Slider {
+                            id: heightCurve
+                            from: 0.5; to: 12; stepSize: 0.1
+                            visible: heightCurveOwn.checked
+                            value: backend.dashTiles.heightCurveRadius > 0 ? backend.dashTiles.heightCurveRadius : 2.5
+                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                            onMoved: backend.dashTiles.setHeightCurveRadius(value)
+                        }
+                        Controls.Label {
+                            text: heightCurve.value.toFixed(1) + " m radius (smaller tilts rows to you more)"
+                            visible: heightCurveOwn.checked
+                        }
+                    }
+                    Ft.Hint {
+                        text: heightCurveOwn.checked
+                              ? "For the rows over and under the center display, at the sides too. A strong tilt makes those panels a little smaller."
+                              : "Off: the rows over and under follow the curves above."
+                    }
                 }
 
                 Ft.Disclosure {

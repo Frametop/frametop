@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 HOME = tempfile.mkdtemp(prefix="ft-eyes-slip-filter-test-")
@@ -396,6 +397,21 @@ for _ in range(4):   # a day of the headset off and on, steady glints and looks 
 check("after reseats the pill's slip is sure (the eyes' mean) though h alone isn't (2026-11-22: it never opened)",
       (sf.headset_status(hs)["slip_sd"] <= gazecheck.PILL_SD, sf._largest_sd(hs.P[sf.H, sf.H]) > gazecheck.PILL_SD),
       (True, True))
+one = sf.load(None, {0: JAC})[0]   # one eye calibrated: the other gets no readings, ever
+t = 0.0
+for _ in range(4):   # the headset off and on, glints, looks and a few clicks after each
+    one.reseat()
+    for i in range(20):
+        one.update("glint", one.expect("glint"), t)
+        one.update("steam", one.expect("steam"), t)
+        if i % 5 == 0:
+            sf.teach_click({0: one}, {0: np.zeros(2)}, t)
+        t += 1.0
+check("one eye mapped: the pill reads that eye's slip, not a mean with one nothing pins (council, 2026-11-24)",
+      (sf.headset_status(one.headset, eyes=[0])["slip_sd"] <= gazecheck.PILL_SD,
+       sf.headset_status(one.headset)["slip_sd"] > gazecheck.PILL_SD,
+       eyeslip.headset_status([types.SimpleNamespace(filter=one), types.SimpleNamespace(filter=None)], None)["slip_sd"]
+       <= gazecheck.PILL_SD), (True, True, True))
 
 # --- Kept across restarts ---
 r0, l0, hs = pair()

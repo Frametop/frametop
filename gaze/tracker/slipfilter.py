@@ -328,15 +328,18 @@ def _largest_sd(C):
     return float(math.sqrt(max(np.linalg.eigvalsh((C + C.T) / 2).max(), 0.0)))
 
 
-def headset_status(headset):
+def headset_status(headset, eyes=(0, 1)):
     """The eyes' mean slip (degrees, as slip_deg) and how sure it is: what the fit pill reads.
+    `eyes`: the mapped ones. An eye with no calibration gets no readings, so nothing pins its own
+    part: in the mean it would keep the pill unsure after a reseat or two, as h alone did.
 
     Not h alone: how the slip splits between h and the eyes' own parts isn't observable (every
     reading sees only their sum), so h's sd grows with each reseat and never comes back. It sat
     near 5 degrees all day (2026-11-22) and the pill, which needs 2.5, never opened. The mean is
     what the readings pin, and it is still the headset's slip once the eyes' own parts average out.
     """
-    m = 0.5 * (_rows(0, "click") + _rows(1, "click"))
+    eyes = tuple(eyes) or (0, 1)
+    m = sum(_rows(e, "click") for e in eyes) / len(eyes)
     return {"slip_deg": [round(float(v), 3) for v in m @ headset.x],
             "slip_sd": round(_largest_sd(m @ headset.P @ m.T), 3)}
 

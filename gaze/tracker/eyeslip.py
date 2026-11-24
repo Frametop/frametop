@@ -169,12 +169,12 @@ def eye_status(f, t):
 def headset_status(eyes, t):
     """The headset's slip moved on to t (the fit pill's reading: slipfilter.headset_status), or
     None while no eye is mapped."""
-    f = next((e.filter for e in eyes if e.filter), None)
-    if not f:
+    mapped = [e.filter for e in eyes if e.filter]
+    if not mapped:
         return None
     if t is not None:
-        f.predict(t)
-    return slipfilter.headset_status(f.headset)
+        mapped[0].predict(t)
+    return slipfilter.headset_status(mapped[0].headset, eyes=[f.eye for f in mapped])
 
 
 def log_row(eyes, t):

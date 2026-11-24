@@ -129,11 +129,11 @@ class Plan(unittest.TestCase):
         known["eDP-2"]["modes"] = [dict(HZ240, refresh_mhz=239760)]
         self.assertEqual(hm.plan_body(host, known)["monitors"]["eDP-2"]["mode"]["refresh_mhz"], 239761)
 
-    def test_no_connected_panel_sends_nothing(self):
+    def test_no_connected_panel_of_its_monitors_is_no_plan(self):
         host = pc()
         for d in host["displays"]:
             d["off"] = True
-        self.assertIsNone(hm.plan_body(host, listed()), "the PC's grace runs as it would")
+        self.assertIsNone(hm.plan_body(host, listed()))
         self.assertIsNone(hm.plan_body(pc(), listed("HDMI-A-1")), "only unplugged monitors have panels on")
 
     def test_a_picked_scale_goes_in_the_plan_where_the_pc_can_set_it(self):
@@ -242,6 +242,17 @@ class Sending(unittest.TestCase):
         hm.release(pc(monitors=False), self.said.append, self.request)
         self.assertEqual([(m, b) for _, m, _, b, _ in self.sent], [("POST", {"monitors": {}})])
 
+    def test_with_no_panel_connected_its_monitors_go_back_now(self):
+        host = pc()
+        for d in host["displays"][:2]:
+            d["off"] = True  # its virtual display and window panel stay connected: not monitors
+        hm.sync(host, self.said.append, self.request)
+        self.assertEqual([(m, b) for _, m, _, b, _ in self.sent], [("POST", {"monitors": {}})])
+        self.replies["POST"] = (500, None)
+        hm.sync(host, self.said.append, self.request)
+        self.assertEqual(len(self.said), 1)
+        self.assertIn("weren't put back now (it answered 500)", self.said[0])
+
     def test_the_headset_off_puts_each_controlled_hosts_monitors_back_now(self):
         a, b = pc(), pc(name="Other", address="192.0.2.8", monitors=False)
         hm.put_back_all([a, a, b], self.said.append, self.request)
@@ -250,7 +261,7 @@ class Sending(unittest.TestCase):
         self.replies["POST"] = (0, None)
         hm.put_back_all([a], self.said.append, self.request)
         self.assertEqual(self.said, ["PC: its monitors weren't put back now (it answered 0); "
-                                     "they go back two minutes after its streams ended"])
+                                     "they go back 15 seconds after its streams end"])
 
     def test_sync_all_asks_each_controlled_host_once(self):
         a, b = pc(), pc(name="Other", address="192.0.2.8", monitors=False)
@@ -430,6 +441,22 @@ class Layout(unittest.TestCase):
         self.m.start_remotes(self.m.screens_socket(), self.m.load_layout())
         self.assertEqual(sorted(e for e in self.synced if not e.startswith("start ")), ["Other", "PC"])
         self.assertTrue(all(e.startswith("start ") for e in self.synced[2:]), "plans first, then the streams")
+
+    def test_a_profile_without_a_pcs_panels_puts_its_monitors_back_after_the_starts(self):
+        other = pc(name="Other", address="192.0.2.8", monitors=True)
+        for d in other["displays"]:
+            d["id"] = "other-" + d["id"]
+            d["off"] = True
+        self.m.save_layout({"hosts": [pc(monitors=True), other]})
+        self.with_screens()
+        layout = self.m.load_layout()
+        running = {n: "live" for n, _, _ in self.m.remote_displays(layout)}
+        self.m.remotes_running = lambda sock: running
+        self.synced.clear()
+        self.m.start_remotes(self.m.screens_socket(), layout)
+        plans = [e for e in self.synced if not e.startswith("remote ")]
+        self.assertEqual((plans[0], plans[-1], plans.count("Other")), ("PC", "Other", 1))
+        self.assertTrue(all(e.startswith("start ") for e in plans[1:-1]))
 
     def test_without_the_switch_nothing_is_sent(self):
         self.m.remote_command(["disconnect", "pc-edp"])

@@ -6,7 +6,8 @@ a plan made from the host's display panels: each monitor with a connected panel 
 its panel's stream size (the PC picks a mode of that size, or makes one on Hyprland) and the
 scale picked for it (`scale`, else its own), and every other monitor (no panel here, or its
 panel disconnected) goes off. The PC applies it only while one of those panels streams, and
-puts every monitor back two minutes after the last one ends (/api/frametop/monitors). A size
+puts every monitor back when Frametop lets go of it (the last panel disconnected, the headset
+off), or 15 seconds after the last stream drops (/api/frametop/monitors). A size
 its monitor refuses (one bigger than its panel, or any made mode on some drivers) is in the
 PC's answer as its `error` and in that monitor's `refused`: the monitor stays as it was.
 
@@ -115,16 +116,13 @@ def wishes(host):
 
 
 def plan_body(host, listed):
-    """The POST body for the host, or None when there is nothing to send: no display panel is
-    connected (the PC's grace then runs as it would). listed: the PC's monitors as it answered
+    """The POST body for the host, or None when there is nothing to send: no display panel of a
+    monitor it has is connected. listed: the PC's monitors as it answered
     ({id: monitor}); a panel of a monitor it doesn't have (unplugged), a mode or size it can't
     take, or a scale it can't set (Windows, an older build) is left out, so the rest of the plan
     still takes: the stream then crops or fits the monitor as it is."""
-    want = wishes(host)
-    if not any(w["on"] for w in want.values()):
-        return None
     monitors = {}
-    for monitor, wish in want.items():
+    for monitor, wish in wishes(host).items():
         m = listed.get(monitor)
         if m is None:
             continue
@@ -172,10 +170,12 @@ def ask(host, timeout=3.0, request=None):
 
 
 def sync(host, log, request=None):
-    """Sends the host's plan made from its panels, if it controls its monitors. Never raises:
-    what went wrong goes to log()."""
+    """Sends the host's plan made from its panels, if it controls its monitors; with no display
+    panel connected, its monitors go back now. Never raises: what went wrong goes to log()."""
     if not controls(host):
         return
+    if not any(w["on"] for w in wishes(host).values()):
+        return put_back(host, log, request)
     request = request or ft_hostapi.request
     name = host.get("name") or host.get("address")
     try:
@@ -218,22 +218,24 @@ def release(host, log, request=None):
     return not why
 
 
+def put_back(host, log, request=None):
+    """The host's monitors go back as they were now, and its plan with that: sync sends it again
+    before its streams start. A PC that doesn't take it puts them back by itself soon after its
+    streams ended."""
+    why = _drop_plan(host, request)
+    if why:
+        log(f"{host.get('name')}: its monitors weren't put back now{why}; they go back 15 seconds after its streams end")
+
+
 def put_back_all(hosts, log, request=None):
-    """The headset came off (ft_remoteaway): each host that controls its monitors puts them back
-    now, all at once, not two minutes after its streams ended. Its plan goes with that; sync
-    sends it again before the streams start. One that doesn't take it still puts them back
-    after its own two minutes."""
+    """The headset came off (ft_remoteaway): put_back() for each host that controls its monitors,
+    all at once."""
     import concurrent.futures
     hosts = [h for h in {id(h): h for h in hosts}.values() if controls(h)]
     if not hosts:
         return
-
-    def one(h):
-        why = _drop_plan(h, request)
-        if why:
-            log(f"{h.get('name')}: its monitors weren't put back now{why}; they go back two minutes after its streams ended")
     with concurrent.futures.ThreadPoolExecutor(len(hosts)) as pool:
-        list(pool.map(one, hosts))
+        list(pool.map(lambda h: put_back(h, log, request), hosts))
 
 
 def owes_release(host):

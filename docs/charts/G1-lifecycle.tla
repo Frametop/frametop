@@ -432,16 +432,18 @@ PowerdTimesOut ==
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, lvl, t, hOff0,
                    powerd, pAway, pFresh, near, stby, mark>>
 
-\* DISPLAY_OFF_MIN without use, DISPLAY_OFF_STANDBY=1: ft-powerd leaves powerd-standby, then has
-\* the ft_pointer driver write "not worn" (pointer/driver/worn.h). SteamVR does the rest.
+\* DISPLAY_OFF_MIN without use, DISPLAY_OFF_STANDBY=1: ft-powerd leaves powerd-standby, has the
+\* ft_pointer driver write "not worn" (pointer/driver/worn.h), and turns the backlight off as
+\* above (SteamVR only darkens the displays 5 s later). SteamVR does the rest.
 PowerdAsksStandby ==
     /\ WornPart /\ OffMin /\ Standby /\ powerd = "up" /\ ~pAway /\ disp = "on" /\ stby = "none"
     /\ stby' = "asked" /\ mark' = TRUE /\ lvl' = "off" /\ t' = IF lvl = "on" THEN 0 ELSE t
+    /\ disp' = "darkPd" /\ saved' = TRUE /\ pdOff' = TRUE
     /\ UNCHANGED <<svrVars, relay, rgame, stU, stD, desk, told, lost, pauseVars, hOff0, powerd,
-                   pAway, pFresh, disp, saved, pdOff, near>>
+                   pAway, pFresh, near>>
 
-\* SteamVR didn't go away within 15 s of the write (time isn't counted here: any moment before
-\* ft-powerd's away): ft-powerd writes "worn" back and turns the backlight off instead.
+\* SteamVR still has the headset as worn 15 s after the write (time isn't counted here: any
+\* moment before ft-powerd's away): ft-powerd writes "worn" back, and the backlight stays off.
 PowerdGivesUp ==
     /\ WornPart /\ powerd = "up" /\ stby = "asked" /\ ~pAway
     /\ stby' = "none" /\ mark' = FALSE /\ lvl' = "on" /\ t' = IF lvl = "off" THEN 0 ELSE t

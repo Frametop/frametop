@@ -644,9 +644,10 @@ def cleanup(run=None, force=False):
             pass
     steps = {}
     # Displays back on first, while the fake wearer still holds off SteamVR's standby: ft-powerd
-    # lights the panels on "on" even in standby. Two quick datagrams, then the release.
+    # lights the panels on "on" even in standby, and ends a standby it asked for (a standby
+    # drive that stopped halfway). Two quick datagrams, then the release.
     if (baseline.get('power') or {}).get('displays') in ('on', 'away') \
-            and ask('ft_powerd', 'status').split()[:2] == ['ok', 'off']:
+            and ask('ft_powerd', 'status').split()[:2] in (['ok', 'off'], ['ok', 'standby']):
         answer = ask('ft_powerd', 'on')
         steps['power'] = {'ok': answer == 'ok', 'reply': answer}
     steps['release'] = bench('release', timeout=60)

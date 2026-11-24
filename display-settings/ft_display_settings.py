@@ -991,12 +991,9 @@ class Backend(QObject):
 
     @Property("QVariantMap", notify=powerChanged)
     def power(self):
-        conf = ft_layout.read_conf()
-        try:
-            off_min = float(conf.get("DISPLAY_OFF_MIN") or 0)
-        except ValueError:
-            off_min = 0.0
-        standby = ft_conf.number(conf, "DISPLAY_OFF_STANDBY", 1) != 0    # as ft-powerd reads it
+        conf = ft_layout.read_conf()    # both as ft-powerd reads them
+        off_min = ft_conf.number(conf, "DISPLAY_OFF_MIN", 0)
+        standby = ft_conf.number(conf, "DISPLAY_OFF_STANDBY", 1) != 0
         state, unused, _ = self._powerd or ("", 0, 0)
         return {"offMinutes": off_min, "standby": standby,
                 "service": self._powerd is not None, "state": state, "unused": unused,
@@ -1025,6 +1022,12 @@ class Backend(QObject):
         if not reply.startswith("ok"):
             self.message.emit(f"Couldn't turn the displays off: {reply.split(' ', 1)[-1]}", True)
         self._check_powerd()
+
+    @Slot()
+    def displaysOnNow(self):
+        """For a pointer that isn't an input device of the Frame's (remote desktop): those are
+        the only ones ft-powerd can't see being used."""
+        self._ipc.ask(FT_POWERD, "on", then=lambda _reply: self._check_powerd(), timeout=0.5)
 
     def _steam_call(self, what, fn):
         """Runs fn, which talks to Steam (up to a few seconds), off the UI thread, then reads

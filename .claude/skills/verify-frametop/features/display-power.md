@@ -27,24 +27,28 @@ Preconditions:
 
 ### Standby (tracking paused)
 
-With `DISPLAY_OFF_STANDBY=1` (the default) `power off` asks SteamVR for its standby instead of
-only turning the backlight off, but never while the testbench fakes a wearer, so the steps above
-still end in `off`. To drive the standby itself, nobody may wear the headset and `T worn` must be
+With `DISPLAY_OFF_STANDBY=1` (the default) `power off` also asks SteamVR for its standby as it
+turns the backlight off, but never while the testbench fakes a wearer, so the steps above still
+end in `off`. To drive the standby itself, nobody may wear the headset and `T worn` must be
 released (no `frametop-fake-worn.json`). Then fake the wearer through the driver, which leaves
-no flag and which the headset's own driver undoes 15-20 s later:
+no flag and which the headset's own driver undoes 15-25 s later:
 
 - `python3 -c 'import socket; s=socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM); s.sendto(b"worn 1", "\0ft_pointer")'`,
   wait 2 s: `T power status` says `on`.
-- **Standby.** `T power off` within 10 s, wait 8 s: `power.displays` is `standby`, vrserver.txt
-  has a new `0 - entering standby`, and frametop-power's log says `standby: SteamVR took it`.
+- **Standby.** `T power off` within 10 s: `power.displays` is `off` at once (the backlight) and
+  `standby` within 10 s, vrserver.txt has a new `0 - entering standby`, and frametop-power's log
+  says `standby: SteamVR has the headset as off`, then `standby: tracking and cameras paused`.
 - **Wake.** `T power on`: the log says `standby ended: asked to` and `power.displays` is `on`
   within 2 s (and `away` again once the headset's driver has corrected the wearer).
+
+The fake wake restarts tracking, and the pose settling can count as movement in the seconds
+before tracking pauses (`standby ended: headset 0 moved ...`): wait for `away` and start over.
+`~/.local/state/verify/frametop/standby-tracking/drive.py` on the Frame runs all of it.
 
 ## Gotchas
 
 - Never send the driver `worn` more than once per step: every write wakes vrserver for about
   6 s (pointer/driver/worn.h).
-
-- `V cleanup` turns the displays back on if the run turned them off, but only when its baseline
+- `V cleanup` turns the displays back on if the run turned them off or left a standby, but only when its baseline
   had them on or away.
 - Displays off can look like a crash to someone who picks the headset up: never leave them off.

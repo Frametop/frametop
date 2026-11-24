@@ -47,6 +47,22 @@ int main() {
         CHECK(!s.Active());
         CHECK(s.Start(400, true, false) == Standby::Begin::Ask);
     }
+    {  // Away at the last moment still holds.
+        Standby s;
+        CHECK(s.Start(0, true, false) == Standby::Begin::Ask);
+        CHECK(s.Tick(Standby::kAnswerSecs, true) == Standby::Step::Holds);
+    }
+    {  // One under way comes before the setting, the setting before the testbench, the testbench
+       // before a standby that didn't hold.
+        Standby s;
+        CHECK(s.Start(0, true, false) == Standby::Begin::Ask);
+        CHECK(s.Start(1, false, true) == Standby::Begin::Busy);
+        CHECK(s.Tick(6, true) == Standby::Step::Holds);
+        CHECK(s.Tick(30, false) == Standby::Step::Woke);
+        CHECK(s.Start(31, false, true) == Standby::Begin::Disabled);
+        CHECK(s.Start(31, true, true) == Standby::Begin::Testing);
+        CHECK(s.Start(31, true, false) == Standby::Begin::Unheld);
+    }
     {  // The write couldn't be sent.
         Standby s;
         CHECK(s.Start(0, true, false) == Standby::Begin::Ask);

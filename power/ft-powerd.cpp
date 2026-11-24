@@ -24,16 +24,13 @@
 // and tracking keeps running, which is why they can wake the moment the headset moves, but
 // it also means this saves the panels' power and light, not the whole headset's.
 //
-// So with DISPLAY_OFF_STANDBY=1 (the default) the backlight is the fallback, and SteamVR's own
-// standby comes first: ft-powerd has the ft_pointer driver tell SteamVR the headset came off
-// ("worn 0" on @ft_pointer, pointer/driver/worn.h). SteamVR then turns the displays off itself
-// 5 s later and pauses tracking, the cameras and the compositor: about 5 W instead of 17, with
-// the desktop, the services and remote access all still up. It ends with a key, a button or a
-// mouse ("worn 1"), with "on", when the proximity sensor changes (the headset is picked up or
-// put on: SteamVR wakes by itself), or when the testbench fakes a wearer. Movement can't end
-// it: the poses aren't valid in standby. standby.h has the rules and when the backlight is
-// used after all. ~/.cache/frametop/powerd-standby is there while a standby ft-powerd asked for
-// is under way, so the next start ends one that a crash left behind.
+// So with DISPLAY_OFF_STANDBY=1 (the default) ft-powerd also asks SteamVR for its own standby
+// as it turns the backlight off: the ft_pointer driver tells SteamVR the headset came off
+// ("worn 0" on @ft_pointer, pointer/driver/worn.h), and 5 s later SteamVR pauses tracking, the
+// cameras and the compositor (about 5 W instead of 17, with the desktop, the services and
+// remote access all still up). standby.h has the rules: what ends it, and when the backlight
+// alone is used. ~/.cache/frametop/powerd-standby is there while a standby ft-powerd asked for
+// is under way, so the next start ends one that a kill left behind.
 // If something else turns the backlight back on while it's off (SteamVR leaving standby,
 // the brightness setting), that counts as use. While SteamVR has the headset in standby
 // (taken off), SteamVR owns the displays and ft-powerd waits, unless they are still lit
@@ -48,9 +45,11 @@
 //
 // Control (datagrams on @ft_powerd; the reply goes to the sender's address):
 //   status -> "ok on|off|standby|away <seconds since use> <timeout seconds, 0 = never>"
-//             (standby: SteamVR's standby, asked for by ft-powerd; away: SteamVR's standby
-//             because the headset came off)
-//   off    -> "ok": the displays off now, to try it (for 2 s nothing counts as use)
+//             (off: the backlight is off and tracking runs; standby: SteamVR's standby, asked
+//             for by ft-powerd, has paused tracking; away: SteamVR's standby because the
+//             headset came off)
+//   off    -> "ok": the displays off now, to try it (for 2 s nothing counts as use); also
+//             "ok" while a standby ft-powerd asked for is under way
 //   on     -> "ok": back on
 // Settings (~/.config/frametop.conf, re-read when the file changes): DISPLAY_OFF_MIN (0 =
 // never, the default; displays SteamVR's standby leaves lit go off either way),
@@ -254,6 +253,7 @@ int main() {
     bool off = false, away = false, wasDark = false;
     int restore = 0;  // the brightness to put back
     Standby standby;  // SteamVR's standby, when ft-powerd asked for it
+    bool paused = false;  // that standby has begun: SteamVR paused tracking and the cameras
 
     auto turnOff = [&](const char *why) {
         const int b = ReadInt(kBacklight, -1);
@@ -285,14 +285,16 @@ int main() {
             case Standby::Begin::Ask:
                 // The file first: a kill between the two still leaves the next start a standby to end.
                 MakeCacheDir();
-                WriteInt(StandbyPath(), 1);
-                if (AskWorn(ctl, false)) {
+                if (WriteInt(StandbyPath(), 1) && AskWorn(ctl, false)) {
+                    // The backlight too, now: SteamVR's standby only darkens them 5 s later.
                     std::printf("standby asked for: %s\n", why);
+                    turnOff(why);
                     return true;
                 }
                 std::remove(StandbyPath().c_str());
                 standby.Abort();
-                std::printf("no standby: the ft_pointer driver isn't listening\n");
+                std::printf("no standby: the ft_pointer driver isn't listening, or %s can't be written\n",
+                            StandbyPath().c_str());
                 break;
             case Standby::Begin::Testing:
                 std::printf("no standby: the testbench fakes a wearer\n");
@@ -308,10 +310,11 @@ int main() {
         turnOff(why);
         return off;
     };
+    // A driver that isn't listening has gone with its SteamVR, and the standby with it.
     auto endStandby = [&](const std::string &why) {
-        AskWorn(ctl, true);
+        const bool told = AskWorn(ctl, true);
         std::remove(StandbyPath().c_str());
-        std::printf("standby ended: %s\n", why.c_str());
+        std::printf("standby ended: %s%s\n", why.c_str(), told ? "" : " (the ft_pointer driver isn't listening)");
     };
 
     // SteamVR is asked every 100 ms (events, the activity level, poses: IPC calls to
@@ -380,7 +383,7 @@ int main() {
             }
             switch (standby.Tick(Secs(now), away)) {
             case Standby::Step::Holds:
-                std::printf("standby: SteamVR took it (tracking and cameras paused)\n");
+                std::printf("standby: SteamVR has the headset as off\n");
                 break;
             case Standby::Step::Failed:
                 endStandby("SteamVR didn't take it");
@@ -394,6 +397,11 @@ int main() {
             case Standby::Step::None:
                 break;
             }
+            // Idle comes within a second of the write, the standby proper 5 s after it, or
+            // later while something keeps SteamVR awake (a new client, an awake pointer).
+            const bool pausedNow = standby.Holding() && level == vr::k_EDeviceActivityLevel_Standby;
+            if (pausedNow && !paused) std::printf("standby: tracking and cameras paused\n");
+            paused = pausedNow;
 
             // Raw poses: recentering or a new play area doesn't move anything.
             sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseRawAndUncalibrated, 0, poses, vr::k_unMaxTrackedDeviceCount);
@@ -472,7 +480,7 @@ int main() {
             while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == ' ')) cmd.pop_back();
             if (cmd == "status") {
                 char s[96];
-                std::snprintf(s, sizeof s, "ok %s %.0f %.0f", standby.Holding() ? "standby" : off ? "off" : away ? "away" : "on",
+                std::snprintf(s, sizeof s, "ok %s %.0f %.0f", standby.Holding() && paused ? "standby" : off ? "off" : away ? "away" : "on",
                               std::chrono::duration<double>(now - lastUse).count(), offAfter);
                 reply = s;
             } else if (cmd == "off") {

@@ -70,13 +70,21 @@ def restore(ask, saved, panels, keys=None):
     than `tiles remember` refuses that one: the tiles connected now still go back. A tile it
     refuses doesn't stop the ones after it.)"""
     first, *tiles = remember_commands(saved, keys or {})
-    try:
-        ask(first)
-    except RuntimeError:
+    if _refused(ask, first):
         tiles = []
     for command in tiles:
-        try:
-            ask(command)
-        except RuntimeError:
-            pass
+        _refused(ask, command)
     return [ask(c) for c in commands(saved, panels)]
+
+
+def _refused(ask, command):
+    """Asks ft-screens one thing; whether it refused it. No answer at all (ask's own kind of
+    RuntimeError, ft_layout's NoAnswer) isn't a refusal: it's raised on, so a restore doesn't wait
+    out every tile of an ft-screens that hangs."""
+    try:
+        ask(command)
+    except RuntimeError as e:
+        if type(e) is not RuntimeError:
+            raise
+        return True
+    return False

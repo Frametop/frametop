@@ -89,6 +89,21 @@ class Pure(unittest.TestCase):
         layout_tiles.restore(ask, [["screen:1", TILE], ["screen:2", SAT]], {}, keys)
         self.assertIn(f"tiles remember screen:2 {SAT}", asked)
 
+    def test_no_answer_stops_it_at_the_first_wait(self):
+        class NoAnswer(RuntimeError):   # (ft_layout's: nobody there, after a 10 s wait)
+            pass
+        asked = []
+
+        def ask(text):
+            asked.append(text)
+            if len(asked) > 1:
+                raise NoAnswer("ft-screens didn't answer")
+            return "ok"
+        keys = {f"screen:{i}": f"screen:{i}" for i in range(8)}
+        with self.assertRaises(NoAnswer):
+            layout_tiles.restore(ask, [[k, TILE] for k in keys], {}, keys)
+        self.assertEqual(len(asked), 2)
+
     def test_older_ft_screens_still_takes_the_set(self):
         asked = []
 

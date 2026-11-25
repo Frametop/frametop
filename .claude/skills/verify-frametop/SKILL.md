@@ -156,6 +156,8 @@ hand (when hand tracking runs). Run it after every `scripts/fast-install`, befor
 changed feature by hand: it catches a change that broke something next to it. It launches its
 own run (`smoke`), guards every step, and always cleans up; exit 0 all passed, 1 a step
 failed, 2 the run couldn't start or the guard stopped it. `--only gaze,keys` runs some,
+`--allow-host-input` passes that allowance to its launch and its `T worn on` (the hard rule above:
+only once the user allowed it in this session),
 `--capture` adds a capture to each snapshot (read them before calling one proof). It proves
 readbacks, not looks: a visual change still needs its own capture, and what only a person can
 judge still goes in HEADSET-TESTS.md. A recipe that gains a readback check belongs in it too.

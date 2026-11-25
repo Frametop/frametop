@@ -4,7 +4,7 @@ run against the live Frametop, after `scripts/fast-install`. Each step drives th
 through the testbench and checks Frametop's own readbacks; nothing here reads a capture (with
 --capture the snapshots take them, for a person or an agent to look at).
 
-  smoke [--only FEATURE,...] [--capture] [--list]
+  smoke [--only FEATURE,...] [--capture] [--allow-host-input] [--list]
 
 Features, in the order they run (`--only` picks some):
 
@@ -17,7 +17,10 @@ Features, in the order they run (`--only` picks some):
 
 It runs inside one `verify-frametop launch smoke` run and always ends with its cleanup, after a
 failure too. It stops at once, cleaning up, when someone puts the headset on (`V guard`), as the
-verify skill's hard rules say. What only a person can judge stays in HEADSET-TESTS.md.
+verify skill's hard rules say. So does a remote display streaming from a host that lends its keyboard
+and mouse: --allow-host-input lets the faked wearer take them (`V launch` and `T worn on` get the
+flag), only once the user allowed it in the session. What only a person can judge stays in
+HEADSET-TESTS.md.
 Exit 0 when every step passed, 1 when one failed, 2 when the run couldn't start or the guard
 stopped it; stopped from outside, it cleans up and exits 130 (Ctrl-C) or 128 + the signal
 (SIGTERM, SIGHUP).
@@ -211,6 +214,7 @@ def main(argv):
     a = argparse.ArgumentParser(usage=__doc__.split("\n\n")[1].strip())
     a.add_argument("--only", default=",".join(FEATURES))
     a.add_argument("--capture", action="store_true")
+    a.add_argument("--allow-host-input", action="store_true")
     a.add_argument("--list", action="store_true")
     args = a.parse_args(argv)
     if args.list:
@@ -223,7 +227,8 @@ def main(argv):
     for sig in (signal.SIGTERM, signal.SIGHUP):   # so the cleanup runs (a closed terminal too; nohup stays)
         if signal.getsignal(sig) is not signal.SIG_IGN:
             signal.signal(sig, lambda n, _: sys.exit(128 + n))
-    launch = call([V, "launch", "smoke"], check=False)
+    allow = ["--allow-host-input"] if args.allow_host_input else []
+    launch = call([V, "launch", "smoke", *allow], check=False)
     if launch.returncode != 0:
         print(launch.stdout.strip(), launch.stderr.strip(), sep="\n", file=sys.stderr)
         return 2
@@ -232,7 +237,7 @@ def main(argv):
     s = Smoke(args.capture)
     stopped = None
     try:
-        t("worn", "on")
+        t("worn", "on", *allow)
         t("compositor", "awake")
         t("pose", "set", *POSE)
         for name in picked:

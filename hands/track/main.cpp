@@ -58,7 +58,7 @@
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
 // stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
 // and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud unless set, found at /run/host/run/ft-npud from the container: landmarks
-// from the NPU student, the CPU model whenever the daemon is missing or fails; 0: the CPU models only; track/npulandmarks.h,
+// from the NPU student, the CPU model whenever the daemon is missing or fails; an absolute path: its folder; 0 or any other word: the CPU models only; track/npulandmarks.h,
 // npu_dir_setting in track/npuserver.h; Frametop Settings' Hands page switches it, hands/handsnpu.py), HANDS_NPU_DET
 // (1, as --npu-det: the side cameras' palm search on the NPU detector too; track/npudetector.h), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
@@ -380,8 +380,8 @@ int main(int argc, char **argv) {
         else {
             std::printf("usage: %s [--seconds N] [--threads N] [--int8] [--status S] [--models DIR] [--nice N] [--no-publish]\n"
                         "          [--no-gestures] (hands for the cutouts only: no pinches or grips)\n"
-                        "          [--npu DIR] (landmarks from the NPU student through ft-npud in DIR, /run/ft-npud unless HANDS_NPU\n"
-                        "                       says another; 0: the CPU models only)\n"
+                        "          [--npu DIR] (landmarks from the NPU student through ft-npud in DIR, an absolute path; /run/ft-npud\n"
+                        "                       unless HANDS_NPU names another; 0 or any other word: the CPU models only)\n"
                         "          [--npu-det] (with --npu: the side cameras' palm search on the NPU detector too)\n"
                         "          [--record DIR] [--record-for S] [--record-hz N] [--record-only] [--cpus 5,6,7]\n"
                         "          [--sides auto|0|1] (auto: tell from the hands which side camera is which; 1: exchange them,\n"

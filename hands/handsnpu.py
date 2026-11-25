@@ -5,7 +5,7 @@ ft-hands asks ft-npud, the root service that runs the NPU student on the headset
 landmarks, and runs the CPU model itself whenever that service isn't there or stops answering
 (hands/track/npulandmarks.h). HANDS_NPU in ~/.config/frametop.conf says which, read as ft-hands
 reads it (npu_dir_setting in hands/track/npuserver.h): not set, auto or 1 is the NPU at
-/run/ft-npud; 0 is the CPU only; anything else is the service's folder.
+/run/ft-npud; an absolute path is the service's folder; 0, or any other word, is the CPU only.
 
 The service is there when its heads file is: /run/ft-npud/ft-npud.heads on the host, the same
 under /run/host from the release's container (where Frametop Settings runs).

@@ -491,7 +491,7 @@ void TileKnown(int i, const std::string &key, bool floated) {
     const std::string line = g_tileMemory.Get(k);
     switch (dashtiles::TileWhenKnown(k, line, g_newWindowsTiled, floated)) {
         case dashtiles::WhenKnown::Leave:
-            if (line == "room") g_tileRoom.insert(i);
+            if (dashtiles::LeftInRoom(line, floated)) g_tileRoom.insert(i);
             return;
         case dashtiles::WhenKnown::Anchor: return TileAnchor(i, dashtiles::Stay::Default, "a new window: tiled unless put in the room (NEW_WINDOWS_TILED)");
         case dashtiles::WhenKnown::Restore: break;

@@ -204,4 +204,9 @@ inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line, 
     return line.empty() ? WhenKnown::Leave : WhenKnown::Restore;   // (a line that isn't one: Restore says so)
 }
 
+// Left where it is (TileWhenKnown's Leave): is that the room on purpose, to remember as "room"? Its line
+// said so, or the user just floated it there: without this a float wrote "off" over its app's place, and
+// the next window of that app came as a new tile.
+inline bool LeftInRoom(const std::string &line, bool floated) { return floated || line == "room"; }
+
 }  // namespace dashtiles

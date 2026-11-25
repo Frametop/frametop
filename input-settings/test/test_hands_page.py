@@ -149,6 +149,10 @@ class Page(unittest.TestCase):
         self.b.message.connect(lambda text, bad: said.append((text, bad)))
         self.b.setHandsNpu(False)   # the choice it shows already: nothing runs (no restart for nothing)
         self.assertEqual((ran, self.b.handsNpu["busy"]), ([], False))
+        fis.write_conf_value("HANDS_NPU", "auto")   # ...and the NPU row while it reads the NPU
+        self.b.setHandsNpu(True)
+        self.assertEqual((ran, self.b.handsNpu["busy"]), ([], False))
+        fis.write_conf_value("HANDS_NPU", "0")
         self.b.setHandsNpu(True)
         for _ in range(200):
             self.app.processEvents()

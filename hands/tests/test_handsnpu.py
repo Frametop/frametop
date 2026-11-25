@@ -101,6 +101,9 @@ class HandsNpu(unittest.TestCase):
         self.write("HANDS_NPU=/run/other\n")
         hn.switch(True, None, self.conf)
         self.assertEqual(self.read(), "HANDS_NPU=/run/other\n")   # its own folder kept
+        self.write("HANDS_NPU=off\n")   # a word that isn't a folder is the CPU: the NPU row writes over it
+        hn.switch(True, None, self.conf)
+        self.assertIn("HANDS_NPU=auto", self.read())
 
     def test_now_restarts_ft_hands_and_says_what_went_wrong(self):
         self.write("")

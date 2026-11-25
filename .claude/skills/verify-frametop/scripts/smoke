@@ -17,8 +17,8 @@ Features, in the order they run (`--only` picks some):
 
 It runs inside one `verify-frametop launch smoke` run and always ends with its cleanup, after a
 failure too. It stops at once, cleaning up, when someone puts the headset on (`V guard`), as the
-verify skill's hard rules say. So does a remote display streaming from a host that lends its keyboard
-and mouse: --allow-host-input lets the faked wearer take them (`V launch` and `T worn on` get the
+verify skill's hard rules say. It also stops at once for a remote display streaming from a host that
+lends its keyboard and mouse: --allow-host-input lets the faked wearer take them (`V launch` and `T worn on` get the
 flag), only once the user allowed it in the session. What only a person can judge stays in
 HEADSET-TESTS.md.
 Exit 0 when every step passed, 1 when one failed, 2 when the run couldn't start or the guard

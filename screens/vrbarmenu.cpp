@@ -164,8 +164,8 @@ barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const 
         case Item::BarPosition: l.icon = Icon::BarPosition, l.value = barside::Label(s.barSide); break;
         case Item::Reset: l.icon = Icon::Reset, l.red = true; break;
         case Item::Back: l.icon = Icon::Back; break;
-        case Item::Edge: break;
-        case Item::Inside: break;
+        case Item::Edge:
+        case Item::Inside:
         case Item::Outside: break;
         case Item::Scale: l.icon = Icon::Scale, l.value = appscale::Label(appscale::Percent(AppScale(i))); break;
         case Item::ScaleStep: break;

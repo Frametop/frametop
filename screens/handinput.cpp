@@ -983,7 +983,7 @@ void HandInput::Poke(int s, const Input &in, const std::vector<Panel> &panels, c
     for (int f : {9, 13, 17}) straightest = std::max(straightest, FingerExtension(*h, f));
     const bool nearest = t.d + p_.nearest <= others || ext - straightest >= p_.pointing;
     double x = 0, y = 0;
-    // a control before the content under it: the bar row sits inside the panel's edge (vr.cpp's barside.h)
+    // a control before the content under it: the bar row can sit inside the panel's edge (barside.h's In)
     const Control ctl = ControlAt(*P, t.u, t.v, 0.01);
     bool over = ctl == Control::None && ToBuffer(*P, t.u, t.v, &x, &y);
     // just past the content's edge (not on a control): at the edge

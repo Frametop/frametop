@@ -987,6 +987,9 @@ int main() {
                       TileWhenKnown("app:firefox", "tile 0 1 0 1 1", true, true) == W::Leave &&
                       TileWhenKnown("app:firefox", "room", false, true) == W::Leave);
             check("...only a window: a screen floated isn't a thing", TileWhenKnown("screen:2", "off", true, true) == W::Restore);
+            check("left in the room: remembered as the room when its line said so or the user floated it",
+                  dashtiles::LeftInRoom("room", false) && dashtiles::LeftInRoom("", true) && dashtiles::LeftInRoom("tile 0 1 0 1 1", true) &&
+                      !dashtiles::LeftInRoom("", false) && !dashtiles::LeftInRoom("off", false));
             check("a junk line: Restore (which says it isn't one)", TileWhenKnown("screen:1", "junk") == W::Restore &&
                                                                        TileWhenKnown("app:x", "junk") == W::Anchor);
         }

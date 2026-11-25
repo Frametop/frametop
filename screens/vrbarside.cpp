@@ -104,8 +104,8 @@ bool SetBarInset(int i, barside::Inset inset, const char *by) {
     const auto it = g_screens.find(i);
     if (it == g_screens.end()) return false;
     const bool kept = Remember(i, it->second.barSide, inset);
-    std::printf("screen %d: its grab bar %s its edge (%s)%s\n", i + 1,
-                inset == barside::Inset::Default ? "inside or past, as the setting says," : inset == barside::Inset::Inside ? "inside" : "past",
+    std::printf("screen %d: its grab bar %s (%s)%s\n", i + 1,
+                inset == barside::Inset::Default ? "where the setting puts it" : inset == barside::Inset::Inside ? "inside its edge" : "past its edge",
                 by, kept ? "" : "; not remembered: it has no key yet");
     std::fflush(stdout);
     Apply(it->second, it->second.barSide, inset);

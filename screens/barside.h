@@ -93,10 +93,11 @@ inline UV Place(Side s, double w, double h, double in, double along) {
 // of the edge by its gap, over the panel's content while it shows.
 //   Outside: `clear` out, so nothing of the row is over the content. A tile has only `room` past its
 // edge, its half of the gap to the next tile: further out the panel's plane runs on behind that tile
-// (MenuAt), and a bar there was hard to grab (the reason it went inside). So its bar's pill, `pillHalf`
-// either side of the line, goes no further out than `room`, and the rest of it lies over the edge.
-inline double In(bool inside, double clear, double pillHalf, double room) {
-    return inside ? clear : -std::min(clear, room - pillHalf);
+// (MenuAt) and that tile's own resize band begins, and a bar there was hard to grab (the reason it
+// went inside). So its bar, `half` either side of the line with its hit padding, goes no further out
+// than `room`: a press past that is the next tile's. The rest of the bar lies over its own edge.
+inline double In(bool inside, double clear, double half, double room) {
+    return inside ? clear : -std::min(clear, room - half);
 }
 
 // The bar's turn about its own face, radians: none along the bottom or the top; a quarter turn
@@ -132,9 +133,9 @@ inline Box Union(const Box &a, const Box &b) {
 // Its layout and its look are menulayout.h's and barmenuart.h's.
 
 // Its centre on the panel's surface: beside the bar at the clicked spot, a gap clear of it, toward
-// the panel's middle (a bar past the edge too: over the panel's edge then). Past the edge is the gap to the next tile, and the panel's plane runs on behind
-// that tile (the tiles curve round the head), so a popup there was hidden; over its own panel
-// nothing covers it.
+// the panel's middle (a bar past the edge too: over the panel's edge then). Past the edge is the gap
+// to the next tile, and the panel's plane runs on behind that tile (the tiles curve round the head),
+// so a popup there was hidden; over its own panel nothing covers it.
 // `at`: the clicked spot on the bar; `barHalf`: the bar's half thickness; mw, mh: its size.
 inline UV MenuAt(Side s, UV at, double barHalf, double gap, double mw, double mh) {
     const UV o = Outward(s);

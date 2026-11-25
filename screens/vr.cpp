@@ -831,8 +831,8 @@ Mat OnSurface(const Screen &s, double u, double v, double dz) {
 
 // (the row's middle: in from the screen's edge by a gap and the taller of the bar's half and a button's,
 // so grown buttons (a hand near: ChromeSize) stay inside it. Until 2026-11-18 the row hung under the
-// screen so they didn't overlap it (user, 2026-10-11); now it's inside, as a bar between two stacked
-// tiles was hard to grab: barside.h)
+// screen so they didn't overlap it (user, 2026-10-11); then it went inside, as a bar between two stacked
+// tiles was hard to grab; since 2026-11-24 it's past the edge again unless set inside: barside.h's In)
 // A canvas centered at the screen corner. Only its padded corner-stroke mask is
 // interactive; the window and its safety margin are excluded from every primitive.
 int HandlePixels() { return g_resizeCorner.sharp ? 256 : 64; }
@@ -935,17 +935,19 @@ void PaintResizeMask(Screen &s) {
 // keeps the row clear of the edge by a gap). A tile's stays within its half of the gap to the next tile.
 bool BarInside(const Screen &s) { return barside::Inside(s.barInset, g_barInside); }
 double BarIn(const Screen &s) {
-    return barside::In(BarInside(s), barhit::Below(s.chrome, s.grip, g_barPaddingY), s.chrome * barhit::kAspect / 2, TiledCap(s));
+    return barside::In(BarInside(s), barhit::Below(s.chrome, s.grip, g_barPaddingY), barhit::Height(s.chrome, g_barPaddingY) / 2, TiledCap(s));
 }
 barside::UV BarSpot(const Screen &s, double along) { return barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), along); }
 // The bar's own rectangle on the panel's surface, its hit padding with it.
 barside::Box BarBox(const Screen &s) {
-    const double half = barhit::Width(s.chrome, g_barPaddingX) / 2;
-    return barside::Row(s.barSide, s.metres, s.heightMetres(), BarIn(s), -half, half, barhit::Height(s.chrome, g_barPaddingY) / 2);
+    const double deep = barhit::Height(s.chrome, g_barPaddingY) / 2;
+    const double along = std::max(0.0, barhit::Width(s.chrome, g_barPaddingX) / 2 - deep);   // (Row adds `deep` at each end too)
+    return barside::Row(s.barSide, s.metres, s.heightMetres(), BarIn(s), -along, along, deep);
 }
 // Off the surface: the bar a little in front of the resize handle. Past the edge the bar lies over that
 // edge's resize band, and the nearer overlay is the one a laser and the 3D mouse get.
 constexpr double kHandleLift = 0.003, kBarLift = 0.0035;
+static_assert(kBarLift > kHandleLift, "the bar is the nearer overlay where it lies over a resize band");
 Mat BarOffset(const Screen &s) {
     const barside::UV c = BarSpot(s, 0);
     return OnSurface(s, c.u, c.v, kBarLift);

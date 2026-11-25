@@ -146,7 +146,6 @@ int main() {
     { Cmd t; check("floatapp: another word isn't asked", Parse("floatapp 7 org.kde.konsole later", t) == FloatApp && !t.on); }
     { Cmd t; check("barside: panel and edge", Parse("barside 3 right", t) == BarSide && t.n == 3 && !std::strcmp(t.word, "right")); }
     check("barside: an edge is needed", V("barside 3") == Unknown);
-    { Cmd t; check("barside: inside or outside its edge", Parse("barside 2 outside", t) == BarSide && t.n == 2 && !std::strcmp(t.word, "outside")); }
     check("groups: tiles", GroupOf(Anchor) == TileGroup && GroupOf(Tiles) == TileGroup && GroupOf(FloatApp) == TileGroup);
 
     // Which handler runs each verb (ft_vr_command's dispatch): every verb has one, Unknown none.

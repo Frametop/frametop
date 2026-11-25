@@ -97,7 +97,6 @@ inline std::vector<Row> Placement(const Kind &k) {
 // edges, inside that edge or past it (barside::Inset): this panel's own choice.
 inline std::vector<Row> Edges(const Kind &k, bool back) {
     std::vector<Row> r;
-    r.reserve(8);
     if (back) r.push_back({Item::Back});
     for (barside::Side s : barside::kAll) r.push_back({Item::Edge, s});
     r.push_back({Item::Outside}), r.push_back({Item::Inside});
@@ -170,7 +169,7 @@ inline const char *Caption(const std::vector<Row> &rows, size_t at) {
     if (i == Item::InRoom) return "Placement";
     if (i == Item::ScaleStep && before != Item::ScaleStep) return "Scale";
     if (i == Item::Edge && before != Item::Edge) return "Controls Position";
-    if (i == Item::Outside) return "Inside or Outside";
+    if (i == Item::Outside) return "Outside or Inside";
     return nullptr;
 }
 

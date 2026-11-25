@@ -940,6 +940,19 @@ class AccessibilityTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, "desktop stop would preserve its accessibility watcher as an app")
 
+    def test_desktop_stop_ends_helpers_of_the_release_before_an_update(self):
+        source = (ROOT / "session/keep-apps.sh").read_text()
+        find_root = source[source.index("root=$("):source.index("while read -r pid")]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            for tree, want in (("frametop/releases/0.3.0-exp.27", "frametop/releases/"),
+                               ("src/frametop", "src/frametop/")):
+                session = os.path.join(tmp, tree, "session")
+                os.makedirs(session)
+                result = subprocess.run(["bash", "-c", find_root + '\necho "$root"', session + "/keep-apps.sh"],
+                                        capture_output=True, text=True, check=True)
+                self.assertEqual(result.stdout.strip(), os.path.join(tmp, want))
+
     def test_update_check_reports_missing_accessibility_host_files(self):
         import runpy
         from unittest.mock import patch

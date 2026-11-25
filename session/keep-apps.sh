@@ -16,8 +16,10 @@ own+='xembedsniproxy|gmenudbusmenu|DiscoverNotifie|kimpanel|ibus|xdg-|at-spi|dco
 keep=()
 # So does anything run from Frametop's own files: the session's helpers (ft-dashroute,
 # Frunner, ft-floatd...) mostly run as python3, and kept ones would hold their sockets
-# against the next desktop's copies, from a release that may be gone by then.
+# against the next desktop's copies, from a release that may be gone by then. Right after an
+# update that's the release before this one, so any release's files count, not just these.
 root=$(cd "$(dirname "$0")/.." && pwd -P)/
+[[ $root =~ ^(.*/frametop/releases/)[^/]+/$ ]] && root=${BASH_REMATCH[1]}
 while read -r pid; do
   comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
   [[ $comm =~ $own ]] && continue

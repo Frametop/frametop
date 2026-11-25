@@ -46,6 +46,7 @@ function desktop(tileIs, without) {
     return {
         w,
         size(g) { w.frame = g; w.frameGeometryChanged.emit(); },
+        place: () => command(JSON.stringify([{cmd: "place", id: "w1", output: "WL-1", x: 4300, y: 4300, w: 800, h: 600}])),
         turn(ms = 0) {
             now += ms;
             timers.forEach(t => { if (t.due <= now) { t.due = undefined; t.timeout.emit(); } });
@@ -83,7 +84,35 @@ for (const ms of [10, 1500]) {  // (the app's answer)
     d.w.maximizedChanged.emit();
     asBefore("maximized (the size, then the mode) after " + ms + " ms", d);
 }
-let d = desktop(null, "tileChanged");
+for (const mode of [3, undefined]) {  // (KWin 6.2 has no mode to read)
+    const was = mode === undefined ? "KWin 6.2" : "KWin 6.6";
+    let d = desktop("requested");
+    d.w.maximizeMode = mode;
+    d.size(FULL);
+    d.w.maximizedChanged.emit();
+    asBefore("maximized in " + was, d);
+    d = desktop("requested");
+    d.size(FULL);
+    d.turn();
+    d.place();  // an app that opens maximized, floated: un-maximized at its remembered size in one go
+    d.size(HOME);
+    d.w.maximizeMode = mode && 0;
+    d.w.maximizedChanged.emit();
+    d.turn();
+    check("un-maximized by being floated in " + was + ": its size is reported", d.sizes(), ["1400x1200", "800x600"]);
+}
+let d = desktop("requested");
+d.w.maximizeMode = 3;
+d.size(FULL);
+d.w.maximizedChanged.emit();
+d.size({x: 4300, y: 4300, width: 900, height: 650});  // an app that won't have the size it had
+d.w.maximizeMode = 0;
+d.w.maximizedChanged.emit();
+d.turn(20);
+check("refused the size it had: asked for once more", [d.w.asked, d.sizes()], [HOME, []]);
+d.turn(1200);
+check("...then the app has its way", d.sizes(), ["900x650"]);
+d = desktop(null, "tileChanged");
 d.size({x: 4300, y: 4300, width: 900, height: 650});
 check("a resize isn't taken in the middle of KWin's own work", d.sizes(), []);
 d.turn();

@@ -11,6 +11,6 @@ import sys
 
 node = shutil.which("node")
 if not node:
-    print("skip  no node here")
-    sys.exit(0)
+    print("no node here")
+    sys.exit(77)
 sys.exit(subprocess.run([node, os.path.join(os.path.dirname(os.path.realpath(__file__)), "kwin-order.js")]).returncode)

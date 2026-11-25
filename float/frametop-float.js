@@ -66,6 +66,12 @@ function isMaximized(w) {
     return g.x === a.x && g.y === a.y && g.width === a.width && g.height === a.height;
 }
 
+// As maximized, one way or both: a floating window's output is bigger than it both ways.
+function fills(w) {
+    const a = workspace.clientArea(KWin.MaximizeArea, w), g = w.frameGeometry;
+    return g.width === a.width || g.height === a.height;
+}
+
 function report(type, w) {
     if (w.deleted) return;  // a window on its way out still changes output and size
     const ev = info(w);
@@ -148,13 +154,16 @@ function hold(w, width, height) {
     holdTimer.interval = 1100;
     holdTimer.start();
 }
-// A size change while a size is held: true when it isn't that size (the script asked again).
 // (ft-floatd's sizes can be fractional, the window's are whole: within a pixel is the same.)
+function sized(w, width, height) {
+    const g = w.frameGeometry;
+    return Math.abs(g.width - width) < 1 && Math.abs(g.height - height) < 1;
+}
+// A size change while a size is held: true when it isn't that size (the script asked again).
 function holding(w) {
     const id = String(w.internalId), h = held[id], s = settled[id];
     if (!h) return false;
-    const g = w.frameGeometry;
-    if (!s || h.until < Date.now() || w.move || w.resize || (Math.abs(g.width - h.w) < 1 && Math.abs(g.height - h.h) < 1)) {
+    if (!s || h.until < Date.now() || w.move || w.resize || sized(w, h.w, h.h)) {
         delete held[id];
         return false;
     }
@@ -167,11 +176,11 @@ function holding(w) {
 // maximizing make of it: its output is its size plus a margin, so half of it (or all of it) is no size to
 // take, and the next press would halve it (or grow it) again. Its size comes in before KWin says it's
 // maximized, and in KWin 6.2 before it's in a tile, so a size on a spare is taken a turn of KWin's event
-// loop later (takeLate), and when one of these came with it, it's asked for as it was instead.
+// loop later (lateTimer), and when one of these came with it, it's asked for as it was instead.
 function asItWas(w) {
     const id = String(w.internalId), s = settled[id];
-    delete late[id];
     if (!s || !w.output || s.output !== w.output.name || s.fullScreen) return;
+    if (!sized(w, s.frame.w, s.frame.h)) delete late[id];  // (at its size already: ft-floatd may wait for it)
     hold(w, s.frame.w, s.frame.h);
     w.frameGeometry = {x: s.frame.x, y: s.frame.y, width: s.frame.w, height: s.frame.h};
 }
@@ -195,7 +204,7 @@ lateTimer.timeout.connect(() => {
             return;
         }
         if (s && s.fullScreen !== w.fullScreen) delete held[id];  // (full screen's size, or the one after it)
-        if (untile(w) || holding(w)) return;
+        if (untile(w) ? !(s && sized(w, s.frame.w, s.frame.h)) : holding(w)) return;
         settle(w);
         if (isSpare(w.output)) report("geometry", w);
     });
@@ -250,6 +259,10 @@ workspace.screensChanged.connect(() => {
         if (before[name] !== now[name] && !(m && parseInt(m[1]) >= screens)) screensChanged = true;
     });
     const all = workspace.windowList();
+    all.forEach(w => {  // (a size the app took just before it all: not one to undo)
+        const id = String(w.internalId);
+        if (late[id] && !moved[id] && !held[id] && !w.tile) settle(w);
+    });
     all.forEach(w => putBack(w, screensChanged));
     takeLayout();
     all.forEach(reportMoved);
@@ -307,7 +320,9 @@ function watch(w) {
     w.maximizedChanged.connect(() => {
         if (!onSpare() || !w.normalWindow || w.fullScreen) return;
         w.setMaximize(false, false);
-        if (!changingOutputs()) asItWas(w);
+        // (not on its way back: that size is the app's answer. KWin 6.2 doesn't say which it is.)
+        const maximized = w.maximizeMode === undefined ? fills(w) : w.maximizeMode !== 0;
+        if (maximized && !changingOutputs()) asItWas(w);
     });
     if (w.tileChanged) w.tileChanged.connect(() => { if (!changingOutputs()) untile(w); });
 }

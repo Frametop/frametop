@@ -25,8 +25,8 @@ class FakeScreens:
     """ft-screens with `up` of the desktop's screens shown and a head pose; what it's asked is
     recorded. A screen it has no panel for answers with an error, as ft-screens does."""
 
-    def __init__(self, up, head=True):
-        self.up, self.head, self.asked = up, head, []
+    def __init__(self, up, head=True, remote=()):
+        self.up, self.head, self.remote, self.asked = up, head, remote, []
 
     def ask(self, text, timeout=10.0):
         self.asked.append(text)
@@ -40,9 +40,11 @@ class FakeScreens:
             return "ok 0 1.6 0 0"
         if text.startswith("get "):
             n = int(text.split()[1])
-            if n <= self.up:
+            if n <= self.up or n in self.remote:
                 return "ok 0 1.6 -2 1 0 0 0 1 0 0 0 1 2.0 1.0 0 none"
             raise RuntimeError(f"error no screen {n}")
+        if text.split()[0] == "recentre":
+            return "ok 1 0.000 1.600 0.000 0.00"
         return "ok"
 
     def close(self):
@@ -117,13 +119,14 @@ class Arrange(unittest.TestCase):
         self.assertEqual(self.m.remote_anchor(screens, self.m.load_layout()), ((0.0, 1.6, 0.0), 30.0))
         self.assertNotIn("get 1", screens.asked)
 
-    def test_reset_moves_the_remote_displays_only(self):
+    def test_reset_goes_by_a_remote_display(self):
+        # (none of the desktop's screens up to go by)
         self.streams_only()
-        screens = FakeScreens(up=0)
+        screens = FakeScreens(up=0, remote=(101,))
         self.m.screens_socket = lambda: screens
-        self.m.recenter_screens()
+        self.assertEqual(self.m.recenter_screens(), 1)
         self.assertFalse([a for a in screens.asked if a in ("get 1", "get 2")], screens.asked)
-        self.assertIn("get 101", screens.asked)
+        self.assertEqual([a.split()[:2] for a in screens.asked if a.startswith("recentre")], [["recentre", "101"]])
 
 
 class StreamsCommand(unittest.TestCase):

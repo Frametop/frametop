@@ -50,7 +50,7 @@ struct Cmd {
     char mod[16] = {}, b1[16] = {}, b2[16] = {}, b3[16] = {};  // windowdrag
     double da = 0, db = 0;                // carryturn
     char appId[128] = {};                 // floatapp: the window's app (ft-floatd's desktop file name); `on`: "asked"
-    const char *rest = nullptr;           // tiles: "clear", "gaps", "recentre" or "set ..." (what follows "tiles ")
+    const char *rest = nullptr;           // tiles: "clear", "gaps", "pack", "recentre" or "set ..." (what follows "tiles ")
 };
 
 // Which of ft_vr_command's handlers (vr.cpp) runs a verb: one per group of commands. A verb's case

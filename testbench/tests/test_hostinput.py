@@ -161,14 +161,20 @@ class GuardProcessTests(Fixture):
         self.assertFalse(self.lock_free())   # no stream can lease oma7 now
         self.assertTrue(self.lock_free('192.0.2.92'))   # input off: not its business
         hostinput.clear_flag()   # worn off, physical or release
-        self.assertEqual(guard.wait(5), 0)
+        # SteamVR says worn a while longer: no stream may have the lock yet, whoever stops the guard
+        time.sleep(hostinput.GUARD_POLL + 0.5)
+        guard.send_signal(signal.SIGTERM)   # worn on again: start_guard stops the old one
+        time.sleep(hostinput.GUARD_SETTLE - 1.2)
+        self.assertIsNone(guard.poll())
+        self.assertFalse(self.lock_free())
+        self.assertEqual(guard.wait(10), 0)
         self.assertTrue(self.lock_free())
 
     def test_it_lets_go_when_an_allowed_wearer_replaces_it(self):
         guard = self.start()
         self.wait_flag(guard)
         hostinput.set_flag(True, 2.0)
-        self.assertEqual(guard.wait(5), 0)
+        self.assertEqual(guard.wait(10), 0)
         self.assertTrue(hostinput.read_flag()['allow_host_input'])
 
     def test_a_busy_lock_means_no_guard_and_no_flag(self):
@@ -186,7 +192,7 @@ class GuardProcessTests(Fixture):
         guard = self.start()
         self.wait_flag(guard)
         guard.send_signal(signal.SIGTERM)   # its unit stopped while the wearer is faked
-        self.assertEqual(guard.wait(5), 0)
+        self.assertEqual(guard.wait(10), 0)
         self.assertEqual(hostinput.read_flag()['pid'], guard.pid)   # ft-stream still sends no lease
         self.assertTrue(self.lock_free())
         hostinput.clear_flag()   # the next testbench command
@@ -198,7 +204,7 @@ class GuardProcessTests(Fixture):
             layout = json.loads(self.layout.read_text())
             layout['hosts'][2]['input'] = True   # ...when it starts lending its input
             self.layout.write_text(json.dumps(layout))
-            self.assertEqual(guard.wait(5), 0)
+            self.assertEqual(guard.wait(10), 0)
             self.assertIn('releasing the wearer', guard.stdout.read())
             self.assertEqual(hostinput.read_flag()['pid'], guard.pid)
         finally:

@@ -31,6 +31,9 @@ from pathlib import Path
 LAYOUT = Path.home() / '.config/frametop-layout.json'
 GUARD_UNIT = 'frametop-fake-worn-guard'
 GUARD_POLL = 0.5
+# SteamVR, and so the pointer helper, still says worn for about a second after the faked wearer
+# goes, and a stream that gets the lock then has never seen FLAG: the guard keeps the locks longer
+GUARD_SETTLE = 3.0
 
 
 def runtime_dir():
@@ -166,12 +169,13 @@ def take_locks(hosts, held):
     return busy
 
 
-def guard(layout=LAYOUT, poll=GUARD_POLL, release=None):
+def guard(layout=LAYOUT, poll=GUARD_POLL, settle=GUARD_SETTLE, release=None):
     """The guard process: take every input host's lock, then write FLAG naming this process, and
     hold them while FLAG does. A host given "input": true meanwhile has its lock taken too; if a
     stream holds it, or the guard is told to stop while FLAG still names it, the faked wearer goes
-    (RELEASE) but FLAG stays (release_confirmed). Exit 0 once FLAG has gone or the guard has let
-    go, 3 if a lock was busy from the start."""
+    (RELEASE) but FLAG stays (release_confirmed). However it ends, it holds the locks SETTLE seconds
+    more, stopped or not. Exit 0 once FLAG has gone or the guard has let go, 3 if a lock was busy
+    from the start."""
     held = {}
     stop = []
     signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
@@ -198,6 +202,7 @@ def guard(layout=LAYOUT, poll=GUARD_POLL, release=None):
             release_confirmed(release)
         return 0
     finally:
+        time.sleep(settle)
         for fd in held.values():
             os.close(fd)
 

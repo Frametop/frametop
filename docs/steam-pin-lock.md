@@ -13,7 +13,11 @@ again (its Restart desktop button). It needs the guard installed
 (`desktops.sh install` puts in `frametop-pin-lock.service`) and a PIN set in
 Steam's own Security settings. With the gamescope backend the switch refuses to
 turn on, since the session would refuse to start. Turned on in an unlocked
-session, Frametop stays hidden until Steam locks and unlocks once (below).
+session, Frametop shows as soon as the guard reads Steam's unlocked state.
+
+**Known gap: cold boot.** On a cold boot Frametop can show for about a second
+before Steam's PIN screen ("Cold-boot startup", below). Don't rely on this
+feature to conceal the desktop right after a boot.
 
 Why not KWin's own lock screen: the nested KWin starts with `--no-lockscreen`
 (`session/frametop-session.sh`). Its lock screen would ask for the Linux
@@ -25,14 +29,12 @@ feature avoids.
 ## Behavior
 
 - Steam's existing PIN remains the only unlock authority. No second password.
-- Unknown, locked, stale, disconnected or reset state denies access. An observer
-  starting in an unlocked session stays denied until it observes Steam's next
-  real, non-cancellable lock and subsequent dismissal. One that restarts, or
-  whose query to Steam fails quickly, resumes an unlock it saw that way (below,
-  "Resuming a seen unlock"). A stall, a slow reply or a suspend while it runs
-  still needs a new lock. **It never requests a PIN screen, locks or unlocks
-  Steam, or submits credentials. Steam alone owns those actions.** An absent
-  prompt is not treated as proof of authentication.
+- Unknown, locked, stale, disconnected or reset state denies access. A fresh,
+  valid snapshot with loaded PIN settings, no active lock, no mandatory prompt
+  and no reset permits access, including after observer startup/restart. There is
+  no requirement to lock/unlock again. **It never requests a PIN
+  screen, locks or unlocks Steam, or submits credentials. Steam alone owns those
+  actions.** An absent prompt without initialized settings is not enough.
 - Screens, floating windows, popups, controls and compositor-owned guides hide;
   desktop input is rejected. Full Keyboard hides and cancels input, leaving
   Steam's own keyboard available. Frunner and the hand/gaze panel views also hide.
@@ -74,6 +76,23 @@ Frametop tools already use the local Chrome DevTools connection through
 it loads settings and mounts its initial PIN screen: **false alone is not proof
 of unlock**. A dialog can also be cancellable, or a PIN-reset flow can clear it.
 
+The current policy requires loaded settings with both lock-preference booleans,
+defined lock props, a valid UI generation and explicit boolean state flags before
+accepting an inactive lock. A live probe in an already-unlocked session reported
+PIN configured, inactive lock, no mandatory prompt and no reset. The observer now
+accepts that current snapshot without requiring a previously observed lock cycle.
+
+**Cold-boot startup (confirmed failure, 2026-11-11).** These same loaded-settings
+and inactive flags do occur before Steam's initial mandatory prompt mounts. On a
+cold boot with this policy the wearer briefly saw Frametop before Steam's PIN
+screen: the guard logged `unlocked (steam-unlocked)` at boot +48.8 s and
+`locked (steam-locked)` at +49.7 s, about 0.9 s later (found by Firtina Ozbalikchi). This
+policy trades the former extra lock-cycle requirement for trusting Steam's
+explicit current state once settings are loaded; it is not a verified
+authentication-completed signal, and a fixed delay would not make it one. Keep the
+feature experimental/default-off until startup has a proof and passes a cold-boot
+wearer test. A Steam client restart initializes the same way and is untested.
+
 The observer in `steam/pin_lock.py` returns only explicit lock/configuration/reset
 booleans and the UI context's time origin. It never returns the settings object,
 PIN, account name, callback or authentication ticket. The default diagnostic makes
@@ -83,18 +102,14 @@ no calls to lock, unlock, change settings or submit credentials. Run locally on 
 python3 steam/pin_lock.py --seconds 180
 ```
 
-Output is only state changes: unknown, locked, or unlocked-after-observed-lock.
-Unknown is deliberately not interpreted as unlocked. The diagnostic requires
-observing a non-cancellable lock and then its dismissal in the same context.
-Connection failure, UI-context replacement, malformed data, PIN reset or changed
-lock configuration discard that evidence. Starting the probe in an already
-unlocked session therefore reports unknown until a real lock/unlock is observed.
+Output is only state changes: unknown, locked, or unlocked.
+Unknown is deliberately not interpreted as unlocked. Each fresh snapshot is
+classified independently; connection failure, malformed data, PIN reset and
+inconsistent lock flags deny access. No previous unlocked state is reused after
+a failure. A later fresh, valid inactive snapshot can recover automatically.
 The default read-only probe exits after a bounded duration, at most ten minutes.
 `--watch` is the installed guard mode; unlike the diagnostic it publishes access
-leases, but all Steam access remains read-only. If the guard starts too late to
-observe Steam's lock screen, or loses proof, leave it running and use Steam's own
-controls to lock and unlock once. Frametop stays hidden until that cycle is
-observed; the observer does not summon a prompt for you. Short-lived locks entirely
+leases, but all Steam access remains read-only. Short-lived locks entirely
 between observations can be missed, so maintain the bounded-latency limitations
 above rather than claiming event-perfect observation.
 Initialized settings explicitly reporting no Steam PIN configured permit access;
@@ -117,8 +132,8 @@ unsaved text, and KWrite, nested KWin and the compositor kept the same processes
 No screenshots were needed or published.
 
 This validates basic visual concealment/restoration and unsaved-work preservation,
-not all input routes, auxiliary panels, lock latency or failure cases. Input
-blocking, observer failure, UI restart, cold boot and the wider suspend/resume
+not all input routes, auxiliary panels, lock latency or failure cases. UI restart,
+cold boot and the wider suspend/resume
 matrix remain hardware-test gaps and must be completed before recommending
 general use. This contribution covers Steam PIN protection only, not a
 new remote-desktop hosting or client implementation.
@@ -128,11 +143,10 @@ the floating-window test, the wearer received repeated prompts; logs showed
 unknown states while unlocking, but the exact observation failure was not
 reproduced in the next monitored cycle. That behavior was removed: Frametop is
 now strictly passive. Fixed diagnostic reason codes identify invalid snapshots,
-inconsistent flags, UI-generation changes, observation gaps/suspend, stale replies
+inconsistent flags, observation gaps/suspend, stale replies
 and failed queries without logging raw Steam data or credentials.
 
-Before the guard resumed a seen unlock (2026-11-20), an approved guard-only
-restart left the passive observer denied without
+In the earlier observed-lock-latch revision, an approved guard-only restart stayed denied without
 creating a PIN prompt. The wearer used Steam's configured PIN-on-wake flow via
 the headset power button and confirmed Frametop returned normally. Logs showed
 unknown (including an observation-gap/suspend invalidation), then a real locked
@@ -145,8 +159,23 @@ Full Keyboard confirmed visible. Read-only overlay observations showed every
 Frametop panel, including Full Keyboard, hidden while denied; the desktop and
 floating window returned after unlock. The wearer confirmed that result and
 accepted Full Keyboard remaining dismissed rather than reopening automatically.
-Typing after summoning it again is still unverified. These sequential lease and
+The wearer subsequently confirmed keyboard typing recovery in another app, and
+normal summon/interaction attempts while locked did not reveal Frametop or cause
+unexpected edits after unlock. These sequential lease and
 overlay queries are not an atomic lock-latency measurement.
+
+A later observer-stop test confirmed the guard inactive, an invalid access lease,
+no Frametop overlays visible and unchanged compositor/KWin/keyboard processes.
+The extra lock-cycle requirement after restarting that older guard prompted the
+current fresh-state recovery change. That change needs its own live startup and
+recovery checks; the earlier tests do not establish its cold-boot safety.
+
+The fresh-state revision was loaded with a guard-only restart while Steam was
+already unlocked. It immediately reported unlocked/steam-unlocked and readbacks
+showed the desktop and floating windows visible, without a new Steam lock cycle
+or PIN prompt. The wearer confirmed it looked correct. The compositor, KWin and
+keyboard retained their processes. This checks warm observer startup, not
+cold boot, which fails ("Cold-boot startup", above).
 
 ## Intended boundary
 
@@ -159,60 +188,15 @@ user, privileged access, other unrestricted Steam applications or disk access.
 The existing local DevTools endpoint itself permits same-user UI access. Steam's
 PIN is not disk encryption or a Linux login boundary.
 
-## Resuming a seen unlock
-
-Without this, a guard restart (an update, a crash, a SteamVR restart) or a short
-loss of Steam's DevTools kept Frametop hidden until Steam locked again. Firtina
-Ozbalikchi found that and wrote the first recovery (PR 95); the version here
-keeps their goal with a narrower proof, since loaded settings and an inactive lock
-alone let Frametop show before Steam's PIN screen on a cold boot (below).
-
-While the guard holds an unlock that followed a lock it saw, it keeps a record in
-`$XDG_RUNTIME_DIR/frametop-pin-carry` (`steam/pin_carry.py`): Steam's UI context
-(`performance.timeOrigin`), the boot's id, the boottime and monotonic clocks, and
-the kernel's suspend counts (`/sys/power/suspend_stats/success` and `fail`),
-refreshed with every lease. It's written like the lease: private, atomic, read
-without following links. A new guard, or one whose query failed quickly (a reply
-over the 750 ms lease counts as a stall), resumes the unlock only when all of
-these hold:
-
-- Steam's snapshot is well formed, PIN set, and shows no lock, prompt or reset;
-- it's the record's UI context on the record's boot;
-- no suspend since the record: boottime hasn't run ahead of monotonic, and the
-  kernel hasn't tried one (a failed suspend counts);
-- the record is under 60 s old (a SteamVR restart takes the guard down with it).
-  A resumed unlock refreshes the record, so restarts each under 60 s apart keep
-  carrying it.
-
-A lock the guard sees (mandatory or with inconsistent flags), a PIN reset or a PIN
-turned off ends the record, so an unlock the guard didn't see after one isn't
-resumed. So does a stall or suspend while the guard runs, or one it's stopped
-across: SteamOS freezes the user slice, the guard with it, before it suspends, so
-a guard that wakes to a gap may be ahead of Steam's PIN-on-wake screen. The counts
-are read before each lease's clocks, so a record never claims a suspend didn't
-happen after it was dated. Without readable counts there is no record. A Steam client restart is a new UI
-context and a cold boot starts with an empty `/run/user`, so both still need a
-lock seen first. A lock Steam shows and the wearer dismisses with the PIN while
-the guard is down is resumed: the PIN was entered. If clearing the record fails,
-the guard resumes nothing until it succeeds. Same-user code could write the
-record, but it could write the lease too (see above); the record adds no new
-boundary. The log says `unlocked-after-observed-lock (unlock-carried-over)` when
-it's used.
-
 ## Required before general use
 
 1. Validate actual lock/unlock, cancellation, incorrect PIN (entered only in
    Steam), reset, UI restarts, suspend/resume and boot. Confirm no initial false
-   state can authorize content. An observer restarting in an unlocked session
-   resumes only an unlock it proved ("Resuming a seen unlock"); a guard restart
-   while unlocked, and one right after a sleep/wake, still need a wearer test.
-   One earlier recovery was tried and is not in this tree (PR 95, commit 8200793,
-   2026-11-09): accepting an inactive lock from a fresh, well-formed snapshot
-   with loaded PIN settings, with no lock seen first. On a cold boot the
-   wearer then saw Frametop before Steam's PIN screen: the guard logged
-   unlocked 0.9 s before Steam reported its lock (2026-11-11). Loaded settings
-   and an inactive lock are therefore not proof at startup, and the observer
-   here still requires a lock it has seen.
+   loaded-settings/inactive state can authorize content before Steam's initial
+   mandatory prompt: on a cold boot it currently does ("Cold-boot startup"), so
+   this needs a fix and a retest. Check Steam client restarts and PIN-on-wake for
+   the same window. Verify fresh-state recovery in an unlocked session and
+   fail-closed recovery when the settings/lock flags are unavailable.
 2. Verify the independent security gate, not ordinary hide/pause. Start denied
    before displaying any sensitive texture or accepting input. Normal
    visibility, profiles, resume and manual startup must not override it.
@@ -238,7 +222,7 @@ it's used.
 python3 -m unittest discover -s steam/test -p "test_pin_*.py" -v
 ```
 
-The tests cover initial false, mandatory vs cancellable prompts, relocking,
+Thirty-seven tests cover valid inactive startup, mandatory vs cancellable prompts, relocking,
 context reload, disconnect, invalid snapshots and booleans, reset/configuration
 changes, inconsistent props and avoiding credential fields in the expression.
 They also exercise the guard loop using fake Steam, atomic/private lease writing,
@@ -251,12 +235,9 @@ The guard-loop tests use deterministic clocks to check scheduling gaps, a suspen
 within the lease interval, slow authentication responses and slow no-PIN responses.
 None may reuse stale evidence to permit access.
 They also reject every guard-side Steam expression except the read-only snapshot,
-check that repeated unknown states never request prompts, and verify that a UI
-restart, a stall or a suspend needs a real Steam lock cycle. A restarted guard or
-a failed observation resumes a seen unlock only in the same UI context, within
-60 s and with no suspend tried (clocks or counts), and never past a seen lock, a
-PIN reset, a PIN turned off or a record it couldn't clear. The carry record is
-checked for privacy, exact contents, symlinks, FIFOs and other boots' records.
+check that repeated unknown states never request prompts, and verify passive
+recovery after a failed observation or UI restart uses a new valid snapshot rather
+than an old unlock or a forced lock cycle. Missing/uninitialized settings stay denied.
 
 Integration tripwires check overlay show-call coverage, that the lock path cannot
 stop applications, release-before-focus-clear ordering and the independent export

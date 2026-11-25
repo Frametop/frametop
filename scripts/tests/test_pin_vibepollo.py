@@ -10,6 +10,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -26,9 +27,13 @@ def load():
 
 
 pv = load()
-NEW_TAG = "frametop-2.0.5"
-NEW_PKG = "vibepollo-2.0.5-1-x86_64.pkg.tar.zst"
-INSTALLER = b"#!/bin/bash\necho installer 2.0.5\n"
+# The pin in the tree is whatever it is now; the fake releases are far past any real one.
+OLD_TAG = pv.read_pin(ROOT)["tag"]
+NEW_TAG = "frametop-99.0.0"
+NEWER_TAG = "frametop-99.0.1"
+NEW_PKG = "vibepollo-99.0.0-1-x86_64.pkg.tar.zst"
+DRIFTED_TAG = "frametop-0.0.1"
+INSTALLER = b"#!/bin/bash\necho installer 99.0.0\n"
 
 
 def sha(name):
@@ -39,7 +44,7 @@ NOTES = "- Windows: `sunshine.exe` ... go into a Vibepollo 2.0.3 install (Nonary
 
 
 def fake_release(tag=NEW_TAG, prerelease=False, draft=False, drop=(), extra=(), setup_exe=True, notes=NOTES):
-    names = [NEW_PKG, "vibepollo-debug-2.0.5-1-x86_64.pkg.tar.zst", "sunshine.exe",
+    names = [NEW_PKG, "vibepollo-debug-99.0.0-1-x86_64.pkg.tar.zst", "sunshine.exe",
              "sunshine_wgc_capture.exe", "frametop_clipboard.exe", *extra]
     if setup_exe:
         names.append(pv.SETUP_EXE)
@@ -131,17 +136,17 @@ class TestPin(Copy):
         _, changed, _ = pv.pin(self.root, fetch=fake_release())
         self.assertEqual(changed, [])
         self.assertEqual(self.text(pv.KIT), kit)
-        self.assertEqual(kit.count("  # frametop-2.0.4\n"), 1)
+        self.assertEqual(kit.count(f"  # {OLD_TAG}\n"), 1)
 
     def test_two_releases_keep_both_older_builds(self):
         pv.pin(self.root, fetch=fake_release())
         pin = pv.read_pin(self.root)
-        pin["tag"] = "frametop-2.0.6"
-        pin["windows"]["files"]["sunshine.exe"] = sha("2.0.6")
+        pin["tag"] = NEWER_TAG
+        pin["windows"]["files"]["sunshine.exe"] = sha(NEWER_TAG)
         pv.write_pin(self.root, pin)
         pv.apply(self.root)
         kit = self.text(pv.KIT)
-        self.assertIn("  # frametop-2.0.4\n", kit)
+        self.assertIn(f"  # {OLD_TAG}\n", kit)
         self.assertIn(f'"{sha("sunshine.exe").upper()}"  # {NEW_TAG}\n', kit)
         self.assertEqual(pv.current(pv.read_texts(self.root))["older"][-1], sha("sunshine.exe"))
 
@@ -152,7 +157,7 @@ class TestPin(Copy):
 
     def test_setup_exe_warning_is_about_the_latest_release(self):
         named = fake_release(setup_exe=False)  # the pinned tag lacks it
-        latest = fake_release(tag="frametop-2.0.6")  # the latest has it
+        latest = fake_release(tag=NEWER_TAG)  # the latest has it
 
         def fetch(url):
             return latest(url) if url.endswith("/latest") else named(url)
@@ -169,7 +174,7 @@ class TestPin(Copy):
             ("not ours", fake_release(tag="2.18.9")),
             ("a tag the kits can't take", fake_release(tag="frametop-$(id)")),
             ("missing file", fake_release(drop=("frametop_clipboard.exe",))),
-            ("two packages", fake_release(extra=("vibepollo-2.0.5-2-x86_64.pkg.tar.zst",))),
+            ("two packages", fake_release(extra=("vibepollo-99.0.0-2-x86_64.pkg.tar.zst",))),
         ]:
             with self.subTest(name):
                 with self.assertRaises(pv.PinError):
@@ -192,25 +197,27 @@ class TestPin(Copy):
 
     def test_older_list_closed_by_its_own_line(self):
         # A hand-written entry whose comment ends in ")" stays inside the list.
-        kit = self.text(pv.KIT).replace("$OlderBuildShas = @()", '$OlderBuildShas = @(\n    "' + "A" * 64 + '"  # a test build (by hand)\n)')
+        by_hand = '$OlderBuildShas = @(\n    "' + "A" * 64 + '"  # a test build (by hand)\n)'
+        kit = re.sub(pv.OLDER, lambda m: by_hand, self.text(pv.KIT), flags=re.M)
         (self.root / pv.KIT).write_text(kit)
+        replaced = pv.read_pin(self.root)["windows"]["files"]["sunshine.exe"].upper()
         pv.pin(self.root, fetch=fake_release())
         kit = self.text(pv.KIT)
-        self.assertIn('  # a test build (by hand)\n    "F3CF', kit)
+        self.assertIn(f'  # a test build (by hand)\n    "{replaced}"', kit)
         self.assertEqual(pv.current(pv.read_texts(self.root))["older"][0], "a" * 64)
         self.assertEqual(len(pv.current(pv.read_texts(self.root))["older"]), 2)
 
     def test_suffixed_tag_left_alone(self):
         doc = self.root / "host/linux/README.md"
-        doc.write_text(doc.read_text() + "\nframetop-2.0.4-1 was a test build.\n")
+        doc.write_text(doc.read_text() + f"\n{OLD_TAG}-1 was a test build.\n")
         pv.pin(self.root, fetch=fake_release())
-        self.assertIn("frametop-2.0.4-1 was a test build.", doc.read_text())
+        self.assertIn(f"{OLD_TAG}-1 was a test build.", doc.read_text())
 
     def test_check_names_drift(self):
-        (self.root / pv.GET_SH).write_text(self.text(pv.GET_SH).replace("\nTAG=frametop-2.0.4\n", "\nTAG=frametop-2.0.3\n"))
+        (self.root / pv.GET_SH).write_text(self.text(pv.GET_SH).replace(f"\nTAG={OLD_TAG}\n", f"\nTAG={DRIFTED_TAG}\n"))
         problems = pv.check(self.root)
         self.assertEqual(len(problems), 1)
-        self.assertIn("frametop-2.0.3", problems[0])
+        self.assertIn(DRIFTED_TAG, problems[0])
 
     def test_check_names_windows_drift(self):
         kit = self.text(pv.KIT)
@@ -254,7 +261,7 @@ class TestMain(unittest.TestCase):
             for p in (pv.PIN, pv.GET_SH, pv.KIT) + pv.DOCS:
                 (root / p).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(ROOT / p, root / p)
-            (root / pv.GET_SH).write_text((root / pv.GET_SH).read_text().replace("TAG=frametop-2.0.4", "TAG=frametop-2.0.3"))
+            (root / pv.GET_SH).write_text((root / pv.GET_SH).read_text().replace(f"TAG={OLD_TAG}", f"TAG={DRIFTED_TAG}"))
             saved = pv.ROOT
             pv.ROOT = root
             try:
@@ -262,7 +269,7 @@ class TestMain(unittest.TestCase):
             finally:
                 pv.ROOT = saved
             self.assertEqual(code, 1)
-            self.assertIn("frametop-2.0.3", out)
+            self.assertIn(DRIFTED_TAG, out)
 
 
 if __name__ == "__main__":

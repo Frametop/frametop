@@ -36,19 +36,21 @@ $ProgressPreference = "SilentlyContinue"
 $VibepolloVersion = "2.0.3"
 $SetupUrl = "https://github.com/Nonary/Vibepollo/releases/download/2.0.3/VibepolloSetup-v2.0.3.exe"
 $SetupSha = "D099E2A686D6E4A61A1F8D48E04C2A2FDA2FE27BCFD7D50EF2365758B09AAB05"
-# Frametop's build: Frametop/frametop-vibepollo release frametop-2.0.4 (its CI, from the tag).
+# Frametop's build: Frametop/frametop-vibepollo release frametop-2.0.6 (its CI, from the tag).
 # $BuildUrl, the Sha values and $OlderBuildShas come from host/vibepollo-pin.json: for a new
 # build, run scripts/pin-vibepollo.py pin.
 # Each file: where it goes in the install, its SHA-256, and the SHA-256 of Vibepollo 2.0.3's own
 # (none: 2.0.3 has no such file).
-$BuildUrl = "https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.4"
+$BuildUrl = "https://github.com/Frametop/frametop-vibepollo/releases/download/frametop-2.0.6"
 $BuildFiles = @(
-    @{ Path = "sunshine.exe"; Sha = "F3CFDCC2FB22519F024CBC1969E9BC77A9BB7392FF47E6B3212C844BCE681BDF"; Stock = "37100D36E920B84899898FEB57EF234702329CE9A7A02A9321AE47F7CF3A132A" }
-    @{ Path = "tools\sunshine_wgc_capture.exe"; Sha = "E16C4EAE337E87297D897B7CBC672B4BCF93BD634AC852710AC655AFAEFF26BB"; Stock = "E6A4EE79E0B8CC71E2227277B99AF25FFFFC57DFF0DFFFEDE042B8C56EFB6066" }
-    @{ Path = "tools\frametop_clipboard.exe"; Sha = "2E020870D9933F017F6DFEBF65ABEAEFFD41B04765C44DC3A7454F9D3780ABDD"; Stock = $null }
+    @{ Path = "sunshine.exe"; Sha = "57D764DC94F3BC9AE10414D77EB2F7EAB2AED118FA45BAFD28341609445FE58A"; Stock = "37100D36E920B84899898FEB57EF234702329CE9A7A02A9321AE47F7CF3A132A" }
+    @{ Path = "tools\sunshine_wgc_capture.exe"; Sha = "E4C8AA6333D434902EB976019DB4CD0082700885CD14D09884FD55E81258E7A2"; Stock = "E6A4EE79E0B8CC71E2227277B99AF25FFFFC57DFF0DFFFEDE042B8C56EFB6066" }
+    @{ Path = "tools\frametop_clipboard.exe"; Sha = "C029FD863291CB9317D097D999E11A5CF140F3D7183699BD92979CAD842E0D5E"; Stock = $null }
 )
 # Earlier Frametop builds on Vibepollo 2.0.3 (their sunshine.exe), replaced by this one.
-$OlderBuildShas = @()
+$OlderBuildShas = @(
+    "F3CFDCC2FB22519F024CBC1969E9BC77A9BB7392FF47E6B3212C844BCE681BDF"  # frametop-2.0.4
+)
 # sunshine.exe of earlier setups, which Vibepollo 2.0.3's installer replaces first: Vibepollo
 # 2.0.0's own and the Frametop builds the 2.0.0 kits put in, and Frametop's 2.0.3 build.
 $EarlierShas = @(

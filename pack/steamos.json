@@ -48,6 +48,30 @@
       "steamvr": "2.19.3",
       "frametop": "0.3.0-exp.26",
       "date": "2026-11-24"
+    },
+    {
+      "build": "20261022.6150929",
+      "version": "0.4.5",
+      "branch": "stable",
+      "steamvr": "2.18.2",
+      "frametop": "0.3.0-exp.27",
+      "date": "2026-11-24"
+    },
+    {
+      "build": "20261118.6185655",
+      "version": "0.5.10",
+      "branch": "beta",
+      "steamvr": "2.19.4",
+      "frametop": "0.3.0-exp.28",
+      "date": "2026-11-25"
+    },
+    {
+      "build": "20261125.6090751",
+      "version": "0.5.11",
+      "branch": "beta",
+      "steamvr": "2.19.5",
+      "frametop": "0.3.0-exp.28",
+      "date": "2026-11-25"
     }
   ],
   "broken": []

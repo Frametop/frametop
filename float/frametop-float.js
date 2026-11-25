@@ -162,18 +162,21 @@ function holding(w) {
     return true;
 }
 
-// A floating window stays an ordinary window: its output is its size plus a margin, so half of it (a
-// snap key, Meta+arrow by default, or a tile of KWin's editor) is no place for it, and each press would
-// halve it again. Out of the tile and back as it was; true when it was in one. (KWin restores the size
-// from before the tile itself, when the app answers: asked for again by holding.)
+// A floating window stays an ordinary window, as KWin's snap keys (Meta+arrow), its tiles and maximizing
+// find it: its output is its size plus a margin, so half of it (or all of it) is no size to take, and the
+// next press would halve it (or grow it) again. KWin's own way back is the size from before, when the app
+// answers, and the size it snapped to can still come in first: asked for again by holding.
+function asItWas(w) {
+    const s = settled[String(w.internalId)];
+    if (!s || !w.output || s.output !== w.output.name || s.fullScreen) return;
+    hold(w, s.frame.w, s.frame.h);
+    w.frameGeometry = {x: s.frame.x, y: s.frame.y, width: s.frame.w, height: s.frame.h};
+}
+// True when it was in a tile.
 function untile(w) {
-    const id = String(w.internalId), s = settled[id];
     if (!isSpare(w.output) || !w.normalWindow || !w.tile) return false;
     w.tile = null;
-    if (s && s.output === w.output.name && !s.fullScreen) {
-        hold(w, s.frame.w, s.frame.h);
-        w.frameGeometry = {x: s.frame.x, y: s.frame.y, width: s.frame.w, height: s.frame.h};
-    }
+    asItWas(w);
     return true;
 }
 
@@ -277,8 +280,9 @@ function watch(w) {
     });
     w.minimizedChanged.connect(() => { if (onSpare()) report("minimized", w); });
     w.maximizedChanged.connect(() => {
-        // (an ordinary window: untile)
-        if (onSpare() && w.normalWindow && !w.fullScreen) w.setMaximize(false, false);
+        if (!onSpare() || !w.normalWindow || w.fullScreen) return;
+        w.setMaximize(false, false);
+        if (!changingOutputs()) asItWas(w);
     });
     if (w.tileChanged) w.tileChanged.connect(() => { if (!changingOutputs()) untile(w); });
 }

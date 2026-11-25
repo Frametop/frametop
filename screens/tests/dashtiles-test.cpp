@@ -569,7 +569,7 @@ int main() {
         for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
         const auto &l = b.Arrange(desk);
         const double rel[3][4] = {{1, 0, 0, 0.5}, {0, 1, 0, 2}, {0, 0, 1, -1}};
-        auto d = b.DropFor(2, l.az1 + 40, 20, desk);
+        auto d = b.DropFor(2, l.az1 + 40 + (b.PlacedOf(2)->az1 - b.PlacedOf(2)->az0) / 2, 20, desk);   // (its near edge 40 degrees off)
         check("drop: far off: torn off", d.kind == tiling::Drop::TearOff);
         b.Drop(2, d);
         check("pulled off: back in its place, still on the grid", !b.Satellite(2) && b.Anchored(2) && b.Tiled(2));
@@ -990,6 +990,11 @@ int main() {
             check("left in the room: remembered as the room when its line said so or the user floated it",
                   dashtiles::LeftInRoom("room", false) && dashtiles::LeftInRoom("", true) && dashtiles::LeftInRoom("tile 0 1 0 1 1", true) &&
                       !dashtiles::LeftInRoom("", false) && !dashtiles::LeftInRoom("off", false));
+            // the move and size keys: the focused tile when it's an app's, else the app's tile typing goes to
+            check("keys panel: an app's tile focused: it", dashtiles::KeysPanel(3, true, 5, true) == 3);
+            check("keys panel: a display focused (or none), typing in an app's tile: that tile",
+                  dashtiles::KeysPanel(1, false, 5, true) == 5 && dashtiles::KeysPanel(-1, false, 5, true) == 5);
+            check("keys panel: no app's tile either way: the desktop's keys", dashtiles::KeysPanel(1, false, 2, false) == -1);
             check("a junk line: Restore (which says it isn't one)", TileWhenKnown("screen:1", "junk") == W::Restore &&
                                                                        TileWhenKnown("app:x", "junk") == W::Anchor);
         }

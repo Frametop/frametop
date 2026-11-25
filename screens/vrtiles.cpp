@@ -652,11 +652,18 @@ bool KeysTile(int i) {
     const Screen &s = it->second;
     return s.floating || s.gsapp || IsWindowPanel(s);
 }
-// The panel the tiling keys act on: the one a tiling key just moved (g_tileHold: until the 3D mouse
+// The panel the move and size keys act on (tilestate.h's KeysPanel): the focused tile when it's an app's,
+// else the app's tile typing goes to, shown; -1: none.
+int KeysPanel() {
+    const int typing = TypingPanel();
+    const auto t = g_screens.find(typing);
+    return dashtiles::KeysPanel(g_tileFocus, KeysTile(g_tileFocus), typing, t != g_screens.end() && t->second.visible && KeysTile(typing));
+}
+// The focused tile: the one a tiling key just moved (g_tileHold: until the 3D mouse
 // is back on a panel or, with DASH_TILE_LOOK, you turn to another), else the one under the pointer, else the one you're
 // looking at (within 25 degrees of straight ahead; unless DASH_TILE_LOOK is off). The relay is told
-// when it's an anchored app's tile (KeysTile; the keys are the desktop's or the PC's otherwise),
-// and that one gets a thin border.
+// when the keys have an anchored app's tile to act on (KeysPanel; the keys are the desktop's or the
+// PC's otherwise), and that one gets a thin border.
 void UpdateTileFocus() {
     const int64_t now = NowMs();
     Mat head;
@@ -685,7 +692,7 @@ void UpdateTileFocus() {
     }
     g_tileFocus = f;
     // (1: an app's tile, every tiling key; 2: a screen's or a remote display's, the nudges only)
-    const int tile = KeysTile(f) ? 1 : g_tiles.Anchored(f) ? 2 : 0;
+    const int tile = KeysPanel() >= 0 ? 1 : g_tiles.Anchored(f) ? 2 : 0;
     if (tile != g_tileFocusSaid || (tile && now - g_tileFocusSaidMs >= kTileFocusRenewMs)) {
         SendRelay(tile == 1 ? "tilefocus 1" : tile == 2 ? "tilefocus 2" : "tilefocus 0");
         g_tileFocusSaid = tile, g_tileFocusSaidMs = now;
@@ -696,9 +703,9 @@ void UpdateTileFocus() {
 // The border: one overlay, behind the focused tile, a frame its shape. Placed after the tick's
 // moves (the end of ft_vr_poll) and whenever the tiles are (RetileDash), so it keeps up with its tile.
 void PlaceTileBorder() {
-    const int f = g_tileFocus;
+    const int f = KeysPanel();
     const auto it = g_screens.find(f);
-    const bool tile = it != g_screens.end() && it->second.visible && KeysTile(f);
+    const bool tile = it != g_screens.end() && it->second.visible;
     TileBorder &b = g_tileBorder;
     if (!tile) {
         if (b.on >= 0 && b.overlay != vr::k_ulOverlayHandleInvalid) PinHide(b.overlay);
@@ -905,9 +912,10 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
     case vrcmd::Tile: {
         dashtiles::Key key;
         if (!dashtiles::ParseKey(parsed.word, &key)) return (void)std::snprintf(reply, size, "error no such tiling key");
-        const int i = g_tileFocus;
-        if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
         const bool nudge = key == dashtiles::Key::NudgeUp || key == dashtiles::Key::NudgeDown;   // (any tile's)
+        const int keys = KeysPanel();
+        const int i = (nudge && g_tiles.Tiled(g_tileFocus)) || keys < 0 ? g_tileFocus : keys;
+        if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "ok no tile has the focus");
         if (!nudge && !KeysTile(i)) return (void)std::snprintf(reply, size, "ok a screen or a remote display: drag it");
         g_tileHold = i, g_tileHoldMs = NowMs(), g_mouseScreen = -1;   // (the relay hid the 3D mouse: it keeps the focus)
         if (Mat head; !HeadForward(&head, g_tileHoldFwd)) g_tileHoldFwd[0] = g_tileHoldFwd[1] = g_tileHoldFwd[2] = 0;

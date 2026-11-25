@@ -39,17 +39,19 @@ struct Drop {
     int before = -1;
     bool leftOfSlot = false;   // NewColumn: let go left of Steam's slot (at the split: which side it goes)
 };
-constexpr double kTearMarginDeg = 10;   // this far past the strip, under the desk or over the tallest column: torn off
+constexpr double kTearMarginDeg = 10;   // its edge this far past the strip, under the desk or over the tallest column: torn off
 
 inline Drop DropAt(const Layout &l, const std::vector<Column> &cols, double az, double el, int self = -1) {
     Drop d;
     if (cols.empty()) return d.kind = Drop::NewColumn, d.col = 0, d;
     az = WrapNear(az, (l.az0 + l.az1) / 2);
-    double half = 0;   // the dragged panel's half height, and its column
+    double half = 0, halfAz = 0;   // the dragged panel's half height and half width, and its column
     int own = -1;
     for (const Placed &p : l.tiles)
-        if (p.id == self) half = (p.el1 - p.el0) / 2, own = p.col;
-    if (az < l.az0 - kTearMarginDeg || az > l.az1 + kTearMarginDeg || el < l.el0 - kTearMarginDeg - half ||
+        if (p.id == self) half = (p.el1 - p.el0) / 2, halfAz = (p.az1 - p.az0) / 2, own = p.col;
+    // (round you too: a wide tile set down beside the strip has its middle half its width past it, torn off
+    // by the bare margin; user, 2026-11-24: "dragging the window from above Dodie to the side of Dodie doesn't work")
+    if (az < l.az0 - kTearMarginDeg - halfAz || az > l.az1 + kTearMarginDeg + halfAz || el < l.el0 - kTearMarginDeg - half ||
         el > l.el1 + kTearMarginDeg + half)
         return d;
     d.leftOfSlot = l.split >= 0 && az < l.slotAz;

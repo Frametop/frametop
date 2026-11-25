@@ -256,6 +256,31 @@ int main() {
         check("any: none lost", kept);
         check("any: none smaller than the squeeze", size);
     }
+    // --- a shelf that fills the display's width: Meta+Right at its right end moves it out at once, not
+    // a lean first that nobody sees (user, 2026-11-24: "it will sometimes require pressing it twice")
+    {
+        Desk d;
+        for (int i = 2; i <= 5; ++i) d.Open(i, 1280, 800);
+        const bool full = d.Row({2, 3, 4, 5}) && d.Over(2) && d.At(5).az1 > d.At(1).az1 - dashtiles::tilekeys::kLeanSeenDeg;
+        check("keys: four over the display, their shelf as wide as it", full);
+        check("keys: ...Right on the right one: a column of its own, in one press", d.Key(5, Key::Right) && d.Cols() == 2 && d.At(5).col > d.At(1).col);
+        Desk e;
+        e.Open(2, 1280, 800);
+        const double was = e.At(2).azDeg;
+        check("keys: one small one over it, room beside: Right leans it first", e.Key(2, Key::Right) && e.Cols() == 1 && e.At(2).azDeg > was + 1);
+    }
+    // --- dragged from over the display to beside it: its middle is half its width past the strip there
+    // (user, 2026-11-24: "dragging the window from above Dodie to the side of Dodie doesn't work")
+    {
+        Desk d(3440, 1440);
+        d.Open(2, 1600, 1100);
+        const double halfW = (d.At(2).az1 - d.At(2).az0) / 2;
+        const auto drop = d.Again(2, d.b.Last().az1 + halfW + 5, d.At(1).elDeg);
+        check("drop: beside the display, its near edge 5 degrees off: a column there", halfW > tiling::kTearMarginDeg - 5 &&
+                                                                                         drop.kind == tiling::Drop::NewColumn && d.Cols() == 2 && d.At(2).col > d.At(1).col);
+        const auto far = d.Again(2, d.b.Last().az1 + halfW + tiling::kTearMarginDeg + 3, d.At(1).elDeg);
+        check("drop: ...well past it: still torn off", far.kind == tiling::Drop::TearOff);
+    }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed != 0;
 }

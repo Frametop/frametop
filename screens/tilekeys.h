@@ -30,6 +30,9 @@ inline bool ParseKey(const char *word, Key *k) {
 
 namespace tilekeys {
 
+constexpr double kLeanSeenDeg = 1;   // a shelf's lean that moves it less than this isn't seen
+
+
 // Let go over its own column, already its top (or Meta+Shift+Up alone in its column, user
 // 2026-11-20: "tile it up"): a neighbouring column's top panel in under it, the one on side `side`
 // first, if it fits (none that can: nothing). It stays where it is; the one pulled in moves
@@ -137,9 +140,12 @@ inline bool Press(tilegrid::Grid &g, slotsplit::Policy &slot, const View &v, int
         case Key::Left:
         case Key::Right: {
             // narrower than its column and not against that edge yet: it goes there first (user,
-            // 2026-11-19: "a 600 pixel wide display that I can either set on the right, or the left")
+            // 2026-11-19: "a 600 pixel wide display that I can either set on the right, or the left").
+            // As good as there already (its shelf fills the column): the key moves it on, not a press with
+            // nothing to see (user, 2026-11-24: "it will sometimes require pressing it twice to move").
             const int dir = k == Key::Left ? -1 : +1;
-            if (const tiling::Placed *p = v.PlacedOf(id); p && p->narrow && p->lean != dir) return g.SetAlign(id, dir);
+            if (const tiling::Placed *p = v.PlacedOf(id); p && p->narrow && p->lean != dir && v.LeanRoom(*p, dir) > kLeanSeenDeg)
+                return g.SetAlign(id, dir);
             if (const tiling::Placed *p = v.PlacedOf(id); p && !v.Alone(id) && OntoWide(g, v, id, !p->below, dir)) return true;
             return slot.Move(g, id, [&] { return g.MoveSide(id, dir, slot.Key()); });
         }

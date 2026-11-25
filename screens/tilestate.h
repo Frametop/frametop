@@ -209,4 +209,13 @@ inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line, 
 // the next window of that app came as a new tile.
 inline bool LeftInRoom(const std::string &line, bool floated) { return floated || line == "room"; }
 
+// The panel the move and size keys act on: the focused tile (pointed or looked at) when it's an app's,
+// else the app's tile typing goes to; -1: none, the keys are the desktop's. On the desktop Meta+arrows
+// are KWin's quick tile, and that acts on the window with the keyboard: alone on its own output it was
+// cut in half, then sent off it (user, 2026-11-24: "it cuts the display in half from the top, and then
+// if I do it again, it disappears entirely", looking at the display beside it).
+inline int KeysPanel(int focus, bool focusIsApp, int typing, bool typingIsApp) {
+    return focusIsApp ? focus : typingIsApp ? typing : -1;
+}
+
 }  // namespace dashtiles

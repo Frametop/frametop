@@ -108,6 +108,17 @@ struct View {
         const double h = tilepack::Grown(f, {other, Unshrunk(q->az1 - q->az0), Unshrunk(q->el1 - q->el0)}, params.gapDeg);
         return h >= 0 && (under ? ColumnFits(col, fills[size_t(col)].height, params.gapDeg + h) : ColumnFits(col, h));
     }
+    // How far tile `p`'s shelf could still lean to side `dir` (-1 left): from its end there to its column's edge,
+    // as laid out last. A shelf that fills its column has none.
+    double LeanRoom(const tiling::Placed &p, int dir) const {
+        double edge = dir < 0 ? 1e9 : -1e9, end = edge;
+        for (const tiling::Placed &q : last.tiles) {
+            if (q.col != p.col) continue;
+            edge = dir < 0 ? std::min(edge, q.az0) : std::max(edge, q.az1);
+            if (q.below == p.below && q.shelf == p.shelf) end = dir < 0 ? std::min(end, q.az0) : std::max(end, q.az1);
+        }
+        return dir < 0 ? end - edge : edge - end;
+    }
     bool Alone(int id) const {
         const tilegrid::Where w = grid.Find(id);
         return w.ok() && grid.Cols()[size_t(w.col)].cells.size() == 1;

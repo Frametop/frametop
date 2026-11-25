@@ -390,6 +390,7 @@ void TileDrop(Screen &s, int i);
 void TileResized(Screen &s, int i);
 void UpdateDashTiles();
 void PlaceTileBorder();
+int TypingPanel();   // the panel typing goes to (compositor.c's keys_update: the gamepad pill's), -1 Steam
 void TileGlowTarget(int *on, bool *hot);   // the panel the centre's glow is round now, and whether it's a drop onto it (vrtilecentre.cpp)
 bool TileCurveToggle(const Screen &s);     // the centre display's curve round the arc on or off (false: not the centre)
 // ---------------------------------------------------------------- vrtilecentre.cpp's

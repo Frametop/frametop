@@ -78,7 +78,8 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout reset                    recenter after the 3-second countdown (Meta+Shift+R,
                                      screen reset button, or mapped button). With ft-screens,
                                      everything in the room moves in one piece, each panel
-                                     where you have it among the others; apps and streams stay.
+                                     where you have it among the others; Keep in View ends;
+                                     apps and streams stay.
                                      apply or use NAME puts each panel back in its layout.
   ft-layout capture                  save the current arrangement as the custom layout
   ft-layout save NAME                save it as a named layout too, and use that; with the
@@ -845,7 +846,12 @@ def recenter_screens():
             return apply_screens()
         moved, eye, heading = int(f[1]), tuple(map(float, f[2:5])), float(f[5])
         for n, rel in head_pins:
-            sock.ask(f"pin {n} head " + " ".join(f"{v:.5f}" for v in rel))
+            try:
+                sock.ask(f"pin {n} head " + " ".join(f"{v:.5f}" for v in rel))
+            except NoAnswer:
+                raise
+            except RuntimeError as e:
+                log(f"recenter: screen {n} not pinned again ({e})")
         recenter_tiles(sock)
         try:
             sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset

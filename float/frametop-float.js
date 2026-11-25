@@ -16,6 +16,7 @@ let marking = false;   // the script itself is setting keep-below (see mark)
 const settled = {};    // id -> {output, frame, fullScreen, maximized}: where a window belongs (see putBack)
 const held = {};       // id -> {w, h, until, asked}: a size asked for, for a second (see hold)
 const moved = {};      // id -> true, or "back" once put back: it moved while KWin changed the outputs
+const late = {};       // id -> true: its size (or place) on a spare came in, to take next turn (see asItWas)
 let layout = "", layoutOutputs = {}, layoutSince = 0;  // the outputs at the last screensChanged
 const activeAt = {};   // id -> when it was last KWin's active window (ms), for frunner's most recent
 
@@ -162,12 +163,14 @@ function holding(w) {
     return true;
 }
 
-// A floating window stays an ordinary window, as KWin's snap keys (Meta+arrow), its tiles and maximizing
-// find it: its output is its size plus a margin, so half of it (or all of it) is no size to take, and the
-// next press would halve it (or grow it) again. KWin's own way back is the size from before, when the app
-// answers, and the size it snapped to can still come in first: asked for again by holding.
+// A floating window stays an ordinary window, whatever KWin's snap keys (Meta+arrow), its tiles and
+// maximizing make of it: its output is its size plus a margin, so half of it (or all of it) is no size to
+// take, and the next press would halve it (or grow it) again. Its size comes in before KWin says it's
+// maximized, and in KWin 6.2 before it's in a tile, so a size on a spare is taken a turn of KWin's event
+// loop later (takeLate), and when one of these came with it, it's asked for as it was instead.
 function asItWas(w) {
-    const s = settled[String(w.internalId)];
+    const id = String(w.internalId), s = settled[id];
+    delete late[id];
     if (!s || !w.output || s.output !== w.output.name || s.fullScreen) return;
     hold(w, s.frame.w, s.frame.h);
     w.frameGeometry = {x: s.frame.x, y: s.frame.y, width: s.frame.w, height: s.frame.h};
@@ -179,6 +182,24 @@ function untile(w) {
     asItWas(w);
     return true;
 }
+const lateTimer = new QTimer();
+lateTimer.singleShot = true;
+lateTimer.interval = 0;
+lateTimer.timeout.connect(() => {
+    Object.keys(late).forEach(id => {
+        delete late[id];
+        const w = byId(id), s = settled[id];
+        if (!w || w.deleted) return;
+        if (changingOutputs()) {
+            moved[id] = true;
+            return;
+        }
+        if (s && s.fullScreen !== w.fullScreen) delete held[id];  // (full screen's size, or the one after it)
+        if (untile(w) || holding(w)) return;
+        settle(w);
+        if (isSpare(w.output)) report("geometry", w);
+    });
+});
 
 // Runs while KWin's output change still counts as going on (nothing reported), so the steps on
 // the way don't reach ft-floatd: told only where the window ends up (see reportMoved).
@@ -245,9 +266,12 @@ function watch(w) {
             moved[id] = true;
             return;
         }
-        if (untile(w) || holding(w)) return;
-        settle(w);
-        if (onSpare()) report("geometry", w);
+        if (onSpare()) {
+            late[id] = true;
+            lateTimer.start();
+        } else if (!holding(w)) {
+            settle(w);
+        }
     });
     w.outputChanged.connect(() => {
         if (changingOutputs()) {
@@ -276,14 +300,10 @@ function watch(w) {
             return;
         }
         if (settled[id]) settled[id].fullScreen = w.fullScreen;
+        delete held[id];  // (a size asked for before it)
         if (onSpare()) report("fullscreen", w);
     });
     w.minimizedChanged.connect(() => { if (onSpare()) report("minimized", w); });
-    // (its size comes in between these two: not taken)
-    if (w.maximizedAboutToChange) w.maximizedAboutToChange.connect(mode => {
-        const s = settled[id];
-        if (mode && s && onSpare() && w.normalWindow && !s.fullScreen && !changingOutputs()) hold(w, s.frame.w, s.frame.h);
-    });
     w.maximizedChanged.connect(() => {
         if (!onSpare() || !w.normalWindow || w.fullScreen) return;
         w.setMaximize(false, false);
@@ -303,6 +323,7 @@ workspace.windowRemoved.connect(w => {
     delete watched[id];
     delete settled[id];
     delete held[id];
+    delete late[id];
     delete moved[id];
     delete activeAt[id];
 });

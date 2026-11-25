@@ -13,15 +13,15 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 timers = {}  # GLib.timeout_add's callbacks still due, run by hand
+added = []   # ...and how long each was set for
 
 
 def timeout_add(ms, fn):
-    timers[len(timers) + 1 + 1000 * len(added)] = fn
     added.append(ms)
-    return list(timers)[-1]
+    timers[len(added)] = fn
+    return len(added)
 
 
-added = []
 glib = types.SimpleNamespace(idle_add=mock.MagicMock(), timeout_add=timeout_add, timeout_add_seconds=mock.MagicMock(),
                              source_remove=lambda n: timers.pop(n), io_add_watch=mock.MagicMock())
 repository = types.SimpleNamespace(GLib=glib, Gio=mock.MagicMock())

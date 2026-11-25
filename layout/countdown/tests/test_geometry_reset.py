@@ -262,6 +262,26 @@ class GeometryResetReview(unittest.TestCase):
                 if want:  # (the move takes it off the head: pinned again after)
                     self.assertLess(asks.index(h.moves()[0]), asks.index(want[0]))
 
+    def test_pins_of_a_preset_or_unreadable_are_not_pinned_again(self):
+        h = Harness(self.lock, profile=False)  # (a preset has no pins, whatever the screen's entry kept)
+        h.layout["screens"][0]["pin"] = {"hand": "head", "rel": [0] * 12}
+        h.pins = {1: "head"}
+        self.assertEqual(h.run(), 0)
+        h = Harness(self.lock)
+        h.layout["layouts"]["Cockpit"][0]["pin"] = {"hand": "head", "rel": [0] * 11}
+        h.pins = {1: "head"}
+        self.assertEqual(h.run(), 0)  # (a "pin" sent fails it)
+
+    def test_a_pin_that_fails_ends_nothing_else(self):
+        h = Harness(self.lock)
+        h.layout["layouts"]["Cockpit"][0]["pin"] = {"hand": "head", "rel": [0] * 12}
+        h.pins = {1: "head"}
+        h.failures["pin 1 head " + " ".join(["0.00000"] * 12)] = RuntimeError("error no screen 1")
+        self.assertEqual(h.run(), 0)
+        self.assertIn(("ask", "tiles recentre"), h.events)
+        self.assertIn("anchor", [e[0] for e in h.events])
+        self.assertEqual(h.events[-1], ("kwin_follow",))
+
     def test_a_pc_windows_panel_leads_nothing(self):
         # (its place in the layout is where it last opened, not where you put it: desktopless)
         h = Harness(self.lock)

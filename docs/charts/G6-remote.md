@@ -10,7 +10,7 @@ Model: `G6-remote.tla` (module `G6RemoteExit`): how an ft-stream ends and whethe
 The rest of G6 is checked by two more models here, which matched their baselines at `78e93b1`. The verify skills (`verify-remote-streams`, `verify-fake-worn-guard`) run their checks:
 
 - [remote-streams/](remote-streams/): `HostInputLease.tla` (3,561 states), `HostChart.tla` (345), `RemoteStreams.tla` (164).
-- [fake-worn-guard/](fake-worn-guard/): `FakeWornGuard.tla` (264 to 632 states).
+- [fake-worn-guard/](fake-worn-guard/): `FakeWornGuard.tla` (106 to 956 states).
 
 Results at `78e93b1`:
 

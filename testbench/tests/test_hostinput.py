@@ -131,6 +131,25 @@ class HostInputTests(Fixture):
             self.assertEqual(slept, [])
             self.assertIsNone(hostinput.read_flag())
 
+    def test_a_worn_on_while_the_flag_settles_keeps_its_flag(self):
+        on = cli.parser().parse_args(['worn', 'on'])
+        bench = mock.Mock(control=mock.Mock(return_value={'ok': True}))
+        for live in (True, False):   # the old guard still lives; or died, and worn on starts pid 43's
+            start_guard = mock.Mock(side_effect=lambda socket=None: hostinput.set_flag(False, 2.0, pid=43))
+            hostinput.set_flag(False, 1.0, pid=42)
+
+            def meanwhile(_):   # the other command's whole run, in this one's wait
+                with mock.patch.object(hostinput.time, 'sleep'):
+                    cli.drop_unsafe_worn(bench, on)
+                    cli.dispatch(on, bench)
+            with mock.patch.object(hostinput, 'guard_alive', lambda flag, proc='/proc': live or flag['pid'] == 43), \
+                 mock.patch.object(hostinput, 'start_guard', start_guard), \
+                 mock.patch.object(hostinput, 'state', lambda *a, **k: {'input_streams': []}), \
+                 mock.patch.object(hostinput.time, 'sleep', meanwhile):
+                hostinput.settle_and_clear_flag()
+            self.assertEqual(hostinput.read_flag()['pid'], 42 if live else 43)
+            self.assertEqual(start_guard.called, not live)
+
     def test_flag_round_trip_and_garbled_flag_is_not_an_allow(self):
         self.assertIsNone(hostinput.read_flag())
         hostinput.set_flag(True, 5.0)

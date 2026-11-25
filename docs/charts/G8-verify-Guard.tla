@@ -13,11 +13,12 @@ EXTENDS FakeWornGuard
 TtlEnds ==
     /\ proxy = "up" /\ faked
     /\ faked' = FALSE
-    /\ UNCHANGED <<proxy, flag, guard, lock, stream, pc, asked, seen, saidTest, lease>>
+    /\ UNCHANGED <<says, proxy, flag, guard, lock, stream, pc, asked, seen, saidTest, lease>>
 
 FairSpec == Init /\ [][Next \/ TtlEnds]_vars /\ SF_vars(TtlEnds)
     /\ WF_vars(OnCheck) /\ WF_vars(OnStartGuard) /\ WF_vars(OnWait) /\ WF_vars(OnFake)
-    /\ WF_vars(OnVerify) /\ WF_vars(OffSend) /\ WF_vars(StopOldGuard)
+    /\ WF_vars(OnVerify) /\ WF_vars(OffSend) /\ WF_vars(OffClear) /\ WF_vars(StopOldGuard)
+    /\ WF_vars(HelperSettles)
     /\ WF_vars(GuardStarts) /\ WF_vars(GuardLetsGo) /\ WF_vars(GuardCleanup) /\ WF_vars(ProxyRecovers)
 
 \* The guard always restores the real wearer: once the wearer is faked with no live guard and no

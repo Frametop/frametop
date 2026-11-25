@@ -81,9 +81,13 @@ def clear_flag():
 def settle_and_clear_flag():
     """The faked wearer has gone: FLAG goes SETTLE seconds later, when the pointer helper has stopped
     saying worn. A stream that finds no FLAG leases on the helper's next "worn", and FLAG's guard
-    lets go of the locks with it."""
-    if (read_flag() or {}).get('allow_host_input') is False:
+    lets go of the locks with it. Another command's `worn on` meanwhile writes FLAG anew, and that
+    one isn't this command's to clear."""
+    flag = read_flag()
+    if (flag or {}).get('allow_host_input') is False:
         time.sleep(SETTLE)
+        if read_flag() != flag:
+            return
     clear_flag()
 
 

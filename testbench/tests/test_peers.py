@@ -203,9 +203,9 @@ class CommandsTest(unittest.TestCase):
                 return {'ok': True}
 
         with mock.patch.object(peers, 'stop_all', side_effect=lambda: order.append('peers') or {'stopped': [2]}), \
-                mock.patch.object(cli.hostinput, 'settle_and_clear_flag'):
+                mock.patch.object(cli.hostinput, 'settle_and_clear_flag', side_effect=lambda: order.append('flag')):
             result = cli.dispatch(cli.parser().parse_args(['release']), Bench())
-        self.assertEqual((order, result['peers']), (['peers', 'fakes', 'control'], {'stopped': [2]}))
+        self.assertEqual((order, result['peers']), (['peers', 'fakes', 'control', 'flag'], {'stopped': [2]}))
 
 
 @unittest.skipUnless(peers.in_box() and all(path.is_file() for path in peersim.PROGRAMS.values()),

@@ -299,7 +299,10 @@ def dispatch(args, bench):
             # The guard holds every input host's lock before the wearer is faked, so no stream,
             # live or started later, can lease.
             flag = hostinput.read_flag()
-            if not (flag and flag.get('allow_host_input') is False and hostinput.guard_alive(flag)):
+            if flag and flag.get('allow_host_input') is False and hostinput.guard_alive(flag):
+                # a command that just released the wearer mustn't clear it (settle_and_clear_flag)
+                hostinput.set_flag(False, time.time(), pid=flag['pid'])
+            else:
                 if flag and flag.get('allow_host_input') is False:
                     # drop_unsafe_worn couldn't confirm its release. start_guard would clear this
                     # flag, and a guard that then fails to start would leave the wearer faked

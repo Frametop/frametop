@@ -36,6 +36,12 @@ int main(void) {
             }
         }
     }
+    // A spare's first size suits every whole buffer scale KWin 6.2 can restore for it: at 640 x 480
+    // a window that floated at 215% (whole scale 3) left KWin unable to start.
+    for (int k = 1; k <= 6; k++) {
+        assert(FT_SPARE_WIDTH % k == 0);
+        assert(FT_SPARE_HEIGHT % k == 0);
+    }
     puts("screen-scale: ok");
     return 0;
 }

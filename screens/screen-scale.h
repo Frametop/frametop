@@ -23,4 +23,11 @@ static inline int ft_screen_toplevel_dim(int px, double scale) {
     return n;
 }
 
+// A spare output's size until ft-floatd sizes it. KWin 6.2 starts a spare at the scale it saved
+// for that output (a floating window's, up to 3) and gives the buffer that scale rounded up as
+// its whole buffer scale. A buffer that isn't a multiple of it is a protocol error that
+// disconnects KWin, and KWin then restarts into the same error. 720 x 480 is a multiple of
+// every whole scale up to 6.
+enum { FT_SPARE_WIDTH = 720, FT_SPARE_HEIGHT = 480 };
+
 #endif

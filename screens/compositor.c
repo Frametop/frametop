@@ -419,12 +419,13 @@ static void screen_commit(struct wl_listener *l, void *data) {
     struct wlr_xdg_surface *xdg = sc->toplevel->base;
     if (xdg->initial_commit) {
         // First commit: tell KWin the size of this screen, after its preferred scale (KWin 6.6
-        // resizes from both: configure_screen). A spare is 640 x 480 until ft-floatd sizes it.
+        // resizes from both: configure_screen). A spare is FT_SPARE_WIDTH x FT_SPARE_HEIGHT until
+        // ft-floatd sizes it.
         if (sc->index < sc->server->n_config) {
             configure_screen(sc);
         } else {
             wlr_fractional_scale_v1_notify_scale(xdg->surface, sc->server->scale[sc->index]);
-            wlr_xdg_toplevel_set_size(sc->toplevel, 640, 480);
+            wlr_xdg_toplevel_set_size(sc->toplevel, FT_SPARE_WIDTH, FT_SPARE_HEIGHT);
         }
         wlr_xdg_toplevel_set_activated(sc->toplevel, true);
         if (sc->decoration)

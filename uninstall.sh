@@ -295,7 +295,7 @@ main() {
   run rm -rf "$HOME/.local/share/frametop/apps" "$HOME/.local/share/kwin/decorations/kwin4_decoration_qml_frametop" \
     "$HOME/.cache/frametop" "$HOME/.cache/frametop-framedrop" "$HOME/.cache/frametop-installer"
 
-  local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-tiles.txt" "$HOME/.config/frametop-palm.txt" "$HOME/.config/frametop-remote"
+  local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-tiles.txt" "$HOME"/.config/frametop-palm.txt* "$HOME/.config/frametop-remote"
                   "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream"
                   "$HOME/.local/state/frametop-trial")
   local kept=()

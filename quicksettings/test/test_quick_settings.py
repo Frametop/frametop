@@ -83,6 +83,21 @@ class File(unittest.TestCase):
         kept = [p for p in Path(self.path).parent.iterdir() if p.name != "frametop-palm.txt" and p.read_text() == "rubbish\n"]
         self.assertEqual(len(kept), 1)
 
+    def test_fields_are_trimmed_as_the_card_trims_them(self):
+        e = palm.parse_line("menu\t1\tdictate\t \u00a0Talk \r")
+        self.assertEqual(e["label"], "\u00a0Talk")
+        self.assertIsNone(palm.parse_line("  # a note"))
+        self.assertEqual(len(palm.parse_line("menu\t1\tdictate\t" + "x" * 900)["label"]), palm.LABEL_MAX)
+        self.assertEqual(int(re.search(r"kLabelMax = (\d+)", CARD).group(1)), palm.LABEL_MAX)
+
+    def test_restore_needs_its_copy(self):
+        Path(self.path).write_text("rubbish\n")
+        real, ft_store.backup = ft_store.backup, lambda path: None
+        self.addCleanup(setattr, ft_store, "backup", real)
+        with self.assertRaises(ft_store.StoreError):
+            palm.restore(self.path)
+        self.assertEqual(Path(self.path).read_text(), "rubbish\n")
+
     def test_the_relay_takes_only_what_shows(self):
         lines = [f"menu\t1\trun:c{i}\tC{i}\n" for i in range(8)] + ["menu\t0\tdictate\tTalk\n", "quick\t1\tfrunner\tFind\n"]
         Path(self.path).write_text("".join(lines))
@@ -95,6 +110,10 @@ class File(unittest.TestCase):
         Path(self.path).write_text("menu\t1\trun:x\tX\nquick\t0\trun:x\tX\nmenu\t1\trun:xy\tXY\n")
         self.assertEqual(palm.drop_action("run:x", self.path), 2)
         self.assertEqual([e["action"] for e in palm.of(palm.load(self.path), "menu")], ["run:xy"])
+        Path(self.path).write_text("eyes\t0\trun:x\tMine\n")
+        self.assertEqual(palm.drop_action("run:x", self.path), 1)
+        self.assertEqual(palm.of(palm.load(self.path), "eyes"),
+                         [palm.Entry("eyes", False, "gaze_quickcal", "Quick Eye Calibrate")])
 
 
 class Page(unittest.TestCase):
@@ -187,8 +206,20 @@ class Page(unittest.TestCase):
     def test_a_file_that_does_not_parse_says_so(self):
         Path(self.path).write_text("rubbish\n")
         self.b.setShown("menu", 0, False)
-        self.assertTrue(self.said and self.said[0][1])
+        self.b.add("menu", "dictate")
+        self.assertEqual([bad for _, bad in self.said], [True, True])
         self.assertEqual(Path(self.path).read_text(), "rubbish\n")
+
+
+    def test_a_file_changed_elsewhere_is_not_edited_by_place(self):
+        self.assertEqual(len(self.b.groups), 3)
+        palm.update(lambda e: palm_tiles.remove(e, "menu", 0), self.path, self.conf)
+        self.b.setLabel("menu", 1, "Mine")   # (the page's second tile is the file's first now)
+        self.assertNotIn("Mine", Path(self.path).read_text())
+        self.assertEqual(len(self.said), 1)
+        self.assertEqual(self.tiles("menu")[0][0], "Hide Screens")   # (the page reads it again)
+        self.b.setLabel("menu", 0, "Mine")
+        self.assertEqual(self.tiles("menu")[0][0], "Mine")
 
 
 class Choices(unittest.TestCase):
@@ -202,8 +233,8 @@ class Choices(unittest.TestCase):
         listed = palm_tiles.choices([], [])
         entries = [palm.Entry("menu", True, a, "x") for a in ("run:gone", "dictate", "run:gone", "keys:125+32")]
         extra = palm_tiles.with_missing(listed, entries)[len(listed):]
-        self.assertEqual([c["value"] for c in extra], ["keys:125+32", "run:gone"])
-        self.assertIn("not available", extra[1]["text"])
+        self.assertEqual(extra, [{"value": "keys:125+32", "text": "keys:125+32"},
+                                 {"value": "run:gone", "text": "run:gone (not available)"}])
 
     def test_profiles_read(self):
         with tempfile.TemporaryDirectory() as tmp:

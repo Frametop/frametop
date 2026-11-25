@@ -27,6 +27,10 @@ GROUPS = (
 )
 
 
+class Moved(Exception):
+    """The file isn't what the page shows."""
+
+
 class Backend(QObject):
     changed = Signal()
     message = Signal(str, bool)
@@ -34,21 +38,33 @@ class Backend(QObject):
     def __init__(self, conf=None, path=None):
         super().__init__()
         self._conf, self._path = conf, path   # frametop.conf's and the palm file's (None: the real ones)
+        self._seen = None   # the entries the page last got: its rows go by their place in these
 
     def _entries(self):
         return palm.load(self._path, self._conf)
 
     def _edit(self, fn, *args):
+        """fn(entries, *args), saved; whether it was. Not if the file isn't what the page shows any more:
+        a row's place could be another tile's."""
+        def change(entries):
+            if self._seen is not None and entries != self._seen:
+                raise Moved
+            return fn(entries, *args)
+        saved = False
         try:
-            palm.update(lambda entries: fn(entries, *args), self._path, self._conf)
+            self._seen = palm.update(change, self._path, self._conf)
+            saved = True
+        except Moved:
+            self.message.emit("The palm menu had changed elsewhere: look again and try once more", False)
         except (OSError, ft_store.StoreError) as e:
             self.message.emit(f"Couldn't save the palm menu: {e}", True)
         self.changed.emit()
+        return saved
 
     @Property("QVariantList", notify=changed)
     def groups(self):
         """[{page, title, help, max, shown, full, fixed, tiles: [{page, index, label, action, on, first, last}]}]"""
-        entries = self._entries()
+        entries = self._seen = self._entries()
         out = []
         for page, title, about in GROUPS:
             tiles = palm.of(entries, page)
@@ -60,8 +76,13 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=changed)
     def actions(self):
-        """[{value, text}]: what a tile can run."""
+        """[{value, text}]: what a tile can run, and what one has."""
         return palm_tiles.with_missing(palm_tiles.choices(), self._entries())
+
+    @Property("QVariantList", notify=changed)
+    def newActions(self):
+        """[{value, text}]: what a new tile can run."""
+        return palm_tiles.choices()
 
     @Property(int, constant=True)
     def labelMax(self):
@@ -91,8 +112,7 @@ class Backend(QObject):
     @Slot(str, str)
     def add(self, page, action):
         was_full = palm_tiles.full(self._entries(), page)
-        self._edit(palm_tiles.add, page, action)
-        if was_full:
+        if self._edit(palm_tiles.add, page, action) and was_full:
             self.message.emit(f"Added hidden: {palm.MAX[page]} fit on this page, so hide one to show it", False)
 
     @Slot(str, int)

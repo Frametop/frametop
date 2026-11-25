@@ -86,8 +86,9 @@ class Bindings(unittest.TestCase):
         self.assertEqual(input_commands.removed_text("x", 2, 1), "x removed, and 2 bindings and 1 palm menu tile to it")
 
     def test_drop_tiles(self):
-        path = Path(input_commands.ft_palm_menu.PATH)
-        self.assertTrue(path.is_relative_to(os.environ["HOME"]))
+        path = Path(os.environ["HOME"]) / "palm" / "frametop-palm.txt"
+        self.addCleanup(setattr, input_commands.ft_palm_menu, "PATH", input_commands.ft_palm_menu.PATH)
+        input_commands.ft_palm_menu.PATH = str(path)
         self.assertEqual(input_commands.drop_tiles("x"), (0, ""))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("menu\t1\trun:x\tMine\nmenu\t1\tdictate\tTalk\n")
@@ -97,7 +98,6 @@ class Bindings(unittest.TestCase):
         tiles, problem = input_commands.drop_tiles("x")
         self.assertEqual(tiles, 0)
         self.assertIn("x removed, but not its palm menu tiles", problem)
-        path.write_text("")
 
 
 class RunNow(unittest.TestCase):

@@ -260,7 +260,8 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS,
                     and from its key list the tiling keys: KEY_LIST_RUNNABLE; from this user only),
-                    as a button would ({"t": "action"}, or an error)
+                    as a button would ({"t": "action"}, or an error); from Frametop Settings' Keyboard
+                    page too, keyboard_toggle (SETTINGS_ACTIONS)
   palm ACTION       from ft-screens' palm Quick Access (unbound, so no answer): run the action of one
                     of its tiles. Only one ~/.config/frametop-palm.txt shows there now
                     (conf/ft_palm_menu.py; a command of yours, "run:NAME", among them), and from this
@@ -528,6 +529,10 @@ def needs_pointer(a):
             and a not in ("steam_menu", "pause_toggle", "frunner", "os_menu", "keys_list", "hands_toggle", "release_keys",
                           "desktopless_toggle", "close_app", "gaze_quickcal")
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
+
+
+# What Frametop Settings runs with "action NAME" past frunner's: its Keyboard page's button.
+SETTINGS_ACTIONS = frozenset({"keyboard_toggle"})
 
 
 def works_paused(a):
@@ -2515,12 +2520,13 @@ class Relay:
                 self.reply(addr, self.pause.status())
             return
         if cmd == "action" and len(words) == 2:
-            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu.
-            # Only those (KEY_LIST_RUNNABLE), and only from this user: never run:, command: or keys:.
+            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu; or
+            # Frametop Settings' keyboard button. Only those (KEY_LIST_RUNNABLE, SETTINGS_ACTIONS), and
+            # only from this user: never run:, command: or keys:.
             name = words[1]
             if uid != os.getuid():
                 self.reply(addr, {"t": "error", "error": "another user's"})
-            elif name not in KEY_LIST_RUNNABLE:
+            elif name not in KEY_LIST_RUNNABLE and name not in SETTINGS_ACTIONS:
                 self.reply(addr, {"t": "error", "error": f"not a menu action {name!r}"})
             elif self.pause.paused and not works_paused(name):
                 self.reply(addr, {"t": "error", "error": "paused"})

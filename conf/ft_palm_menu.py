@@ -9,8 +9,9 @@ ACTION" on its control socket). A line each, tabs between, in the order the card
 PAGE is menu (the card's first page), quick (its Quick Settings page) or eyes (the wide row under the
 tiles while gaze mode is on: one entry). 1 shows it, 0 keeps it here hidden. ACTION is the input
 relay's: one of Frametop's own (CATALOGUE), "profile:NAME", or "run:NAME", a command of yours
-(commands/ft_commands.py). LABEL is the tile's words. Blank lines and lines starting with # are
-left out. A page shows its first MAX entries that are on.
+(commands/ft_commands.py); any other the relay knows works too, written here by hand. LABEL is the
+tile's words (LABEL_MAX characters). Blank lines and lines starting with # are left out, and a save from
+Frametop Settings drops them. A page shows its first MAX entries that are on.
 
 With no file the card is DEFAULT, whose Quick Settings page shows only those QUICK_SETTINGS in
 frametop.conf names, if it's set (how that page was picked before this file).
@@ -66,6 +67,9 @@ LEFT_OUT = frozenset({"left", "right", "middle", "back", "scroll_up", "scroll_do
                       "gaze_left", "gaze_right", "dictate_hold", "key", "none"})
 
 
+SPACE = " \t\r\n"   # what a field is trimmed of (screens/palmtiles.h's Trim)
+
+
 class Entry(dict):
     """One tile: {page, on, action, label}."""
 
@@ -81,9 +85,9 @@ def clean(text, limit=None):
 
 def parse_line(line):
     """A line's Entry, None for a blank or a comment, or ValueError (screens/palmtiles.h's ParseLine)."""
-    if not line.strip() or line.startswith("#"):
+    if not line.strip(SPACE) or line.strip(SPACE).startswith("#"):
         return None
-    parts = [p.strip() for p in line.split("\t")]
+    parts = [p.strip(SPACE) for p in line.split("\t")]
     if len(parts) != 4:
         raise ValueError("not PAGE, 1 or 0, ACTION and LABEL with tabs between")
     page, on, action, label = parts
@@ -93,7 +97,7 @@ def parse_line(line):
         raise ValueError(f"{on!r} isn't 1 or 0")
     if not action or not label:
         raise ValueError("no action or no label")
-    return Entry(page, on == "1", action, label)
+    return Entry(page, on == "1", action, label[:LABEL_MAX].strip(SPACE))
 
 
 def parse(text):
@@ -176,15 +180,16 @@ def update(fn, path=None, conf=None):
 
 
 def restore(path=None):
-    """DEFAULT written back, whatever the file had (a copy of one that doesn't parse is kept)."""
+    """DEFAULT written back, whatever the file had. A copy of one that doesn't parse is kept; with no
+    copy made, ft_store.StoreError and the file stays."""
     path = path or PATH
     with ft_store.locked(path):
         try:
             bad = bool(parse(_read(path, "strict") or "")[1])
         except (OSError, ValueError):
             bad = True
-        if bad:
-            ft_store.backup(path)
+        if bad and not ft_store.backup(path):
+            raise ft_store.refuse(path, "no copy of it could be made")
         ft_store.write_text(path, text_of(parse(DEFAULT)[0]))
 
 
@@ -199,8 +204,9 @@ def actions(entries):
 
 
 def drop_action(action, path=None):
-    """Take out the tiles that ran `action` (a command that's gone). How many went; with no file,
-    none (the defaults run no commands), and the file isn't written."""
+    """Take out the tiles that ran `action` (a command that's gone); the eye row, always there, runs its
+    default again, shown or hidden as it was. How many went; with no file, none (the defaults run no
+    commands), and the file isn't written."""
     path = path or PATH
     if not any(e["action"] == action for e in load(path)):
         return 0
@@ -208,6 +214,8 @@ def drop_action(action, path=None):
 
     def change(entries):
         gone.extend(e for e in entries if e["action"] == action)
+        for e in of(gone, "eyes"):
+            e.update(of(parse(DEFAULT)[0], "eyes")[0], on=e["on"])
         return [e for e in entries if e["action"] != action]
     update(change, path)
     return len(gone)

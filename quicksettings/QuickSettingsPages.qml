@@ -32,6 +32,7 @@ Item {
             // rows (and the keyboard focus) it doesn't concern.
             readonly property var groups: backend.groups
             readonly property var choices: backend.actions
+            readonly property var newChoices: backend.newActions
             onVisibleChanged: if (visible) backend.refresh()
             actions: [
                 Kirigami.Action {
@@ -112,7 +113,7 @@ Item {
                                 id: fresh
                                 Layout.fillWidth: true
                                 Layout.maximumWidth: Kirigami.Units.gridUnit * 18
-                                model: qpage.choices
+                                model: qpage.newChoices
                                 textRole: "text"
                                 valueRole: "value"
                                 wheelEnabled: false
@@ -132,7 +133,7 @@ Item {
             footer: Ft.HelpFooter {
                 text: "To run something of your own, save it under Custom commands, then pick \"Run command NAME\" here. "
                       + "A page shows up to six tiles; hidden ones stay in this list. Clear a tile's text to get the usual words back. "
-                      + "Reset Layout asks for a second tap, and a tile called Hide Screens says Show Screens while they're hidden."
+                      + "A tile called Hide Screens says Show Screens while they're hidden."
             }
         }
     }

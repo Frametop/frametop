@@ -244,6 +244,7 @@ CASES += [
     ("action screens_toggle, other user", "action screens_toggle", {"uid": OTHER}),
     ("action not a menu one", "action left", {}), ("action run:", "action run:x", {}),
     ("action keys:", "action keys:125+32", {}), ("action unbound", "action dock_all", {"addr": b""}),
+    ("action keyboard_toggle (Frametop Settings' button)", "action keyboard_toggle", {}),
     ("action gaze_quickcal (the palm's, not a menu one)", "action gaze_quickcal", {}),
     ("palm screens_toggle", "palm screens_toggle", {"addr": b""}),
     ("palm screens_toggle, paused", "palm screens_toggle", {"paused": True}),

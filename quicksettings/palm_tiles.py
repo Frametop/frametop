@@ -1,6 +1,6 @@
 """Frametop Settings' Quick Settings page: what its tiles can run, and changing the list
 (conf/ft_palm_menu.py's entries). Plain Python (no Qt): ft_quick_settings' Backend calls these.
-Tests: quicksettings/test/test_quick_settings.py.
+Tests: quicksettings/test/ (test_palm_page.py has the page itself).
 """
 import os
 import sys
@@ -38,9 +38,9 @@ def with_missing(listed, entries):
     """The picker's choices with any action a tile has that isn't there now (a command or profile
     that's gone, or one put in the file by hand), so its picker still shows what it is."""
     known = {c["value"] for c in listed}
-    gone = sorted({e["action"] for e in entries} - known)
-    return listed + [{"value": a, "text": f"{ACTION_LABELS.get(a, a)} (not available)"
-                      if a.startswith((RUN, PROFILE)) or a not in ACTION_LABELS else ACTION_LABELS[a]} for a in gone]
+    others = sorted({e["action"] for e in entries} - known)
+    return listed + [{"value": a, "text": f"{a} (not available)" if a.startswith((RUN, PROFILE))
+                      else ACTION_LABELS.get(a, a)} for a in others]
 
 
 def suggested(action, page="menu"):

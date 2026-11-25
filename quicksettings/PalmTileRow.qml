@@ -29,6 +29,7 @@ RowLayout {
         }
     }
     Controls.TextField {
+        objectName: "palmLabel"
         Layout.fillWidth: true
         Layout.minimumWidth: Kirigami.Units.gridUnit * 5
         Layout.preferredWidth: Kirigami.Units.gridUnit * 12
@@ -44,6 +45,7 @@ RowLayout {
         }
     }
     Controls.ComboBox {
+        objectName: "palmAction"
         Layout.fillWidth: true
         Layout.minimumWidth: Kirigami.Units.gridUnit * 5
         Layout.preferredWidth: Kirigami.Units.gridUnit * 14
@@ -51,6 +53,8 @@ RowLayout {
         textRole: "text"
         valueRole: "value"
         currentIndex: row.chosen
+        // A new list puts a ComboBox on its first entry: back to this tile's.
+        onModelChanged: currentIndex = Qt.binding(() => row.chosen)
         wheelEnabled: false   // (scrolling the page mustn't change what a tile runs)
         opacity: row.tile.on ? 1 : 0.6
         Accessible.name: "What " + row.tile.label + " runs"

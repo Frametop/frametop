@@ -13,7 +13,8 @@
 
 namespace palmtiles {
 
-constexpr int kMax = 6;   // a page's tiles (quickaccess.h's kTiles)
+constexpr int kMax = 6;         // a page's tiles (quickaccess.h's kTiles)
+constexpr int kLabelMax = 40;   // a label's characters (the rest is left out)
 
 struct Entry {
     std::string action, label;   // (the relay's action, or ours: kReset)
@@ -50,6 +51,14 @@ inline std::string Trim(const std::string &s) {
     return a == std::string::npos ? "" : s.substr(a, s.find_last_not_of(kSpace) - a + 1);
 }
 
+// The first n characters of UTF-8 text.
+inline std::string Head(const std::string &s, int n) {
+    size_t i = 0;
+    for (; i < s.size(); ++i)
+        if ((s[i] & 0xc0) != 0x80 && n-- == 0) break;
+    return s.substr(0, i);
+}
+
 // `item` is one of `list`'s, commas between.
 inline bool Listed(const std::string &list, const std::string &item) {
     for (size_t at = 0; at <= list.size();) {
@@ -62,7 +71,7 @@ inline bool Listed(const std::string &list, const std::string &item) {
 
 // One line, "PAGE<TAB>1|0<TAB>ACTION<TAB>LABEL"; false: blank, a comment or not one.
 inline bool ParseLine(const std::string &line, std::string *page, bool *on, Entry *e) {
-    if (line.empty() || line[0] == '#') return false;
+    if (Trim(line).rfind("#", 0) == 0) return false;
     std::vector<std::string> parts;
     for (size_t at = 0; at <= line.size();) {
         const size_t end = std::min(line.find('\t', at), line.size());
@@ -70,7 +79,7 @@ inline bool ParseLine(const std::string &line, std::string *page, bool *on, Entr
         at = end + 1;
     }
     if (parts.size() != 4 || (parts[1] != "0" && parts[1] != "1") || parts[2].empty() || parts[3].empty()) return false;
-    *page = parts[0], *on = parts[1] == "1", *e = {parts[2], parts[3]};
+    *page = parts[0], *on = parts[1] == "1", *e = {parts[2], Trim(Head(parts[3], kLabelMax))};
     return true;
 }
 

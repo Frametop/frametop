@@ -320,6 +320,9 @@ void PinchRelease(int side, int tile) {
     }
 }
 
+// The slot the palm hand's pinch starts on.
+int PinchStart() { return g_card.settings ? kButton : palmtiles::PinchSlot(g_card.menu); }
+
 // The drag, on to this tick's pinch point and palm: the tile it lights.
 int StepDrag(const palmmenu::PalmMenu &palm, int side) {
     double at[3];
@@ -369,16 +372,15 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     // this Update's release: the tile under its last held frame, as drawn (council, 2026-11-19: not the
     // release frame's, whose contact moves as the fingers open; palmmenu let go only with the palm up)
     if (released >= 0) {
-        const bool mine = released == side && g_card.drag.on();
-        const int tile = mine ? g_card.drag.place() : kAlone;
-        if (mine) g_card.drag.End();
+        const int tile = released != side ? kAlone : g_card.drag.on() ? g_card.drag.place() : PinchStart();
+        if (released == side) g_card.drag.End();
         PinchRelease(released, tile);
     }
     // (the palm hand's pinch: the card holds still where it was while it's dragged across it; a new
     // pinch, let go and pinched again in one read whether it did anything or not, starts afresh)
     if (!palm.pinched(side)) g_card.drag.End();
     else if (!g_card.drag.on() || palm.pinchCount(side) != g_card.dragPinch)
-        g_card.drag.Start(g_card.settings ? kButton : palmtiles::PinchSlot(g_card.menu)), g_card.dragPinch = palm.pinchCount(side), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
+        g_card.drag.Start(PinchStart()), g_card.dragPinch = palm.pinchCount(side), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
     if (g_card.drag.on()) StepDrag(palm, side);   // (each tick: HandsFrame() is the last tick's news)
     g_card.pose = g_card.drag.on() ? g_card.dragPose : card ? FacingPose(c, in.head) : g_card.pose;
     if (float(g_card.w) != g_card.widthSet) {

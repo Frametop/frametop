@@ -66,6 +66,36 @@
   "log": [],
   "raised": null
  },
+ "action keyboard_toggle (Frametop Settings' button)": {
+  "calls": [
+   [
+    "Popen",
+    [
+     "/bin/sh",
+     "-c",
+     "systemctl --user reset-failed \"$0\" 2>/dev/null; exec systemctl --user start --no-block \"$0\"",
+     "frametop-keyboard.service"
+    ]
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "keyboard_toggle",
+      "t": "action"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "action keyboard_toggle",
+  "log": [
+   "keyboard_toggle: Full Keyboard isn't running (quit from its panel?): starting it"
+  ],
+  "raised": null
+ },
  "action keys:": {
   "calls": [
    [

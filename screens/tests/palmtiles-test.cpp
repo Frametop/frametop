@@ -29,7 +29,7 @@ int main() {
     check("...empty: none, and the first page is whole", Defaults("").quick.empty() && Defaults("").first.size() == 6);
 
     {
-        const Menu m = Parse("# a comment\n\n"
+        const Menu m = Parse("# a comment\n  # another\n\n"
                              "menu\t1\trun:gonk\tGonk it\n"
                              "menu\t0\tsteam_menu\tSteam Menu\n"
                              "menu\t1\tprofile:My Desk\t Desk \r\n"

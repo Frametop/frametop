@@ -107,9 +107,9 @@ Installed. What's left:
   2. Open https://localhost:47990 and create the Web UI login. The Steam Frame signs in with it once.
   3. For virtual displays: in the Web UI's settings, turn on
      "Remove Remote Monitor when its client disconnects".
-  4. On the Steam Frame: open Remote displays (in Frametop Settings; in Frametop 0.3.0, the
-     Frametop Remote Displays app), choose Add computer, pick this PC, sign in with the
-     Web UI login, and choose its displays.
+  4. On the Steam Frame: open Remote displays (in Frametop Settings; in the stable release
+     0.3.0 and builds before exp.24, the Frametop Remote Displays app), choose Add computer,
+     pick this PC, sign in with the Web UI login, and choose its displays.
 Don't add Vibepollo's own package repository: an update from it would replace Frametop's build.
 EOF
 }

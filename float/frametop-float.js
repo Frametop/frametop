@@ -279,6 +279,11 @@ function watch(w) {
         if (onSpare()) report("fullscreen", w);
     });
     w.minimizedChanged.connect(() => { if (onSpare()) report("minimized", w); });
+    // (its size comes in between these two: not taken)
+    if (w.maximizedAboutToChange) w.maximizedAboutToChange.connect(mode => {
+        const s = settled[id];
+        if (mode && s && onSpare() && w.normalWindow && !s.fullScreen && !changingOutputs()) hold(w, s.frame.w, s.frame.h);
+    });
     w.maximizedChanged.connect(() => {
         if (!onSpare() || !w.normalWindow || w.fullScreen) return;
         w.setMaximize(false, false);

@@ -66,10 +66,11 @@ function isMaximized(w) {
     return g.x === a.x && g.y === a.y && g.width === a.width && g.height === a.height;
 }
 
-// As maximized, one way or both: a floating window's output is bigger than it both ways.
+// As maximized, one way or both: a floating window's output is bigger than it both ways. (Within a pixel:
+// the area can be fractional, the window's size is whole.)
 function fills(w) {
     const a = workspace.clientArea(KWin.MaximizeArea, w), g = w.frameGeometry;
-    return g.width === a.width || g.height === a.height;
+    return Math.abs(g.width - a.width) < 1 || Math.abs(g.height - a.height) < 1;
 }
 
 function report(type, w) {

@@ -1,16 +1,16 @@
 {
-  "tag": "frametop-2.0.4",
+  "tag": "frametop-2.0.6",
   "linux": {
-    "package": "vibepollo-2.0.4-1-x86_64.pkg.tar.zst",
-    "package_sha256": "1bff4e8b26ba909344a27d7aab893e1ec2fe384050607ca66da9f9673b624b08",
+    "package": "vibepollo-2.0.6-1-x86_64.pkg.tar.zst",
+    "package_sha256": "dc2150dfb38a46eed38aaeb0966fe3cb6b3f9062dbeb576740498b45409b8762",
     "installer_sha256": "8b3611684341df7bbad0b2f6dc80c3644a8dc182fe0fe5282dcf618c87f27242"
   },
   "windows": {
     "base": "2.0.3",
     "files": {
-      "sunshine.exe": "f3cfdcc2fb22519f024cbc1969e9bc77a9bb7392ff47e6b3212c844bce681bdf",
-      "tools\\sunshine_wgc_capture.exe": "e16c4eae337e87297d897b7cbc672b4bcf93bd634ac852710ac655afaeff26bb",
-      "tools\\frametop_clipboard.exe": "2e020870d9933f017f6dfebf65abeaeffd41b04765c44dc3a7454f9d3780abdd"
+      "sunshine.exe": "57d764dc94f3bc9ae10414d77eb2f7eab2aed118fa45bafd28341609445fe58a",
+      "tools\\sunshine_wgc_capture.exe": "e4c8aa6333d434902eb976019db4cd0082700885cd14d09884fd55e81258e7a2",
+      "tools\\frametop_clipboard.exe": "c029fd863291cb9317d097d999e11a5cf140f3d7183699bd92979cad842e0d5e"
     }
   }
 }

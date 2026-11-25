@@ -215,7 +215,7 @@ With only the displays off (Pause tracking too switched off, or SteamVR not goin
 
 ## Known limitations
 
-This is an early release, tested on one Steam Frame (SteamOS 0.5.9 beta build 20261113, SteamVR 2.19.3; before that SteamOS 0.4.5 build 20261007, SteamVR 2.18.2, and SteamOS 0.3.0 build 20260922, SteamVR 2.17.10).
+This is an early release, tested on one Steam Frame (SteamOS 0.5.11 beta build 20261125, SteamVR 2.19.5, and 0.5.9 and 0.5.10 before it; before that SteamOS 0.4.5 build 20261007, SteamVR 2.18.2, and SteamOS 0.3.0 build 20260922, SteamVR 2.17.10).
 
 - A SteamOS or SteamVR update can break parts of it until Frametop catches up. After an update, run `cd ~/frametop && scripts/doctor.sh` in a terminal. It checks what Frametop needs from SteamOS, and says what changed since the versions you last marked as working and what to try. Once everything works, `scripts/doctor.sh --mark-good` records the versions. If something stops working, please report it.
 - The first install downloads 1–2 GB for the build container and compiles everything on the headset, which takes several minutes.

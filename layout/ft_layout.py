@@ -77,8 +77,9 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      wait for the screens, skip if "auto" is off
   ft-layout reset                    recenter after the 3-second countdown (Meta+Shift+R,
                                      screen reset button, or mapped button). With ft-screens,
-                                     move unpinned panels only; preserve apps and streams.
-                                     Use NAME explicitly to restore its full profile.
+                                     everything in the room moves in one piece, each panel
+                                     where you have it among the others; apps and streams stay.
+                                     apply or use NAME puts each panel back in its layout.
   ft-layout capture                  save the current arrangement as the custom layout
   ft-layout save NAME                save it as a named layout too, and use that; with the
                                      desktop's apps and hidden screens, as a profile
@@ -758,8 +759,8 @@ def apply_screens(wait=0):
 
 
 def recenter_tiles(sock):
-    """The tiled panels (pinned to the dashboard, so left alone above): ft-screens puts their
-    group in front of you, its middle straight ahead."""
+    """The tiled panels (pinned to the dashboard, so "recentre" leaves them): ft-screens puts
+    their group in front of you as it is, its middle straight ahead."""
     try:
         sock.ask("tiles recentre")
     except NoAnswer:
@@ -768,66 +769,60 @@ def recenter_tiles(sock):
         pass  # an older ft-screens
 
 
-def recenter_screens():
-    """Recenter existing panels without restoring apps or display state.
+def recenter_lead(sock, layout):
+    """(screen number, degrees to the left of straight ahead) of the panel a recenter goes by:
+    the main screen (the one with the taskbar), or with that one hidden or pinned somewhere,
+    the next of the layout's screens and connected remote displays, where the layout has it
+    round you. None with none of them in the room."""
+    count = native_count(layout)
+    planned = [(i + 1, t) for i, t in enumerate(plan(layout, count))]
+    if count:  # the main one first, the others in their order
+        main = primary_screen(layout) + 1
+        planned.sort(key=lambda p: p[0] != main)
+    displays = remote_displays(layout)
+    planned += [(n, t) for (n, _, d), t in zip(displays, plan_remotes(layout, count, displays))
+                if not d.get("off") and t is not None]
+    hidden = set(sock.ask("concealed").split()[1:])
+    for n, t in planned:
+        x, _, z = t["pos"]
+        if str(n) in hidden or math.hypot(x, z) < 0.3:  # (straight above: no way round you)
+            continue
+        try:
+            if parse_get(sock.ask(f"get {n}"))["hand"] == "none":
+                return n, yaw_pitch(t["pos"])[0]
+        except NoAnswer:
+            raise
+        except RuntimeError as e:
+            log(f"recenter: screen {n} unavailable ({e})")
+    return None
 
-    Named layout poses are read into this invocation only. Do not save that copy:
-    Reset must not change window state, hidden screens, or remote connections.
-    A panel pinned to the head (its pin button) goes back in the room, as with a full
-    reset, and is pinned again only if the layout saved it so; one on a wrist or the
-    dashboard stays there.
-    """
+
+def recenter_screens():
+    """Turn and move everything in the room in one piece, so it's round where you are and
+    the way you look now (ft-screens' "recentre"): every panel keeps its place among the
+    others, its size and how far from you it is. One pinned to the head, a wrist or the
+    dashboard stays on its pin; the tiled ones come round you as they are.
+
+    The layout is only read: Reset must not change saved places, window state, hidden
+    screens, or remote connections. How many panels of the room moved."""
     layout = load_layout()
     name = layout.get("active") if layout.get("mode") == "custom" else None
     if name in layout.get("layouts", {}):
-        use_named(layout, name)
-    count = native_count(layout)
-    custom = layout.get("mode") == "custom"
-    targets = [(i + 1, t, screen_entry(layout, i).get("pin") if custom else None)
-               for i, t in enumerate(plan(layout, count))]
-    displays = remote_displays(layout)
-    targets.extend((n, t, d.get("pin")) for (n, _, d), t in zip(displays, plan_remotes(layout, count, displays))
-                   if not d.get("off") and t is not None)
+        use_named(layout, name)  # (this invocation's copy; not saved)
     sock = screens_socket()
-    movable = []
     try:
-        for n, t, saved in targets:
-            try:
-                current = parse_get(sock.ask(f"get {n}"))
-            except NoAnswer:
-                raise
-            except RuntimeError as e:
-                log(f"recenter: screen {n} unavailable; left alone ({e})")
-                continue
-            if current["hand"] not in ("none", "head"):
-                where = "the dashboard" if current["hand"] == "dashboard" else "a wrist"
-                log(f"recenter: screen {n} is on {where}; left alone")
-                continue
-            head_pin = saved if saved and saved.get("hand") == "head" and len(saved.get("rel", [])) == 12 else None
-            movable.append((n, t, head_pin))
-        if not movable:
-            recenter_tiles(sock)
-            log("recenter: no unpinned panels available")
-            return []
-        # Sample once, after the countdown and inspection, immediately before moving.
-        f = sock.ask("head").split()
-        eye, heading = tuple(map(float, f[1:4])), float(f[4])
-        results = []
-        for n, t, head_pin in movable:
-            center = tuple(e + v for e, v in zip(eye, turn_yaw(t["pos"], heading)))
-            # "place" leaves a head-pinned panel in the room
-            results.append(sock.ask("place %d %.4f %.4f %.4f %.3f %.3f %.3f" %
-                                    (n, *center, t["face"][0] + heading, t["face"][1], t["roll"])))
-            if head_pin:
-                sock.ask(f"pin {n} head " + " ".join(f"{v:.5f}" for v in head_pin["rel"]))
+        lead = recenter_lead(sock, layout)
+        # The head is sampled there: once, after the countdown, as everything moves.
+        f = sock.ask("recentre %d %.2f" % lead if lead else "recentre").split()
+        moved, eye, heading = int(f[1]), tuple(map(float, f[2:5])), float(f[5])
         recenter_tiles(sock)
         try:
             sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset
         except RuntimeError:
             pass  # an older ft-screens
         save_anchor(eye, heading)
-        log(f"recentered {len(results)} panel(s); app windows and streams unchanged")
-        return results
+        log(f"recentered {moved} panel(s); app windows and streams unchanged")
+        return moved
     finally:
         sock.close()
 

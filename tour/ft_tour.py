@@ -161,11 +161,11 @@ def pages(f, keys):
                  ["Click the curve button", "Curves the screen around you, or flattens it"],
                  ["Drag the roll button sideways, or scroll on it", "Rolls the screen; it snaps level near straight"],
                  ["Click the pin button (left of the reset button)", "Keeps the screen fixed in view as you turn your head. "
-                                                                     "Click again, or reset the layout, to leave it in the room"],
+                                                                     "Click again to leave it in the room"],
                  ["Hold Move All Windows in the bar's menu and move",
                   "Carries every screen and window together, tiled or in the room, as they stand"],
                  "Getting back",
-                 ["The reset button (left of the bar), or Meta+Shift+R", "Puts every screen back in its layout"],
+                 ["The reset button (left of the bar), or Meta+Shift+R", "Brings everything round to where you look, each in its place"],
                  ["Meta+Shift+H", "Hides or shows all screens"]],
         "actions": [{"id": "settings:screens", "text": "Screens settings", "icon": "video-display"}]}]
 

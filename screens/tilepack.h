@@ -1,4 +1,4 @@
-// Packing the dashboard tiles into columns (dashtiles.h's Board): a reset packs them all again, and
+// Packing the dashboard tiles into columns (dashtiles.h's Board): `tiles pack` packs them all again, and
 // a new tile on a full desk goes on a column with room for it. A column is as wide as its widest
 // panel, and narrower ones share a shelf, side by side, as long as the shelf, gaps and all, is no
 // wider than that (user, 2026-11-19: "if we had one window that was 1,200 pixels across, you could

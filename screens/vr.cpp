@@ -1089,13 +1089,28 @@ void MoveFramePins(bool dashMoved) {
     }
 }
 
+// Placed from where your head is now (recentre.h). With no head pose it's as it was.
+void PlacedFromHere(Screen &s) {
+    Mat head;
+    if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;
+    for (int k = 0; k < 3; ++k) s.from[k] = head.m[k][3];
+    s.fromKnown = true;
+}
+// The room moved by `j` (a universe's jump, a shared room's shift): so did where you stood.
+static void StepFrom(Screen &s, const Mat &j) {
+    const Mat at = Mul(j, Translation(s.from[0], s.from[1], s.from[2]));
+    for (int k = 0; k < 3; ++k) s.from[k] = at.m[k][3];
+}
+
 // Placed, it belongs to `universe` (universefix.h): 0 for the one now, unless it's set again where
 // it was. Moves that carry on from where it was (a resize keeping a corner, a roll) pass its own;
 // a spin or an animation, the universe its poses are in.
 void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe) {   // (vrpanel.h: universe 0)
     if (universe) s.universe = universe;
-    else if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0)
+    else if (s.universe == 0 || s.pinned != kNone || std::memcmp(&s.pose, &pose, sizeof pose) != 0) {
         s.universe = g_universe ? g_universe : ReadUniverse();   // (before the first tick: panels made at start)
+        PlacedFromHere(s);
+    }
     s.pinned = kNone;
     s.pinMode = levelpin::Rigid;
     s.dashHasRel = false;   // waiting for the dashboard (dashWait) and moved: it attaches where it is then
@@ -3976,6 +3991,7 @@ void StartGrabMove(int index, Screen &s, const Mat &to, double width, double ms 
     if (!ScreenPose(s, &p)) return;
     g_grabMoves[index] = {p, to, p, s.metres, s.floating ? s.metres : width, NowMs(), ms, easeOut,
                           universe ? universe : g_universe};
+    if (!universe) PlacedFromHere(s);   // (one that carries on, or goes home, has its own)
 }
 
 // ---------------------------------------------------------------- the front slot
@@ -6908,6 +6924,8 @@ struct Parked {
     uint64_t universe;   // where the pose was placed (universefix.h)
     bool dashWait, dashHasRel;   // waiting for the dashboard (WaitForDash)
     Mat dashRel;
+    std::array<float, 3> from;   // Screen's from, and whether it's known
+    bool fromKnown;
 };
 std::map<int, Parked> g_parked;
 
@@ -6941,7 +6959,11 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
         Mat d;
         if (k.pinned == kDashboard ? g_dash.a.ever : k.pinned != kNone && DevicePose(k.pinned, &d))
             PinIn(s, k.pinned, k.pinRel, k.pinMode);
-        else SetAbsolute(s, k.pose), s.universe = k.universe;
+        else {
+            SetAbsolute(s, k.pose), s.universe = k.universe;
+            std::copy(k.from.begin(), k.from.end(), s.from);
+            s.fromKnown = k.fromKnown;
+        }
         if (k.dashWait) s.dashWait = true, s.dashHasRel = k.dashHasRel, s.dashRel = k.dashRel;
         s.alone = k.alone;
         g_parked.erase(pk);
@@ -7029,7 +7051,7 @@ void ft_vr_screen_destroy(int index) {
     Mat p;
     const Screen &s = it->second;
     if (s.remote && ScreenPose(s, &p)) g_parked[index] = {p, s.metres, s.tileCurve > 0 ? s.tileCurve : s.curve, s.pinned, s.pinRel, s.alone, s.pinMode, s.universe,
-                                                        s.dashWait, s.dashHasRel, s.dashRel};
+                                                        s.dashWait, s.dashHasRel, s.dashRel, {s.from[0], s.from[1], s.from[2]}, s.fromKnown};
     TileGone(index);
     ForgetAppScale(index);
     g_chromePool.Release(index);
@@ -7176,6 +7198,7 @@ void FollowUniverse(const universefix::Switch &sw) {
             g_spin.base.erase(i);   // (turning round its old axis: it stays where it is now)
             if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
             SetAbsolute(s, Mul(j, s.pose), sw.to);
+            StepFrom(s, j);
             moved += " " + std::to_string(i + 1);
         } else if (!(dash && s.pinned == kDashboard)) {   // (those went with the dashboard's frame)
             kept += " " + std::to_string(i + 1);
@@ -7224,6 +7247,7 @@ void ShiftRoom(const roomshift::Shift &by, char *reply, int size) {
         if (b != g_spin.base.end()) b->second = Mul(j, b->second);
         if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
         SetAbsolute(s, Mul(j, s.pose), s.universe);
+        StepFrom(s, j);
         ++moved;
     }
     const Mat axis = Mul(j, Translation(g_spin.cx, 0, g_spin.cz));
@@ -7250,8 +7274,10 @@ void ShiftCommand(vrcmd::Verb verb, const vrcmd::Cmd &c, char *reply, int size) 
 // ---------------------------------------------------------------- for the layout's carry (vrlayoutgrab.cpp)
 
 extern "C++" void ftvr::SpinForget(int i) { g_spin.base.erase(i); }
-// Another laser, its title bar or a hand has it.
-extern "C++" bool ftvr::HeldElsewhere(const Screen &s, int i) { return s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i); }
+// Another laser, its title bar, a hand or carry-all has it.
+extern "C++" bool ftvr::HeldElsewhere(const Screen &s, int i) {
+    return s.drag != Drag::None || s.titleCarry || g_handInput.heldByHand(i) || CarryAllHas(i);
+}
 // On its way somewhere, its way moves by `step` too (as a universe's jump moves it, FollowUniverse): true if it was.
 extern "C++" bool ftvr::StepOnItsWay(Screen &s, int i, const Mat &step) {
     const auto m = g_grabMoves.find(i);
@@ -7262,10 +7288,10 @@ extern "C++" bool ftvr::StepOnItsWay(Screen &s, int i, const Mat &step) {
     return true;
 }
 // The places in the room no panel is in now: the front slot's home, a stopped remote display's.
-extern "C++" void ftvr::StepPlaces(const Mat &step) {
+extern "C++" void ftvr::StepPlaces(const Mat &step, bool all) {
     if (g_front.panel >= 0) {
         g_front.home = Mul(step, g_front.home);
-        if (LayoutMoves(g_front.panel)) g_front.to = Mul(step, g_front.to);
+        if (all || LayoutMoves(g_front.panel)) g_front.to = Mul(step, g_front.to);
     }
     for (auto &[i, k] : g_parked)
         if (k.pinned == kNone) k.pose = Mul(step, k.pose);
@@ -8431,6 +8457,8 @@ static void FloatCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
 //                     [12 numbers: device->screen, when pinned]"   (pin: none|left|right|head|dashboard)
 //   screens       -> "ok <count> <index>:<pixels w>x<h>:<metres> ..."
 //   head          -> "ok x y z yaw"
+//   recentre [<screen> <degrees>] -> "ok <moved> x y z yaw"   the room's panels in one piece round where your head
+//                    is now (yours in x y z yaw): that screen where the layout has it round you (vrrecentre.cpp)
 //   reach         -> "ok lx ly lz rx ry rz"   where the left and the right hand controller are
 //                    (metres, as head); an error while either isn't tracked or a game runs
 //   universe      -> "ok <id> room|temporary|unknown"   SteamVR's universe now (universefix.h)
@@ -8520,6 +8548,7 @@ void ft_vr_command(const char *cmd, char *reply, int size) {
     case vrcmd::FloatGroup: return FloatCommand(verb, parsed, cmd, reply, size);
     case vrcmd::TileGroup: return TileCommand(verb, parsed, cmd, reply, size);
     case vrcmd::SpinGroup:
+        if (verb == vrcmd::Recentre) return RecentreCommand(parsed, reply, size);
         if (verb != vrcmd::Spin) return ShiftCommand(verb, parsed, reply, size);
         SpinCommand(cmd + 5, reply, size);
         return;

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Reset Screen Layout
-GenericName=Put the VR desktop's screens back in their layout
-Comment=Float the screens and arrange them in the layout from Frametop Settings
+GenericName=Bring the VR desktop's screens round to you
+Comment=Bring the screens round to where you're looking, each in its place
 Exec=@REPO@/layout/ft-layout-reset
 Icon=view-restore
 Categories=Settings;

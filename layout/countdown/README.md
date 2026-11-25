@@ -5,12 +5,13 @@ control and face forward before Frametop samples the head pose. The overlay is
 non-interactive and closes after three seconds. Repeated reset requests are
 rejected while that reset is pending or applying.
 
-With ft-screens, reset moves only existing unpinned local and connected remote
-panels. It reads the active profile's poses without restoring apps, fullscreen
-state, visibility, sizes, or connections, and does not save configuration.
-Disconnected and pinned panels are left alone. The legacy gamescope backend
-still reopens the active profile after its countdown. Direct `apply` and `use`
-commands remain immediate; use `ft-layout use NAME` to restore a full profile.
+With ft-screens, reset moves everything in the room in one piece (ft-screens'
+`recentre`): the panels keep their places among each other. It reads where the
+layout has the main screen round you, and changes no apps, fullscreen state,
+visibility, sizes, connections, or configuration. Pinned panels stay on their
+pins. The legacy gamescope backend still reopens the active profile after its
+countdown. Direct `apply` and `use` commands remain immediate; use `ft-layout
+apply` or `ft-layout use NAME` to put each panel back where the layout has it.
 
 ## Build and run
 

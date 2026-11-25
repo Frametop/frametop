@@ -956,14 +956,16 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             RememberTiles();
             return (void)std::snprintf(reply, size, "ok %s %d%s", arc ? "arc" : "centre", i + 1, arc ? (g_tiles.Arc(i) ? " on" : " off") : "");
         }
-        if (!std::strcmp(parsed.rest, "recentre")) {   // (a reset: packed again too, tilepack.h)
+        if (!std::strcmp(parsed.rest, "recentre")) {   // (a reset: the group round you, each tile as it is in it)
             LayoutLetGo("a reset");
             g_tilePut.Clear();
+            return g_tileReset = true, (void)std::snprintf(reply, size, "ok");
+        }
+        if (!std::strcmp(parsed.rest, "pack")) {   // (tilepack.h)
             g_tiles.Repack(TileInfo);
             RetileDash();
             RememberTiles();
-            std::printf("dashboard tiles: packed again (a reset): %zu columns\n", g_tiles.Grid().Cols().size());
-            return g_tileReset = true, (void)std::snprintf(reply, size, "ok");
+            return (void)std::snprintf(reply, size, "ok %zu", g_tiles.Grid().Cols().size());
         }
         if (!std::strcmp(parsed.rest, "clear")) {
             for (const int id : g_tiles.Ids()) TileUnanchor(id, "tiles clear");

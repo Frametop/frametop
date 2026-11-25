@@ -85,6 +85,10 @@ class Harness:
             if self.on_head:
                 self.on_head()
             return "ok " + " ".join(map(str, self.head))
+        if command.startswith("recentre"):
+            if self.on_head:
+                self.on_head()
+            return "ok 1 " + " ".join(map(str, self.head))
         if command.startswith("get "):
             return "ok 0 0 -1 1 0 0 0 1 0 0 0 1 4 2 .25 none"
         return "ok"
@@ -116,9 +120,9 @@ class ResetCountdownReview(unittest.TestCase):
             self.assertEqual(any(e[0] == "helper_end" for e in h.events), h.helper_available)
         h.on_head = read_head
         self.assertEqual(h.run("reset"), 0)
-        place = next(e[1] for e in h.events if e[0] == "ask" and e[1].startswith("place "))
-        self.assertEqual(list(map(float, place.split()[2:5])), [8.0, 20.0, 30.0])
-        self.assertEqual(float(place.split()[5]), 90.0)
+        self.assertEqual([e[1] for e in h.events if e[0] == "ask" and e[1].startswith(("recentre", "place"))],
+                         ["recentre 1 0.00"])
+        self.assertIn(("anchor", (10.0, 20.0, 30.0), 90.0), h.events)
         actions = [e[0] for e in h.events]
         waited = "helper_end" if h.helper_available else "sleep"
         self.assertLess(actions.index(waited), actions.index("load"))
@@ -195,7 +199,7 @@ class ResetCountdownReview(unittest.TestCase):
         self.assertEqual(duplicates, [1, 1, 1])
         self.assertEqual(sum(e[0] == "helper_start" for e in h.events), 1)
         self.assertEqual(sum(e[0] == "sleep" for e in h.events), 1)
-        self.assertEqual(sum(e == ("ask", "head") for e in h.events), 1)
+        self.assertEqual(sum(e == ("ask", "recentre 1 0.00") for e in h.events), 1)
         h.on_helper = h.on_sleep = h.on_head = None
         self.assertEqual(h.run("reset"), 0)
         self.assertEqual(sum(e[0] == "helper_start" for e in h.events), 2)

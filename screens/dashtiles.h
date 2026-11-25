@@ -68,7 +68,7 @@ public:
     // Tiled panels laid out at no size, so the others close up their gap: Steam's window with the
     // dashboard closed, and any panel not shown (user, 2026-11-19: desktopless mode hid the desktop's
     // screen and a PC's display wasn't live, and their columns left "a massive gap in the middle").
-    // A reset packs them at their own size (Repack), so one shown again comes back where it was.
+    // `tiles pack` packs them at their own size (Repack), so one shown again comes back where it was.
     std::set<int> absent;
     bool stayDefault = false;   // DASH_TILE_STAY: a panel whose stay is Default stays shown
 
@@ -358,7 +358,7 @@ public:
     }
 
     // Every tile packed into columns again (tilepack.h), the centre display's in the middle (hidden
-    // now or not), sizes kept: a reset's (user, 2026-11-19: "Tiling looks way broken ... There's a
+    // now or not), sizes kept: `tiles pack` (user, 2026-11-19: "Tiling looks way broken ... There's a
     // massive gap in the middle").
     template <typename InfoOf>
     void Repack(InfoOf info) {

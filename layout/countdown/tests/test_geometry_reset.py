@@ -27,11 +27,13 @@ class Harness:
         self.helper_elapsed = 3.05
         self.helper_error = None
         self.helper_code = 0
-        self.on_helper = self.on_sleep = self.on_head = self.on_place = self.on_get = None
+        self.on_helper = self.on_sleep = self.on_head = self.on_get = None
         self.head = [1.0, 2.0, 3.0, 0.0]
         self.failures = {}
         self.pins = {}
         self.present = {1, 101}
+        self.concealed = ""
+        self.moved = 2
         self.layout = copy.deepcopy(self.m.DEFAULTS)
         self.layout["screens"] = [{"pos": [9, 9, 9], "face": [0, 0], "metres": 5,
                                     "curve": .5, "hidden": True, "scale": 1.25}]
@@ -96,10 +98,12 @@ class Harness:
         self.events.append(("ask", command))
         if command in self.failures:
             raise self.failures[command]
-        if command == "head":
+        if command.startswith("recentre"):
             if self.on_head:
                 self.on_head()
-            return "ok " + " ".join(map(str, self.head))
+            return f"ok {self.moved} " + " ".join(map(str, self.head))
+        if command == "concealed":
+            return "ok" + self.concealed
         if command.startswith("get "):
             n = int(command.split()[1])
             if self.on_get:
@@ -107,19 +111,15 @@ class Harness:
             if n not in self.present:
                 raise RuntimeError("screen not present")
             return "ok 0 0 -1 1 0 0 0 1 0 0 0 1 4 2 .25 " + self.pins.get(n, "none")
-        if command.startswith("place "):
-            if self.on_place:
-                self.on_place()
+        if command in ("vrkeyboard close", "tiles recentre"):
             return "ok"
-        if command.startswith("pin ") or command in ("vrkeyboard close", "tiles recentre"):
-            return "ok"
-        raise AssertionError("Reset sent a non-geometric command: " + command)
+        raise AssertionError("Reset sent something other than the one move: " + command)  # (a place, a pin)
 
     def run(self):
         return self.m.main(["ft-layout", "reset"])
 
-    def places(self):
-        return [e[1] for e in self.events if e[0] == "ask" and e[1].startswith("place ")]
+    def moves(self):
+        return [e[1] for e in self.events if e[0] == "ask" and e[1].startswith("recentre")]
 
 
 class GeometryResetReview(unittest.TestCase):
@@ -128,26 +128,40 @@ class GeometryResetReview(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.lock = pathlib.Path(self.temp.name) / "layout.lock"
 
-    def test_profile_restores_only_screen_poses_and_preserves_configuration(self):
+    def test_one_move_and_the_layout_and_configuration_stay(self):
         h = Harness(self.lock)
         original = copy.deepcopy(h.layout)
         h.head = [10, 20, 30, 90]
         self.assertEqual(h.run(), 0)
         self.assertEqual(h.layout, original)
-        self.assertEqual(h.places(), [
-            "place 1 8.0000 20.0000 30.0000 90.000 0.000 5.000",
-            "place 101 7.0000 21.0000 28.0000 100.000 20.000 3.000"])
-        self.assertEqual(sum(e == ("ask", "head") for e in h.events), 1)
+        self.assertEqual(h.moves(), ["recentre 1 0.00"])
+        self.assertIn(("anchor", (10.0, 20.0, 30.0), 90.0), h.events)
         actions = [e[0] for e in h.events]
         self.assertLess(actions.index("helper_end"), actions.index("load"))
         self.assertEqual(actions[-2:], ["socket_close", "kwin_follow"])
 
-    def test_preset_reset_places_screen_without_restoring_windows(self):
+    def test_the_lead_is_where_the_layout_has_it_round_you(self):
+        h = Harness(self.lock)
+        h.layout["layouts"]["Cockpit"][0]["pos"] = [-1, 0.4, -1]  # 45 degrees to the left
+        self.assertEqual(h.run(), 0)
+        self.assertEqual(h.moves(), ["recentre 1 45.00"])
+
+    def test_preset_lead(self):
         h = Harness(self.lock, profile=False)
         h.layout["hosts"] = []
-        h.head = [10, 20, 30, 90]
         self.assertEqual(h.run(), 0)
-        self.assertEqual(h.places(), ["place 1 8.0000 20.0000 30.0000 90.000 0.000 0.000"])
+        self.assertEqual(h.moves(), ["recentre 1 -0.00"])
+
+    def test_the_main_screen_leads(self):
+        h = Harness(self.lock)
+        h.layout["screen_count"] = 2
+        h.layout["primary"] = 2
+        h.layout["screens"].append({})
+        h.layout["layouts"]["Cockpit"].append({"pos": [1, 0, -1], "face": [0, 0], "roll": 0, "metres": 1})
+        h.present = {1, 2, 101}
+        h.m.native_count = h.m.screen_count = lambda layout=None: 2
+        self.assertEqual(h.run(), 0)
+        self.assertEqual(h.moves(), ["recentre 2 -45.00"])
 
     def test_head_is_sampled_after_countdown_and_all_panel_inspection(self):
         h = Harness(self.lock)
@@ -155,8 +169,8 @@ class GeometryResetReview(unittest.TestCase):
         h.on_get = lambda n: setattr(h, "head", [10, 20, 30, 90])
         self.assertEqual(h.run(), 0)
         asks = [e[1] for e in h.events if e[0] == "ask"]
-        self.assertEqual(asks[:3], ["get 1", "get 101", "head"])
-        self.assertTrue(h.places()[0].startswith("place 1 8.0000 20.0000 30.0000 90.000"))
+        self.assertEqual(asks[:4], ["concealed", "get 1", "recentre 1 0.00", "tiles recentre"])
+        self.assertIn(("anchor", (10.0, 20.0, 30.0), 90.0), h.events)
 
     def test_countdown_failures_and_fast_success_preserve_three_second_minimum(self):
         scenarios = [(.25, None, 0, 2.75), (0, FileNotFoundError("missing"), 0, 3),
@@ -169,7 +183,7 @@ class GeometryResetReview(unittest.TestCase):
                 self.assertEqual(h.run(), 0)
                 self.assertEqual([e[1] for e in h.events if e[0] == "sleep"], [] if sleep is None else [sleep])
 
-    def test_duplicate_reset_suppressed_through_helper_fallback_head_and_placement(self):
+    def test_duplicate_reset_suppressed_through_helper_fallback_and_the_move(self):
         h = Harness(self.lock)
         h.helper_elapsed = .25
         h.helper_code = 1
@@ -177,12 +191,11 @@ class GeometryResetReview(unittest.TestCase):
         h.on_helper = lambda: duplicates.append(h.run())
         h.on_sleep = lambda _: duplicates.append(h.run())
         h.on_head = lambda: duplicates.append(h.run())
-        h.on_place = lambda: duplicates.append(h.run())
         self.assertEqual(h.run(), 0)
-        self.assertEqual(duplicates, [1, 1, 1, 1, 1])
+        self.assertEqual(duplicates, [1, 1, 1])
         self.assertEqual(sum(e[0] == "helper_start" for e in h.events), 1)
-        self.assertEqual(len(h.places()), 2)
-        h.on_helper = h.on_sleep = h.on_head = h.on_place = None
+        self.assertEqual(len(h.moves()), 1)
+        h.on_helper = h.on_sleep = h.on_head = None
         self.assertEqual(h.run(), 0)
         self.assertEqual(sum(e[0] == "helper_start" for e in h.events), 2)
 
@@ -203,35 +216,34 @@ class GeometryResetReview(unittest.TestCase):
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
             h = Harness(self.lock)
             self.assertEqual(h.run(), 1)
-            self.assertFalse(h.places())
+            self.assertFalse(h.moves())
             self.assertFalse(any(e[0] == "socket" for e in h.events))
         self.assertEqual(h.run(), 0)
 
-    def test_wrist_pinned_local_and_remote_panels_are_left_untouched(self):
-        h = Harness(self.lock)
-        h.pins = {1: "left", 101: "right"}
+    def test_a_pinned_hidden_or_absent_main_screen_leads_nothing(self):
+        for what, setup in (("wrist", lambda h: h.pins.update({1: "left"})), ("head", lambda h: h.pins.update({1: "head"})),
+                            ("dashboard", lambda h: h.pins.update({1: "dashboard"})),
+                            ("hidden", lambda h: setattr(h, "concealed", " 1")), ("absent", lambda h: h.present.remove(1))):
+            with self.subTest(what):
+                h = Harness(self.lock)
+                setup(h)
+                self.assertEqual(h.run(), 0)
+                self.assertEqual(h.moves(), ["recentre 101 -33.69"])  # (the remote display's place, 2 m right, 3 m ahead)
+
+    def test_with_none_of_the_layout_in_the_room_what_is_there_still_comes(self):
+        h = Harness(self.lock)  # (desktopless: floating windows and no screen)
+        h.pins = {1: "head", 101: "right"}
         self.assertEqual(h.run(), 0)
-        self.assertEqual(h.places(), [])
-        self.assertNotIn(("ask", "head"), h.events)
+        self.assertEqual(h.moves(), ["recentre"])
+        self.assertEqual(h.events[-1], ("kwin_follow",))
+
+    def test_nothing_in_the_room_leaves_plasma_alone(self):
+        h = Harness(self.lock)
+        h.pins = {1: "dashboard", 101: "dashboard"}
+        h.moved = 0
+        self.assertEqual(h.run(), 0)
+        self.assertIn(("ask", "tiles recentre"), h.events)  # (the tiles come round you)
         self.assertNotIn(("kwin_follow",), h.events)
-        self.assertEqual(h.events[-1], ("socket_close",))
-
-    def test_head_pinned_panels_go_back_in_the_room(self):
-        h = Harness(self.lock)
-        h.pins = {1: "head", 101: "head"}
-        self.assertEqual(h.run(), 0)
-        self.assertEqual([p.split()[1] for p in h.places()], ["1", "101"])
-        self.assertFalse(any(e[0] == "ask" and e[1].startswith("pin ") for e in h.events))
-
-    def test_head_pin_saved_in_the_profile_is_pinned_again(self):
-        h = Harness(self.lock)
-        h.pins = {1: "head"}
-        rel = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -1]
-        h.layout["layouts"]["Cockpit"][0]["pin"] = {"hand": "head", "rel": rel}
-        self.assertEqual(h.run(), 0)
-        asks = [e[1] for e in h.events if e[0] == "ask"]
-        place = asks.index(next(p for p in h.places() if p.startswith("place 1 ")))
-        self.assertTrue(asks[place + 1].startswith("pin 1 head "))
 
     def test_moved_panels_close_the_keyboard_and_rearrange_plasma(self):
         h = Harness(self.lock)
@@ -244,26 +256,26 @@ class GeometryResetReview(unittest.TestCase):
             with self.subTest(off=off):
                 h = Harness(self.lock)
                 h.layout["hosts"][0]["displays"][0]["off"] = off
-                h.present = {1}
+                h.present = set()
                 self.assertEqual(h.run(), 0)
-                self.assertEqual(len(h.places()), 1)
-                self.assertTrue(h.places()[0].startswith("place 1 "))
+                self.assertEqual(h.moves(), ["recentre"])
                 self.assertEqual(("ask", "get 101") in h.events, not off)
 
     def test_ipc_timeout_aborts_without_any_panel_motion_and_releases_locks(self):
         h = Harness(self.lock)
-        h.failures["get 101"] = h.m.NoAnswer("mock compositor timeout")
+        h.failures["get 1"] = h.m.NoAnswer("mock compositor timeout")
         self.assertEqual(h.run(), 1)
-        self.assertEqual(h.places(), [])
+        self.assertEqual(h.moves(), [])
         self.assertEqual(h.events[-2], ("socket_close",))
         h.failures.clear()
         self.assertEqual(h.run(), 0)
 
     def test_missing_head_does_not_move_panels_and_releases_socket_and_locks(self):
         h = Harness(self.lock)
-        h.failures["head"] = RuntimeError("head pose unavailable")
+        h.failures["recentre 1 0.00"] = RuntimeError("no head pose (headset off?)")
         self.assertEqual(h.run(), 1)
-        self.assertEqual(h.places(), [])
+        self.assertNotIn(("ask", "tiles recentre"), h.events)
+        self.assertFalse(any(e[0] in ("anchor", "kwin_follow") for e in h.events))
         self.assertEqual(h.events[-2], ("socket_close",))
         h.failures.clear()
         self.assertEqual(h.run(), 0)

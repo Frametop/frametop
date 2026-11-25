@@ -944,8 +944,8 @@ Item {
                     opacity: 0.7
                     text: "The diagram shows your current screens (dashed lines show where this layout would move them). "
                           + "Layouts always center around whichever direction you're facing when applied. You can move screens "
-                          + "by hand anytime using their grab bars, and snap them back with Meta+Shift+R, Arrange now above, "
-                          + "or a shortcut in Mouse buttons."
+                          + "by hand anytime using their grab bars, snap them back with Arrange now above, and bring them "
+                          + "all round to where you're looking, as they are, with Meta+Shift+R or a shortcut in Mouse buttons."
                 }
             }
         }

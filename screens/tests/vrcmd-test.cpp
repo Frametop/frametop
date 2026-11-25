@@ -42,7 +42,7 @@ int main() {
         {"moving 5 1", Moving}, {"torn 5 100 200", Torn}, {"carry toggle", CarryToggle}, {"carry take 5", CarryTake},
         {"carryturn 1.5 -2", CarryTurn}, {"carry 5", Carry}, {"up", Up},
         {"windowdrag meta move resize none", WindowDrag}, {"pulled 103 0.5 0.02 7", Pulled}, {"spin 30", Spin},
-        {"shift 0.25 -1.5 30", Shift}, {"shift back", ShiftBack},
+        {"shift 0.25 -1.5 30", Shift}, {"shift back", ShiftBack}, {"recentre 1 0.00", Recentre},
         {"anchor focused toggle", Anchor}, {"stay 2 on", Stay}, {"tile left", Tile}, {"tiles", Tiles},
         {"tiles set 1 tile 0 0 0 1 1 1 0", Tiles}, {"floatapp 5 org.kde.dolphin", FloatApp},
         {"barside 2 left", BarSide}, {"barside 2 menu", BarSide},
@@ -128,6 +128,11 @@ int main() {
     check("the pointer's pose (6 numbers) is no panel pose", V("pose 1 2 3 4 5") == Unknown);
     { Cmd t; check("tiles set: the rest after it", Parse("tiles set 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "set 2 off")); }
     { Cmd t; check("tiles add: the rest after it", Parse("tiles add 2 off", t) == Tiles && t.rest && !std::strcmp(t.rest, "add 2 off")); }
+    { Cmd t; check("tiles pack: the rest after it", Parse("tiles pack", t) == Tiles && t.rest && !std::strcmp(t.rest, "pack")); }
+    { Cmd t; check("recentre: the panel and where it is round you", Parse("recentre 101 -33.69", t) == Recentre && t.n == 101 && near(t.yaw, -33.69)); }
+    { Cmd t; t.n = 3; check("recentre alone: no panel", Parse("recentre", t) == Recentre && t.n == 0); }
+    check("recentre: a panel needs its bearing, a number, and no more", V("recentre 1") == Unknown && V("recentre 0 10") == Unknown &&
+          V("recentre 1 nan") == Unknown && V("recentre 1 361") == Unknown && V("recentre 1 10 5") == Unknown && V("recentred") == Unknown);
     { Cmd t; check("tiles recentre: the rest after it", Parse("tiles recentre", t) == Tiles && t.rest && !std::strcmp(t.rest, "recentre")); }
     { Cmd t; check("tiles clear", Parse("tiles clear", t) == Tiles && t.rest && !std::strcmp(t.rest, "clear")); }
     { Cmd t; check("tiles gaps", Parse("tiles gaps", t) == Tiles && t.rest && !std::strcmp(t.rest, "gaps")); }
@@ -161,6 +166,6 @@ int main() {
     check("groups: helper words, hand features, cutouts, floating, spin",
           GroupOf(Hands) == HelperWordGroup && GroupOf(SpinDistance) == HelperWordGroup &&
               GroupOf(GrabThat) == HandFeatureGroup && GroupOf(Cutouts) == CutoutsGroup && GroupOf(Up) == FloatGroup &&
-              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup && GroupOf(Shift) == SpinGroup && GroupOf(ShiftBack) == SpinGroup);
+              GroupOf(Moving) == FloatGroup && GroupOf(Spin) == SpinGroup && GroupOf(Shift) == SpinGroup && GroupOf(ShiftBack) == SpinGroup && GroupOf(Recentre) == SpinGroup);
     return failed ? 1 : 0;
 }

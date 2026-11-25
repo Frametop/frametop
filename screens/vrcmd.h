@@ -21,7 +21,7 @@ enum Verb {
     SteamvrList, Typing, CalPanel, Ray, Turn, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
     WindowDrag, Pulled,
-    Spin, Shift, ShiftBack,
+    Spin, Shift, ShiftBack, Recentre,
     Anchor, Stay, Tile, Tiles, FloatApp, BarSide,
     Front, Debug, State,  // keep State last: kLastVerb, and the test walks Place..kLastVerb
 };
@@ -76,7 +76,7 @@ inline Group GroupOf(Verb v) {
     case Float: case Hold: case Unfloat: case Sub: case Minimized: case Moving: case Torn: case CarryToggle:
     case CarryTake: case CarryTurn: case Carry: case Up: case WindowDrag: case Pulled:
         return FloatGroup;
-    case Spin: case Shift: case ShiftBack:
+    case Spin: case Shift: case ShiftBack: case Recentre:
         return SpinGroup;
     case Anchor: case Stay: case Tile: case Tiles: case FloatApp:
         return TileGroup;
@@ -101,6 +101,9 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "get %d", &c.n) == 1) return Get;
     if (std::strncmp(cmd, "screens", 7) == 0) return Screens;
     if (std::strcmp(cmd, "universe") == 0) return Universe;
+    // "recentre", or "recentre N DEGREES": the screen the rest go by, and where the layout has it round you
+    if (std::strcmp(cmd, "recentre") == 0) return c.n = 0, c.yaw = 0, Recentre;
+    if (char more; std::sscanf(cmd, "recentre %d %lf %c", &c.n, &c.yaw, &more) == 2 && c.n > 0 && std::fabs(c.yaw) <= 360) return Recentre;
     if (std::strncmp(cmd, "head", 4) == 0) return Head;
     if (std::strcmp(cmd, "reach") == 0) return Reach;
     if (std::sscanf(cmd, "visibility %15s", c.word) == 1) return Visibility;
@@ -156,7 +159,7 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "anchor %15s %15s", c.word, c.hand) == 2) return Anchor;
     if (std::sscanf(cmd, "stay %15s %15s", c.word, c.hand) == 2) return Stay;
     if (std::strcmp(cmd, "tiles") == 0) return Tiles;
-    if (!std::strcmp(cmd, "tiles clear") || !std::strcmp(cmd, "tiles gaps") || !std::strcmp(cmd, "tiles recentre") ||
+    if (!std::strcmp(cmd, "tiles clear") || !std::strcmp(cmd, "tiles gaps") || !std::strcmp(cmd, "tiles recentre") || !std::strcmp(cmd, "tiles pack") ||
         ((!std::strncmp(cmd, "tiles set", 9) || !std::strncmp(cmd, "tiles add", 9)) && (!cmd[9] || cmd[9] == ' ')) ||
         (!std::strncmp(cmd, "tiles centre", 12) && (!cmd[12] || cmd[12] == ' ')) || !std::strncmp(cmd, "tiles arc ", 10) ||
         (!std::strncmp(cmd, "tiles remember", 14) && (!cmd[14] || cmd[14] == ' ')))

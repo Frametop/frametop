@@ -37,7 +37,7 @@ struct ResetAsk {
 constexpr int64_t kResetAskMs = 3000, kResetAskLeastMs = 300;   // (the least: the press that opened it isn't the answer)
 constexpr const char *kResetAskKey = "frametop.resetask";
 // (the seconds left first: "Resetting in 3.")
-constexpr const char *kResetAskBody = "Your screens go back to their layout around where you are now. Cancel keeps them.";
+constexpr const char *kResetAskBody = "Everything comes round to where you look, as it stands. Cancel leaves it where it is.";
 int SecondsLeft() { return int(std::max<int64_t>(1, (kResetAskMs - (NowMs() - g_resetAsk.shownMs) + 999) / 1000)); }
 
 // The button under a texture point (y down), -1 none.

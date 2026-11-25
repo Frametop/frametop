@@ -406,7 +406,7 @@ POINTER_SETTINGS = [
     ("POINTER_FOLLOW_REACH", "Mouse reach", 70, 20, 85, 1, "°", "follow",
      "Maximum distance from the center of your view that the mouse can move the pointer."),
     ("POINTER_WAKE_COUNTS", "Mouse wake sensitivity", 40, 5, 200, 5, "steps", "fine",
-     "How much mouse movement is needed to activate the 3D pointer. Increase if desk bumps wake it accidentally."),
+     "How much mouse movement is needed to take the 3D pointer when it's off, or a controller, a hand or your gaze has it. Increase if desk bumps wake it accidentally."),
     ("POINTER_IDLE", "Hand back to controllers after", 30, 5, 120, 5, "s", "fine",
      "Seconds of mouse inactivity before VR controllers automatically regain the laser."),
     ("POINTER_CONTROLLER_PICKUP", "Controller pickup threshold", 1.0, 0.5, 5.0, 0.1, "×", "fine",

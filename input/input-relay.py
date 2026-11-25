@@ -126,6 +126,9 @@ lets go.
 In gaze mode outside games, the helper keeps the pointer ("gazeawake 1", repeated every 5
 seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the mouse is idle.
 It says the same during ft-screens' carry-all, in games too (the head carries the panels then).
+While the mouse has the pointer (it's on, and no gaze, hand ray or hand's hold drives it), the
+helper says "mousehas 1" the same way ("mousehas 0" or silence ends it): a mouse that rested then
+moves the pointer from its first count, with no wake_counts to get past first.
 When something else let the pointer go, the gaze takes it back and the helper says "gazewoke"
 (the pointer is on again here too). The hides here say why: "hide toggle" (pointer_toggle: the
 gaze leaves it off until something wakes it), "hide idle", "hide pause", "hide tilekey" (a
@@ -269,7 +272,7 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     Ignored from another user
   tilefocus 2       from ft-screens: a screen's or a remote display's tile has the focus: only the
                     nudges (TILE_NUDGE_ACTIONS) are ft-screens' (renewed and lapsing as 1)
-  vrbtn, vrhello, gazeawake, gazewoke   from the pointer helper (above)
+  vrbtn, vrhello, gazeawake, gazewoke, mousehas   from the pointer helper (above)
   vrgame 1|0        from the pointer helper: a VR game runs (on a change and every 5 s), for pausing
   vrlink 1|0        from the pointer helper: Steam Link's client is the scene app (on a change and
                     every 5 s), so pc_game.py asks the PC whether it runs a game
@@ -891,6 +894,7 @@ class Pointer:
     WAKE_WINDOW = 1.0  # seconds in which WAKE_COUNTS of motion must add up
     QUEUE_MAX = 512  # commands kept while the helper is behind (see send)
     MOVE_EVERY = 0.004  # mouse motion goes to the helper at most this often (see flush)
+    MOUSE_HAS_LAPSE = 12.0  # the helper renews its "mousehas 1" every 5 s; the wake guard is back this long after the last
 
     def __init__(self, sensitivity, idle, wake_counts=40):
         # Never blocks (see send): a stalled helper must not stall the keyboard, volume keys and pausing.
@@ -917,10 +921,13 @@ class Pointer:
         self.system_at = None  # dashboard toggle: when to press the virtual system button
         self.system_release = None
         # Waking (or re-claiming after a pause) needs deliberate movement, so sensor
-        # jitter from a mouse lying on a desk can't steal the laser from a controller.
+        # jitter from a mouse lying on a desk can't steal the laser from a controller. Not while
+        # the helper says the mouse has the pointer (mouse_has_until): there's nothing to steal,
+        # and the motion counted on the way is lost, a dead zone after every rest.
         self.wake_counts = wake_counts
         self.pending = 0
         self.pending_since = 0.0
+        self.mouse_has_until = 0.0  # the helper's "mousehas 1" holds until then
         self.gaze_awake_until = 0.0  # the helper's gaze mode keeps the pointer until then
         # Driver buttons this pointer pressed and hasn't released (trigger, b, x, joystick: the
         # left, right, middle and back actions, from a mouse button, a mapped controller button
@@ -992,8 +999,13 @@ class Pointer:
             self.claim_at = now  # another device may have taken the laser meanwhile
         self.last_used = now
 
+    def mouse_has(self, on, now):
+        """The helper's "mousehas 1|0": the mouse has the pointer, so a rest needs no waking."""
+        self.mouse_has_until = now + self.MOUSE_HAS_LAPSE if on else 0.0
+
     def motion(self, code, value, now):
-        dormant = not self.active or now - self.last_used > self.RESUME_PAUSE
+        rested = now - self.last_used > self.RESUME_PAUSE and now >= self.mouse_has_until
+        dormant = not self.active or rested
         if dormant and code in (REL_X, REL_Y):
             if now - self.pending_since > self.WAKE_WINDOW:
                 self.pending, self.pending_since = 0, now
@@ -2638,6 +2650,10 @@ class Relay:
         if cmd == "gazeawake" and len(words) == 2:
             if self.lease.current:
                 self.lease.current.gaze_awake_until = now + 12.0 if words[1] == "1" else 0.0
+            return
+        if cmd == "mousehas" and len(words) == 2:
+            if self.lease.current:
+                self.lease.current.mouse_has(words[1] == "1", now)
             return
         if cmd == "gazewoke":
             # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.

@@ -287,6 +287,35 @@ lease.configure(True, 0.03, 30.0, 40, paused=False)
 lease.conf.active = True
 check("lease: holding: the pointer came on", (lease.holding_changed(), lease.holding_changed()), (True, False))
 
+# The wake guard (Pointer.motion): 40 counts of motion within a second before a mouse that
+# rested moves anything, unless the helper says the mouse has the pointer ("mousehas 1").
+def moved(p, counts, at):
+    """What the helper got for `counts` of mouse motion to the right at `at`, one count an event."""
+    p.sock.sent.clear()
+    for _ in range(counts):
+        p.motion(relay.REL_X, 1, at)
+    p.flush()
+    return [line for line in p.sock.sent if line.startswith("move")]
+
+
+p = lease.conf
+p.sock = type("Recorder", (), {"sent": [], "sendto": lambda self, data, addr: self.sent.append(data.decode())})()
+p.active, p.last_used = True, 100.0
+check("wake guard: the mouse in use: every count moves", moved(p, 3, 100.5), ["move -0.0900 0.0000"])
+check("wake guard: after a rest, the first counts are held back", moved(p, 39, 103.0), [])
+check("wake guard: ...and the pointer moves from the count that makes the wake counts", moved(p, 3, 103.1), ["move -0.0900 0.0000"])
+p.mouse_has(True, 110.0)
+check("wake guard: the mouse has the pointer: a rest costs nothing, the first count moves",
+      moved(p, 1, 113.0), ["move -0.0300 0.0000"])
+check("wake guard: ...until the helper stops saying so", moved(p, 5, 113.0 + relay.Pointer.MOUSE_HAS_LAPSE + 10), [])
+p.mouse_has(True, 140.0)
+p.mouse_has(False, 141.0)
+check("wake guard: something else took the pointer: guarded again at once", moved(p, 5, 145.0), [])
+p.mouse_has(True, 150.0)
+p.active = False
+check("wake guard: the pointer off (idle, hidden): waking is guarded whatever the helper last said", moved(p, 5, 151.0), [])
+p.active = True
+
 held = relay.HeldKeys()
 held.meta, held.meta_hidden = {relay.KEY_LEFTMETA, relay.KEY_RIGHTMETA}, {relay.KEY_LEFTMETA}
 held.modifiers = {relay.MODIFIERS[relay.KEY_LEFTMETA], relay.MODIFIERS[29]}  # Meta and Left Ctrl

@@ -599,6 +599,7 @@
 #include "hanging.h"
 #include "handsin.h"
 #include "kbray.h"
+#include "mousehas.h"
 #include "twohand.h"
 #include "rayowner.h"
 #include "typing.h"
@@ -1470,6 +1471,8 @@ struct Pointer {
     // Gaze mode outside games, and its dot (see the top): lastMove/lastHeld/pulseAt.
     bool inGame = false, gazeAwake = false, gameSent = false;
     bool inLink = false, linkSent = false;  // Steam Link's client is the scene app (DEE-346)
+    bool mouseHasSent = false;  // "mousehas" as the relay last heard it (mousehas.h)
+    Clock::time_point mouseHasAt{};
     Clock::time_point inGameAt{}, gazeAwakeAt{}, gameSentAt{};
     Clock::time_point lastMove{}, lastHeld{}, pulseAt{};
     // The left button, as sent to the driver; pressRight: the next press is the right button
@@ -2746,6 +2749,14 @@ void Pointer::GazeAwake() {
         gameSentAt = t;
         SendTo(out, FT_SOCK_RELAY, inGame ? "vrgame 1" : "vrgame 0");
         SendTo(out, FT_SOCK_RELAY, inLink ? "vrlink 1" : "vrlink 0");
+    }
+    // The mouse has the pointer (mousehas.h): the relay moves it from the first count after a rest.
+    // Repeated, as above; silence ends it there.
+    const bool has = mousehas::Has(active, gazeOn, raySide >= 0, hold.src != Src::None && hold.src != Src::Mouse);
+    if (has != mouseHasSent || t - mouseHasAt > std::chrono::seconds(5)) {
+        mouseHasSent = has;
+        mouseHasAt = t;
+        SendTo(out, FT_SOCK_RELAY, has ? "mousehas 1" : "mousehas 0");
     }
 }
 

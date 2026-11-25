@@ -37,68 +37,71 @@ exec "$root/scripts/frame.sh" -C screens 'set -e; mkdir -p build/include
 . ../scripts/openvr.sh
 . ../scripts/stb.sh
 stb_fetch build/include stb_truetype.h stb_image_write.h
+. ../scripts/objs.sh   # obj: only what changed is compiled, several at once
 cc="gcc -std=c11 -O2 -Wall -Wno-unused-parameter $(pkg-config --cflags wlroots-0.20 wayland-server xkbcommon libdrm pixman-1)"
-$cc -c -o build/compositor.o compositor.c
-$cc -c -o build/remote.o remote.c
-$cc -c -o build/share.o share.c
-$cc -c -o build/child.o child.c
+obj $cc -c -o build/compositor.o compositor.c
+obj $cc -c -o build/remote.o remote.c
+obj $cc -c -o build/share.o share.c
+obj $cc -c -o build/child.o child.c
 cxx="g++ -std=c++17 -O2 -Wall -Wno-missing-field-initializers -Ibuild/include $(pkg-config --cflags egl glesv2 gbm libdrm)"
-$cxx -c -o build/vr.o vr.cpp
-$cxx -c -o build/vrgsapps.o vrgsapps.cpp
-$cxx -c -o build/vrtiles.o vrtiles.cpp
-$cxx -c -o build/vrtilecentre.o vrtilecentre.cpp
-$cxx -c -o build/vrbarmenu.o vrbarmenu.cpp
-$cxx -c -o build/vrappscale.o vrappscale.cpp
-$cxx -c -o build/vrbarhold.o vrbarhold.cpp
-$cxx -c -o build/vrturn.o vrturn.cpp
-$cxx -c -o build/vrlayoutgrab.o vrlayoutgrab.cpp
-$cxx -c -o build/vrbarside.o vrbarside.cpp
-$cxx -c -o build/vrresetask.o vrresetask.cpp
-$cxx -c -o build/vrvoice.o vrvoice.cpp
-$cxx -c -o build/vrquick.o vrquick.cpp
-$cxx -c -o build/vrgazemode.o vrgazemode.cpp
-$cxx -c -o build/vrstats.o vrstats.cpp
-$cxx -c -o build/vrsteamwin.o vrsteamwin.cpp
-$cxx -c -o build/vrsteamfollow.o vrsteamfollow.cpp
-$cxx -c -o build/vrsteamhit.o vrsteamhit.cpp
-$cxx -c -o build/vrkbspot.o vrkbspot.cpp
-$cxx -c -o build/label.o label.cpp
-$cxx -c -o build/overlaytex.o overlaytex.cpp
-$cxx -c -o build/handcut.o handcut.cpp
-$cxx -c -o build/handrender.o handrender.cpp
-$cxx -c -o build/rendernode.o rendernode.cpp
-$cxx -c -o build/handinput.o handinput.cpp
-$cxx -c -o build/palmmenu.o palmmenu.cpp
-$cxx -c -o build/grabthat.o grabthat.cpp
-$cxx -c -o build/steampanels.o steampanels.cpp
-$cxx $(pkg-config --cflags xcb xcb-xtest xcb-icccm) -c -o build/gsforward.o gsforward.cpp
-$cxx -pthread -c -o build/gslink.o gslink.cpp
-$cxx -pthread -c -o build/steamcdp.o steamcdp.cpp
-$cxx -c -o build/handtest.o handtest.cpp
-$cxx -c -o build/handmesh.o handmesh.cpp
-$cxx -c -o build/handskin.o handskin.cpp
-$cxx -c -o build/handmodels.o handmodels.cpp
-$cxx -c -o build/modelfile.o ../avatar/modelfile.cpp
-python3 -I tools/hand-asset.py --cpp build/handasset.cpp >/dev/null
-$cxx -I. -c -o build/handasset.o build/handasset.cpp
-$cxx -c -o build/handrobot.o handrobot.cpp
-$cxx -c -o build/vroutput.o vroutput.cpp
-$cxx -c -o build/handview.o handview.cpp
-$cxx -c -o build/bodyfile.o ../avatar/bodyfile.cpp
-$cxx -c -o build/bodypose.o ../avatar/pose/bodypose.cpp
+obj $cxx -c -o build/vr.o vr.cpp
+obj $cxx -c -o build/vrgsapps.o vrgsapps.cpp
+obj $cxx -c -o build/vrtiles.o vrtiles.cpp
+obj $cxx -c -o build/vrtilecentre.o vrtilecentre.cpp
+obj $cxx -c -o build/vrbarmenu.o vrbarmenu.cpp
+obj $cxx -c -o build/vrappscale.o vrappscale.cpp
+obj $cxx -c -o build/vrbarhold.o vrbarhold.cpp
+obj $cxx -c -o build/vrturn.o vrturn.cpp
+obj $cxx -c -o build/vrlayoutgrab.o vrlayoutgrab.cpp
+obj $cxx -c -o build/vrbarside.o vrbarside.cpp
+obj $cxx -c -o build/vrresetask.o vrresetask.cpp
+obj $cxx -c -o build/vrvoice.o vrvoice.cpp
+obj $cxx -c -o build/vrquick.o vrquick.cpp
+obj $cxx -c -o build/vrgazemode.o vrgazemode.cpp
+obj $cxx -c -o build/vrstats.o vrstats.cpp
+obj $cxx -c -o build/vrsteamwin.o vrsteamwin.cpp
+obj $cxx -c -o build/vrsteamfollow.o vrsteamfollow.cpp
+obj $cxx -c -o build/vrsteamhit.o vrsteamhit.cpp
+obj $cxx -c -o build/vrkbspot.o vrkbspot.cpp
+obj $cxx -c -o build/label.o label.cpp
+obj $cxx -c -o build/overlaytex.o overlaytex.cpp
+obj $cxx -c -o build/handcut.o handcut.cpp
+obj $cxx -c -o build/handrender.o handrender.cpp
+obj $cxx -c -o build/rendernode.o rendernode.cpp
+obj $cxx -c -o build/handinput.o handinput.cpp
+obj $cxx -c -o build/palmmenu.o palmmenu.cpp
+obj $cxx -c -o build/grabthat.o grabthat.cpp
+obj $cxx -c -o build/steampanels.o steampanels.cpp
+obj $cxx $(pkg-config --cflags xcb xcb-xtest xcb-icccm) -c -o build/gsforward.o gsforward.cpp
+obj $cxx -pthread -c -o build/gslink.o gslink.cpp
+obj $cxx -pthread -c -o build/steamcdp.o steamcdp.cpp
+obj $cxx -c -o build/handtest.o handtest.cpp
+obj $cxx -c -o build/handmesh.o handmesh.cpp
+obj $cxx -c -o build/handskin.o handskin.cpp
+obj $cxx -c -o build/handmodels.o handmodels.cpp
+obj $cxx -c -o build/modelfile.o ../avatar/modelfile.cpp
+python3 -I tools/hand-asset.py --cpp build/handasset.cpp.new >/dev/null   # (kept when the same, so its object is too)
+cmp -s build/handasset.cpp.new build/handasset.cpp || mv build/handasset.cpp.new build/handasset.cpp
+obj $cxx -I. -c -o build/handasset.o build/handasset.cpp
+obj $cxx -c -o build/handrobot.o handrobot.cpp
+obj $cxx -c -o build/vroutput.o vroutput.cpp
+obj $cxx -c -o build/handview.o handview.cpp
+obj $cxx -c -o build/bodyfile.o ../avatar/bodyfile.cpp
+obj $cxx -c -o build/bodypose.o ../avatar/pose/bodypose.cpp
 avatars=""
 for f in bodymesh handfit demo bodygpu windowview mirrorview belowview sheet stage canvas picture live main; do
-  $cxx -Wextra -I. -c -o build/avatars-$f.o ../avatar/view/$f.cpp
+  obj $cxx -Wextra -I. -c -o build/avatars-$f.o ../avatar/view/$f.cpp
   avatars="$avatars build/avatars-$f.o"
 done
 for f in room/people room/client room/room room/sentbody room/pretend room/roompicture abstract/abstract; do   # the people of a shared room
-  $cxx -Wextra -I. -c -o build/avatars-${f/\//-}.o ../avatar/$f.cpp
+  obj $cxx -Wextra -I. -c -o build/avatars-${f/\//-}.o ../avatar/$f.cpp
   avatars="$avatars build/avatars-${f/\//-}.o"
 done
 for f in micear ownface; do   # the face of the avatar you wear: its mouth from the microphone
-  $cxx -Wextra $(pkg-config --cflags libpulse-simple) -c -o build/avatars-$f.o ../avatar/face/$f.cpp
+  obj $cxx -Wextra $(pkg-config --cflags libpulse-simple) -c -o build/avatars-$f.o ../avatar/face/$f.cpp
   avatars="$avatars build/avatars-$f.o"
 done
+objs_done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
 g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrtilecentre.o build/vrbarmenu.o build/vrappscale.o build/vrbarhold.o build/vrturn.o build/vrlayoutgrab.o build/vrbarside.o build/vrresetask.o build/vrvoice.o build/vrquick.o build/vrgazemode.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/vrkbspot.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/steamcdp.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1 xcb xcb-xtest xcb-icccm) $vrlibs -pthread

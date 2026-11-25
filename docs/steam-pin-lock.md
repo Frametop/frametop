@@ -13,7 +13,11 @@ again (its Restart desktop button). It needs the guard installed
 (`desktops.sh install` puts in `frametop-pin-lock.service`) and a PIN set in
 Steam's own Security settings. With the gamescope backend the switch refuses to
 turn on, since the session would refuse to start. Turned on in an unlocked
-session, Frametop stays hidden until Steam locks and unlocks once (below).
+session, Frametop shows as soon as the guard reads Steam's unlocked state.
+
+**Known gap: cold boot.** On a cold boot Frametop can show for about a second
+before Steam's PIN screen ("Cold-boot startup", below). Don't rely on this
+feature to conceal the desktop right after a boot.
 
 Why not KWin's own lock screen: the nested KWin starts with `--no-lockscreen`
 (`session/frametop-session.sh`). Its lock screen would ask for the Linux
@@ -78,13 +82,16 @@ accepting an inactive lock. A live probe in an already-unlocked session reported
 PIN configured, inactive lock, no mandatory prompt and no reset. The observer now
 accepts that current snapshot without requiring a previously observed lock cycle.
 
-**Unverified initialization assumption:** no cold-boot test has demonstrated
-whether those same loaded-settings/inactive flags can briefly occur before an
-initial mandatory prompt mounts. The risk was inferred from initialization code,
-not observed in a headset startup test. This revision trades the former extra
-lock-cycle requirement for trusting Steam's explicit current state once settings
-are loaded; it is not a verified authentication-completed signal. Keep the feature
-experimental/default-off until that startup ordering has been validated.
+**Cold-boot startup (confirmed failure, 2026-11-11).** These same loaded-settings
+and inactive flags do occur before Steam's initial mandatory prompt mounts. On a
+cold boot with this policy the wearer briefly saw Frametop before Steam's PIN
+screen: the guard logged `unlocked (steam-unlocked)` at boot +48.8 s and
+`locked (steam-locked)` at +49.7 s, about 0.9 s later (found by Firtina Ozbalikchi). This
+policy trades the former extra lock-cycle requirement for trusting Steam's
+explicit current state once settings are loaded; it is not a verified
+authentication-completed signal, and a fixed delay would not make it one. Keep the
+feature experimental/default-off until startup has a proof and passes a cold-boot
+wearer test. A Steam client restart initializes the same way and is untested.
 
 The observer in `steam/pin_lock.py` returns only explicit lock/configuration/reset
 booleans and the UI context's time origin. It never returns the settings object,
@@ -167,8 +174,8 @@ The fresh-state revision was loaded with a guard-only restart while Steam was
 already unlocked. It immediately reported unlocked/steam-unlocked and readbacks
 showed the desktop and floating windows visible, without a new Steam lock cycle
 or PIN prompt. The wearer confirmed it looked correct. The compositor, KWin and
-keyboard retained their processes. This checks warm observer startup, not the
-unverified cold-boot ordering above.
+keyboard retained their processes. This checks warm observer startup, not
+cold boot, which fails ("Cold-boot startup", above).
 
 ## Intended boundary
 
@@ -186,7 +193,9 @@ PIN is not disk encryption or a Linux login boundary.
 1. Validate actual lock/unlock, cancellation, incorrect PIN (entered only in
    Steam), reset, UI restarts, suspend/resume and boot. Confirm no initial false
    loaded-settings/inactive state can authorize content before Steam's initial
-   mandatory prompt. Verify fresh-state recovery in an unlocked session and
+   mandatory prompt: on a cold boot it currently does ("Cold-boot startup"), so
+   this needs a fix and a retest. Check Steam client restarts and PIN-on-wake for
+   the same window. Verify fresh-state recovery in an unlocked session and
    fail-closed recovery when the settings/lock flags are unavailable.
 2. Verify the independent security gate, not ordinary hide/pause. Start denied
    before displaying any sensitive texture or accepting input. Normal

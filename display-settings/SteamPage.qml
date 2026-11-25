@@ -64,8 +64,8 @@ Kirigami.ScrollablePage {
             text: "Whenever Steam prompts for your Security PIN, all Frametop screens, windows, and the "
                   + "VR keyboard hide and stop accepting input, while your apps keep running safely in "
                   + "the background. Remote access and notification forwarding also stay off while this "
-                  + "protection is enabled. After turning this on, lock and unlock Steam once to activate "
-                  + "normal visibility."
+                  + "protection is enabled. Right after the headset boots, Frametop may show for about a "
+                  + "second before Steam's PIN screen does."
         }
         RestartRow { visible: backend.steamPinLockRestartNeeded }
 

@@ -67,7 +67,8 @@ void RecentreCommand(const vrcmd::Cmd &c, char *reply, int size) {
         for (auto &[i, s] : g_screens) {
             if (!InRoom(i, s)) continue;
             SpinForget(i);   // (turning round where you were: it stays where this puts it)
-            SetAbsolute(s, Mul(step, s.pose), UniverseNow());
+            // (one no one has placed yet, made round the floor's middle: the same round you)
+            SetAbsolute(s, Mul(s.unplaced ? recentre::LevelHead(head) : step, s.pose), UniverseNow());
             s.from = here, s.unplaced = false;
             ++moved;
         }

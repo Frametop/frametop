@@ -2892,7 +2892,8 @@ void UpdateSpin() {
         ++it;
     }
     if (done) {
-        for (const auto &[i, p] : g_spin.base) PlacedFromHere(g_screens.at(i));   // (turned round where you are)
+        for (const auto &[i, p] : g_spin.base)
+            if (Screen &s = g_screens.at(i); !s.unplaced) PlacedFromHere(s);   // (turned round where you are)
         // The panel now nearest straight ahead (of where you face) gets typing and the active window.
         Mat head;
         double nearest = kSpinFocus;
@@ -4290,9 +4291,10 @@ void AnimateGrabMoves() {
 }
 
 // A reset moves the room as it lives: the front slot's panel goes home first, unless a manual control took it
-// (it's where you put it), and what's on its way is there at once. Sizes set in the slot are forgotten.
+// (it's where you put it) or holds it, and what's on its way is there at once. Sizes set in the slot are forgotten.
 void SettleForReset() {
-    if (g_front.panel >= 0 && !g_front.released) FrontHome("a reset");
+    const auto f = g_screens.find(g_front.panel);
+    if (f != g_screens.end() && !g_front.released && !HeldElsewhere(f->second, f->first)) FrontHome("a reset");
     for (auto &[i, m] : g_grabMoves) m.startMs = INT64_MIN / 2;
     AnimateGrabMoves();
     g_frontDeg.clear();

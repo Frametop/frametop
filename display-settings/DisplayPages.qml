@@ -1029,7 +1029,7 @@ Item {
                         onChose: backend.setVisibility("in_games", picked)
                     }
                     Controls.Button {
-                        visible: vpage.v.mode === "always" && (vpage.v.in_games || "hide") === "visible"
+                        visible: (vpage.v.in_games || "hide") === "visible"
                         text: "Open VR games settings"
                         icon.name: "applications-games"
                         onClicked: root.show("games")

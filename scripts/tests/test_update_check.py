@@ -88,7 +88,7 @@ class SavedUniverses(unittest.TestCase):
         self.assertEqual(self.check({"jsonid": "chaperone_info", "version": 6, "rooms": []})[0], "warn")
 
     def test_an_empty_file_or_another_shape_warns(self):
-        for data in ({}, [], {"version": 5}, {"jsonid": "chaperone_info", "universes": [{"universeID": "5"}]}):
+        for data in ({}, [], {"version": 5}, {"jsonid": "chaperone_info", "version": 6}, {"jsonid": "chaperone_info", "universes": [{"universeID": "5"}]}):
             with self.subTest(data=data):
                 self.said.clear()
                 self.assertEqual(self.check(data)[0], "warn")

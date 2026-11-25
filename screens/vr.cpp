@@ -7991,11 +7991,13 @@ static void VisibilityCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
         return;
     }
     case vrcmd::InGames: {
+        const Mode before = EffectiveMode();
         if (!std::strcmp(word, "hide")) g_inGames = InGames::Hide;
         else if (!std::strcmp(word, "visible")) g_inGames = InGames::Visible;
         else return (void)std::snprintf(reply, size, "error modes: hide visible");
-        g_manual = false;
-        ++g_switchGen;
+        // The hide/show switch means something else only in another mode: in the same one it may be
+        // what shows the screen this was picked on.
+        if (EffectiveMode() != before) g_manual = false, ++g_switchGen;
         UpdateVisibility();
         std::snprintf(reply, size, "ok %s", word);
         return;

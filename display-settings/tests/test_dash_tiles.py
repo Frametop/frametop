@@ -101,6 +101,16 @@ class DashTiles(unittest.TestCase):
         self.assertTrue(self.t.atBar)
         self.assertEqual(self.asked[-1], "handsetting DASH_TILE_AT_BAR 1")
 
+    def test_new_windows_tiled_unless_off(self):
+        self.assertTrue(self.t.newWindowsTiled)
+        self.t.setNewWindowsTiled(False)
+        self.assertIn("NEW_WINDOWS_TILED=0", self.conf())
+        self.assertFalse(self.t.newWindowsTiled)
+        self.assertEqual(self.asked[-1], "handsetting NEW_WINDOWS_TILED 0")
+        self.t.setNewWindowsTiled(True)
+        self.assertTrue(self.t.newWindowsTiled)
+        self.assertEqual(self.asked[-1], "handsetting NEW_WINDOWS_TILED 1")
+
     def test_numbers_written_and_sent(self):
         self.t.setDeskDeg(-20)
         self.t.setRadius(2.25)

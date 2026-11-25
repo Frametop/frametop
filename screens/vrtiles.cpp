@@ -41,6 +41,7 @@ bool g_dashWasUp = false;
 Mat g_tileWorld = Identity();             // the group frame in the room, last tick (the dashboard's moves as it opens)
 tilekeep::Put g_tilePut;                  // put there by hand (Move All Windows): an opening leaves it
 bool g_tileStayTheater = false;           // DASH_TILE_STAY_THEATER: staying ones stay over a game in SteamVR's theater too
+bool g_newWindowsTiled = true;            // NEW_WINDOWS_TILED: a window with no place of its own comes on the tiles (0: in the room)
 // The wall: at Steam's bar (DASH_TILE_AT_BAR, tileframe.h's AtBar), or where DASH_TILE_RADIUS and
 // DASH_TILE_DESK_DEG put it; which one the group has now (the last Regroup's: the bar may not be placed).
 struct Wall {
@@ -404,6 +405,7 @@ void SetTileStayDefault(bool on) {
     g_tiles.stayDefault = on;   // (each one that follows it: shown or hidden next tick)
 }
 void SetTileStayTheater(bool on) { g_tileStayTheater = on; }
+void SetNewWindowsTiled(bool on) { g_newWindowsTiled = on; }   // (the next window to come: those here stay)
 void SetTileAtBar(bool on) {
     if (on == g_tileAtBar) return;
     g_tileAtBar = on;
@@ -487,11 +489,11 @@ void TileKnown(int i, const std::string &key) {
     BarSideKnown(i, k);   // (its bar's edge is remembered by the same key)
     if (g_tileMemory.Used(k)) SaveTileMemory();   // (its use kept over a restart: the last to go when it's full)
     const std::string line = g_tileMemory.Get(k);
-    switch (dashtiles::TileWhenKnown(k, line)) {
+    switch (dashtiles::TileWhenKnown(k, line, g_newWindowsTiled)) {
         case dashtiles::WhenKnown::Leave:
             if (line == "room") g_tileRoom.insert(i);
             return;
-        case dashtiles::WhenKnown::Anchor: return TileAnchor(i, dashtiles::Stay::Default, "a new window: tiled unless put in the room");
+        case dashtiles::WhenKnown::Anchor: return TileAnchor(i, dashtiles::Stay::Default, "a new window: tiled unless put in the room (NEW_WINDOWS_TILED)");
         case dashtiles::WhenKnown::Restore: break;
     }
     const int after = g_tileFocus >= 0 && g_tiles.Tiled(g_tileFocus) ? g_tileFocus : -1;

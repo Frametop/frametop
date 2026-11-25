@@ -5656,6 +5656,7 @@ bool SetHandSetting(const char *key, bool on) {
     else if (n == "DASH_TILE_STAY_THEATER") SetTileStayTheater(on);
     else if (n == "DASH_TILE_LOOK") SetTileLookFocus(on);
     else if (n == "DASH_TILE_AT_BAR") SetTileAtBar(on);
+    else if (n == "NEW_WINDOWS_TILED") SetNewWindowsTiled(on);
     else if (n == "GSAPP_PANELS") GsSwitch(on);
     else if (n == "STEAM_DASH_PANEL") SteamDashSwitch(on);
     else if (n == "SCREEN_PIN_LEVEL") SetPinMode(on ? levelpin::Level : levelpin::Rigid);   // (2, Walk: the command's own case)
@@ -6060,6 +6061,7 @@ bool ft_vr_init(void) {
     SetTileStayTheater(handcut::Setting("DASH_TILE_STAY_THEATER", "0") == "1");
     SetTileLookFocus(handcut::Setting("DASH_TILE_LOOK", "1") != "0");
     SetTileAtBar(handcut::Setting("DASH_TILE_AT_BAR", "1") != "0");   // the wall at Steam's bar
+    SetNewWindowsTiled(handcut::Setting("NEW_WINDOWS_TILED", "1") != "0");   // a new window: on the tiles, or in the room
     LoadTileMemory();
     LoadBarSides();
     GsSwitch(handcut::Setting("GSAPP_PANELS", "1") != "0");   // the gamescope apps as panels of ours

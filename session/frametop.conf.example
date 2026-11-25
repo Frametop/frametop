@@ -9,6 +9,7 @@ PHYS_WIDTH=1.6     # gamescope: panel width in metres, docked
 REMOTE=0           # 1 = serve the desktop's primary screen over VNC on the tailnet (port 5900; Frametop Settings > Remote access, see README)
 FLOAT_SLOTS=16     # screens backend: how many windows can float in VR at once (spare outputs; 0 turns it off; restart the desktop after a change)
 FLOAT_MARGIN=300   # floating windows: pixels around each window on its output, so menus have room past its edges
+NEW_WINDOWS_TILED=1        # a new window (a floating one here, or a PC's app or window) comes as a dashboard tile | 0 = floating in the room. An app's own last place wins either way: tiled before -> tiled again, put in the room (In the Room in its bar's menu) -> in the room
 FLOAT_DOCK_DISTANCE=0.10   # floating windows: carried this near a screen (m), one lights up and the window docks onto it when let go (0: off)
 WINDOW_DRAG_MOD=meta         # window drag: hold this (meta, alt, or off) and press a button anywhere in a window
 WINDOW_DRAG_LEFT=move        # ...the left button: move, resize, or none (the same for KWin, floating windows and PC windows)

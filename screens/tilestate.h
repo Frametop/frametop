@@ -177,21 +177,24 @@ private:
 // A window's panel (a Frame window floating, "app:ID"; a PC window, "remote:HOST/app:APP" or
 // "remote:HOST/window:ADDRESS") goes on the tiles when it comes, unless its app was put in the room
 // on purpose (user, 2026-11-19: "make the default for windows be tiled mode when they are created
-// unless they are configured for free float in the room"). Others (screens, remote displays) as
-// they were.
+// unless they are configured for free float in the room"), or new windows are set to come in the
+// room (NEW_WINDOWS_TILED 0; user, 2026-11-24: "choose whether new windows should default to tiled
+// or in the world space"): then only one tiled before goes back on the tiles. Others (screens,
+// remote displays) as they were.
 inline bool IsWindowKey(const std::string &key) {
     return key.rfind("app:", 0) == 0 ||
            (key.rfind("remote:", 0) == 0 && (key.find("/app:") != std::string::npos || key.find("/window:") != std::string::npos));
 }
 enum class WhenKnown { Restore, Anchor, Leave };
 // What the panel with `key` does when it comes, its app's remembered `line` (empty: none): Restore
-// that line, Anchor it as a new tile, or Leave it where it is.
-inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line) {
+// that line, Anchor it as a new tile, or Leave it where it is. `newWindowsTiled`: a window with no
+// place of its own goes on the tiles (else it's left in the room).
+inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line, bool newWindowsTiled = true) {
     State s;
     const bool parsed = !line.empty() && Parse(line, &s);
     if (parsed && s.kind != State::Kind::Off) return WhenKnown::Restore;
     if (parsed && s.room) return WhenKnown::Leave;
-    if (IsWindowKey(key)) return WhenKnown::Anchor;
+    if (IsWindowKey(key)) return newWindowsTiled ? WhenKnown::Anchor : WhenKnown::Leave;
     return line.empty() ? WhenKnown::Leave : WhenKnown::Restore;   // (a line that isn't one: Restore says so)
 }
 

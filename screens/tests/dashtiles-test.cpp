@@ -973,6 +973,15 @@ int main() {
                                                                 TileWhenKnown("screen:2", "off") == W::Restore &&
                                                                 TileWhenKnown("remote:10.0.0.5/display:DP-1", "") == W::Leave &&
                                                                 TileWhenKnown("steam:dashboard", "") == W::Leave);
+            check("new windows set to the room: left there", TileWhenKnown("app:org.kde.dolphin", "", false) == W::Leave &&
+                                                                 TileWhenKnown("remote:10.0.0.5/window:0x55aa", "", false) == W::Leave &&
+                                                                 TileWhenKnown("app:firefox", "off", false) == W::Leave &&
+                                                                 TileWhenKnown("app:x", "junk", false) == W::Leave);
+            check("new windows set to the room: one tiled before goes back, one put in the room stays",
+                  TileWhenKnown("app:firefox", "tile 0 1 0 1 1", false) == W::Restore && TileWhenKnown("app:firefox", "room", false) == W::Leave);
+            check("new windows set to the room: screens and remote displays as before",
+                  TileWhenKnown("screen:2", "", false) == W::Leave && TileWhenKnown("screen:2", "off", false) == W::Restore &&
+                      TileWhenKnown("remote:10.0.0.5/display:DP-1", "tile 0 1 0 1 1", false) == W::Restore);
             check("a junk line: Restore (which says it isn't one)", TileWhenKnown("screen:1", "junk") == W::Restore &&
                                                                        TileWhenKnown("app:x", "junk") == W::Anchor);
         }

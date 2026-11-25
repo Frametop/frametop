@@ -1181,6 +1181,18 @@ Item {
                     Ft.Hint {
                         text: "Anchor screens, apps, or remote displays to the SteamVR dashboard so they snap neatly into a curved workspace."
                     }
+                    Controls.ComboBox {
+                        id: newWindowsBox
+                        Kirigami.FormData.label: "New windows open:"
+                        // NEW_WINDOWS_TILED: 1, 0 (row 0 is tiled)
+                        model: ["Tiled on the dashboard", "Floating in the room"]
+                        currentIndex: backend.dashTiles.newWindowsTiled ? 0 : 1
+                        onActivated: {
+                            backend.dashTiles.setNewWindowsTiled(currentIndex === 0)
+                            currentIndex = Qt.binding(() => backend.dashTiles.newWindowsTiled ? 0 : 1)
+                        }
+                    }
+                    Ft.Hint { text: "For an app's first window. After that, an app opens where you last put it: tiled, or in the room." }
                     Controls.Switch {
                         Kirigami.FormData.label: "Keep open:"
                         text: "Keep anchored panels visible after closing the dashboard"

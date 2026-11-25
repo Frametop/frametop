@@ -6,7 +6,8 @@ takes live as `handsetting KEY VALUE`, as the drag bars' are. And whether the ap
 dashboard (Steam's gamescope session) come up as Frametop panels (GSAPP_PANELS; docs/design.md
 "Gamescope apps"), which go on the dashboard the first time. And whether Steam's own dashboard
 window and its menu are Frametop panels too (STEAM_DASH_PANEL, off unless "1"; docs/design.md
-"Steam's dashboard window").
+"Steam's dashboard window"). And where a new window comes: on the tiles or in the room
+(NEW_WINDOWS_TILED; screens/tilestate.h's TileWhenKnown).
 
 The QML reaches it as backend.dashTiles. The numbers' ranges are ft-screens' own
 (TileSettings() in screens/vrtiles.cpp): a value outside one is refused there, so it's clamped here.
@@ -26,6 +27,7 @@ STAY_THEATER = "DASH_TILE_STAY_THEATER"   # off unless "1"
 LOOK = "DASH_TILE_LOOK"   # on unless "0": with no pointer on a panel, the tiling keys act on the one you look at
 GSAPPS = "GSAPP_PANELS"   # on unless "0", as ft-screens reads it
 STEAM_WINDOWS = "STEAM_DASH_PANEL"   # off unless "1", as ft-screens reads it
+NEW_WINDOWS = "NEW_WINDOWS_TILED"   # on unless "0": a new window comes on the tiles (0: in the room), unless its app has a place
 AT_BAR = "DASH_TILE_AT_BAR"   # on unless "0": the wall at Steam's bar, its desk line and distance (not the two below)
 # key: (default, lo, hi), as screens/vrtiles.cpp's TileSettings() and tiling::Params have them
 NUMBERS = {
@@ -100,6 +102,14 @@ class DashTiles(QObject):
     @Slot(bool)
     def setSteamWindows(self, on):
         self._set_value(STEAM_WINDOWS, "1" if on else "0")
+
+    @Property(bool, notify=changed)
+    def newWindowsTiled(self):
+        return ft_layout.read_conf().get(NEW_WINDOWS, "1") != "0"
+
+    @Slot(bool)
+    def setNewWindowsTiled(self, on):
+        self._set_value(NEW_WINDOWS, "1" if on else "0")
 
     @Property(bool, notify=changed)
     def atBar(self):

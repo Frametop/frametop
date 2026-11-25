@@ -155,22 +155,22 @@ Each model action is one step of the code. Change the model when the code it nam
 
 | Model action | Code (at the sync commit) |
 | --- | --- |
-| `DropFaked`/`DropFlag` in `YouRunWornOn`, `YouRunWornOff`, `YouRunOther` | `cli.py` `drop_unsafe_worn` (l. 413), through `drop_wearer` (`hostinput.py` l. 233), run before every command (`main`, l. 462) |
-| `OnCheck` | `cli.py` `dispatch`, `worn` branch (l. 287): `hostinput.refusal(state())`, then the live-guard test, then the left-flag refusal (l. 305) |
-| `OnStartGuard`, `StopOldGuard`, `OnWait` | `hostinput.py` `start_guard` (l. 260): `systemctl stop`, `clear_flag`, `systemd-run`, wait for a live guard's flag |
-| `OnFake`, `KeepFlag` | `cli.py` `bench.control('worn 1')` (l. 313) and its `except BaseException`: `release_or_keep_flag` (l. 401) |
-| `OnVerify` | `cli.py` the check after `worn 1` (l. 317): no live guard -> `release_or_keep_flag` |
-| `OffSend`, `OffClear` | `cli.py` `worn off|physical` (l. 289: `control`, then `settle_and_clear_flag`) and `release` (l. 354) |
+| `DropFaked`/`DropFlag` in `YouRunWornOn`, `YouRunWornOff`, `YouRunOther` | `cli.py` `drop_unsafe_worn` (l. 421), through `drop_wearer` (`hostinput.py` l. 237), run before every command (`main`, l. 470) |
+| `OnCheck` | `cli.py` `dispatch`, `worn` branch (l. 288): `hostinput.refusal(state())`, then the live-guard test, then the left-flag refusal (l. 310) |
+| `OnStartGuard`, `StopOldGuard`, `OnWait` | `hostinput.py` `start_guard` (l. 264): `systemctl stop`, `clear_flag`, `systemd-run`, wait for a live guard's flag |
+| `OnFake`, `KeepFlag` | `cli.py` `bench.control('worn 1')` (l. 317) and its `except BaseException`: `release_or_keep_flag` (l. 409) |
+| `OnVerify` | `cli.py` the check after `worn 1` (l. 323): no live guard -> `release_or_keep_flag` |
+| `OffSend`, `OffClear` | `cli.py` `worn off|physical` (l. 289: `control`, then `settle_and_clear_flag`) and `release` (l. 357) |
 | `Settled`, `says`, `HelperSettles` | `hostinput.py` `settle_and_clear_flag` (l. 81) and its `SETTLE`; `HEADSET_OFF_AFTER` in `pointer/helper/ft-pointer.cpp`. A drop's wait is one step in the model: the flag is there all through it |
-| `GuardStarts`, `GuardLetsGo` | `hostinput.py` `guard` (l. 181): `take_locks` (l. 164), then `set_flag`; leaves once the flag stops naming it |
-| `GuardTerm`, `GuardStopped`, `GuardReleases` | `guard`'s SIGTERM path (l. 208) and `release_confirmed` (l. 217): the wearer goes, the flag stays |
-| `GuardKilled`, `GuardCleanup` | SIGKILL/OOM, then the unit's `ExecStopPost`: `after_guard` (l. 243), `release_confirmed` for any unallowed flag naming no live guard |
-| `MayDieNow` | the window `GuardCanDieMidFake` opens: `pc` in `on_fake`/`on_verify` is after `start_guard` (l. 260) and before the post-check (l. 317) |
-| `GuardAlive` | `hostinput.py` `guard_alive` (l. 291) |
+| `GuardStarts`, `GuardLetsGo` | `hostinput.py` `guard` (l. 185): `take_locks` (l. 168), then `set_flag`; leaves once the flag stops naming it |
+| `GuardTerm`, `GuardStopped`, `GuardReleases` | `guard`'s SIGTERM path (l. 212) and `release_confirmed` (l. 221): the wearer goes, the flag stays |
+| `GuardKilled`, `GuardCleanup` | SIGKILL/OOM, then the unit's `ExecStopPost`: `after_guard` (l. 247), `release_confirmed` for any unallowed flag naming no live guard |
+| `MayDieNow` | the window `GuardCanDieMidFake` opens: `pc` in `on_fake`/`on_verify` is after `start_guard` (l. 264) and before the post-check (l. 323) |
+| `GuardAlive` | `hostinput.py` `guard_alive` (l. 295) |
 | `Released`, the proxy's `hung` | `transport.py` `request` (l. 9): a 4 s timeout raises `socket.timeout`, after the proxy may have acted |
 | `StreamStarts`, `StreamEnds` | a stream to a host with `"input"` (true, `"keyboard"` or `"mouse"`) opens or closes (`HostInput` in `stream/ft-stream.cpp`) |
-| `StreamTakesLock` | `HostInput::Tick` (l. 443): `flock` on `frametop-input-HOST.lock`, retried every 3 s |
-| `StreamTick` (`asked`, `saidTest`, `seen`, `lease`) | `HostInput::Tick`: ask `gaze ? headset` once a second, `TakeAnswers` (l. 417), `hostinput::TestForbidding` (`stream/hostinput.h` l. 170) on the flag every tick, `AfterTest` (l. 181) and `TakeAnswers(now, false)` when it goes, then `Decide` (l. 121): a lease only with no test's file and a fresh "worn" |
+| `StreamTakesLock` | `HostInput::Tick` (l. 512): `flock` on `frametop-input-HOST.lock`, retried every 3 s |
+| `StreamTick` (`asked`, `saidTest`, `seen`, `lease`) | `HostInput::Tick`: ask `gaze ? headset` once a second, `TakeAnswers` (l. 470), `hostinput::TestForbidding` (`stream/hostinput.h` l. 242) on the flag every tick, `AfterTest` (l. 253) and `TakeAnswers(now, false)` when it goes, then `Decide` (l. 139): a lease only with no test's file and a fresh "worn" |
 | `HelperAnswers` | the pointer helper's answer to `gaze ? headset`: "worn" while the testbench fakes the wearer, and a while after |
 
 ## Scope
@@ -219,11 +219,11 @@ Covered code:
 - `stream/hostinput.h`: `Decide`, `Fresh`, `TestForbidding`, `AfterTest`
 - `docs/host-input.md`: the lease rule and the guard's description
 
-**Sync commit: `12a79ebc`** (experimental, 2026-11-25, after the fixes for A to G). The model describes the covered code as of
+**Sync commit: `7ce153e6`** (experimental, 2026-11-25, after the fixes for A to G). The model describes the covered code as of
 this commit. To see whether it needs another look:
 
 ```sh
-git diff 12a79ebc -- testbench/frame_testbench/hostinput.py testbench/frame_testbench/cli.py testbench/frame_testbench/transport.py stream/ft-stream.cpp stream/hostinput.h docs/host-input.md
+git diff 7ce153e6 -- testbench/frame_testbench/hostinput.py testbench/frame_testbench/cli.py testbench/frame_testbench/transport.py stream/ft-stream.cpp stream/hostinput.h docs/host-input.md
 ```
 
 Move the sync commit forward only after you have read that diff, confirmed that every model action

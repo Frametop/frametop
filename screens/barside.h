@@ -91,14 +91,13 @@ inline UV Place(Side s, double w, double h, double in, double along) {
 // How far in from the panel's edge the row's line is; negative: past the edge.
 //   Inside (user, 2026-11-18: "the overlay should be inside of the display"): `clear` in, the row clear
 // of the edge by its gap, over the panel's content while it shows.
-//   Outside: `clear` out, so nothing of the row is over the content. A tile has only `room` past its
-// edge, its half of the gap to the next tile: further out the panel's plane runs on behind that tile
-// (MenuAt) and that tile's own resize band begins, and a bar there was hard to grab (the reason it
-// went inside). So its bar, `half` either side of the line with its hit padding, goes no further out
-// than `room`: a press past that is the next tile's. The rest of the bar lies over its own edge.
-inline double In(bool inside, double clear, double half, double room) {
-    return inside ? clear : -std::min(clear, room - half);
-}
+//   Outside: `clear` out, so nothing of the row is over the content, a dashboard tile's too. For a
+// day (2026-11-24) a tile's bar stopped at its half of the gap to the next tile, which with the usual
+// gap left most of it over the tile's own edge (user: "it actually just moves to the top of the display
+// instead of floating outside of the display like the behavior used to"). So it hangs clear of its tile
+// as a floating panel's does, over the gap and the next tile's edge when the gap is narrower than the
+// bar; a panel whose bar is hard to grab there can have it inside (its bar's menu).
+inline double In(bool inside, double clear) { return inside ? clear : -clear; }
 
 // The bar's turn about its own face, radians: none along the bottom or the top; a quarter turn
 // clockwise down a side, so the bar's own +x (its mouse x) runs down, as `along` does there.

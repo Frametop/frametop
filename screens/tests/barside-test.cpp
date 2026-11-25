@@ -91,27 +91,22 @@ int main() {
         check("a bad memory line is refused and leaves both", !barside::Parse(bad, &ms, &mi) && ms == Side::Right && mi == Inset::Inside);
 
     // (half: the bar's half depth, its hit padding with it)
-    const double clear = 0.05, half = 0.014, none = 1e9;
-    check("inside: the row's line clear of the edge, in", near(barside::In(true, clear, half, none), clear) &&
-          near(barside::In(true, clear, half, 0.02), clear));
-    check("outside, nothing beside it: as far past the edge", near(barside::In(false, clear, half, none), -clear));
-    check("outside, a tile: its bar ends at its half of the gap", near(barside::In(false, clear, half, 0.02), -(0.02 - half)));
-    check("outside, a tile with a narrow gap: the line just inside, the bar over the edge",
-          near(barside::In(false, clear, half, 0.01), half - 0.01) && barside::In(false, clear, half, 0.01) < half);
-    check("outside, a wide gap: no further than clear of the edge", near(barside::In(false, clear, half, 0.5), -clear));
-    for (double room : {0.01, 0.02, 0.5}) {   // (the next tile's resize band starts at `room`)
-        const auto row = barside::Row(Side::Bottom, w, h, barside::In(false, clear, half, room), 0, 0, half);
-        check("outside, a tile: nothing of the bar past its half of the gap", row.v0 > -(h / 2 + room) - 1e-9);
+    const double clear = 0.05, half = 0.014;
+    check("inside: the row's line clear of the edge, in", near(barside::In(true, clear), clear));
+    check("outside: as far past the edge, a tile's too", near(barside::In(false, clear), -clear));
+    {
+        const auto row = barside::Row(Side::Bottom, w, h, barside::In(false, clear), 0, 0, half);
+        check("outside: the bar, its padding with it, hangs clear of its panel", row.v1 < -h / 2);
     }
-    const auto out = barside::Place(Side::Bottom, w, h, barside::In(false, clear, half, none), 0.1);
+    const auto out = barside::Place(Side::Bottom, w, h, barside::In(false, clear), 0.1);
     check("a row past the bottom edge is under the panel", near(out.u, 0.1) && near(out.v, -(h / 2 + clear)));
-    const auto outRow = barside::Row(Side::Bottom, w, h, barside::In(false, clear, half, none), -0.1, 0.1, 0.03);
+    const auto outRow = barside::Row(Side::Bottom, w, h, barside::In(false, clear), -0.1, 0.1, 0.03);
     check("...and none of it over the content", outRow.v1 < -h / 2 && !outRow.Contains(0, -h / 2 + 0.001));
     for (Side s : barside::kAll) {   // (a flipped sign on one side would put its row inside)
-        const auto c = barside::Place(s, w, h, barside::In(false, clear, half, none), 0);
+        const auto c = barside::Place(s, w, h, barside::In(false, clear), 0);
         const auto o = barside::Outward(s);
         check("a row past each edge is beyond that edge", near(c.u * o.u + c.v * o.v, (barside::Vertical(s) ? w : h) / 2 + clear));
-        const auto in = barside::Place(s, w, h, barside::In(true, clear, half, none), 0);
+        const auto in = barside::Place(s, w, h, barside::In(true, clear), 0);
         check("...and a row inside is short of it", near(in.u * o.u + in.v * o.v, (barside::Vertical(s) ? w : h) / 2 - clear));
     }
     for (Side s : barside::kAll) {

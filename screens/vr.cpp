@@ -932,10 +932,10 @@ void PaintResizeMask(Screen &s) {
 }
 // The bar row's line in from the panel's edge, on the edge the panel's bar is on, negative when the row
 // is past the edge: the panel's own choice, else the setting's (barside::In; barhit::Below's distance
-// keeps the row clear of the edge by a gap). A tile's stays within its half of the gap to the next tile.
+// keeps the row clear of the edge by a gap).
 bool BarInside(const Screen &s) { return barside::Inside(s.barInset, g_barInside); }
 double BarIn(const Screen &s) {
-    return barside::In(BarInside(s), barhit::Below(s.chrome, s.grip, g_barPaddingY), barhit::Height(s.chrome, g_barPaddingY) / 2, TiledCap(s));
+    return barside::In(BarInside(s), barhit::Below(s.chrome, s.grip, g_barPaddingY));
 }
 barside::UV BarSpot(const Screen &s, double along) { return barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), along); }
 // The bar's own rectangle on the panel's surface, its hit padding with it.

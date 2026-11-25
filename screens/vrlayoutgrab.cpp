@@ -25,6 +25,7 @@ Mat g_layoutFrom = Identity();   // where the held panel was when it started
 
 // What rides on the dashboard, in the carry as one: no panel has this number.
 constexpr int kBoard = -1;
+constexpr double kMovedM = 0.02;   // let go nearer where it was: not moved, the tiles stay as they were kept (or not)
 
 // Everything on the dashboard moves with it: not a panel another laser has, nor what's glued to one.
 bool OnBoard(const Screen &s) { return s.pinned == kDashboard && s.drag == Drag::None && s.glueTo < 0; }
@@ -33,13 +34,14 @@ void LayoutGrabEnd() {
     const int panel = g_layoutGrab.panel;
     const auto it = g_screens.find(panel);
     Mat p, head;
-    const bool moved = it == g_screens.end() || !ScreenPose(it->second, &p) || Apart(p, g_layoutFrom) > 0.02;
+    const bool moved = it == g_screens.end() || !ScreenPose(it->second, &p) || Apart(p, g_layoutFrom) > kMovedM;
     const bool board = g_layoutGrab.Moves(kBoard);
     bool screens = false;
     for (const auto &[i, s] : g_screens) screens |= s.Desktop() && LayoutMoves(i);
     if (screens) ArrangeDesktopSoon();   // (KWin's outputs follow where the screens are)
     g_layoutGrab.End();
-    if (board) TileGroupPut(moved && DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? &head : nullptr);
+    if (board) RetileDash();   // (the held one back in its place in it)
+    if (board && moved) TileGroupPut(DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? &head : nullptr);
     std::printf("screen %d: move all let go: the windows stay there\n", panel + 1);
 }
 }  // namespace
@@ -70,7 +72,7 @@ void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
     }
     Mat group;
     if (TileGroup(&group)) g.Take(kBoard, group);
-    s.layoutHeld = true;
+    s.layoutHeld = s.barCarry = true;   // (let go wherever the laser is by then, as a bar's carry)
     ApplyAlpha(s);
     std::printf("screen %d: move all: %zu other panel(s) in the room and %zu on the dashboard go with it\n", index + 1,
                 g.rel.size() - 1 - size_t(g.Moves(kBoard)), g.Moves(kBoard) ? tiles : 0);
@@ -82,7 +84,7 @@ void UpdateLayoutGrab() {
     const auto c = g_screens.find(g.panel);
     if (c == g_screens.end() || !c->second.layoutHeld) return LayoutGrabEnd();
     Mat dev, head;
-    if (!DevicePose(c->second.dragDevice, &dev) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return;   // (they wait)
+    if (!DevicePose(c->second.dragDevice, &dev) || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head)) return g.Lose();   // (they wait)
     const Mat step = g.Move(Mul(dev, c->second.dragRel), head);
     for (auto it = g.rel.begin(); it != g.rel.end();) {
         const int i = it->first;
@@ -104,6 +106,21 @@ void UpdateLayoutGrab() {
         ++it;
     }
     StepPlaces(step);
+}
+
+void LayoutLetGo(const char *why) {
+    if (!g_layoutGrab.on()) return;
+    std::printf("screen %d: move all ended: %s\n", g_layoutGrab.panel + 1, why);
+    const auto it = g_screens.find(g_layoutGrab.panel);
+    if (it != g_screens.end() && it->second.layoutHeld) EndDrag(it->second);
+    LayoutGrabEnd();
+}
+
+// A command places panel `i` (a room's answer, a window that starts to float): the rest goes on without
+// it; the held one lets go.
+void LayoutPlaced(int i) {
+    if (i == g_layoutGrab.panel) LayoutLetGo("the panel held was placed by a command");
+    else g_layoutGrab.Drop(i);
 }
 
 // The room was shifted under it (ShiftRoom): what goes with it goes on from where that put it.

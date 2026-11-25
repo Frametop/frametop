@@ -193,6 +193,62 @@ int main() {
         const double steady = b.PanDeg();
         b.Arrange(desk);
         check("pan: arranged again unchanged: still", near(b.PanDeg(), steady, 1e-9));
+        {   // the only one showing hides (Steam's page with the dashboard closed) and comes back: where it was
+            dashtiles::Board d;
+            d.Anchor(1, -1, dashtiles::Stay::Default), d.Anchor(2, -1, dashtiles::Stay::Default);
+            d.absent = {1};
+            d.Arrange(desk), d.Recentre(2), d.Arrange(desk);
+            const double was = d.PlacedOf(2)->azDeg;
+            d.absent = {1, 2}, d.Arrange(desk);
+            d.absent = {1}, d.Arrange(desk);
+            check("pan: the only one showing hid and came back: where it was", near(d.PlacedOf(2)->azDeg, was, 1e-6));
+        }
+        {   // ...and turned aside: an empty strip has no room for its turn, and it's back with it all the same
+            dashtiles::Board d;
+            d.Anchor(5, -1, dashtiles::Stay::Default);
+            d.Arrange(desk);
+            d.Drop(5, d.DropFor(5, 20, 0, desk), 20);
+            d.Arrange(desk);
+            d.absent = {5}, d.Arrange(desk);
+            d.absent = {}, d.Arrange(desk);
+            check("pan: alone, it hid and came back: where it was let go", near(d.PlacedOf(5)->azDeg, 20, 1e-6));
+            d.Recentre(), d.Arrange(desk);
+            d.absent = {5}, d.Arrange(desk);
+            d.absent = {}, d.Arrange(desk);
+            check("pan: ...recentred since: where that has it", near(d.PlacedOf(5)->azDeg, 0, 1e-6));
+        }
+        for (const int n : {2, 4}) {   // Steam's page or a stream hides and comes back over and over: nothing creeps round
+            dashtiles::Board d;
+            for (int k = 1; k <= n; ++k) d.Anchor(k, k - 1, dashtiles::Stay::Default);
+            d.Arrange(desk);
+            const double at1 = d.PlacedOf(1)->azDeg;
+            double worst = 0;
+            for (int k = 0; k < 6; ++k) {
+                d.absent = {2}, d.Arrange(desk);
+                d.absent = {}, d.Arrange(desk);
+                worst = std::max(worst, std::fabs(d.PlacedOf(1)->azDeg - at1));
+            }
+            check("pan: hidden and shown again six times: nothing creeps round", worst < 1e-6);
+        }
+        {   // centred while it was fitted: the turns from before that don't come back
+            dashtiles::Board d;
+            for (int k = 1; k <= 3; ++k) d.Anchor(k, k - 1, dashtiles::Stay::Default);
+            d.Arrange(desk);
+            d.Recentre(3), d.Arrange(desk);   // (the right one straight ahead; fitted, the left one is)
+            const double turned = d.PanDeg();
+            d.params.fit = true, d.Recentre(), d.Arrange(desk);
+            d.params.fit = false, d.Arrange(desk);
+            check("pan: centred while fitted: not as it was turned before", std::fabs(turned) > 5 && std::fabs(d.PanDeg() - turned) > 5);
+        }
+        {   // they come one at a time (streams connecting): as they'd be had they come at once
+            dashtiles::Board d;
+            for (int k = 1; k <= 3; ++k) d.Anchor(k, k - 1, dashtiles::Stay::Default);
+            d.absent = {1, 2, 3}, d.Arrange(desk);
+            d.absent = {2, 3}, d.Arrange(desk);
+            d.absent = {3}, d.Arrange(desk);
+            d.absent = {}, d.Arrange(desk);
+            check("pan: shown one at a time: centred", near(d.PlacedOf(2)->azDeg, 0, 1.5));
+        }
         b.Recentre();
         b.Arrange(desk);
         check("pan: recentred: the centre display straight ahead (moves left it off to one side)",

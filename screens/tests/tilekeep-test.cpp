@@ -29,15 +29,20 @@ int main() {
     const M spot = in(headAt(0.2, 0, -1.8));
     put.At(spot, group);
     check("put, the head still there: they stay", put.Holds(spot, group, wall));
-    check("a metre off: they stay", put.Holds(in(headAt(0.2, 0, -0.8)), group, wall));
-    check("two metres off: they come", !put.Holds(in(headAt(0.2, 0, 0.3)), group, wall));
+    check("1.4 metres off: they stay", put.Holds(in(headAt(0.2, 0, -0.4)), group, wall));
+    check("1.6 metres off: they come", !put.Holds(in(headAt(0.2, 0, -0.2)), group, wall));
     check("stood up or lay down (higher, lower): they stay",
           put.Holds(in(headAt(0.2, 0.6, -1.8)), group, wall) && put.Holds(in(headAt(0.2, -1.9, -1.8)), group, wall));
-    check("turned 60 degrees either way: they stay",
-          put.Holds(in(headAt(0.2, 0, -1.8, 60)), group, wall) && put.Holds(in(headAt(0.2, 0, -1.8, -60)), group, wall));
+    // (the spot is a little to the right of their middle: straight at it is 9 degrees to the left)
+    check("turned 80 degrees either way from their middle: they stay",
+          put.Holds(in(headAt(0.2, 0, -1.8, 89)), group, wall) && put.Holds(in(headAt(0.2, 0, -1.8, -71)), group, wall));
     check("turned your back: they come", !put.Holds(in(headAt(0.2, 0, -1.8, 180)), group, wall));
-    check("turned 120 degrees: they come",
-          !put.Holds(in(headAt(0.2, 0, -1.8, 120)), group, wall) && !put.Holds(in(headAt(0.2, 0, -1.8, -120)), group, wall));
+    check("turned 100 degrees: they come",
+          !put.Holds(in(headAt(0.2, 0, -1.8, 109)), group, wall) && !put.Holds(in(headAt(0.2, 0, -1.8, -91)), group, wall));
+    check("the head on its side: no way faced to tell by, they stay", put.Holds(in(PanelPose<M>(0.2, 0, -1.8, 0, 0, 90)), group, wall));
+    tilekeep::Put middle;
+    middle.At(in(headAt(0, 0, -wall)), group);
+    check("in their middle: no way to it to tell by, they stay", middle.Holds(in(headAt(0, 0, -wall, 180)), group, wall));
     check("looking at the ceiling or the desk: the way you face is the same",
           put.Holds(in(headAt(0.2, 0, -1.8, 0, 85)), group, wall) && put.Holds(in(headAt(0.2, 0, -1.8, 0, -85)), group, wall) &&
               !put.Holds(in(headAt(0.2, 0, -1.8, 180, 85)), group, wall));
@@ -50,6 +55,17 @@ int main() {
     const M moved = PanelPose<M>(-2, 1.2, 0.5, -80, 0, 0);
     check("the room's frame changed, the head with it: they stay", put.Holds(Mul(moved, headAt(0.2, 0, -1.8)), moved, wall));
     check("the dashboard dragged off: they come", !put.Holds(spot, moved, wall));
+    // an opening that left them holds them a moment
+    check("put: not held yet", !put.Settling(5000));
+    put.Kept(5000);
+    check("left by an opening: held for a second", put.Settling(5000) && put.Settling(5999) && !put.Settling(6000));
+    put.At(spot, group);
+    check("put again meanwhile: the hold is the old opening's", !put.Settling(5500));
+    put.Kept(5000);
+    put.Clear();
+    check("a reset or another wall: not held, and the next opening brings them", !put.Settling(5500) && !put.Holds(spot, group, wall));
+    put.Kept(5000);
+    check("nothing put: nothing held", !put.Settling(5500));
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;
 }

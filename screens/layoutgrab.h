@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <map>
+#include <utility>
 
 #include "posemath.h"
 
@@ -41,6 +42,7 @@ struct Grab {
     M frame{};
     std::map<int, M> rel;   // what it moves, the held one too -> its pose in the frame
     bool slid = false;      // the last tick only slid it (Slide)
+    bool lost = false;      // a pose is lost: the next Move's way is the poses' return, not the hand's
 
     bool on() const { return panel >= 0; }
     bool Moves(int i) const { return on() && rel.count(i); }
@@ -50,13 +52,22 @@ struct Grab {
         slid = !Frame(at, head, &frame);
         if (slid) frame = posemath::Translation<M>(at.m[0][3], at.m[1][3], at.m[2][3]);
     }
-    void End() { panel = -1, rel.clear(), slid = false; }
+    void End() { panel = -1, rel.clear(), slid = lost = false; }
+    void Lose() { lost = true; }
+    void Drop(int i) { rel.erase(i); }   // (it stays where it is)
     void Take(int i, const M &pose) { rel[i] = posemath::Mul(posemath::Inverse(frame), pose); }
     M Pose(int i) const { return posemath::Mul(frame, rel.at(i)); }
     // The carried point is at `at` now: the set turned with it about the head, or only slid. Returns how
     // the set moved since the last tick, for what goes with it and has no pose here (a panel's way
-    // somewhere, the front slot's home).
+    // somewhere, the front slot's home): nothing on the first after Lose (a universe's jump meanwhile has
+    // moved those already).
     M Move(const M &at, const M &head) {
+        const M step = Step(at, head);
+        return std::exchange(lost, false) ? posemath::Identity<M>() : step;
+    }
+
+private:
+    M Step(const M &at, const M &head) {
         M f{};
         if (!Frame(at, head, &f)) return slid = true, Slide(at);
         if (!slid) return Turn(f);
@@ -66,8 +77,6 @@ struct Grab {
         frame = f, slid = false;
         return step;
     }
-
-private:
     M Turn(const M &f) {
         const M step = posemath::Mul(f, posemath::Inverse(frame));
         frame = f;

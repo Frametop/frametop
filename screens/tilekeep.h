@@ -8,10 +8,12 @@
 #include "posemath.h"
 
 #include <cmath>
+#include <cstdint>
 
 namespace tilekeep {
 
 constexpr double kNearM = 1.5;       // this far from the spot, level, and you've walked off
+constexpr int64_t kHoldMs = 1000;    // an opening that left them holds them this long, whatever the bar does as it settles
 constexpr double kFacingDeg = 90;    // their middle further round than this, and you've turned from them
 
 // Put by hand: the head's spot then in the tiles' group frame (level, its -Z the way to their middle),
@@ -19,12 +21,18 @@ constexpr double kFacingDeg = 90;    // their middle further round than this, an
 struct Put {
     bool on = false;
     double x = 0, z = 0;
+    int64_t holdTill = 0;
 
     template <class M>
     void At(const M &head, const M &group) {
         const M h = posemath::Mul(posemath::Inverse(group), head);
-        on = true, x = h.m[0][3], z = h.m[2][3];
+        on = true, x = h.m[0][3], z = h.m[2][3], holdTill = 0;
     }
+    // They go round you again (a reset, another wall): the next opening too.
+    void Clear() { *this = {}; }
+    // An opening at `now` left them, and till kHoldMs after they're held there.
+    void Kept(int64_t now) { holdTill = now + kHoldMs; }
+    bool Settling(int64_t now) const { return on && now < holdTill; }
     // They stay, with the head where it is now and their middle `wallM` out from the group's centre.
     template <class M>
     bool Holds(const M &head, const M &group, double wallM) const {

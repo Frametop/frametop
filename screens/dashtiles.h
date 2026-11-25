@@ -42,6 +42,7 @@
 #include "tileview.h"
 #include "tiledrop.h"
 #include "tiling.h"
+#include "turnkeep.h"
 
 #include <algorithm>
 #include <climits>
@@ -440,7 +441,8 @@ public:
         }
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
         centreNow_ = CentreOf(info);
-        pan_ = l.split >= 0 || params.fit ? 0 : Pan(l);   // (fitted: always round the middle)
+        if (recentre_ || moved_ >= 0) turns_ = {};   // (in any mode: it's used up here)
+        pan_ = l.split >= 0 || params.fit ? 0 : turns_.Keep(l, [&] { return Pan(l); });   // (fitted: always round the middle)
         if (pan_ != 0) tiling::Turn(&l, pan_);
         ShowNudges(&l);
         moved_ = -1, recentre_ = false;
@@ -639,6 +641,7 @@ private:
     std::set<int> arc_;           // curved round the arc while the centre
     std::map<int, double> nudge_; // moved up (down: negative), degrees
     double pan_ = 0;              // the strip turned this far from centred
+    turnkeep::Turns turns_;       // ...each way it has been laid out (what shows) since a move or a Recentre
     bool recentre_ = false;
     int centreOn_ = -1;
     int moved_ = -1;              // the panel just moved (the next Arrange's), and where it was let go (NAN: by a key, or not said)

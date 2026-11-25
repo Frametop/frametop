@@ -12,4 +12,4 @@ A window asks what to install, and your SteamOS password for the optional parts 
 
 Before installing, the installer checks your SteamOS build against the builds Frametop was tested on, and stops if this release is known not to work there.
 
-To show another computer's monitors as screens (remote displays), set that computer up once. A Windows or Linux PC runs Frametop's build of Vibepollo: the [install steps are in our Vibepollo fork's README](https://github.com/Frametop/frametop-vibepollo#install-it). A Mac uses its [host kit](https://github.com/Frametop/frametop/releases/tag/macos-host-1).
+To show another computer's monitors as screens (remote displays), set that computer up once. On a Windows or Linux PC, install Vibepollo from our fork: [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo). A Mac uses its [host kit](https://github.com/Frametop/frametop/releases/tag/macos-host-1).

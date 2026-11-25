@@ -128,15 +128,21 @@ A profile is a named setup: where the screens are, with their sizes and pins, wh
 
 Remote displays bring another computer's monitors into Frametop. Each one is a panel with a screen's controls: move it, resize it, curve it, pin it, and save it in a profile. The mouse, the keyboard and the lasers work on it, and its sound plays on the Frame. The computer streams with Sunshine's protocol, and the Frame decodes the streams in hardware.
 
-Each computer needs its streaming software set up once. For a Windows or Linux PC that's Frametop's build of Vibepollo, and [its README](https://github.com/Frametop/frametop-vibepollo#install-it) has the install steps:
+Each computer streams with software you set up once:
 
-| Computer | What it streams | Set up with |
+| Computer | What it streams | Streams with |
 | --- | --- | --- |
-| Windows PC | Its monitors, and virtual monitors at any size | Vibepollo with Frametop's build: [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo#install-it) |
+| Windows PC | Its monitors, and virtual monitors at any size | Frametop's build of Vibepollo |
 | Mac with Apple silicon | Its main monitor or a Retina / ultrawide virtual monitor with nothing installed, or every real monitor | Built-in macOS Screen Sharing, or Sunshine for multiple monitors: [host/macos/README.md](host/macos/README.md) |
-| Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build: [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo#install-it) |
+| Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Frametop's build of Vibepollo |
 
-Then, on the Frame, open Frametop Settings and pick Remote displays (or Remote displays in the Frametop menu), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. While you type on a remote display, Frametop's own key combinations still work, so Meta+J clicks where you look; the Remote PC shortcuts page lists the ones the computer gets instead, as they are or as other keys (Meta+Shift+Space can open the computer's launcher while Meta+Space stays frunner's). A PC with a Steam Link dongle can stream over it, which skips your router.
+To add a computer:
+
+1. Install Vibepollo on your PC from our fork: [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo). For a Mac, follow [host/macos/README.md](host/macos/README.md) instead.
+2. On the Frame, open Frametop Settings, pick Remote displays (or Remote displays in the Frametop menu), and choose Add computer.
+3. Sign in with the computer's Web UI login, and pick its displays.
+
+Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. While you type on a remote display, Frametop's own key combinations still work, so Meta+J clicks where you look; the Remote PC shortcuts page lists the ones the computer gets instead, as they are or as other keys (Meta+Shift+Space can open the computer's launcher while Meta+Space stays frunner's). A PC with a Steam Link dongle can stream over it, which skips your router.
 
 With Share the clipboard on a computer's card (Vibepollo on Windows or Linux), text or an image you copy on the desktop can be pasted on the computer once you click one of its displays, and what you copy there can be pasted on the desktop once you click back.
 

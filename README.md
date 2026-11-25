@@ -4,7 +4,7 @@ Frametop is a desktop for the Steam Frame that runs on the headset itself, with 
 
 - **Screens that are real monitors.** Each KDE Plasma screen has its own resolution and shape: an ultrawide in front, portrait screens beside it. Move, resize, curve, and roll them, or pin one to your wrist or your head. They come back to your layout when the desktop starts.
 - **Windows that float on their own.** Take any app window off the screens into a panel of its own with Meta+Shift+F, its title bar button, or Launch as Standalone. It stays part of the desktop, so drag and drop and the clipboard still work between floating windows and the screens.
-- **Your other computers' monitors.** Stream a Windows PC's or a Mac's monitors, or a virtual monitor at any size, as screens of their own, with the same controls. See [Remote displays](#remote-displays).
+- **Your other computers' monitors.** Stream a Windows PC's, a Linux PC's or a Mac's monitors, or a virtual monitor at any size, as screens of their own, with the same controls. See [Remote displays](#remote-displays).
 - **Profiles.** Save where your screens are, which ones show, and which apps are open where. Switch to a profile from Display Settings, a key, or its launcher entry, or start the desktop in one.
 - **One mouse for all of SteamVR.** A Bluetooth mouse drives a small dot anchored in the room. It works the screens, the dashboard, Steam, and overlays, and hands the laser back when you pick up a controller.
 - **Your hands (experimental).** Hand tracking from the headset's own cameras: poke a screen to click, pinch and grab screens to move, resize, and throw them, and see your hands over the screens.
@@ -114,15 +114,21 @@ A profile is a named setup: where the screens are, with their sizes and pins, wh
 
 Remote displays bring another computer's monitors into Frametop. Each one is a panel with a screen's controls: move it, resize it, curve it, pin it, and save it in a profile. The mouse, the keyboard and the lasers work on it, and its sound plays on the Frame. The computer streams with Sunshine's protocol, and the Frame decodes the streams in hardware.
 
-Each computer needs a host kit once:
+Each computer streams with software you set up once:
 
-| Computer | What it streams | Set up with |
+| Computer | What it streams | Streams with |
 | --- | --- | --- |
-| Windows PC | Its monitors, and virtual monitors at any size | Vibepollo with Frametop's build: [host/windows/README.md](host/windows/README.md) |
+| Windows PC | Its monitors, and virtual monitors at any size | Frametop's build of Vibepollo |
 | Mac with Apple silicon | Its monitors | Sunshine, one instance per monitor, and Frametop Streams in the menu bar to turn them on and off: [host/macos/README.md](host/macos/README.md) |
-| Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Vibepollo with Frametop's build, not tested yet: [host/linux/README.md](host/linux/README.md) |
+| Linux PC (Arch, CachyOS) | Its monitors, and virtual monitors | Frametop's build of Vibepollo |
 
-Then, on the Frame, open Frametop Remote Displays (in the app menu, or Remote displays in Display Settings), choose Add computer, sign in with the computer's Web UI login, and pick its displays. Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
+To add a computer:
+
+1. Install Vibepollo on your PC from our fork: [Frametop/frametop-vibepollo](https://github.com/Frametop/frametop-vibepollo). For a Mac, follow [host/macos/README.md](host/macos/README.md) instead.
+2. On the Frame, open Frametop Remote Displays (in the app menu, or Remote displays in Display Settings) and choose Add computer.
+3. Sign in with the computer's Web UI login, and pick its displays.
+
+Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. A PC with a Steam Link dongle can stream over it, which skips your router.
 
 A monitor you stream switches to the stream's resolution while it streams (Windows), so pick a size the monitor has, or one with the same shape. A computer that's asleep can't be reached. [docs/reference.md](docs/reference.md#frametop-remote-displays) has the details.
 

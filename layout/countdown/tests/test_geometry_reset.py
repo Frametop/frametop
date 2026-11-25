@@ -150,7 +150,7 @@ class GeometryResetReview(unittest.TestCase):
         h = Harness(self.lock, profile=False)
         h.layout["hosts"] = []
         self.assertEqual(h.run(), 0)
-        self.assertEqual(h.moves(), ["recentre 1 -0.00"])
+        self.assertEqual(h.moves(), ["recentre 1 0.00"])
 
     def test_the_main_screen_leads(self):
         h = Harness(self.lock)
@@ -237,12 +237,30 @@ class GeometryResetReview(unittest.TestCase):
         self.assertEqual(h.moves(), ["recentre"])
         self.assertEqual(h.events[-1], ("kwin_follow",))
 
+    def test_a_pc_windows_panel_leads_nothing(self):
+        # (its place in the layout is where it last opened, not where you put it: desktopless)
+        h = Harness(self.lock)
+        h.layout["hosts"][0]["displays"][0]["window"] = True
+        h.present = {101}
+        self.assertEqual(h.run(), 0)
+        self.assertEqual(h.moves(), ["recentre"])
+
+    def test_screens_never_arranged_are_arranged(self):
+        # (the desktop came up with the headset off)
+        h = Harness(self.lock)
+        h.failures["recentre 1 0.00"] = RuntimeError("error not arranged yet")
+        h.m.apply_screens = lambda: h.events.append(("arranged",)) or ["ok"]
+        self.assertEqual(h.run(), 0)
+        self.assertIn(("arranged",), h.events)
+        self.assertEqual(h.events[-1], ("kwin_follow",))
+
     def test_nothing_in_the_room_leaves_plasma_alone(self):
         h = Harness(self.lock)
         h.pins = {1: "dashboard", 101: "dashboard"}
         h.moved = 0
         self.assertEqual(h.run(), 0)
         self.assertIn(("ask", "tiles recentre"), h.events)  # (the tiles come round you)
+        self.assertNotIn("anchor", [e[0] for e in h.events])  # (nothing is arranged from here)
         self.assertNotIn(("kwin_follow",), h.events)
 
     def test_moved_panels_close_the_keyboard_and_rearrange_plasma(self):

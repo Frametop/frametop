@@ -35,7 +35,7 @@ look; held, the pointer stops there and your head steers it (it stays put in you
 the release clicks; held still for half a second, it's a real press that your head drags
 ("gazekey left|right 1|0" to the helper; by default Meta+J and Meta+K, DEFAULT_KEY_BINDINGS),
 gaze_quickcal = the gaze service's one-dot check ("quickcal" to @ft_gazed), sens_up, sens_down,
-layout_reset = open the profile in use again, or put the desktop screens back in their layout (ft-layout reset), screens_toggle = hide or show the desktop screens
+layout_reset = everything in the room round where you are, as it stands (ft-layout reset), screens_toggle = hide or show the desktop screens
 ("toggle" to ft-screens; Meta+Shift+H by default),
 keyboard_toggle = open or close Frametop's keyboard, float_toggle = float the desktop window under the
 pointer (else the active one) in VR, or put it back if it floats, dock_all = put every floating

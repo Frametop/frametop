@@ -16,7 +16,9 @@
 namespace ftvr {
 
 namespace {
-bool InRoom(int i, const Screen &s) { return s.pinned == kNone && s.glueTo < 0 && !HeldElsewhere(s, i); }
+bool InRoom(int i, const Screen &s) {
+    return s.pinned == kNone && s.glueTo < 0 && (!s.floating || s.floatOn) && !HeldElsewhere(s, i);
+}
 
 double FromHead(const Screen &s, const Mat &head) {
     return std::hypot(s.pose.m[0][3] - head.m[0][3], s.pose.m[1][3] - head.m[1][3], s.pose.m[2][3] - head.m[2][3]);
@@ -45,27 +47,31 @@ void RecentreCommand(const vrcmd::Cmd &c, char *reply, int size) {
     if (!DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head))
         return (void)std::snprintf(reply, size, "error no head pose (headset off?)");
     LayoutLetGo("a reset");
+    SettleForReset();
     const int lead = LeadOf(c.n - 1, head);
+    if (lead >= 0 && lead == c.n - 1 && g_screens.at(lead).unplaced)   // (nothing of yours to keep: ft-layout arranges)
+        return (void)std::snprintf(reply, size, "error not arranged yet");
     int moved = 0;
     if (lead >= 0) {
         const Screen &l = g_screens.at(lead);
         recentre::Lead<Mat> by;
         by.pose = l.pose;
-        by.known = l.fromKnown;
-        for (int k = 0; k < 3; ++k) by.from[k] = l.from[k];
+        by.from = l.from;
         by.planned = lead == c.n - 1;
         by.bearing = c.yaw * M_PI / 180;
         std::vector<Mat> seen;
         for (const auto &[i, s] : g_screens)
             if (s.visible && InRoom(i, s)) seen.push_back(s.pose);
         const Mat step = recentre::Step(by, head, seen);
+        const recentre::Stood here = recentre::StoodAt(head);
         for (auto &[i, s] : g_screens) {
             if (!InRoom(i, s)) continue;
             SpinForget(i);   // (turning round where you were: it stays where this puts it)
-            if (!StepOnItsWay(s, i, step)) SetAbsolute(s, Mul(step, s.pose));
+            SetAbsolute(s, Mul(step, s.pose), UniverseNow());
+            s.from = here, s.unplaced = false;
             ++moved;
         }
-        StepPlaces(step, true);
+        StepPlaces(step, &here);
         ArrangeDesktopSoon();   // KWin's outputs follow where the screens are now
         std::printf("recentred by screen %d: %d panel(s) moved %.2f m, turned %.0f degrees\n", lead + 1, moved,
                     std::hypot(l.pose.m[0][3] - by.pose.m[0][3], l.pose.m[1][3] - by.pose.m[1][3], l.pose.m[2][3] - by.pose.m[2][3]),

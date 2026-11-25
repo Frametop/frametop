@@ -34,8 +34,7 @@ static M around(const M &head, double yaw, double dist, double up = 0) {
 }
 static Lead<M> lead(const M &pose, const M &head, double bearing) {
     Lead<M> l;
-    l.pose = pose, l.known = true, l.planned = true, l.bearing = bearing * kDeg;
-    for (int k = 0; k < 3; ++k) l.from[k] = head.m[k][3];
+    l.pose = pose, l.from = recentre::StoodAt(head), l.planned = true, l.bearing = bearing * kDeg;
     return l;
 }
 
@@ -84,9 +83,17 @@ int main() {
         const M behind = around(was, 190, 1.2);
         check("...all round you there's no middle: the lead's front is", same(Mul(Step(l, now, {a, behind}), a), around(now, 0, 1.2)));
     }
+    {   // the room moved meanwhile (a universe's jump, a shared room's shift): where you stood moved with it
+        const M jump = Level<M>(3, 0.4, -2, 1.1), main = around(was, 20, 2);
+        Lead<M> l = lead(Mul(jump, main), was, 20);
+        l.from = recentre::Moved(jump, recentre::StoodAt(was));
+        check("a room that jumped, and back where you stood in it: nothing moves",
+              same(Step(l, Mul(jump, was), {}), Level<M>(0, 0, 0, 0)));
+        check("where you stood, not known, stays that", !recentre::Moved(jump, recentre::Stood{}).known);
+    }
     {   // not known where you stood
         Lead<M> l = lead(main, was, 0);
-        l.known = false;
+        l.from.known = false;
         const M s = Step(l, now, {main});
         check("not known from where: straight ahead, 1.5 m off, as high as it is", near(Mul(s, main).m[1][3], main.m[1][3]) && near(std::hypot(Mul(s, main).m[0][3] - now.m[0][3], Mul(s, main).m[2][3] - now.m[2][3]), 1.5));
     }

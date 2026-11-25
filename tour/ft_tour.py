@@ -200,7 +200,7 @@ def pages(f, keys):
                  ["You have just been typing", "Lift the hand off the keyboard before trying a hand gesture"],
                  ["Gaze mode is on", "Look at the control and pinch. The hand ray is normally off in gaze mode"],
                  ["Recenter on the Pointer settings page", "Adjusts the pointer. Use Reset Screen Layout to "
-                                                          "reposition the screens"],
+                                                          "bring the screens round you"],
                  "Menus and shortcuts",
                  ["Turn a palm toward your face, hold still and look at it", "When its ring appears, pinch with "
                                                                            "that hand to open the Steam menu or close the dashboard"],

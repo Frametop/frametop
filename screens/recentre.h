@@ -37,12 +37,26 @@ M Level(double x, double y, double z, double yaw) {
 template <class M>
 M LevelHead(const M &head) { return Level<M>(head.m[0][3], head.m[1][3], head.m[2][3], YawOf(head)); }
 
+// Where your head was when a panel was last placed or moved (no head pose then: not known).
+struct Stood {
+    bool known = false;
+    float at[3] = {};
+};
+template <class M>
+Stood StoodAt(const M &head) { return {true, {head.m[0][3], head.m[1][3], head.m[2][3]}}; }
+// The room moved by `j`, and where you stood with it.
+template <class M>
+Stood Moved(const M &j, const Stood &s) {
+    Stood out = StoodAt(posemath::Mul(j, posemath::Translation<M>(s.at[0], s.at[1], s.at[2])));
+    out.known = s.known;
+    return out;
+}
+
 // The panel the rest go by.
 template <class M>
 struct Lead {
     M pose{};
-    bool known = false;     // where your head was when it was last placed
-    double from[3] = {};
+    Stood from;             // where your head was when it was last placed
     bool planned = false;   // the layout says where it is round you: `bearing` (radians, left positive)
     double bearing = 0;
 };
@@ -53,8 +67,8 @@ template <class M>
 M From(const Lead<M> &lead, const M &head, const std::vector<M> &centres) {
     const double own = YawOf(lead.pose);   // (facing the lead's front)
     double p[3] = {lead.pose.m[0][3] + std::sin(own) * kGuessM, head.m[1][3], lead.pose.m[2][3] + std::cos(own) * kGuessM};
-    if (lead.known)
-        for (int k = 0; k < 3; ++k) p[k] = lead.from[k];
+    if (lead.from.known)
+        for (int k = 0; k < 3; ++k) p[k] = lead.from.at[k];
     double yaw = own;
     const double dx = lead.pose.m[0][3] - p[0], dz = lead.pose.m[2][3] - p[2];
     if (lead.planned) {

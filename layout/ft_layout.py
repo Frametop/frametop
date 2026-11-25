@@ -781,7 +781,7 @@ def recenter_lead(sock, layout):
         planned.sort(key=lambda p: p[0] != main)
     displays = remote_displays(layout)
     planned += [(n, t) for (n, _, d), t in zip(displays, plan_remotes(layout, count, displays))
-                if not d.get("off") and t is not None]
+                if not d.get("off") and t is not None and not d.get("window")]  # (a window: where you put it)
     hidden = set(sock.ask("concealed").split()[1:])
     for n, t in planned:
         x, _, z = t["pos"]
@@ -789,7 +789,7 @@ def recenter_lead(sock, layout):
             continue
         try:
             if parse_get(sock.ask(f"get {n}"))["hand"] == "none":
-                return n, yaw_pitch(t["pos"])[0]
+                return n, round(yaw_pitch(t["pos"])[0], 2) + 0.0  # (no -0.0)
         except NoAnswer:
             raise
         except RuntimeError as e:
@@ -804,7 +804,8 @@ def recenter_screens():
     dashboard stays on its pin; the tiled ones come round you as they are.
 
     The layout is only read: Reset must not change saved places, window state, hidden
-    screens, or remote connections. How many panels of the room moved."""
+    screens, or remote connections. How many panels of the room moved. A desktop that came up
+    with no head pose (the headset off) was never arranged: that happens now instead."""
     layout = load_layout()
     name = layout.get("active") if layout.get("mode") == "custom" else None
     if name in layout.get("layouts", {}):
@@ -813,14 +814,21 @@ def recenter_screens():
     try:
         lead = recenter_lead(sock, layout)
         # The head is sampled there: once, after the countdown, as everything moves.
-        f = sock.ask("recentre %d %.2f" % lead if lead else "recentre").split()
+        try:
+            f = sock.ask("recentre %d %.2f" % lead if lead else "recentre").split()
+        except RuntimeError as e:
+            if "not arranged" not in str(e):
+                raise
+            log("recenter: nothing arranged since the desktop started: arranging")
+            return apply_screens()
         moved, eye, heading = int(f[1]), tuple(map(float, f[2:5])), float(f[5])
         recenter_tiles(sock)
         try:
             sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset
         except RuntimeError:
             pass  # an older ft-screens
-        save_anchor(eye, heading)
+        if moved:
+            save_anchor(eye, heading)
         log(f"recentered {moved} panel(s); app windows and streams unchanged")
         return moved
     finally:

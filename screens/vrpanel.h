@@ -15,6 +15,7 @@
 #include "hoverhaptics.h"
 #include "levelpin.h"
 #include "posemath.h"
+#include "recentre.h"
 #include "resizecorner.h"
 #include "sysstats.h"
 #include "vrcmd.h"
@@ -231,8 +232,8 @@ struct Screen {
     int heldX = 0, heldY = 0, heldW = 0, heldH = 0, heldTitle = 0;
     std::map<int, Sub> subs;
     uint64_t universe = 0;        // the SteamVR universe it was placed in (0: not known yet; universefix.h)
-    float from[3] = {};           // where your head was when it was last placed or moved (recentre.h), in that universe
-    bool fromKnown = false;       // ... (no head pose then: not known)
+    recentre::Stood from;         // where your head was when it was last placed or moved, in that universe
+    bool unplaced = false;        // made with no head pose (round a head at the floor's middle), and not placed since
     // Attention (UpdateAttention): what ft_vr_screen_attention answers, and until when (ms)
     // it stays focused or in view after the last reason for it.
     ft_attention attention = FT_FOCUSED;
@@ -303,7 +304,6 @@ void AnnounceOverlay(const char *key);
 void SendDashpatch(const std::string &msg);   // to ft-dashpatch (@ft_dashpatch)
 bool MakePanel(Screen &s, const char *prefix, const char *label);
 void SetAbsolute(Screen &s, const Mat &pose, uint64_t universe = 0);
-void PlacedFromHere(Screen &s);   // placed or moved from where your head is now (Screen's from)
 void ApplyCurve(const Screen &s);
 void CapCurve(Screen &s);
 void KeepCorner(Screen &s, double oldW, double oldH);
@@ -460,7 +460,12 @@ void ArrangeDesktopSoon();   // KWin's outputs follow where the screens are, in 
 void SpinForget(int i);      // out of the lazy susan's turn, where it is
 bool HeldElsewhere(const Screen &s, int i);
 bool StepOnItsWay(Screen &s, int i, const Mat &step);
-void StepPlaces(const Mat &step, bool all = false);   // all: the front panel went too (else as Move All has it)
+void StepPlaces(const Mat &step, const recentre::Stood *reset = nullptr);   // a reset: everything went, and you stand there
+
+// ---------------------------------------------------------------- vr.cpp's, for the recentre
+
+void SettleForReset();       // the front slot's panel home, what's on its way there
+uint64_t UniverseNow();
 
 // ---------------------------------------------------------------- vrrecentre.cpp's
 

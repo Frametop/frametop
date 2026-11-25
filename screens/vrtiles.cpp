@@ -474,7 +474,7 @@ void TileStay(int i, bool on, const char *by) {
 }
 
 // A panel's key is known (made, or ft-floatd said whose window it is): back to its last state.
-void TileKnown(int i, const std::string &key) {
+void TileKnown(int i, const std::string &key, bool floated) {
     const std::string k = dashtiles::Memory::Clean(key);
     const auto was = g_tileKey.find(i);
     if (was != g_tileKey.end() && was->second == k) return;
@@ -489,7 +489,7 @@ void TileKnown(int i, const std::string &key) {
     BarSideKnown(i, k);   // (its bar's edge is remembered by the same key)
     if (g_tileMemory.Used(k)) SaveTileMemory();   // (its use kept over a restart: the last to go when it's full)
     const std::string line = g_tileMemory.Get(k);
-    switch (dashtiles::TileWhenKnown(k, line, g_newWindowsTiled)) {
+    switch (dashtiles::TileWhenKnown(k, line, g_newWindowsTiled, floated)) {
         case dashtiles::WhenKnown::Leave:
             if (line == "room") g_tileRoom.insert(i);
             return;
@@ -1018,7 +1018,7 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
     case vrcmd::FloatApp: {
         Screen *s = Find(parsed.n);
         if (!s || !s->floating) return (void)std::snprintf(reply, size, "error no such floating window");
-        TileKnown(parsed.n - 1, std::string("app:") + parsed.appId);
+        TileKnown(parsed.n - 1, std::string("app:") + parsed.appId, parsed.on != 0);
         std::snprintf(reply, size, "ok");
         return;
     }

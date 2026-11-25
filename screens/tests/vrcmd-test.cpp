@@ -141,7 +141,9 @@ int main() {
     check("tiles: not a tile key, nor tilesx", V("tilesx") == Tile && V("tiles setx") == Tile);
     check("stay is no state", V("state") == State && V("stay 1") == Unknown);
     { Cmd t; check("floatapp: panel and app", Parse("floatapp 7 org.kde.konsole", t) == FloatApp && t.n == 7 &&
-                                                   !std::strcmp(t.appId, "org.kde.konsole")); }
+                                                   !std::strcmp(t.appId, "org.kde.konsole") && !t.on); }
+    { Cmd t; check("floatapp: asked (floated by the user)", Parse("floatapp 7 org.kde.konsole asked", t) == FloatApp && t.on == 1); }
+    { Cmd t; check("floatapp: another word isn't asked", Parse("floatapp 7 org.kde.konsole later", t) == FloatApp && !t.on); }
     { Cmd t; check("barside: panel and edge", Parse("barside 3 right", t) == BarSide && t.n == 3 && !std::strcmp(t.word, "right")); }
     check("barside: an edge is needed", V("barside 3") == Unknown);
     check("groups: tiles", GroupOf(Anchor) == TileGroup && GroupOf(Tiles) == TileGroup && GroupOf(FloatApp) == TileGroup);

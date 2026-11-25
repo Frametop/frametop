@@ -49,7 +49,7 @@ struct Cmd {
     int gx = 0, gy = 0;                   // torn
     char mod[16] = {}, b1[16] = {}, b2[16] = {}, b3[16] = {};  // windowdrag
     double da = 0, db = 0;                // carryturn
-    char appId[128] = {};                 // floatapp: the window's app (ft-floatd's desktop file name)
+    char appId[128] = {};                 // floatapp: the window's app (ft-floatd's desktop file name); `on`: "asked"
     const char *rest = nullptr;           // tiles: "clear", "gaps", "recentre" or "set ..." (what follows "tiles ")
 };
 
@@ -163,7 +163,9 @@ inline Verb Parse(const char *cmd, Cmd &c) {
         return c.rest = cmd + 6, Tiles;   // "clear", or "set N STATE; N STATE..." ("add": more of the same set);
                                           // "centre [N]", "arc N": the centre display; "remember [KEY STATE]": a profile's (vrtiles.cpp)
     if (std::sscanf(cmd, "tile %15s", c.word) == 1) return Tile;
-    if (std::sscanf(cmd, "floatapp %d %127s", &c.n, c.appId) == 2) return FloatApp;
+    // "floatapp N APP [asked]": asked, the user floated it off the desktop just now (it stays in the room)
+    if (const int got = std::sscanf(cmd, "floatapp %d %127s %15s", &c.n, c.appId, c.word); got >= 2)
+        return c.on = got == 3 && !std::strcmp(c.word, "asked"), FloatApp;
     if (std::sscanf(cmd, "barside %d %15s", &c.n, c.word) == 2) return BarSide;
     if (std::sscanf(cmd, "front %d", &c.n) == 1) return Front;
     if (std::strcmp(cmd, "debug") == 0) return Debug;

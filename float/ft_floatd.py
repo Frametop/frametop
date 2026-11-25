@@ -573,7 +573,7 @@ class Daemon:
             # shows; user, 2026-11-01: "auto-engage carry mode when a window transitions from desktop to
             # floating"). Not one torn off its screen: ft-screens carries that on already ("torn").
             torn = bool(self.tear and self.tear[0] == ev.get("id"))
-            floated = self.float_window(ev)
+            floated = self.float_window(ev, asked=True)
             if floated and not torn and carry_on_float():
                 self.screens.ask(f"carry take {floated.slot.index}", quiet=True)
         elif kind == "dock-request":
@@ -736,10 +736,13 @@ class Daemon:
         f.mpp = mpp
         self.set_panel(f, f.crop, f.title)
 
-    def float_window(self, ev, place=None, mpp=None, scale=None):
+    def float_window(self, ev, place=None, mpp=None, scale=None, asked=False):
         """Float a window: its panel in front of where it was on its screen, or at place (centre
         and axes in the world), at the density of its screen, or mpp, and at its screen's scale,
-        or scale (then ev's frame is the window's size at that scale). Returns its Float."""
+        or scale (then ev's frame is the window's size at that scale). Returns its Float.
+        asked: the user floated it off the desktop just now (the float key, its title bar's
+        button, Float in VR, a tear-off), so its panel stays in the room: ft-screens doesn't put
+        it on the dashboard tiles ("floatapp ... asked"), as it does a window that opens floating."""
         wid = ev["id"]
         if wid in self.floats:
             return self.floats[wid]
@@ -776,7 +779,8 @@ class Daemon:
             self.place_panel(f, ev)
         if f.app:
             # whose window it is: on the dashboard again if that app's last one was (ft-screens' tiles)
-            self.screens.ask(f"floatapp {slot.index} {re.sub(r'[^A-Za-z0-9._-]', '_', f.app)}", quiet=True)
+            self.screens.ask(f"floatapp {slot.index} {re.sub(r'[^A-Za-z0-9._-]', '_', f.app)}" + (" asked" if asked else ""),
+                             quiet=True)
         if tear:
             # torn off: ft-screens carries it on with the laser that held it, by where it held it (pixels in it)
             k, out = scales.get(ev["output"], 1.0) or 1.0, ev.get("outputRect") or {"x": 0, "y": 0}

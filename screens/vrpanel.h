@@ -378,7 +378,7 @@ void TileGroupPut(const Mat *head);
 void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf = -1);   // (leftOf tiled: a column just left of its)
 void TileUnanchor(int i, const char *by);
 void TileInRoom(int i, const char *by);   // Placement's In the Room: off the tiles, its app (a window's) kept in the room
-void TileKnown(int i, const std::string &key);
+void TileKnown(int i, const std::string &key, bool floated = false);   // floated: floatapp's "asked" (tilestate.h)
 void TileGone(int i);
 // Frametop is stopping: a panel going from now on leaves no gap to fill (TileGone).
 void TilesStopping();

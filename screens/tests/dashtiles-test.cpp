@@ -982,6 +982,11 @@ int main() {
             check("new windows set to the room: screens and remote displays as before",
                   TileWhenKnown("screen:2", "", false) == W::Leave && TileWhenKnown("screen:2", "off", false) == W::Restore &&
                       TileWhenKnown("remote:10.0.0.5/display:DP-1", "tile 0 1 0 1 1", false) == W::Restore);
+            check("floated off the desktop by the user: in the room, whatever its app did last or new windows do",
+                  TileWhenKnown("app:firefox", "", true, true) == W::Leave && TileWhenKnown("app:firefox", "off", true, true) == W::Leave &&
+                      TileWhenKnown("app:firefox", "tile 0 1 0 1 1", true, true) == W::Leave &&
+                      TileWhenKnown("app:firefox", "room", false, true) == W::Leave);
+            check("...only a window: a screen floated isn't a thing", TileWhenKnown("screen:2", "off", true, true) == W::Restore);
             check("a junk line: Restore (which says it isn't one)", TileWhenKnown("screen:1", "junk") == W::Restore &&
                                                                        TileWhenKnown("app:x", "junk") == W::Anchor);
         }

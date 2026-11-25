@@ -119,5 +119,12 @@ check("float request, off: no carry", float_request(False), [])
 check("float request, on: carried", float_request(True), ["carry take 4"])
 check("torn off, on: no carry take (torn carries it)", float_request(True, ("w1", 1300, 760)), [])
 check("...it's still carried as torn", [t for t in d.screens.sent if t.startswith("torn")], ["torn 4 500 160"])
+# A window the user floats off the desktop stays in the room: ft-screens hears "asked", and leaves it
+# off the dashboard tiles (a window that opens floating, above, is the tiles' to place).
+check("...and ft-screens hears the user asked for it", [t for t in d.screens.sent if t.startswith("floatapp")],
+      ["floatapp 4 org.kde.dolphin asked"])
+float_request(False)
+check("the float key, the title bar's button, Float in VR: asked too",
+      [t for t in d.screens.sent if t.startswith("floatapp")], ["floatapp 4 org.kde.dolphin asked"])
 
 sys.exit(1 if failed else 0)

@@ -188,8 +188,14 @@ inline bool IsWindowKey(const std::string &key) {
 enum class WhenKnown { Restore, Anchor, Leave };
 // What the panel with `key` does when it comes, its app's remembered `line` (empty: none): Restore
 // that line, Anchor it as a new tile, or Leave it where it is. `newWindowsTiled`: a window with no
-// place of its own goes on the tiles (else it's left in the room).
-inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line, bool newWindowsTiled = true) {
+// place of its own goes on the tiles (else it's left in the room). `floated`: the user took this
+// window off the desktop just now (the float key, its title bar's button, Float in VR, a tear-off):
+// it stays in the room, whatever its app did last (user, 2026-11-24: "Float = in the room", after a
+// tester's "floating a window defaults it to tiled, which was confusing"). The memory can't tell an
+// app tiled by hand from one a default tiled, so it doesn't decide here.
+inline WhenKnown TileWhenKnown(const std::string &key, const std::string &line, bool newWindowsTiled = true,
+                               bool floated = false) {
+    if (floated && IsWindowKey(key)) return WhenKnown::Leave;
     State s;
     const bool parsed = !line.empty() && Parse(line, &s);
     if (parsed && s.kind != State::Kind::Off) return WhenKnown::Restore;

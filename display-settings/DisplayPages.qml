@@ -1192,7 +1192,7 @@ Item {
                             currentIndex = Qt.binding(() => backend.dashTiles.newWindowsTiled ? 0 : 1)
                         }
                     }
-                    Ft.Hint { text: "For an app's first window. An app you tiled comes back tiled, and one you put In the Room stays there, whatever this says. Apps opened from Steam's dashboard always tile." }
+                    Ft.Hint { text: "For apps that open floating. A window you float off the desktop yourself stays in the room. An app you tiled comes back tiled, and one you put In the Room stays there, whatever this says. Apps opened from Steam's dashboard always tile." }
                     Controls.Switch {
                         Kirigami.FormData.label: "Keep open:"
                         text: "Keep anchored panels visible after closing the dashboard"

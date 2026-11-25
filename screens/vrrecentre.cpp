@@ -24,7 +24,7 @@ double FromHead(const Screen &s, const Mat &head) {
     return std::hypot(s.pose.m[0][3] - head.m[0][3], s.pose.m[1][3] - head.m[1][3], s.pose.m[2][3] - head.m[2][3]);
 }
 
-// The panel asked for, else the nearest shown, else the nearest; -1: none in the room.
+// The panel asked for, else the nearest shown (and placed), else the nearest; -1: none in the room.
 int LeadOf(int asked, const Mat &head) {
     const auto it = g_screens.find(asked);
     if (it != g_screens.end() && InRoom(asked, it->second)) return asked;
@@ -32,7 +32,7 @@ int LeadOf(int asked, const Mat &head) {
     for (const bool shown : {true, false}) {
         double nearest = 0;
         for (const auto &[i, s] : g_screens) {
-            if (!InRoom(i, s) || (shown && !s.visible)) continue;
+            if (!InRoom(i, s) || (shown && (!s.visible || s.from.unplaced))) continue;
             const double d = FromHead(s, head);
             if (best < 0 || d < nearest) best = i, nearest = d;
         }
@@ -49,7 +49,7 @@ void RecentreCommand(const vrcmd::Cmd &c, char *reply, int size) {
     LayoutLetGo("a reset");
     SettleForReset();
     const int lead = LeadOf(c.n - 1, head);
-    if (lead >= 0 && lead == c.n - 1 && g_screens.at(lead).unplaced)   // (nothing of yours to keep: ft-layout arranges)
+    if (lead >= 0 && lead == c.n - 1 && g_screens.at(lead).from.unplaced)   // (nothing of yours to keep: ft-layout arranges)
         return (void)std::snprintf(reply, size, "error not arranged yet");
     int moved = 0;
     if (lead >= 0) {
@@ -61,15 +61,15 @@ void RecentreCommand(const vrcmd::Cmd &c, char *reply, int size) {
         by.bearing = c.yaw * M_PI / 180;
         std::vector<Mat> seen;
         for (const auto &[i, s] : g_screens)
-            if (s.visible && InRoom(i, s)) seen.push_back(s.pose);
-        const Mat step = recentre::Step(by, head, seen);
+            if (s.visible && InRoom(i, s) && !s.from.unplaced) seen.push_back(s.pose);
+        const Mat unplaced = recentre::LevelHead(head);   // (made round the floor's middle: the same round you)
+        const Mat step = l.from.unplaced ? unplaced : recentre::Step(by, head, seen);
         const recentre::Stood here = recentre::StoodAt(head);
         for (auto &[i, s] : g_screens) {
             if (!InRoom(i, s)) continue;
             SpinForget(i);   // (turning round where you were: it stays where this puts it)
-            // (one no one has placed yet, made round the floor's middle: the same round you)
-            SetAbsolute(s, Mul(s.unplaced ? recentre::LevelHead(head) : step, s.pose), UniverseNow());
-            s.from = here, s.unplaced = false;
+            SetAbsolute(s, Mul(s.from.unplaced ? unplaced : step, s.pose), UniverseNow());
+            s.from = here;
             ++moved;
         }
         StepPlaces(step, &here);

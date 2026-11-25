@@ -233,7 +233,6 @@ struct Screen {
     std::map<int, Sub> subs;
     uint64_t universe = 0;        // the SteamVR universe it was placed in (0: not known yet; universefix.h)
     recentre::Stood from;         // where your head was when it was last placed or moved, in that universe
-    bool unplaced = false;        // made with no head pose (round a head at the floor's middle), and not placed since
     // Attention (UpdateAttention): what ft_vr_screen_attention answers, and until when (ms)
     // it stays focused or in view after the last reason for it.
     ft_attention attention = FT_FOCUSED;

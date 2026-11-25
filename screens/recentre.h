@@ -41,13 +41,14 @@ M LevelHead(const M &head) { return Level<M>(head.m[0][3], head.m[1][3], head.m[
 struct Stood {
     bool known = false;
     float at[3] = {};
+    bool unplaced = false;   // made with no head pose, round a pretended head at the floor's middle, and not placed since
 };
 template <class M>
-Stood StoodAt(const M &head) { return {true, {head.m[0][3], head.m[1][3], head.m[2][3]}}; }
+Stood StoodAt(const M &head, bool unplaced = false) { return {true, {head.m[0][3], head.m[1][3], head.m[2][3]}, unplaced}; }
 // The room moved by `j`, and where you stood with it.
 template <class M>
 Stood Moved(const M &j, const Stood &s) {
-    Stood out = StoodAt(posemath::Mul(j, posemath::Translation<M>(s.at[0], s.at[1], s.at[2])));
+    Stood out = StoodAt(posemath::Mul(j, posemath::Translation<M>(s.at[0], s.at[1], s.at[2])), s.unplaced);
     out.known = s.known;
     return out;
 }

@@ -1094,7 +1094,6 @@ void MoveFramePins(bool dashMoved) {
 static void PlacedFromHere(Screen &s) {
     Mat head;
     s.from = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ? recentre::StoodAt(head) : recentre::Stood{};
-    s.unplaced = false;
 }
 
 // Placed, it belongs to `universe` (universefix.h): 0 for the one now, unless it's set again where
@@ -2893,7 +2892,7 @@ void UpdateSpin() {
     }
     if (done) {
         for (const auto &[i, p] : g_spin.base)
-            if (Screen &s = g_screens.at(i); !s.unplaced) PlacedFromHere(s);   // (turned round where you are)
+            PlacedFromHere(g_screens.at(i));   // (turned round where you are)
         // The panel now nearest straight ahead (of where you face) gets typing and the active window.
         Mat head;
         double nearest = kSpinFocus;
@@ -6903,7 +6902,7 @@ void ft_vr_screen_create(int index, double metres, int count) {
     const double yaw = heading + (double(count - 1) / 2 - index) * 35;
     const double dx = -std::sin(yaw * M_PI / 180), dz = -std::cos(yaw * M_PI / 180);
     SetAbsolute(s, PanelPose(head.m[0][3] + dx * 2, head.m[1][3], head.m[2][3] + dz * 2, yaw, 0, 0));
-    if (!seen) s.from = recentre::StoodAt(head), s.unplaced = true;
+    if (!seen) s.from = recentre::StoodAt(head, true);
     TileKnown(index, "screen:" + std::to_string(index + 1));
 }
 
@@ -6948,7 +6947,7 @@ bool ft_vr_remote_create(int index, const char *label, double metres, bool *rest
     const double yaw = std::atan2(head.m[0][2], head.m[2][2]) * 180 / M_PI;
     const double dx = -std::sin(yaw * M_PI / 180), dz = -std::cos(yaw * M_PI / 180);
     SetAbsolute(s, PanelPose(head.m[0][3] + dx * 2, head.m[1][3], head.m[2][3] + dz * 2, yaw, 0, 0));
-    if (!seen) s.from = recentre::StoodAt(head), s.unplaced = true;
+    if (!seen) s.from = recentre::StoodAt(head, true);
     const auto pk = g_parked.find(index);
     if (pk != g_parked.end()) {
         const Parked &k = pk->second;
@@ -7191,7 +7190,7 @@ void FollowUniverse(const universefix::Switch &sw) {
         GrabMove *move = m != g_grabMoves.end() ? &m->second : nullptr;
         if (!follows(move ? move->universe : s.universe)) continue;
         // pinned: it rides its device; carried: the carry places it
-        if (sw.moved && s.pinned == kNone && s.drag == Drag::None) {
+        if (sw.moved && s.pinned == kNone && s.drag == Drag::None && !s.from.unplaced) {   // (one not placed yet isn't of the room)
             if (move) move->from = Mul(j, move->from), move->to = Mul(j, move->to), move->lastSet = Mul(j, move->lastSet);
             g_spin.base.erase(i);   // (turning round its old axis: it stays where it is now)
             if (i == g_front.panel) g_front.to = Mul(j, g_front.to);
@@ -7206,12 +7205,12 @@ void FollowUniverse(const universefix::Switch &sw) {
     }
     if (follows(g_spin.universe)) g_spin.universe = sw.to;   // (the ones it moved left the spin)
     if (g_front.panel >= 0 && follows(g_front.homeUniverse)) {
-        if (sw.moved) g_front.home = Mul(j, g_front.home), g_front.homeFrom = recentre::Moved(j, g_front.homeFrom);
+        if (sw.moved && !g_front.homeFrom.unplaced) g_front.home = Mul(j, g_front.home), g_front.homeFrom = recentre::Moved(j, g_front.homeFrom);
         g_front.homeUniverse = sw.to;
     }
     for (auto &[i, k] : g_parked) {
         if (!follows(k.universe)) continue;
-        if (sw.moved && k.pinned == kNone) k.pose = Mul(j, k.pose), k.from = recentre::Moved(j, k.from);
+        if (sw.moved && k.pinned == kNone && !k.from.unplaced) k.pose = Mul(j, k.pose), k.from = recentre::Moved(j, k.from);
         k.universe = sw.to;
     }
     char jump[128] = "no head pose around it: jump unknown";
@@ -7238,7 +7237,7 @@ void ShiftRoom(const roomshift::Shift &by, char *reply, int size) {
     const Mat j = roomshift::Pose<Mat>(by);
     int moved = 0;
     for (auto &[i, s] : g_screens) {
-        if (s.pinned != kNone || s.drag != Drag::None) continue;
+        if (s.pinned != kNone || s.drag != Drag::None || s.from.unplaced) continue;   // (one not placed yet isn't of the room)
         const auto m = g_grabMoves.find(i);
         if (m != g_grabMoves.end()) m->second.from = Mul(j, m->second.from), m->second.to = Mul(j, m->second.to), m->second.lastSet = Mul(j, m->second.lastSet);
         const auto b = g_spin.base.find(i);
@@ -7250,9 +7249,9 @@ void ShiftRoom(const roomshift::Shift &by, char *reply, int size) {
     }
     const Mat axis = Mul(j, Translation(g_spin.cx, 0, g_spin.cz));
     g_spin.cx = axis.m[0][3], g_spin.cz = axis.m[2][3];
-    if (g_front.panel >= 0) g_front.home = Mul(j, g_front.home), g_front.homeFrom = recentre::Moved(j, g_front.homeFrom);
+    if (g_front.panel >= 0 && !g_front.homeFrom.unplaced) g_front.home = Mul(j, g_front.home), g_front.homeFrom = recentre::Moved(j, g_front.homeFrom);
     for (auto &[i, k] : g_parked)
-        if (k.pinned == kNone) k.pose = Mul(j, k.pose), k.from = recentre::Moved(j, k.from);
+        if (k.pinned == kNone && !k.from.unplaced) k.pose = Mul(j, k.pose), k.from = recentre::Moved(j, k.from);
     LayoutShifted();   // (Move All Windows meanwhile)
     g_shifted = roomshift::Then(g_shifted, by);
     if (moved) ArrangeDesktopSoon();   // KWin's outputs follow where the screens are now
@@ -7288,6 +7287,7 @@ extern "C++" bool ftvr::StepOnItsWay(Screen &s, int i, const Mat &step) {
 // The places in the room no panel is in now: the front slot's home, a stopped remote display's.
 extern "C++" void ftvr::StepPlaces(const Mat &step, const recentre::Stood *reset) {
     const auto moved = [&](Mat &pose, recentre::Stood &from, uint64_t &universe) {
+        if (from.unplaced) return;
         pose = Mul(step, pose);
         from = reset ? *reset : recentre::Moved(step, from);
         if (reset) universe = UniverseNow();

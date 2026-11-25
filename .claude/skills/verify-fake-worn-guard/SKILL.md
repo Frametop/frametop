@@ -41,9 +41,9 @@ frame-job --local -- .claude/skills/verify-fake-worn-guard/scripts/check
   doesn't allow host input, which stops ft-stream's lease.
 
 Read every result, and draw the chart, with the pstack `/statechart` skill. Give it
-`docs/charts/fake-worn-guard/FakeWornGuard.tla` with `docs/charts/fake-worn-guard/Kills.cfg` (264 states: it draws F's window, the guard gone
-before `worn 1`) or `docs/charts/fake-worn-guard/NoF.cfg` (480 states: the proxy hangs), and `docs/charts/fake-worn-guard/view.mjs` as its
-view. `All` (632 states) is over its 500-state chart budget, so it would draw only bug paths. It
+`docs/charts/fake-worn-guard/FakeWornGuard.tla` with `docs/charts/fake-worn-guard/Kills.cfg` (408 states: it draws F's window, the guard gone
+before `worn 1`) or `docs/charts/fake-worn-guard/Hangs.cfg` (240 states: the proxy hangs), and `docs/charts/fake-worn-guard/view.mjs` as its
+view. `NoF` (704 states) and `All` (956) are over its 500-state chart budget, so they would draw only bug paths. It
 turns each violation into the shortest path in plain words. Rendered charts are in `work/` if
 that folder is still there (not committed): `fake-worn-guard.png` (Kills, no bug paths),
 `fake-worn-guard-small.png` (the same, under 100 KB), `fake-worn-guard-nof.png` (NoF) and
@@ -74,7 +74,7 @@ and the post-check after `worn 1`, which was finding F's window.
 | `Kills` | TRUE | FALSE | TRUE | every rule holds (`NoHostTakeover` broke by finding B, then F, before their fixes) |
 | `Hangs` | FALSE | TRUE | FALSE | every rule holds (both broke, by finding A, before the fix) |
 | `All` | TRUE | TRUE | TRUE | every rule holds (`NoHostTakeover` broke as in `Kills`, and `FakeIsNoticed` by finding D, before their fixes) |
-| `NoF` | TRUE | TRUE | FALSE | every rule holds: `All` without F's window, which guarded B, D and E while F was open, and is small enough to chart |
+| `NoF` | TRUE | TRUE | FALSE | every rule holds: `All` without F's window, which guarded B, D and E while F was open |
 
 ## Findings
 
@@ -137,6 +137,17 @@ B and E are fixed only in the code on this branch. The installed ft-stream may p
   guard tests guard it in the code; `GuardReleases` clearing the flag again brings F's path back
   (`YouRunWornOn OnCheck OnStartGuard GuardStarts OnWait GuardStopped OnFake StreamStarts
   StreamTakesLock StreamTick HelperAnswers StreamTick`) in `Kills` and `All`.
+- **G (fixed in `12a79ebc`). The flag went with the wearer, and the helper still said worn.** The
+  pointer helper says worn for up to three seconds after the faked wearer goes (SteamVR's lag, and
+  its own `HEADSET_OFF_AFTER`). The model had it answer "away" at once, so it missed this: `worn
+  off` released the wearer and cleared the flag, the guard let go, and a stream that took the lock
+  found no flag, asked, heard "worn" and leased for about a second (2026-11-25, twice, a real
+  host). Now the flag goes only `SETTLE` seconds after the wearer (`settle_and_clear_flag`, the
+  model's `says`, `Settled` and `OffClear`), on every path that clears one. `OffClear` without its
+  `~says` brings G's path back in every config: `YouRunWornOn OnCheck OnStartGuard GuardStarts
+  OnWait OnFake OnVerify YouRunWornOff OffSend OffClear GuardLetsGo StreamStarts StreamTakesLock
+  StreamTick HelperAnswers StreamTick`. `test_the_flag_stays_until_the_pointer_helper_stops_saying_worn`
+  guards it in the code.
 
 ## Model to code
 
@@ -144,22 +155,23 @@ Each model action is one step of the code. Change the model when the code it nam
 
 | Model action | Code (at the sync commit) |
 | --- | --- |
-| `DropFaked`/`DropFlag` in `YouRunWornOn`, `YouRunWornOff`, `YouRunOther` | `cli.py` `drop_unsafe_worn` (l. 413), through `drop_wearer` (`hostinput.py` l. 220), run before every command (`main`, l. 462) |
+| `DropFaked`/`DropFlag` in `YouRunWornOn`, `YouRunWornOff`, `YouRunOther` | `cli.py` `drop_unsafe_worn` (l. 413), through `drop_wearer` (`hostinput.py` l. 233), run before every command (`main`, l. 462) |
 | `OnCheck` | `cli.py` `dispatch`, `worn` branch (l. 287): `hostinput.refusal(state())`, then the live-guard test, then the left-flag refusal (l. 305) |
-| `OnStartGuard`, `StopOldGuard`, `OnWait` | `hostinput.py` `start_guard` (l. 245): `systemctl stop`, `clear_flag`, `systemd-run`, wait for a live guard's flag |
+| `OnStartGuard`, `StopOldGuard`, `OnWait` | `hostinput.py` `start_guard` (l. 260): `systemctl stop`, `clear_flag`, `systemd-run`, wait for a live guard's flag |
 | `OnFake`, `KeepFlag` | `cli.py` `bench.control('worn 1')` (l. 313) and its `except BaseException`: `release_or_keep_flag` (l. 401) |
 | `OnVerify` | `cli.py` the check after `worn 1` (l. 317): no live guard -> `release_or_keep_flag` |
-| `OffSend` | `cli.py` `worn off|physical` (`control`, then `clear_flag`) and `release` (l. 360) |
-| `GuardStarts`, `GuardLetsGo` | `hostinput.py` `guard` (l. 168): `take_locks` (l. 151), then `set_flag`; leaves once the flag stops naming it |
-| `GuardTerm`, `GuardStopped`, `GuardReleases` | `guard`'s SIGTERM path (l. 197) and `release_confirmed` (l. 204): the wearer goes, the flag stays |
-| `GuardKilled`, `GuardCleanup` | SIGKILL/OOM, then the unit's `ExecStopPost`: `after_guard` (l. 230), `release_confirmed` for any unallowed flag naming no live guard |
-| `MayDieNow` | the window `GuardCanDieMidFake` opens: `pc` in `on_fake`/`on_verify` is after `start_guard` (l. 245) and before the post-check (l. 317) |
-| `GuardAlive` | `hostinput.py` `guard_alive` (l. 276) |
+| `OffSend`, `OffClear` | `cli.py` `worn off|physical` (l. 289: `control`, then `settle_and_clear_flag`) and `release` (l. 354) |
+| `Settled`, `says`, `HelperSettles` | `hostinput.py` `settle_and_clear_flag` (l. 81) and its `SETTLE`; `HEADSET_OFF_AFTER` in `pointer/helper/ft-pointer.cpp`. A drop's wait is one step in the model: the flag is there all through it |
+| `GuardStarts`, `GuardLetsGo` | `hostinput.py` `guard` (l. 181): `take_locks` (l. 164), then `set_flag`; leaves once the flag stops naming it |
+| `GuardTerm`, `GuardStopped`, `GuardReleases` | `guard`'s SIGTERM path (l. 208) and `release_confirmed` (l. 217): the wearer goes, the flag stays |
+| `GuardKilled`, `GuardCleanup` | SIGKILL/OOM, then the unit's `ExecStopPost`: `after_guard` (l. 243), `release_confirmed` for any unallowed flag naming no live guard |
+| `MayDieNow` | the window `GuardCanDieMidFake` opens: `pc` in `on_fake`/`on_verify` is after `start_guard` (l. 260) and before the post-check (l. 317) |
+| `GuardAlive` | `hostinput.py` `guard_alive` (l. 291) |
 | `Released`, the proxy's `hung` | `transport.py` `request` (l. 9): a 4 s timeout raises `socket.timeout`, after the proxy may have acted |
 | `StreamStarts`, `StreamEnds` | a stream to a host with `"input"` (true, `"keyboard"` or `"mouse"`) opens or closes (`HostInput` in `stream/ft-stream.cpp`) |
 | `StreamTakesLock` | `HostInput::Tick` (l. 443): `flock` on `frametop-input-HOST.lock`, retried every 3 s |
 | `StreamTick` (`asked`, `saidTest`, `seen`, `lease`) | `HostInput::Tick`: ask `gaze ? headset` once a second, `TakeAnswers` (l. 417), `hostinput::TestForbidding` (`stream/hostinput.h` l. 170) on the flag every tick, `AfterTest` (l. 181) and `TakeAnswers(now, false)` when it goes, then `Decide` (l. 121): a lease only with no test's file and a fresh "worn" |
-| `HelperAnswers` | the pointer helper's answer to `gaze ? headset`: "worn" while the testbench fakes the wearer |
+| `HelperAnswers` | the pointer helper's answer to `gaze ? headset`: "worn" while the testbench fakes the wearer, and a while after |
 
 ## Scope
 
@@ -197,7 +209,7 @@ Left out:
 ## Coverage and sync
 
 Covered code:
-- `testbench/frame_testbench/hostinput.py`: `read_flag`, `set_flag`, `clear_flag`, `take_locks`,
+- `testbench/frame_testbench/hostinput.py`: `read_flag`, `set_flag`, `clear_flag`, `settle_and_clear_flag`, `take_locks`,
   `guard`, `release_confirmed`, `drop_wearer`, `after_guard`, `release_wearer`, `start_guard`, `guard_alive`, `refusal`,
   and `state`'s `input_streams`
 - `testbench/frame_testbench/cli.py`: `dispatch` (`worn` and `release` branches),
@@ -207,11 +219,11 @@ Covered code:
 - `stream/hostinput.h`: `Decide`, `Fresh`, `TestForbidding`, `AfterTest`
 - `docs/host-input.md`: the lease rule and the guard's description
 
-**Sync commit: `1f485fe`** (experimental, 2026-10-30, after the fixes for A to F). The model describes the covered code as of
+**Sync commit: `12a79ebc`** (experimental, 2026-11-25, after the fixes for A to G). The model describes the covered code as of
 this commit. To see whether it needs another look:
 
 ```sh
-git diff 1f485fe -- testbench/frame_testbench/hostinput.py testbench/frame_testbench/cli.py testbench/frame_testbench/transport.py stream/ft-stream.cpp stream/hostinput.h docs/host-input.md
+git diff 12a79ebc -- testbench/frame_testbench/hostinput.py testbench/frame_testbench/cli.py testbench/frame_testbench/transport.py stream/ft-stream.cpp stream/hostinput.h docs/host-input.md
 ```
 
 Move the sync commit forward only after you have read that diff, confirmed that every model action

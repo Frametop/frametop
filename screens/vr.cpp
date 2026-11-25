@@ -442,6 +442,7 @@ InGames g_inGames = InGames::Hide;       // during a VR game, the always mode ac
 // ---------------------------------------------------------------- chrome (bar, button, handle)
 
 double g_barPaddingY = barhit::kDefaultPaddingCm, g_barPaddingX = barhit::kDefaultPaddingCm;
+bool g_barInside = false;   // (past the edge unless set: inside, the row took the clicks meant for the content under it)
 barhit::Style g_barPreview;
 uint64_t g_barVersion = 1;
 resizecorner::Style g_resizeCorner;
@@ -929,17 +930,29 @@ void PaintResizeMask(Screen &s) {
     s.resizePaintedVersion = g_resizeVersion, s.resizePaintedX = s.cornerX, s.resizePaintedY = s.cornerY;
     s.resizePaintedArm = arm, s.resizePaintedOut = out, s.resizePaintedAlong = along;
 }
-// The bar row's line in from the panel's edge (barhit::Below's distance, the row clear of the edge by
-// a gap), on the edge the panel's bar is on (barside.h).
-double BarIn(const Screen &s) { return barhit::Below(s.chrome, s.grip, g_barPaddingY); }
+// The bar row's line in from the panel's edge, on the edge the panel's bar is on, negative when the row
+// is past the edge: the panel's own choice, else the setting's (barside::In; barhit::Below's distance
+// keeps the row clear of the edge by a gap). A tile's stays within its half of the gap to the next tile.
+bool BarInside(const Screen &s) { return barside::Inside(s.barInset, g_barInside); }
+double BarIn(const Screen &s) {
+    return barside::In(BarInside(s), barhit::Below(s.chrome, s.grip, g_barPaddingY), s.chrome * barhit::kAspect / 2, TiledCap(s));
+}
 barside::UV BarSpot(const Screen &s, double along) { return barside::Place(s.barSide, s.metres, s.heightMetres(), BarIn(s), along); }
+// The bar's own rectangle on the panel's surface, its hit padding with it.
+barside::Box BarBox(const Screen &s) {
+    const double half = barhit::Width(s.chrome, g_barPaddingX) / 2;
+    return barside::Row(s.barSide, s.metres, s.heightMetres(), BarIn(s), -half, half, barhit::Height(s.chrome, g_barPaddingY) / 2);
+}
+// Off the surface: the bar a little in front of the resize handle. Past the edge the bar lies over that
+// edge's resize band, and the nearer overlay is the one a laser and the 3D mouse get.
+constexpr double kHandleLift = 0.003, kBarLift = 0.0035;
 Mat BarOffset(const Screen &s) {
     const barside::UV c = BarSpot(s, 0);
-    return OnSurface(s, c.u, c.v, 0.003);
+    return OnSurface(s, c.u, c.v, kBarLift);
 }
 
-// Put the bar and the corner tab on the screen, the bar inside its edge (same parent: the room or the
-// controller), sized for the screen and its distance, and on its surface. Their centres on the surface:
+// Put the bar and the corner tab on the screen, the bar inside its edge or past it (same parent: the room
+// or the controller), sized for the screen and its distance, and on its surface. Their centres on the surface:
 // u along it, v up, metres from the screen's centre. The bar on another edge (s.barSide; barside.h's
 // Place) runs along that edge; the tab is at the corner an aim is at (UpdateCorner).
 void ControlUV(const Screen &s, double u[kControls], double v[kControls]) {
@@ -956,7 +969,7 @@ std::array<Mat, kControls> ControlOffsets(const Screen &s) {
     double u[kControls], v[kControls];
     ControlUV(s, u, v);
     std::array<Mat, kControls> m;
-    for (int k = 0; k < kControls; ++k) m[k] = OnSurface(s, u[k], v[k], 0.003);
+    for (int k = 0; k < kControls; ++k) m[k] = OnSurface(s, u[k], v[k], k == kBarPart ? kBarLift : kHandleLift);
     // Down a side the bar stands on end (its texture and mouse x turn with it).
     if (barside::Vertical(s.barSide)) m[kBarPart] = Mul(m[kBarPart], RollZ(barside::Roll(s.barSide)));
     // The handle's texture is clear; orientation lives in its mask, not the transform.
@@ -1476,9 +1489,12 @@ void UpdateCorner(Screen &s, const Mat &p, const std::vector<Mat> &lasers) {
     } else if (s.drag == Drag::Resize) {
         best = 0;
     } else {
+        const bool hasBar = s.bar != vr::k_ulOverlayHandleInvalid;
+        const barside::Box bar = BarBox(s);
         for (const Mat &d : lasers) {
             double u, v;
             if (!RayOnSurface(s, p, d, &u, &v)) continue;
+            if (hasBar && bar.Contains(u, v)) continue;   // on its bar (in front of the edge's band, past the edge: kBarLift)
             if (glowStyle) {   // the glow's hit area (corners, then edges), else coming up to a corner or an edge
                 // (the one it's at keeps it on a tie, so it doesn't flip between two)
                 auto consider = [&](double close, int x, int y, bool hit) {
@@ -1582,7 +1598,7 @@ void UpdateControls() {
             std::vector<Mat> spots;
             for (double f : {-0.5, -0.25, 0.0, 0.25, 0.5}) {
                 const barside::UV c = BarSpot(s, f * barhit::Width(s.chrome, g_barPaddingX));
-                spots.push_back(Mul(p, OnSurface(s, c.u, c.v, 0.003)));
+                spots.push_back(Mul(p, OnSurface(s, c.u, c.v, kBarLift)));
             }
             UpdateCorner(s, p, lasers);
             const double reach = std::max(s.grip * 1.5, s.chrome * 0.12);
@@ -1739,7 +1755,7 @@ bool RollLever(Screen &s, const Mat &l) {
     s.rollLever = {};
     double hx, hy;
     if (!RollSpot(s, l, &hx, &hy)) return false;
-    // (the bar's line, a top or bottom bar's: half the height, less how far in it sits)
+    // (the bar's line, a top or bottom bar's: half the height, less how far in it sits; past the edge: more)
     s.rollLever = posemath::RollLever(hx, hy, s.heightMetres() / 2 - BarIn(s), s.barSide == barside::Side::Top);
     return true;
 }
@@ -3273,7 +3289,7 @@ void UpdateAim() {
             continue;
         }
         const double m = s.grip * (g_tick < s.aimUntil ? 2.0 : 0.25), h = s.heightMetres();
-        // The panel and its controls: the bar row inside its edge (barside.h), the resize tab off its corner.
+        // The panel and its controls: the bar row inside its edge or past it (barside.h), the resize tab off its corner.
         const double gap = std::max(s.chrome * 0.06, s.grip), reach = barhit::Width(s.chrome, g_barPaddingX) / 2 + gap * 2 + s.grip * 2;
         const double hw = s.metres / 2 + CornerHandleSize(s), hh = h / 2 + CornerHandleSize(s);
         const barside::Box box = barside::Union({-hw, hw, -hh, hh},
@@ -6072,6 +6088,7 @@ bool ft_vr_init(void) {
         std::printf("window drag: a WINDOW_DRAG_* setting isn't meta|super|alt|off or move|resize|none: the defaults\n");
     num("GRAB_BAR_PADDING_X", g_barPaddingX, 0, barhit::kMaxPaddingCm);
     num("GRAB_BAR_PADDING_Y", g_barPaddingY, 0, barhit::kMaxPaddingCm);
+    g_barInside = handcut::Setting("GRAB_BAR_INSIDE", "0") == "1";
     g_barPreview.enabled = handcut::Setting("GRAB_BAR_PREVIEW", "0") == "1";
     g_barPreview.always = handcut::Setting("GRAB_BAR_PREVIEW_ALWAYS", "0") == "1";
     g_barPreview.haptics = handcut::Setting("GRAB_BAR_HAPTICS", "1") == "1";
@@ -7684,8 +7701,11 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
     case vrcmd::BarSide: {
         if (!Find(n)) return (void)std::snprintf(reply, size, "error no screen %d", n);
         barside::Side side;
+        barside::Inset inset;
         if (!std::strcmp(word, "menu") || !std::strcmp(word, "edges")) OpenBarMenu(n - 1, 0, word[0] == 'e');
-        else if (!barside::Parse(word, &side)) return (void)std::snprintf(reply, size, "error bottom, top, left, right, menu or edges");
+        else if (barside::Parse(word, &inset)) SetBarInset(n - 1, inset, "command");
+        else if (!barside::Parse(word, &side))
+            return (void)std::snprintf(reply, size, "error bottom, top, left, right, inside, outside, default, menu or edges");
         else SetBarSide(n - 1, side, "command");
         std::snprintf(reply, size, "ok");
         return;
@@ -8017,6 +8037,7 @@ static void HelperWordCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *
                 else if ((value == 0 || value == 1) && name == "GRAB_BAR_PREVIEW") g_barPreview.enabled = value != 0, valid = true;
                 else if ((value == 0 || value == 1) && name == "GRAB_BAR_PREVIEW_ALWAYS") g_barPreview.always = value != 0, valid = true;
                 else if ((value == 0 || value == 1) && name == "GRAB_BAR_HAPTICS") g_barPreview.haptics = value != 0, valid = true;
+                else if ((value == 0 || value == 1) && name == "GRAB_BAR_INSIDE") g_barInside = value != 0, valid = true;
             }
             if (!valid) return (void)std::snprintf(reply, size, "error invalid drag-bar setting");
             ++g_barVersion;

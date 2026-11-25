@@ -1,8 +1,10 @@
-// The edge each panel's grab bar is on (barside.h's geometry; vr.cpp places the controls by
-// Screen::barSide), picked from the bar's menu (vrbarmenu.cpp) or `barside N EDGE`.
-//   Each panel's edge is remembered by its key (TileKnown's: "screen:2", "app:ID", "remote:HOST/APP")
-// in ~/.config/frametop-bars.txt, a line each, "KEY<TAB>EDGE"; a panel with no key yet keeps its edge
-// for the session.
+// The edge each panel's grab bar is on, and whether it sits inside that edge or past it (barside.h's
+// geometry; vr.cpp places the controls by Screen::barSide and barInset), picked from the bar's menu
+// (vrbarmenu.cpp) or `barside N EDGE|inside|outside|default`.
+//   Each panel's choices are remembered by its key (TileKnown's: "screen:2", "app:ID", "remote:HOST/APP")
+// in ~/.config/frametop-bars.txt, a line each, "KEY<TAB>EDGE" or "KEY<TAB>EDGE inside|outside"
+// (barside::Text); a panel with no key yet keeps them for the session. One with no inside or outside
+// of its own follows the setting (GRAB_BAR_INSIDE).
 #include "vrpanel.h"
 
 #include <cstdio>
@@ -13,7 +15,7 @@
 namespace ftvr {
 namespace {
 
-dashtiles::Memory g_barMemory;          // key -> edge name (barside::Name)
+dashtiles::Memory g_barMemory;          // key -> its edge and inset (barside::Text)
 std::map<int, std::string> g_barKey;    // panel -> its key (TileKnown's)
 
 std::string BarsPath() {
@@ -31,11 +33,19 @@ void WriteBars() {
         std::fprintf(stderr, "grab bar edges: can't write %s\n", path.c_str());
 }
 
-// Moved to an edge: its controls go there now.
-void Apply(Screen &s, barside::Side side) {
-    if (s.barSide == side) return;
-    s.barSide = side;
+// Moved to an edge, inside it or past it: its controls go there now.
+void Apply(Screen &s, barside::Side side, barside::Inset inset) {
+    if (s.barSide == side && s.barInset == inset) return;
+    s.barSide = side, s.barInset = inset;
     PlaceChrome(s);
+}
+
+// Its choices kept under its key. False: it has no key yet.
+bool Remember(int i, barside::Side side, barside::Inset inset) {
+    const auto key = g_barKey.find(i);
+    if (key == g_barKey.end()) return false;
+    if (g_barMemory.Set(key->second, barside::Text(side, inset))) WriteBars();
+    return true;
 }
 
 }  // namespace
@@ -56,35 +66,49 @@ void BarSideKnown(int i, const std::string &key) {
     g_barKey[i] = key;
     const auto it = g_screens.find(i);
     if (it == g_screens.end()) return;
+    Screen &s = it->second;
     barside::Side side = barside::Side::Bottom;
-    if (!barside::Parse(g_barMemory.Get(key), &side)) {
-        // nothing remembered: an edge picked before its key came is its key's now
-        if (it->second.barSide != barside::Side::Bottom && g_barMemory.Set(key, barside::Name(it->second.barSide))) WriteBars();
+    barside::Inset inset = barside::Inset::Default;
+    if (!barside::Parse(g_barMemory.Get(key), &side, &inset)) {
+        // nothing remembered: choices made before its key came are its key's now
+        if (s.barSide != barside::Side::Bottom || s.barInset != barside::Inset::Default) Remember(i, s.barSide, s.barInset);
         return;
     }
     g_barMemory.Used(key);
-    if (side != it->second.barSide)
-        std::printf("screen %d: its grab bar on the %s (remembered for %s)\n", i + 1, barside::Name(side), key.c_str());
-    Apply(it->second, side);
+    if (side != s.barSide || inset != s.barInset)
+        std::printf("screen %d: its grab bar on the %s (remembered for %s)\n", i + 1, barside::Text(side, inset).c_str(), key.c_str());
+    Apply(s, side, inset);
 }
 
-// Its app or display went: the next one on the panel starts at the bottom (or its own remembered edge).
+// Its app or display went: the next one on the panel starts at the bottom, inside or outside as the
+// setting says (or with its own remembered choices).
 void BarSideGone(int i) {
     if (BarMenuOn(i)) CloseBarMenu("its panel went");
     g_barKey.erase(i);
     const auto it = g_screens.find(i);
-    if (it != g_screens.end()) it->second.barSide = barside::Side::Bottom;
+    if (it != g_screens.end()) it->second.barSide = barside::Side::Bottom, it->second.barInset = barside::Inset::Default;
 }
 
 bool SetBarSide(int i, barside::Side side, const char *by) {
     const auto it = g_screens.find(i);
     if (it == g_screens.end()) return false;
-    const auto key = g_barKey.find(i);
-    if (key != g_barKey.end() && g_barMemory.Set(key->second, barside::Name(side))) WriteBars();
+    const bool kept = Remember(i, side, it->second.barInset);
     std::printf("screen %d: its grab bar on the %s (%s)%s\n", i + 1, barside::Name(side), by,
-                key == g_barKey.end() ? "; not remembered: it has no key yet" : "");
+                kept ? "" : "; not remembered: it has no key yet");
     std::fflush(stdout);
-    Apply(it->second, side);
+    Apply(it->second, side, it->second.barInset);
+    return true;
+}
+
+bool SetBarInset(int i, barside::Inset inset, const char *by) {
+    const auto it = g_screens.find(i);
+    if (it == g_screens.end()) return false;
+    const bool kept = Remember(i, it->second.barSide, inset);
+    std::printf("screen %d: its grab bar %s its edge (%s)%s\n", i + 1,
+                inset == barside::Inset::Default ? "inside or past, as the setting says," : inset == barside::Inset::Inside ? "inside" : "past",
+                by, kept ? "" : "; not remembered: it has no key yet");
+    std::fflush(stdout);
+    Apply(it->second, it->second.barSide, inset);
     return true;
 }
 

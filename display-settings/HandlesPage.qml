@@ -18,8 +18,24 @@ Kirigami.ScrollablePage {
     Kirigami.FormLayout {
         Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Grab bars" }
         Ft.Hint {
-            text: "Use the bar underneath a screen or window to move it. Adding grab padding makes the "
+            text: "Use the bar at the bottom of a screen or window to move it. Adding grab padding makes the "
                   + "bar easier to aim at without making the bar itself look larger. Changes apply immediately."
+        }
+        Controls.ComboBox {
+            id: barInsideBox
+            Kirigami.FormData.label: "Bars sit:"
+            // GRAB_BAR_INSIDE: 0, 1 (row 0 is outside)
+            model: ["Outside the edge", "Inside the edge"]
+            currentIndex: backend.grabBarInside ? 1 : 0
+            onActivated: {
+                backend.setGrabBarInside(currentIndex === 1)
+                currentIndex = Qt.binding(() => backend.grabBarInside ? 1 : 0)
+            }
+        }
+        Ft.Hint {
+            text: "Outside, the bar never covers what's on the screen. Inside, it sits over the content near "
+                  + "the edge while it shows. A tiled panel's bar stays within the gap to the next tile, so part "
+                  + "of it lies over the edge. To choose for one screen or window, tap its bar and open Bar Position."
         }
         Ft.SliderRow {
             Kirigami.FormData.label: "Vertical grab padding:"

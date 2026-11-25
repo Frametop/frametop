@@ -6,7 +6,8 @@
 // (vrappscale.cpp), View in Theater, Move All Windows, Bar Position and Reset Layout (panelmenu.h). Placement opens its page: In the Room,
 // Keep in View, Tiled (the one it is checked) and Stay Shown while it's on the dashboard.
 // A right click on the bar, as before, or `barside N edges` opens the edges page: Bottom, Top, Left,
-// Right (the panel's own checked), and View in Theater where the panel has it. Bar Position goes there
+// Right (the panel's own checked), Outside the Edge and Inside the Edge (the one it is checked; a pick is
+// this panel's own from then on), and View in Theater where the panel has it. Bar Position goes there
 // with Back first. It opens over the panel beside the bar at the spot clicked, toward its middle
 // (barside::MenuAt), a row lit under a laser, the 3D mouse or a fingertip near it; its bar goes blue.
 //   A click on a row does it and closes the menu; Rotate and Move All Windows are held (a press starts
@@ -130,6 +131,8 @@ bool On(const panelmenu::Row &r, const Screen &s, int i) {
         case panelmenu::Item::OnDashboard: return Placed(s, i) == Where::Dashboard;
         case panelmenu::Item::StayShown: return TileStays(s, i);
         case panelmenu::Item::Edge: return s.barSide == r.side;
+        case panelmenu::Item::Inside: return BarInside(s);
+        case panelmenu::Item::Outside: return !BarInside(s);
         case panelmenu::Item::ScaleStep: return appscale::Same(AppScale(i), r.percent / 100.0);
         default: return false;
     }
@@ -162,6 +165,8 @@ barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const 
         case Item::Reset: l.icon = Icon::Reset, l.red = true; break;
         case Item::Back: l.icon = Icon::Back; break;
         case Item::Edge: break;
+        case Item::Inside: break;
+        case Item::Outside: break;
         case Item::Scale: l.icon = Icon::Scale, l.value = appscale::Label(appscale::Percent(AppScale(i))); break;
         case Item::ScaleStep: break;
     }
@@ -262,6 +267,8 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
         case Item::Reset: DoReset(i, "its bar's menu"); break;   // (ft-layout's reset counts 3-2-1 in front of you first)
         case Item::ScaleStep: SetAppScale(i, r.percent / 100.0); break;
         case Item::Edge: SetBarSide(i, r.side, "its bar's menu"); break;
+        case Item::Inside: SetBarInset(i, barside::Inset::Inside, "its bar's menu"); break;
+        case Item::Outside: SetBarInset(i, barside::Inset::Outside, "its bar's menu"); break;
         default: break;
     }
 }

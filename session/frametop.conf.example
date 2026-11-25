@@ -15,6 +15,7 @@ WINDOW_DRAG_MOD=meta         # window drag: hold this (meta, alt, or off) and pr
 WINDOW_DRAG_LEFT=move        # ...the left button: move, resize, or none (the same for KWin, floating windows and PC windows)
 WINDOW_DRAG_RIGHT=resize
 WINDOW_DRAG_MIDDLE=none
+GRAB_BAR_INSIDE=0         # drag bars sit past their panels' edges | 1 = inside the edge, over the content while they show. A panel's own choice (its bar's menu > Bar Position) wins; applies live
 GRAB_BAR_PADDING_X=2      # drag bars: centimetres added to EACH left/right edge, 0..50; Frametop Settings > Grab bars & corners, applies live
 GRAB_BAR_PADDING_Y=2      # centimetres added to EACH top/bottom edge, 0..50; 0 is the original target, no multipliers
 GRAB_BAR_PREVIEW=0         # show the draggable rectangle whenever its bar is visible

@@ -30,6 +30,8 @@ enum class Item {
     Reset,         // reset the layout (asks first)
     Back,          // a page back to the main one
     Edge,          // the bar on that edge (Row::side)
+    Inside,        // the bar inside the panel's edge, over its content
+    Outside,       // the bar past the panel's edge
     Scale,         // a PC app window's scale page (its value: the scale)
     ScaleStep,     // that scale (Row::percent)
 };
@@ -91,11 +93,14 @@ inline std::vector<Row> Placement(const Kind &k) {
 }
 
 // The edges page. From the main page it starts with Back; from a right click on the bar (as before
-// Option C) it's the edges alone, and View in Theater under them where the panel has it.
+// Option C) it's the edges alone, and View in Theater under them where the panel has it. Under the
+// edges, inside that edge or past it (barside::Inset): this panel's own choice.
 inline std::vector<Row> Edges(const Kind &k, bool back) {
     std::vector<Row> r;
+    r.reserve(8);
     if (back) r.push_back({Item::Back});
     for (barside::Side s : barside::kAll) r.push_back({Item::Edge, s});
+    r.push_back({Item::Outside}), r.push_back({Item::Inside});
     if (!back && k.theater) r.push_back({Item::Theater});
     return r;
 }
@@ -130,6 +135,8 @@ inline std::string Label(const Row &r) {
         case Item::Reset: return "Reset Layout";
         case Item::Back: return "Back";
         case Item::Edge: return barside::Label(r.side);
+        case Item::Inside: return "Inside the Edge";
+        case Item::Outside: return "Outside the Edge";
         case Item::Scale: return "Scale";
         case Item::ScaleStep: return appscale::Label(r.percent);
     }
@@ -138,7 +145,8 @@ inline std::string Label(const Row &r) {
 
 // One of a page's choices: the one picked gets a check.
 inline bool Choice(Item i) {
-    return i == Item::InRoom || i == Item::KeepInView || i == Item::OnDashboard || i == Item::Edge || i == Item::ScaleStep;
+    return i == Item::InRoom || i == Item::KeepInView || i == Item::OnDashboard || i == Item::Edge || i == Item::Inside ||
+           i == Item::Outside || i == Item::ScaleStep;
 }
 // On or off (Curved's tile blue, Stay Shown checked).
 inline bool Toggle(Item i) { return i == Item::Curve || i == Item::StayShown; }
@@ -152,7 +160,7 @@ inline bool Held(Item i) { return i == Item::Rotate || i == Item::MoveAll; }
 inline bool RuleAbove(const std::vector<Row> &rows, size_t at) {
     if (at == 0 || at >= rows.size()) return false;
     const Item i = rows[at].item, before = rows[at - 1].item;
-    return i == Item::Reset || i == Item::StayShown || (i == Item::Theater && before == Item::Edge);
+    return i == Item::Reset || i == Item::StayShown || (i == Item::Theater && before == Item::Inside);
 }
 
 // The grey capitals over a page's choices, or none.
@@ -162,6 +170,7 @@ inline const char *Caption(const std::vector<Row> &rows, size_t at) {
     if (i == Item::InRoom) return "Placement";
     if (i == Item::ScaleStep && before != Item::ScaleStep) return "Scale";
     if (i == Item::Edge && before != Item::Edge) return "Controls Position";
+    if (i == Item::Outside) return "Inside or Outside";
     return nullptr;
 }
 

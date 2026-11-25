@@ -65,6 +65,48 @@ int main() {
         check("every edge's menu is on its own panel", std::fabs(c.u) + 0.06 < w / 2 && std::fabs(c.v) + 0.05 < h / 2);
     }
 
+    // Inside the edge or past it (barside::Inset, In).
+    using barside::Inset;
+    for (Inset i : {Inset::Default, Inset::Inside, Inset::Outside}) {
+        Inset back = Inset::Inside;
+        check("inset names parse back", barside::Parse(barside::Name(i), &back) && back == i);
+    }
+    Inset keptInset = Inset::Outside;
+    check("an edge's name is no inset", !barside::Parse("left", &keptInset) && keptInset == Inset::Outside);
+    check("a panel's own inset wins over the setting", barside::Inside(Inset::Inside, false) && !barside::Inside(Inset::Outside, true));
+    check("none of its own: the setting's", barside::Inside(Inset::Default, true) && !barside::Inside(Inset::Default, false));
+
+    check("memory text: the edge alone with no inset of its own", barside::Text(Side::Left, Inset::Default) == "left");
+    check("memory text: the edge and the inset", barside::Text(Side::Top, Inset::Outside) == "top outside" &&
+          barside::Text(Side::Bottom, Inset::Inside) == "bottom inside");
+    for (Side s : barside::kAll)
+        for (Inset i : {Inset::Default, Inset::Inside, Inset::Outside}) {
+            Side bs = Side::Bottom;
+            Inset bi = Inset::Default;
+            check("memory text parses back", barside::Parse(barside::Text(s, i), &bs, &bi) && bs == s && bi == i);
+        }
+    Side ms = Side::Right;
+    Inset mi = Inset::Inside;
+    for (const char *bad : {"", "inside", "middle outside", "top sideways", "top default", "top  outside", "top outside "})
+        check("a bad memory line is refused and leaves both", !barside::Parse(bad, &ms, &mi) && ms == Side::Right && mi == Inset::Inside);
+
+    const double clear = 0.05, pill = 0.014, none = 1e9;
+    check("inside: the row's line clear of the edge, in", near(barside::In(true, clear, pill, none), clear) &&
+          near(barside::In(true, clear, pill, 0.02), clear));
+    check("outside, nothing beside it: as far past the edge", near(barside::In(false, clear, pill, none), -clear));
+    check("outside, a tile: its pill ends at its half of the gap", near(barside::In(false, clear, pill, 0.02), -(0.02 - pill)));
+    check("outside, a tile with a narrow gap: the line just inside, the pill over the edge",
+          near(barside::In(false, clear, pill, 0.01), pill - 0.01) && barside::In(false, clear, pill, 0.01) < pill);
+    check("outside, a wide gap: no further than clear of the edge", near(barside::In(false, clear, pill, 0.5), -clear));
+    const auto out = barside::Place(Side::Bottom, w, h, barside::In(false, clear, pill, none), 0.1);
+    check("a row past the bottom edge is under the panel", near(out.u, 0.1) && near(out.v, -(h / 2 + clear)));
+    const auto outRow = barside::Row(Side::Bottom, w, h, barside::In(false, clear, pill, none), -0.1, 0.1, 0.03);
+    check("...and none of it over the content", outRow.v1 < -h / 2 && !outRow.Contains(0, -h / 2 + 0.001));
+    for (Side s : barside::kAll) {
+        const auto c = barside::MenuAt(s, barside::Place(s, w, h, -clear, 0), 0.02, 0.01, 0.12, 0.1);
+        check("a bar past the edge: its menu still on its own panel", std::fabs(c.u) < w / 2 && std::fabs(c.v) < h / 2);
+    }
+
     std::printf("%s\n", failed ? "FAILED" : "all passed");
     return failed != 0;
 }

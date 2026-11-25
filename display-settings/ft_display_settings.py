@@ -685,6 +685,16 @@ class Backend(QObject):
         self._setBarNumber("GRAB_BAR_PADDING_X", cm, 2.0, 0.0, 50.0)
 
     @Property(bool, notify=changed)
+    def grabBarInside(self):
+        """Bars sit inside their panels' edges, over the content (GRAB_BAR_INSIDE=1); else past the edge.
+        A panel's own choice in its bar's menu wins (screens/vrbarside.cpp)."""
+        return ft_layout.read_conf().get("GRAB_BAR_INSIDE", "0") == "1"
+
+    @Slot(bool)
+    def setGrabBarInside(self, inside):
+        self._setBar("GRAB_BAR_INSIDE", "1" if inside else "0")
+
+    @Property(bool, notify=changed)
     def grabBarHaptics(self):
         return ft_layout.read_conf().get("GRAB_BAR_HAPTICS", "1") == "1"
 

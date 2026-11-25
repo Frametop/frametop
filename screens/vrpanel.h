@@ -170,7 +170,8 @@ struct Screen {
     bool cutting = false;         // showing a cutout buffer (side by side) instead
     vr::SharedTextureHandle_t cutShown = 0;  // ...this one
     double chrome = 0.3;          // the bar's width; the other controls follow it (ChromeSize)
-    barside::Side barSide = barside::Side::Bottom;   // the edge its bar and buttons are on (vrbarmenu.cpp)
+    barside::Side barSide = barside::Side::Bottom;   // the edge its bar and buttons are on (vrbarside.cpp)
+    barside::Inset barInset = barside::Inset::Default;   // ...inside that edge or past it; Default: as GRAB_BAR_INSIDE says
     double grip = 0.04;           // the corner tab's and the round buttons' size
     // A floating window's panel (see the top): the window's rectangle in the buffer, its
     // title bar's height there, and the density.
@@ -339,12 +340,14 @@ bool CarryScroll(const vr::VREvent_t &ev);
 bool CarryClick(const vr::VREvent_t &ev);
 void ReleaseAwayBy(vr::TrackedDeviceIndex_t dev, uint32_t vrButton, void (*handle)(const struct ft_event *, void *), void *data);
 double Apart(const Mat &a, const Mat &b);
-double BarIn(const Screen &s);    // the bar row's line, metres in from the panel's edge
+double BarIn(const Screen &s);    // the bar row's line, metres in from the panel's edge (negative: past it)
+bool BarInside(const Screen &s);  // its bar inside its edge: its own choice, else the setting's
 barside::UV BarSpot(const Screen &s, double along);   // a spot on the bar's line, `along` from its middle
 void DoReset(int panel, const char *how);   // the layout reset (ft-layout reset), confirmed `how` (from panel's menu; -1 none)
 bool ModeVisible();    // the screens show now (the mode, the manual toggle, not paused)
 bool LasersByMode();   // controllers' lasers work our panels now (SCREEN_LASERS, not in a game or Gamepad mode)
 extern double g_barPaddingX, g_barPaddingY;   // the grab bar's hit padding (GRAB_BAR_PADDING_X/Y, cm)
+extern bool g_barInside;                      // bars inside their panels' edges (GRAB_BAR_INSIDE), a panel's own choice aside
 
 // ---------------------------------------------------------------- vrtiles.cpp's
 
@@ -436,6 +439,7 @@ void LoadBarSides();
 void BarSideKnown(int i, const std::string &key);   // its key now: its remembered edge, if any
 void BarSideGone(int i);
 bool SetBarSide(int i, barside::Side side, const char *by);   // false: no such panel
+bool SetBarInset(int i, barside::Inset inset, const char *by);   // inside its edge, past it, or as the setting says
 
 // ---------------------------------------------------------------- vrlayoutgrab.cpp's
 

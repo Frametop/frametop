@@ -71,6 +71,17 @@ class GrabBar(unittest.TestCase):
         self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_HAPTICS 1")
         self.assertIn("backend.setGrabBarHaptics(checked)", PAGES.read_text())
 
+    def test_bars_inside_or_outside_the_edge(self):
+        self.assertFalse(self.b.grabBarInside)   # outside unless set
+        self.b.setGrabBarInside(True)
+        self.assertTrue(self.b.grabBarInside)
+        self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_INSIDE 1")
+        self.assertIn("GRAB_BAR_INSIDE=1", Path(fds.CONF_PATH).read_text())
+        self.b.setGrabBarInside(False)
+        self.assertFalse(self.b.grabBarInside)
+        self.assertEqual(self.asked[-1], "handsetting GRAB_BAR_INSIDE 0")
+        self.assertIn("backend.setGrabBarInside(currentIndex === 1)", PAGES.read_text())
+
     def test_bad_persisted_values_use_default(self):
         for value in ("nan", "inf", "junk", "-1", "51"):
             Path(fds.CONF_PATH).write_text(f"GRAB_BAR_PADDING_Y={value}\n")

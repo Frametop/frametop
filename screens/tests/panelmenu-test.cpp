@@ -76,15 +76,22 @@ int main() {
     check("Rows picks the page", panelmenu::Rows(panelmenu::Page::Placement, desktop, true) == dp &&
           panelmenu::Rows(panelmenu::Page::Main, desktop, false) == d);
 
-    // The edges page: four edges, Back from the main page; from a right click as before (Theater under them).
+    // The edges page: four edges, then outside or inside the edge; Back from the main page; from a right
+    // click as before (Theater under them).
     const auto fromMain = panelmenu::Edges(game, true), fromRight = panelmenu::Edges(game, false);
-    check("edges from the main page: Back, then the four", fromMain.size() == 5 && fromMain[0].item == Item::Back &&
-          fromMain[1] == panelmenu::Row{Item::Edge, barside::Side::Bottom} && fromMain[4] == panelmenu::Row{Item::Edge, barside::Side::Right});
-    check("edges from a right click: the four, then View in Theater", fromRight.size() == 5 && fromRight[0].item == Item::Edge &&
-          fromRight[4].item == Item::Theater && panelmenu::RuleAbove(fromRight, 4));
+    check("edges from the main page: Back, the four, then outside and inside", fromMain.size() == 7 && fromMain[0].item == Item::Back &&
+          fromMain[1] == panelmenu::Row{Item::Edge, barside::Side::Bottom} && fromMain[4] == panelmenu::Row{Item::Edge, barside::Side::Right} &&
+          fromMain[5].item == Item::Outside && fromMain[6].item == Item::Inside);
+    check("edges from a right click: the four, outside and inside, then View in Theater", fromRight.size() == 7 &&
+          fromRight[0].item == Item::Edge && fromRight[4].item == Item::Outside && fromRight[5].item == Item::Inside &&
+          fromRight[6].item == Item::Theater && panelmenu::RuleAbove(fromRight, 6));
     check("the edges' caption is over the first edge only", panelmenu::Caption(fromMain, 1) && !panelmenu::Caption(fromMain, 2) &&
-          panelmenu::Caption(fromRight, 0) && !panelmenu::Caption(fromRight, 4));
-    check("a desktop screen's right click: just the edges", panelmenu::Edges(desktop, false).size() == 4);
+          panelmenu::Caption(fromRight, 0) && !panelmenu::Caption(fromRight, 6));
+    check("outside and inside have a caption of their own, over the first", panelmenu::Caption(fromMain, 5) && !panelmenu::Caption(fromMain, 6) &&
+          std::string(panelmenu::Caption(fromMain, 5)) != panelmenu::Caption(fromMain, 1));
+    check("a desktop screen's right click: the edges, outside and inside", panelmenu::Edges(desktop, false).size() == 6);
+    check("outside and inside are choices that open nothing", panelmenu::Choice(Item::Inside) && panelmenu::Choice(Item::Outside) &&
+          !panelmenu::Opens(Item::Inside) && !panelmenu::Held(Item::Outside) && !panelmenu::Toggle(Item::Inside));
     check("edge rows differ by their side", !(panelmenu::Row{Item::Edge, barside::Side::Top} == panelmenu::Row{Item::Edge, barside::Side::Left}));
     for (const auto &rows : {d, f, g, st, dp, fp, gp, fromMain, fromRight})
         for (const auto &r : rows) check("every row has a label", !panelmenu::Label(r).empty());

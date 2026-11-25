@@ -19,7 +19,7 @@
 //     you look now, as it stands (`ft-layout reset`, like Meta+Shift+R).
 //   - a pin button left of that: pins the screen to your head as it is now, so it stays fixed in
 //     view (as "pin <screen> head" does), or back in the room where it is then. Blue while pinned.
-//     Arranging ends it: the layout places every screen again, as its profile has it (TogglePinView).
+//     A reset ends it, and arranging: the layout places every screen as its profile has it (TogglePinView).
 //   - Move All Windows, a row of its bar's menu: held by a laser, the panel and every other one, in
 //     the room or on the dashboard, go with the laser in one piece and level (vrlayoutgrab.cpp).
 //   The controls are translucent, like SteamVR's own, and brighten under a laser. They
@@ -2093,8 +2093,8 @@ void FinishDrag(Screen &s, int index) {
 // The pin button (user, 2026-10-23: "pins a display to the headset perspective so that the window becomes
 // fixed in view ... a toggle that resets when the displays profiles are reset"): pinned to the head where it
 // is now, as "pin <screen> head" does (a screen on a wrist moves to the head); pressed again, it's back in the
-// room where it is then. Arranging ends it too (`ft-layout apply`, opening a profile: "place" leaves it in the
-// room, and only those the profile pins are pinned again); a reset, which only recentres the room, doesn't.
+// room where it is then. A reset ends it too, the same way (vrrecentre.cpp), and arranging (`ft-layout apply`,
+// opening a profile: "place" leaves it in the room); only those the layout saved pinned are pinned again.
 void TogglePinView(Screen &s, int index, const char *by) {
     Mat p;
     EndDrag(s);

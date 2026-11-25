@@ -33,6 +33,7 @@ class Harness:
         self.pins = {}
         self.present = {1, 101}
         self.concealed = ""
+        self.allowed = set()
         self.moved = 2
         self.layout = copy.deepcopy(self.m.DEFAULTS)
         self.layout["screens"] = [{"pos": [9, 9, 9], "face": [0, 0], "metres": 5,
@@ -111,7 +112,7 @@ class Harness:
             if n not in self.present:
                 raise RuntimeError("screen not present")
             return "ok 0 0 -1 1 0 0 0 1 0 0 0 1 4 2 .25 " + self.pins.get(n, "none")
-        if command in ("vrkeyboard close", "tiles recentre"):
+        if command in ("vrkeyboard close", "tiles recentre") or command in self.allowed:
             return "ok"
         raise AssertionError("Reset sent something other than the one move: " + command)  # (a place, a pin)
 
@@ -236,6 +237,30 @@ class GeometryResetReview(unittest.TestCase):
         self.assertEqual(h.run(), 0)
         self.assertEqual(h.moves(), ["recentre"])
         self.assertEqual(h.events[-1], ("kwin_follow",))
+
+    def test_keep_in_view_ends_but_a_pin_the_layout_saved_is_back(self):
+        rel = [1, 0, 0, 0, 0, 1, 0, .5, 0, 0, 1, -1]
+        back = " head " + " ".join(f"{v:.5f}" for v in rel)
+        saved = {"hand": "head", "rel": rel}
+        remote = lambda h: h.layout["profiles"]["Cockpit"]["remote"]["remote-one"]
+        for what, pins, setup, want in (
+                ("Keep in View", {1: "head", 101: "head"}, lambda h: None, []),
+                ("a screen saved on the head", {1: "head"}, lambda h: h.layout["layouts"]["Cockpit"][0].update(pin=saved), ["pin 1" + back]),
+                ("...and off it now", {}, lambda h: h.layout["layouts"]["Cockpit"][0].update(pin=saved), []),
+                ("...and on a wrist now", {1: "left"}, lambda h: h.layout["layouts"]["Cockpit"][0].update(pin=saved), []),
+                ("saved on a wrist", {1: "head"}, lambda h: h.layout["layouts"]["Cockpit"][0].update(pin={"hand": "left", "rel": rel}), []),
+                ("a remote display saved on the head", {101: "head"}, lambda h: remote(h).update(pin=saved), ["pin 101" + back]),
+                ("...and disconnected", {101: "head"}, lambda h: (remote(h).update(pin=saved), h.layout["hosts"][0]["displays"][0].update(off=True)), [])):
+            with self.subTest(what):
+                h = Harness(self.lock)
+                h.pins = pins
+                setup(h)
+                h.allowed = {"pin 1" + back, "pin 101" + back}
+                self.assertEqual(h.run(), 0)
+                asks = [e[1] for e in h.events if e[0] == "ask"]
+                self.assertEqual([a for a in asks if a.startswith("pin ")], want)
+                if want:  # (the move takes it off the head: pinned again after)
+                    self.assertLess(asks.index(h.moves()[0]), asks.index(want[0]))
 
     def test_a_pc_windows_panel_leads_nothing(self):
         # (its place in the layout is where it last opened, not where you put it: desktopless)

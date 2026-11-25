@@ -162,6 +162,21 @@ function holding(w) {
     return true;
 }
 
+// A floating window stays an ordinary window: its output is its size plus a margin, so half of it (a
+// snap key, Meta+arrow by default, or a tile of KWin's editor) is no place for it, and each press would
+// halve it again. Out of the tile and back as it was; true when it was in one. (KWin restores the size
+// from before the tile itself, when the app answers: asked for again by holding.)
+function untile(w) {
+    const id = String(w.internalId), s = settled[id];
+    if (!isSpare(w.output) || !w.normalWindow || !w.tile) return false;
+    w.tile = null;
+    if (s && s.output === w.output.name && !s.fullScreen) {
+        hold(w, s.frame.w, s.frame.h);
+        w.frameGeometry = {x: s.frame.x, y: s.frame.y, width: s.frame.w, height: s.frame.h};
+    }
+    return true;
+}
+
 // Runs while KWin's output change still counts as going on (nothing reported), so the steps on
 // the way don't reach ft-floatd: told only where the window ends up (see reportMoved).
 function putBack(w, screensChanged) {
@@ -172,7 +187,10 @@ function putBack(w, screensChanged) {
     // floating window that flipped forever, its output changing size with it. Ask for the
     // state it had: KWin's request hasn't reached the app yet, so it never sees it.
     w.fullScreen = s.fullScreen;
-    if (o && isSpare(o) && !s.fullScreen) w.setMaximize(false, false);
+    if (o && isSpare(o) && !s.fullScreen) {
+        w.setMaximize(false, false);
+        if (w.tile) w.tile = null;
+    }
     // Not where KWin had to move it: its output went, a screen changed, or it's full screen or
     // maximized (KWin fits those to their output).
     const back = o && !s.fullScreen && !w.fullScreen && !w.move && !w.resize && !s.maximized
@@ -224,7 +242,7 @@ function watch(w) {
             moved[id] = true;
             return;
         }
-        if (holding(w)) return;
+        if (untile(w) || holding(w)) return;
         settle(w);
         if (onSpare()) report("geometry", w);
     });
@@ -259,9 +277,10 @@ function watch(w) {
     });
     w.minimizedChanged.connect(() => { if (onSpare()) report("minimized", w); });
     w.maximizedChanged.connect(() => {
-        // A floating window stays an ordinary window: its output is its size plus a margin.
+        // (an ordinary window: untile)
         if (onSpare() && w.normalWindow && !w.fullScreen) w.setMaximize(false, false);
     });
+    if (w.tileChanged) w.tileChanged.connect(() => { if (!changingOutputs()) untile(w); });
 }
 
 workspace.windowAdded.connect(w => {
@@ -365,6 +384,7 @@ function run(c) {
             if (!o) break;
             if (w.fullScreen && !c.keepFullScreen) w.fullScreen = false;
             w.setMaximize(false, false);
+            if (w.tile) w.tile = null;  // (half a screen: not half of its own output)
             expect(w, o.name, c, w.fullScreen && !!c.keepFullScreen);
             workspace.sendClientToScreen(w, o);
             w.frameGeometry = {x: c.x, y: c.y, width: c.w, height: c.h};

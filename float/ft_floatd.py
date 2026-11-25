@@ -48,7 +48,7 @@ id, else its class, so Flatpak and X11 apps match too), within LAUNCH_SECONDS fl
 D-Bus-activated apps open their window from a process that was already running, hence the
 name. Each app's last floating place (its pose relative to the primary screen, so it moves
 with the screens' layout), size in pixels, and scale are kept in PLACES_PATH, by desktop
-file name, whenever one of its windows stops floating.
+file name, whenever one of its windows stops floating or changes its size.
 
 Profiles (docs/profiles.md): "windows" lists every app window with where it is: on a screen
 (its rectangle on that output, maximized or not) or floating (its pose relative to the primary
@@ -99,6 +99,7 @@ SPARE_Y, SPARE_CELL = 4000, 4000
 PULL_OUT = 0.3           # a floated window starts this far in front of its screen (metres), clear of it
 DEFAULT_MPP = 1.6 / 1920  # metres per pixel when ft-screens can't say (no SteamVR)
 PLACES_PATH = os.path.expanduser("~/.config/frametop-float.json")  # each app's last floating place
+KEEP_MS = 1000              # a changed size is kept once it stood this long (keep_soon)
 LAUNCH_SECONDS = 30      # a launched app's window must show up within this
 # Scroll on a floating window's corner tab (user, 2026-10-30): its panel bigger or smaller at the
 # same pixels, 5% a notch, from half to twice its screen's density (metres per pixel).
@@ -416,6 +417,7 @@ class Float:
         self.resizing = False     # KWin's resize by the window's edge is going on (see follow)
         self.subs = {}            # popup or dialog id -> number on the panel
         self.steps = 0            # Meta+scroll notches not applied yet (scale_soon)
+        self.keeping = 0          # GLib's timer of keep_soon (0: none)
         self.app = ""             # its desktop file name (for its remembered place)
 
 
@@ -735,6 +737,7 @@ class Daemon:
         log(f"{f.id[:9]} density {f.mpp * 1000:.4f} -> {mpp * 1000:.4f} mm a pixel")
         f.mpp = mpp
         self.set_panel(f, f.crop, f.title)
+        self.keep_soon(f)
 
     def float_window(self, ev, place=None, mpp=None, scale=None, asked=False):
         """Float a window: its panel in front of where it was on its screen, or at place (centre
@@ -839,6 +842,8 @@ class Daemon:
         if not full and not (f.normal and abs(f.normal[0] - w) <= math.ceil(s) and abs(f.normal[1] - h) <= math.ceil(s)):
             # (Within a logical pixel it's the same size: a size asked for in pixels comes out
             # rounded to whole logical pixels. Keeping it stops scale changes from creeping.)
+            if f.normal:
+                self.keep_soon(f)
             f.normal = (w, h)
         m = 0 if full else self.margin
         if f.resizing:
@@ -905,6 +910,7 @@ class Daemon:
         self.screens.ask(f"scale {slot.index} {s:g}")
         self.rescaled(slot, s)
         self.command(cmd="geometry", id=f.id, x=slot.pos[0] + m / s, y=slot.pos[1] + m / s, w=w / s, h=h / s)
+        self.keep_soon(f)
 
     def rescaled(self, slot, s):
         """KWin has the spare at scale s now: ask for its size again in the new scale's terms,
@@ -955,8 +961,21 @@ class Daemon:
         log(f"{f.id[:9]} carried onto screen {screen + 1}")
         self.dock(f, frame={"x": round(fx), "y": round(fy), "w": round(w), "h": round(h)}, output=name)
 
+    def keep_soon(self, f):
+        """Its size, density or scale changed: kept once it stops changing, not only when its panel goes
+        (a desktop that stops with it floating would bring the old size back)."""
+        if f.keeping:
+            GLib.source_remove(f.keeping)
+
+        def keep():
+            f.keeping = 0
+            if self.floats.get(f.id) is f:
+                self.remember(f)
+            return False
+        f.keeping = GLib.timeout_add(KEEP_MS, keep)
+
     def remember(self, f):
-        """Keep where an app's window floated (before its panel goes)."""
+        """Keep where an app's window floats (and before its panel goes)."""
         if not f.app or not f.frame:
             return
         g, ref = self.panel_get(f.slot.index), self.reference()

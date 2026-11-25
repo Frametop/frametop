@@ -797,10 +797,31 @@ def recenter_lead(sock, layout):
     return None
 
 
+def saved_head_pins(sock, layout):
+    """Those of the layout's screens and connected remote displays that are on the head now and that
+    it saved there: (screen number, its place from the head as saved)."""
+    custom = layout.get("mode") == "custom"
+    saved = [(i + 1, screen_entry(layout, i).get("pin") if custom else None) for i in range(native_count(layout))]
+    saved += [(n, d.get("pin")) for n, _, d in remote_displays(layout) if not d.get("off")]
+    found = []
+    for n, pin in saved:
+        if not pin or pin.get("hand") != "head" or len(pin.get("rel", [])) != 12:
+            continue
+        try:
+            if parse_get(sock.ask(f"get {n}"))["hand"] == "head":
+                found.append((n, pin["rel"]))
+        except NoAnswer:
+            raise
+        except RuntimeError as e:
+            log(f"recenter: screen {n} unavailable ({e})")
+    return found
+
+
 def recenter_screens():
     """Turn and move everything in the room in one piece, so it's round where you are and
     the way you look now (ft-screens' "recentre"): every panel keeps its place among the
-    others, its size and how far from you it is. One pinned to the head, a wrist or the
+    others, its size and how far from you it is. One pinned to the head (Keep in View) is left
+    in the room where you see it, unless the layout saved it pinned; one on a wrist or the
     dashboard stays on its pin; the tiled ones come round you as they are.
 
     The layout is only read: Reset must not change saved places, window state, hidden
@@ -813,6 +834,7 @@ def recenter_screens():
     sock = screens_socket()
     try:
         lead = recenter_lead(sock, layout)
+        head_pins = saved_head_pins(sock, layout)
         # The head is sampled there: once, after the countdown, as everything moves.
         try:
             f = sock.ask("recentre %d %.2f" % lead if lead else "recentre").split()
@@ -822,6 +844,8 @@ def recenter_screens():
             log("recenter: nothing arranged since the desktop started: arranging")
             return apply_screens()
         moved, eye, heading = int(f[1]), tuple(map(float, f[2:5])), float(f[5])
+        for n, rel in head_pins:
+            sock.ask(f"pin {n} head " + " ".join(f"{v:.5f}" for v in rel))
         recenter_tiles(sock)
         try:
             sock.ask("vrkeyboard close")  # the keyboard, if open, goes too, as with a full reset

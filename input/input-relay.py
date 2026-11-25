@@ -2536,7 +2536,7 @@ class Relay:
                 self.reply(addr, {"t": "action", "action": name})
             return
         if cmd == "palm" and len(words) >= 2:
-            self.palm_action(data.decode(errors="replace").split(None, 1)[1].strip(), addr, uid, now)
+            self.palm_action(data.decode(errors="replace").split(None, 1)[1].strip(ft_palm_menu.SPACE), addr, uid, now)
             return
         if cmd == "tilefocus" and words[1:] in (["1"], ["2"], ["0"]):
             # From ft-screens (unbound, no reply): an anchored app's tile has the focus (1), a

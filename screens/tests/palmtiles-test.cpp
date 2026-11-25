@@ -29,6 +29,11 @@ int main() {
     check("...empty: none, and the first page is whole", Defaults("").quick.empty() && Defaults("").first.size() == 6);
 
     {
+        const std::string snow = "\u2603";
+        std::string many;
+        for (int i = 0; i < 60; ++i) many += snow;
+        check("cut by characters", Head(many, 2) == snow + snow && Head("ab", 5) == "ab" && Head("", 3).empty());
+        check("a long label is cut", int(Parse("menu\t1\ta\t" + many + "\n").first[0].label.size()) == 3 * kLabelMax);
         const Menu m = Parse("# a comment\n  # another\n\n"
                              "menu\t1\trun:gonk\tGonk it\n"
                              "menu\t0\tsteam_menu\tSteam Menu\n"

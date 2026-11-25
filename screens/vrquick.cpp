@@ -372,7 +372,8 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     // this Update's release: the tile under its last held frame, as drawn (council, 2026-11-19: not the
     // release frame's, whose contact moves as the fingers open; palmmenu let go only with the palm up)
     if (released >= 0) {
-        const int tile = released != side ? kAlone : g_card.drag.on() ? g_card.drag.place() : PinchStart();
+        const int tile = released != side || fresh ? kAlone :   // (a card only now back wasn't seen)
+                         g_card.drag.on() ? g_card.drag.place() : PinchStart();
         if (released == side) g_card.drag.End();
         PinchRelease(released, tile);
     }

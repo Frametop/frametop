@@ -28,6 +28,9 @@ namespace dashtiles {
 enum class Stay { Default = 0, On = 1, Off = 2 };
 inline int StayNumber(Stay s) { return int(s); }
 inline Stay StayOf(int n) { return n == 0 ? Stay::Default : n == 2 ? Stay::Off : Stay::On; }
+// Whether a staying panel still stays while a VR game may run: "Hide screens during VR games"
+// (ingames) keeps it out of the game's view, until the hide/show key shows it.
+inline bool StaysInGame(bool game, bool hideInGames, bool keyShown) { return !game || !hideInGames || keyShown; }
 
 struct State {
     enum class Kind { Off, Tile, Sat };

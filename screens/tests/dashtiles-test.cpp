@@ -563,6 +563,11 @@ int main() {
         c.stayDefault = true;
         check("stay: restored off, it stays off with the default on", c.Restore(4, "tile 2 0 0 1 1", -1) && !c.Stay(4));
     }
+    // --- a VR game with "Hide screens during VR games": the staying panels go, until the hide/show key
+    check("stay in a VR game: hidden with ingames hide, back with the key",
+          !dashtiles::StaysInGame(true, true, false) && dashtiles::StaysInGame(true, true, true));
+    check("stay in a VR game: as ever with ingames visible, or no game",
+          dashtiles::StaysInGame(true, false, false) && dashtiles::StaysInGame(false, true, false));
     // --- tear off and back
     {
         dashtiles::Board b;

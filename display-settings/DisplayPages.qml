@@ -1021,7 +1021,6 @@ Item {
                     Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "During VR games" }
 
                     Ft.RadioChoices {
-                        enabled: vpage.v.mode === "always"
                         choices: [
                             { value: "hide", text: "Hide screens during VR games", help: "Keeps your game view clear; open the SteamVR dashboard (or press Meta+Shift+H) to view screens." },
                             { value: "visible", text: "Keep screens visible over VR games", help: "Keeps your screens floating in front of VR games. Note: also turn off automatic pausing in VR games settings so the desktop stays active." }
@@ -1037,7 +1036,7 @@ Item {
                     }
                     Controls.Label {
                         visible: vpage.v.mode !== "always"
-                        text: "Only applies when screens are set to Always visible above."
+                        text: "Screens in the room only follow this when they are set to Always visible above; dashboard tiles always do."
                         opacity: 0.7
                         font: Kirigami.Theme.smallFont
                         wrapMode: Text.Wrap

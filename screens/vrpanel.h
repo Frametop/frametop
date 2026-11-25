@@ -290,6 +290,8 @@ extern bool g_vr;
 extern bool g_ctrl, g_alt, g_meta, g_shift;   // held on a keyboard (ft_vr_key)
 extern bool g_manual;   // the hide key's switch
 extern bool g_paused;   // Frametop paused for a VR game: everything hidden
+extern bool g_gameRunning;   // a VR game Frametop gives way to
+extern InGames g_inGames;    // whether the panels hide in one
 int64_t NowMs();
 bool DevicePose(vr::TrackedDeviceIndex_t dev, Mat *out);
 bool LaserPose(vr::TrackedDeviceIndex_t dev, Mat *out);   // where its laser starts, pointing down its -z

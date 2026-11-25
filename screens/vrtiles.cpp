@@ -538,7 +538,9 @@ bool TileStays(const Screen &s, int i) { return !s.steamDash && g_tiles.Stay(i);
 
 // Anchored panels (dashtiles.h): shown with the dashboard, or always when they stay; the hide key
 // (the manual switch in "always") and a panel's own conceal still hide them. The visibility mode
-// is the room's panels' (user, 2026-11-16).
+// is the room's panels' (user, 2026-11-16). During a VR game (a browser's WebXR session is one) the
+// staying ones go too, as the room's panels do (tilestate.h's StaysInGame): a browser's own window
+// stood in the middle of the VR video it was playing.
 // While SteamVR's theater shows Steam's page the tiles step aside, as the rest of the dashboard
 // does then (user, 2026-11-18: "Hide while theater"); they're back when it docks again. A game lent
 // to the theater from its panel (View in Theater) hides only the staying ones, unless
@@ -547,10 +549,11 @@ bool TileStays(const Screen &s, int i) { return !s.steamDash && g_tiles.Stay(i);
 // open the dashboard, our applications don't show up").
 bool TileShown(const Screen &s, int i, bool dashUp) {
     const bool hiddenByKey = EffectiveMode() == Mode::Always && g_manual;
+    const bool stays = TileStays(s, i) && dashtiles::StaysInGame(g_gameRunning, g_inGames == InGames::Hide, g_manual);
     const bool gameTheater = GsInTheater() && !dashUp && !g_tileStayTheater;
     if ((SteamDashInTheater() || gameTheater) && s.drag == Drag::None) return false;
     return !g_paused && s.shown && !s.alone && !hiddenByKey &&
-           (TileStays(s, i) || dashUp || s.drag != Drag::None || i == PadPanel());
+           (stays || dashUp || s.drag != Drag::None || i == PadPanel());
 }
 
 // A dragged tile's middle at (az, el) round the group's centre right on the centre display's (not itself).

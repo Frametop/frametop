@@ -31,9 +31,9 @@ from pathlib import Path
 LAYOUT = Path.home() / '.config/frametop-layout.json'
 GUARD_UNIT = 'frametop-fake-worn-guard'
 GUARD_POLL = 0.5
-# SteamVR, and so the pointer helper, still says worn for about a second after the faked wearer
-# goes, and a stream that gets the lock then has never seen FLAG: the guard keeps the locks longer
-GUARD_SETTLE = 3.0
+# The pointer helper says worn a while after the faked wearer goes: SteamVR's own lag (up to a
+# second seen) and the helper's HEADSET_OFF_AFTER (1.5 s, pointer/helper/ft-pointer.cpp)
+SETTLE = 4.0
 
 
 def runtime_dir():
@@ -76,6 +76,15 @@ def set_flag(allow, now, pid=None):
 
 def clear_flag():
     flag_path().unlink(missing_ok=True)
+
+
+def settle_and_clear_flag():
+    """The faked wearer has gone: FLAG goes SETTLE seconds later, when the pointer helper has stopped
+    saying worn. A stream that finds no FLAG leases on the helper's next "worn", and FLAG's guard
+    lets go of the locks with it."""
+    if (read_flag() or {}).get('allow_host_input') is False:
+        time.sleep(SETTLE)
+    clear_flag()
 
 
 def input_hosts(layout=LAYOUT):
@@ -169,13 +178,12 @@ def take_locks(hosts, held):
     return busy
 
 
-def guard(layout=LAYOUT, poll=GUARD_POLL, settle=GUARD_SETTLE, release=None):
+def guard(layout=LAYOUT, poll=GUARD_POLL, release=None):
     """The guard process: take every input host's lock, then write FLAG naming this process, and
     hold them while FLAG does. A host given "input": true meanwhile has its lock taken too; if a
     stream holds it, or the guard is told to stop while FLAG still names it, the faked wearer goes
-    (RELEASE) but FLAG stays (release_confirmed). However it ends, it holds the locks SETTLE seconds
-    more, stopped or not. Exit 0 once FLAG has gone or the guard has let go, 3 if a lock was busy
-    from the start."""
+    (RELEASE) but FLAG stays (release_confirmed). Exit 0 once FLAG has gone or the guard has let
+    go, 3 if a lock was busy from the start."""
     held = {}
     stop = []
     signal.signal(signal.SIGTERM, lambda *_: stop.append(1))
@@ -202,7 +210,6 @@ def guard(layout=LAYOUT, poll=GUARD_POLL, settle=GUARD_SETTLE, release=None):
             release_confirmed(release)
         return 0
     finally:
-        time.sleep(settle)
         for fd in held.values():
             os.close(fd)
 
@@ -229,7 +236,7 @@ def drop_wearer(release=None):
     again: FLAG gone with the wearer still faked would leave nothing to notice."""
     if not release_confirmed(release):
         return False
-    clear_flag()
+    settle_and_clear_flag()
     return True
 
 

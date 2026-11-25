@@ -20,7 +20,8 @@ class CliTests(unittest.TestCase):
                       # a guard that took the locks and wrote the flag naming itself
                       mock.patch.object(hostinput, 'start_guard',
                                         mock.Mock(side_effect=lambda socket=None: hostinput.set_flag(False, 1.0))),
-                      mock.patch.object(hostinput, 'guard_alive', mock.Mock(return_value=True))):
+                      mock.patch.object(hostinput, 'guard_alive', mock.Mock(return_value=True)),
+                      mock.patch.object(hostinput, 'SETTLE', 0)):
             patch.start()
             self.addCleanup(patch.stop)
 

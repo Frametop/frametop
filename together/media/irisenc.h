@@ -34,9 +34,11 @@ enum class Format { kRgba, kNv12 };
 // What an encoder that takes these (V4L2 fourccs) is given: RGBA when it's one, or else NV12.
 Format Picks(const std::vector<uint32_t> &formats);
 // Where an NV12 picture's Cb,Cr rows begin in the encoder's buffer (its Y rows are followed by
-// as many more as fill a step of 32), and the bytes the whole takes.
+// as many more as fill a step of 32), and the bytes the whole takes, in whole pages.
 inline size_t Nv12Chroma(int stride, int height) { return size_t(stride) * size_t((height + 31) / 32 * 32); }
-inline size_t Nv12Size(int stride, int height) { return Nv12Chroma(stride, height) + size_t(stride) * size_t((height / 2 + 15) / 16 * 16); }
+inline size_t Nv12Size(int stride, int height) {
+    return (Nv12Chroma(stride, height) + size_t(stride) * size_t((height / 2 + 15) / 16 * 16) + 4095) / 4096 * 4096;
+}
 
 struct Config {
     int width = 0, height = 0;   // what Takes says yes to

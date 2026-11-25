@@ -34,8 +34,10 @@ class Fixture(unittest.TestCase):
         self.run = self.tmp / 'run'
         self.run.mkdir()
         env = mock.patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(self.run)})
-        env.start()
-        self.addCleanup(env.stop)
+        settle = mock.patch.object(hostinput, 'SETTLE', 0)
+        for patch in (env, settle):
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def process(self, pid, *argv):
         d = self.proc / str(pid)
@@ -110,6 +112,25 @@ class HostInputTests(Fixture):
         self.assertEqual(detail['logs'], logs)
         self.assertEqual(detail['locks'], [])
 
+    def test_the_flag_stays_until_the_pointer_helper_stops_saying_worn(self):
+        slept = []
+        with mock.patch.object(hostinput, 'SETTLE', 4.0), \
+             mock.patch.object(hostinput.time, 'sleep', lambda s: slept.append((s, hostinput.read_flag() is not None))):
+            bench = mock.Mock(control=mock.Mock(return_value={'ok': True}))
+            for end in (lambda: cli.dispatch(cli.parser().parse_args(['worn', 'off']), bench),
+                        lambda: cli.dispatch(cli.parser().parse_args(['worn', 'physical']), bench),
+                        lambda: hostinput.drop_wearer(lambda: None)):   # a dead guard's, at the next command
+                hostinput.set_flag(False, 1.0)
+                end()
+                self.assertEqual(slept, [(4.0, True)])
+                self.assertIsNone(hostinput.read_flag())
+                slept.clear()
+            hostinput.settle_and_clear_flag()   # nothing was faked
+            hostinput.set_flag(True, 1.0)       # the user allowed it
+            hostinput.settle_and_clear_flag()
+            self.assertEqual(slept, [])
+            self.assertIsNone(hostinput.read_flag())
+
     def test_flag_round_trip_and_garbled_flag_is_not_an_allow(self):
         self.assertIsNone(hostinput.read_flag())
         hostinput.set_flag(True, 5.0)
@@ -161,20 +182,14 @@ class GuardProcessTests(Fixture):
         self.assertFalse(self.lock_free())   # no stream can lease oma7 now
         self.assertTrue(self.lock_free('192.0.2.92'))   # input off: not its business
         hostinput.clear_flag()   # worn off, physical or release
-        # SteamVR says worn a while longer: no stream may have the lock yet, whoever stops the guard
-        time.sleep(hostinput.GUARD_POLL + 0.5)
-        guard.send_signal(signal.SIGTERM)   # worn on again: start_guard stops the old one
-        time.sleep(hostinput.GUARD_SETTLE - 1.2)
-        self.assertIsNone(guard.poll())
-        self.assertFalse(self.lock_free())
-        self.assertEqual(guard.wait(10), 0)
+        self.assertEqual(guard.wait(5), 0)
         self.assertTrue(self.lock_free())
 
     def test_it_lets_go_when_an_allowed_wearer_replaces_it(self):
         guard = self.start()
         self.wait_flag(guard)
         hostinput.set_flag(True, 2.0)
-        self.assertEqual(guard.wait(10), 0)
+        self.assertEqual(guard.wait(5), 0)
         self.assertTrue(hostinput.read_flag()['allow_host_input'])
 
     def test_a_busy_lock_means_no_guard_and_no_flag(self):
@@ -192,7 +207,7 @@ class GuardProcessTests(Fixture):
         guard = self.start()
         self.wait_flag(guard)
         guard.send_signal(signal.SIGTERM)   # its unit stopped while the wearer is faked
-        self.assertEqual(guard.wait(10), 0)
+        self.assertEqual(guard.wait(5), 0)
         self.assertEqual(hostinput.read_flag()['pid'], guard.pid)   # ft-stream still sends no lease
         self.assertTrue(self.lock_free())
         hostinput.clear_flag()   # the next testbench command
@@ -204,7 +219,7 @@ class GuardProcessTests(Fixture):
             layout = json.loads(self.layout.read_text())
             layout['hosts'][2]['input'] = True   # ...when it starts lending its input
             self.layout.write_text(json.dumps(layout))
-            self.assertEqual(guard.wait(10), 0)
+            self.assertEqual(guard.wait(5), 0)
             self.assertIn('releasing the wearer', guard.stdout.read())
             self.assertEqual(hostinput.read_flag()['pid'], guard.pid)
         finally:

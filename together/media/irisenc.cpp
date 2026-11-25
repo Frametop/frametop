@@ -87,9 +87,9 @@ bool Encoder::Open(const Config &cfg, std::string &err) {
     }
     stride_ = of.fmt.pix_mp.plane_fmt[0].bytesperline;
     frameSize_ = of.fmt.pix_mp.plane_fmt[0].sizeimage;
-    // Where the Cb,Cr rows begin isn't the driver's to say here, so anything but the size that
-    // layout takes (in whole pages) could mean they begin elsewhere.
-    if (nv12 && (stride_ < cfg.width || frameSize_ != (Nv12Size(stride_, cfg.height) + 4095) / 4096 * 4096)) {
+    // Where the Cb,Cr rows begin isn't the driver's to say here, so any size but that layout's
+    // could mean they begin elsewhere.
+    if (nv12 && (stride_ < cfg.width || frameSize_ != Nv12Size(stride_, cfg.height))) {
         errno = EINVAL;
         return fail("the encoder's NV12 layout isn't the one known");
     }

@@ -20,10 +20,11 @@ keep=()
 # update that's the release before this one, so any release's own folder counts, not just
 # this one's. releases/current doesn't: that's what people's programs name.
 root=$(cd "$(dirname "$0")/.." && pwd -P)/
-releases=$root
+releases=
 [[ $root =~ ^(.*/frametop/releases/)[^/]+/$ ]] && releases=${BASH_REMATCH[1]}
 ours() {  # ours COMMAND-LINE: ft-screens' launcher (distrobox enter, podman exec) stays too
-  [[ $1 =~ ft-screens|ft-layout|frametop-session ]] || [[ ${1//"${releases}current/"/} == *"$releases"* ]]
+  [[ $1 =~ ft-screens|ft-layout|frametop-session || $1 == *"$root"* ]] && return
+  [ -n "$releases" ] && [[ ${1//"${releases}current"/} =~ "$releases"[^\ /]+/ ]]
 }
 while read -r pid; do
   comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue

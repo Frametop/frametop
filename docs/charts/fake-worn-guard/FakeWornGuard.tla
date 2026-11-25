@@ -14,6 +14,7 @@ CONSTANTS
 
 VARIABLES
     faked,   \* the input proxy fakes the wearer
+    says,    \* the pointer helper says worn: while faked, and a while after (SteamVR's lag and its own)
     proxy,   \* "up" answers; "hung" may or may not act on a request, and its reply times out
     flag,    \* $XDG_RUNTIME_DIR/frametop-fake-worn.json: "none", "guard" (names the guard's pid)
              \* or "cli" (names a testbench command's pid, left when a release went unconfirmed)
@@ -25,10 +26,10 @@ VARIABLES
     seen,    \* ft-stream's last answer from the pointer helper: "none", "worn", "away"
     saidTest,\* ft-stream's last tick found a test's flag
     lease    \* ft-stream is sending the host engage leases
-vars == <<faked, proxy, flag, guard, lock, stream, pc, asked, seen, saidTest, lease>>
+vars == <<faked, says, proxy, flag, guard, lock, stream, pc, asked, seen, saidTest, lease>>
 
 Init ==
-    /\ faked = FALSE /\ proxy = "up" /\ flag = "none" /\ guard = "off"
+    /\ faked = FALSE /\ says = FALSE /\ proxy = "up" /\ flag = "none" /\ guard = "off"
     /\ lock = "none" /\ stream = "off" /\ pc = "idle"
     /\ asked = FALSE /\ seen = "none" /\ saidTest = FALSE /\ lease = FALSE
 
@@ -45,6 +46,8 @@ Released == IF proxy = "up" THEN {FALSE} ELSE {FALSE, faked}
 Unsafe == flag # "none" /\ ~GuardAlive
 DropFaked == IF Unsafe THEN Released ELSE {faked}
 DropFlag == IF Unsafe /\ proxy = "up" THEN "none" ELSE flag
+\* settle_and_clear_flag: a command that clears a flag first waits until the helper stops saying worn
+Settled(next) == says' = IF flag # "none" /\ next = "none" THEN FALSE ELSE says
 
 \* release_or_keep_flag after an unconfirmed release: the flag stays, or one naming the command
 \* is written if none is left
@@ -55,19 +58,19 @@ KeepFlag == IF flag = "none" THEN "cli" ELSE flag
 YouRunWornOn ==
     /\ pc = "idle"
     /\ \E f \in DropFaked : faked' = f
-    /\ flag' = DropFlag /\ pc' = "on_check"
+    /\ flag' = DropFlag /\ pc' = "on_check" /\ Settled(DropFlag)
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, guard, lock, stream>>
 
 YouRunWornOff ==   \* `worn off`, `worn physical` and `release` end the fake the same way
     /\ pc = "idle"
     /\ \E f \in DropFaked : faked' = f
-    /\ flag' = DropFlag /\ pc' = "off_send"
+    /\ flag' = DropFlag /\ pc' = "off_send" /\ Settled(DropFlag)
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, guard, lock, stream>>
 
 YouRunOther ==     \* any other testbench command: only drop_unsafe_worn matters
     /\ pc = "idle" /\ Unsafe
     /\ \E f \in DropFaked : faked' = f
-    /\ flag' = DropFlag
+    /\ flag' = DropFlag /\ Settled(DropFlag)
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, guard, lock, stream, pc>>
 
 \* refusal(state()): a live stream to an input host refuses; a live guard is kept; a flag naming
@@ -78,20 +81,20 @@ OnCheck ==
              ELSE IF GuardAlive THEN "on_fake"
              ELSE IF flag # "none" THEN "idle"
              ELSE "on_stop"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, stream>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, stream>>
 
 \* start_guard: `systemctl stop` (waits for the old unit), clear_flag, systemd-run
 OnStartGuard ==
     /\ pc = "on_stop" /\ guard = "off"
     /\ flag' = "none" /\ guard' = "starting" /\ pc' = "on_wait"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, lock, stream>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, lock, stream>>
 
 \* start_guard's wait: the flag names a live guard, or the unit went inactive (busy: refused)
 OnWait ==
     /\ pc = "on_wait"
     /\ \/ GuardAlive /\ pc' = "on_fake"
        \/ guard = "off" /\ pc' = "idle"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, stream>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, stream>>
 
 \* bench.control('worn 1'). A timeout: release_or_keep_flag (the release times out too, so the
 \* flag stays), raise.
@@ -101,6 +104,7 @@ OnFake ==
          THEN faked' = TRUE /\ flag' = flag /\ pc' = "on_verify"
          ELSE /\ \E f \in {TRUE, FALSE} : faked' = f   \* worn 1 and the release may each have acted
               /\ flag' = KeepFlag /\ pc' = "idle"
+    /\ says' = (says \/ faked')
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, guard, lock, stream>>
 
 \* the check after worn 1: no live guard -> release_or_keep_flag, refuse
@@ -110,16 +114,21 @@ OnVerify ==
          THEN UNCHANGED <<faked, flag>>
          ELSE /\ \E f \in Released : faked' = f
               /\ flag' = IF proxy = "up" THEN "none" ELSE KeepFlag
-    /\ pc' = "idle"
+    /\ Settled(flag') /\ pc' = "idle"
     /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, guard, lock, stream>>
 
-\* worn 0 / worn-release / release, then clear_flag. A timeout raises before clear_flag.
+\* worn 0 / worn-release / release, then settle_and_clear_flag (OffClear). A timeout raises before it.
 OffSend ==
     /\ pc = "off_send"
     /\ \E f \in Released : faked' = f
-    /\ flag' = IF proxy = "up" THEN "none" ELSE flag
-    /\ pc' = "idle"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, guard, lock, stream>>
+    /\ pc' = IF proxy = "up" THEN "off_clear" ELSE "idle"
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, proxy, flag, guard, lock, stream>>
+
+\* the flag goes, and with it the guard, once the helper has stopped saying worn (SETTLE)
+OffClear ==
+    /\ pc = "off_clear" /\ (flag = "none" \/ ~says)
+    /\ flag' = "none" /\ pc' = "idle"
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, guard, lock, stream>>
 
 \* ---- the guard unit ----
 
@@ -129,13 +138,13 @@ GuardStarts ==
     /\ IF lock = "none"
          THEN lock' = "guard" /\ flag' = "guard" /\ guard' = "holding"
          ELSE guard' = "exited" /\ UNCHANGED <<lock, flag>>
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, stream, pc>>
 
 \* the flag no longer names it: return 0, closing the lock
 GuardLetsGo ==
     /\ guard = "holding" /\ flag # "guard"
     /\ guard' = "exited" /\ lock' = "none"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, flag, stream, pc>>
 
 \* release_confirmed: release (3 tries), and leave the flag for the next testbench command
 \* (finding F: the guard may go before `worn 1` fakes the wearer, so ft-stream needs the flag)
@@ -151,7 +160,7 @@ GuardTerm ==
     /\ guard = "holding"
     /\ IF flag = "guard" THEN GuardReleases ELSE UNCHANGED <<faked, flag>>
     /\ guard' = "exited" /\ lock' = "none"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, proxy, stream, pc>>
 
 \* outside the testbench: SIGTERM (systemctl stop, the session ending)
 GuardStopped == GuardCanDie /\ MayDieNow /\ GuardTerm
@@ -166,7 +175,7 @@ GuardKilled ==
     /\ GuardCanDie /\ MayDieNow /\ guard \in {"starting", "holding"}
     /\ guard' = "exited"
     /\ lock' = IF lock = "guard" THEN "none" ELSE lock
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, flag, stream, pc>>
 
 \* ExecStopPost (after_guard): a flag naming no live guard (the dead one, or a command) -> release
 \* the wearer, the flag stays
@@ -174,24 +183,24 @@ GuardCleanup ==
     /\ guard = "exited"
     /\ IF flag # "none" THEN GuardReleases ELSE UNCHANGED <<faked, flag>>
     /\ guard' = "off"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, proxy, lock, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, proxy, lock, stream, pc>>
 
 \* ---- the world ----
 
 StreamStarts ==
     /\ stream = "off" /\ stream' = "live"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, pc>>
 
 StreamTakesLock ==
     /\ stream = "live" /\ lock = "none"
     /\ stream' = "holding" /\ lock' = "stream"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, guard, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, proxy, flag, guard, pc>>
 
 StreamEnds ==
     /\ stream # "off" /\ stream' = "off"
     /\ lock' = IF stream = "holding" THEN "none" ELSE lock
     /\ asked' = FALSE /\ seen' = "none" /\ saidTest' = FALSE /\ lease' = FALSE
-    /\ UNCHANGED <<faked, proxy, flag, guard, pc>>
+    /\ UNCHANGED <<says, faked, proxy, flag, guard, pc>>
 
 \* ft-stream's tick while it holds the lock (HostInput::Tick): ask the pointer helper (once a
 \* second), take the answers that came, read the test flags (TestForbidding), then Decide: a flag
@@ -205,28 +214,32 @@ StreamTick ==
     /\ saidTest' = (flag # "none")
     /\ seen' = IF TestGone THEN "none" ELSE seen
     /\ lease' = (flag = "none" /\ ~TestGone /\ seen = "worn")
-    /\ UNCHANGED <<faked, proxy, flag, guard, lock, stream, pc>>
+    /\ UNCHANGED <<says, faked, proxy, flag, guard, lock, stream, pc>>
 
 \* the pointer helper answers an ask a tick sent (that tick read the flags too): what the wearer
-\* is when it answers. ft-stream acts on it at its next tick.
+\* is when it answers, or was a moment ago. ft-stream acts on it at its next tick.
 HelperAnswers ==
     /\ asked /\ asked' = FALSE
-    /\ seen' = IF faked THEN "worn" ELSE "away"
-    /\ UNCHANGED <<faked, proxy, flag, guard, lock, stream, pc, saidTest, lease>>
+    /\ seen' = IF says THEN "worn" ELSE "away"
+    /\ UNCHANGED <<says, faked, proxy, flag, guard, lock, stream, pc, saidTest, lease>>
+
+HelperSettles ==
+    /\ says /\ ~faked /\ says' = FALSE
+    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, proxy, flag, guard, lock, stream, pc>>
 
 ProxyHangs ==
     /\ ProxyCanHang /\ proxy = "up" /\ proxy' = "hung"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, flag, guard, lock, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, flag, guard, lock, stream, pc>>
 
 ProxyRecovers ==
     /\ proxy = "hung" /\ proxy' = "up"
-    /\ UNCHANGED <<asked, seen, saidTest, lease, faked, flag, guard, lock, stream, pc>>
+    /\ UNCHANGED <<says, asked, seen, saidTest, lease, faked, flag, guard, lock, stream, pc>>
 
 Next ==
     \/ YouRunWornOn \/ YouRunWornOff \/ YouRunOther
-    \/ OnCheck \/ OnStartGuard \/ StopOldGuard \/ OnWait \/ OnFake \/ OnVerify \/ OffSend
+    \/ OnCheck \/ OnStartGuard \/ StopOldGuard \/ OnWait \/ OnFake \/ OnVerify \/ OffSend \/ OffClear
     \/ GuardStarts \/ GuardLetsGo \/ GuardStopped \/ GuardKilled \/ GuardCleanup
-    \/ StreamStarts \/ StreamTakesLock \/ StreamEnds \/ StreamTick \/ HelperAnswers \/ ProxyHangs \/ ProxyRecovers
+    \/ StreamStarts \/ StreamTakesLock \/ StreamEnds \/ StreamTick \/ HelperAnswers \/ HelperSettles \/ ProxyHangs \/ ProxyRecovers
 
 Spec == Init /\ [][Next]_vars
 
@@ -244,7 +257,7 @@ NoHostTakeover == ~lease
 FakeIsNoticed == (faked /\ pc = "idle") => flag # "none"
 
 TypeOK ==
-    /\ faked \in BOOLEAN /\ proxy \in {"up", "hung"} /\ flag \in {"none", "guard", "cli"}
+    /\ faked \in BOOLEAN /\ says \in BOOLEAN /\ (faked => says) /\ proxy \in {"up", "hung"} /\ flag \in {"none", "guard", "cli"}
     /\ guard \in {"off", "starting", "holding", "exited"}
     /\ lock \in {"none", "guard", "stream"} /\ stream \in {"off", "live", "holding"}
     /\ (lock = "stream") <=> (stream = "holding")

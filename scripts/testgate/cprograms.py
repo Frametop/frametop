@@ -126,9 +126,11 @@ def items(root, env=os.environ):
         # number indexes what is kept of it: what the sanitizer says of one out of range ends the test)
         P("together-pcpanels-test", "together/tests/pcpanels-test.cpp", "together/flow/pcpanels.cpp",
           "together/flow/video.cpp", *SESSION, flags=f"{ASAN} -fno-sanitize-recover=undefined"),
-        # the sizes the Frame's encoder is given (one it isn't resets the Frame): against /dev/null
+        # the sizes the Frame's encoder is given (one it isn't resets the Frame), against /dev/null, and the
+        # picture format and NV12 layout
         P("together-encsize-test", "together/tests/encsize-test.cpp", "together/media/irisenc.cpp", flags=ASAN),
-        # a shared screen's picture into the encoder's, RGBA or NV12 (on the Frame's GPU; skipped elsewhere)
+        # a shared screen's picture into the encoder's, RGBA or NV12 (on the Frame's GPU; elsewhere only the
+        # test picture)
         P("together-blit-test", "together/tests/blit-test.cpp", "together/media/blit.cpp", "together/media/pictures.cpp",
           "together/media/irisenc.cpp", flags=CXX2, pkgs="gbm libdrm egl glesv2"),
         # control of shared panels: the rules by themselves, then several Frames' sessions against each other

@@ -70,6 +70,7 @@ const label = (action, from, to) => {
     case "OnFake": return up ? "worn 1 answers" : "worn 1 and its release time out";
     case "OnVerify": return up ? RELEASED : "the post-check's release times out";
     case "OffSend": return up ? RELEASED : "the release times out";
+    case "OffClear": return "the helper stopped saying worn: the flag goes";
     case "GuardLetsGo": return "the flag went: the guard lets go";
     case "GuardKilled": return "the guard is killed";
     case "GuardStopped": return "the guard is stopped (SIGTERM)";
@@ -80,7 +81,7 @@ const label = (action, from, to) => {
     case "HelperAnswers": return "the helper answers";
     case "ProxyHangs": return "the proxy hangs";   // never changes a chart state, so never drawn
   }
-  return null;   // ProxyRecovers, StopOldGuard, StreamEnds
+  return null;   // ProxyRecovers, StopOldGuard, StreamEnds, HelperSettles
 };
 
 export const title = "frame-testbench fake-worn guard vs a stream to an input host";

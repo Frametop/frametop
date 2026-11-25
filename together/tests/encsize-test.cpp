@@ -40,7 +40,7 @@ int main() {
     // NV12's layout, as the 0.5.10 driver sizes it (v4l2-ctl --set-fmt-video-out, 2026-11-25)
     check("an NV12 picture's bytes are the driver's",
           irisenc::Nv12Size(640, 360) == 368640 && irisenc::Nv12Size(1280, 720) == 1413120 && irisenc::Nv12Size(1920, 1200) == 3502080 &&
-              irisenc::Nv12Size(640, 1136) == 1105920);
+              irisenc::Nv12Size(640, 1136) == 1105920 && irisenc::Nv12Size(1408, 792) == 1691648);
     check("...its Cb,Cr rows after Y rows to a step of 32", irisenc::Nv12Chroma(640, 360) == 640 * 384 && irisenc::Nv12Chroma(1920, 800) == 1920 * 800);
     using irisenc::Format;
     const uint32_t ab24 = V4L2_PIX_FMT_RGBA32, nv12 = V4L2_PIX_FMT_NV12, q08c = v4l2_fourcc('Q', '0', '8', 'C');

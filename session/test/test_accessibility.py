@@ -954,8 +954,11 @@ class AccessibilityTests(unittest.TestCase):
                     (release, "podman exec box ft-screens", True),
                     (release, f"tail -f {tmp}/frametop/releases/current/notes", False),
                     (release, f"tmux new {tmp}/frametop/releases/current/desktops.sh restart", False),
+                    (release, f"tmux new -c {tmp}/frametop/releases/current", False),
+                    (release, f"du -sh {tmp}/frametop/releases/", False),
                     (release, "konsole", False),
                     (checkout, f"python3 {checkout}/frunner/ft-frunner", True),
+                    (checkout, f"bash {checkout}/desktops.sh restart", True),
                     (checkout, f"python3 {tmp}/src/other/tool", False)):
                 session = os.path.join(tree, "session")
                 os.makedirs(session, exist_ok=True)

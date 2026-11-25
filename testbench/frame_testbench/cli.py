@@ -288,7 +288,7 @@ def dispatch(args, bench):
     if args.command == 'worn':
         if args.state != 'on':
             result = bench.control('worn 0' if args.state == 'off' else 'worn-release')
-            hostinput.clear_flag()
+            hostinput.settle_and_clear_flag()
             return result
         if args.allow_host_input:
             hostinput.set_flag(True, time.time())   # a guard sees it isn't named and lets go
@@ -362,7 +362,7 @@ def dispatch(args, bench):
             subprocess.run(['systemctl', '--user', 'stop', FAKES_UNIT], timeout=20)
             faked = {'running': False, 'stopped': FAKES_UNIT, 'error': str(error)}
         result = bench.control('release')
-        hostinput.clear_flag()
+        hostinput.settle_and_clear_flag()
         result['fakes'] = faked
         result['peers'] = gone
         return result

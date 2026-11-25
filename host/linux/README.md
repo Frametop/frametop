@@ -67,9 +67,11 @@ sudo ufw allow Vibepollo                                                        
 ## Remove
 
 ```bash
-sudo vibepollo reset      # only to delete its settings, login and pairings too
 sudo pacman -R vibepollo
+sudo rm -rf /var/lib/vibepollo /etc/vibepollo      # only to delete its settings, login and pairings too
 ```
+
+Don't run `sudo vibepollo reset` first: in frametop-2.0.6 and older, a reset that fails leaves Vibepollo's services masked, and `pacman -R` may then stop with "could not safely quiesce the existing Vibepollo host". If that happened, restart the PC and run the commands above.
 
 ## Source
 

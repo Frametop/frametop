@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""scripts/update-check.py: what it says about the KWin effects the session turns off, KWin's EIS,
-the eye cameras' rate, the palm menu's readouts, and the tracking cameras' rate under the 60 fps hand
-tracking switch.
+"""scripts/update-check.py: what it says about the KWin effects the session turns off, SteamVR's saved
+universes, KWin's EIS, the eye cameras' rate, the palm menu's readouts, and the tracking cameras'
+rate under the 60 fps hand tracking switch.
 
 KWin 6.2 has a blur and a contrast effect, each with a factory named in kwin_wayland. KWin 6.6
 (SteamOS 0.5.8) has no contrast effect of its own, which is not something to warn about; a
@@ -10,6 +10,7 @@ KWin without the blur effect is.
   python3 scripts/tests/test_update_check.py
 """
 import importlib.util
+import json
 import os
 import tempfile
 import time
@@ -52,6 +53,45 @@ class KWinEffects(unittest.TestCase):
                 state, _, detail = self.m.kwin_effects(blob)
                 self.assertEqual(state, "warn")
                 self.assertIn(named, detail)
+
+
+class SavedUniverses(unittest.TestCase):
+    """SteamVR's saved universes, as screens/universefix.h reads them."""
+
+    def setUp(self):
+        self.m = load()
+        self.said = []
+        self.m.report = lambda *a: self.said.append(a)
+
+    def check(self, data):
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())) / "chaperone_info.vrchap"
+        path.write_text(json.dumps(data))
+        self.m.CHAPERONE = str(path)
+        self.m.check_chaperone()
+        (state, _, detail), = self.said
+        return state, detail
+
+    def test_rooms_are_counted(self):
+        room = {"universeID": "5", "standing": {"translation": [0.1, 1.2, 0.3], "yaw": 0.4}}
+        lost = {"universeID": "6", "standing": {"translation": [0, 1.6, 0], "yaw": 0}}
+        state, detail = self.check({"jsonid": "chaperone_info", "version": 5, "universes": [room, lost]})
+        self.assertEqual(state, "ok")
+        self.assertIn("2, 1 with the guessed floor", detail)
+
+    def test_no_list_once_the_last_universe_is_gone(self):
+        self.assertEqual(self.check({"jsonid": "chaperone_info", "version": 5})[0], "skip")
+
+    def test_an_empty_list(self):
+        self.assertEqual(self.check({"jsonid": "chaperone_info", "version": 5, "universes": []})[0], "skip")
+
+    def test_the_list_under_another_name_warns(self):
+        self.assertEqual(self.check({"jsonid": "chaperone_info", "version": 6, "rooms": []})[0], "warn")
+
+    def test_an_empty_file_or_another_shape_warns(self):
+        for data in ({}, [], {"version": 5}, {"jsonid": "chaperone_info", "universes": [{"universeID": "5"}]}):
+            with self.subTest(data=data):
+                self.said.clear()
+                self.assertEqual(self.check(data)[0], "warn")
 
 
 class KWinEis(unittest.TestCase):

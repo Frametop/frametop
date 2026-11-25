@@ -636,8 +636,10 @@ def check_chaperone():
         return report("warn", "SteamVR's saved universes", f"{CHAPERONE} unreadable ({e}): screens placed while "
                       "SteamVR has lost the room jump when it finds it again")
     universes = data.get("universes") if isinstance(data, dict) else None
-    if universes == []:
-        return report("skip", "SteamVR's saved universes", "none yet (no room set up)")
+    # SteamVR leaves the list out once it has dropped the last universe (seen with 2.19.5: "jsonid"
+    # and "version" alone). Any other key without the list is a changed format.
+    if universes == [] or (isinstance(data, dict) and "jsonid" in data and data.keys() <= {"jsonid", "version"}):
+        return report("skip", "SteamVR's saved universes", "none saved")
 
     def number(v):
         return isinstance(v, (int, float)) and not isinstance(v, bool)

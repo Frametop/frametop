@@ -51,14 +51,13 @@ class HandsNpu(unittest.TestCase):
     def test_the_setting_reads_as_ft_hands_reads_it(self):
         for value in ("", "auto", "1"):
             self.assertEqual(hn.folder(value), "/run/ft-npud")
-        for value in ("0", "off", "cpu"):
-            self.assertEqual(hn.folder(value), "")
+        self.assertEqual(hn.folder("0"), "")
         self.assertEqual(hn.folder("/run/other"), "/run/other")
         # the same rule as the tracker's, by its source
         with open(os.path.join(HERE, "..", "track", "npuserver.cpp")) as f:
             cpp = f.read()
         self.assertIn('value.empty() || value == "auto" || value == "1"', cpp)
-        self.assertIn('value == "0" || value == "off" || value == "cpu"', cpp)
+        self.assertIn('if (value == "0") return "";', cpp)
         with open(os.path.join(HERE, "..", "track", "npuserver.h")) as f:
             self.assertIn(f'kNpuDefaultDir[] = "{hn.DEFAULT_DIR}"', f.read())
 

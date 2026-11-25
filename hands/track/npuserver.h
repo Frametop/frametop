@@ -11,7 +11,7 @@
 #include <sys/types.h>
 
 // HANDS_NPU's value as ft-npud's folder: /run/ft-npud unless it's set (and for auto or 1), so the NPU is used
-// wherever the daemon runs and the CPU models where it doesn't; none ("") for 0, off or cpu; a folder as given.
+// wherever the daemon runs and the CPU models where it doesn't; none ("") for 0; a folder as given.
 // hands/handsnpu.py reads the setting the same way for Frametop Settings.
 inline constexpr char kNpuDefaultDir[] = "/run/ft-npud";
 std::string npu_dir_setting(const std::string &value);

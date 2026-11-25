@@ -5,7 +5,7 @@ ft-hands asks ft-npud, the root service that runs the NPU student on the headset
 landmarks, and runs the CPU model itself whenever that service isn't there or stops answering
 (hands/track/npulandmarks.h). HANDS_NPU in ~/.config/frametop.conf says which, read as ft-hands
 reads it (npu_dir_setting in hands/track/npuserver.h): not set, auto or 1 is the NPU at
-/run/ft-npud; 0, off or cpu is the CPU only; anything else is the service's folder.
+/run/ft-npud; 0 is the CPU only; anything else is the service's folder.
 
 The service is there when its heads file is: /run/ft-npud/ft-npud.heads on the host, the same
 under /run/host from the release's container (where Frametop Settings runs).
@@ -33,7 +33,6 @@ import handsmode  # noqa: E402  (frametop.conf's path)
 KEY = "HANDS_NPU"
 CONF_PATH = handsmode.CONF_PATH
 DEFAULT_DIR = "/run/ft-npud"   # kNpuDefaultDir in hands/track/npuserver.h
-CPU = ("0", "off", "cpu")
 HEADS = "ft-npud.heads"
 ROOTS = ("", "/run/host")      # the host's / from the host, and from the container
 
@@ -46,7 +45,7 @@ def folder(value):
     """HANDS_NPU's value as ft-npud's folder, "" for the CPU only: npu_dir_setting's rule."""
     if value in ("", "auto", "1"):
         return DEFAULT_DIR
-    return "" if value in CPU else value
+    return "" if value == "0" else value
 
 
 def service_there(where=DEFAULT_DIR, roots=None):

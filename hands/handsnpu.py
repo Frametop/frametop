@@ -45,14 +45,14 @@ def folder(value):
     """HANDS_NPU's value as ft-npud's folder, "" for the CPU only: npu_dir_setting's rule."""
     if value in ("", "auto", "1"):
         return DEFAULT_DIR
-    return "" if value == "0" else value
+    return value if value.startswith("/") else ""
 
 
 def service_there(where=DEFAULT_DIR, roots=None):
     """Whether ft-npud runs with its folder at WHERE: its heads file, as ft-hands looks for it
     (under each of ROOTS, or the roots given)."""
     roots = ROOTS if roots is None else roots
-    return where.startswith("/") and any(os.path.lexists(root + where + "/" + HEADS) for root in roots)
+    return any(os.path.lexists(root + where + "/" + HEADS) for root in roots)
 
 
 def state(conf=None, conf_path=CONF_PATH, roots=None):

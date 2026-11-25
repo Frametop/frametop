@@ -147,6 +147,8 @@ class Page(unittest.TestCase):
         old, fis.host = fis.host, host
         self.addCleanup(setattr, fis, "host", old)
         self.b.message.connect(lambda text, bad: said.append((text, bad)))
+        self.b.setHandsNpu(False)   # the choice it shows already: nothing runs (no restart for nothing)
+        self.assertEqual((ran, self.b.handsNpu["busy"]), ([], False))
         self.b.setHandsNpu(True)
         for _ in range(200):
             self.app.processEvents()

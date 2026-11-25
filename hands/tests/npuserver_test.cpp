@@ -73,7 +73,8 @@ int main() {
 
     // HANDS_NPU: the daemon's own folder unless it's switched off or names another
     CHECK(npu_dir_setting("") == "/run/ft-npud" && npu_dir_setting("auto") == "/run/ft-npud" && npu_dir_setting("1") == "/run/ft-npud");
-    CHECK(npu_dir_setting("0").empty());
+    // 0, and a word that is no folder: the CPU only (test_handsnpu.py checks handsnpu.folder with the same values)
+    for (const char *v : {"0", "off", "cpu", "auto ", "run/other"}) CHECK(npu_dir_setting(v).empty());
     CHECK(npu_dir_setting("/run/other") == "/run/other");
 
     // overflowuid reads as a number

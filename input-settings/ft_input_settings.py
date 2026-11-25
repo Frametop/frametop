@@ -2219,8 +2219,9 @@ class Backend(QObject):
     @Slot(bool)
     def setHandsNpu(self, npu):
         """handsnpu.py npu|cpu --now on the host (it restarts ft-hands there), off the UI thread.
-        One at a time."""
-        if self._npu_want is not None:
+        One at a time, and nothing for the choice it already shows (picking the same row again
+        would restart hand tracking for nothing)."""
+        if self._npu_want is not None or handsnpu.state(read_conf())["npu"] == bool(npu):
             return
         self._npu_want = bool(npu)
         self.handsChanged.emit()

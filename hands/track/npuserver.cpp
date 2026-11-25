@@ -15,8 +15,7 @@ bool exists(const std::string &path) {
 
 std::string npu_dir_setting(const std::string &value) {
     if (value.empty() || value == "auto" || value == "1") return kNpuDefaultDir;
-    if (value == "0") return "";
-    return value;
+    return value[0] == '/' ? value : "";   // a folder; 0, and a word that is neither: the CPU only
 }
 
 std::string npu_server_dir(const std::string &dir) {

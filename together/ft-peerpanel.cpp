@@ -161,7 +161,7 @@ int Run(const Args &args) {
 
     Converter conv;
     conv.toSteamVR = false;
-    conv.range = EGL_YUV_FULL_RANGE_EXT;   // what the Frame's encoder makes of RGBA (docs/together.md, T2)
+    conv.range = EGL_YUV_FULL_RANGE_EXT;   // what a Frame's encoder makes of RGBA, and what blit.cpp draws as NV12 (docs/together.md, T2)
     Incoming in{together};
     local::PanelHand hand{uint8_t(args.panel)};
     local::HandSender toRoom(args.socket);

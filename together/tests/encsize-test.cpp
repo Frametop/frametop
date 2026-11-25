@@ -35,6 +35,12 @@ int main() {
     check("down: 128 to 8192, even", downs);
     check("an Open at a width that isn't a step is refused, and says why", opened(1366, 768) == 'r' && opened(854, 480) == 'r' && opened(0, 0) == 'r');
     check("...before the device is asked anything; one at a step goes on to it", opened(1280, 720) == 'd' && opened(1408, 792) == 'd');
+    // NV12's layout, as the 0.5.10 driver sizes it (v4l2-ctl --set-fmt-video-out, 2026-11-25)
+    check("an NV12 picture's bytes are the driver's",
+          irisenc::Nv12Size(640, 360) == 368640 && irisenc::Nv12Size(1280, 720) == 1413120 && irisenc::Nv12Size(1920, 1200) == 3502080 &&
+              irisenc::Nv12Size(640, 1136) == 1105920);
+    check("...its Cb,Cr rows after Y rows to a step of 32", irisenc::Nv12Chroma(640, 360) == 640 * 384 && irisenc::Nv12Chroma(1920, 800) == 1920 * 800);
+    check("a device that lists no formats is asked for RGBA", irisenc::Picks("/dev/null") == irisenc::Format::kRgba);
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;
 }

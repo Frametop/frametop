@@ -29,6 +29,23 @@ bool SetCtrl(int fd, uint32_t id, int32_t value) {
 
 }  // namespace
 
+Format Picks(const char *device) {
+    const int fd = open(device, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) return Format::kRgba;   // Open says why
+    Format format = Format::kRgba;
+    v4l2_fmtdesc d = {};
+    d.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+    for (; Xioctl(fd, VIDIOC_ENUM_FMT, &d) == 0; ++d.index) {
+        if (d.pixelformat == V4L2_PIX_FMT_NV12) format = Format::kNv12;
+        if (d.pixelformat == V4L2_PIX_FMT_RGBA32) {
+            format = Format::kRgba;
+            break;
+        }
+    }
+    close(fd);
+    return format;
+}
+
 bool Encoder::Fail(const char *what) {
     err_ = std::string(what) + ": " + strerror(errno);
     return false;
@@ -65,15 +82,23 @@ bool Encoder::Open(const Config &cfg, std::string &err) {
     of.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
     of.fmt.pix_mp.width = cfg.width;
     of.fmt.pix_mp.height = cfg.height;
-    of.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_RGBA32;
+    const bool nv12 = cfg.format == Format::kNv12;
+    const uint32_t fourcc = nv12 ? V4L2_PIX_FMT_NV12 : V4L2_PIX_FMT_RGBA32;
+    of.fmt.pix_mp.pixelformat = fourcc;
     of.fmt.pix_mp.num_planes = 1;
     if (Xioctl(fd_, VIDIOC_S_FMT, &of) < 0) return fail("S_FMT picture");
-    if (of.fmt.pix_mp.pixelformat != V4L2_PIX_FMT_RGBA32) {
+    if (of.fmt.pix_mp.pixelformat != fourcc) {
         errno = EINVAL;
-        return fail("the encoder doesn't take RGBA");
+        return fail(nv12 ? "the encoder doesn't take NV12" : "the encoder doesn't take RGBA");
     }
     stride_ = of.fmt.pix_mp.plane_fmt[0].bytesperline;
     frameSize_ = of.fmt.pix_mp.plane_fmt[0].sizeimage;
+    if (nv12) {
+        if (stride_ < cfg.width || frameSize_ < Nv12Size(stride_, cfg.height)) {
+            errno = EINVAL;
+            return fail("the encoder's NV12 layout isn't the one known");
+        }
+    }
 
     v4l2_streamparm parm = {};
     parm.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;

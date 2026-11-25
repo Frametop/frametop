@@ -29,7 +29,9 @@ public:
         uint32_t stride = 0;
         uint8_t *px = pictures.Map(into, stride);
         if (!px) return false;
-        testpattern::Draw(px, int(stride), pictures.width(), pictures.height(), frame_, was_[into]);
+        const PictureLayout &l = pictures.layout();
+        if (l.nv12) testpattern::DrawNv12(px, px + l.chroma / l.stride * stride, int(stride), l.width, l.height, frame_, was_[into]);
+        else testpattern::Draw(px, int(stride), l.width, l.height, frame_, was_[into]);
         pictures.Unmap(into);
         was_[into] = frame_;
         frame_ = (frame_ + 1) & ((1 << testpattern::kBits) - 1);

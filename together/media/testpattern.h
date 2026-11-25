@@ -25,15 +25,10 @@ inline int BarAt(int height, int width, int frame) {
     return top + frame * 6 % travel;
 }
 
-// Draws picture `frame` into RGBA rows of `stride` bytes. `was` is the picture these rows last
-// held (only what changed since is drawn), or -1 when they hold anything.
-inline void Draw(uint8_t *px, int stride, int width, int height, int frame, int was) {
-    const auto fill = [&](int x0, int y0, int x1, int y1, uint32_t c) {
-        for (int y = std::max(0, y0); y < std::min(height, y1); ++y) {
-            uint32_t *row = reinterpret_cast<uint32_t *>(px + size_t(y) * size_t(stride));
-            std::fill(row + std::max(0, x0), row + std::min(width, x1), c);
-        }
-    };
+// Draws picture `frame`, each rectangle of it with fill(x0, y0, x1, y1, colour). `was` is the
+// picture that is there now (only what changed since is drawn), or -1 when it is anything.
+template <class Fill>
+void Paint(int width, int height, int frame, int was, Fill fill) {
     if (was < 0) fill(0, 0, width, height, kGrey);
     else fill(0, BarAt(height, width, was), width, BarAt(height, width, was) + kBarHeight, kGrey);
     fill(0, BarAt(height, width, frame), width, BarAt(height, width, frame) + kBarHeight, kBar);
@@ -42,6 +37,36 @@ inline void Draw(uint8_t *px, int stride, int width, int height, int frame, int 
         const bool light = i == 0 || (i >= 2 && (frame >> (i - 2) & 1));
         fill(i * side, 0, (i + 1) * side, side, light ? kLight : kDark);
     }
+}
+
+// Into RGBA rows of `stride` bytes.
+inline void Draw(uint8_t *px, int stride, int width, int height, int frame, int was) {
+    Paint(width, height, frame, was, [&](int x0, int y0, int x1, int y1, uint32_t c) {
+        for (int y = std::max(0, y0); y < std::min(height, y1); ++y) {
+            uint32_t *row = reinterpret_cast<uint32_t *>(px + size_t(y) * size_t(stride));
+            std::fill(row + std::max(0, x0), row + std::min(width, x1), c);
+        }
+    });
+}
+
+// Into an NV12 picture (BT.709, full range, as blit.h's): Y rows at `luma`, Cb,Cr rows at
+// `chroma`, `stride` bytes each. A Cb,Cr pixel is the colour of its first pixel.
+inline void DrawNv12(uint8_t *luma, uint8_t *chroma, int stride, int width, int height, int frame, int was) {
+    const auto byte = [](double v) { return uint8_t(std::clamp(v + 0.5, 0.0, 255.0)); };
+    Paint(width, height, frame, was, [&](int x0, int y0, int x1, int y1, uint32_t c) {
+        const double r = c & 0xff, g = c >> 8 & 0xff, b = c >> 16 & 0xff;
+        const double y709 = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        x0 = std::max(0, x0), y0 = std::max(0, y0), x1 = std::min(width, x1), y1 = std::min(height, y1);
+        for (int y = y0; y < y1; ++y) {
+            uint8_t *row = luma + size_t(y) * size_t(stride);
+            std::fill(row + x0, row + std::max(x0, x1), byte(y709));
+        }
+        const uint8_t cb = byte((b - y709) / 1.8556 + 128), cr = byte((r - y709) / 1.5748 + 128);
+        for (int y = (y0 + 1) / 2; y < (y1 + 1) / 2; ++y) {
+            uint8_t *row = chroma + size_t(y) * size_t(stride);
+            for (int x = (x0 + 1) / 2; x < (x1 + 1) / 2; ++x) row[2 * x] = cb, row[2 * x + 1] = cr;
+        }
+    });
 }
 
 // The number of the picture in these RGBA rows (at least Square(width) of them), or -1 when its

@@ -128,6 +128,9 @@ def items(root, env=os.environ):
           "together/flow/video.cpp", *SESSION, flags=f"{ASAN} -fno-sanitize-recover=undefined"),
         # the sizes the Frame's encoder is given (one it isn't resets the Frame): against /dev/null
         P("together-encsize-test", "together/tests/encsize-test.cpp", "together/media/irisenc.cpp", flags=ASAN),
+        # a shared screen's picture into the encoder's, RGBA or NV12 (on the Frame's GPU; skipped elsewhere)
+        P("together-blit-test", "together/tests/blit-test.cpp", "together/media/blit.cpp", "together/media/pictures.cpp",
+          "together/media/irisenc.cpp", flags=CXX2, pkgs="gbm libdrm egl glesv2"),
         # control of shared panels: the rules by themselves, then several Frames' sessions against each other
         P("together-controlrules-test", "together/tests/controlrules-test.cpp", flags=ASAN),
         # where the wearer looks on its way out: shared only when they say so, and the pointer that keeps quiet
@@ -172,6 +175,7 @@ def items(root, env=os.environ):
         single("stream/test/clipboard-test.cpp", CXX, cflags="-Istream"),
         single("stream/test/audio-clock-test.cpp", CXX),
         single("stream/test/kwin-frame-test.cpp", CXX, cflags="-Istream", pkgs="libcrypto"),
+        single("stream/test/visible-test.cpp", CXX, cflags="-Istream"),
         # ft-appless's macOS High Performance Screen Sharing client: SRP, its crypto and a loopback session
         single("stream/test/apple-hp-test.cpp", CXX2, cflags="-Istream", pkgs="openssl zlib", libs="-lpthread"),
         # ft-clip, the shared clipboard's desktop side, against a wlroots data-control seat of the test's own

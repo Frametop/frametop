@@ -4,6 +4,8 @@
 // translation unit. It began in the spikes (S1).
 #pragma once
 
+#include "visible.h"
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -253,25 +255,31 @@ struct Decoder {
         return false;
     }
 
+    // The part of its pictures the decoder says is seen, or nothing.
+    VisibleRect Crop() const {
+        v4l2_selection sel{};
+        sel.type = V4L2_BUF_TYPE_VIDEO_CAPTURE, sel.target = V4L2_SEL_TGT_COMPOSE;
+        if (Xioctl(fd, VIDIOC_G_SELECTION, &sel) < 0) {
+            sel.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            if (Xioctl(fd, VIDIOC_G_SELECTION, &sel) < 0) return {};
+        }
+        return {sel.r.left, sel.r.top, sel.r.width, sel.r.height};
+    }
+
     bool SetUpCapture() {
         v4l2_format f{};
         f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         if (Xioctl(fd, VIDIOC_G_FMT, &f) < 0) return std::perror("G_FMT capture"), false;
+        const VisibleRect before = Crop();
         f.fmt.pix_mp.pixelformat = fourcc;
         if (Xioctl(fd, VIDIOC_S_FMT, &f) < 0) return std::perror("S_FMT capture"), false;
         if (Xioctl(fd, VIDIOC_G_FMT, &f) < 0) return std::perror("G_FMT capture"), false;
         const auto &pm = f.fmt.pix_mp;
         planes = pm.num_planes;
-        width = pm.width, height = pm.height;
-        v4l2_selection sel{};
-        sel.type = V4L2_BUF_TYPE_VIDEO_CAPTURE, sel.target = V4L2_SEL_TGT_COMPOSE;
-        if (Xioctl(fd, VIDIOC_G_SELECTION, &sel) < 0) {
-            sel.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-            if (Xioctl(fd, VIDIOC_G_SELECTION, &sel) < 0) sel.r = {0, 0, pm.width, pm.height};
-        }
-        width = sel.r.width, height = sel.r.height;
+        const VisibleRect seen = Visible(before, Crop(), pm.width, pm.height);
+        width = seen.width, height = seen.height;
         std::printf("decoder: capture %s, coded %ux%u, visible %ux%u at %d,%d, %u plane(s):", Fourcc(pm.pixelformat).c_str(),
-                    pm.width, pm.height, width, height, sel.r.left, sel.r.top, planes);
+                    pm.width, pm.height, width, height, seen.left, seen.top, planes);
         for (uint32_t i = 0; i < planes; ++i)
             std::printf(" [%u bytes/line, %u bytes]", pm.plane_fmt[i].bytesperline, pm.plane_fmt[i].sizeimage);
         const Layout l = PlaneLayout(fourcc, pm.width, pm.height);

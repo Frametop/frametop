@@ -29,12 +29,31 @@ void main() {
 })";
 
 // A screen is opaque whatever its buffer's alpha says (KWin's are XRGB or ARGB).
-const char *kFragment = R"(
+const char *kRgba = R"(
 #extension GL_OES_EGL_image_external : require
 precision highp float;
 uniform samplerExternalOES tex;
 varying vec2 uv;
 void main() { gl_FragColor = vec4(texture2D(tex, uv).rgb, 1.0); })";
+
+// BT.709, full range. A Cb,Cr pixel's middle is the corner its four pixels share, so the
+// sampler gives their mean.
+const char *kY = R"(
+#extension GL_OES_EGL_image_external : require
+precision highp float;
+uniform samplerExternalOES tex;
+varying vec2 uv;
+void main() { gl_FragColor = vec4(dot(texture2D(tex, uv).rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0, 0.0, 1.0); })";
+const char *kCbCr = R"(
+#extension GL_OES_EGL_image_external : require
+precision highp float;
+uniform samplerExternalOES tex;
+varying vec2 uv;
+void main() {
+    vec3 c = texture2D(tex, uv).rgb;
+    float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    gl_FragColor = vec4(vec2((c.b - y) / 1.8556, (c.r - y) / 1.5748) + 128.0 / 255.0, 0.0, 1.0);
+})";
 
 GLuint Shader(GLenum type, const char *src) {
     const GLuint s = glCreateShader(type);
@@ -90,35 +109,46 @@ bool Blit::Open(const Pictures &pictures, std::string &err) {
     if (ctx == EGL_NO_CONTEXT || !eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) return err = "no surfaceless GLES context", Close(), false;
     ctx_ = ctx;
 
-    const GLuint vs = Shader(GL_VERTEX_SHADER, kVertex), fs = Shader(GL_FRAGMENT_SHADER, kFragment);
-    program_ = glCreateProgram();
-    glAttachShader(program_, vs), glAttachShader(program_, fs);
-    glBindAttribLocation(program_, 0, "pos");
-    glLinkProgram(program_);
-    GLint ok = 0;
-    glGetProgramiv(program_, GL_LINK_STATUS, &ok);
-    glDeleteShader(vs), glDeleteShader(fs);
-    if (!vs || !fs || !ok) return err = "the blit's shader doesn't build", Close(), false;
     const float quad[] = {0, 0, 1, 0, 0, 1, 1, 1};
     glGenBuffers(1, &quad_);
     glBindBuffer(GL_ARRAY_BUFFER, quad_);
     glBufferData(GL_ARRAY_BUFFER, sizeof quad, quad, GL_STATIC_DRAW);
 
-    width_ = pictures.width(), height_ = pictures.height();
+    const PictureLayout &l = pictures.layout();
+    planeCount_ = l.nv12 ? 2 : 1;
+    if (!l.nv12 ? !OpenPlane(planes_[0], pictures, kRgba, DRM_FORMAT_ABGR8888, 1, 0, err)
+                : !OpenPlane(planes_[0], pictures, kY, DRM_FORMAT_R8, 1, 0, err) ||
+                      !OpenPlane(planes_[1], pictures, kCbCr, DRM_FORMAT_GR88, 2, l.chroma, err))
+        return Close(), false;
+    return true;
+}
+
+// `shrink`: how many of the picture's pixels, each way, one of the plane's stands for.
+bool Blit::OpenPlane(Plane &plane, const Pictures &pictures, const char *fragment, uint32_t format, int shrink, size_t offset, std::string &err) {
+    const GLuint vs = Shader(GL_VERTEX_SHADER, kVertex), fs = Shader(GL_FRAGMENT_SHADER, fragment);
+    plane.program = glCreateProgram();
+    glAttachShader(plane.program, vs), glAttachShader(plane.program, fs);
+    glBindAttribLocation(plane.program, 0, "pos");
+    glLinkProgram(plane.program);
+    GLint ok = 0;
+    glGetProgramiv(plane.program, GL_LINK_STATUS, &ok);
+    glDeleteShader(vs), glDeleteShader(fs);
+    if (!vs || !fs || !ok) return err = "the blit's shader doesn't build", false;
+    plane.width = pictures.width() / shrink, plane.height = pictures.height() / shrink;
     for (int i = 0; i < Pictures::kCount; ++i) {
         Dmabuf d;
-        d.width = uint32_t(width_), d.height = uint32_t(height_), d.format = DRM_FORMAT_ABGR8888, d.modifier = DRM_FORMAT_MOD_LINEAR;
-        d.planes = 1, d.fd[0] = pictures.fd(i), d.stride[0] = pictures.stride();
-        EGLImageKHR image = Image(dpy, d);
-        if (image == EGL_NO_IMAGE_KHR) return err = "EGL can't import the encoder's pictures", Close(), false;
-        target_[i] = image;
-        glGenRenderbuffers(1, &rb_[i]);
-        glBindRenderbuffer(GL_RENDERBUFFER, rb_[i]);
+        d.width = uint32_t(plane.width), d.height = uint32_t(plane.height), d.format = format, d.modifier = DRM_FORMAT_MOD_LINEAR;
+        d.planes = 1, d.fd[0] = pictures.fd(i), d.offset[0] = uint32_t(offset), d.stride[0] = pictures.layout().stride;
+        EGLImageKHR image = Image(dpy_, d);
+        if (image == EGL_NO_IMAGE_KHR) return err = "EGL can't import the encoder's pictures", false;
+        plane.image[i] = image;
+        glGenRenderbuffers(1, &plane.rb[i]);
+        glBindRenderbuffer(GL_RENDERBUFFER, plane.rb[i]);
         pImageTargetRenderbuffer(GL_RENDERBUFFER, image);
-        glGenFramebuffers(1, &fbo_[i]);
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo_[i]);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb_[i]);
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return err = "the GPU can't draw into the encoder's pictures", Close(), false;
+        glGenFramebuffers(1, &plane.fbo[i]);
+        glBindFramebuffer(GL_FRAMEBUFFER, plane.fbo[i]);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, plane.rb[i]);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return err = "the GPU can't draw into the encoder's pictures", false;
     }
     return true;
 }
@@ -132,20 +162,22 @@ void Blit::Drop(From &f) {
 void Blit::Close() {
     if (ctx_) {
         for (auto &[id, f] : from_) Drop(f);
-        for (int i = 0; i < Pictures::kCount; ++i) {
-            if (fbo_[i]) glDeleteFramebuffers(1, &fbo_[i]);
-            if (rb_[i]) glDeleteRenderbuffers(1, &rb_[i]);
-            if (target_[i]) pDestroyImage(dpy_, target_[i]);
-            fbo_[i] = rb_[i] = 0, target_[i] = nullptr;
+        for (Plane &p : planes_) {
+            for (int i = 0; i < Pictures::kCount; ++i) {
+                if (p.fbo[i]) glDeleteFramebuffers(1, &p.fbo[i]);
+                if (p.rb[i]) glDeleteRenderbuffers(1, &p.rb[i]);
+                if (p.image[i]) pDestroyImage(dpy_, p.image[i]);
+            }
+            if (p.program) glDeleteProgram(p.program);
+            p = Plane{};
         }
         if (quad_) glDeleteBuffers(1, &quad_);
-        if (program_) glDeleteProgram(program_);
         eglMakeCurrent(dpy_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         eglDestroyContext(dpy_, ctx_);
     }
     from_.clear();
     if (dpy_) eglTerminate(dpy_);
-    dpy_ = ctx_ = nullptr, program_ = quad_ = 0, width_ = height_ = 0;
+    dpy_ = ctx_ = nullptr, quad_ = 0, planeCount_ = 0;
 }
 
 bool Blit::Import(uint32_t id, const Dmabuf &from, std::string &err) {
@@ -183,16 +215,19 @@ void Blit::Forget(uint32_t id) {
 bool Blit::Draw(uint32_t id, int into) {
     const auto it = from_.find(id);
     if (!ctx_ || it == from_.end() || into < 0 || into >= Pictures::kCount) return false;
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo_[into]);
-    glViewport(0, 0, width_, height_);
-    glUseProgram(program_);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, it->second.texture);
-    glUniform1i(glGetUniformLocation(program_, "tex"), 0);
     glBindBuffer(GL_ARRAY_BUFFER, quad_);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    for (int k = 0; k < planeCount_; ++k) {
+        const Plane &p = planes_[k];
+        glBindFramebuffer(GL_FRAMEBUFFER, p.fbo[into]);
+        glViewport(0, 0, p.width, p.height);
+        glUseProgram(p.program);
+        glUniform1i(glGetUniformLocation(p.program, "tex"), 0);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
     glFinish();
     return glGetError() == GL_NO_ERROR;
 }

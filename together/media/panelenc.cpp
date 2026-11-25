@@ -19,18 +19,14 @@ bool PanelEncoder::Open(int width, int height, int fps, int bitrate, std::string
     irisenc::Config cfg;
     cfg.width = width, cfg.height = height, cfg.fps = fps, cfg.bitrate = bitrate;
     cfg.hevc = true, cfg.dmabuf = true;
+    cfg.format = irisenc::Picks(cfg.device);
     if (!enc_.Open(cfg, err)) return Close(), false;
     // The encoder reads rows past the picture's last, to its own step down (1080 rows as 1088):
-    // the buffers are made that long.
-    const size_t rows = enc_.stride() > 0 ? (enc_.frameSize() + size_t(enc_.stride()) - 1) / size_t(enc_.stride()) : 0;
-    if (rows > 8192 + 64) return err = "the encoder's layout makes no sense", Close(), false;
-    if (!pictures_.Open(width, height, int(rows), err)) return Close(), false;
-    if (uint32_t(enc_.stride()) != pictures_.stride() || pictures_.size() < enc_.frameSize()) {
-        err = "the encoder's layout isn't a GBM buffer's at " + std::to_string(width) + "x" + std::to_string(height) + " (stride " +
-              std::to_string(enc_.stride()) + " and " + std::to_string(pictures_.stride()) + ", size " + std::to_string(enc_.frameSize()) + " and " +
-              std::to_string(pictures_.size()) + ")";
-        return Close(), false;
-    }
+    // its frameSize has them, so the buffers are made that long.
+    PictureLayout layout;
+    layout.width = width, layout.height = height, layout.nv12 = cfg.format == irisenc::Format::kNv12;
+    layout.stride = uint32_t(enc_.stride()), layout.size = enc_.frameSize(), layout.chroma = enc_.chroma();
+    if (!pictures_.Open(layout, err)) return Close(), false;
     bitrate_ = bitrate;
     return true;
 }

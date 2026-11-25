@@ -1,7 +1,9 @@
 // The GPU pass of a shared panel (docs/together.md): a screen's buffer, as KWin drew it and in
 // whatever layout the GPU keeps it, drawn into one of the encoder's pictures (pictures.h) at the
-// stream's size. ft-screens hands the buffers over as DMA-BUFs; each is imported once and drawn
-// from every time the screen changes.
+// stream's size. An NV12 picture is drawn in two passes, its Y and its Cb,Cr, as BT.709 at full
+// range: what the RGBA encoder makes of RGBA, so a viewer converts both alike (ft-peerpanel).
+// ft-screens hands the buffers over as DMA-BUFs; each is imported once and drawn from every time
+// the screen changes.
 //
 // One GL context, made current on the thread that calls Open; every call after it is from that
 // thread. No encoder and no sockets here.
@@ -52,13 +54,21 @@ private:
         void *image = nullptr;   // EGLImageKHR
         unsigned texture = 0;
     };
+    // One of a picture's planes, as the GPU draws into it: all of an RGBA picture, or an NV12
+    // picture's Y or Cb,Cr.
+    struct Plane {
+        unsigned program = 0;
+        int width = 0, height = 0;
+        unsigned fbo[Pictures::kCount] = {}, rb[Pictures::kCount] = {};
+        void *image[Pictures::kCount] = {};   // EGLImageKHR
+    };
+    bool OpenPlane(Plane &plane, const Pictures &pictures, const char *fragment, uint32_t format, int shrink, size_t offset, std::string &err);
     void Drop(From &f);
 
     void *dpy_ = nullptr, *ctx_ = nullptr;   // EGLDisplay, EGLContext
-    unsigned program_ = 0, quad_ = 0;
-    unsigned fbo_[Pictures::kCount] = {}, rb_[Pictures::kCount] = {};
-    void *target_[Pictures::kCount] = {};
-    int width_ = 0, height_ = 0;
+    unsigned quad_ = 0;
+    Plane planes_[2];
+    int planeCount_ = 0;
     std::map<uint32_t, From> from_;
 };
 

@@ -57,8 +57,9 @@
 // (subtract or none: tools/check_color.py tells both), HANDS_MISREAD_GUARD (0 or 1: the
 // tracker's guards for fine-tuned landmark models, Tracker::set_misread_guard), HANDS_MODEL (latest,
 // stock, or a version's name: models/catalog.py), HANDS_MODELS (as --models: a folder with palm.ncnn.*
-// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud, found at /run/host/run/ft-npud from the container: landmarks
-// from the NPU student, the CPU model whenever the daemon is missing or fails; track/npulandmarks.h), HANDS_NPU_DET
+// and hand.ncnn.*, used instead of HANDS_MODEL), HANDS_NPU (as --npu: ft-npud's folder, /run/ft-npud unless set, found at /run/host/run/ft-npud from the container: landmarks
+// from the NPU student, the CPU model whenever the daemon is missing or fails; 0, off or cpu: the CPU models only; track/npulandmarks.h,
+// npu_dir_setting in track/npuserver.h; Frametop Settings' Hands page switches it, hands/handsnpu.py), HANDS_NPU_DET
 // (1, as --npu-det: the side cameras' palm search on the NPU detector too; track/npudetector.h), HANDS_REACQUIRE (seconds
 // the palm search aims at a lost hand, 0 off: Tracker::set_reacquire), HANDS_PAIR_SIDES (0 or 1: two
 // hands are one left and one right, Tracker::set_pair_sides), HANDS_PINCH_DIP (0 or 1: pinches also
@@ -77,6 +78,7 @@
 #include "io.h"
 #include "npudetector.h"
 #include "npulandmarks.h"
+#include "npuserver.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -268,7 +270,7 @@ int main(int argc, char **argv) {
     std::vector<int> cpus = {5, 6, 7};
     if (const auto c = parse_cpus(setting("HANDS_CPUS").c_str()); !c.empty()) cpus = c;
     if (const std::string m = setting("HANDS_MODELS"); !m.empty()) models = m;
-    std::string npu_dir = setting("HANDS_NPU");
+    std::string npu_dir = npu_dir_setting(setting("HANDS_NPU"));   // (the NPU unless switched off: the CPU where ft-npud isn't)
     bool npu_det = setting("HANDS_NPU_DET") == "1";
     // Which side camera is which (see the top): auto, 0 or 1, and where that came from
     std::string sides_mode = setting("HANDS_SWAP_SIDES"), sides_from = "config";
@@ -331,7 +333,7 @@ int main(int argc, char **argv) {
         else if (a == "--threads" && more) threads = std::max(1, std::atoi(argv[++i]));
         else if (a == "--status" && more) status = std::atof(argv[++i]);
         else if (a == "--models" && more) models = argv[++i];
-        else if (a == "--npu" && more) npu_dir = argv[++i];
+        else if (a == "--npu" && more) npu_dir = npu_dir_setting(argv[++i]);
         else if (a == "--npu-det") npu_det = true;
         else if (a == "--nice" && more) niceness = std::atoi(argv[++i]);
         else if (a == "--int8") int8 = true;
@@ -378,7 +380,8 @@ int main(int argc, char **argv) {
         else {
             std::printf("usage: %s [--seconds N] [--threads N] [--int8] [--status S] [--models DIR] [--nice N] [--no-publish]\n"
                         "          [--no-gestures] (hands for the cutouts only: no pinches or grips)\n"
-                        "          [--npu DIR] (landmarks from the NPU student through ft-npud in DIR, /run/ft-npud)\n"
+                        "          [--npu DIR] (landmarks from the NPU student through ft-npud in DIR, /run/ft-npud unless HANDS_NPU\n"
+                        "                       says another; 0: the CPU models only)\n"
                         "          [--npu-det] (with --npu: the side cameras' palm search on the NPU detector too)\n"
                         "          [--record DIR] [--record-for S] [--record-hz N] [--record-only] [--cpus 5,6,7]\n"
                         "          [--sides auto|0|1] (auto: tell from the hands which side camera is which; 1: exchange them,\n"

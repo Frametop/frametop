@@ -71,6 +71,11 @@ int main() {
         std::printf("npuserver: container checks ran\n");
     }
 
+    // HANDS_NPU: the daemon's own folder unless it's switched off or names another
+    CHECK(npu_dir_setting("") == "/run/ft-npud" && npu_dir_setting("auto") == "/run/ft-npud" && npu_dir_setting("1") == "/run/ft-npud");
+    CHECK(npu_dir_setting("0").empty() && npu_dir_setting("off").empty() && npu_dir_setting("cpu").empty());
+    CHECK(npu_dir_setting("/run/other") == "/run/other");
+
     // overflowuid reads as a number
     CHECK(npu_overflow_uid() > 0);
 

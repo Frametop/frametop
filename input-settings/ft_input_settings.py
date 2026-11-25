@@ -41,7 +41,9 @@ to the input relay over its control socket (@frametop_relay):
     Frametop's panels (HANDS_NEAR, sent live to ft-screens: "handinput on|off"), and the hand
     models (HANDS_MODEL, from hands/models.json: latest, a version, or stock MediaPipe), the same way.
     Its 60 fps switch (hands/handsrate.py on the host) puts the tracking cameras in their no-dark
-    mode, which stops the controllers, and has ft-hands track every frame.
+    mode, which stops the controllers, and has ft-hands track every frame. Its Runs on choice
+    (hands/handsnpu.py on the host, HANDS_NPU) is the NPU, with the CPU where its service isn't,
+    or the CPU only.
   - Bluetooth: paired devices, and re-applying the Bluetooth LE fixes after pairing.
   - A warning on every page when SteamVR won't load the ft_pointer driver (blocked after a
     crash, disabled, or SteamVR in safe mode) or hasn't loaded it (@ft_pointer doesn't answer
@@ -100,6 +102,8 @@ import handsmode  # noqa: E402
 HANDSMODE = os.path.join(REPO, "hands", "handsmode.py")
 import handsrate  # noqa: E402  (the 60 fps switch: the cameras' mode and ft-hands' rate)
 HANDSRATE = os.path.join(REPO, "hands", "handsrate.py")
+import handsnpu  # noqa: E402  (the NPU or CPU choice for the landmark model)
+HANDSNPU = os.path.join(REPO, "hands", "handsnpu.py")
 # The 60 fps switch stays busy this long after a switch: each one stops XRService, and SteamVR
 # gives up on an XRService that stops more than five times in a minute.
 RATE_COOLDOWN = 15.0
@@ -576,6 +580,7 @@ class Backend(QObject):
         self._hands_lock = threading.Lock()  # one handsmode.py at a time
         self._rate_want = None  # the 60 fps switch's new state while handsrate.py sets it
         self._rate_busy = False  # from a switch until RATE_COOLDOWN after it
+        self._npu_want = None  # the NPU or CPU choice while handsnpu.py sets it
         self._hands_refreshing = False
         self._model_busy = {"hands": "", "eyes": ""}  # what a model download is doing, per kind
         self._model_views = {}
@@ -2197,6 +2202,36 @@ class Backend(QObject):
                 time.sleep(RATE_COOLDOWN)
             finally:   # whatever went wrong, the switch isn't left held
                 self._rate_want, self._rate_busy = None, False
+                self.handsChanged.emit()
+        threading.Thread(target=job, daemon=True).start()
+
+    # --- the NPU or the CPU (hands/handsnpu.py) ---
+    @Property("QVariantMap", notify=handsChanged)
+    def handsNpu(self):
+        """Where the landmark model runs: "npu" (the choice; while it's being set, what was asked),
+        "available" (the NPU service is there), "busy" (being set) and "note" (why the NPU isn't
+        what runs)."""
+        st = handsnpu.state(read_conf())
+        if self._npu_want is not None:
+            st["npu"] = self._npu_want
+        return dict(st, busy=self._npu_want is not None)
+
+    @Slot(bool)
+    def setHandsNpu(self, npu):
+        """handsnpu.py npu|cpu --now on the host (it restarts ft-hands there), off the UI thread.
+        One at a time."""
+        if self._npu_want is not None:
+            return
+        self._npu_want = bool(npu)
+        self.handsChanged.emit()
+
+        def job():
+            try:
+                r = host("python3", HANDSNPU, "npu" if npu else "cpu", "--now")
+                said = (r.stdout.strip() or r.stderr.strip() or "no answer")[:400]
+                self.message.emit(said, r.returncode != 0)
+            finally:   # whatever went wrong, the choice shows what the file says again
+                self._npu_want = None
                 self.handsChanged.emit()
         threading.Thread(target=job, daemon=True).start()
 

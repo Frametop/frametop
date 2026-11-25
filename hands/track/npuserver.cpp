@@ -13,6 +13,12 @@ bool exists(const std::string &path) {
 
 }  // namespace
 
+std::string npu_dir_setting(const std::string &value) {
+    if (value.empty() || value == "auto" || value == "1") return kNpuDefaultDir;
+    if (value == "0" || value == "off" || value == "cpu") return "";
+    return value;
+}
+
 std::string npu_server_dir(const std::string &dir) {
     // the heads file: the daemon writes it next to its socket, and the session reads it first
     const std::string heads = "/ft-npud.heads";

@@ -1887,6 +1887,7 @@ Item {
             header: DriverWarning {}
             property var st: backend.handsStatus
             property var rate: backend.handsRate   // read once a change: it reads two files
+            property var npu: backend.handsNpu
             // The 60 fps switch turns on only where hand tracking runs; on, it can always be turned off.
             readonly property bool rateUsable: !!st.installed && backend.handsMode !== "off"
             readonly property var range: backend.handsMarginRange
@@ -1962,6 +1963,35 @@ Item {
                             Controls.ToolTip.visible: hovered
                             onClicked: { marginSlider.value = hpage.range.default; backend.setHandsMargin(hpage.range.default) }
                         }
+                    }
+
+                    // Where the landmark model runs (hands/handsnpu.py, HANDS_NPU): the NPU through its
+                    // service, the CPU where that isn't there, or the CPU only.
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Processor" }
+                    Controls.ComboBox {
+                        id: handsNpuBox
+                        objectName: "handsNpuBox"
+                        Kirigami.FormData.label: "Runs on:"
+                        // row 0 is the NPU
+                        model: ["NPU (recommended)", "CPU only"]
+                        enabled: !hpage.npu.busy
+                        currentIndex: hpage.npu.npu ? 0 : 1
+                        onActivated: {
+                            backend.setHandsNpu(currentIndex === 0)
+                            currentIndex = Qt.binding(() => hpage.npu.npu ? 0 : 1)
+                        }
+                    }
+                    Controls.Label {
+                        objectName: "handsNpuNote"
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        text: hpage.npu.busy ? "Restarting hand tracking."
+                              : hpage.npu.note ? hpage.npu.note
+                              : hpage.npu.npu ? "The headset's NPU reads the finger positions, which leaves the CPU for SteamVR and your apps. The CPU takes over by itself if the NPU stops answering."
+                              : hpage.npu.available ? "The CPU reads the finger positions. The NPU is available on this headset."
+                              : "The CPU reads the finger positions."
                     }
 
                     // 60 tracked frames a second (hands/handsrate.py): the cameras' no-dark mode, which stops

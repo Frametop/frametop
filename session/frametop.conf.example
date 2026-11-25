@@ -100,6 +100,7 @@ HANDS_BRIGHT_OFF=25        # ... and back to the mono cameras under this
 HANDS_COLOR_LEFT=color_video0  # hand tracking: which colour camera is passthrough_left (hands/tools/check_color.py tells)
 HANDS_COLOR_CROP=subtract  # hand tracking: how the colour calibration's crop applies, subtract | none (check_color.py tells)
 #HANDS_MODEL=latest        # hand tracking: latest = the fine-tuned models we recommend, following new versions (hands/models/student) | stock = Google's MediaPipe models | a version's name (hands/models.json). Pick it on Frametop Settings' Hands page, which downloads it
+#HANDS_NPU=auto            # hand tracking's finger positions: auto (or unset) = on the headset's NPU through its service (ft-npud), and on the CPU by itself wherever that service isn't running or stops answering | 0 = the CPU only | a folder = the service's, if it isn't /run/ft-npud. Pick it on Frametop Settings' Hands page (Runs on), which restarts hand tracking
 #HANDS_MODELS=            # hand tracking: a folder of palm.ncnn.* and hand.ncnn.* to use instead of the fine-tuned models (hands/models/student; hands/models/ncnn has the stock ones)
 HANDS_MODELS_UPDATE=1      # hand tracking: 1 = when it starts, fetch newer fine-tuned models if GitHub's main (stable) or experimental branch pins them (hands/models.pin), without a new release | 0 = keep the ones it came with
 HANDS_MATTE=circle         # hand cutouts: circle = a round hole per hand | mesh = hand-shaped, from the skeleton | capsules = ft-hands' capsules (the old look)

@@ -124,6 +124,40 @@ class Page(unittest.TestCase):
         self.assertFalse(self.b.handsRate["busy"])
         self.assertEqual(len(ran), 1)
 
+    def test_npu_choice_shows_the_setting_and_runs_handsnpu(self):
+        # The NPU unless HANDS_NPU says the CPU; whether its service is there is handsnpu's to say
+        # (none in the test's folders). The choice runs handsnpu.py on the host with --now, shows
+        # what was asked while it runs, and says what handsnpu.py said.
+        self.addCleanup(setattr, fis.handsnpu, "ROOTS", fis.handsnpu.ROOTS)
+        fis.handsnpu.ROOTS = (os.path.join(HOME, "no-run"),)
+        st = self.b.handsNpu
+        self.assertEqual((st["npu"], st["available"], st["busy"]), (True, False, False))
+        self.assertIn("uses the CPU", st["note"])
+        fis.write_conf_value("HANDS_NPU", "0")
+        self.assertEqual((self.b.handsNpu["npu"], self.b.handsNpu["note"]), (False, ""))
+
+        class Ran:
+            returncode, stdout, stderr = 0, "Hand tracking uses the NPU when it's there.\n", ""
+        ran, said, seen = [], [], []
+
+        def host(*cmd, timeout=20):
+            ran.append(cmd)
+            seen.append(self.b.handsNpu)   # while it runs
+            return Ran()
+        old, fis.host = fis.host, host
+        self.addCleanup(setattr, fis, "host", old)
+        self.b.message.connect(lambda text, bad: said.append((text, bad)))
+        self.b.setHandsNpu(True)
+        for _ in range(200):
+            self.app.processEvents()
+            if said and not self.b.handsNpu["busy"]:
+                break
+            time.sleep(0.01)
+        self.assertEqual(ran, [("python3", fis.HANDSNPU, "npu", "--now")])
+        self.assertEqual((seen[0]["npu"], seen[0]["busy"]), (True, True))
+        self.assertEqual(said, [("Hand tracking uses the NPU when it's there.", False)])
+        self.assertFalse(self.b.handsNpu["npu"])   # what the file says again (the made-up host wrote nothing)
+
     def test_rate_switch_says_what_went_wrong(self):
         class Failed:
             returncode, stdout = 1, ""

@@ -19,12 +19,11 @@ bool PanelEncoder::Open(int width, int height, int fps, int bitrate, std::string
     irisenc::Config cfg;
     cfg.width = width, cfg.height = height, cfg.fps = fps, cfg.bitrate = bitrate;
     cfg.hevc = true, cfg.dmabuf = true;
-    cfg.format = irisenc::Picks(cfg.device);
     if (!enc_.Open(cfg, err)) return Close(), false;
     // The encoder reads rows past the picture's last, to its own step down (1080 rows as 1088):
     // its frameSize has them, so the buffers are made that long.
     PictureLayout layout;
-    layout.width = width, layout.height = height, layout.nv12 = cfg.format == irisenc::Format::kNv12;
+    layout.width = width, layout.height = height, layout.nv12 = enc_.format() == irisenc::Format::kNv12;
     layout.stride = uint32_t(enc_.stride()), layout.size = enc_.frameSize(), layout.chroma = enc_.chroma();
     if (!pictures_.Open(layout, err)) return Close(), false;
     bitrate_ = bitrate;

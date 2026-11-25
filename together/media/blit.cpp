@@ -36,8 +36,9 @@ uniform samplerExternalOES tex;
 varying vec2 uv;
 void main() { gl_FragColor = vec4(texture2D(tex, uv).rgb, 1.0); })";
 
-// BT.709, full range. A Cb,Cr pixel's middle is the corner its four pixels share, so the
-// sampler gives their mean.
+// BT.709, full range. A Cb,Cr pixel stands for four of the picture's: their middles are a quarter
+// of it from its own, which `step4` is, and the mean of the four is what it gets, whatever size the
+// screen's buffer is.
 const char *kY = R"(
 #extension GL_OES_EGL_image_external : require
 precision highp float;
@@ -48,9 +49,11 @@ const char *kCbCr = R"(
 #extension GL_OES_EGL_image_external : require
 precision highp float;
 uniform samplerExternalOES tex;
+uniform vec2 step4;
 varying vec2 uv;
 void main() {
-    vec3 c = texture2D(tex, uv).rgb;
+    vec2 m = vec2(-step4.x, step4.y);
+    vec3 c = (texture2D(tex, uv - step4).rgb + texture2D(tex, uv + step4).rgb + texture2D(tex, uv + m).rgb + texture2D(tex, uv - m).rgb) / 4.0;
     float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
     gl_FragColor = vec4(vec2((c.b - y) / 1.8556, (c.r - y) / 1.5748) + 128.0 / 255.0, 0.0, 1.0);
 })";
@@ -226,6 +229,7 @@ bool Blit::Draw(uint32_t id, int into) {
         glViewport(0, 0, p.width, p.height);
         glUseProgram(p.program);
         glUniform1i(glGetUniformLocation(p.program, "tex"), 0);
+        glUniform2f(glGetUniformLocation(p.program, "step4"), 0.25f / float(p.width), 0.25f / float(p.height));   // only the Cb,Cr's has it
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
     glFinish();

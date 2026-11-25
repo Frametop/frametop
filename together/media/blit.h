@@ -1,7 +1,7 @@
 // The GPU pass of a shared panel (docs/together.md): a screen's buffer, as KWin drew it and in
 // whatever layout the GPU keeps it, drawn into one of the encoder's pictures (pictures.h) at the
 // stream's size. An NV12 picture is drawn in two passes, its Y and its Cb,Cr, as BT.709 at full
-// range: what the RGBA encoder makes of RGBA, so a viewer converts both alike (ft-peerpanel).
+// range: what the encoder made of RGBA, so a viewer converts both alike (ft-peerpanel).
 // ft-screens hands the buffers over as DMA-BUFs; each is imported once and drawn from every time
 // the screen changes.
 //

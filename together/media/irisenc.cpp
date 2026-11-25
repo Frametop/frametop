@@ -1,6 +1,7 @@
 // See irisenc.h.
 #include "irisenc.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -29,21 +30,9 @@ bool SetCtrl(int fd, uint32_t id, int32_t value) {
 
 }  // namespace
 
-Format Picks(const char *device) {
-    const int fd = open(device, O_RDWR | O_NONBLOCK | O_CLOEXEC);
-    if (fd < 0) return Format::kRgba;   // Open says why
-    Format format = Format::kRgba;
-    v4l2_fmtdesc d = {};
-    d.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-    for (; Xioctl(fd, VIDIOC_ENUM_FMT, &d) == 0; ++d.index) {
-        if (d.pixelformat == V4L2_PIX_FMT_NV12) format = Format::kNv12;
-        if (d.pixelformat == V4L2_PIX_FMT_RGBA32) {
-            format = Format::kRgba;
-            break;
-        }
-    }
-    close(fd);
-    return format;
+Format Picks(const std::vector<uint32_t> &formats) {
+    const auto has = [&](uint32_t f) { return std::find(formats.begin(), formats.end(), f) != formats.end(); };
+    return !has(V4L2_PIX_FMT_RGBA32) && has(V4L2_PIX_FMT_NV12) ? Format::kNv12 : Format::kRgba;
 }
 
 bool Encoder::Fail(const char *what) {
@@ -82,7 +71,12 @@ bool Encoder::Open(const Config &cfg, std::string &err) {
     of.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
     of.fmt.pix_mp.width = cfg.width;
     of.fmt.pix_mp.height = cfg.height;
-    const bool nv12 = cfg.format == Format::kNv12;
+    std::vector<uint32_t> formats;
+    v4l2_fmtdesc listed = {};
+    listed.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+    for (; Xioctl(fd_, VIDIOC_ENUM_FMT, &listed) == 0; ++listed.index) formats.push_back(listed.pixelformat);
+    format_ = Picks(formats);
+    const bool nv12 = format_ == Format::kNv12;
     const uint32_t fourcc = nv12 ? V4L2_PIX_FMT_NV12 : V4L2_PIX_FMT_RGBA32;
     of.fmt.pix_mp.pixelformat = fourcc;
     of.fmt.pix_mp.num_planes = 1;
@@ -93,11 +87,11 @@ bool Encoder::Open(const Config &cfg, std::string &err) {
     }
     stride_ = of.fmt.pix_mp.plane_fmt[0].bytesperline;
     frameSize_ = of.fmt.pix_mp.plane_fmt[0].sizeimage;
-    if (nv12) {
-        if (stride_ < cfg.width || frameSize_ < Nv12Size(stride_, cfg.height)) {
-            errno = EINVAL;
-            return fail("the encoder's NV12 layout isn't the one known");
-        }
+    // Where the Cb,Cr rows begin isn't the driver's to say here, so anything but the size that
+    // layout takes (in whole pages) could mean they begin elsewhere.
+    if (nv12 && (stride_ < cfg.width || frameSize_ != (Nv12Size(stride_, cfg.height) + 4095) / 4096 * 4096)) {
+        errno = EINVAL;
+        return fail("the encoder's NV12 layout isn't the one known");
     }
 
     v4l2_streamparm parm = {};

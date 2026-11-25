@@ -7,8 +7,8 @@
 // DMA-BUFs the caller owns (QueueDmabuf), which costs no copy when the buffer's layout is the
 // encoder's (stride(), frameSize()).
 //
-// What a picture is made of is the driver's to say (Picks): RGBA up to SteamOS 0.5.9, NV12 from
-// 0.5.10 on, whose driver (qcom-iris, kernel 7.2) takes no RGBA.
+// What a picture is made of is the driver's to say (Picks, format()): RGBA up to SteamOS 0.5.9, NV12
+// from 0.5.10 on, whose driver (qcom-iris, kernel 7.2) takes no RGBA.
 //
 // No GPU, SteamVR or network calls here. One thread per Encoder.
 #pragma once
@@ -31,8 +31,8 @@ inline bool Takes(int width, int height) {
 }
 
 enum class Format { kRgba, kNv12 };
-// What the encoder at `device` is given: RGBA when its driver takes it, or else NV12.
-Format Picks(const char *device);
+// What an encoder that takes these (V4L2 fourccs) is given: RGBA when it's one, or else NV12.
+Format Picks(const std::vector<uint32_t> &formats);
 // Where an NV12 picture's Cb,Cr rows begin in the encoder's buffer (its Y rows are followed by
 // as many more as fill a step of 32), and the bytes the whole takes.
 inline size_t Nv12Chroma(int stride, int height) { return size_t(stride) * size_t((height + 31) / 32 * 32); }
@@ -44,7 +44,6 @@ struct Config {
     int bitrate = 3000000;       // bits a second
     int keyframeEvery = 0;       // frames between keyframes; 0: only when asked (ForceKey)
     bool hevc = true;            // false: H.264
-    Format format = Format::kRgba;
     bool dmabuf = false;         // pictures come as DMA-BUFs (QueueDmabuf), not copies
     const char *device = "/dev/video-enc0";
 };
@@ -73,11 +72,12 @@ class Encoder {
     // Readable (POLLIN) when an encoded picture waits, writable (POLLOUT) when a picture slot is
     // free again.
     int fd() const { return fd_; }
-    // A picture's layout in the encoder's buffers: bytes a row, and bytes in all.
+    // What a picture is made of, and its layout in the encoder's buffers: bytes a row, and bytes in all.
+    Format format() const { return format_; }
     int stride() const { return stride_; }
     size_t frameSize() const { return frameSize_; }
     // NV12: where its Cb,Cr rows begin (as many bytes a row as the Y rows).
-    size_t chroma() const { return cfg_.format == Format::kNv12 ? Nv12Chroma(stride_, cfg_.height) : 0; }
+    size_t chroma() const { return format_ == Format::kNv12 ? Nv12Chroma(stride_, cfg_.height) : 0; }
 
     // Copy mode: a free picture buffer to fill (stride() bytes a row), or nullptr when
     // every one is with the encoder. Then Queue it.
@@ -109,6 +109,7 @@ class Encoder {
 
     int fd_ = -1;
     Config cfg_;
+    Format format_ = Format::kRgba;
     int stride_ = 0;
     size_t frameSize_ = 0;
     std::vector<Buf> in_, out_;

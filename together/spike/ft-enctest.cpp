@@ -11,6 +11,8 @@
 // and asks for a keyframe halfway, to show both controls work on a running session. --out writes
 // session 0's stream (Annex B) to FILE.
 //
+// RGBA only: the encoder of SteamOS 0.5.10 takes none, so it ends there with "the encoder takes no RGBA".
+//
 // For each session: pictures in and out, bytes, the bitrate it made, keyframes, and the time from
 // queueing a picture to holding its encoded unit. Then this process's CPU use over the run, and
 // the codec's and the hottest thermal zone before and after. Build: together/build.sh --spikes; run in the dev
@@ -101,6 +103,10 @@ void Session(const Args &a, int index, Result &r, const std::atomic<bool> &stop)
     cfg.dmabuf = a.dmabuf;
     irisenc::Encoder enc;
     if (!enc.Open(cfg, r.err)) return;
+    if (enc.format() != irisenc::Format::kRgba) {
+        r.err = "the encoder takes no RGBA";
+        return;
+    }
     r.opened = true;
     r.encStride = enc.stride();
     r.encSize = enc.frameSize();

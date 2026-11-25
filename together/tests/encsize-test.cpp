@@ -3,6 +3,8 @@
 // the test says the same on a machine with the encoder and on one without.
 #include "../media/irisenc.h"
 
+#include <linux/videodev2.h>
+
 #include <cstdio>
 
 static int failed = 0;
@@ -40,7 +42,12 @@ int main() {
           irisenc::Nv12Size(640, 360) == 368640 && irisenc::Nv12Size(1280, 720) == 1413120 && irisenc::Nv12Size(1920, 1200) == 3502080 &&
               irisenc::Nv12Size(640, 1136) == 1105920);
     check("...its Cb,Cr rows after Y rows to a step of 32", irisenc::Nv12Chroma(640, 360) == 640 * 384 && irisenc::Nv12Chroma(1920, 800) == 1920 * 800);
-    check("a device that lists no formats is asked for RGBA", irisenc::Picks("/dev/null") == irisenc::Format::kRgba);
+    using irisenc::Format;
+    const uint32_t ab24 = V4L2_PIX_FMT_RGBA32, nv12 = V4L2_PIX_FMT_NV12, q08c = v4l2_fourcc('Q', '0', '8', 'C');
+    check("a driver that lists RGBA is given it, wherever it lists it",
+          irisenc::Picks({nv12, q08c, ab24}) == Format::kRgba && irisenc::Picks({ab24, nv12}) == Format::kRgba);
+    check("one with NV12 and no RGBA is given NV12", irisenc::Picks({nv12, q08c}) == Format::kNv12 && irisenc::Picks({q08c, nv12}) == Format::kNv12);
+    check("one that lists neither is asked for RGBA", irisenc::Picks({}) == Format::kRgba && irisenc::Picks({q08c}) == Format::kRgba);
     std::printf("%s\n", failed ? "FAILED" : "all ok");
     return failed ? 1 : 0;
 }

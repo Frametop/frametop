@@ -9,7 +9,7 @@ and this script writes them in from the pin:
   host/linux/get.sh                       TAG, PACKAGE and both SHA-256s
   host/windows/frametop-host-setup.ps1    the release URL and each file's SHA-256; the build it
                                           replaces goes on $OlderBuildShas
-  README.md, host/*/README.md             every mention of the pinned tag and package (links,
+  host/*/README.md                        every mention of the pinned tag and package (links,
                                           steps): a sentence there about an earlier build has
                                           to name that build, not the pinned one
 
@@ -22,8 +22,9 @@ and this script writes them in from the pin:
   scripts/pin-vibepollo.py check       exit 1 if a file doesn't match the pin; changes nothing
 
 The installers people run download the kit from `main` (FrametopHostSetup.exe and the Pages
-one-liner both do), not from this branch. So a new pin reaches them only once host/ and the
-README section are on main too: land the same change there.
+one-liner both do), not from this branch. So a new pin reaches them only once host/ is on main
+too: land the same change there. The top README names no release: it sends readers to the
+fork's own README for the install steps.
 
 Windows: Frametop's files go into a stock Vibepollo install (windows.base, the kit's
 $VibepolloVersion), which the release notes name. A release built for another base needs the
@@ -43,10 +44,10 @@ REPO = "Frametop/frametop-vibepollo"
 PIN = "host/vibepollo-pin.json"
 GET_SH = "host/linux/get.sh"
 KIT = "host/windows/frametop-host-setup.ps1"
-DOCS = ("README.md", "host/linux/README.md", "host/windows/README.md")
+DOCS = ("host/linux/README.md", "host/windows/README.md")
 # The Windows host setup as a program (the fork's packaging/windows/frametop-host-setup), on
 # the fork's releases after frametop-2.0.4. It holds no pins (it runs the kit from main), so
-# the pages link the latest release's copy.
+# the Windows kit's README links the latest release's copy.
 SETUP_EXE = "FrametopHostSetup.exe"
 SETUP_EXE_URL = f"https://github.com/{REPO}/releases/latest/download/{SETUP_EXE}"
 WINDOWS_FILES = ("sunshine.exe", "tools\\sunshine_wgc_capture.exe", "tools\\frametop_clipboard.exe")
@@ -216,9 +217,8 @@ def problems_in(pin, texts):
     for doc in DOCS:
         if not re.search(tag_pattern(pin["tag"]), texts[doc]):
             problems.append(f"{doc} doesn't name {pin['tag']}")
-    for doc in ("README.md", "host/windows/README.md"):
-        if SETUP_EXE_URL not in texts[doc]:
-            problems.append(f"{doc} doesn't link {SETUP_EXE_URL}")
+    if SETUP_EXE_URL not in texts["host/windows/README.md"]:
+        problems.append(f"host/windows/README.md doesn't link {SETUP_EXE_URL}")
     return problems
 
 

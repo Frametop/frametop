@@ -121,9 +121,9 @@ class TestPin(Copy):
         self.assertIn(f"sha256sum -c {NEW_PKG}.sha256", linux)  # the package's .sha256 too
         self.assertNotIn(old["linux"]["package"], linux)
         self.assertIn("Builds before frametop-2.0.3", linux)  # an earlier build, left alone
-        for doc in ("README.md", "host/windows/README.md"):
-            self.assertIn(pv.SETUP_EXE_URL, self.text(doc))  # no pins in it: the latest copy
-            self.assertIn(f"releases/tag/{NEW_TAG}", self.text(doc))
+        windows = self.text("host/windows/README.md")
+        self.assertIn(pv.SETUP_EXE_URL, windows)  # no pins in it: the latest copy
+        self.assertIn(f"releases/tag/{NEW_TAG}", windows)
         self.assertEqual(pv.check(self.root), [])
 
     def test_pin_a_named_tag(self):
@@ -224,7 +224,8 @@ class TestPin(Copy):
         sha = pv.read_pin(self.root)["windows"]["files"]["tools\\frametop_clipboard.exe"].upper()
         (self.root / pv.KIT).write_text(kit.replace(sha, "0" * 64))
         self.assertEqual(len(pv.check(self.root)), 1)
-        (self.root / "README.md").write_text(self.text("README.md").replace(pv.SETUP_EXE_URL, "x"))
+        doc = self.root / "host/windows/README.md"
+        doc.write_text(doc.read_text().replace(pv.SETUP_EXE_URL, "x"))
         self.assertEqual(len(pv.check(self.root)), 2)
 
     def test_bad_sha_asset_refused(self):

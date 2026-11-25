@@ -21,6 +21,10 @@ and this script writes them in from the pin:
   scripts/pin-vibepollo.py apply       write the pin into the files (after editing it by hand)
   scripts/pin-vibepollo.py check       exit 1 if a file doesn't match the pin; changes nothing
 
+The installers people run download the kit from `main` (FrametopHostSetup.exe and the Pages
+one-liner both do), not from this branch. So a new pin reaches them only once host/ and the
+README section are on main too: land the same change there.
+
 Windows: Frametop's files go into a stock Vibepollo install (windows.base, the kit's
 $VibepolloVersion), which the release notes name. A release built for another base needs the
 kit changed by hand first (its installer URL and hash, the stock files' hashes, $EarlierShas),

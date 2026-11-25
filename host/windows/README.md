@@ -22,19 +22,19 @@ Or open PowerShell on the PC (Start, type `powershell`, Enter; no admin needed) 
 irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1 | iex
 ```
 
-It downloads this kit's setup into `%LOCALAPPDATA%\Frametop\host-kit` and runs it, as in step 3 below: an admin window opens and the setup goes on there. Run the same line again for a newer kit. For the options under [Check and remove](#check-and-remove), run `"Setup Frametop host.cmd"` in that folder with them, or pass them to the one line: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1))) -Check`.
+It downloads this kit's setup into `%LOCALAPPDATA%\Frametop\host-kit` and runs it: an admin window opens and the setup goes on there, as described below. Run the same line again for a newer kit. For the options under [Check and remove](#check-and-remove), run `"Setup Frametop host.cmd"` in that folder with them, or pass them to the one line: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Frametop/frametop/main/host/windows/get.ps1))) -Check`.
 
-Or with the kit's zip:
+The zip in the [`windows-host-1`](https://github.com/Frametop/frametop/releases/tag/windows-host-1) release is an older kit that installs an older build (Vibepollo 2.0.0). Use one of the two ways above instead.
 
-1. Download `frametop-windows-host-1.zip` from the [`windows-host-1`](https://github.com/Frametop/frametop/releases/tag/windows-host-1) release and extract it. You get a folder named `frametop-windows-host`.
-2. Double-click `Setup Frametop host.cmd` in that folder. Windows may warn that the file came from the internet: choose Run. Then allow the admin prompt.
-3. The setup does the following:
+Either way, allow the admin prompt. Then:
+
+1. The setup does the following:
    - If Vibepollo isn't installed, it downloads Vibepollo 2.0.3, checks the download's SHA-256 and runs Vibepollo's installer. Follow the installer's steps, then go back to the setup window. It does the same over an earlier kit's setup (Vibepollo 2.0.0), since Frametop's build now goes into 2.0.3.
    - It puts in Frametop's build, after checking each file's SHA-256: `sunshine.exe`, and in Vibepollo's `tools` folder `sunshine_wgc_capture.exe` (it captures app windows and their menus) and `frametop_clipboard.exe` (it reads the clipboard). Vibepollo's own files are kept next to them as `<name>.2.0.3-original`.
    - It changes three Vibepollo settings: remote displays carry the PC's sound, and a virtual display goes away when Frametop disconnects it but stays through a dropped stream. Your other settings stay as they are.
    - It asks for the Web UI user name and password that the Steam Frame signs in with. If Vibepollo already has a login, you can keep it. The password is typed in the setup window and is never shown or saved.
    - It lets Vibepollo through the firewall on every network type, says whether a Steam Link dongle is plugged in, and checks that the Web UI answers.
-4. When it says Done, it prints this PC's name and addresses. On the Steam Frame, open Remote displays in Frametop Settings and choose Add computer. Pick this PC, sign in with the Web UI login, and choose the displays to show: its monitors, or a virtual display at the size you pick.
+2. When it says Done, it prints this PC's name and addresses. On the Steam Frame, open Remote displays (in Frametop Settings; in Frametop 0.3.0, the Frametop Remote Displays app) and choose Add computer. Pick this PC, sign in with the Web UI login, and choose the displays to show: its monitors, or a virtual display at the size you pick.
 
 When a newer kit comes out, run its setup the same way. It replaces an older Frametop build.
 

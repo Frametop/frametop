@@ -387,7 +387,7 @@ function Main {
         $_.IPAddress -notmatch "^(127\.|169\.254\.)" -and $_.InterfaceAlias -notmatch "Tailscale|vEthernet|Loopback" -and
         (-not $dongle -or $_.InterfaceIndex -ne $dongle.ifIndex) } | ForEach-Object { $_.IPAddress }
     Write-Host ""
-    Say "Done. On the Steam Frame: open Remote displays in Frametop Settings, Add computer, pick $([Net.Dns]::GetHostName()) ($($addresses -join ', ')), and sign in as '$user'."
+    Say "Done. On the Steam Frame: open Remote displays (in Frametop Settings; in Frametop 0.3.0, the Frametop Remote Displays app), Add computer, pick $([Net.Dns]::GetHostName()) ($($addresses -join ', ')), and sign in as '$user'."
 }
 
 try {

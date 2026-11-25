@@ -4,31 +4,35 @@
 // While that tip is near the card, the hand is the card's (vr.cpp leaves it out of near input and tells
 // the pointer helper it's ours), and the card stays though the palm turns as you reach (Input::engaged),
 // as it does for a laser on it (not the mouse's or gaze's cursor, which sits on whatever you look at).
-//   The palm hand's own pinch holds the card still where it was, lights Steam Menu, and moves what's lit
-// as the pinch moves across it (quickaccess::Drag); its release does that tile (PinchRelease).
+//   What the tiles say and run is the user's (palmtiles.h), read from ~/.config/frametop-palm.txt each
+// time the card shows. A tile is the input relay's own action (its "palm ACTION"), under its rules
+// (this user; while Frametop is paused for a VR game only some, and the rest dim); Reset Layout is ours
+// (DoReset: at once, as ft-layout's reset counts 3-2-1 in front of you itself).
+//   The palm hand's own pinch holds the card still where it was, lights Steam Menu (palmtiles::PinchSlot),
+// and moves what's lit as the pinch moves across it (quickaccess::Drag); its release does that tile
+// (PinchRelease). With no card to see, the pinch is Steam Menu.
 //   Its header shows CPU, GPU, memory, temperature and the battery (vrstats.cpp) and the Quick Settings button, which
-// turns the card to its toggles (quicksettings.h: those QUICK_SETTINGS in frametop.conf picks, read as
-// it opens) with Back in the button's place; hidden, it's on its first page again.
-//   With gaze mode on (vrgazemode.cpp, read as it shows), a wide Quick Eye Calibrate row sits under the
-// tiles on both pages: the gaze service's quick check (the input relay's gaze_quickcal).
+// turns the card to that page's tiles with Back in the button's place; hidden, it's on its first page again.
+//   With gaze mode on (vrgazemode.cpp, read as it shows), a wide row sits under the tiles on both pages:
+// Quick Eye Calibrate at first (the relay's gaze_quickcal).
 #include "vrpanel.h"
 #include "batteryart.h"
 #include "label.h"
+#include "labelfit.h"
 #include "overlaytex.h"
 #include "palmmenu.h"
+#include "palmtiles.h"
 #include "quickaccess.h"
-#include "quicksettings.h"
 #include "../conf/ft_conf.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
 namespace ftvr {
 namespace {
-
-using quickaccess::Tile;
 
 constexpr const char *kKey = "frametop.quickaccess";
 constexpr int64_t kLaserKeepMs = 500;   // a laser on it keeps it (engaged) this long after it last moved there
@@ -37,9 +41,10 @@ constexpr uint8_t kCardBg[4] = {24, 24, 30, 230};
 using quickaccess::kButton;
 using quickaccess::kEyeCal;
 using quickaccess::kSlots;
+static_assert(palmtiles::kMax == quickaccess::kTiles, "a page's tiles fill the card's grid");
 
 // How a tile looks: what Draw last drew of it, so a change repaints only it. kOn: a toggle that's on;
-// kBlank: no tile there (the Quick Settings page with fewer than six).
+// kBlank: no tile there (a page with fewer than six).
 enum Style { kPlain, kHot, kDim, kOn, kBlank, kStyles };
 struct Look {
     bool valid = false;
@@ -63,8 +68,8 @@ struct {
     bool lasers = false;        // MakeOverlaysInteractiveIfVisible is set
     float widthSet = -1;        // the width SetOverlayWidthInMeters has
     bool settings = false;      // on the Quick Settings page
-    std::vector<int> toggles;   // ...its toggles (quicksettings::kAll's), in the tiles' order
-    bool eyes = false;          // the Quick Eye Calibrate row shows (gaze mode was on as it showed)
+    palmtiles::Menu menu;       // what each page's tiles say and run, as read when it showed
+    bool eyes = false;          // the wide row shows (gaze mode was on as it showed)
     std::vector<uint8_t> px;                // the card as shown
     std::vector<uint8_t> bg;                // ...without its tiles or header
     std::vector<uint8_t> styles[kStyles];   // a tile's box in each style, without its label
@@ -79,31 +84,37 @@ void Invalidate() {
     g_card.head.clear();
 }
 
-// The Quick Settings toggle in slot i, -1 none (a blank slot, or not on that page).
-int ToggleAt(int i) {
-    return g_card.settings && i >= 0 && i < int(g_card.toggles.size()) ? g_card.toggles[i] : -1;
+// The tiles of the page it's on.
+const std::vector<palmtiles::Entry> &Page() { return g_card.settings ? g_card.menu.quick : g_card.menu.first; }
+
+// The tile in slot i, null for none (a blank slot, the header's button, no eye row).
+const palmtiles::Entry *At(int i) {
+    if (i == kEyeCal) return g_card.eyes ? &g_card.menu.eyes : nullptr;
+    return i >= 0 && i < int(Page().size()) ? &Page()[i] : nullptr;
+}
+
+// The palm menu's file now (palmtiles.h); with none, the default card.
+palmtiles::Menu ReadMenu() {
+    const char *home = std::getenv("HOME");
+    const std::string path = std::string(home ? home : "/tmp") + "/.config/frametop-palm.txt";
+    if (std::FILE *f = std::fopen(path.c_str(), "r")) {
+        std::string text;
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, f)) > 0 && text.size() < (1 << 18)) text.append(buf, n);
+        std::fclose(f);
+        return palmtiles::Parse(text);
+    }
+    char value[512];
+    return palmtiles::Defaults(ft_conf_setting("QUICK_SETTINGS", value, sizeof value) ? value : nullptr);
 }
 
 int H() { return quickaccess::Height(g_card.eyes); }   // the card's height in pixels now
 
 std::string Label(int i) {
-    if (i == kEyeCal) return g_card.eyes ? quickaccess::kEyeSpec.label : "";
     if (i == kButton) return g_card.settings ? "Back" : "Quick Settings";
-    if (g_card.settings) return ToggleAt(i) >= 0 ? quicksettings::kAll[ToggleAt(i)].label : "";
-    if (i < 0 || i >= quickaccess::kTiles) return "";
-    const quickaccess::Spec &s = quickaccess::kSpecs[i];
-    if (s.tile == Tile::Screens) return ModeVisible() ? "Hide Screens" : "Show Screens";
-    return s.label;
-}
-
-// A toggle that's on, where ft-screens knows (the rest show no state: quicksettings::State).
-bool On(int toggle) {
-    if (toggle < 0) return false;
-    switch (quicksettings::kAll[toggle].state) {
-        case quicksettings::State::Screens: return ModeVisible();
-        case quicksettings::State::Paused: return g_paused;
-        default: return false;
-    }
+    const palmtiles::Entry *e = At(i);
+    return e ? palmtiles::Words(*e, ModeVisible()) : "";
 }
 
 // The card's picture under box (x0, y0) w x h, with each style's box over it, into out[].
@@ -147,25 +158,19 @@ void DrawTile(int i, const Look &look) {
         std::memcpy(&g_card.px[(size_t(y0 + y) * kW + x0) * 4], &t[size_t(y) * w * 4], size_t(w) * 4);
     const uint8_t v = look.style == kHot ? 20 : look.style == kDim ? 120 : 245;
     const uint8_t ink[3] = {v, v, uint8_t(look.style == kHot ? 24 : look.style == kDim ? 128 : 250)};
-    // two lines when it's wide: "Reset" over "Layout…"
-    const std::string &text = look.text;
-    const size_t sp = text.find(' ');
-    const int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    if (label::Width(text.c_str(), kText) <= (i == kEyeCal ? w : kTile) - 20 || sp == std::string::npos) {
-        label::Draw(g_card.px.data(), kW, H(), text.c_str(), kText, cx, cy, 255, ink);
-    } else {
-        label::Draw(g_card.px.data(), kW, H(), text.substr(0, sp).c_str(), kText, cx, cy - kText * 6 / 10, 255, ink);
-        label::Draw(g_card.px.data(), kW, H(), text.substr(sp + 1).c_str(), kText, cx, cy + kText * 6 / 10, 255, ink);
-    }
+    // as many lines as it takes, "Reset" over "Layout…", smaller when the words are long
+    const labelfit::Fit fit = labelfit::Make(look.text, {kText, 24, 20}, w - 20, i == kEyeCal ? 2 : 3,
+                                             [](const std::string &t, int size) { return label::Width(t.c_str(), size); });
+    const int n = int(fit.lines.size()), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, step = fit.size * 12 / 10;
+    for (int k = 0; k < n; ++k)
+        label::Draw(g_card.px.data(), kW, H(), fit.lines[k].c_str(), fit.size, cx, cy + (2 * k - (n - 1)) * step / 2, 255, ink);
 }
 
 // A tile that does nothing now: one that doesn't work while Frametop is paused for a VR game (the
 // header's button always does: Game Pause is on the page it opens).
 bool Idle(int i) {
-    if (!g_paused || i == kButton) return false;
-    if (i == kEyeCal) return true;   // (the gaze service holds its checks while a game has the headset)
-    if (g_card.settings) return ToggleAt(i) >= 0 && !quicksettings::WorksPaused(ToggleAt(i));
-    return i >= 0 && i < quickaccess::kTiles && !quickaccess::WorksPaused(quickaccess::kSpecs[i].tile);
+    const palmtiles::Entry *e = g_paused ? At(i) : nullptr;
+    return e && !palmtiles::WorksPaused(e->action);
 }
 
 // The battery's line in the header's left, its picture and words together centred on (cx, cy).
@@ -187,7 +192,7 @@ bool DrawHead() {
     battery::Reading bat;
     if (g_card.settings) {
         a = "Quick Settings";
-        b = g_card.toggles.empty() ? "Pick them in Frametop Settings" : "";
+        b = Page().empty() ? "Pick them in Frametop Settings" : "";
     } else {
         const sysstats::Words &w = SystemStats(NowMs());
         auto or_dash = [](const std::string &s, const char *name) { return s.empty() ? std::string(name) + " \xe2\x80\x93" : s; };
@@ -219,7 +224,7 @@ bool DrawHead() {
 }
 
 // SteamVR's dark tiles: the one under the fingertip (else the palm pinch's drag, else a laser's) white,
-// the toggles that are on blue, and the idle ones dim. Only the tiles that changed are
+// a toggle that's on blue (palmtiles::Lit), and the idle ones dim. Only the tiles that changed are
 // repainted (council, 2026-11-19: the whole card took ~25 ms on a little core).
 void Draw() {
     using namespace quickaccess;
@@ -233,12 +238,12 @@ void Draw() {
         Look &look = now[i];
         look.valid = true;
         look.text = Label(i);
-        const bool blank = i == kEyeCal ? !g_card.eyes : g_card.settings && i != kButton && ToggleAt(i) < 0;
-        look.style = blank                ? kBlank
-                     : Idle(i)            ? kDim
-                     : i == lit           ? kHot
-                     : On(ToggleAt(i))    ? kOn
-                                          : kPlain;
+        const palmtiles::Entry *e = At(i);
+        look.style = !e && i != kButton ? kBlank
+                     : Idle(i)          ? kDim
+                     : i == lit         ? kHot
+                     : e && palmtiles::Lit(*e, ModeVisible(), g_paused) ? kOn
+                                                                        : kPlain;
         if (look == g_card.looks[i]) continue;
         DrawTile(i, look);
         changed = true;
@@ -252,13 +257,9 @@ void Draw() {
     if (!ok) g_card.head.clear();
 }
 
-// To the Quick Settings page (QUICK_SETTINGS read now: Frametop Settings may have changed it), or back.
+// To the Quick Settings page, or back.
 void TurnPage(bool settings) {
     g_card.settings = settings;
-    if (settings) {
-        char value[512];
-        g_card.toggles = quicksettings::Chosen(ft_conf_setting("QUICK_SETTINGS", value, sizeof value) ? value : nullptr);
-    }
     std::printf("palm Quick Access: %s\n", settings ? "the Quick Settings page" : "the first page");
 }
 
@@ -281,18 +282,10 @@ void PressTile(int i, const char *by) {
     std::fflush(stdout);
     if (Idle(i)) return (void)std::printf("palm Quick Access: not while paused for a game\n");
     if (i == kButton) return TurnPage(!g_card.settings);
-    if (i == kEyeCal) return SendRelay(std::string("action ") + quickaccess::kEyeSpec.action);
-    if (g_card.settings) {
-        // (the input relay's own action, under its rules, as the tiles' are)
-        return SendRelay(std::string("action ") + quicksettings::kAll[ToggleAt(i)].action);
-    }
-    const quickaccess::Spec &s = quickaccess::kSpecs[i];
-    if (s.tile == Tile::Reset) {
-        // (at once: ft-layout's reset counts 3-2-1 in front of you itself, user 2026-11-19: "it does a countdown then another")
-        return DoReset(-1, (std::string("palm Quick Access, ") + by).c_str());
-    }
-    // (the input relay's own action, under its rules: this user, and while paused only PAUSED_ACTIONS)
-    SendRelay(std::string("action ") + s.action);
+    const palmtiles::Entry *e = At(i);
+    if (!e) return;
+    if (e->action == palmtiles::kReset) return DoReset(-1, (std::string("palm Quick Access, ") + by).c_str());
+    SendRelay("palm " + e->action);
 }
 
 bool Make() {
@@ -312,12 +305,13 @@ bool Make() {
     return true;
 }
 
-// The palm hand's pinch, let go (palmmenu's toggled): `tile` its drag lit, kAlone for the pinch alone
-// (Steam Menu, as before the drag), -1 nothing (let go off the card, or the palm turned away).
+// The palm hand's pinch, let go (palmmenu's toggled): `tile` its drag lit, kAlone for the pinch with no
+// card to see (Steam Menu, as before there was one), -1 nothing (let go off the card, or the palm turned away).
 constexpr int kAlone = -2;
 void PinchRelease(int side, int tile) {
     const char *by = side ? "the right hand's pinch" : "the left hand's pinch";
-    if (tile == kAlone || (tile == int(Tile::SteamMenu) && !g_card.settings)) {
+    const palmtiles::Entry *e = At(tile);
+    if (tile == kAlone || (e && e->action == palmtiles::kSteamMenu)) {
         PalmSteamMenu(side);
     } else if (tile >= 0) {
         PressTile(tile, by);
@@ -361,13 +355,15 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
         g_card.side = side, g_card.shownMs = NowMs(), g_card.hover = -1, g_card.laserMs = -1;
         g_card.poke.Reset(NowMs()), g_card.drag.End();   // (the other palm's drag ends)
         if (g_card.settings) TurnPage(false);
-        if (eyes != g_card.eyes) {
+        g_card.menu = ReadMenu();   // (Frametop Settings may have changed it)
+        const bool row = eyes && g_card.menu.eyesShown;
+        if (row != g_card.eyes) {
             // a card of the other height: its pictures made again, and the mouse's scale with it
-            g_card.eyes = eyes, g_card.px.clear();
+            g_card.eyes = row, g_card.px.clear();
             const vr::HmdVector2_t scale = {{float(quickaccess::kW), float(H())}};
             vr::VROverlay()->SetOverlayMouseScale(g_card.overlay, &scale);
         }
-        std::printf("palm Quick Access: over the %s palm%s\n", side ? "right" : "left", g_card.eyes ? ", with Quick Eye Calibrate" : "");
+        std::printf("palm Quick Access: over the %s palm%s\n", side ? "right" : "left", g_card.eyes ? ", with the eye row" : "");
     }
     g_card.w = palm.params().size, g_card.h = g_card.w * H() / quickaccess::kW;
     // this Update's release: the tile under its last held frame, as drawn (council, 2026-11-19: not the
@@ -382,7 +378,7 @@ void UpdateQuickAccess(const QuickAccessIn &in) {
     // pinch, let go and pinched again in one read whether it did anything or not, starts afresh)
     if (!palm.pinched(side)) g_card.drag.End();
     else if (!g_card.drag.on() || palm.pinchCount(side) != g_card.dragPinch)
-        g_card.drag.Start(g_card.settings ? kButton : int(Tile::SteamMenu)), g_card.dragPinch = palm.pinchCount(side), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
+        g_card.drag.Start(g_card.settings ? kButton : palmtiles::PinchSlot(g_card.menu)), g_card.dragPinch = palm.pinchCount(side), g_card.dragPose = card ? FacingPose(c, in.head) : g_card.pose;
     if (g_card.drag.on()) StepDrag(palm, side);   // (each tick: HandsFrame() is the last tick's news)
     g_card.pose = g_card.drag.on() ? g_card.dragPose : card ? FacingPose(c, in.head) : g_card.pose;
     if (float(g_card.w) != g_card.widthSet) {

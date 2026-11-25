@@ -195,9 +195,9 @@ def items(root, env=os.environ):
           flags="-std=gnu11 -Wall -Wextra -Wno-unused-function -Werror -pthread"),
     ]
     for name in ("trackwatch", "levelpin", "dashanchor", "tiling", "dashtiles", "tilewide", "tilecurve", "centreglow", "barside", "appscale", "panelmenu", "menulayout",
-                 # palm Quick Access (quickaccess.h): its tiles, where a tip or laser lands, Reset's ask,
-                 # its Quick Settings toggles (quicksettings.h); and its readouts (sysstats.h, battery.h)
-                 "quickaccess", "sysstats", "battery"):
+                 # palm Quick Access (quickaccess.h): where a tip or laser lands, the pokes and the pinch's drag;
+                 # its tiles (palmtiles.h, labelfit.h); and its readouts (sysstats.h, battery.h)
+                 "quickaccess", "palmtiles", "sysstats", "battery"):
         out.append(single(f"screens/tests/{name}-test.cpp", CXX2))
     out += [
         # gamescope apps (gsforward.h): the policy, and the X side against an Xvfb when there is one

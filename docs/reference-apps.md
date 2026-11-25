@@ -32,7 +32,7 @@ Below the sections are Controls guide and Frametop Tour. The sidebar always show
 | Remote access | Remote access | `remote/remote_access.py`, `remote/RemoteAccessPages.qml` |
 | Avatar | Hands & avatar | `avatar/ft_avatar_settings.py`, `avatar/AvatarPages.qml` |
 | Together | Frametop Together | `together/ft_together_settings.py`, `together/TogetherPages.qml` |
-| Quick Settings | Quick Settings | `quicksettings/ft_quick_settings.py`, `quicksettings/QuickSettingsPages.qml` |
+| Quick Settings | Quick Settings | `quicksettings/ft_quick_settings.py`, `quicksettings/QuickSettingsPages.qml` (with `palm_tiles.py` and `PalmTileRow.qml` beside them) |
 
 `settings/install.sh` (run by `install.sh`) installs its menu entry, and removes the entries of the four apps it replaced: Frametop Input Settings, Frametop Display Settings, Frametop Remote Displays and Frametop Remote Access. Its launcher hands podman the real `XDG_RUNTIME_DIR` and user bus and gives the app the session's Wayland socket, because the desktop session runs on a private D-Bus and podman fails on it. Profiles leave Frametop Settings out, as they left Display Settings out: profiles are saved from it, so it would open itself again. A profile saved before with one of the old apps open skips it.
 

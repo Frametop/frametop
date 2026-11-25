@@ -295,13 +295,13 @@ main() {
   run rm -rf "$HOME/.local/share/frametop/apps" "$HOME/.local/share/kwin/decorations/kwin4_decoration_qml_frametop" \
     "$HOME/.cache/frametop" "$HOME/.cache/frametop-framedrop" "$HOME/.cache/frametop-installer"
 
-  local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-tiles.txt" "$HOME/.config/frametop-remote"
+  local settings=("$HOME"/.config/frametop.conf* "$HOME"/.config/frametop-*.json* "$HOME/.config/frametop-tiles.txt" "$HOME/.config/frametop-palm.txt" "$HOME/.config/frametop-remote"
                   "$HOME/.config/frametop-keyboard" "$HOME/.config/frametop" "$HOME/.local/state/frametop" "$HOME/.local/share/frametop-stream"
                   "$HOME/.local/state/frametop-trial")
   local kept=()
   for f in "${settings[@]}"; do [ -e "$f" ] && kept+=("$f"); done
   if [ ${#kept[@]} -gt 0 ]; then
-    echo "Your settings: the screen layout and profiles, the dashboard tiles, button maps, the keyboard's, gaze calibration, the remote"
+    echo "Your settings: the screen layout and profiles, the dashboard tiles, the palm menu, button maps, the keyboard's, gaze calibration, the remote"
     echo "desktop password, the remote displays' pairings and sign-ins (their computers keep Frametop's"
     echo "clients and token until you remove them in their Web UI), and the Frametop desktop's own Plasma"
     echo "setup (${kept[*]/#$HOME/\~})."

@@ -47,75 +47,14 @@
   "log": [],
   "raised": null
  },
- "action gaze_quickcal (the palm's eye row)": {
-  "addr": "",
-  "calls": [
-   [
-    "screens_sock.sendto",
-    [
-     "quickcal",
-     "\u0000ft_control_test_gazed"
-    ],
-    {}
-   ],
-   [
-    "reply",
-    [
-     "",
-     {
-      "action": "gaze_quickcal",
-      "t": "action"
-     }
-    ],
-    {}
-   ]
-  ],
-  "changed": {},
-  "datagram": "action gaze_quickcal",
-  "log": [
-   "gaze_quickcal"
-  ],
-  "raised": null
- },
- "action gaze_quickcal, no pointer": {
-  "addr": "",
-  "calls": [
-   [
-    "screens_sock.sendto",
-    [
-     "quickcal",
-     "\u0000ft_control_test_gazed"
-    ],
-    {}
-   ],
-   [
-    "reply",
-    [
-     "",
-     {
-      "action": "gaze_quickcal",
-      "t": "action"
-     }
-    ],
-    {}
-   ]
-  ],
-  "changed": {},
-  "datagram": "action gaze_quickcal",
-  "log": [
-   "gaze_quickcal"
-  ],
-  "no_pointer": true,
-  "raised": null
- },
- "action gaze_quickcal, paused": {
+ "action gaze_quickcal (the palm's, not a menu one)": {
   "calls": [
    [
     "reply",
     [
      "\u0000ft_control_test_client",
      {
-      "error": "paused",
+      "error": "not a menu action 'gaze_quickcal'",
       "t": "error"
      }
     ],
@@ -125,7 +64,6 @@
   "changed": {},
   "datagram": "action gaze_quickcal",
   "log": [],
-  "paused": true,
   "raised": null
  },
  "action keys:": {
@@ -1679,6 +1617,361 @@
   "datagram": "keyboard",
   "log": [],
   "paused": true,
+  "raised": null
+ },
+ "palm an unknown action there": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not on the palm menu 'no_such_action'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm no_such_action",
+  "log": [
+   "palm: 'no_such_action' isn't on the palm menu"
+  ],
+  "raised": null
+ },
+ "palm dictate (not there)": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not on the palm menu 'dictate'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm dictate",
+  "log": [
+   "palm: 'dictate' isn't on the palm menu"
+  ],
+  "raised": null
+ },
+ "palm dock_all (hidden there)": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not on the palm menu 'dock_all'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm dock_all",
+  "log": [
+   "palm: 'dock_all' isn't on the palm menu"
+  ],
+  "raised": null
+ },
+ "palm gaze_quickcal": {
+  "addr": "",
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "quickcal",
+     "\u0000ft_control_test_gazed"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "gaze_quickcal",
+      "t": "palm"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm gaze_quickcal",
+  "log": [
+   "gaze_quickcal"
+  ],
+  "raised": null
+ },
+ "palm gaze_quickcal, no pointer": {
+  "addr": "",
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "quickcal",
+     "\u0000ft_control_test_gazed"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "gaze_quickcal",
+      "t": "palm"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm gaze_quickcal",
+  "log": [
+   "gaze_quickcal"
+  ],
+  "no_pointer": true,
+  "raised": null
+ },
+ "palm gaze_quickcal, paused": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "paused",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm gaze_quickcal",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "palm profile: with a space": {
+  "calls": [
+   [
+    "Popen",
+    [
+     "REPO/layout/ft-layout",
+     "use",
+     "Work desk"
+    ]
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "profile:Work desk",
+      "t": "palm"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm profile:Work desk",
+  "log": [
+   "profile:Work desk"
+  ],
+  "raised": null
+ },
+ "palm run: not there": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "not on the palm menu 'run:other'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm run:other",
+  "log": [
+   "palm: 'run:other' isn't on the palm menu"
+  ],
+  "raised": null
+ },
+ "palm run:my-cmd": {
+  "addr": "",
+  "calls": [
+   [
+    "run_named",
+    "my-cmd"
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "run:my-cmd",
+      "t": "palm"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm run:my-cmd",
+  "log": [
+   "my-cmd: started"
+  ],
+  "raised": null
+ },
+ "palm run:my-cmd, other user": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "another user's",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm run:my-cmd",
+  "log": [],
+  "raised": null,
+  "uid": "OTHER"
+ },
+ "palm run:my-cmd, paused": {
+  "calls": [
+   [
+    "run_named",
+    "my-cmd"
+   ],
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "action": "run:my-cmd",
+      "t": "palm"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm run:my-cmd",
+  "log": [
+   "my-cmd: started"
+  ],
+  "paused": true,
+  "raised": null
+ },
+ "palm screens_toggle": {
+  "addr": "",
+  "calls": [
+   [
+    "screens_sock.sendto",
+    [
+     "toggle",
+     "\u0000ft_control_test_screens"
+    ],
+    {}
+   ],
+   [
+    "reply",
+    [
+     "",
+     {
+      "action": "screens_toggle",
+      "t": "palm"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm screens_toggle",
+  "log": [
+   "screens_toggle"
+  ],
+  "raised": null
+ },
+ "palm screens_toggle, other user": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "another user's",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm screens_toggle",
+  "log": [],
+  "raised": null,
+  "uid": "OTHER"
+ },
+ "palm screens_toggle, paused": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "paused",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm screens_toggle",
+  "log": [],
+  "paused": true,
+  "raised": null
+ },
+ "palm, arity": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'palm'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "palm",
+  "log": [],
   "raised": null
  },
  "pause ?": {

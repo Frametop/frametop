@@ -14,8 +14,8 @@ settings/controls/.
   - access: Remote access over VNC (remote/: remote_access.py and RemoteAccessPages.qml)
   - avatar: Appearance, the hand model your hands are drawn with (avatar/: ft_avatar_settings.py
     and AvatarPages.qml)
-  - quick: Quick Settings, the toggles the palm menu's Quick Settings shows (quicksettings/:
-    ft_quick_settings.py and QuickSettingsPages.qml)
+  - quick: Quick Settings, the palm menu's tiles (quicksettings/: ft_quick_settings.py and
+    QuickSettingsPages.qml)
 An area's backend and pages are made the first time one of its sections opens, so a section
 nobody opens costs nothing (its backend's polling never starts).
 

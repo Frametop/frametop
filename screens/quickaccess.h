@@ -5,20 +5,18 @@
 // "let the user drag while tapping to select different menu options"): Steam Menu lights as it pinches
 // (what the pinch alone did before), the card holds still, moving the pinched hand moves what's lit
 // (Drag), and letting go does the lit tile; off the card, nothing.
-//   The tiles are actions that touch every screen, the input relay's own (its "action NAME", the ones
-// frunner's OS menu runs: conf/ft_input_actions.py's MENU_ACTIONS), so they keep its rules (this user
-// only; while Frametop is paused for a VR game only Steam Menu works, and the rest dim: WorksPaused);
-// Reset Layout resets at once (ft-layout's reset counts 3-2-1 in front of you itself).
+//   What the tiles say and run is palmtiles.h's (the user picks them in Frametop Settings); here they
+// are slots.
 //   Above the tiles, a header (user, 2026-11-19: "add to the palm menu a resource tracker ... a quick
 // settings menu that when clicked opens a small window that has toggle options"): CPU, GPU, memory,
 // temperature (sysstats.h) and the battery (battery.h) on the left, and on the right a button, kButton,
-// that turns the card to its Quick Settings page (quicksettings.h's toggles in the tiles' places, the
-// button then Back).
-//   Under the tiles, while gaze mode is on, one wide row: Quick Eye Calibrate, the gaze service's quick
-// check (user, 2026-11-22: "a quick eye calibrate option to the palm menu ... only an option if eye
+// that turns the card to its Quick Settings page (its own tiles in their places, the button then
+// Back).
+//   Under the tiles, while gaze mode is on, one wide row: Quick Eye Calibrate at first, the gaze service's
+// quick check (user, 2026-11-22: "a quick eye calibrate option to the palm menu ... only an option if eye
 // tracking is on"). The card is kEyesH tall then, kH without it; a card's height in pixels follows from its
 // size in metres (PxH), so the pokes and the drag find the row with no more to say.
-// Pure: the tiles, their layout, a fingertip's pokes and Reset's ask (screens/tests/quickaccess-test.cpp);
+// Pure: the slots' layout, a fingertip's pokes and the pinch's drag (screens/tests/quickaccess-test.cpp);
 // vrquick.cpp draws the card, places it over the palm and gives it the tip and the clicks.
 #pragma once
 
@@ -29,31 +27,10 @@
 
 namespace quickaccess {
 
-enum class Tile { SteamMenu, Screens, Reset, SpinLeft, SpinRight, DockAll, EyeCal };
-
-struct Spec {
-    Tile tile;
-    const char *label;
-    const char *action;   // the input relay's action (null: ft-screens does it)
-};
-
 constexpr int kCols = 3, kRows = 2, kTiles = kCols * kRows;
 constexpr int kButton = kTiles;      // the header's button: Quick Settings, or Back on that page
 constexpr int kEyeCal = kTiles + 1;  // the row under the tiles, with gaze mode on
 constexpr int kSlots = kTiles + 2;   // what TileAt can say
-constexpr Spec kSpecs[kTiles] = {
-    {Tile::SteamMenu, "Steam Menu", "steam_menu"},
-    {Tile::Screens, "Hide Screens", "screens_toggle"},
-    {Tile::Reset, "Reset Layout\xe2\x80\xa6", nullptr},
-    {Tile::SpinLeft, "Spin Left", "spin_prev"},
-    {Tile::SpinRight, "Spin Right", "spin_next"},
-    {Tile::DockAll, "Dock Windows", "dock_all"},
-};
-constexpr Spec kEyeSpec = {Tile::EyeCal, "Quick Eye Calibrate", "gaze_quickcal"};
-
-// What still works while Frametop is paused for a VR game: the relay's PAUSED_ACTIONS
-// (input/game_pause.py) has steam_menu and none of the others; Reset is ours, and the screens are hidden.
-inline bool WorksPaused(Tile t) { return t == Tile::SteamMenu; }
 
 // No press this soon after the card shows (the hand reaching over as it came), by tip or click.
 constexpr int64_t kShownMs = 300;
@@ -241,7 +218,7 @@ private:
 };
 
 // The palm hand's pinch, dragged across the card, which holds still meanwhile (vrquick.cpp). It starts
-// on Steam Menu, where the pinch alone always went (on the Quick Settings page, on Back); the pinch moving on the card's face (x right, y up,
+// on a tile the caller says (Steam Menu's, where the pinch alone always went; on the Quick Settings page, Back); the pinch moving on the card's face (x right, y up,
 // metres) moves the lit point kGain times as far, from that tile's middle, so the far column is about
 // 7 cm over and the second row 4 cm down. Held at a tile's edge it keeps that tile (StickyTileAt); up to
 // kCancel past the card's edge, the edge tile (council, 2026-11-19: a still pinch drifting 2 cm up or left
@@ -252,7 +229,7 @@ public:
     static constexpr double kGain = 1.0;
     static constexpr double kCancel = 0.015;   // m past the card's edge
 
-    void Start(int from = int(Tile::SteamMenu)) { on_ = true, haveFrom_ = false, place_ = tile_ = start_ = from; }
+    void Start(int from = 0) { on_ = true, haveFrom_ = false, place_ = tile_ = start_ = from; }
     void End() { on_ = false, tile_ = -1; }
     // `at`: the pinch on the card's face this hands frame (null: not seen, what's lit stays, whatever
     // `up` says then: council, 2026-11-19, a lost frame blinked it off); the card w x h metres; `up`: the
@@ -291,7 +268,7 @@ private:
     bool on_ = false, haveFrom_ = false;
     double from_[2] = {0, 0};
     int place_ = -1, tile_ = -1;   // place_: the tile under it, the palm up or not
-    int start_ = int(Tile::SteamMenu);
+    int start_ = 0;
 };
 
 

@@ -1,10 +1,8 @@
-// Palm Quick Access (quickaccess.h): the tiles and their relay actions, which tile a fingertip or a
-// laser lands on (gaps to the nearer tile, nothing past the padding, the mouse's y up, the face's metres),
-// Reset's ask, what works while paused, a fingertip's pokes (hover held at a tile's edge, quick pokes
+// Palm Quick Access (quickaccess.h): which tile a fingertip or a laser lands on (gaps to the nearer tile,
+// nothing past the padding, the mouse's y up, the face's metres), a fingertip's pokes (hover held at a tile's edge, quick pokes
 // that end well behind the card, the tip spent after a press through tremble and lost frames, the easier
 // 1 cm press) and the palm hand's pinch drag.
 #include "../quickaccess.h"
-#include "../quicksettings.h"
 
 #include <cmath>
 #include <cstdio>
@@ -20,20 +18,6 @@ int main() {
     };
     using namespace quickaccess;
 
-    // The actions are the relay's MENU_ACTIONS names (conf/ft_input_actions.py); Reset is ours.
-    const char *relay[] = {"steam_menu", "screens_toggle", "spin_prev", "spin_next", "dock_all"};
-    bool known = true, resetOurs = false;
-    for (const Spec &s : kSpecs) {
-        if (!s.action) {
-            resetOurs = s.tile == Tile::Reset;
-            continue;
-        }
-        bool found = false;
-        for (const char *r : relay) found = found || !std::strcmp(r, s.action);
-        known = known && found;
-    }
-    check("every tile but Reset runs a relay action", known && resetOurs);
-
     // Each tile's centre is that tile, in pixels, through the mouse (y up) and on the face.
     bool centres = true;
     for (int i = 0; i < kTiles; ++i) {
@@ -45,8 +29,8 @@ int main() {
         centres = centres && TileAtFace((cx / kW - 0.5) * w, (0.5 - cy / kH) * h, w, h) == i;
     }
     check("each tile's centre is it, in pixels, mouse and face", centres);
-    check("the top left tile is Steam Menu, top on the face", TileAtFace(-0.04, 0.02, 0.12, 0.12 * kH / kW) == 0);
-    check("the bottom right is Dock Windows", kSpecs[TileAtFace(0.04, -0.02, 0.12, 0.12 * kH / kW)].tile == Tile::DockAll);
+    check("the top left tile is the first, top on the face", TileAtFace(-0.04, 0.02, 0.12, 0.12 * kH / kW) == 0);
+    check("the bottom right is the last", TileAtFace(0.04, -0.02, 0.12, 0.12 * kH / kW) == 5);
     check("the mouse's y is up: low y is the bottom row", TileAtMouse(kW / 2.0, 20) == 4 && TileAtMouse(kW / 2.0, kH - kTop - 20) == 1);
 
     // The gaps go to the nearer tile.
@@ -394,7 +378,7 @@ int main() {
         Drag d;
         check("not dragging: nothing", !d.on() && d.Step(at(0, 0), w, h, true) == -1);
         d.Start();
-        check("a pinch starts on Steam Menu", d.on() && d.tile() == int(Tile::SteamMenu));
+        check("a pinch starts on Steam Menu", d.on() && d.tile() == 0);
         check("...unseen: still Steam Menu", d.Step(nullptr, w, h, true) == 0);
         const double x0 = 0.31, y0 = -0.2;   // (anywhere: it's the moves that count)
         check("...its first point: Steam Menu", d.Step(at(x0, y0), w, h, true) == 0);
@@ -437,30 +421,16 @@ int main() {
             check("...down to the row below: tile 2", b.Step(at(0, -(kHead / 2.0 + kGap + kTile / 2.0) * w / kW), w, h, true) == 2);
             check("...left over the readouts: the tile below them", b.Step(at(-pitch, 0.002), w, h, true) == 1);
         }
+        {
+            // Steam Menu elsewhere on the card (the user's own order): it starts there
+            Drag m;
+            m.Start(5);
+            check("a pinch starts on the tile it's told", m.tile() == 5 && m.Step(at(0, 0), w, h, true) == 5);
+            check("...and moves from there: a tile left", m.Step(at(-pitch, 0), w, h, true) == 4);
+        }
         Drag z;
         z.Start();
         check("a card of no size: what's lit stays", z.Step(at(0, 0), 0, 0, true) == 0);
-    }
-
-    check("paused for a game, only Steam Menu works", WorksPaused(Tile::SteamMenu) && !WorksPaused(Tile::Screens) &&
-                                                          !WorksPaused(Tile::Reset) && !WorksPaused(Tile::SpinLeft) &&
-                                                          !WorksPaused(Tile::SpinRight) && !WorksPaused(Tile::DockAll));
-
-    // Quick Settings (quicksettings.h): QUICK_SETTINGS's names, in the catalogue's order
-    {
-        using quicksettings::Chosen;
-        check("unset: every toggle", Chosen(nullptr).size() == size_t(quicksettings::kCount));
-        check("empty: none", Chosen("").empty() && Chosen(",").empty());
-        const std::vector<int> some = Chosen("dictate,bogus,screens_toggle,dictate,,screens");
-        check("picked ones in the catalogue's order, unknown and repeats left out",
-              some.size() == 2 && !std::strcmp(quicksettings::kAll[some[0]].action, "screens_toggle") &&
-                  !std::strcmp(quicksettings::kAll[some[1]].action, "dictate"));
-        check("a name's prefix isn't it", Chosen("screens").empty() && Chosen("screens_toggle_x").empty());
-        int paused = 0;
-        for (int i = 0; i < quicksettings::kCount; ++i) paused += quicksettings::WorksPaused(i);
-        check("paused for a game, only Game Pause works", paused == 1 && quicksettings::WorksPaused(int(Chosen("pause_toggle")[0])) &&
-                                                          !quicksettings::WorksPaused(-1) && !quicksettings::WorksPaused(99));
-        check("every toggle fits the page", quicksettings::kCount <= kTiles);
     }
 
     {
@@ -468,7 +438,6 @@ int main() {
         int x0, y0, x1, y1;
         Box(kEyeCal, &x0, &y0, &x1, &y1);
         const double cx = (x0 + x1) / 2.0, cy = (y0 + y1) / 2.0;
-        check("the eye row's action is the relay's gaze_quickcal", !std::strcmp(kEyeSpec.action, "gaze_quickcal"));
         check("the eye row is under the tiles, card wide", y0 > kH - kPad && x0 == kPad && x1 == kW - kPad && y1 == kEyesH - kPad);
         check("its centre is it on a card with it, nothing on one without",
               TileAt(cx, cy, kEyesH) == kEyeCal && TileAt(cx, cy) == -1 && TileAtMouse(cx, kEyesH - cy, kEyesH) == kEyeCal);

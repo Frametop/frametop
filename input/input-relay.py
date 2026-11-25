@@ -260,9 +260,11 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     app can capture one; watchers see them as events with id frame_controller
   action NAME       from frunner: run one of Frametop's own actions (ft_input_actions.MENU_ACTIONS,
                     and from its key list the tiling keys: KEY_LIST_RUNNABLE; from this user only),
-                    as a button would ({"t": "action"}, or an error); from ft-screens' palm Quick
-                    Access too (its tiles, Quick Settings and gaze_quickcal: PALM_ACTIONS), unbound,
-                    so no answer
+                    as a button would ({"t": "action"}, or an error)
+  palm ACTION       from ft-screens' palm Quick Access (unbound, so no answer): run the action of one
+                    of its tiles. Only one ~/.config/frametop-palm.txt shows there now
+                    (conf/ft_palm_menu.py; a command of yours, "run:NAME", among them), and from this
+                    user only
   tilefocus 1|0     from ft-screens: an anchored app's dashboard tile has the focus (a floating
                     window, a gamescope app or a PC's app window; renewed every 2 s, lapses
                     TILE_FOCUS_LAPSE after the last), so the tiling keys (TILE_FOCUS_ACTIONS) are
@@ -363,6 +365,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import ft_commands  # noqa: E402  (your commands, "run:NAME")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ft_palm_menu  # noqa: E402  (the palm menu's tiles)
 import ft_pinlock  # noqa: E402
 import kwin_ei  # noqa: E402  (the desktop's wheel through KWin's EIS, issue 108)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "input-settings"))
@@ -374,7 +377,6 @@ from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabular
     KEY_LIST_RUNNABLE,
     KEYS,
     MODIFIERS,
-    QUICK_SETTINGS_ACTIONS,
     TILE_ACTIONS,
     TILE_FOCUS_ACTIONS,
     TILE_NUDGE_ACTIONS,
@@ -528,12 +530,6 @@ def needs_pointer(a):
             and not a.startswith((PROFILE, COMMAND, RUN, KEYS)))
 
 
-QUICK_SETTINGS_NAMES = frozenset(name for name, _ in QUICK_SETTINGS_ACTIONS)
-# ...and the palm Quick Access card's own rows past its tiles: Quick Eye Calibrate (shown while gaze
-# mode is on, screens/vrquick.cpp).
-PALM_ACTIONS = frozenset({"gaze_quickcal"})
-
-
 def works_paused(a):
     """An action that still does something while Frametop is paused (game_pause.py)."""
     return a in game_pause.PAUSED_ACTIONS or a.startswith((COMMAND, RUN))
@@ -541,7 +537,7 @@ def works_paused(a):
 
 # What pressed pause_toggle, for the log (do_action's source).
 PAUSE_SOURCES = {"mouse": "mouse button", "keyboard": "key combination", "left": "controller button",
-                 "right": "controller button", "frunner": "frunner"}
+                 "right": "controller button", "frunner": "frunner", "palm": "palm menu"}
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FT_LAYOUT = os.path.join(REPO, "layout", "ft-layout")
 FT_STEAM = os.path.join(REPO, "steam", "ft-steam")
@@ -1749,6 +1745,22 @@ class Relay:
         elif self.lease.current:
             self.lease.current.action(action, value, now, source)
 
+    def palm_action(self, action, addr, uid, now):
+        """From ft-screens (unbound, no reply): a tile of the palm's Quick Access. The file says which
+        (ft_palm_menu: only what the user put on their palm and shows), read now, so a datagram from
+        anything else can't run a command that isn't there; and only from this user."""
+        if uid != os.getuid():
+            self.reply(addr, {"t": "error", "error": "another user's"})
+        elif action not in ft_palm_menu.actions(ft_palm_menu.load()) or not known_action(action):
+            log(f"palm: {action!r} isn't on the palm menu")
+            self.reply(addr, {"t": "error", "error": f"not on the palm menu {action!r}"})
+        elif self.pause.paused and not works_paused(action):
+            self.reply(addr, {"t": "error", "error": "paused"})
+        else:
+            for value in (1, 0):
+                self.do_action(action, value, now, "palm")
+            self.reply(addr, {"t": "palm", "action": action})
+
     def tap_keys(self, codes, now):
         """A "keys:" action: its keys go down in order and come up in reverse, at once, where typing
         goes (the desktop's screens, else the virtual keyboard for Steam). Down and up together,
@@ -2503,14 +2515,12 @@ class Relay:
                 self.reply(addr, self.pause.status())
             return
         if cmd == "action" and len(words) == 2:
-            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu; or
-            # from ft-screens (unbound, no reply): a tile of the palm's Quick Access, or one of its Quick
-            # Settings toggles or its eye row. Only those (KEY_LIST_RUNNABLE, QUICK_SETTINGS_ACTIONS,
-            # PALM_ACTIONS), and only from this user: never run:, command: or keys:.
+            # From frunner (bound): one of Frametop's own actions, picked in its search or OS menu.
+            # Only those (KEY_LIST_RUNNABLE), and only from this user: never run:, command: or keys:.
             name = words[1]
             if uid != os.getuid():
                 self.reply(addr, {"t": "error", "error": "another user's"})
-            elif name not in KEY_LIST_RUNNABLE and name not in QUICK_SETTINGS_NAMES and name not in PALM_ACTIONS:
+            elif name not in KEY_LIST_RUNNABLE:
                 self.reply(addr, {"t": "error", "error": f"not a menu action {name!r}"})
             elif self.pause.paused and not works_paused(name):
                 self.reply(addr, {"t": "error", "error": "paused"})
@@ -2518,6 +2528,9 @@ class Relay:
                 self.do_action(name, 1, now, "frunner")
                 self.do_action(name, 0, now, "frunner")
                 self.reply(addr, {"t": "action", "action": name})
+            return
+        if cmd == "palm" and len(words) >= 2:
+            self.palm_action(data.decode(errors="replace").split(None, 1)[1].strip(), addr, uid, now)
             return
         if cmd == "tilefocus" and words[1:] in (["1"], ["2"], ["0"]):
             # From ft-screens (unbound, no reply): an anchored app's tile has the focus (1), a

@@ -2140,7 +2140,7 @@ Item {
                         Controls.ToolButton {
                             icon.name: "edit-delete"
                             display: Controls.AbstractButton.IconOnly
-                            text: "Remove (and the buttons mapped to it)"
+                            text: "Remove (and the buttons and palm menu tiles that run it)"
                             Controls.ToolTip.text: text
                             Controls.ToolTip.visible: hovered
                             onClicked: backend.removeCommand(modelData.name)
@@ -2191,7 +2191,7 @@ Item {
 
             footer: Ft.HelpFooter {
                 text: "Saved shell commands run in the background on your headset. Trigger any saved command from Mouse "
-                      + "buttons, Controllers, Keyboard & shortcuts (choose \"Run command NAME\"), Frunner (Meta+Space), "
+                      + "buttons, Controllers, Keyboard & shortcuts, the palm menu in Quick Settings (choose \"Run command NAME\"), Frunner (Meta+Space), "
                       + "Voice dictation (say your wake word, then \"run NAME\"), or directly by name in a terminal "
                       + "(use ft-cmd log NAME to view output)."
             }

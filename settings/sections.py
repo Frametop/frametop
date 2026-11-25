@@ -67,7 +67,7 @@ SECTIONS = [
     ("games", "input", "System", "VR games", "applications-games",
      "game optimization pause vr game performance gesture fps"),
     ("quick-settings", "quick", "System", "Quick Settings", "configure",
-     "palm menu quick access toggles resources cpu gpu memory temperature battery"),
+     "palm menu quick access toggles customize tiles label text action custom command alias resources cpu gpu memory temperature battery"),
     ("power", "display", "System", "Power & startup", "preferences-system-power-management",
      "power display off sleep idle plugged autostart boot start with steamvr"),
     ("steam", "display", "System", "Steam & notifications", "preferences-desktop-notification",

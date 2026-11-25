@@ -1,13 +1,16 @@
 """Input Settings' Commands page: your commands (commands/ft_commands.py) and the bindings
-that run them. Plain Python (no Qt): ft_input_settings' Backend calls these and says the
+and palm menu tiles that run them. Plain Python (no Qt): ft_input_settings' Backend calls these and says the
 returned text in the window. `host` is its host runner (a function like ft_input_settings.host),
 passed in at call time. Tests: input-settings/test/test_input_commands.py.
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
+for folder in ("commands", "conf"):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), folder))
 import ft_commands  # noqa: E402  (your commands: standard library only)
+import ft_palm_menu  # noqa: E402  (the palm menu's tiles)
+import ft_store  # noqa: E402
 
 RUN = "run:"   # an action that runs a command: "run:NAME"
 
@@ -56,8 +59,17 @@ def drop_bindings(rules, name):
     return dropped
 
 
-def removed_text(name, dropped):
-    return f"{name} removed" + (f", and {dropped} binding{'s' if dropped != 1 else ''} to it" if dropped else "")
+def drop_tiles(name):
+    """Take out the palm menu's tiles that ran `name`. (how many went, the problem or "")."""
+    try:
+        return ft_palm_menu.drop_action(RUN + name), ""
+    except (OSError, ft_store.StoreError) as e:
+        return 0, f"{name} removed, but not its palm menu tiles: {e}"
+
+
+def removed_text(name, dropped, tiles=0):
+    went = [f"{n} {what}{'s' if n != 1 else ''}" for n, what in ((dropped, "binding"), (tiles, "palm menu tile")) if n]
+    return f"{name} removed" + (f", and {' and '.join(went)} to it" if went else "")
 
 
 def run_now(name, host, host_ft_cmd):

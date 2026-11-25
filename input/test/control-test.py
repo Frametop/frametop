@@ -83,6 +83,10 @@ relay.log = lambda *a: LOG.append(" ".join(map(str, a)))
 relay.read_config = lambda path=None: {}
 real_read_rules = relay.read_rules
 relay.read_rules = lambda path=None: real_read_rules(os.path.join(OUT, "no-rules.json"))
+relay.ft_palm_menu.PATH = os.path.join(OUT, "frametop-palm.txt")
+with open(relay.ft_palm_menu.PATH, "w") as palm_file:
+    palm_file.write("menu\t1\tscreens_toggle\tScreens\nmenu\t0\tdock_all\tHidden\nmenu\t1\trun:my-cmd\tMine\n"
+                    "quick\t1\tprofile:Work desk\tDesk\nquick\t1\tno_such_action\tBad\neyes\t1\tgaze_quickcal\tEyes\n")
 control = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 screens_sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_NONBLOCK)
 
@@ -161,6 +165,9 @@ def run(text, uid=UID, addr=ADDR, kb_addr=None, paused=False, no_pointer=False):
         r.kb.addr = kb_addr
     if no_pointer:
         r.lease.current = None
+    # Programs and your commands: recorded, not run.
+    relay.subprocess.Popen = lambda argv, **k: calls.append(["Popen", [str(a).replace(relay.REPO, "REPO") for a in argv]])
+    relay.ft_commands.run_named = lambda name: (calls.append(["run_named", name]), (0, f"{name}: started"))[1]
     before = state(r, pointer, sent)
     data = text.encode()
     words = data.decode(errors="replace").split()
@@ -237,9 +244,21 @@ CASES += [
     ("action screens_toggle, other user", "action screens_toggle", {"uid": OTHER}),
     ("action not a menu one", "action left", {}), ("action run:", "action run:x", {}),
     ("action keys:", "action keys:125+32", {}), ("action unbound", "action dock_all", {"addr": b""}),
-    ("action gaze_quickcal (the palm's eye row)", "action gaze_quickcal", {"addr": b""}),
-    ("action gaze_quickcal, no pointer", "action gaze_quickcal", {"addr": b"", "no_pointer": True}),
-    ("action gaze_quickcal, paused", "action gaze_quickcal", {"paused": True}),
+    ("action gaze_quickcal (the palm's, not a menu one)", "action gaze_quickcal", {}),
+    ("palm screens_toggle", "palm screens_toggle", {"addr": b""}),
+    ("palm screens_toggle, paused", "palm screens_toggle", {"paused": True}),
+    ("palm screens_toggle, other user", "palm screens_toggle", {"uid": OTHER}),
+    ("palm dock_all (hidden there)", "palm dock_all", {}),
+    ("palm dictate (not there)", "palm dictate", {}),
+    ("palm run: not there", "palm run:other", {}),
+    ("palm run:my-cmd", "palm run:my-cmd", {"addr": b""}),
+    ("palm run:my-cmd, paused", "palm run:my-cmd", {"paused": True}),
+    ("palm run:my-cmd, other user", "palm run:my-cmd", {"uid": OTHER}),
+    ("palm profile: with a space", "palm profile:Work desk", {}),
+    ("palm an unknown action there", "palm no_such_action", {}),
+    ("palm gaze_quickcal", "palm gaze_quickcal", {"addr": b""}),
+    ("palm gaze_quickcal, no pointer", "palm gaze_quickcal", {"addr": b"", "no_pointer": True}),
+    ("palm gaze_quickcal, paused", "palm gaze_quickcal", {"paused": True}),
 ]
 # Wrong word counts: each command with a word too many or too few.
 for w in ("vrbtn left/view 1 2", "vrhello 1", "vrgame 1 2", "vrdash", "gamepad", "gamepad desktop 1", "vrpad",
@@ -247,7 +266,7 @@ for w in ("vrbtn left/view 1 2", "vrhello 1", "vrgame 1 2", "vrdash", "gamepad",
           "hostbye", "type", "kbhello 1 2", "kbkey 30", "kbkey 30 1 2", "kbtext", "kbpanel", "kbpanel show 1",
           "kbpoke left", "kbpoke right press 0.1 0.2", "calpanel", "calpanel 1 2", "gazeawake", "gazeawake 1 2",
           "gazewoke 1", "devices 1", "watch 5 6", "reload 1", "vrcapture 1 2", "action",
-          "action dock_all 1"):
+          "action dock_all 1", "palm"):
     CASES.append((w + ", arity", w, {"kb_addr": ADDR} if w.startswith("kb") else {}))
 
 

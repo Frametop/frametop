@@ -447,7 +447,7 @@ def pages(f, keys):
                  "System",
                  ["VR games", "Pause the desktop automatically when launching VR games to save performance",
                   "settings:games"],
-                 ["Quick Settings", "Choose which toggles and system stats appear on your palm menu",
+                 ["Quick Settings", "Choose your palm menu's tiles: what each says, and the action or custom command it runs",
                   "settings:quick-settings"],
                  ["Power & startup", "Auto-start with SteamVR, screen sleep timer, and staying awake while charging",
                   "settings:power"],

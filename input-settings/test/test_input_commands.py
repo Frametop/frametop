@@ -82,6 +82,22 @@ class Bindings(unittest.TestCase):
         self.assertEqual(input_commands.removed_text("x", 0), "x removed")
         self.assertEqual(input_commands.removed_text("x", 1), "x removed, and 1 binding to it")
         self.assertEqual(input_commands.removed_text("x", 2), "x removed, and 2 bindings to it")
+        self.assertEqual(input_commands.removed_text("x", 0, 2), "x removed, and 2 palm menu tiles to it")
+        self.assertEqual(input_commands.removed_text("x", 2, 1), "x removed, and 2 bindings and 1 palm menu tile to it")
+
+    def test_drop_tiles(self):
+        path = Path(input_commands.ft_palm_menu.PATH)
+        self.assertTrue(path.is_relative_to(os.environ["HOME"]))
+        self.assertEqual(input_commands.drop_tiles("x"), (0, ""))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("menu\t1\trun:x\tMine\nmenu\t1\tdictate\tTalk\n")
+        self.assertEqual(input_commands.drop_tiles("x"), (1, ""))
+        self.assertNotIn("run:x", path.read_text())
+        path.write_text("menu\t1\trun:x\tMine\nrubbish\n")
+        tiles, problem = input_commands.drop_tiles("x")
+        self.assertEqual(tiles, 0)
+        self.assertIn("x removed, but not its palm menu tiles", problem)
+        path.write_text("")
 
 
 class RunNow(unittest.TestCase):

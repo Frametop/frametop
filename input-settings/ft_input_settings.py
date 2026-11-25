@@ -1622,8 +1622,11 @@ class Backend(QObject):
         saved = dropped is not NOT_SAVED   # (the command is gone either way)
         dropped = dropped if isinstance(dropped, int) else 0
         self.commandsChanged.emit()
-        if saved:
-            self.message.emit(input_commands.removed_text(name, dropped), False)
+        tiles, problem = input_commands.drop_tiles(name)
+        if problem:
+            self.message.emit(problem, True)
+        elif saved:
+            self.message.emit(input_commands.removed_text(name, dropped, tiles), False)
 
     @Slot(str)
     def runCommand(self, name):

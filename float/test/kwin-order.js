@@ -16,7 +16,7 @@ class Signal {
 const HOME = {x: 4300, y: 4300, width: 800, height: 600};
 const HALF = {x: 4000, y: 4000, width: 700, height: 1200}, FULL = {x: 4000, y: 4000, width: 1400, height: 1200};
 
-function desktop(tileIs, without) {
+function desktop(tileIs, without, area = FULL) {
     let now = 1000, command;
     const timers = [], sent = [], signal = new Signal();
     class QTimer {
@@ -25,7 +25,7 @@ function desktop(tileIs, without) {
         stop() { this.due = undefined; }
     }
     const screen = {name: "WL-0", geometry: {x: 0, y: 0, width: 1920, height: 1080}};
-    const spare = {name: "WL-1", geometry: FULL};
+    const spare = {name: "WL-1", geometry: area};
     const w = {internalId: "w1", managed: true, normalWindow: true, output: spare, keepBelow: true, fullScreen: false,
                asked: null, frame: HOME, committed: null, requested: null};
     ["frameGeometryChanged", "outputChanged", "keepBelowChanged", "interactiveMoveResizeStarted", "interactiveMoveResizeFinished",
@@ -44,7 +44,7 @@ function desktop(tileIs, without) {
     command(JSON.stringify([{cmd: "config", screens: 1}]));
     sent.length = 0;
     return {
-        w, spare,
+        w,
         outputsChange() {
             screen.geometry = {x: 0, y: 0, width: 2560, height: 1440};
             workspace.screensChanged.emit();
@@ -95,10 +95,8 @@ for (const mode of [3, undefined]) {  // (KWin 6.2 has no mode to read)
     d.size(FULL);
     d.w.maximizedChanged.emit();
     asBefore("maximized in " + was, d);
-    d = desktop("requested");
+    d = desktop("requested", null, {x: 4000, y: 4000, width: 1400.36, height: 1200.27});
     d.w.maximizeMode = mode;
-    d.spare.geometry = {x: 4000, y: 4000, width: 1400.36, height: 1200.27};
-    d.outputsChange();
     d.size(FULL);
     d.w.maximizedChanged.emit();
     asBefore("...on an output of a fractional size", d);

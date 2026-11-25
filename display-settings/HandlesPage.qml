@@ -34,9 +34,9 @@ Kirigami.ScrollablePage {
         }
         Ft.Hint {
             text: "Outside, a bar sits past the edge, off what's on the screen. Inside, it sits over the content "
-                  + "near the edge while it shows. A dashboard tile's bar goes only as far out as its half of the "
-                  + "gap to the next tile, so most of it still lies over the tile's edge. To choose for one screen "
-                  + "or window, tap its bar and open Bar Position."
+                  + "near the edge while it shows. A dashboard tile's bar hangs past its edge too, so between two "
+                  + "tiles it lies over the gap and the next tile's edge. To choose for one screen or window, tap "
+                  + "its bar and open Bar Position."
         }
         Ft.SliderRow {
             Kirigami.FormData.label: "Vertical grab padding:"

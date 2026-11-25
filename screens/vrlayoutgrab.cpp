@@ -74,8 +74,10 @@ void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
     if (TileGroup(&group)) g.Take(kBoard, group);
     s.layoutHeld = s.barCarry = true;   // (let go wherever the laser is by then, as a bar's carry)
     ApplyAlpha(s);
+    const size_t held = 1 + size_t(g.Moves(kBoard));   // the held panel, and the dashboard's tiles as one
+    const size_t others = g.rel.size() > held ? g.rel.size() - held : 0;
     std::printf("screen %d: move all: %zu other panel(s) in the room and %zu on the dashboard go with it\n", index + 1,
-                g.rel.size() - 1 - size_t(g.Moves(kBoard)), g.Moves(kBoard) ? tiles : 0);
+                others, g.Moves(kBoard) ? tiles : 0);
 }
 
 void UpdateLayoutGrab() {

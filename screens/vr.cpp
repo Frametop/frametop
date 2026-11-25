@@ -6288,7 +6288,6 @@ void ft_vr_gamepad_target(int screen) {
 }
 
 int ft_vr_gamepad_screen(void) { return g_vr ? g_pill.pad : -1; }
-int TypingPanel() { return g_pill.target; }
 
 // The panel ft_pointer's laser went on last (its content or a popup), -1 after it left. Set in
 // ft_vr_poll from the panels' events.

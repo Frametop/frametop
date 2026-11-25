@@ -2,7 +2,8 @@
 
 Accept an inactive lock only in a fresh, well-formed snapshot with loaded PIN
 settings and no reset or inconsistent mandatory prompt. Do not require an earlier
-lock cycle. Cold-boot initialization ordering still needs hardware validation.
+lock cycle. On a cold boot the first lease can come about a second before Steam's
+PIN screen (docs/steam-pin-lock.md).
 Never fetch the settings object over CDP: it can contain the user's PIN.
 Steam alone controls locking and authentication; this module never requests either.
 """

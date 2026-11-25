@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""conf/ft_desktopapps.py: GioUnix's DesktopAppInfo where GLib has it, Gio's where it doesn't,
-and no deprecation warning from reading a .desktop file either way."""
+"""conf/ft_desktopapps.py: GioUnix's DesktopAppInfo where GLib has it and PyGObject can call it,
+Gio's where not, and a .desktop file read either way with no deprecation warning."""
 import importlib
 import os
 import sys
@@ -20,10 +20,14 @@ try:
 except (ImportError, ValueError, AttributeError):
     HAVE_GI = False
 
-ENTRY = "[Desktop Entry]\nType=Application\nName=Test app\nExec=true\n"
+ENTRY = "[Desktop Entry]\nType=Application\nName=Test app\nGenericName=Tester\nExec=true\n"
 
 
 def has_giounix():
+    """GioUnix is here and this PyGObject can call it. An older PyGObject must not even load it:
+    that breaks every DesktopAppInfo in this process (ft_desktopapps.py)."""
+    if gi.version_info < ft_desktopapps.GIOUNIX_FROM:
+        return False
     try:
         gi.require_version("GioUnix", "2.0")
         from gi.repository import GioUnix  # noqa: F401
@@ -44,11 +48,32 @@ class DesktopAppsTest(unittest.TestCase):
                 info = ft_desktopapps.DesktopAppInfo.new_from_filename(path)
                 self.assertEqual(info.get_name(), "Test app")
                 self.assertIsInstance(info, ft_desktopapps.DesktopAppInfo)
+                # DesktopAppInfo's own methods: SteamOS 0.4's PyGObject can't call them on GioUnix's.
+                self.assertEqual(info.get_filename(), path)
+                self.assertEqual(info.get_generic_name(), "Tester")
 
-    @unittest.skipUnless(HAVE_GI and has_giounix(), "this GLib has no GioUnix")
+    @unittest.skipUnless(HAVE_GI and has_giounix(), "no GioUnix this PyGObject can call")
     def test_giounix_where_glib_has_it(self):
         from gi.repository import GioUnix
         self.assertIs(ft_desktopapps.DesktopAppInfo, GioUnix.DesktopAppInfo)
+
+    def test_gio_where_pygobject_cannot_call_giounix(self):
+        real, real_version, asked = gi.require_version, gi.version_info, []
+
+        def spy(namespace, version):
+            asked.append(namespace)
+            return real(namespace, version)
+
+        gi.require_version, gi.version_info = spy, (3, 48, 2)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # Gio's own name warns on a GLib that has GioUnix
+                module = importlib.reload(ft_desktopapps)
+                self.assertIs(module.DesktopAppInfo, Gio.DesktopAppInfo)
+                self.assertNotIn("GioUnix", asked)
+        finally:
+            gi.require_version, gi.version_info = real, real_version
+            importlib.reload(ft_desktopapps)
 
     def test_gio_where_glib_lacks_giounix(self):
         real = gi.require_version

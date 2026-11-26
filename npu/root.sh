@@ -197,7 +197,7 @@ install)
     systemctl reset-failed "$UNIT" 2>/dev/null || true
     if ! systemctl restart "$UNIT" || ! serving; then
         # in place and enabled, and it tries again by itself (the DSP not ready yet, dsp_service restarting)
-        echo "ft-npud: installed $TREE, but it hasn't started yet (it keeps trying): journalctl -u $UNIT" >&2
+        echo "ft-npud: installed $TREE, but it isn't serving yet (it starts again if it fails): journalctl -u $UNIT" >&2
         exit 3
     fi
     echo "ft-npud: installed $TREE and started it"

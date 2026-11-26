@@ -236,7 +236,7 @@ main() {
   fi
   # The release "current" named before this install: install.sh makes this one current when it
   # finishes, so it's read first.
-  local prev= d old_image old_box
+  local prev=
   [ -L "$base/current" ] && prev=$(readlink "$base/current")
   if [ "$tty" = 1 ]; then
     "$dest/install.sh" ${pass[@]+"${pass[@]}"} </dev/tty
@@ -244,14 +244,36 @@ main() {
     "$dest/install.sh" ${pass[@]+"${pass[@]}"} </dev/null
   fi
 
-  # This release is now "current"; the one before stays, to go back to. Older ones go, with
-  # their containers and images (only Frametop's: frametop-... and localhost/frametop:...).
+  # This release is now "current"; the one before stays, to go back to.
   ln -sfn "$version" "$base/current"
+  prune "$base" "$version" "$prev"
+}
+
+# in_use DIR: a process of this user names a file in DIR. The desktop and its session stay on the
+# release they started from until SteamVR restarts, an install or two later too, in its container.
+in_use() {
+  local f
+  for f in /proc/[0-9]*/cmdline; do
+    [ -O "$f" ] && grep -qaF -- "$1/" "$f" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# prune BASE VERSION PREV: the releases in BASE other than VERSION (just installed) and PREV (the
+# one before it) go, with their containers and images (only Frametop's: frametop-... and
+# localhost/frametop:...). One that still runs stays: removing its container would end it (the
+# desktop, mid-session), so a later install removes it.
+prune() {
+  local base=$1 version=$2 prev=$3 d old_image old_box
   for d in "$base"/*/; do
     d=${d%/}
     [ -L "$d" ] && continue  # "current" itself, a link to the release just installed
     [ -f "$d/.frametop-release" ] || continue
     case ${d##*/} in "$version"|"$prev") continue ;; esac
+    if in_use "$d"; then
+      echo "keeping Frametop ${d##*/} for now: it's still running (until SteamVR restarts); a later install removes it"
+      continue
+    fi
     old_image=$(sed -n 's/^IMAGE=//p' "$d/.frametop-release")
     old_box=$(sed -n 's/^BOX=//p' "$d/.frametop-release")
     echo "removing Frametop ${d##*/}, two releases back"

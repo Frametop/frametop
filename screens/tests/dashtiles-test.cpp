@@ -253,6 +253,21 @@ int main() {
             d.Unanchor(3), d.Arrange(wide), d.Arrange(wide);
             check("pan: ...taken off meanwhile: nothing waits on it", d.PlacedOf(3) == nullptr);
         }
+        {   // ...centred with Steam's page hidden (the dashboard closed), and the dashboard opens: it stays straight
+            // ahead. Steam's page had no width there, so no place to keep: it doesn't vote (user, 2026-11-26: back
+            // from the headset off, a remote display went 11 degrees round as the dashboard opened)
+            const auto bar = [](int id) { return dashtiles::Info{id == 3 ? 5.0 : 0.37, id == 3 ? 1.4 : 0.6}; };
+            dashtiles::Board d;
+            d.steam = 9;
+            d.Anchor(3, -1, dashtiles::Stay::Default), d.Anchor(9, 3, dashtiles::Stay::Default);
+            d.absent = {3, 9}, d.Recentre(), d.Arrange(bar);   // (put back, no picture yet; the dashboard closed)
+            d.absent = {9}, d.Arrange(bar);                    // (its picture came)
+            check("pan: centred with Steam's page hidden: straight ahead", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+            d.absent = {}, d.Arrange(bar);                     // (the dashboard opened)
+            check("pan: ...the dashboard opened: still straight ahead", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+            d.absent = {9}, d.Arrange(bar), d.absent = {}, d.Arrange(bar);
+            check("pan: ...closed and opened again: still", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+        }
         {   // centred while it was fitted: the turns from before that don't come back
             dashtiles::Board d;
             for (int k = 1; k <= 3; ++k) d.Anchor(k, k - 1, dashtiles::Stay::Default);

@@ -454,7 +454,7 @@ public:
         pan_ = l.split >= 0 || params.fit ? 0 : turns_.Keep(l, [&] { return Pan(l); });   // (fitted: always round the middle)
         if (pan_ != 0) tiling::Turn(&l, pan_);
         ShowNudges(&l);
-        moved_ = -1, recentre_ = false;
+        moved_ = -1, recentre_ = false, lastAbsent_ = absent;
         return last_ = std::move(l);
     }
     // The dashboard opened: the strip centred again on the next Arrange (its middle straight ahead),
@@ -612,7 +612,7 @@ private:
                     continue;
                 }
                 for (const tiling::Placed &q : last_.tiles)
-                    if (q.id == p.id) {
+                    if (q.id == p.id && !lastAbsent_.count(q.id)) {   // (not shown there: no width, no place to keep)
                         auto [it, added] = vote.try_emplace(p.col, -1.0, 0.0);
                         if (p.az1 - p.az0 > it->second.first) it->second = {p.az1 - p.az0, tiling::WrapNear(q.azDeg - p.azDeg, 0)};
                     }
@@ -681,6 +681,7 @@ private:
     std::map<int, Spot> spots_;
     tilegrid::Grid grid_;
     tiling::Layout last_;
+    std::set<int> lastAbsent_;    // ...and the ones not shown in it
     std::vector<tilepack::Fill> fills_;        // each column as laid out last (RoomFor), from the desk line up
     std::vector<tilepack::Fill> underFills_;   // ...and down
     std::vector<tilepack::Fill> shownFills_;   // ...with its hidden panels at their own size (Settle)

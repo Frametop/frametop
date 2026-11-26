@@ -5,7 +5,8 @@
 
 #include <string>
 
-// Writes the pid to PATH through a temporary file and a rename, refusing a link at PATH. False on failure.
+// Writes the pid to PATH through a temporary file and a rename, refusing a link at PATH, and makes PATH's
+// folder (0700) if it isn't there yet, not its parents. False on failure.
 bool pidfile_write(const std::string &path);
 // Removes PATH if it still holds this process's pid (a newer ft-hands may have written it since).
 void pidfile_remove(const std::string &path);

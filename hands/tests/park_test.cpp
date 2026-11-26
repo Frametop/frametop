@@ -77,6 +77,12 @@ void pidfiles() {
     CHECK(!pidfile_write(link));   // a link at the path is refused
     CHECK(access("/tmp/park-test-elsewhere", F_OK) != 0);
     unlink(link.c_str());
+    const std::string sub = dir + "/frametop-hands", early = sub + "/hands.pid";
+    CHECK(pidfile_write(early));   // before the run dir is made: it makes it
+    struct stat st;
+    CHECK(stat(sub.c_str(), &st) == 0 && (st.st_mode & 0777) == 0700);
+    pidfile_remove(early);
+    rmdir(sub.c_str());
     rmdir(dir.c_str());
 }
 

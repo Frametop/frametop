@@ -26,6 +26,7 @@ STEP_STUB = r"""#!/bin/bash
 rel=${0#"$FAKE_ROOT"/}
 printf 'STEP %s %s\n' "$rel" "$*" | tee -a "$FAKE_LOG"
 case " $FAKE_FAIL " in *" $rel "*) exit 1 ;; esac
+case " ${FAKE_NOT_STARTED:-} " in *" $rel "*) exit 3 ;; esac   # npu/install.sh: in place, not started yet
 [ "$rel" = hands/run.sh ] && [ -n "${FAKE_STEP_SLEEP:-}" ] && sleep "$FAKE_STEP_SLEEP"
 # hands/run.sh sets ft-camd's capabilities only when they're missing
 if [ -n "$PRIVILEGED" ] && ! { [ "${FAKE_CAPS:-0}" = 1 ] && [ "${rel#hands/}" != "$rel" ]; }; then
@@ -416,6 +417,13 @@ class InstallOnce(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("NPU hand tracking: not installed (above), so hand tracking uses the CPU", out)
         self.assertIn("== Done", out)
+        # one in place that hasn't started yet (the DSP not ready) says so, not "not installed"
+        self.log.write_text("")
+        self.cached()
+        code, out = self.run_install(args=["--yes"], FAKE_CAPS="1", FAKE_NOT_STARTED="npu/install.sh")
+        self.assertEqual(code, 0, out)
+        self.assertIn("NPU hand tracking: installed, but ft-npud hasn't started yet; it keeps trying", out)
+        self.assertNotIn("NPU hand tracking: not installed", out)
 
     def test_a_signal_still_ends_the_keep_alive(self):
         def stop_at_hands(p):

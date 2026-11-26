@@ -1,7 +1,10 @@
-"""hands/ft-hands-stop, offline: it stops the ft-hands that wrote its pidfile and no other process, a
-stale or linked pidfile signals nothing, and it always exits 0 (a unit's ExecStartPre and ExecStopPost).
+"""hands/ft-hands-stop, offline: it stops the ft-hands that wrote its pidfile, and one from before pidfiles
+started with exactly the arguments it's given, and no other process; a stale or linked pidfile signals
+nothing, and it always exits 0 (a unit's ExecStartPre and ExecStopPost).
 
-The stand-ins are python3 started through a link named ft-hands, so their comm is ft-hands."""
+The stand-ins are a copy of python3 named ft-hands (the program ft-hands-stop reads from /proc/PID/exe),
+started as ft-hands (a host one's process name) or through a link named exe (podman starts a program in
+the container so that its process name is "exe"), and a link named ft-other for another program."""
 import pathlib
 import shutil
 import subprocess
@@ -11,14 +14,16 @@ import time
 import unittest
 
 STOP = pathlib.Path(__file__).resolve().parents[1] / "ft-hands-stop"
+SLEEP = ["-I", "-c", "import time; time.sleep(60)"]
 
 
 class FtHandsStop(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="ft-hands-stop-"))
         self.procs = []
-        for name in ("ft-hands", "ft-other"):
-            (self.tmp / name).symlink_to(sys.executable)
+        shutil.copy(pathlib.Path(sys.executable).resolve(), self.tmp / "ft-hands")
+        (self.tmp / "exe").symlink_to("ft-hands")
+        (self.tmp / "ft-other").symlink_to(pathlib.Path(sys.executable).resolve())
 
     def tearDown(self):
         for p in self.procs:
@@ -27,15 +32,12 @@ class FtHandsStop(unittest.TestCase):
             p.wait()
         shutil.rmtree(self.tmp)
 
-    def start(self, name="ft-hands", pidfile=None):
-        """A sleeping stand-in, with --pidfile PIDFILE on its command line as ft-hands has it."""
-        argv = [str(self.tmp / name), "-I", "-c", "import time; time.sleep(60)"]
-        if pidfile:
-            argv += ["--pidfile", str(pidfile)]
-        p = subprocess.Popen(argv)
+    def start(self, name="ft-hands", args=()):
+        """A sleeping stand-in started as name, with args after its own (as ft-hands has them)."""
+        p = subprocess.Popen([str(self.tmp / name), *SLEEP, *map(str, args)])
         self.procs.append(p)
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:   # until the link's name shows (exec done)
+        while time.monotonic() < deadline:   # until the name shows (exec done)
             try:
                 if pathlib.Path(f"/proc/{p.pid}/comm").read_text().strip() == name:
                     return p
@@ -58,27 +60,43 @@ class FtHandsStop(unittest.TestCase):
         return p.poll() is None
 
     def test_it_stops_its_own_and_leaves_the_others(self):
-        f = self.tmp / "hands.pid"
-        mine = self.start(pidfile=f)
-        other = self.start(pidfile=self.tmp / "handrec.pid")   # the Hand Recorder's tracker
-        f.write_text(f"{mine.pid}\n")
-        self.assertEqual(self.stop(f), 0)
-        self.assertEqual(mine.wait(timeout=5), -15)   # TERM, not KILL
-        self.assertTrue(self.alive(other))
-        self.assertFalse(f.exists(), "the stale pidfile goes")
+        for name in ("ft-hands", "exe"):   # on the host, and in the container
+            with self.subTest(name):
+                f = self.tmp / "hands.pid"
+                mine = self.start(name, ("--pidfile", f))
+                other = self.start(name, ("--pidfile", self.tmp / "handrec.pid"))   # the Hand Recorder's
+                f.write_text(f"{mine.pid}\n")
+                self.assertEqual(self.stop(f), 0)
+                self.assertEqual(mine.wait(timeout=5), -15)   # TERM, not KILL
+                self.assertTrue(self.alive(other))
+                self.assertFalse(f.exists(), "the stale pidfile goes")
 
     def test_a_pid_that_went_to_another_program_is_not_signalled(self):
         f = self.tmp / "hands.pid"
-        for p in (self.start("ft-other", pidfile=f),   # the name doesn't match
-                  self.start()):                         # an ft-hands without this pidfile
+        for p in (self.start("ft-other", ("--pidfile", f)),   # not an ft-hands program
+                  self.start()):                                # an ft-hands without this pidfile
             f.write_text(f"{p.pid}\n")
             self.assertEqual(self.stop(f), 0)
             self.assertTrue(self.alive(p))
             self.assertFalse(f.exists(), "a stale pidfile goes")
 
+    def test_one_from_before_pidfiles_is_stopped_by_its_exact_arguments(self):
+        f = self.tmp / "hands.pid"
+        old = self.start("exe", ("--status", "60"))                         # the unit's, before an update
+        recorder = self.start("exe", ("--no-gestures", "--status", "0"))    # the Hand Recorder's
+        cutouts = self.start("exe", ("--status", "60", "--no-gestures"))    # more arguments
+        new = self.start("exe", ("--status", "60", "--pidfile", self.tmp / "other.pid"))
+        host = self.start("ft-other", ("--status", "60"))                   # not an ft-hands program
+        self.assertEqual(self.stop(f, *SLEEP, "--status", "60"), 0)   # its whole arguments, the stand-in's too
+        self.assertEqual(old.wait(timeout=5), -15)
+        for p in (recorder, cutouts, new, host):
+            self.assertTrue(self.alive(p))
+        self.assertEqual(self.stop(f), 0)   # without them, only the pidfile's
+        self.assertTrue(self.alive(cutouts))
+
     def test_a_linked_or_missing_pidfile_does_nothing(self):
         f = self.tmp / "hands.pid"
-        p = self.start(pidfile=f)
+        p = self.start(args=("--pidfile", f))
         real = self.pidfile(p.pid, "real.pid")
         f.symlink_to(real)
         self.assertEqual(self.stop(f), 0)
@@ -90,7 +108,7 @@ class FtHandsStop(unittest.TestCase):
 
     def test_one_that_ignores_term_is_killed(self):
         f = self.tmp / "hands.pid"
-        p = subprocess.Popen([str(self.tmp / "ft-hands"), "-I", "-c",
+        p = subprocess.Popen([str(self.tmp / "exe"), "-I", "-c",
                               "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
                               "open(%r, 'w').close(); time.sleep(60)" % str(self.tmp / "ready"),
                               "--pidfile", str(f)])
@@ -100,7 +118,9 @@ class FtHandsStop(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
         f.write_text(f"{p.pid}\n")
+        t = time.monotonic()
         self.assertEqual(self.stop(f), 0)
+        self.assertLess(time.monotonic() - t, 4.5, "inside the units' TimeoutStopSec=5")
         self.assertEqual(p.wait(timeout=5), -9)
 
 

@@ -19,6 +19,8 @@ States per run: 64 (Steady, DashFix) to 1,741 (Code).
 
 Not in the model yet: the Hand Recorder's `needed` file (`hands/rec/handsneeded.py`), fresh while it records, over which the relay's park doesn't hold (the testbench's and another producer's still do: `hands/track/park.cpp`, tested in `hands/tests/park_test.cpp`), and ft-hands letting go of ft-npud while parked. TrackerIdleInPause doesn't hold while the recorder records in a pause, by design.
 
+Fixed in the code, outside the model: each unit stops only its own ft-hands, through its pidfile (`hands/ft-hands-stop`, tested in `hands/tests/test_ft_hands_stop.py`), where a global `pkill -x ft-hands` used to stop the Hand Recorder's too. And ft-hands keeps its name when it starts again on a new ft-camd (`execv("/proc/self/exe")` named it `exe`): the Hand Recorder looked for it by name, didn't find it, and said hand tracking didn't start (`find_processes` in `hands/rec/session.py` also reads the program from `/proc/PID/exe`, for an ft-hands from before the fix).
+
 Also checked in the code and drawn as holding: the helper ends a held pinch as lost when ft-hands is quiet for 2.5 s (`ft-pointer.cpp` 3649-3672), a park ends gestures as lost (`track/main.cpp` 890-917), and ft-screens never holds a near-input grab through a controller (`vr.cpp` 2724-2779).
 
 Results with the fixes (`4e24d91`): every rule holds in all 11 configs, 33 runs. States per run: 64 (Steady, DashFix) to 1,524 (Code). The model now describes the fixed code, with G1's L2 fix (`93cbf29`): `FixPark`, `DashFix` and `L2` no longer switch anything, so the configs that showed one bug each now check the same code with different settings. To see the old breaks, check out `f85dff9` and run its copy of the model.

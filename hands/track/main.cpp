@@ -88,6 +88,7 @@
 #include "sides.h"
 
 #include <sched.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -258,6 +259,9 @@ std::string json_str(const std::string &s) { return s.empty() ? "null" : "\"" + 
 }  // namespace
 
 int main(int argc, char **argv) {
+    // Its name, which hands/ft-hands-stop and the Hand Recorder find it by: run again through
+    // /proc/self/exe (ft-camd back, at the end of main) it would be "exe".
+    prctl(PR_SET_NAME, "ft-hands", 0, 0, 0);
     double seconds = 0, status = 5;
     int threads = 3, niceness = 5;
     bool int8 = false, publish = true, track = true, gestures_on = true;

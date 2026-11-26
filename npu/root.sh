@@ -11,7 +11,7 @@
 # Root opens nothing in the source tree itself: its owner (the user it serves) lists and packs every file (tar -h,
 # links followed, with the owner's own permissions), and root unpacks that into a stage only root can enter. So a
 # link in the tree to /etc/shadow or /dev/sda can't make root copy out what the owner couldn't read.
-# Usage: root.sh install SRC UID   SRC: npu/build/tree, owned by UID, the user ft-npud serves (root)
+# Usage: root.sh install SRC UID   SRC: npu/build/tree, owned by UID, the user ft-npud serves (root); exit 3: in place, not started yet
 #        root.sh uninstall (root) | status
 #        root.sh check UNIT ROOT: run UNIT's ExecStartPre over the tree at ROOT (status does this; tests too)
 set -euo pipefail
@@ -149,13 +149,20 @@ install)
     sed -i "s/@UID@/$USERID/g" "$stage/$UNIT"
     ! grep -q '@[A-Z]*@' "$stage/$UNIT" || fail "$UNIT has a placeholder left"
     find "$stage" -depth \( -name __pycache__ -o -name '*.egg-info' \) -exec rm -rf {} +
-    # tar keeps a FIFO or a device node as itself (one swapped in after the owner's find): files, dirs, links only
-    odd=$(find "$stage" ! -type f ! -type d ! -type l | head -5)
-    [ -z "$odd" ] || fail "special files in the new tree: $odd"
+    # Files and directories only, and only the members at the top. tar -h left no links, so one here came another
+    # way (a header added to the owner's stream while it packed), as would a FIFO or a device node: root writes
+    # and chmods below, and must never do that through a link.
+    odd=$(find -P "$stage" -mindepth 1 ! -type f ! -type d | head -5)
+    [ -z "$odd" ] || fail "not files and directories only in the new tree: $odd"
+    for e in "$stage"/* "$stage"/.[!.]* "$stage"/..?*; do
+        [ -e "$e" ] || continue
+        [[ " ${MEMBERS[*]} " == *" ${e##*/} "* ]] || fail "not part of the tree: ${e##*/}"
+    done
+    rm -f "$stage/SOURCE" "$stage/MANIFEST"
     printf 'from %s\ngraph sha256 %s\nfor uid %s\ninstalled %s\n' "$SRC" \
         "$(sha256sum < "$stage/graphs/landmarks.npz" | cut -d' ' -f1)" "$USERID" "$(date -u +%FT%TZ)" > "$stage/SOURCE"
     chown -R -h root:root "$stage"
-    find "$stage" -mindepth 1 -maxdepth 1 -exec chmod -R u=rwX,go=rX {} +    # the stage itself stays 0700
+    find -P "$stage" -mindepth 1 \( -type d -o -type f \) -exec chmod u=rwX,go=rX {} +    # the stage itself stays 0700
     manifest "$stage" "$stage/$UNIT" > "$stage/MANIFEST"
     preflight "$stage/$UNIT" "$stage"   # also walks every directory above the tree
     chmod 0755 "$stage"
@@ -173,7 +180,11 @@ install)
     systemctl enable -q "$UNIT"
     # the new tree now: a client falls back to the CPU for the second this takes, then connects again
     systemctl reset-failed "$UNIT" 2>/dev/null || true
-    systemctl restart "$UNIT"
+    if ! systemctl restart "$UNIT"; then
+        # in place and enabled, and it tries again by itself (the DSP not ready yet, dsp_service restarting)
+        echo "ft-npud: installed $TREE, but it hasn't started yet (it keeps trying): journalctl -u $UNIT" >&2
+        exit 3
+    fi
     echo "ft-npud: installed $TREE and started it"
     ;;
 status)

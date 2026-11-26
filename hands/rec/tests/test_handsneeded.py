@@ -5,7 +5,11 @@ records (hands/track/park.h), and the recorder's own ft-hands, stopped through i
   python3 -m hands.rec.tests.test_handsneeded
 """
 import os
+import pathlib
 import shlex
+import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -67,6 +71,28 @@ class OwnTrackerTest(unittest.TestCase):
         prop = cmd[cmd.index("-p", cmd.index("TimeoutStopSec=5")) + 1]
         self.assertEqual(prop, "ExecStopPost=-" + shlex.join(["/a b/stop", "/run/p.pid"]))
         self.assertEqual(cmd[-1], "/bin/true")
+
+
+class FindProcessesTest(unittest.TestCase):
+    def test_it_finds_an_ft_hands_podman_started(self):
+        """In Frametop's container a program's process name is "exe": tracker_running() has to see that
+        ft-hands, or the recorder says hand tracking didn't start while Frametop's runs."""
+        with tempfile.TemporaryDirectory() as d:
+            prog = pathlib.Path(d, "ft-hands")
+            shutil.copy(pathlib.Path(sys.executable).resolve(), prog)
+            pathlib.Path(d, "exe").symlink_to("ft-hands")
+            p = subprocess.Popen([os.path.join(d, "exe"), "-I", "-c", "import time; time.sleep(30)", "--status", "60"])
+            try:
+                deadline = time.monotonic() + 5
+                while pathlib.Path("/proc/%d/comm" % p.pid).read_text().strip() != "exe":
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.02)
+                found = dict(session.find_processes("ft-hands"))
+                self.assertIn(p.pid, found)
+                self.assertEqual(found[p.pid][-2:], ["--status", "60"])
+            finally:
+                p.kill()
+                p.wait()
 
 
 if __name__ == "__main__":

@@ -667,21 +667,33 @@ class Panel:
 # Processes
 
 def find_processes(name):
-    """[(pid, argv)] of running processes called name (the container shares the host's PIDs)."""
+    """[(pid, argv)] of running processes called name (the container shares the host's PIDs). A program
+    podman starts in the container is called "exe" (Frametop's ft-hands is), so for those the name is
+    the program's, from /proc/PID/exe."""
     out = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
         try:
             with open("/proc/%s/comm" % pid) as f:
-                if f.read().strip() != name:
-                    continue
+                comm = f.read().strip()
+            if comm != name and not (comm == "exe" and program_name(pid) == name):
+                continue
             with open("/proc/%s/cmdline" % pid, "rb") as f:
                 argv = [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
         except OSError:
             continue
         out.append((int(pid), argv))
     return out
+
+
+def program_name(pid):
+    """The file name of the program process pid runs ("" if it can't be read: another user's)."""
+    try:
+        exe = os.readlink("/proc/%s/exe" % pid)
+    except OSError:
+        return ""
+    return os.path.basename(exe.removesuffix(" (deleted)"))
 
 
 def own_tracker(ring=None):
@@ -2067,6 +2079,9 @@ class Session(Controls):
             self._panel.close()
 
     def _finish(self, state, error=""):
+        if self._needed:   # first: nothing records now, and a failure below mustn't keep Frametop's ft-hands unparked
+            self._needed.stop()
+            self._needed = None
         if self._take:
             self._end_take({"done": "complete", "stopped": "stopped"}.get(state, "stopped"))
         if self._session_json is not None:
@@ -2083,9 +2098,6 @@ class Session(Controls):
         if self._stop_note and state == "stopped":
             self._log(self._stop_note)
         self._stop_units()
-        if self._needed:
-            self._needed.stop()
-            self._needed = None
         self._resume_quiet()
         if self._button:
             self._button.stop()

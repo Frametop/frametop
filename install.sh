@@ -507,8 +507,12 @@ else
 fi
 # NPU hand tracking, once hand tracking is in (ft-hands finds ft-npud by itself)
 if [ "$do_npu" = 1 ] && [ "$hands_done" = 1 ]; then
-  if "$root/npu/install.sh" install; then
+  npu_rc=0
+  "$root/npu/install.sh" install || npu_rc=$?
+  if [ "$npu_rc" = 0 ]; then
     echo "NPU hand tracking: on (ft-npud; Frametop Settings' Hands page says when hand tracking uses it)"
+  elif [ "$npu_rc" = 3 ]; then
+    echo "NPU hand tracking: installed, but ft-npud hasn't started yet; it keeps trying, and hand tracking uses the CPU until it does (journalctl -u ft-npud)"
   else
     echo "NPU hand tracking: not installed (above), so hand tracking uses the CPU. Try again later with: npu/install.sh"
   fi

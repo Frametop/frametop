@@ -37,7 +37,7 @@ case ${1:-status} in
     run_unit $camd frametop-camd.service "the camera broker" "$here/build/ft-camd" --status 60
     if ! systemctl --user -q is-active $hands; then
       "$here/../scripts/container-up.sh"  # so stopping the unit can't take the container down
-      "$here/ft-hands-stop" "$pidfile"   # one left from before (the unit stops its own: ExecStopPost)
+      "$here/ft-hands-stop" "$pidfile" --status 60 --no-gestures   # one left from before (the unit stops its own: ExecStopPost)
     fi
     stop_post="$here/ft-hands-stop $pidfile" \
     run_unit $hands frametop-hands.service "hand tracking, no gestures" "$HOME/.local/bin/distrobox" enter dev -- \
@@ -47,7 +47,7 @@ case ${1:-status} in
     "$0" status ;;
   off)
     systemctl --user stop $hands $camd 2>/dev/null || true
-    "$here/ft-hands-stop" "$pidfile"
+    "$here/ft-hands-stop" "$pidfile" --status 60 --no-gestures   # and one this script started before pidfiles
     echo "hand cutouts off" ;;
   status)
     for u in $camd $hands; do echo "$u: $(systemctl --user is-active $u || true)"; done

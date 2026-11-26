@@ -3,7 +3,8 @@
 # (README.md), or takes it out. Hand tracking (ft-hands) uses it by itself once it runs, and the CPU
 # models whenever it doesn't (HANDS_NPU, Frametop Settings' Hands page).
 # Needs host sudo (frame_sudo in scripts/_env.sh asks for the password), on the Frame or from a PC.
-#   npu/install.sh install    a clone builds the tree first (npu/build.sh); a release brings it built
+#   npu/install.sh install    a clone builds the tree first (npu/build.sh); a release brings it built.
+#                             Exit 3: installed, but ft-npud hasn't started yet (it keeps trying)
 #   npu/install.sh uninstall
 #   npu/install.sh status     what's installed, checked against its MANIFEST (no sudo)
 set -euo pipefail

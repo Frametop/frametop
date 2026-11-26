@@ -8,6 +8,9 @@
 #include <unistd.h>
 
 bool pidfile_write(const std::string &path) {
+    // its folder (the run dir) may not be there yet: ft-camd, which makes it, may still be starting
+    const size_t slash = path.rfind('/');
+    if (slash != std::string::npos && slash > 0) mkdir(path.substr(0, slash).c_str(), 0700);
     struct stat st;
     if (lstat(path.c_str(), &st) == 0 && !S_ISREG(st.st_mode)) return false;
     const std::string tmp = path + ".tmp" + std::to_string(getpid());

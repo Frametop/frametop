@@ -49,6 +49,10 @@ test-c:
         local name=$1 log=build/tests/last.log; shift
         if "$@" >"$log" 2>&1; then echo "$name: ok"; else echo "$name: FAILED"; cat "$log"; status=1; fi
     }
+    g++ -std=c++17 -Wall -Wextra -Werror screens/tests/resizecorner-test.cpp -o build/tests/resizecorner-test
+    run screens/tests/resizecorner-test.cpp build/tests/resizecorner-test
+    g++ -std=c++17 -Wall -Wextra -Werror pointer/tests/overlayregion-test.cpp -o build/tests/overlayregion-test
+    run pointer/tests/overlayregion-test.cpp build/tests/overlayregion-test
     gcc -std=c11 -Wall -Wextra -Werror -I. screens/tests/controller-click-test.c \
       -lm -o build/tests/controller-click-test
     run screens/tests/controller-click-test.c build/tests/controller-click-test

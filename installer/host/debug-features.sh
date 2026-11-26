@@ -15,8 +15,6 @@ rel=$HOME/.local/share/frametop/releases/current
 state=$HOME/.local/state/frametop
 run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 steamlogs=$HOME/.local/share/Steam/logs
-# a journal line's program: "Nov 25 17:56:30 HOST PROGRAM[PID]: ..."
-from='^[A-Za-z.]+ +[0-9]+ [0-9:]+ [^ ]+'
 
 # tailf FILE LINES: a log file's last lines, or that it isn't there
 tailf() {
@@ -52,9 +50,7 @@ for f in /tmp/frametop-dashroute.log /tmp/frametop-gtksettings.log /tmp/frametop
 done
 ulog 40 frametop-autostart frametop-keyboard frametop-dashpatch frametop-pin-lock
 echo "--- journal: frametop-desktop, KWin's, Plasma's and the session's lines (last 60)"
-t 15 journalctl --user -u frametop-desktop -n 3000 --no-pager -o short |
-  grep -a -E "$from (kwin_wayland|plasmashell|plasma_session|ksmserver|xdg-desktop-portal-kde|systemd|ft-[a-z-]+|frametop[a-z-]*)\[" |
-  tail -n 60
+t 15 journalctl --user -u frametop-desktop -n 3000 --no-pager -o short | grep -a -E "$OURS" | tail -n 60
 
 section "Logs: input and the pointer"
 ulog 150 frametop-input-relay
@@ -111,21 +107,24 @@ t 15 journalctl -k -b --no-pager -o short | grep -a -i -E 'cdsp|remoteproc|fastr
   tail -n 40
 
 section "Logs: Frametop Voice (ft-voiced's own lines, without what was heard)"
-# (its lines are "DATE TIME,MS LEVEL ..."; the rest is what voice commands and hooks printed)
+# (its lines are "DATE TIME,MS LEVEL ..."; the rest is what voice commands and hooks printed. A
+# hook of the user's own that logs in that same format gets in: its lines can't be told apart.)
 t 15 journalctl --user -u frametop-voice -n 1000 --no-pager -o short |
-  grep -a -E "$from (systemd\[|[^ ]+\[[0-9]+\]: [0-9-]{10} [0-9:]{8},[0-9]{3} [A-Z]+ )" |
+  grep -a -E "$FROM (systemd\[|[^ ]+\[[0-9]+\]: [0-9-]{10} [0-9:]{8},[0-9]{3} [A-Z]+ )" |
   grep -a -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|short window|decode skipped|line up with' | tail -n 100
-ulog 30 frametop-voice-whisper
+# (whisper.cpp prints what it heard only as "[00:00.000 --> 00:02.000] ..." segments, run with -pr)
+ulog 30 frametop-voice-whisper | grep -a -v -E '\[[0-9:.]+ --> [0-9:.]+\]'
 echo "--- PipeWire, WirePlumber and proxmicmute: warnings (last 30)"
 t 15 journalctl --user -u pipewire -u wireplumber -u steamvr-proxmicmute -p warning -n 30 --no-pager -o short
 
-section "Logs: Frametop Together (people's names left out)"
+section "Logs: Frametop Together (people's names left out, yours too)"
 units frametop-together
 ulog 100 frametop-together 'frametop-room-*' |
   sed -E "s/(ft-together: ).* \(([^)]*)\) at /\1<you> (<login>) at /
           s/: .+ (came in|left)\.\$/: <someone> \1./
           s/You are in .+'s room\./You are in <someone>'s room./
-          s/: [^ ]+ asks to come in\./: <someone> asks to come in./"
+          s/: [^ ]+ asks to come in\./: <someone> asks to come in./
+          s/(in a room of [0-9]+ as ).*(, floor )/\1<you>\2/"
 
 section "Logs: remote displays"
 tailf /tmp/frametop-remote.log 40

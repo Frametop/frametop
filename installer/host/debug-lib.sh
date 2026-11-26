@@ -2,6 +2,14 @@
 
 NOISE='container (exec|exec_died|init|start|died|attach|cleanup)'   # podman's lines for each command run
 
+# A journal line's program ("Nov 25 17:56:30 HOST PROGRAM[PID]: ..."), and the programs whose lines
+# a report keeps from the user's session: the desktop's, SteamVR's, audio's and Frametop's own. Not
+# apps', which can name the user's files, sites and windows.
+FROM='^[A-Za-z.]+ +[0-9]+ [0-9:]+ [^ ]+'
+OURS="$FROM (systemd[a-z-]*|kwin_wayland|plasmashell|plasma_session|ksmserver|kded6|org_kde_powerdevil"
+OURS+='|xdg-desktop-portal[a-z-]*|kscreen-doctor|vrserver|vrcompositor|vrclient_[^ []*|vrwebhelper[^ []*|XRService'
+OURS+='|console_log|pipewire[a-z-]*|wireplumber|dbus-broker[a-z-]*|in-box|podman|conmon|ft-[a-z-]+|frametop[a-z.-]*)\['
+
 section() { printf '\n===== %s\n' "$*"; }
 
 # t SECONDS COMMAND...: a command that can't hang the report

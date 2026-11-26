@@ -156,8 +156,8 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
 
   section "Recent warnings and errors"
   echo "--- this user's (last 80, the last 2 hours)"
-  t 20 journalctl --user -p warning --since -2h -n 80 --no-pager -o short 2>/dev/null |
-    grep -a -v -E "$NOISE" | tail -n 80
+  t 20 journalctl --user -p warning --since -2h -n 400 --no-pager -o short 2>/dev/null |
+    grep -a -E "$OURS" | grep -a -v -E "$NOISE" | tail -n 80
   echo "--- the system's (last 40, the last 2 hours)"
   t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
   echo "--- SteamVR server: Frametop and errors (last 40)"

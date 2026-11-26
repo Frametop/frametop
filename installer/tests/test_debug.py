@@ -5,6 +5,7 @@ is the window's logic without a display."""
 import importlib.util
 import os
 import pathlib
+import shutil
 import re
 import subprocess
 import sys
@@ -76,7 +77,7 @@ class Script(unittest.TestCase):
                         "Logs: input and the pointer", "Logs: gaze and the eye tracker", "Logs: hand tracking",
                         "NPU hand tracking (ft-npud, on the DSP)", "Logs: power",
                         "Logs: Frametop Voice (ft-voiced's own lines, without what was heard)",
-                        "Logs: Frametop Together (people's names left out)", "Logs: remote displays",
+                        "Logs: Frametop Together (people's names left out, yours too)", "Logs: remote displays",
                         "Logs: floating windows and frunner",
                         "Logs: your commands (when each started and ended; not their output)",
                         "Logs: FrameDrop and the Bluetooth fixes", "Logs: SteamVR's compositor (errors, last 30)"):
@@ -102,7 +103,12 @@ class Script(unittest.TestCase):
         (stubs / "journalctl").write_text("""#!/bin/sh
 v="Nov 25 10:00:00 box in-box[1]: 2026-11-25 10:00:00,001"
 case "$*" in
-  *frametop-voice-whisper*) ;;
+  *"-p warning --since"*)
+    echo "Nov 25 10:00:00 box dolphin[7]: KDirWatch: /home/x/Videos/WARNOUTPUT.mkv is gone"
+    echo "Nov 25 10:00:00 box vrserver[8]: vrserver: a warning of SteamVR's" ;;
+  *frametop-voice-whisper*)
+    echo "Nov 25 10:00:00 box in-box[2]: [00:00:00.000 --> 00:00:02.000]  WHISPERHEARD"
+    echo "Nov 25 10:00:00 box in-box[2]: whisper server listening" ;;
   *frametop-voice*)
     echo "$v INFO short window heard nothing; try 1 of 2: 'HEARDONE'"
     echo "$v INFO transcribed: 'HEARDTWO'"
@@ -118,7 +124,8 @@ case "$*" in
     echo "Nov 25 10:00:00 box ft-together[3]: ft-together: Alice Example (alice@github) at 100.101.1.2 port 7400"
     echo "Nov 25 10:00:01 box ft-together[3]: Bob Person came in."
     echo "Nov 25 10:00:02 box ft-together[3]: You are in Carol Name's room."
-    echo "Nov 25 10:00:03 box ft-together[3]: dave@passkey asks to come in." ;;
+    echo "Nov 25 10:00:03 box ft-together[3]: dave@passkey asks to come in."
+    echo "Nov 25 10:00:04 box in-box[4]: in a room of 3 as Erin Own, floor laid; 2 shown" ;;
   *frametop-input-relay*)
     echo "Nov 25 10:00:00 box python3[4]: typing: 2 characters a US layout (Steam) has no key for: TYPEDTEXT" ;;
   *ft-npud*)
@@ -128,13 +135,32 @@ esac
 """)
         (stubs / "journalctl").chmod(0o755)
         text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}")
-        for gone in ("HEARDONE", "HEARDTWO", "HOOKSAID", "CMDOUTPUT", "APPOUTPUT", "Alice", "alice", "Bob", "Carol",
-                     "dave", "TYPEDTEXT", "client connected"):
+        for gone in ("HEARDONE", "HEARDTWO", "HOOKSAID", "WHISPERHEARD", "CMDOUTPUT", "APPOUTPUT", "WARNOUTPUT",
+                     "Alice", "alice", "Bob", "Carol", "dave", "Erin", "TYPEDTEXT", "client connected"):
             self.assertNotIn(gone, text)
         for kept in ("INFO mic open", "Started Frametop command gonk.", "kwin: output WL-1 enabled", "graph 769e4e61",
                      "<someone> came in.", "You are in <someone>'s room.", "<someone> asks to come in.",
-                     "ft-together: <you> (<login>) at <tailnet-ip> port 7400", "has no key for: <hidden>"):
+                     "ft-together: <you> (<login>) at <tailnet-ip> port 7400", "has no key for: <hidden>",
+                     "in a room of 3 as <you>, floor laid", "a warning of SteamVR's", "whisper server listening"):
             self.assertIn(kept, text)
+
+    def test_a_cut_off_says_so(self):
+        stubs = self.home / "stubs"
+        stubs.mkdir()
+        (stubs / "timeout").write_text(f'#!/bin/sh\n[ "$1" = 150 ] && exit 124\nexec {shutil.which("timeout")} "$@"\n')
+        (stubs / "timeout").chmod(0o755)
+        text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}")
+        self.assertIn("(the feature logs stopped at 150 seconds: the rest of them is missing)", text)
+        self.assertNotIn("stopped at 150 seconds", self.run_it())
+
+    def test_a_service_folder_of_the_users_own_is_listed(self):
+        own = self.home / "npud"
+        own.mkdir()
+        (own / "ft-npud.heads").write_text("x")
+        (self.home / ".config" / "frametop.conf").write_text(f'HANDS_NPU="{own}"  # mine\n')
+        text = self.run_it()
+        self.assertIn(f"--- {own} (the heads file and the socket", text)
+        self.assertIn("ft-npud.heads", text)
 
     def test_what_is_private_is_hidden(self):
         text = self.run_it()
@@ -220,6 +246,8 @@ class Mask(unittest.TestCase):
                          "typing: 6 characters the input method has no key for: <hidden>")
         self.assertEqual(self.m("bob@passkey and alice@github, not git@github.com"), "<login> and <login>, not <email>")
         self.assertEqual(self.m("18:00 click on 'Inbox (3) - Mail' (window)"), "18:00 click on '<hidden>' (window)")
+        self.assertEqual(self.m("""menu on "Bob's Tax Return.pdf" (list)"""), "menu on '<hidden>' (list)")
+        self.assertEqual(self.m(r"""click on 'it\'s "quoted" - Writer' (list)"""), "click on '<hidden>' (list)")
         self.assertEqual(self.m("1 /usr/bin/krdpserver --port 3389 -p Ab12Cd34 --certificate x.pem"),
                          "1 /usr/bin/krdpserver --port 3389 -p <hidden> --certificate x.pem")
 

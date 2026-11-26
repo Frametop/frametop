@@ -100,6 +100,9 @@ class Pinch {
 public:
     explicit Pinch(const PinchParams &p = {}) : p_(p) {}
     const PinchParams &params() const { return p_; }
+    // The two distances a hand profile learns for its wearer (profile::learned_pinch), set while it
+    // runs. A pinch that's down carries on by the distances it ends by, which these aren't.
+    void set_learned(double begin_m, double dip_max_m) { p_.begin_m = begin_m, p_.dip_max_m = dip_max_m; }
     // After each processed set: the hands out of Tracker::step, the tracker's views (for
     // the world landmarks) and the capture time. Hands in `gripping` (their ids) are closed:
     // no pinch begins on them, and one that's down on them ends, as lost.

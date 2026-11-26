@@ -178,6 +178,7 @@ int main(int argc, char **argv) {
     bool skeleton = true, pinch_fitted = false;
     skel::Params skel_params;
     std::string labels, hmd_poses, skeleton_dump, publish_dump;
+    std::string profile_in, profile_out;   // the hand profile to start from, and where to write this replay's
     PinchParams pinch_params;
     GripParams grip_params;
     std::string use = "mono", color_left = "color_video0", color_crop = "subtract", sides = "file";
@@ -235,6 +236,8 @@ int main(int argc, char **argv) {
         else if (a == "--views" && more) max_views = std::max(1, std::atoi(argv[++i]));
         else if (a == "--hand-budget" && more) hand_budget = std::atoi(argv[++i]);
         else if (a == "--no-skeleton") skeleton = false;
+        else if (a == "--profile" && more) profile_in = argv[++i];
+        else if (a == "--profile-out" && more) profile_out = argv[++i];
         else if (a == "--pinch-fitted") pinch_fitted = true;
         else if (a == "--labels" && more) labels = argv[++i];
         else if (a == "--hmd-poses" && more) hmd_poses = argv[++i];
@@ -386,6 +389,28 @@ int main(int argc, char **argv) {
     }
     tracker.set_skeleton(skeleton);
     tracker.skeleton().set_params(skel_params);
+    // The hand profile (track/profile.h), off unless asked for so old replays repeat. --profile
+    // FILE starts from one, as ft-hands starts from the wearer's; --profile-out FILE writes what
+    // this replay learned. A replay into a file and a second one from it are the before and after.
+    profile::Profile loaded;   // the --profile one, which --profile-out merges this replay into
+    if (!profile_in.empty() || !profile_out.empty()) {
+        tracker.set_user_scale(true);
+        tracker.set_tile_learning(true);
+        if (!profile_in.empty()) {
+            profile::Profile &prof = loaded;
+            std::string perr;
+            if (!profile::load(profile_in, prof, perr) || prof.empty())
+                return std::fprintf(stderr, "--profile %s: %s\n", profile_in.c_str(), perr.empty() ? "no profile there" : perr.c_str()), 1;
+            for (int s = 0; s < 2; ++s) {
+                skel::Shape sh;
+                if (profile::prior_shape(prof.side[s], sh)) tracker.skeleton().set_prior(s, sh);
+                tracker.set_scale_prior(s, prof.side[s].scale);
+                std::printf("hand profile: %s size %.2f (%ld frames), shape %d/%d settled\n", s ? "right" : "left ",
+                            prof.side[s].scale.value, prof.side[s].scale.n, prof.side[s].settled(), skel::kQuantities);
+            }
+            tracker.seed_tile_stats(prof.tiles);
+        }
+    }
     skeval::Eval eval;
     eval.dump = skeleton_dump;
     if (!labels.empty() && !eval.load_labels(labels)) return std::fprintf(stderr, "%s: can't read it\n", labels.c_str()), 1;
@@ -890,6 +915,14 @@ int main(int argc, char **argv) {
         if (!r.empty())
             std::printf("single-view distance / stereo: 10%% %.2f, median %.2f, 90%% %.2f; change between frames median %.3f, 90%% %.3f\n",
                         r[r.size() / 10], r[r.size() / 2], r[r.size() * 9 / 10], step[step.size() / 2], step[step.size() * 9 / 10]);
+        std::vector<double> fresh = s.mono_ratio_new;
+        std::sort(fresh.begin(), fresh.end());
+        if (!fresh.empty()) {
+            double off = 0;
+            for (double x : fresh) off += std::fabs(x - 1) / double(fresh.size());
+            std::printf("  in a hand's first 10 frames (%zu readings): 10%% %.2f, median %.2f, 90%% %.2f; off by %.1f%% on average\n",
+                        fresh.size(), fresh[fresh.size() / 10], fresh[fresh.size() / 2], fresh[fresh.size() * 9 / 10], 100 * off);
+        }
     }
     std::printf("palms within 20 cm of the eyes: %d of %d hand updates\n", near_face, hand_updates);
     for (int k = 0; k < 2; ++k) std::sort(pinch_len[k].begin(), pinch_len[k].end());
@@ -935,6 +968,41 @@ int main(int argc, char **argv) {
         std::printf("\n");
     }
     if (skeleton) eval.report(tracker.skeleton(), int64_t(t0), label_hits);
+    if (!profile_in.empty() || !profile_out.empty())
+        std::printf("hand profile: the wearer's hand size at the end: left %.3f (%ld frames) right %.3f (%ld frames); a new hand "
+                    "starts at %.3f\n",
+                    tracker.user_scale(0).value, tracker.user_scale(0).n, tracker.user_scale(1).value, tracker.user_scale(1).n,
+                    tracker.start_scale());
+    if (!profile_in.empty() || !profile_out.empty()) {
+        // the search's tiles, most boosted first: where this wearer's hands turned up
+        const auto tiles = tracker.tile_stats();
+        const double mean = profile::mean_rate(tiles);
+        std::vector<std::pair<double, std::string>> rows;
+        for (const auto &[cam, stats] : tiles)
+            for (size_t k = 0; k < stats.size(); ++k) {
+                char buf[120];
+                std::snprintf(buf, sizeof buf, "%s#%zu %.0f/%.0f x%.2f", cam.c_str(), k, stats[k].finds, stats[k].tries,
+                              profile::tile_boost(stats[k], mean));
+                rows.push_back({-profile::tile_boost(stats[k], mean), buf});
+            }
+        std::sort(rows.begin(), rows.end());
+        std::printf("hand profile: the search's tiles (finds/tries, weight), %.3f finds a try over all:", mean);
+        for (size_t k = 0; k < rows.size() && k < 8; ++k) std::printf("  %s", rows[k].second.c_str());
+        std::printf("\n");
+    }
+    if (!profile_out.empty()) {
+        profile::Profile prof = loaded;
+        for (int s = 0; s < 2; ++s) {
+            profile::Side run;
+            tracker.skeleton().calibration(s).quantities(run.q, run.n);
+            run.scale = tracker.user_scale(s);
+            profile::merge(loaded.side[s], run, prof.side[s]);
+        }
+        prof.tiles = tracker.tile_stats();
+        std::string perr;
+        if (!profile::save(profile_out, prof, perr)) return std::fprintf(stderr, "--profile-out: %s\n", perr.c_str()), 1;
+        std::printf("hand profile: written to %s\n", profile_out.c_str());
+    }
     if (flags) {
         flags->finish();
         flags->wait();

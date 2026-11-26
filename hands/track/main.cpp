@@ -74,6 +74,8 @@
 // offline tools. The request is run_dir/flag (key=value lines: dir, note, said_unix, flag_unix),
 // checked 4 times a second and removed when taken; the folder's manifest.json is written last.
 #include "../../conf/ft_conf.h"
+#include "../include/fh_shm.hpp"
+#include "../include/fh_verdicts.h"
 #include "calibfile.h"
 #include "cpus.h"
 #include "flagbuf.h"
@@ -102,6 +104,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstdio>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <optional>
@@ -111,6 +114,8 @@
 namespace {
 
 volatile std::sig_atomic_t g_stop = 0, g_record = 0;
+constexpr double kProfileSaveS = 300;   // the hand profile is written this often while it changes
+constexpr double kGuestCheckS = 10;     // how often a session checks whether its hands match the saved profile
 
 // Which calibrated camera each video device carries. XRService names each tracking camera's
 // sensor subdev once per instance ("Found camera 'slam_left': interface=msm_csiphy0
@@ -306,6 +311,14 @@ int main(int argc, char **argv) {
     // the skeleton fit (track/skeleton.h): published as fh_hands version 2, and as version 1's
     // points and capsules; 0 publishes the One Euro filtered landmarks as before, and no skeleton
     bool skeleton = setting("HANDS_SKELETON") != "0";
+    // the hand profile (track/profile.h): this wearer's hand size and shape, kept between runs.
+    // HANDS_PROFILE=0 turns it off; --profile FILE keeps it somewhere else (and on for a test run).
+    bool profile_on = setting("HANDS_PROFILE") != "0";
+    std::string profile_path;
+    // ...and its parts, each with a switch of its own: where the palm search finds the wearer's hands
+    bool profile_search = setting("HANDS_PROFILE_SEARCH") != "0";
+    // ...and how far apart the wearer's thumb and index read in a pinch, and out of one
+    bool profile_pinch = setting("HANDS_PROFILE_PINCH") != "0";
     PinchParams pinch_params;
     pinch_params.dip = setting("HANDS_PINCH_DIP") == "1";
     setting_number("HANDS_PINCH_FIST_CURL", pinch_params.fist_curl);
@@ -373,6 +386,11 @@ int main(int argc, char **argv) {
         else if (a == "--pair-sides" && more) pair_sides = std::string(argv[++i]) == "1";
         else if (a == "--hold" && more) hold = std::atof(argv[++i]);
         else if (a == "--skeleton" && more) skeleton = std::string(argv[++i]) != "0";
+        else if (a == "--profile" && more) {
+            profile_path = argv[++i];
+            profile_on = profile_path != "0";
+            if (!profile_on) profile_path.clear();
+        }
         else if (a == "--flag-buffer" && more) flag_on = std::string(argv[++i]) != "0";
         else if (a == "--cams" && more) cams_arg = argv[++i];
         else if (a == "--bright" && more) bright_arg = argv[++i];
@@ -403,6 +421,8 @@ int main(int argc, char **argv) {
                         "          [--max-hz N] (30: fast hands; half that slow, 5 idle; HANDS_MAX_HZ)\n"
                         "          [--full-rate 0|1] (0; 1: slow hands get --max-hz too; HANDS_FULL_RATE)\n"
                         "          [--skeleton 0|1] (1: fit a skeleton with the user's bone lengths and publish it; HANDS_SKELETON)\n"
+                        "          [--profile FILE|0] (the wearer's hand size and shape, kept between runs: track/profile.h;\n"
+                        "          ~/.local/state/frametop/hands/profile; 0: none, as HANDS_PROFILE=0)\n"
                         "          [--flag-buffer 0|1] (1: keep the last seconds for `ft-handsctl flag`; HANDS_FLAG_BUFFER)\n"
                         "          [--cams auto|mono|color|all] (auto) [--bright all|color] (all) [--bright-on L] (40) [--bright-off L] (25)\n"
                         "          [--color-left color_video0|color_video3] [--color-crop subtract|none]\n"
@@ -420,7 +440,8 @@ int main(int argc, char **argv) {
                         "auto picks the cameras by the light (see the top of track/main.cpp).\n"
                         "Settings in ~/.config/frametop.conf: HANDS_SWAP_SIDES=auto|0|1, HANDS_CPUS=5,6,7, HANDS_CAMERAS, HANDS_BRIGHT,\n"
                         "HANDS_BRIGHT_ON, HANDS_BRIGHT_OFF, HANDS_COLOR_LEFT, HANDS_COLOR_CROP, HANDS_MISREAD_GUARD=0|1, HANDS_MODELS=DIR,\n"
-                        "HANDS_PINCH_DIP=0|1, HANDS_PINCH_FIST_CURL, HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB\n"
+                        "HANDS_PINCH_DIP=0|1, HANDS_PINCH_FIST_CURL, HANDS_FLAG_BUFFER=0|1, HANDS_FLAG_SECONDS, HANDS_FLAG_CROP, HANDS_FLAG_MB,\n"
+                        "HANDS_PROFILE=0|1, HANDS_PROFILE_SEARCH=0|1, HANDS_PROFILE_PINCH=0|1\n"
                         "(FT_<name> overrides).\n",
                         argv[0]);
             return a == "--help" ? 0 : 1;
@@ -666,6 +687,132 @@ int main(int argc, char **argv) {
     tracker.set_pair_sides(pair_sides);
     tracker.set_hold(reacquire > 0 ? hold : 0.3);
     tracker.set_skeleton(skeleton);
+    // The hand profile: the live tracker's (one that publishes), or the file a test run names. A
+    // run on a replayed ring without --profile neither reads the wearer's nor writes over it.
+    const bool profiling = track && profile_on && (publish || !profile_path.empty());
+    profile_pinch = profile_pinch && profiling && gestures_on;
+    profile::PinchObserver pinch_seen;   // the wearer's pinches, for the profile
+    // ...only the ones the pointer helper turned into a click, a press, a drag or a scroll
+    // (hands/include/fh_verdicts.h). With no helper writing verdicts, no pinch counts.
+    pinch_seen.confirm = true;
+    fh::ShmFile verdicts_file(FH_VERDICTS_FILE, FH_VERDICTS_MAGIC, offsetof(fh_verdicts_t, ring));
+    uint64_t verdicts_seen = 0;
+    int verdicts_opens = 0;
+    auto read_verdicts = [&](int64_t now_ns) {
+        fh_verdicts_t v;
+        if (!verdicts_file.Read(&v, sizeof v, offsetof(fh_verdicts_t, seq))) return;
+        if (verdicts_file.opens != verdicts_opens || v.count < verdicts_seen) verdicts_seen = 0, verdicts_opens = verdicts_file.opens;
+        const uint64_t from = std::max(verdicts_seen, v.count > FH_VERDICTS_RING ? v.count - FH_VERDICTS_RING : uint64_t(0));
+        for (uint64_t i = from; i < v.count; ++i) {
+            const fh_verdict_t &r = v.ring[i % FH_VERDICTS_RING];
+            if (r.kind == 0) pinch_seen.verdict(r.side, int64_t(r.begin_ns), r.outcome == FH_VERDICT_DONE, now_ns);
+        }
+        verdicts_seen = v.count;
+    };
+    // The pinch detector's distances moved to the wearer's pinches (profile::learned_pinch): at the
+    // start, and each time the profile is saved. The ones it was started with are where it moves from.
+    const double begin0 = pinch_params.begin_m, dip0 = pinch_params.dip_max_m;
+    auto learn_pinch = [&] {
+        if (!profile_pinch) return;
+        profile::PinchStat both = pinch_seen.stat[0];
+        both.add(pinch_seen.stat[1]);
+        const profile::PinchLearned l = profile::learned_pinch(both, begin0, dip0);
+        const PinchParams &now_p = pinch.params();
+        if (std::fabs(l.begin_m - now_p.begin_m) < 0.0005 && std::fabs(l.dip_max_m - now_p.dip_max_m) < 0.0005) return;
+        std::printf("hand profile: from %.0f of this wearer's pinches that clicked (80%% reach under %.0f mm, 97%% under %.0f mm) and an idle "
+                    "hand's distances (1%% under %.0f mm): a pinch begins under %.0f mm (%.0f before), a dip counts under %.0f mm "
+                    "(%.0f before)\n",
+                    both.tap_n(), 1000 * profile::quantile(both.taps, 0.80), 1000 * profile::quantile(both.taps, 0.97),
+                    1000 * profile::quantile(both.idle, 0.01), 1000 * l.begin_m, 1000 * now_p.begin_m, 1000 * l.dip_max_m,
+                    1000 * now_p.dip_max_m);
+        pinch.set_learned(l.begin_m, l.dip_max_m);
+    };
+    profile::Profile prof, loaded;   // loaded: as the file was at the start (what a save merges this run into)
+    std::string prof_text;   // what the file holds
+    int prof_saves = 0;
+    bool guest_wearer = false;   // true once this run's hands diverge from the saved profile: stop saving
+    if (profiling) {
+        if (profile_path.empty()) profile_path = profile::default_path();
+        std::string perr;
+        if (!profile::load(profile_path, prof, perr)) std::printf("hand profile: %s: learning afresh\n", perr.c_str());
+        tracker.set_user_scale(true);
+        loaded = prof;
+        for (int s = 0; s < 2; ++s) {
+            skel::Shape sh;
+            if (profile::prior_shape(prof.side[s], sh)) tracker.skeleton().set_prior(s, sh);
+            tracker.set_scale_prior(s, prof.side[s].scale);
+        }
+        if (profile_search) {
+            tracker.set_tile_learning(true);
+            tracker.seed_tile_stats(prof.tiles);
+        }
+        if (profile_pinch)
+            for (int s = 0; s < 2; ++s) pinch_seen.stat[s] = prof.pinch[s];
+        if (prof.empty()) {
+            std::printf("hand profile: none yet in %s: learning this wearer's hands\n", profile_path.c_str());
+        } else {
+            prof_text = profile::text(prof);
+            std::printf("hand profile: %s:", profile_path.c_str());
+            for (int s = 0; s < 2; ++s)
+                std::printf(" %s size %.2f (%ld frames), shape %d/%d settled;", s ? "right" : "left", prof.side[s].scale.value,
+                            prof.side[s].scale.n, prof.side[s].settled(), skel::kQuantities);
+            double tries = 0, finds = 0;
+            for (const auto &[cam, stats] : prof.tiles)
+                for (const profile::TileStat &t : stats) tries += t.tries, finds += t.finds;
+            std::printf(" the search has %.0f finds in %.0f tries%s; %.0f pinches%s\n", finds, tries,
+                        profile_search ? "" : " (not used: HANDS_PROFILE_SEARCH=0)", prof.pinch[0].tap_n() + prof.pinch[1].tap_n(),
+                        profile_pinch ? "" : " (not used)");
+        }
+        learn_pinch();
+    }
+    // Second-wearer check: if this run's settled hand shape or size diverges from the loaded profile,
+    // revert to this session's own measurements and leave the saved file untouched.
+    auto check_wearer = [&] {
+        if (!profiling || guest_wearer || loaded.empty()) return;
+        profile::Side run[2];
+        for (int s = 0; s < 2; ++s) {
+            tracker.skeleton().calibration(s).quantities(run[s].q, run[s].n);
+            run[s].scale = tracker.user_scale(s);
+        }
+        double ratio = 1.0;
+        if (!profile::wearer_mismatch(loaded, run, &ratio)) return;
+        guest_wearer = true;
+        tracker.clear_scale_prior();
+        tracker.skeleton().clear_prior();
+        tracker.set_tile_learning(false);
+        if (profile_pinch) pinch.set_learned(begin0, dip0);
+        std::printf("hand profile: these hands differ from the saved profile (ratio %.2f): using this session's measurements only and leaving %s untouched\n",
+                    ratio, profile_path.c_str());
+        std::fflush(stdout);
+    };
+    // Writes the profile when what the tracker knows has changed: every few minutes, and as it stops.
+    auto save_profile = [&] {
+        if (!profiling) return;
+        check_wearer();
+        if (guest_wearer) return;
+        for (int s = 0; s < 2; ++s) {
+            profile::Side run;
+            tracker.skeleton().calibration(s).quantities(run.q, run.n);
+            run.scale = tracker.user_scale(s);
+            profile::merge(loaded.side[s], run, prof.side[s]);
+        }
+        if (profile_search) {
+            prof.tiles = tracker.tile_stats();
+            profile::forget_old(prof.tiles);
+            tracker.seed_tile_stats(prof.tiles);   // the tracker's counts are halved with the file's
+        }
+        if (profile_pinch) {
+            for (int s = 0; s < 2; ++s) prof.pinch[s] = pinch_seen.stat[s];
+            learn_pinch();
+        }
+        if (prof.empty()) return;
+        const std::string now_text = profile::text(prof);
+        if (now_text == prof_text) return;
+        std::string perr;
+        if (profile::save(profile_path, prof, perr)) prof_text = now_text, ++prof_saves;
+        else std::printf("hand profile: not saved: %s\n", perr.c_str());
+    };
+    uint64_t t_profile = mono_ns(), t_guest = t_profile;
     std::map<std::string, std::vector<uint8_t>> pixels;
     // A mono set is the side pair's newer frames (all the mono cameras' without both sides) with
     // the upper pair's from the same moment. XRService keeps the uppers in step with the sides,
@@ -1190,6 +1337,19 @@ int main(int argc, char **argv) {
             holding.insert(holding.end(), held2.begin(), held2.end());
             grip.update(hands, views, int64_t(capture), holding);
             pinch.update(hands, views, int64_t(capture), grip.gripping(), middle.down());
+            if (profile_pinch && !guest_wearer) read_verdicts(int64_t(capture));
+            if (profile_pinch && !guest_wearer)
+                for (int s = 0; s < 2; ++s) {
+                    bool began = false, ended = false, lost = false;
+                    for (const Pinch::Event &e : pinch.events)
+                        if (e.side == s)
+                            began = began || !std::strcmp(e.what, "begin"), ended = ended || !std::strcmp(e.what, "end"),
+                            lost = lost || !std::strcmp(e.what, "lost");
+                    // the distance the detector went by (fh_pinch_t::distance), while it has the hand
+                    const fh_pinch_t &ps = pinch.side(s);
+                    pinch_seen.update(s, int64_t(capture), ps.flags & FH_PINCH_TRACKED ? double(ps.distance) : -1.0,
+                                      ps.flags & FH_PINCH_DOWN, began, ended, lost);
+                }
             middle.update(hands, views, int64_t(capture), grip.gripping(), pinch.down());
         }
         if (gestures_on && gesture_log && capture - t_glog >= 100'000'000) {
@@ -1230,6 +1390,8 @@ int main(int argc, char **argv) {
         left_sets += on_left, right_sets += on_right, both_sets += on_left && on_right;
 
         const uint64_t now = mono_ns();
+        if ((now - t_guest) / 1e9 >= kGuestCheckS) check_wearer(), t_guest = now;
+        if ((now - t_profile) / 1e9 >= kProfileSaveS) save_profile(), t_profile = now;
         if (status > 0 && (now - t_status) / 1e9 >= status) {
             const double dt = (now - t_status) / 1e9, cpu1 = cpu_seconds();
             const Stats &s = tracker.stats;
@@ -1280,6 +1442,19 @@ int main(int argc, char **argv) {
             if (checking)
                 std::printf("        side cameras: %s, %s\n", side_round ? "checking the decision" : "deciding",
                             side_check.summary().c_str());
+            if (profiling) {
+                double tries = 0, finds = 0;
+                for (const auto &[cam, stats] : tracker.tile_stats())
+                    for (const profile::TileStat &t : stats) tries += t.tries, finds += t.finds;
+                std::printf("        hand profile: size left %.2f right %.2f (new hands start at %.2f)  shape settled left %.0f%% "
+                            "right %.0f%%  search %.0f finds in %.0f tries  pinches %.0f (this run: %d clicked, %d held back, %d unanswered; "
+                            "begin under %.0f mm, dips under %.0f mm)  saved %d time(s)%s\n",
+                            tracker.user_scale(0).value, tracker.user_scale(1).value, tracker.start_scale(),
+                            100 * tracker.skeleton().calibration(0).settled(), 100 * tracker.skeleton().calibration(1).settled(),
+                            finds, tries, pinch_seen.stat[0].tap_n() + pinch_seen.stat[1].tap_n(), pinch_seen.confirmed,
+                            pinch_seen.refused, pinch_seen.unanswered, 1000 * pinch.params().begin_m,
+                            1000 * pinch.params().dip_max_m, prof_saves, guest_wearer ? "  [different wearer: not saving]" : "");
+            }
             if (gestures_on) {
                 std::printf("        pinches: left %u right %u (held back, palm down: %d %d)  middle pinches: left %u right %u  "
                             "grips: left %u right %u",
@@ -1305,6 +1480,7 @@ int main(int argc, char **argv) {
             color_steps = 0;
         }
     }
+    save_profile();   // before the exec below too: the next ft-hands starts from it
     if (flags) flags->finish(), flags->wait();
     if (!color.empty()) unlink(want_file.c_str());
     if (parked) unlink(hands_want_file.c_str());

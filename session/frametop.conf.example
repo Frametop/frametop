@@ -173,6 +173,9 @@ HANDS_FLAG_BUFFER=1        # hands: keep the last seconds of hand crops in RAM (
 HANDS_FLAG_DIR=~/.local/share/frametop/hands/flags  # hands: where `ft-handsctl flag` saves flags (they show your hands and some of the room)
 HANDS_FLAG_FLASH=1         # hands: the drawn hands pulse cyan when a flag is taken | 0 = no pulse
 HANDS_FLAG_TONE=0          # hands: 1 = also a short tone when a flag is taken
+HANDS_PROFILE=1            # hands: keep what ft-hands learns about your hands (size, bone lengths, search weights, confirmed pinch distances) locally in ~/.local/state/frametop/hands/profile (mode 0600, numbers only) | 0 = off
+HANDS_PROFILE_SEARCH=1     # hands profile: 1 = bias CPU palm-search tiles toward where your hands turn up | 0 = fixed search weights
+HANDS_PROFILE_PINCH=1      # hands profile: 1 = adapt pinch thresholds from confirmed pointer clicks (after 100 clicks) | 0 = fixed pinch distances
 POINTER_HANDS=0            # 1 = pinches click (on the release; hold and move to nudge the pointer first) and grips press and drag, with hand tracking
 POINTER_PINCH_GAIN=0.5     # hands without gaze mode: a held pinch drags the pointer this times the hand's angle (precision)
 POINTER_PINCH_DEADZONE=1.5 # hands without gaze mode: degrees the pinching hand moves before the pointer does (a tap's jitter)

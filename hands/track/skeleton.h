@@ -55,6 +55,7 @@ public:
     Shape shape(const Shape &prior) const;
     double settled() const;   // 0..1: the least-sampled quantity's share of kSettle
     int samples(int k) const { return n_[k]; }
+    void quantities(double q[kQuantities], int n[kQuantities]) const;   // the estimates and their samples
 
 private:
     std::vector<float> buf_[kQuantities];
@@ -115,6 +116,12 @@ public:
     // The head's up direction, for the arm model (default: the head frame's +y).
     void set_up(V3 up) { up_ = unit(up); }
     const Calibration &calibration(int side) const { return cal_[side > 0]; }
+    Calibration &calibration(int side) { return cal_[side > 0]; }
+    // The wearer's shape from earlier runs (track/profile.h): what a side's fit uses until its own
+    // calibration has settled, in place of the model's average hand (or the other side's). Once a
+    // quantity has its kSettle samples this run, this run's estimate takes over, as without one.
+    void set_prior(int side, const Shape &s) { prior_[side > 0] = s, has_prior_[side > 0] = true; }
+    void clear_prior() { has_prior_[0] = has_prior_[1] = false; }
     Shape shape(int side, double scale) const;   // the side's current estimate
     static Shape canonical(double scale);        // the model's average hand, times scale
     const Params &params() const { return p_; }
@@ -138,6 +145,8 @@ public:
 private:
     Params p_;
     Calibration cal_[2];   // left, right
+    Shape prior_[2];
+    bool has_prior_[2] = {false, false};
     V3 up_{0, 1, 0};
 };
 

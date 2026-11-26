@@ -588,6 +588,7 @@
 #include "../../conf/ftsock.h"
 #include "../../conf/vrscene.h"
 #include "../../hands/include/fh_events.h"
+#include "../../hands/include/fh_verdicts.h"
 #include "../../hands/include/fh_ray.h"
 #include "../../screens/posemath.h"
 #include "calpanel.h"
@@ -608,7 +609,9 @@
 
 // A pinch's log line as a testing session's event (hands/include/fh_events.h): what it did,
 // from how the line starts (the lines are this file's own: pinchLog's callers, gazehand.h's Says).
-static void PinchEvent(int side, int kind, const std::string &what) {
+// The same outcome goes to ft-hands as the pinch's verdict (hands/include/fh_verdicts.h), by the
+// gesture's begin_ns, so it learns its wearer's pinch from the pinches that did something.
+static void PinchEvent(int side, int kind, const std::string &what, uint64_t begin_ns) {
     auto starts = [&](const char *p) { return what.rfind(p, 0) == 0; };
     const char *k = kind == 2 ? "right-click" : "click", *o = "info";
     if (starts("dragged")) k = "drag", o = "done";
@@ -620,6 +623,12 @@ static void PinchEvent(int side, int kind, const std::string &what) {
              starts("the right button") || starts("joined") || starts("the left button down"))
         o = "done";
     fh_event_text("pointer", k, o, side, 0, ((kind == 2 ? "middle pinch: " : "pinch: ") + what).c_str());
+    const int verdict = !std::strcmp(o, "done")      ? FH_VERDICT_DONE
+                        : !std::strcmp(o, "refused") ? FH_VERDICT_REFUSED
+                        : !std::strcmp(o, "passed")  ? FH_VERDICT_PASSED
+                        : !std::strcmp(o, "lost")    ? FH_VERDICT_LOST
+                                                     : 0;
+    if (verdict) fh_verdict(nullptr, side, kind, verdict, begin_ns);
 }
 
 #include <algorithm>
@@ -2107,6 +2116,12 @@ struct Pointer {
     bool Tick();
 
     Frame fr;  // this tick's readings
+    // The capture time this side's pinch (kind 0) or middle pinch (kind 2) began, as ft-hands
+    // published it: what its verdict names it by (PinchEvent).
+    uint64_t gestureBegin(int side, int kind) const {
+        if (side < 0 || side > 1) return 0;
+        return kind == 2 ? fr.hg.pinch2[side].begin_ns : fr.hg.pinch[side].begin_ns;
+    }
 
     // Where a gesture's point is, seen from the hold's origin: yaw and pitch, degrees.
     auto handAngles(const float p[3], uint64_t t_ns, const Vec3 &from, double &hy, double &hp) {
@@ -2127,7 +2142,8 @@ struct Pointer {
             const std::string says = hold.gaze.Says(secsOf(fr.tnow), lost, why, "", hold.gaze.ByChord() ? lessonSaid : "");
             std::printf("%s %s: %s\n", hold.gaze.Right() && !hold.gaze.ByTap() ? "middle pinch" : "pinch", hold.side ? "right" : "left",
                         says.c_str());
-            PinchEvent(hold.side, hold.gaze.Right() && !hold.gaze.ByTap() ? 2 : 0, says);
+            const int kind = hold.gaze.Right() && !hold.gaze.ByTap() ? 2 : 0;
+            PinchEvent(hold.side, kind, says, gestureBegin(hold.side, kind));
         }
         gazeEndWhy.clear();
     }
@@ -2206,7 +2222,7 @@ struct Pointer {
     // One line per pinch (index or middle) in the log: what it did (clicked where), or why not.
     auto pinchLog(int side, int kind, const std::string &what) {
         std::printf("%s %s: %s\n", kind == 2 ? "middle pinch" : "pinch", side ? "right" : "left", what.c_str());
-        PinchEvent(side, kind, what);
+        PinchEvent(side, kind, what, gestureBegin(side, kind));
     }
     // The chord's right button (see "Gaze pinch" at the top): to the driver as it changes, and the
     // pinch's log line once it's over.
@@ -4758,7 +4774,7 @@ void Pointer::HeldPresses() {
     if (gazeClick.On() && !clickPress) {
         const std::string says = gazeClick.Says(secsOf(fr.tnow), !clickRelease, "the pointer went", lastHit, lessonSaid);
         std::printf("%s %s: %s\n", gazeClick.Right() ? "middle pinch" : "pinch", gazeClickSide ? "right" : "left", says.c_str());
-        PinchEvent(gazeClickSide, gazeClick.Right() ? 2 : 0, says);
+        PinchEvent(gazeClickSide, gazeClick.Right() ? 2 : 0, says, gestureBegin(gazeClickSide, gazeClick.Right() ? 2 : 0));
         gazeClick = {};
     }
 }

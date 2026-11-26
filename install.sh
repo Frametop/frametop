@@ -13,9 +13,9 @@
 #                    [--no-eye-tracker] [--no-eye-recorder] [--no-keyboard]
 #                    [--no-together | --together] [--no-bluetooth | --bluetooth]
 #   --yes           don't ask; installs voice dictation, gaze mode and the Eye Recorder, and hand
-#                   tracking, NPU hand tracking, the Hand Recorder and our eye tracker if sudo can run without a
-#                   password prompt; skips the Bluetooth fixes and the SteamVR restart, and
-#                   Frametop Together unless it's installed already
+#                   tracking, NPU hand tracking, the Hand Recorder and our eye tracker if sudo can
+#                   run without a password prompt; skips the Bluetooth fixes, the SteamVR
+#                   restart, and Frametop Together unless it's installed already
 #   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 320 MB)
 #   --no-hands      don't offer hand tracking, NPU hand tracking or the Hand Recorder
 #   --no-npu        don't offer NPU hand tracking (ft-npud: hand tracking's model on the NPU)

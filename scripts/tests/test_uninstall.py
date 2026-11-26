@@ -60,7 +60,10 @@ class Uninstall(unittest.TestCase):
                 ("the gaze bench's runs, with the recordings",
                  r'for f in [^;\n#]*"\$HOME/\.local/share/frametop/gaze/bench"; do\s*\[ -e "\$f" \] && recs\+='),
                 ("the ft-ondesktop link Steam games' launch options call",
-                 r'ondesktop_link=\$HOME/\.local/bin/ft-ondesktop[^\n]*\n(?:.*\n)*\s*\[ -n "\$ondesktop_link" \] && run rm -f "\$ondesktop_link"')):
+                 r'ondesktop_link=\$HOME/\.local/bin/ft-ondesktop[^\n]*\n(?:.*\n)*\s*\[ -n "\$ondesktop_link" \] && run rm -f "\$ondesktop_link"'),
+                ("NPU hand tracking's unit and tree, in the system files' sudo",
+                 r'exists [^\n]*"\$npu_unit" "\$npu_tree" && sys=1(?:.*\n)*\s*systemctl disable --now ft-npud\.service'
+                 r'(?:.*\n)*\s*rm -rf "\$npu_tree" "\$npu_tree\.prev"(?:.*\n)*[^\n]*true\' sys "\$\{camd_caps:\+\$camd\}" "\$npu_tree" [^\n]*"\$npu_unit"; then')):
             with self.subTest(name):
                 self.assertRegex(text, pattern)
 

@@ -53,7 +53,8 @@ xr_settings=$HOME/.config/openvr/config/cv/xrservice/XRServiceSettings.json  # S
 hands_rate=  # 1 when that mode is on (the 60 fps switch: the controllers don't track) and handsrate.py can take it out
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
-# NPU hand tracking (npu/root.sh): its unit, and its tree on the home partition with the mount point the unit binds it at
+# NPU hand tracking (npu/root.sh's ETCUNIT and TREE; npu/tests/test_root.py checks they match): its unit, and its
+# tree on the home partition, which the unit binds at /var/lib/ft-npud
 npu_unit=/etc/systemd/system/ft-npud.service
 npu_tree=/home/.steamos/offload/var/lib/ft-npud
 bt_files=(/etc/systemd/system/steamframe-bt-fixups.service /etc/systemd/system/bluetooth.service.d/steamframe.conf
@@ -217,18 +218,17 @@ main() {
       echo "warning: the tracking cameras stay in 60 fps hand tracking's mode, where the controllers don't track. Put SteamVR's own back with: python3 $repo/hands/handsrate.py off" >&2; }
     if [ "$sys" = 1 ]; then
       echo "The system files need your password (sudo)."
-      # $1 is ft-camd when it has capabilities to remove, else empty; the system files follow.
+      # $1 is ft-camd when it has capabilities to remove, else empty; $2 ft-npud's tree; the system files follow.
       if ! run sudo bash -c '
-        camd=$1; shift
+        camd=$1 npu_tree=$2; shift 2
         for u in frametop-eyegrab steamframe-bt-fixups; do systemctl disable $u.service 2>/dev/null; done
         systemctl disable --now ft-npud.service 2>/dev/null
         rm -f "$@"
-        t=/home/.steamos/offload/var/lib/ft-npud
-        rm -rf "$t" "$t.prev" "$t.new"
+        rm -rf "$npu_tree" "$npu_tree.prev" "$npu_tree.new"
         rmdir /var/lib/ft-npud /var/lib/ft-npud.prev /var/lib/ft-npud.new 2>/dev/null
         rmdir /etc/frametop /etc/steamframe /etc/systemd/system/bluetooth.service.d 2>/dev/null
         [ -n "$camd" ] && [ -x "$camd" ] && setcap -r "$camd" 2>/dev/null
-        systemctl daemon-reload; true' sys "${camd_caps:+$camd}" "${eyegrab_files[@]}" "${bt_files[@]}" "$npu_unit"; then
+        systemctl daemon-reload; true' sys "${camd_caps:+$camd}" "$npu_tree" "${eyegrab_files[@]}" "${bt_files[@]}" "$npu_unit"; then
         echo "warning: the system files weren't removed (no password?). Run this again to retry." >&2
       fi
     elif [ -n "$camd_caps" ]; then

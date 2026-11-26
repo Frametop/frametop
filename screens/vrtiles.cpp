@@ -152,9 +152,15 @@ std::string TileLine(int i) {
     return !g_tiles.Anchored(i) && g_tileRoom.count(i) ? "room" : g_tiles.Remember(i);
 }
 // Every panel with a key remembered as it is now (a change to one moves the others on the grid too).
+// One centre display remembered: the one chosen now, not also one chosen before it that has gone.
 void RememberTiles() {
     bool changed = false;
-    for (const auto &[i, key] : g_tileKey) changed |= g_tileMemory.Set(key, TileLine(i));
+    const std::string *centre = nullptr;
+    for (const auto &[i, key] : g_tileKey) {
+        changed |= g_tileMemory.Set(key, TileLine(i));
+        if (g_tiles.Anchored(i) && g_tiles.StateOf(i).centre) centre = &key;
+    }
+    if (centre) changed |= g_tileMemory.OnlyCentre(*centre, g_tiles.profileCentre);
     if (changed) SaveTileMemory();
 }
 }  // namespace

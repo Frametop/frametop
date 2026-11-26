@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "tilestate.h"
+
 namespace dashtiles {
 
 // Each app's or display's last state (Board::Remember), by a key of the host's ("screen:2",
@@ -72,6 +74,22 @@ public:
         }
     }
     size_t Size() const { return m_.size(); }
+    // `key` the one remembered as the centre display: every other tile's "centre" dropped, but not
+    // `profileKey`'s (the profile in use saved it: it takes the centre when it comes back, Board::Restore).
+    // A display chosen while the one before was gone left both saying it, so that one took the centre
+    // again when it came back (Slay the Spire from dody, user, 2026-11-26). Their use order is kept.
+    // True when one changed.
+    bool OnlyCentre(const std::string &key, const std::string &profileKey = "") {
+        const std::string k = Clean(key), p = profileKey.empty() ? "" : Clean(profileKey);
+        bool changed = false;
+        for (auto &[other, e] : m_) {
+            State s;
+            if (other == k || other == p || !dashtiles::Parse(e.state, &s) || !s.centre) continue;
+            s.centre = false;
+            e.state = dashtiles::Text(s), changed = true;
+        }
+        return changed;
+    }
 
 private:
     struct Entry {

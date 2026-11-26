@@ -855,6 +855,43 @@ int main() {
         o.Set("zz.new", "off");
         check("memory: the order survives a save and load", o.Get("k101").empty() && o.Get("app:aa.just.opened") == "off");
     }
+    // --- memory: one centre display (user, 2026-11-26: Slay the Spire, the centre once and gone, took
+    // it back from dody, chosen since, when it opened again)
+    {
+        dashtiles::Memory m;
+        m.Set("x11:Slay_the_Spire_2", "tile 0 1 0 0 1.341 centre row");
+        m.Set("app:profiled", "tile 0 3 0 1 1.000 centre");
+        m.Set("remote:dody", "tile 0 2 1 0 1.186 ul centre arc");
+        m.Set("app:dolphin", "tile 0 4 0 1 1.000");
+        m.Set("app:roomy", "room");
+        const std::string before = m.Text();
+        check("one centre: the others' dropped", m.OnlyCentre("remote:dody", "app:profiled") &&
+                                                     m.Get("x11:Slay_the_Spire_2") == "tile 0 1 0 0 1.341 row");
+        check("one centre: the chosen one's kept", m.Get("remote:dody") == "tile 0 2 1 0 1.186 ul centre arc");
+        check("one centre: the profile's kept", m.Get("app:profiled") == "tile 0 3 0 1 1.000 centre");
+        check("one centre: the rest as they were", m.Get("app:dolphin") == "tile 0 4 0 1 1.000" && m.Get("app:roomy") == "room");
+        check("one centre: nothing more to drop", !m.OnlyCentre("remote:dody", "app:profiled"));
+        const auto keys = [](const std::string &text) {
+            std::vector<std::string> k;
+            for (size_t at = 0; at < text.size();) {
+                const size_t end = text.find('\n', at);
+                k.push_back(text.substr(at, text.find('\t', at) - at));
+                at = end == std::string::npos ? text.size() : end + 1;
+            }
+            return k;
+        };
+        check("one centre: the use order kept", keys(m.Text()) == keys(before));
+        // ...so it comes back as a tile, and the chosen centre stays the centre
+        dashtiles::Board b;
+        b.Anchor(101, -1, dashtiles::Stay::On);
+        b.Anchor(3, -1, dashtiles::Stay::On);
+        check("one centre: dody chosen", b.TakeCentre(101) && b.StateOf(101).centre);
+        b.Restore(200, m.Get("x11:Slay_the_Spire_2"), -1, "x11:Slay_the_Spire_2");
+        check("one centre: the game back on the grid, dody still the centre", b.Tiled(200) && b.StateOf(101).centre &&
+                                                                                 !b.StateOf(200).centre);
+        b.Restore(201, "tile 0 1 0 0 1.341 centre row", -1, "x11:other");
+        check("one centre: (a stale line would have taken it: what this guards)", b.StateOf(201).centre);
+    }
     // --- a profile's tiles back: its columns first, as saved; the tiles it doesn't name after
     // (council, 2026-11-16: they were inserted into the live grid, so they joined its columns)
     {

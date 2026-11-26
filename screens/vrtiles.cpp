@@ -629,7 +629,8 @@ bool TileTakeCentre(int i, const char *by) {
     if (!g_tiles.TakeCentre(i)) return false;
     RetileDash();
     RememberTiles();
-    std::printf("%s: the centre display now (%s), in place of %s\n", TileLabel(i).c_str(), by, was >= 0 ? TileLabel(was).c_str() : "none");
+    if (was == i) std::printf("%s: the centre display, chosen now (%s), not only as the widest\n", TileLabel(i).c_str(), by);
+    else std::printf("%s: the centre display now (%s), in place of %s\n", TileLabel(i).c_str(), by, was >= 0 ? TileLabel(was).c_str() : "none");
     return true;
 }
 

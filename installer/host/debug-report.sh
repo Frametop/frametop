@@ -18,6 +18,8 @@
 set -u
 uid=$(id -u)
 export XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
+# (English dates on journal lines, here and in Frametop's own report, for the mask to find the hostname)
+export LC_ALL=C
 inst=${1:-}
 offline=${FRAMETOP_DEBUG_OFFLINE:-0}
 cache=$HOME/.cache/frametop-installer
@@ -158,10 +160,10 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
 
   section "Recent warnings and errors"
   echo "--- this user's (last 80, the last 2 hours)"
-  LC_ALL=C t 20 journalctl --user -p warning --since -2h -n 80 --no-pager -o short 2>/dev/null |
+  t 20 journalctl --user -p warning --since -2h -n 80 --no-pager -o short 2>/dev/null |
     grep -a -v -E 'container (exec|exec_died|init|start|died|attach|cleanup)' | tail -n 80
   echo "--- the system's (last 40, the last 2 hours)"
-  LC_ALL=C t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
+  t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
   echo "--- SteamVR server: Frametop and errors (last 40)"
   grep -a -i -E 'ft_pointer|frametop|\[error\]' "$logs/vrserver.txt" 2>/dev/null | tail -n 40
   echo "--- /tmp/frametop-session.log (last 40)"

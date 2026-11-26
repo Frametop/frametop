@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -51,9 +52,9 @@ class Script(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_it(self):
+    def run_it(self, **more):
         env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
-        env.update(HOME=str(self.home), FRAMETOP_DEBUG_OFFLINE="1")
+        env.update(HOME=str(self.home), FRAMETOP_DEBUG_OFFLINE="1", **more)
         r = subprocess.run(["bash", str(SCRIPT), "9.9.9-test"], env=env, capture_output=True, text=True,
                            timeout=240)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -74,6 +75,16 @@ class Script(unittest.TestCase):
         self.assertIn("this one: 9.9.9-test", text)
         self.assertIn("POINTER=1", text)
         self.assertNotIn("# a comment", text)
+
+    def test_journal_lines_lose_the_hostname_in_any_locale(self):
+        stubs = self.home / "stubs"
+        stubs.mkdir()
+        # (a stand-in journalctl that writes its month as the locale it's given would)
+        (stubs / "journalctl").write_text('#!/bin/sh\n[ "$LC_ALL" = C ] && m=Nov || m=nov.\n'
+                                          'echo "$m 25 17:56:30 $(cat /proc/sys/kernel/hostname) app[1]: up"\n')
+        (stubs / "journalctl").chmod(0o755)
+        text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}", LC_ALL="fr_FR.UTF-8")
+        self.assertIn("Nov 25 17:56:30 <host> app[1]: up", text)
 
     def test_what_is_private_is_hidden(self):
         text = self.run_it()
@@ -145,13 +156,21 @@ class Mask(unittest.TestCase):
                          "<hidden private key>\nok")
         self.assertEqual(self.m("dody.tail1a2b.ts.net is up"), "<tailnet-name> is up")
 
+    def test_what_round_three_found(self):
+        # the relay's journal: a command line isn't JSON, its quotes aren't escaped
+        self.assertEqual(self.m('python3[812]: command:sh -c "echo hunter2 | sudo -S x"'), "python3[812]: command:<hidden>")
+        self.assertEqual(self.m('"command:curl -H \\"Authorization: Bearer abc\\" https://x", "n": 2'),
+                         '"command:<hidden>", "n": 2')
+        for named in ("api-key=abc123", "X-API-Key: abc123", "--api-key abc123"):
+            self.assertNotIn("abc123", self.m(named))
+        self.assertEqual(self.m("- token expired"), "- token expired")
+
     def test_an_unclosed_block_hides_only_its_line(self):
         self.assertEqual(self.m('warn: auth: [retry 1 of 3\n===== next\nkept'), 'warn: auth: "<hidden>"\n===== next\nkept')
 
     def test_long_runs_stay_quick(self):
-        import time
         start = time.monotonic()
-        self.m("-" * 20000 + "a." * 10000 + "ab12-" * 4000)
+        self.m("-" * 20000 + "a." * 10000 + "ab12-" * 4000 + " " + "auth." * 8000 + " " + "tokentoken" * 10000)
         self.assertLess(time.monotonic() - start, 2)
 
     def test_what_stays(self):
@@ -222,7 +241,10 @@ class Window(unittest.TestCase):
             owner.show_debug()                      # still being made (its window may be hidden)
             self.assertEqual((len(made), made[0].shown), (1, 2))
             made[0].busy = False
-            owner.show_debug()                      # done: a new report
+            made[0].unseen = True
+            owner.show_debug()                      # it ended while hidden: shown, once
+            self.assertEqual((len(made), made[0].shown, made[0].unseen), (1, 3, False))
+            owner.show_debug()                      # done and seen: a new report
             self.assertEqual((len(made), made[0].destroyed, made[1].shown), (2, True, 1))
         finally:
             self.page.DebugWindow = real

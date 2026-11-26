@@ -6,7 +6,7 @@ Usage: debug-mask.py FILE [HOSTNAME]  -> the masked text on stdout
 Hidden: the values of anything named like a token, secret, password, credential, cookie, auth or
 API key, wherever it is on a line (KEY=value, KEY: value, "key": value with a nested object or
 list too, --key value, and query parameters), Authorization headers, Bearer and Basic
-credentials, private keys, the command lines of the input relay's command: actions, passwords in
+credentials, private keys, whatever follows "command:" (the input relay's actions), passwords in
 URLs, email addresses, IPv4 addresses but 127.x.x.x (shown as <lan-ip>, <tailnet-ip> or <ip>; a
 version after "version", "v" or "distrobox:" stays), IPv6 addresses but ::1, Tailscale names,
 Wi-Fi network names, Bluetooth addresses, the headset's serial number, and the hostname at the
@@ -17,7 +17,10 @@ Runs on the host's system Python: standard library only, 3.12's syntax.
 import re
 import sys
 
-NAME = r"[A-Za-z0-9_.-]*(?:token|secret|passw|credential|cookie|auth(?!or)|bearer|api_?key|private_?key)[A-Za-z0-9_.-]*"
+NAMED = re.compile(r"(?i)token|secret|passw|credential|cookie|auth(?!or)|bearer|api[_-]?key|private[_-]?key")
+WORD = re.compile(r"(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]+")
+SEP = re.compile(r"[\"']?\s*[=:]\s*")
+FLAG_SEP = re.compile(r"[ \t]+(?!-)")
 HIDDEN = "<hidden>"
 CLOSE = {"{": "}", "[": "]"}
 
@@ -61,9 +64,13 @@ def _value_end(text, i):
 def hide_named(text):
     """NAME=value, NAME: value, "name": value and --name value, anywhere on a line."""
     out, pos = [], 0
-    for m in re.finditer(r"(?i)(?<![A-Za-z0-9_.-])" + NAME + r"[\"']?\s*[=:]\s*|(?<!\S)--?" + NAME + r"[ \t]+(?!-)",
-                         text):
-        if m.start() < pos:
+    for w in WORD.finditer(text):   # (word by word, then a keyword in it: a regex of both backtracks)
+        if w.start() < pos or not NAMED.search(w.group(0)):
+            continue
+        m = SEP.match(text, w.end())
+        if not m and w.group(0).startswith("-") and (w.start() == 0 or text[w.start() - 1].isspace()):
+            m = FLAG_SEP.match(text, w.end())
+        if not m:
             continue
         end = _value_end(text, m.end())
         if end == m.end():
@@ -95,8 +102,10 @@ def mask(text, hostname=""):
         text = re.sub(r"(?m)^([A-Z][a-z]{2} [ \d]\d [\d:]{8}) " + re.escape(hostname) + r" ", r"\1 <host> ", text)
     text = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)",
                   "<hidden private key>", text, flags=re.S)
+    # the input relay's command: actions: to the end of a JSON string, or of the line (its journal)
+    text = re.sub(r'"command:(?:\\.|[^"\\\n])*', '"command:' + HIDDEN, text)
+    text = re.sub(r'\bcommand:(?!<hidden>")[^\n]*', "command:" + HIDDEN, text)
     text = re.sub(r"(?i)\b(authorization\s*:\s*)[^\n\"']+", r"\1" + HIDDEN, text)
-    text = re.sub(r"\bcommand:(?:\\.|[^\"\\\n])+", "command:" + HIDDEN, text)          # the relay's command: actions
     text = re.sub(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}", r"\1 " + HIDDEN, text)
     text = hide_named(text)
     text = re.sub(r"(?i)([?&;](?:[^=&\s\"']*(?:token|key|pin|sig|secret|pass|auth|code)[^=&\s\"']*)=)[^&\s\"']+",

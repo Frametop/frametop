@@ -784,7 +784,9 @@ bool HeadSteady() {
     if (now >= g_tileWornReadMs) {
         g_tileWornReadMs = now + 250;
         const auto level = vr::VRSystem()->GetTrackedDeviceActivityLevel(vr::k_unTrackedDeviceIndex_Hmd);
-        g_tileWorn = level == vr::k_EDeviceActivityLevel_UserInteraction || level == vr::k_EDeviceActivityLevel_UserInteraction_Timeout;
+        // (off as ft-pointer and ft-powerd count it: idle or standby)
+        g_tileWorn = level != vr::k_EDeviceActivityLevel_Idle && level != vr::k_EDeviceActivityLevel_Standby &&
+                     level != vr::k_EDeviceActivityLevel_Idle_Timeout;
     }
     Mat head = Identity();
     const bool valid = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
@@ -816,10 +818,11 @@ void UpdateDashTiles() {
     // (a read that counts: this opening's, or before the group was ever set the last good one)
     const bool fresh = !Dash().why || (!g_tileGroupSet && !std::strcmp(Dash().why, "hidden"));
     // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then, round
-    // you again if this opening brought them round you, not left where they were)
+    // you again if this opening brought them round you, not left where they were; not decided yet, it's
+    // this opening's to decide)
     if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) {
+        if (!g_tileRegroup && !g_tileLeft) g_tilePut.Clear();
         g_tileRegroup = true;
-        if (!g_tileLeft) g_tilePut.Clear();
     }
     const bool steady = HeadSteady();
     GuessTiles(up, steady);
@@ -828,7 +831,11 @@ void UpdateDashTiles() {
     // (an opening waits for a steady head: the headset worn a while and the head still, tilekeep.h;
     // meanwhile the tiles stay where they are in the room, not with the bar)
     const bool waiting = up && g_tileRegroup && g_tileGroupSet && !steady;
-    if (place && (g_tilePut.Settling(NowMs()) || waiting) && Dash().Framed()) TileGroupTo(g_tileWorld);
+    // (only when the bar moved: undone and done again every tick, float error moved them further each time)
+    if (place && (g_tilePut.Settling(NowMs()) || waiting) && Dash().Framed()) {
+        const Mat now = Mul(DashFrame(), g_tileGroupRel);
+        if (std::memcmp(&now, &g_tileWorld, sizeof now) != 0) TileGroupTo(g_tileWorld);
+    }
     if (g_tileRegroup && steady && Dash().ever && fresh && place && (KeepPut() || Regroup())) g_tileRegroup = false;
     // (a reset: now, the dashboard open or not, round where you face, worn or not: SteamVR doesn't move
     // its bar while the dashboard is open, so at the bar a reset after turning did nothing; ft-layout

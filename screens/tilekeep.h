@@ -60,7 +60,7 @@ struct Put {
 };
 
 constexpr int64_t kWornMs = 2000;   // worn this long first: putting it on, the head is still finding its place
-constexpr double kStillM = 0.15;    // the head out of a ball this wide is moving (lifting the headset off, a pose's jump)...
+constexpr double kStillM = 0.15;    // the head more than this from where it was still is moving (lifting the headset off, a pose's jump)...
 constexpr int64_t kStillMs = 300;   // ...and still again only this long after
 
 // Whether the head is steady enough to bring the tiles round it: fed each tick with whether the headset

@@ -584,7 +584,7 @@ HostInput g_hostin;
 // --app window:ADDRESS: a Frametop windows instance, which lends no keyboard or mouse. Its stream
 // mustn't take the host's input lock (keyed by address, not port) from the stream of one of the
 // host's displays: a window panel that started first after a desktop restart held it, its
-// instance answered "released: service", and oma7's keyboard and mouse never came to Frametop
+// instance answered "released: service", and linuxpc's keyboard and mouse never came to Frametop
 // (Daenon, 2026-11-07).
 bool g_windowApp = false;
 

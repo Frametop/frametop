@@ -112,7 +112,7 @@ class Command(test_windows.WindowTest):
         self.answers["/api/frametop/windows"] = (200, self.list)
 
     def opened(self, *args):
-        self.run_window("open", "oma7", "0x55aa10", *args)
+        self.run_window("open", "linuxpc", "0x55aa10", *args)
         self.screens, self.no_screens = Screens(), self.m.screens_socket
         self.m.screens_socket = lambda: self.screens
         self.api.clear()
@@ -131,7 +131,7 @@ class Command(test_windows.WindowTest):
         layout["hosts"][0]["displays"][0]["scale"] = 1.5
         self.m.save_layout(layout)
         self.answers["/api/frametop/windows/open"] = (200, {"output": "FT-W2", "address": "0x77", "status": True})
-        self.run_window("launch", "oma7", "Calc.desktop")
+        self.run_window("launch", "linuxpc", "Calc.desktop")
         body = next(c[4] for c in self.api if c[3] == "/api/frametop/windows/open")
         self.assertEqual(body, {"app": "Calc.desktop", "width": 1278, "height": 798, "scale": 1.5})
         d = self.displays()[-1]
@@ -176,9 +176,9 @@ class Command(test_windows.WindowTest):
     def test_the_app_opens_at_it_again(self):
         n = self.opened("--size", "1280x800")
         self.run_window("scale", n, "1.6")
-        self.run_window("close", "oma7-window-55aa10")
+        self.run_window("close", "linuxpc-window-55aa10")
         self.m.screens_socket = self.no_screens
-        self.run_window("open", "oma7", "0x55aa10", "--size", "1280x800")
+        self.run_window("open", "linuxpc", "0x55aa10", "--size", "1280x800")
         self.assertEqual(self.displays()[-1]["scale"], 1.6)
 
     def test_a_corner_dragged_keeps_the_scale(self):
@@ -214,7 +214,7 @@ class Command(test_windows.WindowTest):
 
         self.w.ft_hostapi.post_json = slow
         self.run_window("scale", n, "1.6")
-        self.assertEqual([(d["id"], d.get("scale")) for d in self.displays()[1:]], [("oma7-window-55aa10", 1.6), ("other", None)])
+        self.assertEqual([(d["id"], d.get("scale")) for d in self.displays()[1:]], [("linuxpc-window-55aa10", 1.6), ("other", None)])
 
     def test_closed_while_the_pc_took_its_time(self):
         n = self.opened("--size", "1280x800")
@@ -228,7 +228,7 @@ class Command(test_windows.WindowTest):
 
         self.w.ft_hostapi.post_json = slow
         self.run_window("scale", n, "1.6")
-        self.assertEqual(([d["id"] for d in self.displays()], self.screens.asked), (["oma7-dp-2"], []))   # (it stays closed)
+        self.assertEqual(([d["id"] for d in self.displays()], self.screens.asked), (["linuxpc-dp-2"], []))   # (it stays closed)
 
     def test_one_at_a_time(self):
         n, held = self.opened("--size", "1280x800"), []
@@ -260,15 +260,15 @@ class Command(test_windows.WindowTest):
         self.run_window("scale", n, "1.5")
         for kv in ("scale=2", "scale=own", "mode=own"):
             with self.assertRaisesRegex(RuntimeError, "a window"):
-                self.m.remote_command(["set", "oma7-window-55aa10", kv])
-        self.m.remote_command(["set", "oma7-window-55aa10", "size=1000x702"])
+                self.m.remote_command(["set", "linuxpc-window-55aa10", kv])
+        self.m.remote_command(["set", "linuxpc-window-55aa10", "size=1000x702"])
         d = self.displays()[-1]
         self.assertEqual((d["size"], d["asked_size"], d["scale"]), ([1002, 702], [1000, 702], 1.5))
 
     def test_the_hosts_port_set_again_keeps_them(self):
         n = self.opened("--size", "1280x800")
         self.run_window("scale", n, "1.6")
-        self.m.remote_command(["host", "oma7", "windows=48990"])
+        self.m.remote_command(["host", "linuxpc", "windows=48990"])
         self.assertEqual(self.m.load_layout()["hosts"][0]["windows"], {"port": 48990, "scales": {"foot": 1.6}})
 
 

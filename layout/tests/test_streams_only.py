@@ -52,8 +52,8 @@ class FakeScreens:
 
 
 LAYOUT = {"screens": [{}, {"hidden": True}],
-          "hosts": [{"name": "oma7", "address": "192.0.2.30",
-                     "displays": [{"id": "oma7-dp-2", "client": "frametop-1", "app": "Desktop"}]}]}
+          "hosts": [{"name": "linuxpc", "address": "192.0.2.30",
+                     "displays": [{"id": "linuxpc-dp-2", "client": "frametop-1", "app": "Desktop"}]}]}
 
 
 class Arrange(unittest.TestCase):

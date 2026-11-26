@@ -95,12 +95,12 @@ class Desktopless(unittest.TestCase):
         self.d.start_watch = lambda: None
         self.d.stop_watch = lambda: None
         self.m.save_layout({"mode": "custom", "screens": [{}, {"hidden": True}, {}],
-                            "hosts": [{"name": "oma7", "address": "192.0.2.30", "windows": {"port": 48989},
+                            "hosts": [{"name": "linuxpc", "address": "192.0.2.30", "windows": {"port": 48989},
                                        "desktopless": True,
-                                       "displays": [{"id": "oma7-dp-2", "client": "frametop-oma7-dp-2",
+                                       "displays": [{"id": "linuxpc-dp-2", "client": "frametop-linuxpc-dp-2",
                                                      "app": "display:DP-2", "size": [5120, 1440]}]},
-                                      {"name": "dody", "address": "192.0.2.40",
-                                       "displays": [{"id": "dody-1", "client": "frametop-dody-1",
+                                      {"name": "gamepc", "address": "192.0.2.40",
+                                       "displays": [{"id": "gamepc-1", "client": "frametop-gamepc-1",
                                                      "app": "display:1", "size": [3840, 2160]}]}]})
         self.m.screen_count = lambda layout=None: 3
         self.m.native_count = lambda layout=None: 3
@@ -140,23 +140,23 @@ class Desktopless(unittest.TestCase):
         self.d.command(["on"])
         layout = self.m.load_layout()
         self.assertTrue(all(s.get("hidden") for s in layout["screens"]))
-        oma7, dody = layout["hosts"]
-        self.assertTrue(oma7["displays"][0].get("hidden"))        # the Linux PC's display: hidden
-        self.assertFalse(dody["displays"][0].get("hidden"))       # one without a windows instance: as it was
-        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["oma7"]})
+        linuxpc, gamepc = layout["hosts"]
+        self.assertTrue(linuxpc["displays"][0].get("hidden"))        # the Linux PC's display: hidden
+        self.assertFalse(gamepc["displays"][0].get("hidden"))       # one without a windows instance: as it was
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["linuxpc"]})
         for n in (1, 2, 3, 101):
             self.assertIn(f"conceal {n}", self.screens.asked)
         self.assertEqual(self.floats, ["float keep", "float all"])
         # the special workspace's window stays; the rest come out shown first, then by recent use
         self.assertEqual([d["app"] for d in self.panels(layout)], ["window:0x30", "window:0x20", "window:0x10"])
-        self.assertEqual([d["key"] for d in self.panels(layout)], ["oma7|foot", "oma7|brave.desktop", "oma7|slack.desktop"])
+        self.assertEqual([d["key"] for d in self.panels(layout)], ["linuxpc|foot", "linuxpc|brave.desktop", "linuxpc|slack.desktop"])
         # ...and ft-screens hears each one's app: its tiles remember the app, not the window
         starts = [a for a in self.screens.asked if a.startswith("remote ") and " start " in a and "window:" in a]
         self.assertEqual([a.split()[10] for a in starts], ["key=foot", "key=brave.desktop", "key=slack.desktop"])
         # the Frame's floating panel 21 is fanned out with them
         self.assertTrue(any(a.startswith("place 21 ") for a in self.screens.asked))
         self.assertEqual(self.m.load_layout()["desktopless"]["on"], True)
-        self.assertEqual(self.d.read_seen(), {"oma7": {"0x10", "0x20", "0x30"}})
+        self.assertEqual(self.d.read_seen(), {"linuxpc": {"0x10", "0x20", "0x30"}})
 
     def test_on_opens_only_as_many_as_there_are_panels(self):
         self.m.REMOTE_MAX = 4   # 2 displays + 2 window panels
@@ -169,7 +169,7 @@ class Desktopless(unittest.TestCase):
         layout = self.m.load_layout()
         self.assertEqual([d["app"] for d in self.panels(layout)], ["window:0x30"])   # no entry left for the others
         self.assertEqual(layout["desktopless"]["full"], 3)
-        self.assertNotIn("0x20", self.d.read_seen()["oma7"])
+        self.assertNotIn("0x20", self.d.read_seen()["linuxpc"])
         # one closes: the next comes out in its place
         host = layout["hosts"][0]
         self.d.W.window_close(layout, host, self.panels(layout)[0])
@@ -203,21 +203,21 @@ class Desktopless(unittest.TestCase):
         self.assertNotIn("reveal 2", self.screens.asked)
         self.assertEqual(self.floats[-1], "dock desktopless")
         self.assertFalse(layout["desktopless"]["on"])
-        self.assertEqual(sorted(layout["desktopless"]["places"]), ["oma7|brave.desktop", "oma7|foot", "oma7|slack.desktop"])
+        self.assertEqual(sorted(layout["desktopless"]["places"]), ["linuxpc|brave.desktop", "linuxpc|foot", "linuxpc|slack.desktop"])
 
     def test_an_app_that_was_not_out_keeps_its_place(self):
         layout = self.m.load_layout()
-        layout["desktopless"] = {"on": False, "places": {"oma7|gimp.desktop": [{"pos": [0, 0, -1]}]}}
+        layout["desktopless"] = {"on": False, "places": {"linuxpc|gimp.desktop": [{"pos": [0, 0, -1]}]}}
         self.m.save_layout(layout)
         self.d.command(["on"])
         self.d.command(["off"])
-        self.assertIn("oma7|gimp.desktop", self.m.load_layout()["desktopless"]["places"])
+        self.assertIn("linuxpc|gimp.desktop", self.m.load_layout()["desktopless"]["places"])
 
     def test_next_time_an_app_opens_where_it_was(self):
         self.d.command(["on"])
         self.d.command(["off"])
         layout = self.m.load_layout()
-        layout["desktopless"]["places"]["oma7|slack.desktop"] = [{"pos": [1.0, 0.2, -0.8], "face": [-50, 5],
+        layout["desktopless"]["places"]["linuxpc|slack.desktop"] = [{"pos": [1.0, 0.2, -0.8], "face": [-50, 5],
                                                                   "roll": 0, "metres": 1.5}]
         self.m.save_layout(layout)
         self.d.command(["on"])
@@ -236,7 +236,7 @@ class Desktopless(unittest.TestCase):
         profile = {}
         self.d.capture(layout, profile)
         self.assertTrue(profile["desktopless"]["on"])
-        self.assertEqual(sorted(profile["desktopless"]["places"]), ["oma7|brave.desktop", "oma7|foot", "oma7|slack.desktop"])
+        self.assertEqual(sorted(profile["desktopless"]["places"]), ["linuxpc|brave.desktop", "linuxpc|foot", "linuxpc|slack.desktop"])
         self.d.command(["off"])
         profile = {}
         self.d.capture(self.m.load_layout(), profile)
@@ -248,14 +248,14 @@ class Desktopless(unittest.TestCase):
         self.assertEqual(self.d.use_profile(layout, "Work"), "on")
         self.assertTrue(all(s.get("hidden") for s in layout["screens"]))
         self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))
-        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["oma7"]})
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["linuxpc"]})
         self.assertEqual(self.screens.asked, [])   # (nothing shown or hidden yet: the arrangement does it)
 
     def test_its_pc_apps_that_are_not_open_start_where_they_were(self):
         place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}
-        self.profile("Work", desktopless={"on": True, "places": {"oma7|gimp.desktop": [place],
-                                                                 "oma7|slack.desktop": [place],
-                                                                 "oma7|foot": [place]}})
+        self.profile("Work", desktopless={"on": True, "places": {"linuxpc|gimp.desktop": [place],
+                                                                 "linuxpc|slack.desktop": [place],
+                                                                 "linuxpc|foot": [place]}})
         layout = self.m.load_layout()
         self.d.use_profile(layout, "Work")
         self.m.save_layout(layout)
@@ -263,8 +263,8 @@ class Desktopless(unittest.TestCase):
         opened = [b["app"] for m, p, b in self.api if p == "/api/frametop/windows/open"]
         self.assertEqual(opened, ["gimp.desktop"])   # slack is open; foot has no desktop file
         gimp = next(d for d in self.panels() if d["app"] == "window:0x99")
-        self.assertEqual((gimp["key"], gimp["pos"], gimp["metres"]), ("oma7|gimp.desktop", [1.0, 0.2, -0.8], 1.5))
-        self.assertIn("0x99", self.d.read_seen()["oma7"])   # (the watcher leaves it alone)
+        self.assertEqual((gimp["key"], gimp["pos"], gimp["metres"]), ("linuxpc|gimp.desktop", [1.0, 0.2, -0.8], 1.5))
+        self.assertIn("0x99", self.d.read_seen()["linuxpc"])   # (the watcher leaves it alone)
 
     def test_its_windows_come_out_at_their_apps_scale(self):
         self.scaling = True
@@ -274,13 +274,13 @@ class Desktopless(unittest.TestCase):
         self.m.save_layout(layout)
         self.d.command(["on"])
         self.assertEqual({d["key"]: (d["scale"], d["pc_app"]) for d in self.panels()},
-                         {"oma7|slack.desktop": (1.6, "slack.desktop"), "oma7|brave.desktop": (1.6, "brave.desktop"),
-                          "oma7|foot": (1.25, "foot")})
+                         {"linuxpc|slack.desktop": (1.6, "slack.desktop"), "linuxpc|brave.desktop": (1.6, "brave.desktop"),
+                          "linuxpc|foot": (1.25, "foot")})
 
     def test_a_profiles_app_starts_at_its_scale(self):
         self.scaling = True
         place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}
-        self.profile("Work", desktopless={"on": True, "places": {"oma7|gimp.desktop": [place]}})
+        self.profile("Work", desktopless={"on": True, "places": {"linuxpc|gimp.desktop": [place]}})
         layout = self.m.load_layout()
         layout["hosts"][0]["windows"]["scales"] = {"gimp.desktop": 2.0}
         self.d.use_profile(layout, "Work")
@@ -291,7 +291,7 @@ class Desktopless(unittest.TestCase):
 
     def test_a_windows_pcs_start_menu_apps_start_too(self):
         place = {"pos": [1.0, 0.2, -0.8], "face": [-50, 5], "roll": 0, "metres": 1.5}
-        self.profile("Work", desktopless={"on": True, "places": {"oma7|Accessories/Paint.lnk": [place]}})
+        self.profile("Work", desktopless={"on": True, "places": {"linuxpc|Accessories/Paint.lnk": [place]}})
         layout = self.m.load_layout()
         self.d.use_profile(layout, "Work")
         self.m.save_layout(layout)
@@ -299,7 +299,7 @@ class Desktopless(unittest.TestCase):
         opened = [b["app"] for m, p, b in self.api if p == "/api/frametop/windows/open"]
         self.assertEqual(opened, ["Accessories/Paint.lnk"])
         paint = next(d for d in self.panels() if d["app"] == "window:0x99")
-        self.assertEqual((paint["key"], paint["label"]), ("oma7|Accessories/Paint.lnk", "Paint"))
+        self.assertEqual((paint["key"], paint["label"]), ("linuxpc|Accessories/Paint.lnk", "Paint"))
 
     def test_using_a_profile_that_was_not_desktopless_puts_the_windows_back(self):
         self.d.command(["on"])
@@ -328,17 +328,17 @@ class Desktopless(unittest.TestCase):
     def test_a_profile_saved_while_on_keeps_what_was_hidden_before(self):
         self.d.command(["on"])
         layout = self.m.load_layout()
-        layout.setdefault("profiles", {})["Work"] = {"remote": {"oma7-dp-2": {"pos": [0, 0, -1]}}}
+        layout.setdefault("profiles", {})["Work"] = {"remote": {"linuxpc-dp-2": {"pos": [0, 0, -1]}}}
         self.m.capture_profile(layout, "Work")
         self.assertEqual(layout["profiles"]["Work"]["hidden"], [2])
-        self.assertFalse(layout["profiles"]["Work"]["remote"]["oma7-dp-2"]["hidden"])
+        self.assertFalse(layout["profiles"]["Work"]["remote"]["linuxpc-dp-2"]["hidden"])
         self.m.save_layout(layout)
         self.d.command(["off"])
         layout = self.m.load_layout()
         layout["layouts"] = {"Work": []}
         self.m.use_hidden(layout, "Work")
         self.d.use_profile(layout, "Work")
-        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["oma7"]})
+        self.assertEqual(layout["desktopless"]["before"], {"screens": [1], "remotes": [], "hosts": ["linuxpc"]})
 
     def test_a_panel_out_before_the_mode_stays_on_the_pc_once_sent_back(self):
         layout = self.m.load_layout()
@@ -354,12 +354,12 @@ class Desktopless(unittest.TestCase):
         a = {"pos": [1.0, 0.0, -1.0], "face": [-40, 0], "roll": 0, "metres": 1.0}
         b = {"pos": [-1.0, 0.0, -1.0], "face": [40, 0], "roll": 0, "metres": 1.0}
         layout = self.m.load_layout()
-        layout["desktopless"] = {"on": False, "places": {"oma7|foot": [a, b]}}
+        layout["desktopless"] = {"on": False, "places": {"linuxpc|foot": [a, b]}}
         self.m.save_layout(layout)
         self.d.command(["on"])
         self.windows.append(window("0x60", "foot", 0, shown=True))
         self.d.open_windows(self.screens, (0, 1.6, 0), 0.0, self.d.read_seen())
-        foot = {d["app"]: d["pos"] for d in self.panels() if d.get("key") == "oma7|foot"}
+        foot = {d["app"]: d["pos"] for d in self.panels() if d.get("key") == "linuxpc|foot"}
         self.assertEqual(foot, {"window:0x30": a["pos"], "window:0x60": b["pos"]})
 
     def test_a_profile_from_before_desktopless_mode_keeps_the_mode(self):
@@ -415,27 +415,27 @@ class Desktopless(unittest.TestCase):
         layout["hosts"][0].pop("desktopless")
         self.m.save_layout(layout)
         self.d.command(["on"])
-        self.d.command(["host", "oma7", "on"])
+        self.d.command(["host", "linuxpc", "on"])
         layout = self.m.load_layout()
         self.assertTrue(layout["hosts"][0]["displays"][0].get("hidden"))
         self.assertIn("conceal 101", self.screens.asked)
         self.assertEqual(len(self.panels(layout)), 3)
         self.screens.asked.clear()
-        self.d.command(["host", "oma7", "off"])
+        self.d.command(["host", "linuxpc", "off"])
         layout = self.m.load_layout()
         self.assertEqual(self.panels(layout), [])
         self.assertFalse(layout["hosts"][0]["displays"][0].get("hidden"))
         self.assertIn("reveal 101", self.screens.asked)
         self.assertNotIn("desktopless", layout["hosts"][0])
-        self.assertIn("oma7|foot", layout["desktopless"]["places"])        # where its panels were, kept
+        self.assertIn("linuxpc|foot", layout["desktopless"]["places"])        # where its panels were, kept
         self.assertTrue(all(s.get("hidden") for s in layout["screens"]))   # the Frame: still in
-        self.assertNotIn("oma7", self.d.read_seen())
+        self.assertNotIn("linuxpc", self.d.read_seen())
 
     def test_a_pc_without_a_windows_instance_cannot_be_in(self):
         with self.assertRaises(RuntimeError):
-            self.d.command(["host", "dody", "on"])
+            self.d.command(["host", "gamepc", "on"])
         self.assertEqual(self.d.sources(self.m.load_layout())["hosts"],
-                         [{"name": "oma7", "on": True, "windows": True}, {"name": "dody", "on": False, "windows": False}])
+                         [{"name": "linuxpc", "on": True, "windows": True}, {"name": "gamepc", "on": False, "windows": False}])
 
     def test_the_frame_switched_out_and_in_while_on(self):
         self.d.command(["on"])
@@ -462,7 +462,7 @@ class Desktopless(unittest.TestCase):
         layout["hosts"][0].pop("desktopless")   # (before the switches: every PC with an instance was in)
         layout["desktopless"]["before"].pop("hosts")
         self.m.save_layout(layout)
-        self.d.command(["host", "oma7", "off"])   # out already, but its panels still out: they go back
+        self.d.command(["host", "linuxpc", "off"])   # out already, but its panels still out: they go back
         layout = self.m.load_layout()
         self.assertEqual(self.panels(layout), [])
         self.assertFalse(layout["hosts"][0]["displays"][0].get("hidden"))
@@ -475,13 +475,13 @@ class Desktopless(unittest.TestCase):
         self.assertFalse(self.m.load_layout()["hosts"][0]["displays"][0].get("hidden"))
 
     def test_a_profile_keeps_an_older_versions_held_pc_display_hidden(self):
-        # on, from before the switches (oma7 in, no "desktopless" on it): a profile that hides its display
+        # on, from before the switches (linuxpc in, no "desktopless" on it): a profile that hides its display
         layout = {"screens": [{}, {}, {}],
-                  "hosts": [{"name": "oma7", "address": "10.0.0.2", "windows": {"port": 9999},
-                             "displays": [{"id": "oma7-1", "hidden": True}]}],
-                  "desktopless": {"on": True, "places": {}, "before": {"screens": [], "remotes": ["oma7-1"]}},
-                  "profiles": {"Normal": {"desktopless": {"on": False}, "remote": {"oma7-1": {"hidden": True}}}}}
-        self.assertEqual(self.d.profile_before(layout, "Normal")["remotes"], ["oma7-1"])
+                  "hosts": [{"name": "linuxpc", "address": "10.0.0.2", "windows": {"port": 9999},
+                             "displays": [{"id": "linuxpc-1", "hidden": True}]}],
+                  "desktopless": {"on": True, "places": {}, "before": {"screens": [], "remotes": ["linuxpc-1"]}},
+                  "profiles": {"Normal": {"desktopless": {"on": False}, "remote": {"linuxpc-1": {"hidden": True}}}}}
+        self.assertEqual(self.d.profile_before(layout, "Normal")["remotes"], ["linuxpc-1"])
         self.d.stop_watch = self.d.write_seen = lambda *a: None
         self.d.close_panels = lambda *a, **kw: None
         self.assertEqual(self.d.use_profile(layout, "Normal"), "off")
@@ -489,10 +489,10 @@ class Desktopless(unittest.TestCase):
 
     def test_a_profile_saved_with_the_frame_out_keeps_its_hidden_screens(self):
         layout = {"screens": [{}, {"hidden": True}, {"hidden": True}],
-                  "hosts": [{"name": "oma7", "address": "10.0.0.2", "windows": {"port": 9999}, "desktopless": True,
+                  "hosts": [{"name": "linuxpc", "address": "10.0.0.2", "windows": {"port": 9999}, "desktopless": True,
                              "displays": []}],
                   "desktopless": {"on": True, "frame": False, "places": {},
-                                  "before": {"screens": [1], "remotes": [], "hosts": ["oma7"]}}}
+                                  "before": {"screens": [1], "remotes": [], "hosts": ["linuxpc"]}}}
         self.m.screens_socket = lambda: (_ for _ in ()).throw(RuntimeError("no screens"))
         profile = {"hidden": [2, 3], "remote": {}}
         self.d.capture(layout, profile)
@@ -500,8 +500,8 @@ class Desktopless(unittest.TestCase):
 
     def test_on_records_the_pcs_it_holds(self):
         self.d.command(["on"])
-        self.assertEqual(self.m.load_layout()["desktopless"]["before"]["hosts"], ["oma7"])
-        self.d.command(["host", "oma7", "off"])
+        self.assertEqual(self.m.load_layout()["desktopless"]["before"]["hosts"], ["linuxpc"])
+        self.d.command(["host", "linuxpc", "off"])
         self.assertEqual(self.m.load_layout()["desktopless"]["before"]["hosts"], [])
 
     def test_toggle_and_status(self):

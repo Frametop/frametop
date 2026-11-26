@@ -3121,7 +3121,7 @@ int g_pullSeq = 0;
 constexpr int64_t kPullMs = 10000;   // (pairing a stream client can take seconds)
 
 // notches > 0 (a push) in that hold pulls nothing and goes nowhere either: on the PC, Super+wheel
-// may be its own (oma7's omarchy: the next or previous workspace), mid-drag.
+// may be its own (linuxpc's omarchy: the next or previous workspace), mid-drag.
 bool PullOff(Screen &s, int index, double notches, void (*handle)(const struct ft_event *, void *), void *data) {
     const char *app = s.remote ? ft_remote_app(index) : nullptr;
     if (!app || std::strncmp(app, "display:", 8) || g_press.torn || g_press.screen != index || IsHandHolder(g_press.device) ||

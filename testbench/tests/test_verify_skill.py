@@ -53,7 +53,7 @@ class VerifySkillTests(unittest.TestCase):
         self.replies = {('status',): proxy(), ('pointer', 'state'): {'ok': True, 'gaze_mode': False},
                         ('power', 'status'): {'ok': True, 'displays': 'on'},
                         ('pointer', 'overlays'): {'ok': True, 'overlays': {'list': []}},
-                        ('host-input',): {'ok': True, 'input_hosts': ['oma7'], 'input_streams': [],
+                        ('host-input',): {'ok': True, 'input_hosts': ['linuxpc'], 'input_streams': [],
                                           'fake_worn': None}}
         self.sent, self.asked, self.log = [], [], []   # log: both, in the order they happened
         self.statuses = []   # each is the reply to one `status` call, before replies[('status',)]
@@ -168,7 +168,7 @@ class VerifySkillTests(unittest.TestCase):
         self.assertEqual(folder.name, '2-after-pinch')
         readbacks = json.loads((folder / 'readbacks.json').read_text())
         self.assertEqual(readbacks['gaze'], {'last': [1, 2]})
-        self.assertEqual(readbacks['host_input']['input_hosts'], ['oma7'])   # who could lend input
+        self.assertEqual(readbacks['host_input']['input_hosts'], ['linuxpc'])   # who could lend input
         self.assertGreater(self.v.LOCK.stat().st_mtime, old + 50)
         self.assertNotIn(('capture', '--output', str(folder / 'capture')), self.sent)
         self.run_main('snapshot', '--capture', '3')
@@ -284,28 +284,28 @@ class VerifySkillTests(unittest.TestCase):
             self.assertFalse(self.v.LOCK.exists())
             self.replies[('status',)] = proxy()
 
-    OMA7 = {'ok': True, 'input_hosts': ['oma7'], 'fake_worn': None,
-            'input_streams': [{'pid': 7, 'host': '192.0.2.61', 'id': 'frametop-oma7-dp-2', 'name': 'oma7'}]}
+    LINUXPC = {'ok': True, 'input_hosts': ['linuxpc'], 'fake_worn': None,
+            'input_streams': [{'pid': 7, 'host': '192.0.2.61', 'id': 'frametop-linuxpc-dp-2', 'name': 'linuxpc'}]}
 
     def test_launch_refuses_while_a_host_that_lends_its_input_streams_unless_allowed(self):
-        self.replies[('host-input',)] = self.OMA7
+        self.replies[('host-input',)] = self.LINUXPC
         report, code = self.v.doctor()
         self.assertEqual(code, 1)
-        self.assertIn('oma7', self.check(report, 'no host-input streams')['detail'])
-        with self.assertRaisesRegex(SystemExit, 'keyboard and mouse of oma7'), \
+        self.assertIn('linuxpc', self.check(report, 'no host-input streams')['detail'])
+        with self.assertRaisesRegex(SystemExit, 'keyboard and mouse of linuxpc'), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.v.launch('x')
         self.assertFalse(self.v.LOCK.exists())
         self.replies[('host-input',)] = {'ok': False, 'error': 'no testbench'}   # unread: refuse too
         with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
             self.v.launch('x')
-        self.replies[('host-input',)] = self.OMA7
+        self.replies[('host-input',)] = self.LINUXPC
         self.assertEqual(self.run_main('launch', 'allowed', '--allow-host-input')[0], 0)
         self.assertTrue(json.loads(self.v.LOCK.read_text())['allow_host_input'])
         self.assertEqual(self.run_main('guard')[0], 0)   # allowed: the run goes on
 
     def test_doctor_fails_a_faked_wearer_without_its_guard(self):
-        self.replies[('host-input',)] = dict(self.OMA7, input_streams=[], guarded=False,
+        self.replies[('host-input',)] = dict(self.LINUXPC, input_streams=[], guarded=False,
                                              fake_worn={'pid': 9, 'allow_host_input': False})
         report, code = self.v.doctor()
         self.assertEqual(code, 1)
@@ -314,7 +314,7 @@ class VerifySkillTests(unittest.TestCase):
         self.assertTrue(self.check(self.v.doctor()[0], 'no host-input streams')['ok'])
 
     def test_launch_with_the_allow_still_refuses_anything_else_unready(self):
-        self.replies[('host-input',)] = self.OMA7
+        self.replies[('host-input',)] = self.LINUXPC
         self.units['frametop-pointer'] = 'failed'
         with self.assertRaisesRegex(SystemExit, 'not ready'), contextlib.redirect_stdout(io.StringIO()):
             self.v.launch('x', allow_host_input=True)
@@ -322,7 +322,7 @@ class VerifySkillTests(unittest.TestCase):
     def test_guard_stops_a_run_when_a_host_that_lends_its_input_starts_streaming(self):
         self.run_main('launch', 'plain')
         self.assertFalse(json.loads(self.v.LOCK.read_text())['allow_host_input'])
-        self.replies[('host-input',)] = self.OMA7
+        self.replies[('host-input',)] = self.LINUXPC
         self.sent.clear()
         with self.assertRaises(SystemExit) as stop:
             self.run_main('guard')
@@ -342,13 +342,13 @@ class VerifySkillTests(unittest.TestCase):
         self.assertFalse(self.v.LOCK.exists())
 
     def stream_fixture(self, result):
-        """A layout with dody and oma7, and an in-box that writes RESULT as the fake viewer would,
-        noting whether dody's input lock was held while it ran."""
+        """A layout with gamepc and linuxpc, and an in-box that writes RESULT as the fake viewer would,
+        noting whether gamepc's input lock was held while it ran."""
         layout = Path(self.tmp.name) / 'layout.json'
         layout.write_text(json.dumps({'hosts': [
             {'name': 'Deej-5090', 'address': '192.0.2.93', 'mic': True, 'displays': [
                 {'client': 'frametop-deej-5090-oled', 'app': 'display:{b7ae}', 'size': [3440, 1440]}]},
-            {'name': 'oma7', 'address': '192.0.2.61', 'input': True, 'displays': []}]}))
+            {'name': 'linuxpc', 'address': '192.0.2.61', 'input': True, 'displays': []}]}))
         seen = {}
 
         def popen(argv, **kwargs):
@@ -416,7 +416,7 @@ class VerifySkillTests(unittest.TestCase):
         self.stream_fixture({'states': [[1.0, 'lost not paired']], 'frames': 0, 'exit': 1})
         self.run_main('launch', 'stream')
         self.assertEqual(self.run_main('stream', 'Deej-5090')[0], 1)   # never live: not ok
-        for argv, error in ((['nowhere'], 'no host'), (['oma7'], 'no display'),
+        for argv, error in ((['nowhere'], 'no host'), (['linuxpc'], 'no display'),
                             (['Deej-5090', '--display', 'other'], 'no display'),
                             (['Deej-5090', '--seconds', 'x'], 'stream HOST'),
                             (['Deej-5090', '--fps', '60'], 'stream HOST')):

@@ -4,7 +4,7 @@ guard that keeps a faked wearer from taking them.
 ft-stream leases a host's keyboard and mouse while the pointer helper says the headset is worn,
 and the helper can't tell the testbench's `worn on` from a real head. So a faked wearer with a
 live stream to a host that has "input": true on its layout entry takes that computer's keyboard
-and mouse away from whoever sits at it (2026-10-30: oma7, mid-sentence). The testbench refuses to
+and mouse away from whoever sits at it (2026-10-30: linuxpc, mid-sentence). The testbench refuses to
 fake the wearer then, unless asked with --allow-host-input. Otherwise, while it fakes the wearer,
 a guard process (`python3 -m frame_testbench.hostinput guard`, its own user unit) holds every
 such host's input lock: ft-stream leases only from the stream holding it

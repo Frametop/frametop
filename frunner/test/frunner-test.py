@@ -105,10 +105,10 @@ with open(os.path.join(home, ".config", "frametop-layout.json"), "w") as f:
         {"name": "desk-pc", "address": "10.0.0.2", "displays": [
             {"id": "desk-oled", "label": "OLED", "client": "c", "app": "primary"},
             {"id": "desk-side", "label": "Side", "client": "c", "app": "primary", "hidden": True}]},
-        {"name": "oma7", "address": "192.0.2.30", "windows": {"port": 48989}, "displays": [
-            {"id": "oma7-window-55aa20", "label": "GIMP", "client": "frametop-oma7-win1", "app": "window:0x55aa20",
+        {"name": "linuxpc", "address": "192.0.2.30", "windows": {"port": 48989}, "displays": [
+            {"id": "linuxpc-window-55aa20", "label": "GIMP", "client": "frametop-linuxpc-win1", "app": "window:0x55aa20",
              "window": True, "port": 48989, "screen": 102}]}]}, f)
-# ft-layout window, faked: oma7's catalog, and launch adding a window panel to the layout as the real one does
+# ft-layout window, faked: linuxpc's catalog, and launch adding a window panel to the layout as the real one does
 FAKE_LAYOUT = os.path.join(home, "fake-ft-layout")
 with open(FAKE_LAYOUT, "w") as f:
     f.write(f"""#!{sys.executable}
@@ -117,24 +117,24 @@ args = sys.argv[1:]
 with open({os.path.join(home, "layout-calls")!r}, "a") as f:
     f.write(" ".join(args) + "\\n")
 if args[:2] == ["window", "catalog"]:
-    print("forgot oma7-window-1: its window closed on oma7")
-    print(json.dumps({{"host": "oma7", "locked": False, "apps": [{{"id": "foot.desktop", "name": "Foot", "icon": "foot"}},
+    print("forgot linuxpc-window-1: its window closed on linuxpc")
+    print(json.dumps({{"host": "linuxpc", "locked": False, "apps": [{{"id": "foot.desktop", "name": "Foot", "icon": "foot"}},
                                                                {{"id": "broken.desktop", "name": "Broken"}}],
                       "windows": [{{"address": "0x55aa10", "class": "foot", "title": "a terminal", "output": None,
                                    "panel": None, "screen": None}},
                                   {{"address": "0x55aa20", "class": "gimp", "title": "GIMP", "output": "FT-W1",
-                                   "panel": "oma7-window-55aa20", "screen": 102}}]}}))
+                                   "panel": "linuxpc-window-55aa20", "screen": 102}}]}}))
 elif args[:2] == ["window", "launch"] and args[3] == "broken.desktop":
-    print("error: oma7: no app broken.desktop")
+    print("error: linuxpc: no app broken.desktop")
     sys.exit(1)
 elif args[:2] == ["window", "launch"]:
     path = {os.path.join(home, ".config", "frametop-layout.json")!r}
     layout = json.load(open(path))
-    layout["hosts"][1]["displays"].append({{"id": "oma7-window-77", "client": "frametop-oma7-win2", "app": "window:0x77",
+    layout["hosts"][1]["displays"].append({{"id": "linuxpc-window-77", "client": "frametop-linuxpc-win2", "app": "window:0x77",
                                            "window": True, "port": 48989, "screen": 107}})
     json.dump(layout, open(path, "w"))
     print("arranged 1 remote display(s)")
-    print("oma7-window-77")
+    print("linuxpc-window-77")
 """)
 os.chmod(FAKE_LAYOUT, 0o755)
 
@@ -491,7 +491,7 @@ try:
     check("a plain open after the key list lists nothing again", json.loads(ask("rows")[3:]), [])
     press(ESC)
 
-    # A PC's apps and windows (DEE-351): oma7 has a Frametop windows instance.
+    # A PC's apps and windows (DEE-351): linuxpc has a Frametop windows instance.
     calls = os.path.join(home, "layout-calls")
 
     def layout_calls():
@@ -506,13 +506,13 @@ try:
     layout_calls()  # the opens before this one asked too
     ask("open")
     time.sleep(0.5)  # its catalog, asked in the background
-    check("each open asks the PC for its apps and windows", layout_calls(), ["window catalog oma7"])
+    check("each open asks the PC for its apps and windows", layout_calls(), ["window catalog linuxpc"])
     type_text("foot")
     check("its apps and windows are found, by name and by the window's app", json.loads(ask("rows")[3:]),
           ["Foot", "a terminal"])
     screens.take()
     press(ENTER)
-    check("Enter on a PC app launches it as a panel", layout_calls(), ["window launch oma7 foot.desktop"])
+    check("Enter on a PC app launches it as a panel", layout_calls(), ["window launch linuxpc foot.desktop"])
     time.sleep(0.3)
     check("...and spins to its panel", [m for m in screens.take() if m.startswith("spin")], ["spin to 107"])
     ask("open")
@@ -520,7 +520,7 @@ try:
     layout_calls()
     type_text("terminal")
     press(ENTER)
-    check("Enter on a PC window opens it as a panel", layout_calls(), ["window open oma7 0x55aa10"])
+    check("Enter on a PC window opens it as a panel", layout_calls(), ["window open linuxpc 0x55aa10"])
     ask("open")
     time.sleep(0.3)
     layout_calls()
@@ -536,16 +536,16 @@ try:
     layout_calls()
     type_text("gimp")
     press(SHIFT, ENTER)
-    check("its menu", json.loads(ask("rows")[3:]), ["GIMP", "Go to its panel", "Back to oma7"])
+    check("its menu", json.loads(ask("rows")[3:]), ["GIMP", "Go to its panel", "Back to linuxpc"])
     press(DOWN)
     press(ENTER)
-    check("Back to oma7 closes its panel", layout_calls(), ["window close oma7-window-55aa20"])
+    check("Back to linuxpc closes its panel", layout_calls(), ["window close linuxpc-window-55aa20"])
     ask("open")
     time.sleep(0.3)
     layout_calls()
     type_text("broken")
     press(ENTER)
-    check("a launch the PC refuses: tried once", layout_calls(), ["window launch oma7 broken.desktop"])
+    check("a launch the PC refuses: tried once", layout_calls(), ["window launch linuxpc broken.desktop"])
 finally:
     daemon.terminate()
     out = daemon.communicate(timeout=5)[0]

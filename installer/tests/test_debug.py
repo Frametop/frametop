@@ -260,7 +260,7 @@ class Mask(unittest.TestCase):
         self.assertEqual(self.m("Authorization: token ghp_abc"), "Authorization: <hidden>")
         self.assertEqual(self.m("-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----\nok"),
                          "<hidden private key>\nok")
-        self.assertEqual(self.m("dody.tail1a2b.ts.net is up"), "<tailnet-name> is up")
+        self.assertEqual(self.m("gamepc.tail1a2b.ts.net is up"), "<tailnet-name> is up")
 
     def test_what_round_three_found(self):
         # the relay's journal: a command line isn't JSON, its quotes aren't escaped

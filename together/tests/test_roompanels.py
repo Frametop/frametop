@@ -231,11 +231,11 @@ class Others(KeeperCase):
         self.assertEqual(self.screens.count("remote 116 stop"), 1)
 
     def test_remote_displays_keep_their_numbers(self):
-        self.screens.remotes = {101: ["mac", "1920x1080"], 116: ["oma7", "1920x1080"]}
+        self.screens.remotes = {101: ["mac", "1920x1080"], 116: ["linuxpc", "1920x1080"]}
         self.together.panel(2)
         self.ticks()
         self.assertEqual(self.screens.remotes[115], ["peer-2", "1280x720"])
-        self.assertEqual((self.screens.remotes[101][0], self.screens.remotes[116][0]), ("mac", "oma7"))
+        self.assertEqual((self.screens.remotes[101][0], self.screens.remotes[116][0]), ("mac", "linuxpc"))
 
     def test_with_every_number_taken_it_waits(self):
         self.screens.remotes = {n: ["host", "1920x1080"] for n in range(101, 117)}

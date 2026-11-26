@@ -64,7 +64,7 @@ class RemoteAdd(unittest.TestCase):
     def add(self, *opts):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.m.remote_command(["add", "oma7", "192.0.2.30", "Desktop", *opts])
+            self.m.remote_command(["add", "linuxpc", "192.0.2.30", "Desktop", *opts])
         return out.getvalue()
 
     def hosts(self):
@@ -94,7 +94,7 @@ class RemoteAdd(unittest.TestCase):
         with self.assertRaises(self.m.LayoutFileError):
             self.add("--fps", "60")
         self.assertEqual([c[0] for c in self.calls], ["pair", "unpair"])
-        self.assertEqual(self.calls[1], ("unpair", "192.0.2.30", "--id", "frametop-oma7-desktop"))
+        self.assertEqual(self.calls[1], ("unpair", "192.0.2.30", "--id", "frametop-linuxpc-desktop"))
         self.assertEqual(self.hosts(), [])
 
     def test_a_failed_unpair_is_said(self):
@@ -106,13 +106,13 @@ class RemoteAdd(unittest.TestCase):
         self.m.save_layout = full_disk
         out = io.StringIO()
         with redirect_stdout(out), self.assertRaisesRegex(OSError, "disk full"):
-            self.m.remote_command(["add", "oma7", "192.0.2.30", "Desktop", "--port", "48000"])
+            self.m.remote_command(["add", "linuxpc", "192.0.2.30", "Desktop", "--port", "48000"])
         self.assertEqual(self.calls[1][:2], ("unpair", "192.0.2.30:48000"))
-        self.assertIn("unpairing frametop-oma7-desktop from 192.0.2.30 failed too: no host", out.getvalue())
+        self.assertIn("unpairing frametop-linuxpc-desktop from 192.0.2.30 failed too: no host", out.getvalue())
 
     def test_pin_pairing_says_the_pin_and_saves_a_pin_host(self):
         out = self.add("--pin", "--size", "1920x1080")
-        self.assertEqual(self.calls, [("pair", "192.0.2.30", "--id", "frametop-oma7-desktop", "--pin")])
+        self.assertEqual(self.calls, [("pair", "192.0.2.30", "--id", "frametop-linuxpc-desktop", "--pin")])
         self.assertIn("PIN 0421", out)
         host = self.hosts()[0]
         self.assertEqual((host["kind"], host["displays"][0]["app"]), ("pin", "Desktop"))
@@ -144,27 +144,27 @@ class RemoteAdd(unittest.TestCase):
             "size": [1920, 1080], "fps": 60, "bitrate": 0, "metres": 1.0})
 
     def test_what_changed_while_the_pin_waited_stays(self):
-        self.during_the_pin(lambda: self.other_display("dody", 1))
+        self.during_the_pin(lambda: self.other_display("gamepc", 1))
         self.add("--pin")
-        self.assertEqual(sorted(h["name"] for h in self.hosts()), ["dody", "oma7"])
+        self.assertEqual(sorted(h["name"] for h in self.hosts()), ["gamepc", "linuxpc"])
 
     def test_the_same_name_taken_while_the_pin_waited_gets_another(self):
         def same():
-            self.m.remote_add_save(self.m.load_layout(), "oma7", "192.0.2.30", 0, {
-                "id": "oma7-desktop", "client": "frametop-oma7-desktop-x", "app": "Desktop", "label": "Desktop",
+            self.m.remote_add_save(self.m.load_layout(), "linuxpc", "192.0.2.30", 0, {
+                "id": "linuxpc-desktop", "client": "frametop-linuxpc-desktop-x", "app": "Desktop", "label": "Desktop",
                 "size": [1920, 1080], "fps": 60, "bitrate": 0, "metres": 1.0})
 
         self.during_the_pin(same)
-        self.assertIn("oma7-desktop-2\n", self.add("--pin"))
-        self.assertEqual([d["id"] for d in self.hosts()[0]["displays"]], ["oma7-desktop", "oma7-desktop-2"])
+        self.assertIn("linuxpc-desktop-2\n", self.add("--pin"))
+        self.assertEqual([d["id"] for d in self.hosts()[0]["displays"]], ["linuxpc-desktop", "linuxpc-desktop-2"])
 
     def test_a_client_another_display_took_meanwhile_is_kept(self):
         def same_client():
-            self.m.remote_add_save(self.m.load_layout(), "oma7", "192.0.2.30", 0, {
-                "id": "oma7-desktop", "client": "frametop-oma7-desktop", "app": "Desktop", "label": "Desktop",
+            self.m.remote_add_save(self.m.load_layout(), "linuxpc", "192.0.2.30", 0, {
+                "id": "linuxpc-desktop", "client": "frametop-linuxpc-desktop", "app": "Desktop", "label": "Desktop",
                 "size": [1920, 1080], "fps": 60, "bitrate": 0, "metres": 1.0})
             for n in range(self.m.REMOTE_MAX - 1):
-                self.other_display("dody", n)
+                self.other_display("gamepc", n)
 
         self.during_the_pin(same_client)
         with self.assertRaisesRegex(RuntimeError, f"at most {self.m.REMOTE_MAX}"):
@@ -172,10 +172,10 @@ class RemoteAdd(unittest.TestCase):
         self.assertNotIn("unpair", [c[0] for c in self.calls], "the other display's pairing stays")
 
     def test_full_while_the_pin_waited_unpairs(self):
-        self.during_the_pin(lambda: [self.other_display("dody", n) for n in range(self.m.REMOTE_MAX)])
+        self.during_the_pin(lambda: [self.other_display("gamepc", n) for n in range(self.m.REMOTE_MAX)])
         with self.assertRaisesRegex(RuntimeError, f"at most {self.m.REMOTE_MAX}"):
             self.add("--pin")
-        self.assertEqual(self.calls[-1], ("unpair", "192.0.2.30", "--id", "frametop-oma7-desktop"))
+        self.assertEqual(self.calls[-1], ("unpair", "192.0.2.30", "--id", "frametop-linuxpc-desktop"))
         self.assertEqual(len(self.hosts()[0]["displays"]), self.m.REMOTE_MAX)
 
     def test_a_pin_host_answers_on_its_gamestream_port(self):

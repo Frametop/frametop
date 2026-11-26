@@ -170,7 +170,7 @@ The rest of the scroll that tore a window off a screen doesn't pull the new pane
 
 While a press carries a panel, the wheel pushes or pulls the carried panel wherever the cursor is. The cursor keeps its depth during the carry, so it's often on the screen or display behind the panel, and the wheel used to go to that screen and do nothing.
 
-On a PC's display, Super with a moving button held keeps the wheel from the PC either way: down pulls the window off, up does nothing. A PC may bind Super+wheel itself (oma7's omarchy switches workspaces), which mid-drag would move the window's workspace away. Super+wheel with no button held is still the PC's.
+On a PC's display, Super with a moving button held keeps the wheel from the PC either way: down pulls the window off, up does nothing. A PC may bind Super+wheel itself (linuxpc's omarchy switches workspaces), which mid-drag would move the window's workspace away. Super+wheel with no button held is still the PC's.
 
 ## Getting at it: the float key and the title bar button
 

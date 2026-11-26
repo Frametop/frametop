@@ -200,7 +200,7 @@ def window_prune(layout, host, windows):
     their panels: the host gives a window a new address each time), and ones disconnected
     ("off"): a window panel has nothing to come back to (its window went back on the PC), so
     one left off by an older build kept the window from being opened or pulled again
-    (Daenon, 2026-11-07: Brave wouldn't pull off oma7's display, GrokBot would)."""
+    (Daenon, 2026-11-07: Brave wouldn't pull off linuxpc's display, GrokBot would)."""
     have = {w.get("address") for w in windows}
     for d in [d for d in host.get("displays", []) if d.get("window") and (address_of(d) not in have or d.get("off"))]:
         window_forget(layout, host, d)

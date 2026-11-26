@@ -82,8 +82,8 @@ int main() {
     r = P(Bytes({kVersion, 2, 0, 'e', 's', 'c', 'a', 'p', 'e'}));
     assert(r.type == Record::kState && !r.engaged && r.text == "escape");
     assert(P(Bytes({kVersion, 2, 2})).type == Record::kNone);
-    r = P(Bytes({kVersion, 3, 3, 'o', 'm', 'a', '7', '\n'}));
-    assert(r.type == Record::kHello && r.kinds == (kKeyboard | kMouse) && r.text == "oma7?");
+    r = P(Bytes({kVersion, 3, 3, 'l', 'i', 'n', 'u', 'x', 'p', 'c', '\n'}));
+    assert(r.type == Record::kHello && r.kinds == (kKeyboard | kMouse) && r.text == "linuxpc?");
     assert(P(Bytes({kVersion, 3, 0xff})).kinds == (kKeyboard | kMouse));
     std::vector<unsigned char> longReason = Bytes({kVersion, 2, 0}), longName = Bytes({kVersion, 3, 1});
     longReason.insert(longReason.end(), 40, 'a'), longName.insert(longName.end(), 80, 'n');
@@ -249,18 +249,18 @@ int main() {
         if (up) said.push_back(msg);
         return up;
     });
-    relay.Start("oma7", "192.0.2.50");
-    const Record hello = P(Bytes({kVersion, 3, 3, 'o', 'm', 'a', '7'})), on = P(Bytes({kVersion, 2, 1})),
+    relay.Start("linuxpc", "192.0.2.50");
+    const Record hello = P(Bytes({kVersion, 3, 3, 'l', 'i', 'n', 'u', 'x', 'p', 'c'})), on = P(Bytes({kVersion, 2, 1})),
                  key = P(Events(kKeyboard, {{1, 30, 1}, {0, 0, 0}})), move = P(Events(kMouse, {{2, 0, 1}}));
     assert(relay.Take(hello).empty() && said.empty());  // not engaged yet: nothing to say
     assert(relay.Take(key).empty() && said.empty());
     assert(relay.Take(on) == "engaged: its keyboard and mouse are here");
     assert(relay.Take(key).empty() && said.empty());  // before a hello the relay has no device
     relay.Take(hello);
-    assert((said == std::vector<std::string>{"hostdev oma7 keyboard oma7", "hostdev oma7 mouse oma7"}));
+    assert((said == std::vector<std::string>{"hostdev linuxpc keyboard linuxpc", "hostdev linuxpc mouse linuxpc"}));
     said.clear();
     relay.Take(key), relay.Take(move);
-    assert((said == std::vector<std::string>{"hostev oma7 keyboard 1 30 1 0 0 0", "hostev oma7 mouse 2 0 1"}));
+    assert((said == std::vector<std::string>{"hostev linuxpc keyboard 1 30 1 0 0 0", "hostev linuxpc mouse 2 0 1"}));
     assert(relay.TakeEvents() == 2 && relay.TakeEvents() == 0);
     up = false;
     relay.Take(key);  // not sent: not counted
@@ -272,7 +272,7 @@ int main() {
     said.clear();
     // A hello without the mouse takes it away; one with no name uses the host's address.
     relay.Take(P(Bytes({kVersion, 3, 1})));
-    assert((said == std::vector<std::string>{"hostdev oma7 keyboard 192.0.2.50", "hostbye oma7 mouse"}));
+    assert((said == std::vector<std::string>{"hostdev linuxpc keyboard 192.0.2.50", "hostbye linuxpc mouse"}));
     said.clear();
     relay.Take(move);
     assert(said.empty());
@@ -295,34 +295,34 @@ int main() {
     up = true;
     assert(relay.owed() == (kKeyboard | kMouse) && relay.devices() == 0);
     relay.Take(hello);  // pays them first, then the devices come back
-    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse", "hostdev oma7 keyboard oma7",
-                                             "hostdev oma7 mouse oma7"}));
+    assert((said == std::vector<std::string>{"hostbye linuxpc keyboard", "hostbye linuxpc mouse", "hostdev linuxpc keyboard linuxpc",
+                                             "hostdev linuxpc mouse linuxpc"}));
     assert(relay.owed() == 0);
     said.clear();
     // Still owed at the hello: that kind waits.
     int failures = 0;
     Relay flaky([&](const std::string &msg) {
-        if (msg.rfind("hostbye oma7 keyboard", 0) == 0 && failures++ < 2) return false;
+        if (msg.rfind("hostbye linuxpc keyboard", 0) == 0 && failures++ < 2) return false;
         said.push_back(msg);
         return true;
     });
-    flaky.Start("oma7", "192.0.2.50");
+    flaky.Start("linuxpc", "192.0.2.50");
     flaky.Take(on), flaky.Take(hello);
     said.clear();
     flaky.Stop();  // the keyboard's hostbye fails, the mouse's goes
-    assert((said == std::vector<std::string>{"hostbye oma7 mouse"}));
+    assert((said == std::vector<std::string>{"hostbye linuxpc mouse"}));
     said.clear();
     flaky.Take(on);
     flaky.Take(hello);  // and fails again: no keyboard hostdev
-    assert((said == std::vector<std::string>{"hostdev oma7 mouse oma7"}) && flaky.owed() == kKeyboard);
+    assert((said == std::vector<std::string>{"hostdev linuxpc mouse linuxpc"}) && flaky.owed() == kKeyboard);
     said.clear();
     flaky.Take(hello);
-    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostdev oma7 keyboard oma7", "hostdev oma7 mouse oma7"}));
+    assert((said == std::vector<std::string>{"hostbye linuxpc keyboard", "hostdev linuxpc keyboard linuxpc", "hostdev linuxpc mouse linuxpc"}));
     said.clear();
 
     // Released: hostbye for each, and events stop.
     assert(relay.Take(P(Bytes({kVersion, 2, 0, 'e', 's', 'c', 'a', 'p', 'e'}))) == "released: escape");
-    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse"}));
+    assert((said == std::vector<std::string>{"hostbye linuxpc keyboard", "hostbye linuxpc mouse"}));
     assert(relay.reason() == "escape" && !relay.engaged());
     said.clear();
     relay.Take(key), relay.Take(hello);
@@ -331,7 +331,7 @@ int main() {
     relay.Take(on), relay.Take(hello);
     said.clear();
     relay.Stop();
-    assert((said == std::vector<std::string>{"hostbye oma7 keyboard", "hostbye oma7 mouse"}) && !relay.engaged());
+    assert((said == std::vector<std::string>{"hostbye linuxpc keyboard", "hostbye linuxpc mouse"}) && !relay.engaged());
 
     // One kind asked for: a hello with both brings only that device, and the other's events go nowhere.
     Relay one([&](const std::string &msg) {
@@ -339,23 +339,23 @@ int main() {
         return true;
     });
     said.clear();
-    one.Start("oma7", "192.0.2.50");
+    one.Start("linuxpc", "192.0.2.50");
     one.Want(kMouse);
     one.Take(on), one.Take(hello);
-    assert((said == std::vector<std::string>{"hostdev oma7 mouse oma7"}));
+    assert((said == std::vector<std::string>{"hostdev linuxpc mouse linuxpc"}));
     said.clear();
     one.Take(key), one.Take(move);
-    assert((said == std::vector<std::string>{"hostev oma7 mouse 2 0 1"}));
+    assert((said == std::vector<std::string>{"hostev linuxpc mouse 2 0 1"}));
     said.clear();
     // Switched to the keyboard: the mouse goes at once, and the keyboard comes with the next hello.
     one.Want(kKeyboard);
-    assert((said == std::vector<std::string>{"hostbye oma7 mouse"}) && one.devices() == 0);
+    assert((said == std::vector<std::string>{"hostbye linuxpc mouse"}) && one.devices() == 0);
     said.clear();
     one.Take(hello);
-    assert((said == std::vector<std::string>{"hostdev oma7 keyboard oma7"}));
+    assert((said == std::vector<std::string>{"hostdev linuxpc keyboard linuxpc"}));
     said.clear();
     one.Want(kKeyboard | kMouse), one.Take(hello);  // both again
-    assert((said == std::vector<std::string>{"hostdev oma7 keyboard oma7", "hostdev oma7 mouse oma7"}));
+    assert((said == std::vector<std::string>{"hostdev linuxpc keyboard linuxpc", "hostdev linuxpc mouse linuxpc"}));
 
     std::puts("hostinput-test: ok");
 }

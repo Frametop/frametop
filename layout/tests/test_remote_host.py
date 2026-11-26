@@ -29,8 +29,8 @@ class RemoteHost(unittest.TestCase):
             raise self.m.NoAnswer("ft-screens isn't running")
 
         self.m.screens_socket = no_screens
-        self.m.save_layout({"hosts": [{"name": "oma7", "address": "192.0.2.30", "route": "auto",
-                                       "displays": [{"id": "oma7-dp-2", "client": "frametop-1", "app": "Desktop"}]}]})
+        self.m.save_layout({"hosts": [{"name": "linuxpc", "address": "192.0.2.30", "route": "auto",
+                                       "displays": [{"id": "linuxpc-dp-2", "client": "frametop-1", "app": "Desktop"}]}]})
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -40,15 +40,15 @@ class RemoteHost(unittest.TestCase):
             return json.load(f)["hosts"][0]
 
     def test_input_on_and_off(self):
-        self.m.remote_command(["host", "oma7", "input=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on"])
         self.assertIs(self.host()["input"], True)
-        self.m.remote_command(["host", "oma7", "input=off"])
+        self.m.remote_command(["host", "linuxpc", "input=off"])
         self.assertIs(self.host()["input"], False)
 
     def test_input_for_one_kind(self):
-        self.m.remote_command(["host", "oma7", "input=keyboard"])
+        self.m.remote_command(["host", "linuxpc", "input=keyboard"])
         self.assertEqual(self.host()["input"], "keyboard")
-        self.m.remote_command(["host", "oma7", "input=mouse"])
+        self.m.remote_command(["host", "linuxpc", "input=mouse"])
         self.assertEqual(self.host()["input"], "mouse")
         out = io.StringIO()
         with redirect_stdout(out):
@@ -57,7 +57,7 @@ class RemoteHost(unittest.TestCase):
 
     def test_input_needs_no_restart(self):
         # ft-stream reads the switch from the layout every 3 s: nothing asks ft-screens to start over.
-        self.m.remote_command(["host", "oma7", "input=on", "mic=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on", "mic=on"])
         self.assertEqual(self.asked, [])
         self.assertIs(self.host()["input"], True)
         self.assertIs(self.host()["mic"], True)
@@ -65,7 +65,7 @@ class RemoteHost(unittest.TestCase):
     def test_bad_values_save_nothing(self):
         for bad in ("input=yes", "input=", "input", "inputs=on", "input=both", "input=Keyboard"):
             with self.assertRaisesRegex(RuntimeError, "input=on\\|off\\|keyboard\\|mouse"):
-                self.m.remote_command(["host", "oma7", "input=on", bad])
+                self.m.remote_command(["host", "linuxpc", "input=on", bad])
             self.assertNotIn("input", self.host())
 
     def test_unknown_host(self):
@@ -77,7 +77,7 @@ class RemoteHost(unittest.TestCase):
         with redirect_stdout(out):
             self.m.remote_command(["list"])
         self.assertNotIn(" input", out.getvalue())
-        self.m.remote_command(["host", "oma7", "input=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on"])
         out = io.StringIO()
         with redirect_stdout(out):
             self.m.remote_command(["list"])
@@ -86,18 +86,18 @@ class RemoteHost(unittest.TestCase):
     def test_clipboard_on_and_off(self):
         # Off until asked for (the shared clipboard, stream/clipboard.h); no restart either way.
         self.assertNotIn("clipboard", self.host())
-        self.m.remote_command(["host", "oma7", "clipboard=on"])
+        self.m.remote_command(["host", "linuxpc", "clipboard=on"])
         self.assertIs(self.host()["clipboard"], True)
         self.assertEqual(self.asked, [])
-        self.m.remote_command(["host", "oma7", "clipboard=off"])
+        self.m.remote_command(["host", "linuxpc", "clipboard=off"])
         self.assertIs(self.host()["clipboard"], False)
         for bad in ("clipboard=yes", "clipboard", "clipboards=on"):
             with self.assertRaisesRegex(RuntimeError, "clipboard=on\\|off"):
-                self.m.remote_command(["host", "oma7", bad])
+                self.m.remote_command(["host", "linuxpc", bad])
         self.assertIs(self.host()["clipboard"], False)
 
     def test_list_says_clipboard(self):
-        self.m.remote_command(["host", "oma7", "input=on", "clipboard=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on", "clipboard=on"])
         out = io.StringIO()
         with redirect_stdout(out):
             self.m.remote_command(["list"])

@@ -36,7 +36,7 @@ A snapshot of the `dashboard-tiling` branch for picking the work back up. The de
 
 ## Proven on the testbench (nobody wearing the headset)
 
-- Dashboard closed: screen 1 and the oma7 display stay; Steam's tile and sidebar hide.
+- Dashboard closed: screen 1 and the linuxpc display stay; Steam's tile and sidebar hide.
   `DASH_TILE_STAY` 0 and 1 hide and show them live; a per-panel override hides only that panel.
 - Sidebar: Steam shut its labels at 3839 ms and the crop began shrinking at 3936 ms.
 - Theater: a game goes in and comes back; the dashboard opens on Steam's tab over it.

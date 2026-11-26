@@ -267,6 +267,9 @@ int main() {
             check("pan: ...the dashboard opened: still straight ahead", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
             d.absent = {9}, d.Arrange(bar), d.absent = {}, d.Arrange(bar);
             check("pan: ...closed and opened again: still", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+            d.Recentre(), d.Arrange(bar);   // (brought round you with the dashboard open: Regroup)
+            d.absent = {9}, d.Arrange(bar);  // (it closes: Steam's page has no width now, so no place to keep)
+            check("pan: ...centred with it open, and it closes: still straight ahead", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
         }
         {   // centred while it was fitted: the turns from before that don't come back
             dashtiles::Board d;

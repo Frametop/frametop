@@ -250,13 +250,14 @@ Mat ToMat(const double m[3][4]) {
 // Each tiled panel pinned to its place at its size there, and each satellite at its own. Nothing
 // until the group has a frame (the dashboard seen).
 void RetileDash() {
-    ApplyWall();
-    FlattenTiles();
-    if (!g_tileGroupSet || !Dash().Framed()) return;
     // (as they are now, not at the last tick: a panel put back (Restore) with no picture yet was laid
     // out at its guess and centred round that, so it never waited to be centred once it showed: user,
     // 2026-11-26, a remote display back from the headset off came back 30 to 40 degrees round)
+    g_tiles.steam = SteamDashIndex();
     g_tiles.absent = TilesAbsent();
+    ApplyWall();
+    FlattenTiles();
+    if (!g_tileGroupSet || !Dash().Framed()) return;
     const auto &l = g_tiles.Arrange(TileInfo);
     const tilecurve::Wall wall = TileWall();
     for (const tiling::Placed &p : l.tiles) {

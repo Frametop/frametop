@@ -612,7 +612,7 @@ private:
                     continue;
                 }
                 for (const tiling::Placed &q : last_.tiles)
-                    if (q.id == p.id && !lastAbsent_.count(q.id)) {   // (not shown there: no width, no place to keep)
+                    if (q.id == p.id && !lastAbsent_.count(q.id) && !absent.count(p.id)) {   // (not shown there or now: no width, no place to keep)
                         auto [it, added] = vote.try_emplace(p.col, -1.0, 0.0);
                         if (p.az1 - p.az0 > it->second.first) it->second = {p.az1 - p.az0, tiling::WrapNear(q.azDeg - p.azDeg, 0)};
                     }

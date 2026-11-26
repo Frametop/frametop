@@ -267,6 +267,13 @@ class Backend(QObject):
                     state = "desktop off"
                 else:
                     state = self._states.get(n, "not running")
+                raw_routes = d.get("routes") if isinstance(d.get("routes"), dict) else {}
+
+                def route_val(route_name, key, default, _routes=raw_routes):
+                    r = _routes.get(route_name)
+                    v = r.get(key) if isinstance(r, dict) else None
+                    return int(v) if isinstance(v, int) and not isinstance(v, bool) else default
+
                 displays.append({"id": d["id"], "number": n, "label": d.get("label") or d["id"], "app": d["app"],
                                  # Its monitor follows it (the host's switch) in the mode picked here.
                                  "host": h.get("name", ""),
@@ -279,6 +286,12 @@ class Backend(QObject):
                                  "virtual": d["app"] == "monitor" or str(d["app"]).startswith("apple:virtual"),
                                  "width": int(w), "height": int(hh),
                                  "fps": int(d.get("fps", 60)), "bitrate": int(d.get("bitrate", 0)),
+                                 "directFps": route_val("direct", "fps", 0),
+                                 "directBitrate": route_val("direct", "bitrate", -1),
+                                 "networkFps": route_val("network", "fps", 0),
+                                 "networkBitrate": route_val("network", "bitrate", -1),
+                                 "hasRoutes": any(isinstance(raw_routes.get(r), dict) and raw_routes[r]
+                                                  for r in ft_layout.ROUTE_NAMES),
                                  "metres": ft_layout.remote_size(d)[0], "shown": not d.get("hidden"),
                                  "connected": not d.get("off"), "state": state})
             address = h.get("address", "")
@@ -665,6 +678,24 @@ class Backend(QObject):
         """Its stream's resolution, frame rate and bitrate (it starts over)."""
         self._run("Changing the stream", "remote", "set", display_id, f"size={width}x{height}", f"fps={fps}",
                   f"bitrate={bitrate}", then=lambda: self._monitors.refresh_of(display_id))
+
+    @Slot(str, int, int, int, int)
+    def setRouteStream(self, display_id, direct_fps, direct_bitrate, network_fps, network_bitrate):
+        """Per-route frame rate and bitrate overrides (direct/dongle vs network).
+        fps: <0 unchanged, 0 reset to display default, >0 explicit fps.
+        bitrate: <=-2 unchanged, -1 reset to display default, >=0 explicit kbit/s."""
+        pairs = []
+        for route, fps, bitrate in (("direct", direct_fps, direct_bitrate), ("network", network_fps, network_bitrate)):
+            if fps == 0:
+                pairs.append(f"{route}.fps=")
+            elif fps > 0:
+                pairs.append(f"{route}.fps={fps}")
+            if bitrate == -1:
+                pairs.append(f"{route}.bitrate=")
+            elif bitrate >= 0:
+                pairs.append(f"{route}.bitrate={bitrate}")
+        if pairs:
+            self._run("Changing route settings", "remote", "set", display_id, *pairs)
 
     def _save(self, layout):
         """Save the layout; False, said in the window, when it can't be (a frametop-layout.json

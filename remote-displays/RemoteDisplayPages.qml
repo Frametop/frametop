@@ -845,6 +845,27 @@ Item {
                                     // (Apply, a scale pick), and its settings stay open through that.
                                     property bool expanded: root.openDisplays[modelData.id] === true
                                     onExpandedChanged: root.openDisplays[modelData.id] = expanded
+                                    readonly property bool showRoutes: !modelData.kwin && (hostCard.modelData.direct !== "" || modelData.hasRoutes)
+                                    property bool directBitrateEdited: false
+                                    property bool networkBitrateEdited: false
+                                    function routeRateModel(currentFps) {
+                                        const list = [{ text: "Default (" + modelData.fps + " fps)", value: 0 }]
+                                        const rates = backend.streamRates.slice()
+                                        if (currentFps > 0 && !rates.includes(currentFps)) {
+                                            rates.push(currentFps)
+                                            rates.sort((a, b) => a - b)
+                                        }
+                                        for (const r of rates) list.push({ text: r + " fps", value: r })
+                                        return list
+                                    }
+                                    function routeBitrateChanged(mbps, savedKbps, edited) {
+                                        if (mbps === 0) return savedKbps > 0 || (savedKbps === 0 && edited)
+                                        return mbps * 1000 !== savedKbps
+                                    }
+                                    function routeBitrateArg(mbps, savedKbps, edited) {
+                                        if (!routeBitrateChanged(mbps, savedKbps, edited)) return -2
+                                        return mbps === 0 ? -1 : mbps * 1000
+                                    }
                                     Layout.fillWidth: true
                                     Kirigami.Separator { Layout.fillWidth: true }
                                     RowLayout {
@@ -939,6 +960,93 @@ Item {
                                                                              disp.ownSize ? ss.pickedHeight : disp.modelData.height,
                                                                              sr.currentValue, sb.value * 1000)
                                             }
+                                        }
+                                        RowLayout {
+                                            objectName: "routeRow-direct"
+                                            visible: disp.showRoutes
+                                            Kirigami.FormData.label: "Dongle / direct:"
+                                            Controls.ComboBox {
+                                                id: directRate
+                                                objectName: "routeFps-direct"
+                                                model: disp.routeRateModel(disp.modelData.directFps)
+                                                textRole: "text"
+                                                valueRole: "value"
+                                                Component.onCompleted: currentIndex = Math.max(0, indexOfValue(disp.modelData.directFps))
+                                            }
+                                            Controls.SpinBox {
+                                                id: directBitrate
+                                                objectName: "routeBitrate-direct"
+                                                visible: !hostCard.apple
+                                                from: 0; to: 150; stepSize: 5; editable: true
+                                                value: disp.modelData.directBitrate >= 0 ? Math.round(disp.modelData.directBitrate / 1000) : 0
+                                                onValueModified: disp.directBitrateEdited = true
+                                            }
+                                            Controls.Label {
+                                                visible: !hostCard.apple
+                                                text: directBitrate.value === 0
+                                                      ? (disp.modelData.directBitrate === 0 && !disp.directBitrateEdited ? "Mbps (auto)" : "Mbps (default)")
+                                                      : "Mbps"
+                                            }
+                                        }
+                                        RowLayout {
+                                            objectName: "routeRow-network"
+                                            visible: disp.showRoutes
+                                            Kirigami.FormData.label: "Network:"
+                                            Controls.ComboBox {
+                                                id: networkRate
+                                                objectName: "routeFps-network"
+                                                model: disp.routeRateModel(disp.modelData.networkFps)
+                                                textRole: "text"
+                                                valueRole: "value"
+                                                Component.onCompleted: currentIndex = Math.max(0, indexOfValue(disp.modelData.networkFps))
+                                            }
+                                            Controls.SpinBox {
+                                                id: networkBitrate
+                                                objectName: "routeBitrate-network"
+                                                visible: !hostCard.apple
+                                                from: 0; to: 150; stepSize: 5; editable: true
+                                                value: disp.modelData.networkBitrate >= 0 ? Math.round(disp.modelData.networkBitrate / 1000) : 0
+                                                onValueModified: disp.networkBitrateEdited = true
+                                            }
+                                            Controls.Label {
+                                                visible: !hostCard.apple
+                                                text: networkBitrate.value === 0
+                                                      ? (disp.modelData.networkBitrate === 0 && !disp.networkBitrateEdited ? "Mbps (auto)" : "Mbps (default)")
+                                                      : "Mbps"
+                                            }
+                                            Controls.Button {
+                                                objectName: "routeApply"
+                                                text: "Apply"
+                                                enabled: directRate.currentValue !== disp.modelData.directFps
+                                                         || networkRate.currentValue !== disp.modelData.networkFps
+                                                         || (!hostCard.apple && disp.routeBitrateChanged(directBitrate.value, disp.modelData.directBitrate, disp.directBitrateEdited))
+                                                         || (!hostCard.apple && disp.routeBitrateChanged(networkBitrate.value, disp.modelData.networkBitrate, disp.networkBitrateEdited))
+                                                onClicked: backend.setRouteStream(
+                                                    disp.modelData.id,
+                                                    directRate.currentValue !== disp.modelData.directFps ? directRate.currentValue : -1,
+                                                    hostCard.apple ? -2 : disp.routeBitrateArg(directBitrate.value, disp.modelData.directBitrate, disp.directBitrateEdited),
+                                                    networkRate.currentValue !== disp.modelData.networkFps ? networkRate.currentValue : -1,
+                                                    hostCard.apple ? -2 : disp.routeBitrateArg(networkBitrate.value, disp.modelData.networkBitrate, disp.networkBitrateEdited))
+                                            }
+                                            Controls.ToolButton {
+                                                objectName: "routeReset"
+                                                icon.name: "edit-clear"
+                                                display: Controls.AbstractButton.IconOnly
+                                                visible: disp.modelData.hasRoutes
+                                                text: "Clear per-route settings"
+                                                Controls.ToolTip.text: text
+                                                Controls.ToolTip.visible: hovered
+                                                onClicked: backend.setRouteStream(disp.modelData.id, 0, -1, 0, -1)
+                                            }
+                                        }
+                                        Controls.Label {
+                                            objectName: "routeHelp"
+                                            visible: disp.showRoutes
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            opacity: 0.7
+                                            text: "Optional frame rate" + (hostCard.apple ? "" : " and bitrate")
+                                                  + " overrides for the direct/dongle link versus the network. With Connection set to Auto, a stream on the network switches to the direct link automatically once it answers."
                                         }
                                         MonitorScalePicker {
                                             // A PC that can set it (Hyprland, KDE; not Windows), or one picked before.

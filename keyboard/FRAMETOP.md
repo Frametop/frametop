@@ -6,6 +6,7 @@ It was imported at 0.8.1, commit `ef915ef75169ac886b7de86d18df2e59150cde2f`, wit
 
 ## Frametop's changes
 
+- `src/vr.cpp`: the opt-in Steam PIN access gate hides and cancels Full Keyboard while locked or state is uncertain, and leaves native replacement disabled so Steam's PIN UI remains usable. Standalone builds without Frametop's shared header retain upstream behavior.
 - `--frametop` (`src/main.cpp`): the VR keyboard, typing through gamescope (libei) as before, started enabled and hidden. Its settings live in `~/.config/frametop-keyboard`. It has no updater and no startup unit: Frametop's service starts it with SteamVR, and it updates with Frametop. The first run turns the Steam keyboard replacement on. Quitting it from its panel exits with status 3, so the service leaves it closed until SteamVR starts again.
 - `src/frametop.cpp`, `include/framekeyboard/frametop.hpp`: the link to Frametop's input relay (below), and a key sink that sends typing to the desktop or to Steam.
 - `src/frametop_vr.cpp`, `include/framekeyboard/frametop_vr.hpp` (`FrametopVr`): Frametop's part of the VR loop. The panel can show over Frametop's screens with the dashboard closed, while Frametop asked for it; lasers can click it there; it tells Frametop whether it's up; touch typing's tips and fingertips. It's OpenVR-free and tested in `tests/frametop_tests.cpp`.

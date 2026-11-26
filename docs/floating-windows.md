@@ -1,5 +1,8 @@
 # Floating windows
 
+Experimental [Steam PIN protection](steam-pin-lock.md) can hide the desktop and
+floating windows without ending apps while Steam is locked or its state is unknown.
+
 Any desktop app can float in VR in a panel of its own, like SteamVR's floating windows, while it stays part of the Frametop desktop. Drag and drop, the clipboard, and focus keep working between floating windows and the screens.
 
 - **Float a window** with "Float in VR" in its window menu (Alt+F3), the float button left of Close in its title bar, or the float key (Meta+Shift+F by default). Start an app floating with "Launch as Standalone" in its right-click menu in the Application Launcher or the taskbar, with `ft-float launch` or `ft-float run`, or from a profile ([profiles.md](profiles.md)).

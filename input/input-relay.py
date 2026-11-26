@@ -297,6 +297,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import ft_commands  # noqa: E402  (your commands, "run:NAME")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "conf"))
 import ft_conf  # noqa: E402  (frametop.conf's grammar, docs/config.md)
+import ft_pinlock  # noqa: E402
 from ft_input_actions import (  # noqa: E402  (the rules file's shared vocabulary)
     DEFAULT_KEY_BINDINGS,
     GAZE_ACTIONS,
@@ -1434,6 +1435,8 @@ class Relay:
     def do_action(self, action, value, now, source="mouse"):
         """A mapped mouse or controller button, or key combination (pointer mode only, but
         for the actions needs_pointer() says don't)."""
+        if value and not ft_pinlock.allowed() and action not in ("steam_menu", "release_keys", "none"):
+            return
         if action == "pause_toggle":
             if value == 1:
                 self.pause.toggle(PAUSE_SOURCES.get(source, source), now)

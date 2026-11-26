@@ -18,6 +18,10 @@ everything.
 """
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "conf"))
+import ft_pinlock
 
 from gi.repository import Gio, GLib
 
@@ -121,6 +125,8 @@ class Forwarder:
                        Gio.DBusCallFlags.NONE, 5000, None, self.done, "CloseNotification")
 
     def notify(self, params):
+        if ft_pinlock.enabled():
+            return  # never export desktop content to an independently visible overlay
         # Children, not unpack(): unpacking would lose the hints' D-Bus types (image-data's bytes).
         pid, app, _replaces, icon, summary, body, actions, hints, timeout = (
             params.get_child_value(i) for i in range(9))

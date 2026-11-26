@@ -29,6 +29,10 @@ stop() {
 }
 
 start() {
+  if python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import ft_pinlock; sys.exit(0 if ft_pinlock.enabled() else 1)' "$here/../conf"; then
+    echo 'Remote desktop access is unavailable with Steam PIN protection enabled' >&2
+    return 3
+  fi
   if [ ! -e "$runtime/remote-capable" ]; then
     echo "this desktop didn't start with remote access on: it applies at the next desktop start" >&2
     return 3

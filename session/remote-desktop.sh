@@ -5,6 +5,11 @@
 # Nothing outside the Frame can reach it. vnc-bridge.sh connects to it and
 # re-serves the desktop over VNC. Started by frametop-session.sh when REMOTE=1.
 set -eu
+here=$(dirname "$(readlink -f "$0")")
+if python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import ft_pinlock; sys.exit(0 if ft_pinlock.enabled() else 1)' "$here/../conf"; then
+  echo 'Remote capture is unavailable with Steam PIN protection enabled' >&2
+  exit 3
+fi
 
 runtime=${1:?usage: remote-desktop.sh <nested XDG_RUNTIME_DIR>}
 # 3389 is taken by SteamOS's own xrdp (a separate X11 session, not the VR desktop).

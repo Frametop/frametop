@@ -34,6 +34,8 @@ new=build/tree.new
 rm -rf "$new"
 mkdir -p "$new/graphs" "$new/app/work"
 tar -C app -cf - --exclude=__pycache__ --exclude="*.c" . | tar -C "$new/app" -xf -
+# but the C sources of the DSP kernel: framenpu checks the kernel it ships against their hashes (provenance.py)
+cp app/framenpu/src/framenpu/sdk/*.c "$new/app/framenpu/src/framenpu/sdk/"
 # The C helpers, for any aarch64 the Frame has (not -march=native: the image is built on another machine)
 cc() { gcc -shared -fPIC -Wall -o "$@"; }
 cc "$new/app/npud/deguard.so" -O2 app/npud/deguard.c
@@ -60,6 +62,12 @@ find "$new" -depth -name __pycache__ -exec rm -rf {} +
 cp graphs/hdq.npz "$new/graphs/landmarks.npz"
 cp ft-npud.service "$new/ft-npud.service"
 chmod -R u=rwX,go=rX "$new"
+# the tree, run by its own Python as the daemon runs it: its memory seals (the fcntl of that CPython has no
+# seal names: transport.py), and the kernel checks out against its sources (dispatch.py does this at each start)
+"$py" -I -B -c "import sys; sys.path[:0] = sys.argv[1:]
+import transport; transport.Memory().map.close()
+from framenpu.provenance import verify_kernel; verify_kernel()" "$new/app/npud" "$new/app/framenpu/src" ||
+  { echo "npu/build.sh: the tree fails its own Python (above)" >&2; exit 1; }
 rm -rf build/tree.old
 [ ! -d build/tree ] || mv build/tree build/tree.old
 mv "$new" build/tree

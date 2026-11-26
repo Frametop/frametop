@@ -5,10 +5,10 @@ is the window's logic without a display."""
 import importlib.util
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
-import types
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -38,6 +38,9 @@ class Script(unittest.TestCase):
                                             "SCREEN_PIN_LEVEL=1\n")
         (conf / "frametop-layout.json").write_text(
             '{"hosts": [{"name": "PC", "address": "192.168.1.20", "auth_key": "s3cr3t", "pin": 4}]}')
+        (conf / "frametop-input.json").write_text('{"key_bindings": {"Meta+K": "command:sshpass -p hunter2 ssh nas"}}')
+        (conf / "frametop-commands.json").write_text(
+            '{"commands": [{"name": "wake-nas", "run": "curl -u admin:pw9 http://nas/wake"}, {"name": "lights"}]}')
         cache = self.home / ".cache" / "frametop-installer"
         cache.mkdir(parents=True)
         (cache / "install.log").write_text(
@@ -74,7 +77,7 @@ class Script(unittest.TestCase):
 
     def test_what_is_private_is_hidden(self):
         text = self.run_it()
-        for secret in ("abc123", "s3cr3t", "ghp_xyz", "a.person@example.com", "aa:bb:cc:dd:ee:ff", "ABCDEF123456",
+        for secret in ("abc123", "s3cr3t", "ghp_xyz", "hunter2", "pw9", "curl", "a.person@example.com", "aa:bb:cc:dd:ee:ff", "ABCDEF123456",
                        "192.168.1.20", "100.101.102.103", "\x1b["):
             self.assertNotIn(secret, text)
         self.assertIn("VIBEPOLLO_TOKEN=<hidden>", text)
@@ -85,6 +88,8 @@ class Script(unittest.TestCase):
         self.assertIn("127.0.0.1", text)
         self.assertIn("distrobox: 1.8.2.5", text)     # a version isn't an address
         self.assertIn("SCREEN_PIN_LEVEL=1", text)
+        self.assertIn('"Meta+K": "command:<hidden>"', text)
+        self.assertIn("frametop-commands.json: the names only\nwake-nas, lights\n", text)
 
     def test_no_release_says_so(self):
         text = self.run_it()
@@ -130,9 +135,29 @@ class Mask(unittest.TestCase):
         self.assertEqual(self.m("a.person@example.com aa:bb:cc:dd:ee:ff cv.ABCDEF123456"),
                          "<email> xx:xx:xx:xx:xx:xx cv.<serial>")
 
+    def test_what_round_two_found(self):
+        self.assertEqual(self.m("connecting to 192.168.1.50. Then 10.0.0.5..."), "connecting to <lan-ip>. Then <lan-ip>...")
+        self.assertEqual(self.m("1234 /frametop/x --token abc123 --password hunter2 -v"),
+                         "1234 /frametop/x --token <hidden> --password <hidden> -v")
+        self.assertEqual(self.m('"Meta+K": "command:curl -u a:b \\"http://x\\"", "n": 2'), '"Meta+K": "command:<hidden>", "n": 2')
+        self.assertEqual(self.m("Authorization: token ghp_abc"), "Authorization: <hidden>")
+        self.assertEqual(self.m("-----BEGIN OPENSSH PRIVATE KEY-----\nAAA\n-----END OPENSSH PRIVATE KEY-----\nok"),
+                         "<hidden private key>\nok")
+        self.assertEqual(self.m("dody.tail1a2b.ts.net is up"), "<tailnet-name> is up")
+
+    def test_an_unclosed_block_hides_only_its_line(self):
+        self.assertEqual(self.m('warn: auth: [retry 1 of 3\n===== next\nkept'), 'warn: auth: "<hidden>"\n===== next\nkept')
+
+    def test_long_runs_stay_quick(self):
+        import time
+        start = time.monotonic()
+        self.m("-" * 20000 + "a." * 10000 + "ab12-" * 4000)
+        self.assertLess(time.monotonic() - start, 2)
+
     def test_what_stays(self):
         for keep in ("distrobox: 1.8.2.5", "SteamVR version 2.19.5.1", "sudo: a password is set", '"pin": 4',
-                     "key_bindings", "std::string", "Nov 25 17:56:30 other-box x: y", "SCREEN_PIN_LEVEL=1"):
+                     "key_bindings", "std::string", "Nov 25 17:56:30 other-box x: y", "SCREEN_PIN_LEVEL=1",
+                     "author: Jane", "user@1000.service: Failed", "--token --other"):
             self.assertEqual(self.m(keep), keep)
 
 
@@ -177,16 +202,48 @@ class Window(unittest.TestCase):
                          and not hasattr(self.page.DebugPage, c))
         self.assertEqual(missing, [])
 
-    def test_a_report_that_ends_after_its_window_closed_leaves_it_be(self):
-        shown = []
-        win = types.SimpleNamespace(gone=True, busy=True, report_show=lambda *a, **k: shown.append(a))
-        self.page.DebugWindow.report_done(win, pathlib.Path("/x/y.txt"))
-        self.page.DebugWindow.report_failed(win, OSError("x"))
-        self.assertEqual((shown, win.busy), ([], False))
+    def test_debug_brings_back_a_report_being_made_and_starts_a_new_one_after(self):
+        made = []
+
+        class Fake:
+            def __init__(self, parent):
+                self.busy, self.destroyed, self.shown = True, False, 0
+                made.append(self)
+
+            def present(self):
+                self.shown += 1
+
+            def destroy(self):
+                self.destroyed = True
+        real, self.page.DebugWindow = self.page.DebugWindow, Fake
+        try:
+            owner = self.page.DebugPage()
+            owner.show_debug()
+            owner.show_debug()                      # still being made (its window may be hidden)
+            self.assertEqual((len(made), made[0].shown), (1, 2))
+            made[0].busy = False
+            owner.show_debug()                      # done: a new report
+            self.assertEqual((len(made), made[0].destroyed, made[1].shown), (2, True, 1))
+        finally:
+            self.page.DebugWindow = real
+
+    def test_closing_only_hides_it(self):
+        self.assertIn("hide_on_close=True", (REPO / "installer/frametop_installer/debug_page.py").read_text())
+
+    def test_it_leaves_the_installers_own_page_alone(self):
+        # (it used to replace it, and an install's progress page stops updating once it isn't shown)
+        source = (REPO / "installer" / "frametop_installer" / "debug_page.py").read_text()
+        self.assertEqual(re.findall(r"self\.(?:stack|page|reveal)\b", source), [])
+
+    def test_the_window_and_the_file_say_the_same_who_to_send_it_to(self):
+        lines = re.findall(r'^  echo "(.*)"$', SCRIPT.read_text(), re.M)
+        start = next(i for i, line in enumerate(lines) if line.startswith("Send this file"))
+        self.assertEqual(" ".join(lines[start:start + 2]), self.page.CONTACT.replace("Send it", "Send this file"))
 
     def test_the_window_waits_longer_than_the_script(self):
         script = SCRIPT.read_text()
-        budget = sum(int(n) for n in __import__("re").findall(r"\bt (\d+) ", script))
+        # (a sanity bound: the t SECONDS calls, the GitHub check's too, against the window's wait)
+        budget = sum(int(n) for n in re.findall(r"\bt (\d+) ", script))
         self.assertLess(budget, self.page.TIMEOUT)
 
 

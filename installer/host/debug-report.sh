@@ -33,7 +33,8 @@ trap 'rm -f "$raw"' EXIT
 
 section() { printf '\n===== %s\n' "$*"; }
 # t SECONDS COMMAND...: a command that can't hang the report
-t() { local s=$1; shift; timeout "$s" "$@" 2>&1; }
+# (one that isn't there returns 127 quietly, for the caller's fallback)
+t() { local s=$1; shift; command -v "$1" >/dev/null 2>&1 || return 127; timeout "$s" "$@" 2>&1; }
 units() {
   for u in "$@"; do
     echo "$u: $(systemctl --user is-enabled "$u" 2>/dev/null || true) / $(systemctl --user is-active "$u" 2>/dev/null || true)"
@@ -55,7 +56,7 @@ show() {
   grep -E '^(PRETTY_NAME|VERSION_ID|BUILD_ID|VARIANT_ID)=' /etc/os-release
   echo "SteamOS branch: $(t 10 steamos-select-branch -c || echo unknown)"
   echo "kernel: $(uname -srm)"
-  echo "model: $(tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null || echo unknown)"
+  echo "model: $(tr -d '\0' 2>/dev/null </sys/firmware/devicetree/base/model || echo unknown)"
   echo "up $(uptime -p 2>/dev/null | sed 's/^up //'), since $(uptime -s 2>/dev/null)"
   echo "load: $(cut -d' ' -f1-3 /proc/loadavg)"
   free -m | sed -n 1,3p
@@ -74,8 +75,8 @@ show() {
   fi
 
   section "SteamVR"
-  echo "build: $(tr -d '\r\n' </opt/steamvr/bin/version.txt 2>/dev/null || echo unknown)," \
-    "last start: $(grep -a -o 'vrcompositor [0-9.]* startup' "$logs/vrcompositor.txt" 2>/dev/null | tail -n 1 || echo 'not found')"
+  last=$(grep -a -o 'vrcompositor [0-9.]* startup' "$logs/vrcompositor.txt" 2>/dev/null | tail -n 1)
+  echo "build: $(tr -d '\r\n' 2>/dev/null </opt/steamvr/bin/version.txt || echo unknown), last start: ${last:-not found}"
   units steamvr.service
   XDG_CONFIG_HOME=$HOME/.config LD_LIBRARY_PATH=/opt/steamvr/bin/linuxarm64 \
     t 10 /opt/steamvr/bin/linuxarm64/vrpathreg show 2>/dev/null | sed -n '/xternal/,$p'
@@ -138,19 +139,29 @@ show() {
   section "Settings"
   echo "--- ~/.config/frametop.conf (without comments)"
   grep -v '^\s*#' "$HOME/.config/frametop.conf" 2>/dev/null | sed 's/\s*#.*//' | grep . || echo "not there"
-  # (not frametop-float.json or frametop-frunner.json: they name the web apps and sites used)
+  # (not frametop-float.json or frametop-frunner.json: they name the web apps and sites used; the
+  # input relay's command: actions are hidden by the mask, and the user's own commands go in by name)
   for f in frametop-input.json frametop-layout.json frametop-voice.json frametop-palm.txt frametop-tiles.txt \
-    frametop-bars.txt frametop-commands.json; do
+    frametop-bars.txt; do
     show "$HOME/.config/$f" 20000
   done
+  f=$HOME/.config/frametop-commands.json
+  if [ -f "$f" ]; then
+    echo "--- $f: the names only"
+    python3 -I -c 'import json, sys
+cs = json.load(open(sys.argv[1], encoding="utf-8")).get("commands", [])
+print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tail -n 1
+  else
+    echo "--- $f: not there"
+  fi
   echo "--- ~/.config/frametop* files: $(cd "$HOME/.config" 2>/dev/null && ls -d frametop* 2>/dev/null | xargs)"
 
   section "Recent warnings and errors"
   echo "--- this user's (last 80, the last 2 hours)"
-  t 20 journalctl --user -p warning --since -2h -n 80 --no-pager -o short 2>/dev/null |
+  LC_ALL=C t 20 journalctl --user -p warning --since -2h -n 80 --no-pager -o short 2>/dev/null |
     grep -a -v -E 'container (exec|exec_died|init|start|died|attach|cleanup)' | tail -n 80
   echo "--- the system's (last 40, the last 2 hours)"
-  t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
+  LC_ALL=C t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
   echo "--- SteamVR server: Frametop and errors (last 40)"
   grep -a -i -E 'ft_pointer|frametop|\[error\]' "$logs/vrserver.txt" 2>/dev/null | tail -n 40
   echo "--- /tmp/frametop-session.log (last 40)"

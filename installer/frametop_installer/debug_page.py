@@ -3,7 +3,9 @@
 host/debug-report.sh collects it on the host and saves it in Downloads. A small window of its own
 runs it, then says where the file is and who to send it to, and can show it in the file manager
 or copy its text. It's a window, not a page, so the installer's own page (an install's progress
-too) carries on under it. The installer sends nothing anywhere: the user does.
+too) carries on under it. Closing it while a report is being made only hides it: Debug brings it
+back, rather than starting a second report on the host. The installer sends nothing anywhere:
+the user does.
 """
 from pathlib import Path
 
@@ -40,24 +42,26 @@ def collect(version, run=host.run, stage=host.stage):
 
 
 class DebugPage:
-    """Mixed into the Window: the Debug button opens the report's window, or brings it forward."""
+    """Mixed into the Window: the Debug button makes a new report in a window of its own, or brings
+    back the one still being made."""
 
     debug_window = None
 
     def show_debug(self):
-        if self.debug_window is None or self.debug_window.gone:
+        if self.debug_window is None or not self.debug_window.busy:
+            if self.debug_window is not None:
+                self.debug_window.destroy()
             self.debug_window = DebugWindow(self)
         self.debug_window.present()
 
 
 class DebugWindow(Gtk.Window):
     def __init__(self, parent):
-        super().__init__(transient_for=parent, title="Debug report", default_width=760, default_height=520)
-        self.gone = False
+        super().__init__(transient_for=parent, title="Debug report", default_width=760, default_height=520,
+                         hide_on_close=True)
         self.busy = False
         self.path = None
         self.note = None
-        self.connect("close-request", self.report_closing)
         self.report_start()
 
     def report_show(self, *widgets, buttons=()):
@@ -78,15 +82,13 @@ class DebugWindow(Gtk.Window):
         self.report_show(Gtk.Spinner(spinning=True, height_request=48),
                          label("Making a debug report...", css=("title-3",), xalign=0.5),
                          label("It looks at SteamOS, SteamVR, Frametop's install, its settings and services, "
-                               "and what's running. That takes up to two minutes.", css=("dim-label",),
+                               "and what's running. That usually takes under a minute.", css=("dim-label",),
                                xalign=0.5))
         own = selfupdate.own_version() or "a local build"
         in_thread(lambda: collect(own), self.report_done, self.report_failed)
 
     def report_done(self, path):
         self.busy = False
-        if self.gone:
-            return
         self.path = path
         self.note = label("", css=("dim-label",))
         self.report_show(label("Debug report saved", css=("title-1",)),
@@ -105,8 +107,6 @@ class DebugWindow(Gtk.Window):
 
     def report_failed(self, error):
         self.busy = False
-        if self.gone:
-            return
         why = str(error) if isinstance(error, ReportError) else f"{error.__class__.__name__}: {error}"
         self.report_show(label("The debug report didn't finish", css=("title-1",)),
                          label(f"{why}. You can also make it in a terminal on the headset:"),
@@ -114,11 +114,6 @@ class DebugWindow(Gtk.Window):
                          label(CONTACT, css=("dim-label",)),
                          buttons=[button("Close", self.close),
                                   button("Try again", self.report_start, css=("suggested-action",))])
-
-    def report_closing(self, *_):
-        # A report being made finishes on the host anyway; its file just isn't shown.
-        self.gone = True
-        return False
 
     def report_copy(self):
         try:
@@ -134,6 +129,5 @@ class DebugWindow(Gtk.Window):
             try:
                 launcher.open_containing_folder_finish(result)
             except GLib.Error as e:
-                if not self.gone:
-                    self.note.set_label(f"Couldn't open the folder ({e.message}). The file is at {self.path}.")
+                self.note.set_label(f"Couldn't open the folder ({e.message}). The file is at {self.path}.")
         Gtk.FileLauncher.new(Gio.File.new_for_path(str(self.path))).open_containing_folder(self, None, opened)

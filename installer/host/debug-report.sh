@@ -10,11 +10,11 @@
 #
 # Usage: debug-report.sh [INSTALLER_VERSION]
 # Prints "wrote PATH" last.
-# Hidden: the values of settings named like a token, secret, password, credential, cookie or auth,
-# passwords in URLs, email addresses, the last two numbers of IPv4 addresses from 10.x.x.x up (not 127.x.x.x),
-# Bluetooth addresses, and the headset's serial number. Left out: Frametop Voice's part of its
-# report, which listens to the microphone for a second.
-# FRAMETOP_DEBUG_OFFLINE=1: no GitHub check and no Frametop report (the tests).
+# Secrets, addresses and the serial number are hidden before it's saved (debug-mask.py says which).
+# Names the user gave things, such as their PCs' in the screens' layout, stay. Left out: Frametop
+# Voice's part of Frametop's report, which listens to the microphone for a second.
+# The commands' timeouts add up to under 5 minutes, inside the window's 7 (debug_page.TIMEOUT).
+# FRAMETOP_DEBUG_OFFLINE=1: no GitHub check (the tests).
 set -u
 uid=$(id -u)
 export XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
@@ -91,10 +91,14 @@ show() {
   show "$cache/result" 100
   echo "--- the last install's log (last 200 lines)"
   # (curl's download meter is carriage returns: keep the last of each line)
-  tail -n 200 "$cache/install.log" 2>/dev/null | sed 's/.*\r//' || echo "no log"
+  if [ -f "$cache/install.log" ]; then tail -n 200 "$cache/install.log" | sed 's/.*\r//'; else echo "no log"; fi
 
   section "Frametop"
-  ls -1 "$HOME/.local/share/frametop/releases" 2>/dev/null | sed 's/^/release folder: /' || echo "no releases installed"
+  if [ -d "$HOME/.local/share/frametop/releases" ]; then
+    ls -1 "$HOME/.local/share/frametop/releases" | sed 's/^/release folder: /'
+  else
+    echo "no releases installed"
+  fi
   echo "current: $(readlink "$rel" 2>/dev/null || echo none)"
   show "$rel/.frametop-release" 2000
   if [ -d "$HOME/frametop/.git" ]; then
@@ -125,7 +129,8 @@ show() {
     echo "$p: $(pgrep -c -x "$p" 2>/dev/null)"
   done
   echo "Frametop processes (without podman's and distrobox's own):"
-  pgrep -a -f '[f]rametop|[f]t-[a-z]' 2>/dev/null | grep -v -E '^[0-9]+ (/usr/bin/conmon|podman exec|/bin/sh [^ ]*distrobox enter)' |
+  pgrep -a -f '/frametop/|/frametop-|ft-npud' 2>/dev/null |
+    grep -v -E '^[0-9]+ ([^ ]*/)?(conmon|podman exec|sh [^ ]*distrobox enter)( |$)' |
     cut -c1-200 | head -n 40 | sed 's/^/  /'
   echo "the busiest processes now:"
   t 10 top -b -n 1 -w 160 | sed -n '7,22p'
@@ -133,8 +138,9 @@ show() {
   section "Settings"
   echo "--- ~/.config/frametop.conf (without comments)"
   grep -v '^\s*#' "$HOME/.config/frametop.conf" 2>/dev/null | sed 's/\s*#.*//' | grep . || echo "not there"
-  for f in frametop-input.json frametop-layout.json frametop-float.json frametop-voice.json frametop-palm.txt \
-    frametop-tiles.txt frametop-bars.txt frametop-commands.json frametop-frunner.json; do
+  # (not frametop-float.json or frametop-frunner.json: they name the web apps and sites used)
+  for f in frametop-input.json frametop-layout.json frametop-voice.json frametop-palm.txt frametop-tiles.txt \
+    frametop-bars.txt frametop-commands.json; do
     show "$HOME/.config/$f" 20000
   done
   echo "--- ~/.config/frametop* files: $(cd "$HOME/.config" 2>/dev/null && ls -d frametop* 2>/dev/null | xargs)"
@@ -150,9 +156,9 @@ show() {
   echo "--- /tmp/frametop-session.log (last 40)"
   tail -n 40 /tmp/frametop-session.log 2>/dev/null || echo "not there"
 
-  if [ "$offline" != 1 ] && [ -f "$rel/scripts/report.sh" ]; then
+  if [ -f "$rel/scripts/report.sh" ]; then
     section "Frametop's own report (scripts/report.sh --system --desktop --gaze --hands)"
-    r=$(t 180 bash "$rel/scripts/report.sh" --system --desktop --gaze --hands </dev/null)
+    r=$(t 90 bash "$rel/scripts/report.sh" --system --desktop --gaze --hands </dev/null)
     made=$(printf '%s\n' "$r" | sed -n 's/^wrote //p' | tail -n 1)
     if [ -n "$made" ] && [ -f "$made" ]; then
       cat "$made"
@@ -169,22 +175,6 @@ show() {
   echo "Frametop debug report, $(date '+%F %T %Z')"
   echo "Send this file to Deej__ on Discord (a direct message), or email it to dj_anuz@protonmail.com,"
   echo "with what you did, what you expected, and what happened."
-  python3 -I - "$raw" <<'PY'
-import re
-import sys
-
-text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)                                               # colours
-name = r"[A-Za-z0-9_.-]*(?:token|secret|passw|credential|cookie|auth|bearer|api_?key|private_?key)[A-Za-z0-9_.-]*"
-text = re.sub(r"(?im)^(\s*(?:export\s+)?" + name + r"\s*[=:]\s*).+$", r"\1<hidden>", text)             # KEY=value
-text = re.sub(r'(?i)("' + name + r'"\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\]\s]+)', r'\1"<hidden>"', text)    # "key": value
-text = re.sub(r"://[^/\s:@]+:[^/\s@]+@", "://<hidden>@", text)                                       # user:pw@host
-text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}", "<email>", text)
-text = re.sub(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b", "xx:xx:xx:xx:xx:xx", text)
-text = re.sub(r"cv\.[A-Z0-9]{8,}", "cv.<serial>", text)
-# (not 127.x.x.x, and not from 1 to 9: four-part versions, such as distrobox's, start low)
-text = re.sub(r"(?<![\d.])(?!127\.)([1-9]\d{1,2})\.(\d{1,3})\.\d{1,3}\.\d{1,3}(?![\d.])", r"\1.\2.x.x", text)
-sys.stdout.write(text)
-PY
+  python3 -I "$(dirname "${BASH_SOURCE[0]}")/debug-mask.py" "$raw" "$(cat /proc/sys/kernel/hostname 2>/dev/null)"
 } >"$out" || { echo "couldn't write $out" >&2; exit 1; }
 echo "wrote $out"

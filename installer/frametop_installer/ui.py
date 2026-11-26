@@ -9,7 +9,8 @@ headset restarted or crashed), it offers to run the same install again.
 Opening it also looks for updates: a newer Frametop Installer is offered first (update_page.py),
 and the version page says when a newer Frametop than the installed one is out.
 
-The Debug button in the title bar, on every page, saves a debug report to send (debug_page.py).
+The Debug button in the title bar, on every page, opens a window that saves a debug report to
+send (debug_page.py).
 """
 import os
 import sys
@@ -91,7 +92,7 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
                 row.append(b)
             box.append(row)
         self.stack.add_named(clamp, name)
-        self.reveal(name)
+        self.stack.set_visible_child_name(name)
         return box
 
     def open_where_things_are(self):

@@ -51,7 +51,8 @@ share=$f/share/frametop-installer
 install -Dm755 "$here/frametop-installer" "$f/bin/frametop-installer"
 install -d "$share/frametop_installer" "$share/host"
 install -m644 "$root"/installer/frametop_installer/*.py "$share/frametop_installer/"
-install -m755 "$root"/installer/host/* "$share/host/"
+# (files only: a test run leaves host/__pycache__)
+find "$root/installer/host" -maxdepth 1 -type f -exec install -m755 -t "$share/host/" {} +
 install -m755 "$root/get.sh" "$share/get.sh"
 printf 'VERSION=%s\nCOMMIT=%s\n' "$version" "$commit" >"$share/VERSION"
 install -Dm644 "$here/$ID.desktop" "$f/share/applications/$ID.desktop"

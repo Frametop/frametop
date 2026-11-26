@@ -441,6 +441,15 @@ public:
         }
         tiling::Layout l = params.fit ? tilefit::Fit(cols, params) : slot_.Arrange(grid_, cols, params);
         centreNow_ = CentreOf(info);
+        // (centred round one with no picture yet, as a remote display back from waiting while the headset
+        // was off: round it once it shows, unless something moved meanwhile; centred round what showed,
+        // the strip stayed that far off when it came: user, 2026-11-26, "displays get moved off center")
+        if (moved_ >= 0 || !grid_.Has(waitCentre_)) waitCentre_ = -1;
+        else if (!recentre_ && !absent.count(waitCentre_)) recentre_ = true, centreOn_ = waitCentre_;
+        if (recentre_) {
+            const int on = centreOn_ >= 0 ? centreOn_ : centreNow_;
+            waitCentre_ = absent.count(on) ? on : -1;
+        }
         if (recentre_ || moved_ >= 0) turns_ = {};   // (in any mode: it's used up here)
         pan_ = l.split >= 0 || params.fit ? 0 : turns_.Keep(l, [&] { return Pan(l); });   // (fitted: always round the middle)
         if (pan_ != 0) tiling::Turn(&l, pan_);
@@ -644,6 +653,7 @@ private:
     turnkeep::Turns turns_;       // ...each way it has been laid out (what shows) since a move or a Recentre
     bool recentre_ = false;
     int centreOn_ = -1;
+    int waitCentre_ = -1;         // centred round it while it had no picture: centred again once it shows
     int moved_ = -1;              // the panel just moved (the next Arrange's), and where it was let go (NAN: by a key, or not said)
     double movedAz_ = NAN;
 

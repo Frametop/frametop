@@ -230,6 +230,29 @@ int main() {
             }
             check("pan: hidden and shown again six times: nothing creeps round", worst < 1e-6);
         }
+        {   // the centre display back with no picture yet (a stream back from waiting), recentred: straight ahead once it
+            // shows, not where the strip centred without it put it (user, 2026-11-26: an ultrawide at the end, off centre)
+            const auto wide = [](int id) { return dashtiles::Info{id == 3 ? 5.0 : 1.6, 0.9}; };   // (3 the widest: the centre display)
+            dashtiles::Board d;
+            for (int k = 1; k <= 3; ++k) d.Anchor(k, k - 1, dashtiles::Stay::Default);
+            d.Recentre(), d.Arrange(wide);
+            check("pan: the widest the centre display, straight ahead", d.Centre() == 3 && near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+            d.absent = {3}, d.Arrange(wide);   // (gone while the headset was off)
+            d.Recentre(), d.Arrange(wide);     // (put back: Restore)
+            check("pan: ...back with no picture: it isn't straight ahead yet", !near(d.PlacedOf(3)->azDeg, 0, 1));
+            d.absent = {}, d.Arrange(wide);    // (its picture came)
+            check("pan: ...its picture came: straight ahead", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+            d.Arrange(wide);
+            check("pan: ...and stays", near(d.PlacedOf(3)->azDeg, 0, 1e-6));
+            d.absent = {3}, d.Recentre(), d.Arrange(wide);
+            d.Press(1, dashtiles::Key::Right), d.Arrange(wide);   // (moved meanwhile: the move's strip)
+            const double one = d.PlacedOf(1)->azDeg;
+            d.absent = {}, d.Arrange(wide);
+            check("pan: ...a tile moved meanwhile: the strip isn't turned for it when it shows", near(d.PlacedOf(1)->azDeg, one, 1));
+            d.absent = {3}, d.Recentre(), d.Arrange(wide);
+            d.Unanchor(3), d.Arrange(wide), d.Arrange(wide);
+            check("pan: ...taken off meanwhile: nothing waits on it", d.PlacedOf(3) == nullptr);
+        }
         {   // centred while it was fitted: the turns from before that don't come back
             dashtiles::Board d;
             for (int k = 1; k <= 3; ++k) d.Anchor(k, k - 1, dashtiles::Stay::Default);

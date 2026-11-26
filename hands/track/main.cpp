@@ -12,6 +12,8 @@
 // hands, and a gesture down ends, as lost. It writes "0" to run_dir/hands-want every second, so
 // ft-camd stops copying the mono cameras' frames meanwhile (it copies again 3 s after the last
 // write). Unparked, it tracks again from a palm search (about 200 ms). Not while recording.
+// Nor while run_dir/needed is fresh (under 3 s old): the hand recorder touches it every second while it
+// records, and a parked tracker would starve its recording of the mono frames. track/park.h has the rules.
 // The testbench (testbench/, a development tool that never ships) parks it the same way while it
 // publishes fake hands: through $XDG_RUNTIME_DIR/frametop-testbench/hands, which it touches every
 // second. One older than 3 s doesn't count, so a crashed testbench lets go by itself.
@@ -79,6 +81,8 @@
 #include "npudetector.h"
 #include "npulandmarks.h"
 #include "npuserver.h"
+#include "park.h"
+#include "pidfile.h"
 #include "pinch.h"
 #include "record.h"
 #include "sides.h"
@@ -261,6 +265,7 @@ int main(int argc, char **argv) {
     // (models/student, chosen below once --int8 is known: they have no 8-bit files), else the stock ones.
     const std::string model_root = std::string(argv[0]).substr(0, std::string(argv[0]).rfind('/') + 1) + "../models/";
     std::string models;
+    std::string pidfile;
     std::string record, ring_path = "/run/user/" + std::to_string(getuid()) + "/" FH_RING_NAME;
     // SteamOS starts user processes on CPUs 0-4 and keeps 5-7 (two A720s and the X4) for
     // SteamVR's compositor, whose threads there run at real-time priority, so they always
@@ -352,6 +357,7 @@ int main(int argc, char **argv) {
         else if (a == "--sides" && more) sides_mode = argv[++i], sides_from = "option";
         else if (a == "--record-only") track = publish = false;
         else if (a == "--ring" && more) ring_path = argv[++i];
+        else if (a == "--pidfile" && more) pidfile = argv[++i];
         else if (a == "--record" && more) record = argv[++i];
         else if (a == "--record-for" && more) record_for = std::atof(argv[++i]);
         else if (a == "--max-hz" && more) max_hz = std::clamp(std::atof(argv[++i]), 10.0, 120.0);
@@ -387,6 +393,7 @@ int main(int argc, char **argv) {
                         "          [--sides auto|0|1] (auto: tell from the hands which side camera is which; 1: exchange them,\n"
                         "          as --swap-sides; 0: as ft-camd names them)\n"
                         "          [--keep-presence P] (0.5) [--ring PATH] (ft-camd's, or ft-ringplay's)\n"
+                        "          [--pidfile PATH] (its pid, for hands/ft-hands-stop: see track/pidfile.h)\n"
                         "          [--misread-guard 0|1] (0; 1 for fine-tuned landmark models: see Tracker::set_misread_guard)\n"
                         "          [--reacquire S] (1.5; 0: off: see Tracker::set_reacquire) [--pair-sides 0|1] (1) [--hold S] (0.6)\n"
                         "          [--max-hz N] (30: fast hands; half that slow, 5 idle; HANDS_MAX_HZ)\n"
@@ -427,6 +434,14 @@ int main(int argc, char **argv) {
     std::signal(SIGINT, [](int) { g_stop = 1; });
     std::signal(SIGTERM, [](int) { g_stop = 1; });
     std::signal(SIGUSR1, [](int) { g_record = 1; });
+    struct PidfileGuard {
+        std::string path;
+        ~PidfileGuard() { if (!path.empty()) pidfile_remove(path); }
+    } pid_guard;
+    if (!pidfile.empty()) {
+        if (pidfile_write(pidfile)) pid_guard.path = pidfile;
+        else std::fprintf(stderr, "--pidfile %s: can't write it\n", pidfile.c_str());
+    }
 
     std::string err;
     std::map<std::string, Camera> calib;
@@ -871,13 +886,7 @@ int main(int argc, char **argv) {
     const std::string testbench_file = (xdg_run && *xdg_run ? std::string(xdg_run) : "/run/user/" + std::to_string(getuid())) +
                                        "/frametop-testbench/hands";
     const std::string held_file = run_dir() + "/held";   // another producer's turn (see the top)
-    auto fresh = [](const std::string &path) {
-        struct stat st;
-        timespec now;
-        if (stat(path.c_str(), &st) != 0 || clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
-        const double age = double(now.tv_sec - st.st_mtim.tv_sec) + (now.tv_nsec - st.st_mtim.tv_nsec) * 1e-9;
-        return age > -3.0 && age < 3.0;
-    };
+    const std::string needed_file = run_dir() + "/needed";   // a reader that needs live hands (see the top)
     const bool can_park = track && publish;
     bool parked = false, lent = false;   // lent: parked for another producer, which reads the ring
     uint64_t t_park = 0, t_hands_want = 0;
@@ -939,17 +948,20 @@ int main(int argc, char **argv) {
         if (can_park && mono_ns() - t_park > 250'000'000) {
             t_park = mono_ns();
             struct stat pst;
-            const bool by_testbench = fresh(testbench_file), by_park = stat(park_file.c_str(), &pst) == 0;
-            const bool by_other = !by_testbench && !by_park && fresh(held_file);
-            const bool want = !rec && !g_record && (by_park || by_testbench || by_other);
-            lent = want && by_other;
-            if (want != parked) {
-                parked = want;
-                std::printf("%s\n", !parked       ? "unparked: tracking again"
-                                    : by_testbench ? "parked: the testbench publishes fake hands (models stay loaded)"
-                                    : by_other     ? "parked: another producer publishes the hands (run_dir/held; models stay loaded)"
-                                                   : "parked: no tracking until run_dir/park goes (models stay loaded)");
+            ParkInputs in;
+            in.testbench = file_fresh(testbench_file), in.park = stat(park_file.c_str(), &pst) == 0;
+            in.held = file_fresh(held_file), in.needed = file_fresh(needed_file), in.recording = rec || g_record;
+            const ParkState ps = park_decide(in);
+            lent = ps.lent;
+            if (ps.parked != parked) {
+                parked = ps.parked;
+                std::printf("%s\n", !parked                         ? "unparked: tracking again"
+                                    : ps.why == ParkWhy::testbench ? "parked: the testbench publishes fake hands (models stay loaded)"
+                                    : ps.why == ParkWhy::other     ? "parked: another producer publishes the hands (run_dir/held; models stay loaded)"
+                                                                   : "parked: no tracking until run_dir/park goes (models stay loaded)");
                 std::fflush(stdout);
+                // ft-npud serves one client at a time: a parked tracker lets another one have it
+                if (parked && npu_session) npu_session->release();
                 if (parked) {
                     // the hands are gone for every reader, and a gesture down ends, as lost
                     pub.write({}, mono_ns());

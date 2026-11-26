@@ -1,0 +1,23 @@
+#!/bin/bash
+# ft-hands-stop PIDFILE: stops the ft-hands that wrote PIDFILE (ft-hands --pidfile PIDFILE, track/pidfile.h)
+# and no other, so a unit stops its own ft-hands and leaves the Hand Recorder's or another unit's alone.
+# A signal to scripts/in-box doesn't reach the program in the container; the container shares the host's
+# process ids, so this can signal it. It signals only a process named ft-hands, of this user, whose
+# command line holds PIDFILE: a stale file whose pid went to another program is just removed.
+# TERM, then KILL after 5 s. Always exits 0 (a unit's ExecStartPre and ExecStopPost).
+pidfile=${1:-}
+[ -n "$pidfile" ] || { echo "usage: ft-hands-stop PIDFILE" >&2; exit 2; }
+[ -f "$pidfile" ] && [ ! -L "$pidfile" ] || exit 0
+pid=$(head -c 32 -- "$pidfile" 2>/dev/null | tr -dc 0-9)
+ours() {
+  [ -n "$pid" ] && [ -O "/proc/$pid" ] && [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = ft-hands ] &&
+    tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -qxF -- "$pidfile"
+}
+if ours; then
+  kill -TERM "$pid" 2>/dev/null
+  for _ in $(seq 50); do ours || break; sleep 0.1; done
+  ours && kill -KILL "$pid" 2>/dev/null
+fi
+# gone now: its own exit removes the file, unless it was killed
+[ "$(head -c 32 -- "$pidfile" 2>/dev/null | tr -dc 0-9)" = "$pid" ] && rm -f -- "$pidfile"
+exit 0

@@ -238,6 +238,11 @@ def items(root, env=os.environ):
           flags=f"{CXX2} -Wno-unused-parameter"),
         single("hands/tests/xrcams_test.c", GNU11, out="xrcams-test"),
         single("hands/tests/camstart_test.c", GNU11, out="camstart-test"),
+        # when ft-hands parks and its pidfile, and its ft-npud client against a fake daemon (no model runtime)
+        P("park-test", "hands/tests/park_test.cpp", "hands/track/park.cpp", "hands/track/pidfile.cpp",
+          flags=f"{CXX2} -Wno-unused-parameter"),
+        P("npuclient-test", "hands/tests/npuclient_test.cpp", "hands/track/npuclient.cpp", "hands/track/npuserver.cpp",
+          "hands/track/npusession.cpp", "hands/track/npuheads.cpp", flags=f"{CXX2} -Wno-unused-parameter", libs="-lpthread"),
     ]
     # ft-powerd itself has no test (its standby rules do: power/standby-test.cpp); it talks to
     # SteamVR and the display, so it's only compiled, against the pinned OpenVR header

@@ -94,4 +94,4 @@ Only one program writes at a time. To take over from ft-hands:
 
 The gestures file (`include/fh_gestures.md`) goes with it: a producer that writes hands but not gestures leaves the gestures file as ft-hands left it, with nothing down. While ft-hands is parked for `held`, ft-camd keeps filling the ring (`camd/fhring.md`), so the other producer can track from it.
 
-`park` (in the same folder) is the other way to park ft-hands; it is the input relay's, for VR games, and also stops the ring's mono frames. The testbench (`../testbench/`) parks it through its own marker.
+`park` (in the same folder) is the other way to park ft-hands; it is the input relay's, for VR games, and also stops the ring's mono frames. `needed` there, touched every second by a reader that needs live hands and the ring's frames (the hand recorder), holds `park` off while it is under 3 s old; `held` and the testbench still park ft-hands then. The testbench (`../testbench/`) parks it through its own marker.

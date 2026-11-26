@@ -56,6 +56,7 @@ from conf import ft_conf  # noqa: E402  (conf/ft_conf.py: frametop.conf's gramma
 from hands.rec import livelog  # noqa: E402  (hands/rec/livelog.py: a debug session's copy of the live tracker's output)
 from hands.rec import voicelog  # noqa: E402  (hands/rec/voicelog.py: a debug session's microphone, if ticked)
 from hands.rec import eventlog  # noqa: E402  (hands/rec/eventlog.py: a debug session's copy of what the panels and pointer did)
+from hands.rec.handsneeded import HandsNeeded  # noqa: E402  (keeps Frametop's ft-hands unparked while it records)
 # What the recorders share (recorder/): the window and the tests import it from there.
 from recorder.common import (mono_ns, clock_sample, in_container, host_command, host_path,  # noqa: E402
                              write_json, clean_text, tree_version, os_version as _os_version,
@@ -101,6 +102,9 @@ CAMERAS_TEXT = ("The headset's cameras restarted (SteamVR moves them when the co
                 "or plugged in), or they stopped. If you took the headset off, put it back on. This step goes "
                 "again once they're back.")
 HANDS_UNIT = "frametop-handrec-hands.service"
+HANDS_PIDFILE = "handrec.pid"   # in run_dir(): HANDS_UNIT's ft-hands, for hands/ft-hands-stop
+FT_HANDS_STOP = os.path.join(REPO, "hands", "ft-hands-stop")
+LIVE_START_S = 150       # frametop-hands.service's start: its two model checks take up to 60 s each
 CONF_PATH = os.path.expanduser("~/.config/frametop.conf")
 LIVE_KEYS = re.compile(r"^(HANDS|POINTER)_[A-Z0-9_]+$")   # the settings a debug session records
 MARK_FLASH_S = 1.0       # a debug session's mark: the panel shows "Marked" this long
@@ -446,8 +450,13 @@ def get_ready(frametop_hands=False, need_live=False, panel_bin=None, on_part=lam
     def start_live(key):
         if unit_active(LIVE_HANDS_UNIT):
             return True
-        r = subprocess.run(host_command("systemctl", "--user", "start", LIVE_HANDS_UNIT),
-                           capture_output=True, text=True, timeout=60)
+        try:
+            r = subprocess.run(host_command("systemctl", "--user", "start", LIVE_HANDS_UNIT),
+                               capture_output=True, text=True, timeout=LIVE_START_S)
+        except subprocess.TimeoutExpired:
+            fail(key, "Frametop's hand tracking didn't start in %d s (journalctl --user -u %s)"
+                 % (LIVE_START_S, LIVE_HANDS_UNIT))
+            return False
         if r.returncode != 0:
             fail(key, "Frametop's hand tracking didn't start: %s" % (r.stderr or r.stdout).strip())
             return False
@@ -483,11 +492,9 @@ def get_ready(frametop_hands=False, need_live=False, panel_bin=None, on_part=lam
             if not start_live("hands"):
                 return out
         else:
-            argv = [FT_HANDS, "--no-gestures", "--status", "0"]
-            if not STANDALONE:   # built in Frametop's container: it runs there
-                argv = [IN_BOX] + argv
+            argv, stop_post = own_tracker()
             try:
-                if start_unit(HANDS_UNIT, "hand tracking for feedback", argv, log):
+                if start_unit(HANDS_UNIT, "hand tracking for feedback", argv, log, stop_post=stop_post):
                     out["units"].append(HANDS_UNIT)
             except RuntimeError as e:
                 return fail("hands", str(e))
@@ -675,6 +682,20 @@ def find_processes(name):
             continue
         out.append((int(pid), argv))
     return out
+
+
+def own_tracker(ring=None):
+    """The recorder's own tracking ft-hands (no gestures), for HANDS_UNIT: (argv, the unit's ExecStopPost or
+    None). In Frametop's container a signal to scripts/in-box doesn't reach it, so the unit stops it through
+    its pidfile (hands/ft-hands-stop): only this one, not Frametop's."""
+    argv, stop_post = [FT_HANDS, "--no-gestures", "--status", "0"], None
+    if not STANDALONE:   # built in Frametop's container: it runs there
+        pidfile = os.path.join(run_dir(), HANDS_PIDFILE)
+        argv = [IN_BOX] + argv + ["--pidfile", pidfile]
+        stop_post = [FT_HANDS_STOP, pidfile]
+    if ring:
+        argv += ["--ring", ring]
+    return argv, stop_post
 
 
 def tracker_running():
@@ -1565,6 +1586,7 @@ class Session(Controls):
         # Frametop's drawn hands and hand pointer, paused for the session (a test hook: tests empty it)
         self.quiet_units = () if dry_run or ring else QUIET_UNITS
         self._rec_watch = None   # (recorder, sets written, when that changed): _watch_recording
+        self._needed = None      # the HandsNeeded heartbeat while it records (_setup)
         self.input_devices = INPUT_DEVICES   # where mice are looked for (a test hook)
         self._button = None                  # the ButtonReader
         self.print = print   # where dry-run panel commands go (the CLI's stdout)
@@ -1814,6 +1836,9 @@ class Session(Controls):
             if not os.access(FT_HANDS, os.X_OK):
                 raise _Fail("ft-hands isn't built: " + fix_hint("hands/build.sh"))
             self._ensure_ring(ring_path)
+            # Frametop's ft-hands stays unparked while this records, so ft-camd keeps the mono frames coming
+            self._needed = HandsNeeded(self.hands_dir)
+            self._needed.start()
             if not tracker_running():
                 if self.start_processes:
                     self._start_tracker()
@@ -1981,16 +2006,12 @@ class Session(Controls):
             raise _Stop()
 
     def _start_tracker(self):
-        argv = [FT_HANDS, "--no-gestures", "--status", "0"]
-        if not STANDALONE:   # built in Frametop's container: it runs there
-            argv = [IN_BOX] + argv
-        if self.ring:
-            argv += ["--ring", self.ring]
-        self._start_unit(HANDS_UNIT, "hand tracking for feedback", argv)
+        argv, stop_post = own_tracker(self.ring)
+        self._start_unit(HANDS_UNIT, "hand tracking for feedback", argv, stop_post=stop_post)
 
-    def _start_unit(self, unit, what, argv):
+    def _start_unit(self, unit, what, argv, stop_post=None):
         try:
-            if start_unit(unit, what, argv, self._log):
+            if start_unit(unit, what, argv, self._log, stop_post=stop_post):
                 self._units.append(unit)
         except RuntimeError as e:
             raise _Fail(str(e))
@@ -2062,6 +2083,9 @@ class Session(Controls):
         if self._stop_note and state == "stopped":
             self._log(self._stop_note)
         self._stop_units()
+        if self._needed:
+            self._needed.stop()
+            self._needed = None
         self._resume_quiet()
         if self._button:
             self._button.stop()

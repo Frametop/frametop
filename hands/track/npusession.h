@@ -32,6 +32,9 @@ public:
     int connection() const { return connection_; }
     // A failed request (the client has closed): counted and logged; the backends fall back to the CPU.
     void fail(const std::string &why);
+    // Lets ft-npud go while the tracker parks, so another client (the Hand Recorder's own ft-hands, say) can have
+    // it; the next ensure() connects again at once.
+    void release();
     bool connected() const { return client_.connected(); }
     NpuClient &client() { return client_; }
     const NpuHeads &heads() const { return heads_; }

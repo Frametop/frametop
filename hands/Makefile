@@ -19,7 +19,7 @@ LDFLAGS  ?=
 
 CAMD  = camd/camd.c camd/camstart.c camd/tp.c camd/xrcams.c
 TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp track/calibfile.cpp \
-        track/npuheads.cpp track/npuclient.cpp track/npuserver.cpp track/npusession.cpp track/npulandmarks.cpp track/npurequests.cpp track/npudetector.cpp track/detrounds.cpp
+        track/npuheads.cpp track/npuclient.cpp track/npuserver.cpp track/npusession.cpp track/npulandmarks.cpp track/npurequests.cpp track/npudetector.cpp track/detrounds.cpp track/park.cpp track/pidfile.cpp
 HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h include/fh_calib.h ../conf/ft_conf.h
 
 all: build/ft-camd build/ft-hands
@@ -55,8 +55,9 @@ build/flagbuf-test: tests/flagbuf_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 
 check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/calibfile-test build/npuheads-test \
        build/npudetector-test build/npuclient-test build/npuserver-test build/npurequests-test build/trackerdet-test \
-       build/cpus-test
+       build/cpus-test build/park-test
 	build/cpus-test
+	build/park-test
 	build/npuserver-test
 	build/npurequests-test
 	build/npuheads-test
@@ -68,6 +69,10 @@ check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test 
 	build/pinch-test
 	build/flagbuf-test
 	build/calibfile-test
+
+build/park-test: tests/park_test.cpp track/park.cpp track/park.h track/pidfile.cpp track/pidfile.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ tests/park_test.cpp track/park.cpp track/pidfile.cpp
 
 build/cpus-test: tests/cpus_test.cpp track/cpus.h
 	@mkdir -p build

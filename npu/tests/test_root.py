@@ -74,7 +74,8 @@ class RootSh(unittest.TestCase):
             self.assertIn("run as root", out)
 
     def test_it_waits_for_the_line_each_daemon_logs_once_it_serves(self):
-        pattern = re.search(r"grep -q '([^']+)'", ROOT_SH.read_text())[1]   # in serving()
+        serving = ROOT_SH.read_text().split("serving() {", 1)[1].split("\n}\n", 1)[0]
+        pattern = re.search(r"== \*'([^']+)'\*", serving)[1]
         self.assertEqual(pattern, "; serving /")
         for daemon in ("ft_npud.py", "v30a_serve.py"):
             with self.subTest(daemon):

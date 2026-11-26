@@ -49,7 +49,8 @@ serving() {
     local inv
     inv=$(systemctl show -P InvocationID "$UNIT") && [ -n "$inv" ] || return 1
     for _ in $(seq 60); do   # 30 s
-        journalctl -q -o cat "_SYSTEMD_INVOCATION_ID=$inv" 2>/dev/null | grep -q '; serving /' && return 0
+        # read whole, then matched: grep -q would stop reading early, and journalctl would die of SIGPIPE
+        [[ $(journalctl -q -o cat "_SYSTEMD_INVOCATION_ID=$inv" 2>/dev/null) == *'; serving /'* ]] && return 0
         [ "$(systemctl show -P InvocationID "$UNIT")" = "$inv" ] && systemctl is-active -q "$UNIT" || return 1
         sleep 0.5
     done

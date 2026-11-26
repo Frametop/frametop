@@ -87,7 +87,7 @@ def make_zip(version):
     return unpacked, tree, image_id
 
 
-ZIPS = {v: make_zip(v) for v in ("1.0", "2.0", "3.0")}
+ZIPS = {v: make_zip(v) for v in ("1.0", "2.0", "3.0", "4.0", "5.0", "6.0")}
 
 
 def install(version, *options):
@@ -141,6 +141,30 @@ check("--no-keyboard reaches the release's install.sh", (code, "install.sh optio
       (0, True))
 code, out = install("3.0", "--no-such-thing")
 check("an option it doesn't know is refused", (code, "unknown option: --no-such-thing" in out), (2, True))
+
+# A release something still runs from stays (the desktop stays on the release it started from until
+# SteamVR restarts): removing its container would end it. A later install removes it.
+code, out = install("4.0")
+check("4.0 installs, and 3.0 is the one before", (code, current(), folders()), (0, "4.0", ["3.0", "4.0"]))
+def running_from(*path):
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", os.path.join(RELEASES, *path)])
+
+
+desktop = running_from("3.0", "screens", "ft-screens")
+try:
+    code, out = install("5.0")
+finally:
+    desktop.kill()
+    desktop.wait()
+check("two releases on, one still running stays", (code, current(), folders(), "3.0 for now" in out),
+      (0, "5.0", ["3.0", "4.0", "5.0"], True))
+other = running_from("3.0.1", "screens", "ft-screens")   # another folder whose name starts with 3.0
+try:
+    code, out = install("6.0")
+finally:
+    other.kill()
+    other.wait()
+check("...and goes at a later install once it has stopped", (code, current(), folders()), (0, "6.0", ["5.0", "6.0"]))
 
 print("FAILED: " + ", ".join(failures) if failures else "all passed", flush=True)
 shutil.rmtree(TMP, ignore_errors=True)

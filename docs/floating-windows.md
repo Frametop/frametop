@@ -1,5 +1,19 @@
 # Floating windows
 
+**Hover haptics (move bar, controller lasers only)** gives one short buzz on entering the actual move-bar target, only to the physical controller whose laser enters. It defaults on (`GRAB_BAR_HAPTICS=1`) and is independent of the drag-zone preview; mouse/gaze/near-hand hover never buzzes a controller.
+
+The drag bar below a screen or floating window can have a larger laser target. In **Frametop Display Settings → Visibility & pins → Window controls**, set **Vertical padding** and **Horizontal padding** independently in centimetres, from 0 to 50 cm per side (default: 2 cm). For example, 2 cm horizontal padding adds 2 cm on the left and right: the target is 4 cm wider than the visible pill. Zero padding gives the original target. These apply immediately to controller lasers and the 3D mouse, and are saved as `GRAB_BAR_PADDING_Y` and `GRAB_BAR_PADDING_X` in `~/.config/frametop.conf`. Padding stays the same physical size as the visible pill auto-sizes with distance and window width; there is no multiplier mode. The row moves down and neighboring buttons move sideways as needed so the target cannot cover window content or those buttons. Near-hand grab margins remain separate.
+
+**Show drag zone** displays the draggable rectangle with a translucent fill and thin outline whenever its bar shows. **Keep drag zones visible** keeps those bars and previews visible while their panels show; hidden, minimized or paused panels still hide them. Fill and outline each have a color picker and opacity slider. Outline thickness is adjustable from 0 (none) to 8 pixels at the original pill's resolution. These preferences persist too: `GRAB_BAR_PREVIEW`, `GRAB_BAR_PREVIEW_ALWAYS`, `GRAB_BAR_PREVIEW_COLOR`, `GRAB_BAR_PREVIEW_OPACITY`, `GRAB_BAR_OUTLINE_COLOR`, `GRAB_BAR_OUTLINE_OPACITY`, `GRAB_BAR_OUTLINE_WIDTH`. Opacity also follows the bar's normal fade and idle dimming.
+
+The settings UI, captured directly without VR projection:
+
+![Drag-zone padding, preview and styling controls](images/drag-zone-settings.png)
+
+The draggable zone in VR (cropped headset capture, with the wearer's approval):
+
+![A translucent orange drag zone and thin outline around the visible bar](images/drag-zone-vr.png)
+
 Any desktop app can float in VR in a panel of its own, like SteamVR's floating windows, while it stays part of the Frametop desktop. Drag and drop, the clipboard, and focus keep working between floating windows and the screens.
 
 - **Float a window** with "Float in VR" in its window menu (Alt+F3), the float button left of Close in its title bar, or the float key (Meta+Shift+F by default). Start an app floating with "Launch as Standalone" in its right-click menu in the Application Launcher or the taskbar, with `ft-float launch` or `ft-float run`, or from a profile ([profiles.md](profiles.md)).

@@ -228,6 +228,17 @@ void FlattenTiles() {
     }
 }
 
+// The tiles not shown now (Board::absent): Steam's window with the dashboard closed (TileShown: Steam
+// paints it only then, and SteamVR won't show its page without the dashboard), and a panel with no
+// picture yet or hidden on its own. The others close up their gaps meanwhile (user, 2026-11-19).
+std::set<int> TilesAbsent() {
+    std::set<int> absent;
+    if (const int steam = SteamDashIndex(); steam >= 0 && !vr::VROverlay()->IsDashboardVisible()) absent.insert(steam);
+    for (const int id : g_tiles.Ids())
+        if (const auto it = g_screens.find(id); it != g_screens.end() && (!it->second.shown || it->second.alone)) absent.insert(id);
+    return absent;
+}
+
 Mat ToMat(const double m[3][4]) {
     Mat o;
     for (int r = 0; r < 3; ++r)
@@ -242,6 +253,10 @@ void RetileDash() {
     ApplyWall();
     FlattenTiles();
     if (!g_tileGroupSet || !Dash().Framed()) return;
+    // (as they are now, not at the last tick: a panel put back (Restore) with no picture yet was laid
+    // out at its guess and centred round that, so it never waited to be centred once it showed: user,
+    // 2026-11-26, a remote display back from the headset off came back 30 to 40 degrees round)
+    g_tiles.absent = TilesAbsent();
     const auto &l = g_tiles.Arrange(TileInfo);
     const tilecurve::Wall wall = TileWall();
     for (const tiling::Placed &p : l.tiles) {
@@ -802,16 +817,9 @@ void UpdateDashTiles() {
     const bool up = vr::VROverlay()->IsDashboardVisible();
     if (up && !g_dashWasUp) g_tileRegroup = true;
     g_dashWasUp = up;
-    // Steam's window hides with the dashboard closed (TileShown: Steam paints it only then, and SteamVR
-    // won't show its page without the dashboard): the others close up its gap meanwhile (user, 2026-11-19).
-    // So do they round a panel with no picture yet or hidden on its own (Board::absent).
     const int steam = SteamDashIndex();
     g_tiles.steam = steam;
-    std::set<int> absent;
-    if (!up && steam >= 0) absent.insert(steam);
-    for (const int id : g_tiles.Ids())
-        if (const auto it = g_screens.find(id); it != g_screens.end() && (!it->second.shown || it->second.alone)) absent.insert(id);
-    if (absent != g_tiles.absent) {
+    if (std::set<int> absent = TilesAbsent(); absent != g_tiles.absent) {
         g_tiles.absent = std::move(absent);
         if (g_tileGroupSet) RetileDash();
     }

@@ -53,6 +53,21 @@ int main() {
         const auto on = std::find(a.begin(), a.end(), panelmenu::Row{Item::OnDashboard});
         return on != a.end() && on + 1 != a.end() && (on + 1)->item == Item::StayShown && panelmenu::RuleAbove(a, size_t(on + 1 - a.begin()));
     }());
+    check("a tile that can be the centre: Centre Display, right after Stay Shown, no rule above it", [&] {
+        panelmenu::Kind c = anchored;
+        c.centres = true;
+        const auto a = panelmenu::Placement(c);
+        const auto stay = std::find(a.begin(), a.end(), panelmenu::Row{Item::StayShown});
+        return stay != a.end() && stay + 1 == a.end() - 1 && a.back().item == Item::CentreDisplay &&
+               !panelmenu::RuleAbove(a, a.size() - 1) && panelmenu::Label(a.back()) == "Centre Display";
+    }());
+    check("anchored but not one that can be the centre (Steam's page, a satellite): no Centre Display",
+          !has(panelmenu::Placement(anchored), Item::CentreDisplay));
+    check("not anchored: no Centre Display, whatever it says", [&] {
+        panelmenu::Kind c;
+        c.centres = true;
+        return !has(panelmenu::Placement(c), Item::CentreDisplay) && !has(panelmenu::Main(c), Item::CentreDisplay);
+    }());
     for (const auto &rows : {d, f, g, st}) {
         bool listed = false, tilesFirst = true;
         for (const auto &r : rows) tilesFirst &= !(listed && panelmenu::Tile(r.item)), listed |= !panelmenu::Tile(r.item);
@@ -98,7 +113,7 @@ int main() {
 
     check("rotate and move all are held, the rest clicked", panelmenu::Held(Item::Rotate) && panelmenu::Held(Item::MoveAll) &&
           !panelmenu::Held(Item::Curve) && !panelmenu::Held(Item::Reset) && !panelmenu::Held(Item::BarPosition));
-    check("the toggles", panelmenu::Toggle(Item::Curve) && panelmenu::Toggle(Item::StayShown) && !panelmenu::Toggle(Item::MoveAll) &&
+    check("the toggles", panelmenu::Toggle(Item::Curve) && panelmenu::Toggle(Item::StayShown) && panelmenu::Toggle(Item::CentreDisplay) && !panelmenu::Toggle(Item::MoveAll) &&
           !panelmenu::Toggle(Item::Reset));
     check("the choices", panelmenu::Choice(Item::InRoom) && panelmenu::Choice(Item::KeepInView) && panelmenu::Choice(Item::OnDashboard) &&
           panelmenu::Choice(Item::Edge) && !panelmenu::Choice(Item::Curve) && !panelmenu::Choice(Item::StayShown));

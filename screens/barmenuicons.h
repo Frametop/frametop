@@ -10,7 +10,7 @@
 namespace barmenuicons {
 
 enum class Icon {
-    None, Curved, Rotate, Desktop, Close, Theater, InRoom, InView, Dashboard, Controller, StayShown, MoveAll,
+    None, Curved, Rotate, Desktop, Close, Theater, InRoom, InView, Dashboard, Controller, StayShown, Centre, MoveAll,
     BarPosition, Reset, Back, Chevron, Check, Scale,
 };
 
@@ -34,6 +34,8 @@ inline std::vector<iconpath::Shape> Shapes(Icon i) {
             return {{Parse("M9 2h6a3 3 0 0 1 3 3v3.5a3 3 0 0 1-2 2.8V20a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-8.7a3 3 0 0 1-2-2.8V5a3 3 0 0 1 3-3z")}};
         case Icon::StayShown:
             return {{Parse("M14 3l7 7-2 1-3-1-3 3 1 4-1.5 1.5L8 14l-4.5 5.5-1-1L8 13 4.5 9.5 6 8l4 1 3-3-1-3z")}};
+        // (not the design's: a big screen between two narrow ones, in its style)
+        case Icon::Centre: return {{{Rect(6.5, 5, 11, 12, 1.5)}}, {{Rect(1.5, 8, 3.5, 6, 1), Rect(19, 8, 3.5, 6, 1)}, false, 0.55}};
         case Icon::MoveAll:
             return {{Parse("M12 1l3.2 3.2H13V8h-2V4.2H8.8zM12 23l-3.2-3.2H11V16h2v3.8h2.2zM1 12l3.2-3.2V11H8v2H4.2v2.2zM23 12l-3.2 3.2V13H16v-2h3.8V8.8z")},
                     {{Rect(9.5, 9.5, 5, 5, 1)}}};

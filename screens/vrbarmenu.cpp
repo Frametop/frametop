@@ -110,6 +110,7 @@ panelmenu::Kind KindOf(const Screen &s, int i) {
     k.anchored = TileAnchored(i);
     k.scales = AppScale(i) > 0;
     k.rides = s.pinned != kNone && s.pinned != kDashboard;
+    k.centres = TileTiled(i) && i != SteamDashIndex();
     return k;
 }
 
@@ -130,6 +131,7 @@ bool On(const panelmenu::Row &r, const Screen &s, int i) {
         case panelmenu::Item::KeepInView: return Placed(s, i) == Where::View;
         case panelmenu::Item::OnDashboard: return Placed(s, i) == Where::Dashboard;
         case panelmenu::Item::StayShown: return TileStays(s, i);
+        case panelmenu::Item::CentreDisplay: return TileIsCentre(i);
         case panelmenu::Item::Edge: return s.barSide == r.side;
         case panelmenu::Item::Inside: return BarInside(s);
         case panelmenu::Item::Outside: return !BarInside(s);
@@ -159,6 +161,7 @@ barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const 
         case Item::KeepInView: l.icon = Icon::InView; break;
         case Item::OnDashboard: l.icon = Icon::Dashboard; break;
         case Item::StayShown: l.icon = Icon::StayShown; break;
+        case Item::CentreDisplay: l.icon = Icon::Centre; break;
         case Item::MoveAll: l.icon = Icon::MoveAll, l.value = "Hold"; break;   // (a click alone carries nothing)
         case Item::Theater: l.icon = Icon::Theater; break;
         case Item::BarPosition: l.icon = Icon::BarPosition, l.value = barside::Label(s.barSide); break;
@@ -258,6 +261,7 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             if (Placed(s, i) != Where::Dashboard) TileAnchor(i, dashtiles::Stay::Default, by);   // (the choice it is: nothing)
             break;
         case Item::StayShown: TileStay(i, !TileStays(s, i), by); break;
+        case Item::CentreDisplay: TileTakeCentre(i, by); break;   // (the one it is: nothing)
         case Item::Dock: SendFloat("dock " + std::to_string(i + 1)); break;
         case Item::Close: SendFloat("close " + std::to_string(i + 1)); break;
         case Item::Theater:

@@ -10,7 +10,8 @@ credentials, private keys, whatever follows "command:" (the input relay's action
 URLs, email addresses, IPv4 addresses but 127.x.x.x (shown as <lan-ip>, <tailnet-ip> or <ip>; a
 version after "version", "v" or "distrobox:" stays), IPv6 addresses but ::1, Tailscale names,
 Wi-Fi network names, Bluetooth addresses, the headset's serial number, and the hostname at the
-start of journal lines. Colours go. An unquoted value ends at a space: "password: two words"
+start of journal lines, Tailscale logins (name@github), the characters the input relay couldn't
+type, the windows frunner clicked, and Plasma's remote desktop password. Colours go. An unquoted value ends at a space: "password: two words"
 keeps "words".
 Runs on the host's system Python: standard library only, 3.12's syntax.
 """
@@ -106,6 +107,9 @@ def mask(text, hostname=""):
     text = re.sub(r'"command:(?:\\.|[^"\\\n])*', '"command:' + HIDDEN, text)
     text = re.sub(r'\bcommand:(?!<hidden>")[^\n]*', "command:" + HIDDEN, text)
     text = re.sub(r"(?i)\b(authorization\s*:\s*)[^\n\"']+", r"\1" + HIDDEN, text)
+    text = re.sub(r"(has no key for: ).*", r"\1" + HIDDEN, text)                    # what was typed (input relay)
+    text = re.sub(r"(click on ')[^'\n]*'", r"\1" + HIDDEN + "'", text)                # a window's title (frunner)
+    text = re.sub(r"(krdpserver\b[^\n]*?\s-p\s+)\S+", r"\1" + HIDDEN, text)              # its password, on its command line
     text = re.sub(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}", r"\1 " + HIDDEN, text)
     text = hide_named(text)
     text = re.sub(r"(?i)([?&;](?:[^=&\s\"']*(?:token|key|pin|sig|secret|pass|auth|code)[^=&\s\"']*)=)[^&\s\"']+",
@@ -114,6 +118,8 @@ def mask(text, hostname=""):
     text = re.sub(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?!(?:service|scope|socket|target|timer|slice|"
                   r"mount|path|device|swap)\b)[A-Za-z]{2,}\b", "<email>", text)       # (not user@1000.service)
     text = re.sub(r"(?<![A-Za-z0-9.-])[A-Za-z0-9.-]+\.ts\.net\b", "<tailnet-name>", text)
+    text = re.sub(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@(?:github|passkey|gitlab|apple|google|microsoft)\b(?!\.)",
+                  "<login>", text)                                                     # Tailscale logins
     text = re.sub(r"(?i)\b(ssid)(\s*[=:]\s*|\s+)('[^'\n]*'|\"[^\"\n]*\"|\S+)", r"\1\2" + HIDDEN, text)
     text = re.sub(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b", "xx:xx:xx:xx:xx:xx", text)
     text = re.sub(r"cv\.[A-Z0-9]{8,}", "cv.<serial>", text)

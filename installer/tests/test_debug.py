@@ -38,7 +38,7 @@ class Script(unittest.TestCase):
         conf = self.home / ".config"
         conf.mkdir()
         (conf / "frametop.conf").write_text("# a comment\nPOINTER=1\nVIBEPOLLO_TOKEN=abc123  # it pairs\n"
-                                            "SCREEN_PIN_LEVEL=1\n")
+                                            "SCREEN_PIN_LEVEL=1\nHANDS_NPU=1\n")
         (conf / "frametop-layout.json").write_text(
             '{"hosts": [{"name": "PC", "address": "192.168.1.20", "auth_key": "s3cr3t", "pin": 4}]}')
         (conf / "frametop-input.json").write_text('{"key_bindings": {"Meta+K": "command:sshpass -p hunter2 ssh nas"}}')
@@ -74,12 +74,17 @@ class Script(unittest.TestCase):
         for section in ("The headset", "SteamVR", "Frametop Installer", "Frametop", "Services", "What's running",
                         "Settings", "Recent warnings and errors", "Logs: the desktop and its screens",
                         "Logs: input and the pointer", "Logs: gaze and the eye tracker", "Logs: hand tracking",
-                        "NPU hand tracking (ft-npud, on the DSP)", "Logs: Frametop Voice (without what was heard)",
-                        "Logs: Frametop Together", "Logs: remote displays"):
+                        "NPU hand tracking (ft-npud, on the DSP)", "Logs: power",
+                        "Logs: Frametop Voice (ft-voiced's own lines, without what was heard)",
+                        "Logs: Frametop Together (people's names left out)", "Logs: remote displays",
+                        "Logs: floating windows and frunner",
+                        "Logs: your commands (when each started and ended; not their output)",
+                        "Logs: FrameDrop and the Bluetooth fixes", "Logs: SteamVR's compositor (errors, last 30)"):
             self.assertIn(f"\n===== {section}\n", text)
         self.assertIn("this one: 9.9.9-test", text)
         self.assertIn("POINTER=1", text)
         self.assertNotIn("# a comment", text)
+        self.assertIn("frametop.conf: HANDS_NPU=1\n", text)
 
     def test_journal_lines_lose_the_hostname_in_any_locale(self):
         stubs = self.home / "stubs"
@@ -91,27 +96,44 @@ class Script(unittest.TestCase):
         text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}", LC_ALL="fr_FR.UTF-8")
         self.assertIn("Nov 25 17:56:30 <host> app[1]: up", text)
 
-    def test_what_voice_heard_and_what_commands_printed_stay_out(self):
+    def test_what_was_said_typed_or_run_and_who_was_there_stay_out(self):
         stubs = self.home / "stubs"
         stubs.mkdir()
         (stubs / "journalctl").write_text("""#!/bin/sh
+v="Nov 25 10:00:00 box in-box[1]: 2026-11-25 10:00:00,001"
 case "$*" in
+  *frametop-voice-whisper*) ;;
   *frametop-voice*)
-    echo "Nov 25 10:00:00 box in-box[1]: INFO short window heard nothing; try 1 of 2: 'HEARDONE'"
-    echo "Nov 25 10:00:00 box in-box[1]: INFO transcribed: HEARDTWO"
-    echo "Nov 25 10:00:01 box in-box[1]: INFO mic open" ;;
+    echo "$v INFO short window heard nothing; try 1 of 2: 'HEARDONE'"
+    echo "$v INFO transcribed: 'HEARDTWO'"
+    echo "Nov 25 10:00:00 box in-box[1]: HOOKSAID the assistant's answer"
+    echo "$v INFO mic open" ;;
   *frametop-cmd-*)
     echo "Nov 25 10:00:00 box systemd[9]: Started Frametop command gonk."
     echo "Nov 25 10:00:00 box sh[10]: CMDOUTPUT" ;;
+  *frametop-desktop*)
+    echo "Nov 25 10:00:00 box dolphin[7]: KDirWatch: /home/x/Videos/APPOUTPUT.mkv is a file"
+    echo "Nov 25 10:00:00 box kwin_wayland[8]: kwin: output WL-1 enabled" ;;
+  *frametop-together*)
+    echo "Nov 25 10:00:00 box ft-together[3]: ft-together: Alice Example (alice@github) at 100.101.1.2 port 7400"
+    echo "Nov 25 10:00:01 box ft-together[3]: Bob Person came in."
+    echo "Nov 25 10:00:02 box ft-together[3]: You are in Carol Name's room."
+    echo "Nov 25 10:00:03 box ft-together[3]: dave@passkey asks to come in." ;;
+  *frametop-input-relay*)
+    echo "Nov 25 10:00:00 box python3[4]: typing: 2 characters a US layout (Steam) has no key for: TYPEDTEXT" ;;
   *ft-npud*)
-    echo "Nov 25 10:00:00 box python[5]: self-test bit-exact; graph 769e4e61" ;;
+    echo "Nov 25 10:00:00 box python[5]: self-test bit-exact; graph 769e4e61"
+    echo "Nov 25 10:00:01 box python[5]: client connected" ;;
 esac
 """)
         (stubs / "journalctl").chmod(0o755)
         text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}")
-        for gone in ("HEARDONE", "HEARDTWO", "CMDOUTPUT"):
+        for gone in ("HEARDONE", "HEARDTWO", "HOOKSAID", "CMDOUTPUT", "APPOUTPUT", "Alice", "alice", "Bob", "Carol",
+                     "dave", "TYPEDTEXT", "client connected"):
             self.assertNotIn(gone, text)
-        for kept in ("INFO mic open", "Started Frametop command gonk.", "graph 769e4e61"):
+        for kept in ("INFO mic open", "Started Frametop command gonk.", "kwin: output WL-1 enabled", "graph 769e4e61",
+                     "<someone> came in.", "You are in <someone>'s room.", "<someone> asks to come in.",
+                     "ft-together: <you> (<login>) at <tailnet-ip> port 7400", "has no key for: <hidden>"):
             self.assertIn(kept, text)
 
     def test_what_is_private_is_hidden(self):
@@ -192,6 +214,14 @@ class Mask(unittest.TestCase):
         for named in ("api-key=abc123", "X-API-Key: abc123", "--api-key abc123"):
             self.assertNotIn("abc123", self.m(named))
         self.assertEqual(self.m("- token expired"), "- token expired")
+
+    def test_what_the_feature_logs_brought(self):
+        self.assertEqual(self.m("typing: 6 characters the input method has no key for: привет"),
+                         "typing: 6 characters the input method has no key for: <hidden>")
+        self.assertEqual(self.m("bob@passkey and alice@github, not git@github.com"), "<login> and <login>, not <email>")
+        self.assertEqual(self.m("18:00 click on 'Inbox (3) - Mail' (window)"), "18:00 click on '<hidden>' (window)")
+        self.assertEqual(self.m("1 /usr/bin/krdpserver --port 3389 -p Ab12Cd34 --certificate x.pem"),
+                         "1 /usr/bin/krdpserver --port 3389 -p <hidden> --certificate x.pem")
 
     def test_an_unclosed_block_hides_only_its_line(self):
         self.assertEqual(self.m('warn: auth: [retry 1 of 3\n===== next\nkept'), 'warn: auth: "<hidden>"\n===== next\nkept')

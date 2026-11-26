@@ -36,6 +36,17 @@ out=$dir/frametop-debug-$(date +%Y%m%d-%H%M%S).txt
 raw=$(mktemp) || exit 1
 trap 'rm -f "$raw"' EXIT
 
+# show FILE [BYTES]: a file, or why it isn't there
+show() {
+  if [ -f "$1" ]; then
+    echo "--- $1 ($(stat -c '%s bytes, changed %y' "$1" 2>/dev/null | cut -d. -f1))"
+    head -c "${2:-30000}" "$1"
+    echo
+  else
+    echo "--- $1: not there"
+  fi
+}
+
 {
   section "The headset"
   grep -E '^(PRETTY_NAME|VERSION_ID|BUILD_ID|VARIANT_ID)=' /etc/os-release
@@ -146,7 +157,7 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
   section "Recent warnings and errors"
   echo "--- this user's (last 80, the last 2 hours)"
   t 20 journalctl --user -p warning --since -2h -n 80 --no-pager -o short 2>/dev/null |
-    grep -a -v -E 'container (exec|exec_died|init|start|died|attach|cleanup)' | tail -n 80
+    grep -a -v -E "$NOISE" | tail -n 80
   echo "--- the system's (last 40, the last 2 hours)"
   t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
   echo "--- SteamVR server: Frametop and errors (last 40)"
@@ -155,6 +166,7 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
   tail -n 40 /tmp/frametop-session.log 2>/dev/null || echo "not there"
 
   t 150 bash "$here/debug-features.sh"
+  [ $? -eq 124 ] && printf '\n(the feature logs stopped at 150 seconds: the rest of them is missing)\n'
 
   if [ -f "$rel/scripts/report.sh" ]; then
     section "Frametop's own report (scripts/report.sh --system --desktop --gaze --hands)"

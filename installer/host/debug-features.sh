@@ -3,8 +3,10 @@
 # and NPU hand tracking's service, devices and models. debug-report.sh runs it inside a timeout,
 # and masks its output with the rest of the report (debug-mask.py).
 #
-# Left out: what Frametop Voice heard, and the output of the user's own commands (only when each
-# one started and ended goes in).
+# Left out, as what the user said, typed or ran isn't the report's: what Frametop Voice heard
+# and what its commands and hooks printed (only ft-voiced's own lines go in), the output of the
+# user's own commands (only when each started and ended), apps' output in the desktop's session
+# (only KWin's, Plasma's and the session's), and the names of the people in a Together room.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/debug-lib.sh"
 shopt -s nullglob
@@ -13,6 +15,33 @@ rel=$HOME/.local/share/frametop/releases/current
 state=$HOME/.local/state/frametop
 run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 steamlogs=$HOME/.local/share/Steam/logs
+# a journal line's program: "Nov 25 17:56:30 HOST PROGRAM[PID]: ..."
+from='^[A-Za-z.]+ +[0-9]+ [0-9:]+ [^ ]+'
+
+# tailf FILE LINES: a log file's last lines, or that it isn't there
+tailf() {
+  if [ -f "$1" ]; then
+    echo "--- $1 (last $2 lines; changed $(date -r "$1" '+%F %T'))"
+    tail -n "$2" "$1" | sed 's/.*\r//'
+  else
+    echo "--- $1: not there"
+  fi
+}
+
+# ulog LINES UNIT...: user services' last journal lines; slog: system services'
+# (a unit can be a pattern, such as 'frametop-room-*': journalctl matches it, the shell doesn't)
+ulog() {
+  local n=$1 u args=(); shift
+  for u in "$@"; do args+=(-u "$u"); done
+  echo "--- journal: $* (last $n lines)"
+  t 15 journalctl --user "${args[@]}" -n "$((n * 2))" --no-pager -o short | grep -a -v -E "$NOISE" | tail -n "$n"
+}
+slog() {
+  local n=$1 u args=(); shift
+  for u in "$@"; do args+=(-u "$u"); done
+  echo "--- journal: $* (system; last $n lines)"
+  t 15 journalctl "${args[@]}" -n "$n" --no-pager -o short
+}
 
 section "Logs: the desktop and its screens"
 tailf "$state/screens.log" 150
@@ -21,7 +50,11 @@ tailf "$state/ondesktop.log" 40
 for f in /tmp/frametop-dashroute.log /tmp/frametop-gtksettings.log /tmp/frametop-notifyfwd.log /tmp/frametop-tour.log; do
   tailf "$f" 20
 done
-ulog 60 frametop-desktop frametop-autostart frametop-keyboard frametop-dashpatch frametop-pin-lock
+ulog 40 frametop-autostart frametop-keyboard frametop-dashpatch frametop-pin-lock
+echo "--- journal: frametop-desktop, KWin's, Plasma's and the session's lines (last 60)"
+t 15 journalctl --user -u frametop-desktop -n 3000 --no-pager -o short |
+  grep -a -E "$from (kwin_wayland|plasmashell|plasma_session|ksmserver|xdg-desktop-portal-kde|systemd|ft-[a-z-]+|frametop[a-z-]*)\[" |
+  tail -n 60
 
 section "Logs: input and the pointer"
 ulog 150 frametop-input-relay
@@ -47,11 +80,17 @@ npu=$(grep -E '^\s*HANDS_NPU(_DET)?=' "$conf" 2>/dev/null | sed 's/\s*#.*//' | x
 echo "frametop.conf: ${npu:-HANDS_NPU not set (the NPU when ft-npud is there, else the CPU)}"
 sunits ft-npud dsp_service
 for u in ft-npud dsp_service; do
-  echo "$u: $(t 10 systemctl show -p NRestarts -p Result -p ExecMainStatus -p ActiveEnterTimestamp \
+  echo "$u: $(t 10 systemctl show -p LoadState -p NRestarts -p Result -p ExecMainStatus -p ActiveEnterTimestamp \
     -p InactiveEnterTimestamp "$u" | xargs)"
 done
-echo "--- /run/ft-npud (the heads file and the socket: the service is up)"
-ls -la /run/ft-npud 2>&1
+echo "ft-npud runs: $(t 10 systemctl show -p ExecStart --value ft-npud | grep -o 'argv\[\]=[^;]*' | head -n 1)"
+dirs=(/run/ft-npud)
+own=$(sed -n 's/^\s*HANDS_NPU=\s*//p' "$conf" 2>/dev/null | tail -n 1 | sed 's/\s*#.*//' | tr -d "\"'")
+[[ $own == /* && $own != /run/ft-npud ]] && dirs+=("$own")   # (a service folder of the user's own)
+for d in "${dirs[@]}"; do
+  echo "--- $d (the heads file and the socket: the service is up)"
+  ls -la "$d" 2>&1
+done
 echo "--- the DSP's devices"
 ls -l /dev/cdsp /dev/adsp 2>&1
 # (the service sees its tree as /var/lib/ft-npud; outside its namespace it's on the home partition)
@@ -64,22 +103,29 @@ if [ -f "$rel/hands/handsnpu.py" ]; then
 fi
 echo "--- ft-hands' NPU lines (last 20)"
 t 15 journalctl --user -u frametop-hands -n 5000 --no-pager -o short | grep -a -i npu | tail -n 20
-slog 80 ft-npud
+echo "--- journal: ft-npud (system; last 80 lines, without its clients coming and going)"
+t 15 journalctl -u ft-npud -n 3000 --no-pager -o short | grep -a -v -E 'client (connected|left after)' | tail -n 80
 slog 30 dsp_service
 echo "--- the kernel's DSP lines, this boot (last 40)"
 t 15 journalctl -k -b --no-pager -o short | grep -a -i -E 'cdsp|remoteproc|fastrpc|adsprpc|glink|hexagon|smmu.*fault' |
   tail -n 40
 
-section "Logs: Frametop Voice (without what was heard)"
-t 15 journalctl --user -u frametop-voice -u frametop-voice-whisper -n 600 --no-pager -o short |
-  grep -a -v -E "$NOISE" |
+section "Logs: Frametop Voice (ft-voiced's own lines, without what was heard)"
+# (its lines are "DATE TIME,MS LEVEL ..."; the rest is what voice commands and hooks printed)
+t 15 journalctl --user -u frametop-voice -n 1000 --no-pager -o short |
+  grep -a -E "$from (systemd\[|[^ ]+\[[0-9]+\]: [0-9-]{10} [0-9:]{8},[0-9]{3} [A-Z]+ )" |
   grep -a -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|short window|decode skipped|line up with' | tail -n 100
+ulog 30 frametop-voice-whisper
 echo "--- PipeWire, WirePlumber and proxmicmute: warnings (last 30)"
 t 15 journalctl --user -u pipewire -u wireplumber -u steamvr-proxmicmute -p warning -n 30 --no-pager -o short
 
-section "Logs: Frametop Together"
+section "Logs: Frametop Together (people's names left out)"
 units frametop-together
-ulog 100 frametop-together 'frametop-room-*'
+ulog 100 frametop-together 'frametop-room-*' |
+  sed -E "s/(ft-together: ).* \(([^)]*)\) at /\1<you> (<login>) at /
+          s/: .+ (came in|left)\.\$/: <someone> \1./
+          s/You are in .+'s room\./You are in <someone>'s room./
+          s/: [^ ]+ asks to come in\./: <someone> asks to come in./"
 
 section "Logs: remote displays"
 tailf /tmp/frametop-remote.log 40

@@ -10,6 +10,7 @@ input-settings/test/*.py
 input/test/*.py
 hands/tests/test_*.py
 hands/rec/tests/*.py
+npu/tests/test_*.py
 recorder/tests/*.py
 gaze/test/*.py
 gaze/rec/tests/*.py

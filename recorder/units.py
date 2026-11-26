@@ -3,6 +3,7 @@ SteamVR, and pause other units (an overlay, the pointer) for a session and start
 even after a crash. Commands go to the host's systemd from the dev container (common.host_command)."""
 import json
 import os
+import shlex
 import subprocess
 import time
 
@@ -14,16 +15,18 @@ def unit_active(unit):
                           capture_output=True, timeout=30).returncode == 0
 
 
-def start_unit(unit, what, argv, log=lambda line: None, app="Frametop hand recorder"):
-    """Start argv as a transient user unit that stops with SteamVR. True if it started it,
-    False if it was running already; raises RuntimeError if it couldn't."""
+def start_unit(unit, what, argv, log=lambda line: None, app="Frametop hand recorder", stop_post=None):
+    """Start argv as a transient user unit that stops with SteamVR. stop_post: a command (argv) the unit
+    runs after each stop, its failure ignored. True if it started it, False if it was running already;
+    raises RuntimeError if it couldn't."""
     if unit_active(unit):
         log("%s is running already" % unit)
         return False
+    post = ("-p", "ExecStopPost=-" + " ".join(shlex.quote(a) for a in stop_post)) if stop_post else ()
     cmd = host_command("systemd-run", "--user", "--quiet", "--collect", "--unit=" + unit,
                        "--description=" + app + ": " + what,
                        "-p", "PartOf=steamvr.service", "-p", "After=steamvr.service",
-                       "-p", "Restart=on-failure", "-p", "RestartSec=3", "-p", "TimeoutStopSec=5", *argv)
+                       "-p", "Restart=on-failure", "-p", "RestartSec=3", "-p", "TimeoutStopSec=5", *post, *argv)
     for attempt in range(3):   # distrobox-host-exec has failed once, silently, and worked again
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if r.returncode == 0 or unit_active(unit):

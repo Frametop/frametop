@@ -1,0 +1,165 @@
+{
+  "format": "framenpu-teacher-link-build",
+  "reference": {
+    "rs": {
+      "format": "framenpu-teacher-tail-build",
+      "bytes": 4076,
+      "sha256": "a86154a1d37f4143df5036aaddf1954f73f785ba6c097618802f1c220ccda29c",
+      "flags": [
+        "--target=hexagon",
+        "-mcpu=hexagonv75",
+        "-mhvx",
+        "-mhvx-length=128b",
+        "-Os",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-ffp-contract=off",
+        "-mllvm",
+        "-spill-func-threshold=100",
+        "-mllvm",
+        "-spill-func-threshold-Os=100",
+        "-G0",
+        "-fno-jump-tables"
+      ],
+      "toolchain": {
+        "clang": "clang version 21.1.8",
+        "linker": "LLD 21.1.8 (compatible with GNU linkers)",
+        "objcopy": "framenpu objcopy shim (section dump) 1.0"
+      },
+      "sources": {
+        "tests/resident_graph_entry.S": "3fde8572073e0736244927740aa70082859c4f413315cafe097b122fd5156f93",
+        "src/framenpu/sdk/hmx.S": "ca725000e846c220cdf709a82ce61d223dd0862d66687fa968e41be18f262fb6",
+        "tests/teacher_resident_probe.c": "0cdfd4c0698ec22caf1301b097035c38dba8a3c5dc450d1d2c8ec5c4ba9d765b",
+        "tests/landmark_common.h": "e2e922baaf80e217350ee3926e445449430ccbdb7cf3f55ed8409d73e89909bb",
+        "tests/teacher_tail_layout.py": "db128c94cdd75382768992ccd277b995fb5f740747a7c56ea9e266375bdbe08f",
+        "tests/teacher_resident_layout.py": "1ce8119fd52ea090a0d0b0c307d61614ccf3f76b134b84ada906381986678b3a",
+        "tests/hmx_block_layout.py": "ced35770431898d9a89255a801934a5896b6b5f7dcc71510ac60683612d1ac9b",
+        "src/framenpu/sdk/include/framenpu.h": "4e65f4b8fb82586428a810714d91540685cc4895810ad5bb753b178e1db62754",
+        "src/framenpu/sdk/include/fnpu_readback.h": "4c5fd740bcc9269a64d7923d51cedd11bda2a1b4ed5430dcd796332e20a8f820",
+        "src/framenpu/sdk/link.ld": "c0b7dd53a7e254de549280ead79f303db3ab657e13e8565e5be3852c29a08e82"
+      }
+    },
+    "dw": {
+      "format": "framenpu-teacher-tail-build",
+      "bytes": 4052,
+      "sha256": "9473d1a45228872f2b443845f0addaa5818b980c4a3743fadb976cc430d32b27",
+      "flags": [
+        "--target=hexagon",
+        "-mcpu=hexagonv75",
+        "-mhvx",
+        "-mhvx-length=128b",
+        "-Os",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-stack-protector",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
+        "-ffp-contract=off",
+        "-mllvm",
+        "-spill-func-threshold=100",
+        "-mllvm",
+        "-spill-func-threshold-Os=100",
+        "-G0",
+        "-fno-jump-tables"
+      ],
+      "toolchain": {
+        "clang": "clang version 21.1.8",
+        "linker": "LLD 21.1.8 (compatible with GNU linkers)",
+        "objcopy": "framenpu objcopy shim (section dump) 1.0"
+      },
+      "sources": {
+        "tests/resident_graph_entry.S": "3fde8572073e0736244927740aa70082859c4f413315cafe097b122fd5156f93",
+        "tests/teacher_dw_probe.c": "f747a81f72417240b7657d8257991266f7910956f5c0df62940505e6f1fe25b7",
+        "tests/landmark_common.h": "e2e922baaf80e217350ee3926e445449430ccbdb7cf3f55ed8409d73e89909bb",
+        "tests/teacher_tail_layout.py": "db128c94cdd75382768992ccd277b995fb5f740747a7c56ea9e266375bdbe08f",
+        "tests/teacher_resident_layout.py": "1ce8119fd52ea090a0d0b0c307d61614ccf3f76b134b84ada906381986678b3a",
+        "tests/hmx_block_layout.py": "ced35770431898d9a89255a801934a5896b6b5f7dcc71510ac60683612d1ac9b",
+        "src/framenpu/sdk/include/framenpu.h": "4e65f4b8fb82586428a810714d91540685cc4895810ad5bb753b178e1db62754",
+        "src/framenpu/sdk/include/fnpu_readback.h": "4c5fd740bcc9269a64d7923d51cedd11bda2a1b4ed5430dcd796332e20a8f820",
+        "src/framenpu/sdk/link.ld": "c0b7dd53a7e254de549280ead79f303db3ab657e13e8565e5be3852c29a08e82"
+      }
+    }
+  },
+  "stride2": true,
+  "dw_blocks": 2,
+  "heads": false,
+  "stem": false,
+  "stem_profile": false,
+  "stem_vector": false,
+  "stem_gray": false,
+  "s2_even": false,
+  "s2_direct": true,
+  "pw_profile": false,
+  "pw_fast": true,
+  "pw_group": 8,
+  "dw_fast": true,
+  "replay": true,
+  "mheads": true,
+  "resident": true,
+  "res_slots": 4,
+  "cbias": true,
+  "win_hi": "0x1ff0000",
+  "s2_rev": true,
+  "pw_pipe": true,
+  "hmx_inline": true,
+  "pool": true,
+  "pool_sp_pad": 8,
+  "tiles": true,
+  "pw_deep": true,
+  "pw_lg": 3,
+  "post_batch": true,
+  "loader": {
+    "bytes": 3124,
+    "sha256": "6682377218b7f9128e143571d31e323d149afc76ecfc5fb8727c5b3d98505126",
+    "name": "teacher_link_loader_v1"
+  },
+  "linked": {
+    "bytes": 19196,
+    "sha256": "73f7241f624a92b1cddca83a08b41ff2025a3d1574c8d663ea55249c17db093d"
+  },
+  "reservation": {
+    "code": "0x1ff0000",
+    "bytes": 20480,
+    "seal_vector": "0x1ff4f80"
+  },
+  "flags": [
+    "--target=hexagon",
+    "-mcpu=hexagonv75",
+    "-mhvx",
+    "-mhvx-length=128b",
+    "-Os",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-ffp-contract=off",
+    "-mllvm",
+    "-spill-func-threshold=100",
+    "-mllvm",
+    "-spill-func-threshold-Os=100",
+    "-G0",
+    "-fno-jump-tables",
+    "-fomit-frame-pointer"
+  ],
+  "toolchain": {
+    "clang": "clang version 21.1.8",
+    "linker": "LLD 21.1.8 (compatible with GNU linkers)",
+    "objcopy": "framenpu objcopy shim (section dump) 1.0"
+  },
+  "sources": {},
+  "npu_hands": {
+    "kernel": "k/teacher_resident_probe.c",
+    "sha256": "2908ed3fec4609d4eb17d042c7145fb639640cfd914dbb0df1984cc5062a87a2",
+    "framenpu": "8c9baee",
+    "ops": "stride-2 nk 2 (max pool), 3, 5"
+  },
+  "npu_rethink": {
+    "max_crops": 4,
+    "change": "#define RS_MAX_CROPS 3u -> #define RS_MAX_CROPS 4u"
+  },
+  "max_crops": 4
+}

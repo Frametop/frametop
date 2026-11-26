@@ -123,6 +123,19 @@ class Picks(unittest.TestCase):
         self.assertEqual((off["eye_tracker"], off["eye_recorder"]), ((False, False), (False, False)))
         self.assertNotIn("voice", off)   # a part that needs nothing isn't in it
 
+    def test_npu_hand_tracking_only_where_a_release_has_it(self):
+        # releases before it don't have it, so it's absent there, not "always installed"
+        self.assertEqual(options.availability(options.BY_KEY["npu"], EXP24), "absent")
+        self.assertNotIn("--no-npu", options.install_flags({k: False for k in self.ALL}, EXP24))
+        now = EXP24 + ("--no-npu",)
+        self.assertEqual(options.availability(options.BY_KEY["npu"], now), "choice")
+        self.assertEqual(options.install_flags(self.ALL, now), ["--yes", "--together", "--bluetooth"])
+        self.assertIn("--no-npu", options.install_flags(dict(self.ALL, npu=False), now))
+        # it goes with hand tracking, and its box locks while that's off
+        self.assertIn("--no-npu", options.install_flags(dict(self.ALL, hands=False), now))
+        self.assertEqual(options.boxes(dict(self.ALL, hands=False), now)["npu"], (False, False))
+        self.assertTrue(options.needs_password({k: k == "npu" or k == "hands" for k in self.ALL}, now))
+
     def test_only_sudo_parts_need_the_password(self):
         picks = {k: False for k in self.ALL}
         picks.update(voice=True, gaze=True, eye_recorder=True, keyboard=True, together=True)

@@ -1,0 +1,51 @@
+{
+  "format": "framenpu-host-native",
+  "abi": 4,
+  "target": "aarch64-linux-gnu",
+  "bytes": 9168,
+  "sha256": "80f96f9bd7d410ac63c105954200591d76f533e05fc6d6a7b7ad3b5c0bce1011",
+  "source_sha256": {
+    "host/fnpu_host.c": "2b4876f85810f45b24668a01ed44e1bfb2026ae2f41b48c7855f8b3af010aeb5"
+  },
+  "compiler_flags": [
+    "-O2",
+    "-std=c11",
+    "-fPIC",
+    "-shared",
+    "-nostdlib",
+    "-ffreestanding",
+    "-ffp-contract=off",
+    "-fno-stack-protector",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-fvisibility=hidden",
+    "-Wall",
+    "-Werror",
+    "-fuse-ld=lld",
+    "-Wl,--build-id=none",
+    "-Wl,-z,now",
+    "-Wl,-z,relro",
+    "-Wl,-z,noexecstack",
+    "-Wl,--no-undefined",
+    "-Wl,-soname,libfnpu_host.so"
+  ],
+  "exports": [
+    "fnpu_abi",
+    "fnpu_read32",
+    "fnpu_nonfinite32",
+    "fnpu_to_f16",
+    "fnpu_from_f16",
+    "fnpu_stem_columns",
+    "fnpu_grid_pack",
+    "fnpu_grid_unpack",
+    "fnpu_dense",
+    "fnpu_conv1x1",
+    "fnpu_avgpool",
+    "fnpu_hint",
+    "fnpu_conv1x1_f16"
+  ],
+  "toolchain": {
+    "clang": "clang version 23.1.5",
+    "linker": "LLD 23.1.5 (compatible with GNU linkers)"
+  }
+}

@@ -122,6 +122,12 @@ RUN hands/build.sh \
 # (hands/rec/session.py) runs it from.
 RUN hands/rec/build.sh \
  && test -x hands/rec/build/ft-handpanel
+# NPU hand tracking's root service, ft-npud: npu/build/tree, with its own CPython and numpy
+# (pinned by sha256 in npu/build.sh), which npu/install.sh copies to the home partition as root.
+# The downloads it was built from go.
+RUN npu/build.sh \
+ && test -x npu/build/tree/python/bin/python3 && test -f npu/build/tree/graphs/landmarks.npz \
+ && rm -rf npu/build/dl
 # The model importer (VRM, glTF and FBX into Frametop's own model file): it stays in
 # avatar/build/, where Settings runs it from.
 RUN avatar/build.sh \

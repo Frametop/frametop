@@ -1,6 +1,6 @@
 // track/npuclient.cpp and npusession.cpp against a fake ft-npud (no DSP): the layout both sides pin, the HELLO
 // that hands over the sealed memory, BUSY, a silent or old daemon, a closed connection, a signal during a wait,
-// and the retry backoff after a failure.
+// the retry backoff after a failure, and a release (parked) that tries again at once.
 //   build/npuclient-test
 #include "../track/npuclient.h"
 #include "../track/npusession.h"
@@ -222,6 +222,17 @@ void failure_backs_off() {
     CHECK(s.failures == 1);
 }
 
+void release_retries_at_once() {
+    // parked: the session lets go, and unparked it tries again on the next step, not kRetrySeconds later
+    NpuSession s("/tmp/npuclient-test-none");
+    s.fail("ft-npud timed out");
+    s.release();
+    CHECK(!s.connected());
+    CHECK(!s.ensure());
+    CHECK(s.last_error() != "ft-npud timed out");   // it tried: the heads file is missing
+    CHECK(s.failures == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -230,6 +241,7 @@ int main() {
     silent_daemon_times_out();
     signal_does_not_cut_a_wait();
     failure_backs_off();
+    release_retries_at_once();
     std::printf(failures ? "npuclient: %d failures\n" : "npuclient: ok\n", failures);
     return failures != 0;
 }

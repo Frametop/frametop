@@ -35,6 +35,12 @@ void NpuSession::fail(const std::string &why) {
     std::fprintf(stderr, "npu: %s; the CPU models until ft-npud answers again\n", why.c_str());
 }
 
+void NpuSession::release() {
+    if (client_.connected()) std::fprintf(stderr, "npu: ft-npud let go while parked\n");
+    client_.close();
+    retry_at_ = {};
+}
+
 std::string NpuTimes::summary() const {
     const double n = std::max(requests, 1);
     char b[160];

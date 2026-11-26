@@ -1,0 +1,64 @@
+#!/bin/bash
+# ft-hands-stop PIDFILE [ARG...]: stops the ft-hands that wrote PIDFILE (ft-hands --pidfile PIDFILE,
+# track/pidfile.h) and no other, so a unit stops its own ft-hands and leaves the Hand Recorder's or another
+# unit's alone. ARG...: also an ft-hands from before pidfiles whose arguments are exactly ARG..., the one the
+# unit ran before an update replaced it (that one can't be stopped otherwise).
+# A signal to scripts/in-box doesn't reach the program in the container; the container shares the host's
+# process ids, so this can signal it. It signals only this user's processes running an ft-hands program,
+# read from /proc/PID/exe: an ft-hands from before it set its own name is named "exe" once it has started
+# again through /proc/self/exe (on a new ft-camd). A stale file whose pid went to another program is just
+# removed.
+# TERM, then KILL after 3 s (inside the units' TimeoutStopSec=5). Always exits 0 (a unit's ExecStartPre
+# and ExecStopPost).
+pidfile=${1:-}
+[ -n "$pidfile" ] || { echo "usage: ft-hands-stop PIDFILE [ARG...]" >&2; exit 2; }
+shift
+old=("$@")
+
+ft_hands() {   # PID: a process of this user running an ft-hands program
+  local comm exe
+  [[ $1 =~ ^[0-9]+$ ]] && [ -O "/proc/$1" ] || return 1
+  { read -r comm < "/proc/$1/comm"; } 2>/dev/null || return 1
+  [ "$comm" = ft-hands ] || [ "$comm" = exe ] || return 1
+  exe=$(readlink "/proc/$1/exe" 2>/dev/null) || return 1
+  exe=${exe% (deleted)}   # replaced on disk while it runs (an update)
+  [ "${exe##*/}" = ft-hands ]
+}
+argv() { { tr '\0' '\n' < "/proc/$1/cmdline"; } 2>/dev/null; }
+mine() {   # PID: the ft-hands of PIDFILE, or one from before pidfiles started with exactly ARG...
+  ft_hands "$1" || return 1
+  local a i
+  mapfile -t a < <(argv "$1")
+  a=("${a[@]:1}")
+  for i in "${a[@]}"; do [ "$i" = "$pidfile" ] && return 0; done
+  [ ${#old[@]} -gt 0 ] && [ ${#a[@]} -eq ${#old[@]} ] || return 1
+  for i in "${!old[@]}"; do [ "${a[$i]}" = "${old[$i]}" ] || return 1; done
+}
+
+pids=()
+if [ -f "$pidfile" ] && [ ! -L "$pidfile" ]; then
+  pid=$(head -c 32 -- "$pidfile" 2>/dev/null | tr -dc 0-9)
+  [ -n "$pid" ] && mine "$pid" && pids+=("$pid")
+fi
+if [ ${#old[@]} -gt 0 ]; then
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}
+    [ "$p" = "${pid:-}" ] || ! mine "$p" || pids+=("$p")
+  done
+fi
+if [ ${#pids[@]} -gt 0 ]; then
+  kill -TERM "${pids[@]}" 2>/dev/null
+  for _ in $(seq 30); do
+    left=()
+    for p in "${pids[@]}"; do mine "$p" && left+=("$p"); done
+    [ ${#left[@]} -gt 0 ] || break
+    sleep 0.1
+  done
+  for p in "${pids[@]}"; do mine "$p" && kill -KILL "$p" 2>/dev/null; done
+fi
+# gone now: its own exit removes the file, unless it was killed or the file was stale
+if [ -f "$pidfile" ] && [ ! -L "$pidfile" ]; then
+  now=$(head -c 32 -- "$pidfile" 2>/dev/null | tr -dc 0-9)
+  [ "$now" = "${pid:-}" ] && ! mine "$now" && rm -f -- "$pidfile"
+fi
+exit 0

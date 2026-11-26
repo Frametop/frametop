@@ -3,7 +3,8 @@ that's in the repo (and a heading there, for a #anchor), and every repo path a d
 comment names as `dir/.../file.md` (or, in a doc, as `dir/file.ext` in backticks) exists.
 
 A path may be relative to the file's folder or any folder above it (keyboard/ is vendored with its
-own root). Skipped: frame-hands/... (the separate frame-hands project's notes, not this repo),
+own root). Skipped: frame-hands/... (the separate frame-hands project's notes, not this repo), the
+files under npu/app/ (vendored as their upstreams have them, naming files those repos have),
 paths with a placeholder (*, <, $, ~, {), build outputs (a build/ folder, a .venv), a path followed by
 "removed" (a file a change took out), and made-up paths in tests' fixtures."""
 import os
@@ -15,6 +16,7 @@ import urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXTERNAL = ("frame-hands/",)
+VENDORED = ("npu/app/",)
 LINK = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 TICKED = re.compile(r"`([A-Za-z0-9_.-]+/[A-Za-z0-9_./@-]*\.[A-Za-z0-9]+)`")
 MD_REF = re.compile(r"(?<![\w./~$-])([A-Za-z0-9_-]+/[A-Za-z0-9_./-]*\.md)\b")
@@ -89,7 +91,7 @@ class DocLinks(unittest.TestCase):
 
     def test_markdown_links(self):
         bad = []
-        for rel in (p for p in self.files if p.endswith(".md")):
+        for rel in (p for p in self.files if p.endswith(".md") and not p.startswith(VENDORED)):
             path = ROOT / rel
             for n, line in prose(path.read_text(errors="replace")):
                 for target in LINK.findall(re.sub(r"`[^`]*`", "", line)):
@@ -105,7 +107,7 @@ class DocLinks(unittest.TestCase):
 
     def test_named_paths(self):
         bad = []
-        for rel in self.files:
+        for rel in (p for p in self.files if not p.startswith(VENDORED)):
             path = ROOT / rel
             if {"test", "tests"} & set(rel.split("/")[:-1]):
                 continue

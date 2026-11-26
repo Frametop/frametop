@@ -21,6 +21,7 @@ class Part:
     on: str = ""           # the option that puts it in (a part --yes leaves out)
     sudo: bool = False     # needs your password
     needs: str = ""        # the part it needs (unticked, this one goes too)
+    added: bool = False    # releases before it don't have it: absent where off isn't taken
 
 
 PARTS = (
@@ -30,6 +31,10 @@ PARTS = (
     Part("hands", "Hand tracking (experimental)",
          "Poke, pinch and grab the screens with your hands. It uses a lot of the headset's CPU.",
          off="--no-hands", sudo=True),
+    Part("npu", "NPU hand tracking (recommended)",
+         "Hand tracking's model runs on the headset's NPU, so it needs less of the CPU, which VR "
+         "needs. Hand tracking uses the CPU whenever it can't. A small system service.",
+         off="--no-npu", sudo=True, needs="hands", added=True),
     Part("hand_recorder", "Hand Recorder",
          "Records your hands for Frametop's open hand dataset, which trains hand tracking. Nothing "
          "leaves the headset until you press Upload.", off="--no-hand-recorder", sudo=True, needs="hands"),
@@ -94,7 +99,9 @@ def availability(part, supported):
     'absent' (the release doesn't have it)."""
     if part.on:
         return "choice" if part.on in supported and (not part.off or part.off in supported) else "absent"
-    return "choice" if part.off in supported else "always"
+    if part.off in supported:
+        return "choice"
+    return "absent" if part.added else "always"
 
 
 def effective(picked, supported):

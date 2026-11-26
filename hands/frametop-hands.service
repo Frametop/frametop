@@ -12,12 +12,14 @@ PartOf=steamvr.service
 # writes /run/user/UID/frametop-hands/hands and gestures. Settings: HANDS_* in ~/.config/frametop.conf.
 # Before it starts, newer fine-tuned models if its branch pins them (hands/models.sh auto: at most
 # every 15 minutes, never more than a minute, offline or failing it starts with the ones it has).
-ExecStartPre=-/usr/bin/pkill -x ft-hands
+# Its own ft-hands only (hands/ft-hands-stop, through the pidfile), and one this unit started before it had
+# a pidfile (an update while it ran: exactly --status 60): one the Hand Recorder runs keeps going.
+ExecStartPre=-@REPO@/hands/ft-hands-stop %t/frametop-hands/frametop-hands.pid --status 60
 ExecStartPre=-/usr/bin/timeout 60 @REPO@/hands/models.sh auto
 # A version picked by name (HANDS_MODEL, Input Settings' Hands page) that isn't downloaded yet.
 ExecStartPre=-/usr/bin/timeout 60 /usr/bin/python3 @REPO@/models/ft-models auto hands
-ExecStart=@REPO@/scripts/in-box @REPO@/hands/build/ft-hands --status 60
-ExecStopPost=-/usr/bin/pkill -x ft-hands
+ExecStart=@REPO@/scripts/in-box @REPO@/hands/build/ft-hands --status 60 --pidfile %t/frametop-hands/frametop-hands.pid
+ExecStopPost=-@REPO@/hands/ft-hands-stop %t/frametop-hands/frametop-hands.pid --status 60
 Restart=always
 RestartSec=5
 TimeoutStopSec=5

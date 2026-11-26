@@ -1,0 +1,20 @@
+{
+ "loader": {
+  "name": "npu_mw_loader_v1",
+  "bytes": 2076,
+  "sha256": "eba94fbc4f75475dce478949473eec8681da77d2b516cf0a0ccaf58855b8f5da",
+  "qualified_sha256": null,
+  "toolchain": {
+   "clang": "clang version 21.1.8",
+   "linker": "LLD 21.1.8 (compatible with GNU linkers)",
+   "objcopy": "framenpu objcopy shim (section dump) 1.0"
+  },
+  "workers": 2,
+  "entry_sha256": "d65dba39ed91a59b45849de5a87502e87a317d48f890e18ca7e324a929c6f415"
+ },
+ "linked": {
+  "bytes": 8924,
+  "sha256": "6581c55e9fbe5e5551b6707a25eaf85139775601a948eb14abe6dfff4e16ad8a"
+ },
+ "source_sha256": "ac9c797322647c741fd709d34fa3956f896f92d4311a2c36a0a664391b6072c4"
+}

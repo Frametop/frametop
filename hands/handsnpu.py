@@ -34,6 +34,7 @@ KEY = "HANDS_NPU"
 CONF_PATH = handsmode.CONF_PATH
 DEFAULT_DIR = "/run/ft-npud"   # kNpuDefaultDir in hands/track/npuserver.h
 HEADS = "ft-npud.heads"
+UNIT = "/etc/systemd/system/ft-npud.service"   # npu/root.sh installs it
 ROOTS = ("", "/run/host")      # the host's / from the host, and from the container
 
 
@@ -55,6 +56,12 @@ def service_there(where=DEFAULT_DIR, roots=None):
     return any(os.path.lexists(root + where + "/" + HEADS) for root in roots)
 
 
+def service_installed(roots=None):
+    """Whether ft-npud's unit is installed (npu/install.sh), under each of ROOTS or the roots given."""
+    roots = ROOTS if roots is None else roots
+    return any(os.path.lexists(root + UNIT) for root in roots)
+
+
 def state(conf=None, conf_path=CONF_PATH, roots=None):
     """{"npu": the choice, "available": the NPU service is there, "note": why the choice isn't what
     runs}. Reads only."""
@@ -63,8 +70,13 @@ def state(conf=None, conf_path=CONF_PATH, roots=None):
     available = service_there(where or DEFAULT_DIR, roots)
     note = ""
     if where and not available:
-        note = ("The NPU service isn't running on this headset, so hand tracking uses the CPU. "
-                "It switches to the NPU by itself once the service runs.")
+        if where == DEFAULT_DIR and not service_installed(roots):
+            note = ("NPU hand tracking isn't installed, so hand tracking uses the CPU. It's recommended: "
+                    "install it with npu/install.sh in a terminal (it needs your password), or with the "
+                    "Frametop Installer. Hand tracking switches to the NPU by itself once it runs.")
+        else:
+            note = ("The NPU service isn't running on this headset, so hand tracking uses the CPU. "
+                    "It switches to the NPU by itself once the service runs.")
         if where != DEFAULT_DIR:
             note += f" (HANDS_NPU looks for it in {where}.)"
     return {"npu": bool(where), "available": available, "note": note}

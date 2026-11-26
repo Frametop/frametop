@@ -93,6 +93,7 @@ ls -l /dev/cdsp /dev/adsp 2>&1
 # (the service sees its tree as /var/lib/ft-npud; outside its namespace it's on the home partition)
 npud=/home/.steamos/offload/var/lib/ft-npud
 echo "--- $npud: its models, and where they came from"
+ls -la "$npud" 2>&1 | head -n 12
 ls -la "$npud/graphs" 2>&1 | head -n 12
 head -n 20 "$npud/SOURCE" 2>&1
 if [ -f "$rel/hands/handsnpu.py" ]; then

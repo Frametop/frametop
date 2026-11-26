@@ -1,0 +1,53 @@
+{
+  "format": "framenpu-kernel",
+  "abi": 1,
+  "target": "hexagonv75",
+  "bytes": 3672,
+  "sha256": "4ee5d0122fc7cc1df5960e38cbcc58e43f60e7599364dcb70d72ca47e4fa3578",
+  "compiler_flags": [
+    "--target=hexagon",
+    "-mcpu=hexagonv75",
+    "-mhvx",
+    "-mhvx-length=128b",
+    "-Os",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-ffp-contract=off",
+    "-mllvm",
+    "-spill-func-threshold=100",
+    "-mllvm",
+    "-spill-func-threshold-Os=100",
+    "-G0"
+  ],
+  "toolchain": {
+    "clang": "clang version 23.1.4",
+    "linker": "LLD 23.1.4 (compatible with GNU linkers)",
+    "objcopy": "llvm-objcopy, compatible with GNU objcopy"
+  },
+  "source_sha256": {
+    "compiler.py": "a922a94d2328ecff84a6947883653f8b15f0dd249f4ff09afa8f26a5b6e47c8e",
+    "sdk/entry.S": "fce39ec1dfb601ab37be23addc3570af9b662c09dfb2a59b3cb41ef62a614dd8",
+    "sdk/hmx.S": "ca725000e846c220cdf709a82ce61d223dd0862d66687fa968e41be18f262fb6",
+    "sdk/link.ld": "c0b7dd53a7e254de549280ead79f303db3ab657e13e8565e5be3852c29a08e82",
+    "sdk/include/framenpu.h": "4e65f4b8fb82586428a810714d91540685cc4895810ad5bb753b178e1db62754",
+    "sdk/include/fnpu_readback.h": "4c5fd740bcc9269a64d7923d51cedd11bda2a1b4ed5430dcd796332e20a8f820",
+    "sdk/runtime.c": "ab0109990fb03ed16d2dde9c66ff1e4863caee4d02ad2bb2da4a6e7d91ab3893",
+    "sdk/dispatch.S": "73042064e808b6fd5802b073095daea089847510f73e4b1395db9381f27dca75",
+    "sdk/dispatch.ld": "98cb13354342a46c65fab68aebd75192d3123958a66b7078fcaad12922b8b61e",
+    "sdk/dispatch_patch.c": "7510f5a1886682acc6c9592421b2edae549614649a6c2666f55cfa47a4762326"
+  },
+  "supports_direct": true,
+  "additional_payloads": {
+    "dispatch.bin": {
+      "bytes": 96,
+      "sha256": "d329a9ea5ddb7540c977cea989248da0a794544baa1bab5765b646fda3c34700"
+    },
+    "dispatch_patch.bin": {
+      "bytes": 2232,
+      "sha256": "a66980cef803fc07965a64d47b64da05eb2978b37395727be4d11bca6c0d20ee"
+    }
+  }
+}

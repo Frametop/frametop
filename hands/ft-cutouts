@@ -11,6 +11,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 camd=frametop-cutouts-camd.service hands=frametop-cutouts-hands.service
+pidfile=/run/user/$(id -u)/frametop-hands/cutouts.pid  # its ft-hands, for ft-hands-stop
 
 die() { echo "$*" >&2; exit 1; }
 
@@ -20,7 +21,7 @@ run_unit() {  # unit, the ft-handsctl unit it replaces, description, then the co
   systemctl --user -q is-active "$unit" && return
   systemd-run --user --quiet --collect --unit="$unit" --description="Frametop hand cutouts: $what" \
     -p PartOf=steamvr.service -p After=steamvr.service -p Conflicts="$conflicts" \
-    -p Restart=always -p RestartSec=5 -p TimeoutStopSec=5 "$@"
+    -p Restart=always -p RestartSec=5 -p TimeoutStopSec=5 ${stop_post:+-p "ExecStopPost=-$stop_post"} "$@"
 }
 
 case ${1:-status} in
@@ -36,16 +37,17 @@ case ${1:-status} in
     run_unit $camd frametop-camd.service "the camera broker" "$here/build/ft-camd" --status 60
     if ! systemctl --user -q is-active $hands; then
       "$here/../scripts/container-up.sh"  # so stopping the unit can't take the container down
-      pkill -x ft-hands || true
+      "$here/ft-hands-stop" "$pidfile" --status 60 --no-gestures   # one left from before (the unit stops its own: ExecStopPost)
     fi
+    stop_post="$here/ft-hands-stop $pidfile" \
     run_unit $hands frametop-hands.service "hand tracking, no gestures" "$HOME/.local/bin/distrobox" enter dev -- \
-      "$here/build/ft-hands" --status 60 --no-gestures
+      "$here/build/ft-hands" --status 60 --no-gestures --pidfile "$pidfile"
     "$here/ft-handsctl" cutouts on >/dev/null || true
     sleep 4
     "$0" status ;;
   off)
     systemctl --user stop $hands $camd 2>/dev/null || true
-    systemctl --user -q is-active frametop-hands.service || pkill -x ft-hands || true
+    "$here/ft-hands-stop" "$pidfile" --status 60 --no-gestures   # and one this script started before pidfiles
     echo "hand cutouts off" ;;
   status)
     for u in $camd $hands; do echo "$u: $(systemctl --user is-active $u || true)"; done

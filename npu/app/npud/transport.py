@@ -23,6 +23,13 @@ holds a different file.
 """
 import array, fcntl, os, select, socket, struct, mmap
 
+# fcntl's names for the seals, or Linux's own numbers for them (include/uapi/linux/fcntl.h: fixed ABI) where this
+# Python was built without them: the tree's CPython (python-build-standalone, npu/build.sh) has none of them
+F_ADD_SEALS = getattr(fcntl, 'F_ADD_SEALS', 1033)
+F_SEAL_SEAL = getattr(fcntl, 'F_SEAL_SEAL', 0x1)
+F_SEAL_SHRINK = getattr(fcntl, 'F_SEAL_SHRINK', 0x2)
+F_SEAL_GROW = getattr(fcntl, 'F_SEAL_GROW', 0x4)
+
 MAGIC, VERSION = 0x4450504E, 2                    # 'NPPD'; version 2: the memory comes over the socket
 # u32 magic, version, last request byte, frames, features, frames, bad requests, graph id |
 # f32 DSP ms, daemon ms (request received to outputs published), obj scale, reg scale, 4 x pad
@@ -75,7 +82,7 @@ class Memory:
     def __init__(self, size=SHM_BYTES):
         self.fd = os.memfd_create('ft-npud', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
         os.ftruncate(self.fd, size)
-        fcntl.fcntl(self.fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SEAL)
+        fcntl.fcntl(self.fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
         self.map = mmap.mmap(self.fd, size)
 
 

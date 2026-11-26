@@ -1,7 +1,8 @@
 """npu/root.sh, offline and without root: its `check` reads the unit as systemd does and refuses any
 unit without exactly one python3 -I -S -B -c ExecStartPre in [Service], the preflight refuses a tree a
 user owns, install and uninstall refuse to run without root, and the paths it installs to are the
-ones uninstall.sh, update-check.py and handsnpu.py look for."""
+ones uninstall.sh, update-check.py and handsnpu.py look for, and install waits for the line the daemons
+log once they serve."""
 import os
 import pathlib
 import re
@@ -71,6 +72,14 @@ class RootSh(unittest.TestCase):
             code, out = self.root_sh(*args)
             self.assertEqual(code, 1, out)
             self.assertIn("run as root", out)
+
+    def test_it_waits_for_the_line_each_daemon_logs_once_it_serves(self):
+        serving = ROOT_SH.read_text().split("serving() {", 1)[1].split("\n}\n", 1)[0]
+        pattern = re.search(r"== \*'([^']+)'\*", serving)[1]
+        self.assertEqual(pattern, "; serving /")
+        for daemon in ("ft_npud.py", "v30a_serve.py"):
+            with self.subTest(daemon):
+                self.assertIn("; serving %s' % (", (REPO / "npu/app/npud" / daemon).read_text())
 
     def test_its_paths_are_the_ones_the_rest_looks_for(self):
         text = ROOT_SH.read_text()

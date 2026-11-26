@@ -43,6 +43,19 @@ NEEDED=(app/npud/hnet_serve.py app/npud/trust.py python/bin/python3 graphs/landm
 usage() { echo "usage: root.sh install SRC UID | uninstall | status | check UNIT ROOT" >&2; exit 2; }
 fail() { echo "ft-npud: $*" >&2; exit 1; }
 need_root() { [ "$(id -u)" = 0 ] || fail "run as root"; }
+# Type=simple: systemctl restart returns once the program has started, not once it serves. This run serves once it
+# logs its self-test, "... serving /run/ft-npud/ft-npud.sock" (about a second in); one that ends first hasn't started
+serving() {
+    local inv
+    inv=$(systemctl show -P InvocationID "$UNIT") && [ -n "$inv" ] || return 1
+    for _ in $(seq 60); do   # 30 s
+        # read whole, then matched: grep -q would stop reading early, and journalctl would die of SIGPIPE
+        [[ $(journalctl -q -o cat "_SYSTEMD_INVOCATION_ID=$inv" 2>/dev/null) == *'; serving /'* ]] && return 0
+        [ "$(systemctl show -P InvocationID "$UNIT")" = "$inv" ] && systemctl is-active -q "$UNIT" || return 1
+        sleep 0.5
+    done
+    return 1
+}
 
 # the unit's own ExecStartPre (one copy of the check: the unit's), with /var/lib/ft-npud read as ROOT: trust.py's
 # path first, every directory from / down to it root's, not writable by others and no symlink, then trust.py.
@@ -182,9 +195,9 @@ install)
     systemctl enable -q "$UNIT"
     # the new tree now: a client falls back to the CPU for the second this takes, then connects again
     systemctl reset-failed "$UNIT" 2>/dev/null || true
-    if ! systemctl restart "$UNIT"; then
+    if ! systemctl restart "$UNIT" || ! serving; then
         # in place and enabled, and it tries again by itself (the DSP not ready yet, dsp_service restarting)
-        echo "ft-npud: installed $TREE, but it hasn't started yet (it keeps trying): journalctl -u $UNIT" >&2
+        echo "ft-npud: installed $TREE, but it isn't serving yet (it starts again if it fails): journalctl -u $UNIT" >&2
         exit 3
     fi
     echo "ft-npud: installed $TREE and started it"

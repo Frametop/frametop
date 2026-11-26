@@ -15,6 +15,7 @@
 // in ~/.config/frametop-layout.json or command-line arguments.
 #include "iris.h"
 #include "apple_hp.h"
+#include "route_settings.h"
 
 #include <dlfcn.h>
 #include <nlohmann/json.hpp>
@@ -92,20 +93,38 @@ nlohmann::json Layout() {
 }
 
 std::string Route(const std::string &host, int port) {
-    const nlohmann::json layout = Layout();
-    if (layout.is_null()) return host;
-    for (const auto &h : layout["hosts"]) {
-        if (!h.is_object() || h.value("address", "") != host) continue;
-        const std::string route = h.value("route", "auto");
-        if (route == "network") return host;
-        if (h.contains("direct") && h["direct"].is_array()) {
-            for (const auto &d : h["direct"]) {
-                if (d.is_string() && Answers(d.get<std::string>(), port, 1000)) return d.get<std::string>();
+    const HostRoute h = HostRouteOf(Layout(), host);
+    if (!h.known || h.mode == "network") return host;
+    for (const std::string &d : h.direct) {
+        if (Answers(d, port, 1000)) return d;
+    }
+    return h.mode == "dongle" ? "" : host;
+}
+
+std::atomic<bool> g_rerouted{false};
+
+void WatchDirect(std::string host, int port) {
+    RerouteWatch watch;
+    for (int64_t next = MonoNs() + kRerouteCheckSeconds * 1'000'000'000LL; !g_stop; usleep(100'000)) {
+        if (MonoNs() < next) continue;
+        next = MonoNs() + kRerouteCheckSeconds * 1'000'000'000LL;
+        const HostRoute h = HostRouteOf(Layout(), host);
+        std::string answered;
+        if (h.mode == "auto") {
+            for (const std::string &d : h.direct) {
+                if (Answers(d, port, 1000)) {
+                    answered = d;
+                    break;
+                }
             }
         }
-        return route == "dongle" ? "" : host;
+        if (watch.Check(!answered.empty()) && !g_stop) {
+            std::printf("route: %s answers now, so the stream starts again through it\n", answered.c_str());
+            g_rerouted = true;
+            g_stop = 1;
+            return;
+        }
     }
-    return host;
 }
 
 ft_apple_hp::KeyboardMappingConfig LoadKeyboardMapping(const std::string &host, const std::string &id) {
@@ -652,9 +671,10 @@ int RunStream(const std::string &host, const std::string &route, int port, const
 
     g_stop = 1;
     alarm(kExitWatchdogS);
-    viewer.Send(ended_by_host ? ("state lost " + (end_reason.empty() ? std::string("the host ended the stream")
-                                                                     : end_reason.substr(0, 64)))
-                              : "state lost");
+    viewer.Send(g_rerouted     ? "state lost moving to a direct address"
+                : ended_by_host ? ("state lost " + (end_reason.empty() ? std::string("the host ended the stream")
+                                                                       : end_reason.substr(0, 64)))
+                                : "state lost");
     if (!ended_by_host) client.SendInputBlur();
     audio.Stop();
     client.Close();
@@ -782,6 +802,10 @@ int main(int argc, char **argv) {
             Viewer{fd}.Send("state lost the dongle link is down");
             return 1;
         }
+        const char *via = route != host ? "direct" : "network";
+        const bool routed = RouteSettings(Layout(), host, id, via, &fps, &bitrate);
+        if (routed) std::printf("stream: the %s route's settings, %d fps, %d kbit/s\n", via, fps, bitrate);
+        if (route == host) std::thread(WatchDirect, host, port).detach();
         return RunStream(host, route, port, id, app, fd, width, height, fps, bitrate);
     }
     return std::fprintf(stderr, "unknown command %s\n", cmd.c_str()), 2;

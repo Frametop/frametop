@@ -124,9 +124,11 @@ Usage (on the Frame host; Frametop Settings calls it too):
                                      apple:physical is a Mac's built-in Screen Sharing, with --login
                                      its macOS login) -> its id
   ft-layout remote set ID size=WxH|fps=F|bitrate=KBPS|label=TEXT|app=APP|metres=M|
-                          mode=WxH@MHZ|own|scale=0.5..4|own|kb_layout=...|keymap=... ...
+                          mode=WxH@MHZ|own|scale=0.5..4|own|direct.fps=F|direct.bitrate=KBPS|
+                          network.fps=F|network.bitrate=KBPS|kb_layout=...|keymap=... ...
                                      mode: the resolution and refresh (mHz) its monitor is put in,
-                                     on a host with monitors=on; scale: its monitor's scale there
+                                     on a host with monitors=on; scale: its monitor's scale there;
+                                     direct.* / network.*: per-route stream settings (empty resets)
   ft-layout remote host NAME route=auto|network|dongle direct=ADDRESS[,ADDRESS]|none mic=on|off
                              input=on|off|keyboard|mouse clipboard=on|off windows=PORT|off
                              monitors=on|off kb_layout=...|keymap=...
@@ -258,6 +260,10 @@ REMOTE_PIXELS_PER_METRE = 2400  # a new remote display's width in VR (5120 px: 2
 GAMESTREAM_PORT = 47989  # a host's HTTP port, where ft-stream reaches it
 WEB_UI_PORT = 47990  # Vibepollo's Web UI: a host answers there when it's up
 APPLE_PORT = 5900  # macOS High Performance Screen Sharing (screensharingd, TCP/UDP)
+# A display's own settings per route, the way ft-stream / ft-appless reaches its host
+# (stream/route_settings.h): "direct" through a direct address, "network" through its own address.
+ROUTE_LIMITS = {"fps": (1, 240), "bitrate": (0, 500000)}
+ROUTE_NAMES = ("direct", "network")
 STREAM = os.path.join(REPO, "stream", "build", "ft-stream")
 APPLESS = os.path.join(REPO, "stream", "build", "ft-appless")
 RESET_TIMER = os.path.join(REPO, "layout", "countdown", "build", "ft-reset-timer")
@@ -1120,6 +1126,34 @@ def display_target(host, d):
     return f"{host['address']}:{int(port)}" if port and int(port) != default_port else host["address"]
 
 
+def route_settings(d):
+    """A remote display's stream settings for each route it has its own for, as ft-stream takes
+    them: {route: (fps, kbit/s)}, what a route leaves out being the display's own."""
+    routes = d.get("routes") if isinstance(d.get("routes"), dict) else {}
+    return {r: (int(routes[r].get("fps", d.get("fps", 60))), int(routes[r].get("bitrate", d.get("bitrate", 0))))
+            for r in ROUTE_NAMES if isinstance(routes.get(r), dict)}
+
+
+def set_route_setting(d, route, key, value):
+    """One of a display's settings for a route (ROUTE_NAMES); None goes back to the display's own."""
+    if not isinstance(d.get("routes"), dict):
+        d["routes"] = {}
+    routes = d["routes"]
+    if value is None:
+        routes.get(route, {}).pop(key, None)
+    else:
+        routes.setdefault(route, {})[key] = value
+    for r in [r for r, s in routes.items() if not s]:
+        del routes[r]
+    if not routes:
+        del d["routes"]
+
+
+def stream_settings(fps, bitrate):
+    """For remote list: "@60 4000 kbit/s" (0 kbit/s is ft-stream's default for the size and fps)."""
+    return f"@{fps} {bitrate} kbit/s" if bitrate else f"@{fps} default bitrate"
+
+
 def start_remote(sock, n, host, d):
     """Its stream (ft-screens starts it over only if the settings changed). ft-screens'
     reply: "ok restored" when its panel is back where it was before a disconnect."""
@@ -1406,7 +1440,9 @@ def remote_command(args):
                 state += f" kb {kb}"
             if km:
                 state += " keymap " + ",".join(f"{src}:{dst}" for src, dst in km.items())
-            print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}@{d.get('fps', 60)} "
+            routes = "".join(f", {r} {stream_settings(*s)}" for r, s in route_settings(d).items())
+            print(f"{n} {d['id']} {host.get('name')} {display_target(host, d)} {d['app']} {w}x{h}"
+                  f"{stream_settings(d.get('fps', 60), d.get('bitrate', 0))}{routes} "
                   f"{state}{' hidden' if d.get('hidden') else ''}  {d.get('label', '')}")
         return
     if what == "host" and len(args) >= 3:
@@ -1665,8 +1701,10 @@ def remote_command(args):
     if what == "set" and len(args) >= 3:
         layout = load_layout()
         n, host, d = find_display(layout, args[1])
+        rerouted = False
         for kv in args[2:]:
             k, _, v = kv.partition("=")
+            route, dot, key = k.partition(".")
             if d.get("window") and k in ("mode", "scale"):
                 raise RuntimeError("remote set: a window's scale is ft-layout window scale N SCALE" if k == "scale" else
                                    "remote set: a window has no monitor of its own to put in a mode")
@@ -1699,11 +1737,16 @@ def remote_command(args):
                     d.pop("scale", None)
                 else:
                     d["scale"] = float(v)
+            elif dot and route in ROUTE_NAMES and key in ROUTE_LIMITS and (
+                    not v or (v.isdigit() and ROUTE_LIMITS[key][0] <= int(v) <= ROUTE_LIMITS[key][1])):
+                set_route_setting(d, route, key, int(v) if v else None)
+                rerouted = True
             elif ft_remotekeys.apply_keyboard_kv(d, k, v):
                 pass  # ft-appless reloads kb_layout and keymap within 2 s
             else:
                 raise RuntimeError(f"remote set: {kv!r}? (size=WxH fps=F bitrate=KBPS label=TEXT app=APP metres=M "
                                    "mode=WxH@MHZ|own scale=0.5..4|own "
+                                   "direct.fps=F direct.bitrate=KBPS network.fps=F network.bitrate=KBPS "
                                    "kb_layout=qwerty|dvorak|dvorak-qwerty-cmd|colemak|none keymap=FROM:TO[,...]|none)")
         save_layout(layout)
         keys = {kv.partition("=")[0] for kv in args[2:]}
@@ -1714,7 +1757,12 @@ def remote_command(args):
         if d.get("off") or keys == {"scale"}:
             return
         try:
-            start_remote(screens_socket(), n, host, d)  # starts over with the new settings
+            sock = screens_socket()
+            if rerouted and n in (remotes_running(sock) or {}):
+                # ft-screens starts a stream over only when what it passes changes, and a route's
+                # settings are ft-stream/ft-appless's own, so it starts over here, its panel where it is.
+                sock.ask(f"remote {n} stop")
+            start_remote(sock, n, host, d)  # starts over with the new settings
         except RuntimeError as e:
             log(f"saved; not applied now: {e}")
         return

@@ -60,6 +60,9 @@ PACKAGES = {
                            "window's grab bar; picking up a controller; mapped controller buttons; gaze, "
                            "and a gaze calibration with Track Dominant Eye Only on; the reset countdown stays "
                            "visible while turning, accepts no pointer input, and disappears before reset; "
+                           "controller-laser clicks between a Frametop window and a native gamescope window "
+                           "switch physical-keyboard typing without a mouse click (dashboard focus stack: "
+                           "m_entryAtTopOfStack, m_bPanelVisible, m_bCanTakeKeyboardFocus); "
                            "Full Keyboard (keyboard/) opens for a desktop text field over the screens with "
                            "the dashboard closed, in the dashboard, and in place of Steam's own keyboard in a "
                            "Steam field, and its lasers, controller tips and fingertips press keys",

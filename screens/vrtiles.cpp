@@ -642,10 +642,8 @@ void TileDrop(Screen &s, int i) {
     const double pt[3] = {q.m[0][3], q.m[1][3], q.m[2][3]};
     double az, el;
     tilecurve::Direction(TileWall(), pt, &az, &el);
-    if (OverCentre(i, az, el)) {   // (right on the centre display: it takes its place, the two trade)
-        TileTakeCentre(i, "let go on it");
-        return;
-    }
+    // (right on the centre display: it takes its place, the two trade; not a tile, as a satellite: dropped)
+    if (OverCentre(i, az, el) && TileTakeCentre(i, "let go on it")) return;
     const tiling::Drop d = g_tiles.DropFor(i, az, el, TileInfo);
     g_tiles.Drop(i, d, az);
     static const char *kinds[] = {"into column", "a new column at", "pulled off: back in its place, column", "up, a neighbour pulled in under it, column"};
@@ -1010,11 +1008,15 @@ void TileCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, char *re
             if (!arc && !*n) return (void)std::snprintf(reply, size, "ok %d", g_tiles.Centre() + 1);
             const int i = which(n);
             if (i < 0 || !g_tiles.Tiled(i)) return (void)std::snprintf(reply, size, "error no such tile");
-            if (arc && i != g_tiles.Centre()) return (void)std::snprintf(reply, size, "error not the centre display");
-            if (!arc && !TileTakeCentre(i, "ft-screens' socket")) return (void)std::snprintf(reply, size, "ok nothing to do");
-            if (arc && !g_tiles.ToggleArc(i)) return (void)std::snprintf(reply, size, "ok nothing to do");
-            if (arc) RetileDash(), RememberTiles();
-            return (void)std::snprintf(reply, size, "ok %s %d%s", arc ? "arc" : "centre", i + 1, arc ? (g_tiles.Arc(i) ? " on" : " off") : "");
+            if (!arc) {
+                if (!TileTakeCentre(i, "ft-screens' socket")) return (void)std::snprintf(reply, size, "ok nothing to do");
+                return (void)std::snprintf(reply, size, "ok centre %d", i + 1);
+            }
+            if (i != g_tiles.Centre()) return (void)std::snprintf(reply, size, "error not the centre display");
+            if (!g_tiles.ToggleArc(i)) return (void)std::snprintf(reply, size, "ok nothing to do");
+            RetileDash();
+            RememberTiles();
+            return (void)std::snprintf(reply, size, "ok arc %d %s", i + 1, g_tiles.Arc(i) ? "on" : "off");
         }
         if (!std::strcmp(parsed.rest, "recentre")) {   // (a reset: the group round you, each tile as it is in it)
             LayoutLetGo("a reset");

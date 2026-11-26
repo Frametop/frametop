@@ -24,7 +24,7 @@ enum class Item {
     KeepInView,    // placement: pinned to the head (desktop screens and remote displays)
     OnDashboard,   // placement: anchored to the SteamVR dashboard
     StayShown,     // ...and shown with the dashboard closed too (checked when on, while anchored)
-    CentreDisplay, // ...and the tiles' centre display, straight ahead and curved round them (checked when it is; a tile)
+    CentreDisplay, // ...and the tiles' centre display, straight ahead (checked when it is; a tile)
     MoveAll,       // held: carry every panel, in the room and on the dashboard, as they stand (not from one on the head or a wrist)
     Theater,       // View in Theater (Steam's tile, a Steam game's panel)
     BarPosition,   // the edges page (its value: the bar's edge)

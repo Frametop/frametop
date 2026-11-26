@@ -39,7 +39,11 @@ bool g_tileRegroup = true;                // the dashboard opened: the group goe
 bool g_tileReset = false;                 // "tiles recentre" (ft-layout's reset): the group in front of your head now
 bool g_dashWasUp = false;
 Mat g_tileWorld = Identity();             // the group frame in the room, last tick (the dashboard's moves as it opens)
-tilekeep::Put g_tilePut;                  // put there by hand (Move All Windows): an opening leaves it
+tilekeep::Put g_tilePut;                  // put there by hand (Move All Windows) or brought round you: an opening leaves it
+tilekeep::Steady g_tileSteady;            // the headset worn and the head still: only then do they come round it
+int64_t g_tileWornReadMs = 0;             // the headset's activity level, read this often (it's a call to vrserver)
+bool g_tileWorn = false;
+bool g_tileLeft = false;                  // the last opening left them where they were (KeepPut), not brought them round
 bool g_tileStayTheater = false;           // DASH_TILE_STAY_THEATER: staying ones stay over a game in SteamVR's theater too
 bool g_newWindowsTiled = true;            // NEW_WINDOWS_TILED: a window with no place of its own comes on the tiles (0: in the room)
 // The wall: at Steam's bar (DASH_TILE_AT_BAR, tileframe.h's AtBar), or where DASH_TILE_RADIUS and
@@ -317,7 +321,11 @@ bool Regroup(bool atHead = false) {
     g_tiles.Recentre(-1);
     g_tileGroupRel = Mul(Inverse(bar), ToMat(g));
     g_tileGroupSet = true;
-    g_tilePut.Clear();
+    g_tileLeft = false;
+    // (from here they stay as the dashboard opens while you stay here and face them: tilekeep.h; round a
+    // guessed bar, the first real opening still takes them to Steam's)
+    if (Dash().guessed) g_tilePut.Clear();
+    else g_tilePut.At(head, ToMat(g), false);
     RetileDash();
     const tiling::Layout &l = g_tiles.Last();
     // (the facing in the room, 0 its -Z, right positive; the bar from there)
@@ -329,8 +337,8 @@ bool Regroup(bool atHead = false) {
                 g_tileSteamOverBar ? ", Steam's page over the bar" : "", l.el0, l.el1, l.az0, l.az1);
     return true;
 }
-// The dashboard opened by tiles put by hand, with you still there (tilekeep.h): they stay, only Steam's
-// menu a slot in them where it is now. False: they come round you (Regroup).
+// The dashboard opened with you still where the tiles were put by hand or last brought round you
+// (tilekeep.h): they stay, only Steam's menu a slot in them where it is now. False: they come round you (Regroup).
 bool KeepPut() {
     Mat head;
     if (!g_tileGroupSet || !DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head) ||
@@ -338,6 +346,7 @@ bool KeepPut() {
         return false;
     TileGroupTo(g_tileWorld);
     g_tilePut.Kept(NowMs());
+    g_tileLeft = true;
     double g[3][4], barAz = 0, slot = 0;
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 4; ++c) g[r][c] = g_tileWorld.m[r][c];
@@ -345,7 +354,8 @@ bool KeepPut() {
     const int steam = SteamDashIndex();
     g_tileSteamOverBar = steam >= 0 && g_tiles.Tiled(steam);   // (nothing more to wait for: UpdateDashTiles)
     RetileDash();
-    std::printf("dashboard tiles: left where they were put (Move All Windows); Steam's slot %.0f degrees at %.0f\n", slot, barAz);
+    std::printf("dashboard tiles: left where they %s; Steam's slot %.0f degrees at %.0f\n",
+                g_tilePut.byHand ? "were put (Move All Windows)" : "last came round you", slot, barAz);
     return true;
 }
 }  // namespace
@@ -757,14 +767,30 @@ namespace {
 // groups them at the bar as always (g_tileRegroup is still set).
 constexpr long kGuessAgainTicks = 90;   // the head's pose lost this long (about 1 s): off and on again
 long g_guessHeadLost = -1;              // ticks the head's pose has been lost (-1: it's valid)
-void GuessTiles(bool up) {
+bool g_guessAgain = false;              // ...back again: guessed again once the head is steady
+void GuessTiles(bool up, bool steady) {
     Mat head;
     const bool valid = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
-    const bool back = valid && g_guessHeadLost >= kGuessAgainTicks;
+    g_guessAgain = g_guessAgain || (valid && g_guessHeadLost >= kGuessAgainTicks);
     g_guessHeadLost = valid ? -1 : g_guessHeadLost + 1;
     if (!valid || up || Dash().ever || g_tiles.Ids().empty() || TileDragging() || LayoutCarrying()) return;
-    if (Dash().guessed && !back) return;
+    if ((Dash().guessed && !g_guessAgain) || !steady) return;
+    g_guessAgain = false;
     if (GuessDash(head)) Regroup(true);
+}
+// The headset worn and the head steady (tilekeep::Steady), from this tick's head pose.
+bool HeadSteady() {
+    const int64_t now = NowMs();
+    if (now >= g_tileWornReadMs) {
+        g_tileWornReadMs = now + 250;
+        const auto level = vr::VRSystem()->GetTrackedDeviceActivityLevel(vr::k_unTrackedDeviceIndex_Hmd);
+        g_tileWorn = level == vr::k_EDeviceActivityLevel_UserInteraction || level == vr::k_EDeviceActivityLevel_UserInteraction_Timeout;
+    }
+    Mat head = Identity();
+    const bool valid = DevicePose(vr::k_unTrackedDeviceIndex_Hmd, &head);
+    const double at[3] = {head.m[0][3], head.m[1][3], head.m[2][3]};
+    g_tileSteady.Tick(now, g_tileWorn, valid, at);
+    return g_tileSteady.Ready(now);
 }
 }  // namespace
 
@@ -789,16 +815,24 @@ void UpdateDashTiles() {
     }
     // (a read that counts: this opening's, or before the group was ever set the last good one)
     const bool fresh = !Dash().why || (!g_tileGroupSet && !std::strcmp(Dash().why, "hidden"));
-    // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then)
-    if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) g_tileRegroup = true;
-    GuessTiles(up);
+    // (Steam's window tiled after the dashboard opened, the first time: it goes over the bar then, round
+    // you again if this opening brought them round you, not left where they were)
+    if (up && g_tileWallAtBar && !g_tileSteamOverBar && steam >= 0 && g_tiles.Tiled(steam)) {
+        g_tileRegroup = true;
+        if (!g_tileLeft) g_tilePut.Clear();
+    }
+    const bool steady = HeadSteady();
+    GuessTiles(up, steady);
     // (not under Move All Windows: once it's let go)
     const bool place = !LayoutCarrying() && !g_tiles.Ids().empty();
-    if (place && g_tilePut.Settling(NowMs()) && Dash().Framed()) TileGroupTo(g_tileWorld);
-    if (g_tileRegroup && Dash().ever && fresh && place && (KeepPut() || Regroup())) g_tileRegroup = false;
-    // (a reset: now, the dashboard open or not, round where you face: SteamVR doesn't move its bar while
-    // the dashboard is open, so at the bar a reset after turning did nothing; ft-layout leaves the tiled
-    // panels to this. The next opening puts them at the bar again, which SteamVR opens in front of you.)
+    // (an opening waits for a steady head: the headset worn a while and the head still, tilekeep.h;
+    // meanwhile the tiles stay where they are in the room, not with the bar)
+    const bool waiting = up && g_tileRegroup && g_tileGroupSet && !steady;
+    if (place && (g_tilePut.Settling(NowMs()) || waiting) && Dash().Framed()) TileGroupTo(g_tileWorld);
+    if (g_tileRegroup && steady && Dash().ever && fresh && place && (KeepPut() || Regroup())) g_tileRegroup = false;
+    // (a reset: now, the dashboard open or not, round where you face, worn or not: SteamVR doesn't move
+    // its bar while the dashboard is open, so at the bar a reset after turning did nothing; ft-layout
+    // leaves the tiled panels to this. Openings after leave them there while you stay and face them.)
     if (g_tileReset && !LayoutCarrying() && (g_tiles.Ids().empty() || (Dash().Framed() && Regroup(true)))) g_tileReset = false, g_tileRegroup = false;
     const bool settling = !g_tilesStopping && !TileDragging();
     if (settling && g_tiles.FillGap(NowMs())) {

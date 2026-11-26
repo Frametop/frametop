@@ -15,6 +15,8 @@ import unittest
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "installer" / "host" / "debug-report.sh"
 MASK = REPO / "installer" / "host" / "debug-mask.py"
+FEATURES = REPO / "installer" / "host" / "debug-features.sh"
+LIB = REPO / "installer" / "host" / "debug-lib.sh"
 sys.path.insert(0, str(REPO / "installer"))
 
 _spec = importlib.util.spec_from_file_location("debug_mask", MASK)
@@ -70,7 +72,10 @@ class Script(unittest.TestCase):
         self.assertIn("Deej__ on Discord", text.splitlines()[1])
         self.assertIn("dj_anuz@protonmail.com", text)   # the header isn't masked
         for section in ("The headset", "SteamVR", "Frametop Installer", "Frametop", "Services", "What's running",
-                        "Settings", "Recent warnings and errors"):
+                        "Settings", "Recent warnings and errors", "Logs: the desktop and its screens",
+                        "Logs: input and the pointer", "Logs: gaze and the eye tracker", "Logs: hand tracking",
+                        "NPU hand tracking (ft-npud, on the DSP)", "Logs: Frametop Voice (without what was heard)",
+                        "Logs: Frametop Together", "Logs: remote displays"):
             self.assertIn(f"\n===== {section}\n", text)
         self.assertIn("this one: 9.9.9-test", text)
         self.assertIn("POINTER=1", text)
@@ -85,6 +90,29 @@ class Script(unittest.TestCase):
         (stubs / "journalctl").chmod(0o755)
         text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}", LC_ALL="fr_FR.UTF-8")
         self.assertIn("Nov 25 17:56:30 <host> app[1]: up", text)
+
+    def test_what_voice_heard_and_what_commands_printed_stay_out(self):
+        stubs = self.home / "stubs"
+        stubs.mkdir()
+        (stubs / "journalctl").write_text("""#!/bin/sh
+case "$*" in
+  *frametop-voice*)
+    echo "Nov 25 10:00:00 box in-box[1]: INFO short window heard nothing; try 1 of 2: 'HEARDONE'"
+    echo "Nov 25 10:00:00 box in-box[1]: INFO transcribed: HEARDTWO"
+    echo "Nov 25 10:00:01 box in-box[1]: INFO mic open" ;;
+  *frametop-cmd-*)
+    echo "Nov 25 10:00:00 box systemd[9]: Started Frametop command gonk."
+    echo "Nov 25 10:00:00 box sh[10]: CMDOUTPUT" ;;
+  *ft-npud*)
+    echo "Nov 25 10:00:00 box python[5]: self-test bit-exact; graph 769e4e61" ;;
+esac
+""")
+        (stubs / "journalctl").chmod(0o755)
+        text = self.run_it(PATH=f"{stubs}:{os.environ['PATH']}")
+        for gone in ("HEARDONE", "HEARDTWO", "CMDOUTPUT"):
+            self.assertNotIn(gone, text)
+        for kept in ("INFO mic open", "Started Frametop command gonk.", "graph 769e4e61"):
+            self.assertIn(kept, text)
 
     def test_what_is_private_is_hidden(self):
         text = self.run_it()
@@ -187,8 +215,9 @@ class Window(unittest.TestCase):
         self.page, self.host = debug_page, host
 
     def test_the_script_is_put_on_the_host_with_the_others(self):
-        for f in (SCRIPT, MASK):
+        for f in (SCRIPT, FEATURES, LIB, MASK):
             self.assertIn(f.name, self.host.HOST_FILES)
+        for f in (SCRIPT, FEATURES, MASK):
             self.assertTrue(os.access(f, os.X_OK))
 
     def test_it_finds_the_file_the_script_wrote(self):

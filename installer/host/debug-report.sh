@@ -2,8 +2,9 @@
 # The Frametop Installer's Debug button runs this on the host. It writes one text file with what
 # a report of a problem needs, in Downloads: the headset and SteamOS, SteamVR, the Frametop
 # Installer, the installed Frametop and its settings, its services and what's running, the last
-# install's log, recent errors, and, when a Frametop release is installed, its own report
-# (scripts/report.sh). Nothing is sent anywhere: the user sends the file.
+# install's log, recent errors, each feature's logs and NPU hand tracking (debug-features.sh),
+# and, when a Frametop release is installed, its own report (scripts/report.sh). Nothing is sent
+# anywhere: the user sends the file.
 #
 # It also runs by hand, when the window won't open:
 #   bash ~/.cache/frametop-installer/bin/debug-report.sh
@@ -13,9 +14,11 @@
 # Secrets, addresses and the serial number are hidden before it's saved (debug-mask.py says which).
 # Names the user gave things, such as their PCs' in the screens' layout, stay. Left out: Frametop
 # Voice's part of Frametop's report, which listens to the microphone for a second.
-# The commands' timeouts add up to under 5 minutes, inside the window's 7 (debug_page.TIMEOUT).
+# The commands' timeouts add up to under 8 minutes, inside the window's 9 (debug_page.TIMEOUT).
 # FRAMETOP_DEBUG_OFFLINE=1: no GitHub check (the tests).
 set -u
+here=$(dirname "${BASH_SOURCE[0]}")
+. "$here/debug-lib.sh"
 uid=$(id -u)
 export XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus
 # (English dates on journal lines, here and in Frametop's own report, for the mask to find the hostname)
@@ -32,26 +35,6 @@ mkdir -p "$dir" || { echo "couldn't make $dir" >&2; exit 1; }
 out=$dir/frametop-debug-$(date +%Y%m%d-%H%M%S).txt
 raw=$(mktemp) || exit 1
 trap 'rm -f "$raw"' EXIT
-
-section() { printf '\n===== %s\n' "$*"; }
-# t SECONDS COMMAND...: a command that can't hang the report
-# (one that isn't there returns 127 quietly, for the caller's fallback)
-t() { local s=$1; shift; command -v "$1" >/dev/null 2>&1 || return 127; timeout "$s" "$@" 2>&1; }
-units() {
-  for u in "$@"; do
-    echo "$u: $(systemctl --user is-enabled "$u" 2>/dev/null || true) / $(systemctl --user is-active "$u" 2>/dev/null || true)"
-  done
-}
-# show FILE [BYTES]: a file, or why it isn't there
-show() {
-  if [ -f "$1" ]; then
-    echo "--- $1 ($(stat -c '%s bytes, changed %y' "$1" 2>/dev/null | cut -d. -f1))"
-    head -c "${2:-30000}" "$1"
-    echo
-  else
-    echo "--- $1: not there"
-  fi
-}
 
 {
   section "The headset"
@@ -119,11 +102,13 @@ show() {
   t 20 podman images --format '{{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}' 2>/dev/null | grep -i frametop | sed 's/^/image: /'
 
   section "Services"
-  units frametop-input-relay frametop-pointer frametop-power frametop-gaze frametop-desktop frametop-voice \
-    frametop-voice-whisper frametop-camd frametop-hands frametop-handview frametop-installer
-  for u in frametop-eyegrab steamframe-bt-fixups; do
-    echo "$u (system): $(systemctl is-enabled "$u" 2>/dev/null || true) / $(systemctl is-active "$u" 2>/dev/null || true)"
-  done
+  # (every one installed, from its unit file: a feature added later is listed too)
+  mapfile -t user_units < <(systemctl --user list-unit-files --plain --no-legend 'frametop*' 'frame-voice*' 2>/dev/null |
+    awk '$1 !~ /@/ {print $1}')
+  mapfile -t system_units < <(systemctl list-unit-files --plain --no-legend 'frametop*' 'steamframe*' 'ft-npud*' \
+    'dsp_service*' 2>/dev/null | awk '$1 !~ /@/ {print $1}')
+  [ ${#user_units[@]} -gt 0 ] && units "${user_units[@]}" || echo "no Frametop services installed"
+  [ ${#system_units[@]} -gt 0 ] && sunits "${system_units[@]}"
   echo "failed user units: $(systemctl --user --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)"
   echo "failed system units: $(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}' | xargs)"
 
@@ -169,6 +154,8 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
   echo "--- /tmp/frametop-session.log (last 40)"
   tail -n 40 /tmp/frametop-session.log 2>/dev/null || echo "not there"
 
+  t 150 bash "$here/debug-features.sh"
+
   if [ -f "$rel/scripts/report.sh" ]; then
     section "Frametop's own report (scripts/report.sh --system --desktop --gaze --hands)"
     r=$(t 90 bash "$rel/scripts/report.sh" --system --desktop --gaze --hands </dev/null)
@@ -188,6 +175,6 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
   echo "Frametop debug report, $(date '+%F %T %Z')"
   echo "Send this file to Deej__ on Discord (a direct message), or email it to dj_anuz@protonmail.com,"
   echo "with what you did, what you expected, and what happened."
-  python3 -I "$(dirname "${BASH_SOURCE[0]}")/debug-mask.py" "$raw" "$(cat /proc/sys/kernel/hostname 2>/dev/null)"
+  python3 -I "$here/debug-mask.py" "$raw" "$(cat /proc/sys/kernel/hostname 2>/dev/null)"
 } >"$out" || { echo "couldn't write $out" >&2; exit 1; }
 echo "wrote $out"

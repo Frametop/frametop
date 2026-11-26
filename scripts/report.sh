@@ -347,7 +347,7 @@ PY
   journalctl --user -u pipewire -u wireplumber -n 3000 --no-pager -o short 2>/dev/null | grep -a -i -E 'error|cannot|failed' | tail -n 15 | sed 's/^/  /'
   section "Voice dictation (last 30 lines, without what was said)"
   journalctl --user -u frametop-voice -u frametop-voice-whisper -u frame-voice -u frame-voice-whisper -n 200 --no-pager -o short 2>/dev/null | grep -a -v -E "$noise" |
-    grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|decode skipped|line up with' | tail -n 30
+    grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|short window|decode skipped|line up with' | tail -n 30
 fi
 EOF
 
@@ -407,7 +407,7 @@ fi
 if has voice; then
   printf '\n===== Frametop Voice while watching (without what was said)\n'
   journalctl --user -u frametop-voice -u frametop-voice-whisper -u frame-voice -u frame-voice-whisper --since "$since" --no-pager -o short 2>/dev/null |
-    grep -a -v -E "$noise" | grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|decode skipped|line up with' | tail -n 200
+    grep -a -v -E "$noise" | grep -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|short window|decode skipped|line up with' | tail -n 200
   log "PipeWire, WirePlumber and proxmicmute" pipewire wireplumber steamvr-proxmicmute
 fi
 EOF

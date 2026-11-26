@@ -19,7 +19,7 @@ from . import host, selfupdate  # noqa: E402
 from .widgets import button, in_thread, label, vbox  # noqa: E402
 
 SCRIPT = "debug-report.sh"
-TIMEOUT = 420   # more than the script's own timeouts add up to (debug-report.sh)
+TIMEOUT = 540   # more than the script's own timeouts add up to (debug-report.sh)
 CONTACT = ("Send it to Deej__ on Discord (a direct message), or email it to dj_anuz@protonmail.com, "
            "with what you did, what you expected, and what happened.")
 
@@ -86,7 +86,7 @@ class DebugWindow(Gtk.Window):
         self.report_show(Gtk.Spinner(spinning=True, height_request=48),
                          label("Making a debug report...", css=("title-3",), xalign=0.5),
                          label("It looks at SteamOS, SteamVR, Frametop's install, its settings and services, "
-                               "and what's running. That usually takes under a minute.", css=("dim-label",),
+                               "what's running, and each feature's logs. That usually takes under a minute.", css=("dim-label",),
                                xalign=0.5))
         own = selfupdate.own_version() or "a local build"
         in_thread(lambda: collect(own), self.report_done, self.report_failed)
@@ -99,8 +99,8 @@ class DebugWindow(Gtk.Window):
                          label(f"It's {path.name}, in your {path.parent.name or 'home'} folder:"),
                          label(str(path), css=("monospace",), selectable=True),
                          label(CONTACT, css=("heading",)),
-                         label("It has the headset's SteamOS and SteamVR versions, Frametop's install, settings "
-                               "and logs, and what's running. Passwords, tokens, email addresses, network "
+                         label("It has the headset's SteamOS and SteamVR versions, Frametop's install and "
+                               "settings, what's running, and each feature's logs, NPU hand tracking's too. Passwords, tokens, email addresses, network "
                                "addresses, Bluetooth addresses and the headset's serial number are hidden. Names "
                                "you gave things, such as your PCs', stay in. Nothing is sent: you send the file.",
                                css=("dim-label",)),

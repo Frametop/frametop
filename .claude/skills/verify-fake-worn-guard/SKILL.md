@@ -11,7 +11,7 @@ still faked, `$XDG_RUNTIME_DIR/frametop-fake-worn.json` says so.
 
 **The harm.** ft-stream leases a host's input while it holds the host's input lock and the pointer
 helper says "worn", and the helper can't tell `worn on` from a real head. A break takes the keyboard
-and mouse from whoever sits at that computer (2026-10-30: oma7, mid-sentence; see
+and mouse from whoever sits at that computer (2026-10-30: linuxpc, mid-sentence; see
 `docs/host-input.md`).
 
 Tests can't reach this: it depends on the order in which a guard unit, a stream, the pointer
@@ -82,7 +82,7 @@ A, B and C were real, replayed against the code by `scripts/replay` at `68d3f83`
 fixed: `cli.py` `release_or_keep_flag` and `drop_unsafe_worn` release through
 `hostinput.drop_wearer`, so the flag goes only once the proxy confirms the release (or isn't
 there), and a flag naming the command is written if none is left. D, which the fix for C
-uncovered, is fixed too. B is fixed in ft-stream (oma7's `bd606ce`, merged in `81a5c82`), and E,
+uncovered, is fixed too. B is fixed in ft-stream (linuxpc's `bd606ce`, merged in `81a5c82`), and E,
 which that fix uncovered, in `38d6257`. F is fixed in `1f485fe`. Every config now holds.
 
 B and E are fixed only in the code on this branch. The installed ft-stream may predate them:

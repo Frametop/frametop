@@ -101,14 +101,14 @@ class Preview(unittest.TestCase):
         layout = self.layout()
         self.m.save_anchor(*anchor)
         self.assertEqual(self.m.stored_anchor(), anchor)
-        layout["hosts"] = [{"name": "oma7", "displays": [{"id": "oma7-dp-2", "label": "DP-2", "screen": 106,
+        layout["hosts"] = [{"name": "linuxpc", "displays": [{"id": "linuxpc-dp-2", "label": "DP-2", "screen": 106,
                                                            "size": [5120, 1440], "metres": 5.0}]}]
         screen = self.world(anchor, (0.0, 0.0, -2.0), (0.0, 0.0))
         remote = self.world(anchor, (0.0, 0.5, -3.0), (0.0, 5.0))
         window = self.world(anchor, (1.0, 0.0, -1.0), (-45.0, 0.0))
         replies = {"screens": "ok 1 1:1920x1080:1",
                    "head": "ok 1.5000 1.6000 -0.5000 120.00",  # 0.5 m along world +x, turned 30 deg left
-                   "remotes": "ok 1 106:frametop-oma7-dp-2:live:5120x1440",
+                   "remotes": "ok 1 106:frametop-linuxpc-dp-2:live:5120x1440",
                    "get 1": self.get_reply(*screen, 2.0, 1.125),
                    "get 106": self.get_reply(*remote, 5.0, 1.4, 2.0),
                    "get 2": self.get_reply(*window, 1.0, 0.75)}
@@ -121,7 +121,7 @@ class Preview(unittest.TestCase):
         self.assertAlmostEqual(view["head"]["yaw"], 30.0, places=2)
         kinds = {p["kind"]: p for p in view["panels"]}
         self.assertEqual(set(kinds), {"screen", "remote", "window"})
-        self.assertEqual(kinds["remote"]["label"], "oma7 DP-2")
+        self.assertEqual(kinds["remote"]["label"], "linuxpc DP-2")
         self.assertEqual(kinds["window"]["label"], "Frametop Display Settings")
         top = kinds["screen"]["top"]
         self.assertTrue(close(top[len(top) // 2], (0.0, -2.0)), top)
@@ -192,7 +192,7 @@ class Preview(unittest.TestCase):
         layout = self.layout()
         screen = self.world(anchor, (0.0, 0.0, -2.0), (0.0, 0.0))
         replies = {"screens": "ok 1 1:1920x1080:1", "head": "ok 0 1.6 0 0",
-                   "remotes": "ok 2 105:frametop-oma7-edp-2:lost:2560x1600 106:frametop-oma7-dp-2:live:5120x1440",
+                   "remotes": "ok 2 105:frametop-linuxpc-edp-2:lost:2560x1600 106:frametop-linuxpc-dp-2:live:5120x1440",
                    "get 1": self.get_reply(*screen, 2.0, 1.125), "get 105": "error no screen 105",
                    "get 106": self.get_reply(*screen, 5.0, 1.4)}
         room = self.m.read_room(replies.get, layout, [(2, "gone")])

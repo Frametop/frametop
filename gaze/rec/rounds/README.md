@@ -143,7 +143,7 @@ Training reads the cue words in `prompts.jsonl` (`frame-eyes/train/data/ingest.p
    `test_shipped_rounds_load` loads every script; update its count.
 3. A dry run: `python3 -m gaze.rec.session <script> --dry-run --speed 20 --next-after 0.1`.
 4. A replay end to end: `frame-eyes/tools/eyerec-dryrun <bounty>` (record, export, validate), and the
-   export through `eyes_hub.py check` and `ingest.py` on dody. Delete those rounds afterwards: their
+   export through `eyes_hub.py check` and `ingest.py` on gamepc. Delete those rounds afterwards: their
    labels are wrong.
 5. A real round in the headset, with a note in `HEADSET-TESTS.md`: is every cue clear, and is the
    length right?

@@ -29,8 +29,8 @@ class RemoteHost(unittest.TestCase):
             raise self.m.NoAnswer("ft-screens isn't running")
 
         self.m.screens_socket = no_screens
-        self.m.save_layout({"hosts": [{"name": "oma7", "address": "192.0.2.30", "route": "auto",
-                                       "displays": [{"id": "oma7-dp-2", "client": "frametop-1", "app": "Desktop"}]}]})
+        self.m.save_layout({"hosts": [{"name": "linuxpc", "address": "192.0.2.30", "route": "auto",
+                                       "displays": [{"id": "linuxpc-dp-2", "client": "frametop-1", "app": "Desktop"}]}]})
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -40,14 +40,14 @@ class RemoteHost(unittest.TestCase):
             return json.load(f)["hosts"][0]
 
     def test_input_on_and_off(self):
-        self.m.remote_command(["host", "oma7", "input=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on"])
         self.assertIs(self.host()["input"], True)
-        self.m.remote_command(["host", "oma7", "input=off"])
+        self.m.remote_command(["host", "linuxpc", "input=off"])
         self.assertIs(self.host()["input"], False)
 
     def test_input_needs_no_restart(self):
         # ft-stream reads the switch from the layout every 3 s: nothing asks ft-screens to start over.
-        self.m.remote_command(["host", "oma7", "input=on", "mic=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on", "mic=on"])
         self.assertEqual(self.asked, [])
         self.assertIs(self.host()["input"], True)
         self.assertIs(self.host()["mic"], True)
@@ -55,7 +55,7 @@ class RemoteHost(unittest.TestCase):
     def test_bad_values_save_nothing(self):
         for bad in ("input=yes", "input=", "input", "inputs=on"):
             with self.assertRaisesRegex(RuntimeError, "input=on\\|off"):
-                self.m.remote_command(["host", "oma7", "input=on", bad])
+                self.m.remote_command(["host", "linuxpc", "input=on", bad])
             self.assertNotIn("input", self.host())
 
     def test_unknown_host(self):
@@ -67,7 +67,7 @@ class RemoteHost(unittest.TestCase):
         with redirect_stdout(out):
             self.m.remote_command(["list"])
         self.assertNotIn(" input", out.getvalue())
-        self.m.remote_command(["host", "oma7", "input=on"])
+        self.m.remote_command(["host", "linuxpc", "input=on"])
         out = io.StringIO()
         with redirect_stdout(out):
             self.m.remote_command(["list"])

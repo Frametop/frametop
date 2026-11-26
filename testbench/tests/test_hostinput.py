@@ -17,7 +17,7 @@ from unittest import mock
 from frame_testbench import cli, hostinput
 
 LAYOUT = {'hosts': [
-    {'name': 'oma7', 'address': '192.0.2.61', 'input': True, 'displays': []},
+    {'name': 'linuxpc', 'address': '192.0.2.61', 'input': True, 'displays': []},
     {'name': 'Deej-5090', 'address': '192.0.2.93', 'mic': True, 'displays': []},
     {'name': "Daenon's Pro14", 'address': '192.0.2.92', 'input': False, 'displays': []},
     {'name': 'broken'}, 'not a host']}
@@ -49,18 +49,18 @@ class Fixture(unittest.TestCase):
 
 class HostInputTests(Fixture):
     def test_streams_finds_ft_stream_and_strips_a_port(self):
-        self.stream(11, '192.0.2.61', 'frametop-oma7-edp-2')
+        self.stream(11, '192.0.2.61', 'frametop-linuxpc-edp-2')
         self.stream(12, '192.0.2.92:48089', 'frametop-mac-oled')
         self.process(13, '/usr/bin/python3', 'ft-stream', 'stream', '192.0.2.61')
         self.process(14, 'ft-stream', 'pair', '192.0.2.61', '--id', 'x')
         (self.proc / 'self').mkdir()
         (self.proc / '15').mkdir()   # gone before its cmdline was read
         found = sorted(hostinput.streams(self.proc), key=lambda s: s['pid'])
-        self.assertEqual(found, [{'pid': 11, 'host': '192.0.2.61', 'id': 'frametop-oma7-edp-2'},
+        self.assertEqual(found, [{'pid': 11, 'host': '192.0.2.61', 'id': 'frametop-linuxpc-edp-2'},
                                  {'pid': 12, 'host': '192.0.2.92', 'id': 'frametop-mac-oled'}])
 
     def test_only_hosts_with_input_true_count(self):
-        self.assertEqual(hostinput.input_hosts(self.layout), {'192.0.2.61': 'oma7'})
+        self.assertEqual(hostinput.input_hosts(self.layout), {'192.0.2.61': 'linuxpc'})
         self.assertEqual(hostinput.input_hosts(self.tmp / 'missing.json'), {})
         self.layout.write_text('{not json')
         self.assertEqual(hostinput.input_hosts(self.layout), {})
@@ -69,12 +69,12 @@ class HostInputTests(Fixture):
         self.stream(11, '192.0.2.92')   # input off
         self.stream(12, '192.0.2.93')   # no input key
         st = hostinput.state(self.layout, self.proc)
-        self.assertEqual(st['input_hosts'], ['oma7'])
+        self.assertEqual(st['input_hosts'], ['linuxpc'])
         self.assertIsNone(hostinput.refusal(st))
         self.stream(13, '192.0.2.61')
         st = hostinput.state(self.layout, self.proc)
-        self.assertEqual([s['name'] for s in st['input_streams']], ['oma7'])
-        self.assertIn('oma7', hostinput.refusal(st))
+        self.assertEqual([s['name'] for s in st['input_streams']], ['linuxpc'])
+        self.assertIn('linuxpc', hostinput.refusal(st))
 
     def test_locks_say_which_host_lock_is_held_without_taking_it(self):
         held, free = self.run / 'frametop-input-192.0.2.61.lock', self.run / 'frametop-input-192.0.2.93.lock'
@@ -149,7 +149,7 @@ class GuardProcessTests(Fixture):
         guard = self.start()
         self.wait_flag(guard)
         self.assertFalse(hostinput.read_flag()['allow_host_input'])
-        self.assertFalse(self.lock_free())   # no stream can lease oma7 now
+        self.assertFalse(self.lock_free())   # no stream can lease linuxpc now
         self.assertTrue(self.lock_free('192.0.2.92'))   # input off: not its business
         hostinput.clear_flag()   # worn off, physical or release
         self.assertEqual(guard.wait(5), 0)
@@ -347,7 +347,7 @@ class WornGuardTests(Fixture):
 
     def test_worn_on_is_refused_while_a_host_that_lends_input_streams(self):
         self.stream(21, '192.0.2.61')
-        with self.assertRaisesRegex(ValueError, 'oma7.*--allow-host-input'):
+        with self.assertRaisesRegex(ValueError, 'linuxpc.*--allow-host-input'):
             self.worn('on')
         self.assertEqual((self.bench.commands, self.guards), ([], []))
         self.assertIsNone(hostinput.read_flag())
@@ -504,10 +504,10 @@ class WornGuardTests(Fixture):
         self.assertEqual(self.bench.commands, [('worn 1', True)])
 
     def test_host_input_command_reports_streams_and_flag(self):
-        self.stream(23, '192.0.2.61', 'frametop-oma7-dp-2')
+        self.stream(23, '192.0.2.61', 'frametop-linuxpc-dp-2')
         reply = cli.dispatch(cli.parser().parse_args(['host-input']), self.bench)
         self.assertTrue(reply['ok'])
-        self.assertEqual(reply['input_streams'][0]['id'], 'frametop-oma7-dp-2')
+        self.assertEqual(reply['input_streams'][0]['id'], 'frametop-linuxpc-dp-2')
         self.assertIsNone(reply['fake_worn'])
         self.assertEqual((reply['locks'], reply['logs']), ([], []))
 

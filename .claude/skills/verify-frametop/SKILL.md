@@ -223,5 +223,5 @@ A diff touching these gets the extra reviewer (Codex) in the review panel:
   Then `mic-latency bursts.txt mic.mkv --offset-ms MS`, MS the host's clock minus the Frame's: the
   lowest round trip of a few dozen `echo %time%` (Windows, 10 ms steps) or `date +%s.%N` over
   ssh. It prints the bursts matched and missed and the latency's median, spread and drift; the
-  absolute value is only as good as MS (half the round trip). 2026-10-30, dody on the network route: 55 of
+  absolute value is only as good as MS (half the round trip). 2026-10-30, gamepc on the network route: 55 of
   55 bursts, 234 ms, no spread or drift over a minute (both ends run on sample clocks).

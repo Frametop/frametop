@@ -12,7 +12,7 @@ stateDiagram-v2
     lg5: R2 open, HungGetsKilled: an ft-stream the host ended that hangs in LiStopConnection is never killed, its panel freezes and still says live (red R2.1-5, TLC, 5 steps)
     lg6: R3 open, HungLostGetsKilled: one that hangs after it said lost (decoder close, Disconnect Monitor) is never killed and holds every display of its host (red R3.1-6, TLC, 6 steps)
     lg7: R4 open, from the code: a desktop stop SIGTERMs its ft-streams and exits: one that hangs is an orphan nobody kills, and the next desktop starts its display beside it (red R4.1-3)
-    lg8: R5 open, minor, from the logs: a 404 that never clears retries every 30 s for good (remote 105, oma7 eDP-2)
+    lg8: R5 open, minor, from the logs: a 404 that never clears retries every 30 s for good (remote 105, linuxpc eDP-2)
     lg9: Fixed, drawn green: H1 (76121c7), H2 (2c783dd), R1 + the slot leak (e15b65f), fake-worn A C (37d0fbf) D (0c7eb9e) B (bd606ce) E (38d6257) F (1f485fe)
     lg10: Hold at 78e93b1: HostInputLease 3,561 states, HostChart 345, RemoteStreams 164, FakeWornGuard 264 to 632, G6RemoteExit 312 (all but R2, R3). AskedEnds holds, and breaks without e15b65f's SIGKILL
     lg11: A stuck ft-stream keeps frametop-input-HOST.lock and frametop-audio-HOST.lock until it dies: the host's other streams get no keyboard, mouse or sound

@@ -114,8 +114,15 @@ if has system; then
   echo "the busiest processes now:"
   top -b -n 1 -w 160 2>/dev/null | sed -n '7,17p'
 
-  section "/tmp/frametop-session.log (last 60 lines)"
-  tail -n 60 /tmp/frametop-session.log 2>/dev/null || echo "missing"
+  # (all the session's programs' stderr goes there, apps' too: only Frametop's own lines, D-Bus
+  # starting services without who asked, and the portals')
+  section "/tmp/frametop-session.log: Frametop's, D-Bus's and the portals' lines (last 60)"
+  if [ -f /tmp/frametop-session.log ]; then
+    grep -a -E '^(frametop|Frametop|ft-[a-z-]+|remote desktop|window drag|Steam PIN|Error EACCES|dbus-daemon\[|\((/usr/lib/)?(xdg-desktop-portal|flatpak-portal)[a-z-]*:)' \
+      /tmp/frametop-session.log | sed -E 's/comm="[^"]*"?/comm="<hidden>"/' | tail -n 60
+  else
+    echo "missing"
+  fi
   section "SteamVR server: Frametop and errors (last 60 lines)"
   grep -a -i -E 'ft_pointer|frametop|\[error\]' $logs/vrserver.txt 2>/dev/null | tail -n 60
 fi

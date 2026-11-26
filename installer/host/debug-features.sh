@@ -5,8 +5,9 @@
 #
 # Left out, as what the user said, typed or ran isn't the report's: what Frametop Voice heard
 # and what its commands and hooks printed (only ft-voiced's own lines go in), the output of the
-# user's own commands (only when each started and ended), apps' output in the desktop's session
-# (only KWin's, Plasma's and the session's), and the names of the people in a Together room.
+# user's own commands (only when each started and ended), apps' output in the user's session
+# (only the desktop's, SteamVR's, audio's and Frametop's programs: OURS in debug-lib.sh), and the
+# names of the people in a Together room, the user's too.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/debug-lib.sh"
 shopt -s nullglob
@@ -49,7 +50,7 @@ for f in /tmp/frametop-dashroute.log /tmp/frametop-gtksettings.log /tmp/frametop
   tailf "$f" 20
 done
 ulog 40 frametop-autostart frametop-keyboard frametop-dashpatch frametop-pin-lock
-echo "--- journal: frametop-desktop, KWin's, Plasma's and the session's lines (last 60)"
+echo "--- journal: frametop-desktop, the desktop's own programs' lines (last 60)"
 t 15 journalctl --user -u frametop-desktop -n 3000 --no-pager -o short | grep -a -E "$OURS" | tail -n 60
 
 section "Logs: input and the pointer"
@@ -112,7 +113,8 @@ section "Logs: Frametop Voice (ft-voiced's own lines, without what was heard)"
 t 15 journalctl --user -u frametop-voice -n 1000 --no-pager -o short |
   grep -a -E "$FROM (systemd\[|[^ ]+\[[0-9]+\]: [0-9-]{10} [0-9:]{8},[0-9]{3} [A-Z]+ )" |
   grep -a -v -E 'transcribed|voice command|wake word:|window [0-9.]+s|short window|decode skipped|line up with' | tail -n 100
-# (whisper.cpp prints what it heard only as "[00:00.000 --> 00:02.000] ..." segments, run with -pr)
+# (whisper-server prints what it heard only when run with -pr, which the unit doesn't; in case,
+# its timestamped segments are left out)
 ulog 30 frametop-voice-whisper | grep -a -v -E '\[[0-9:.]+ --> [0-9:.]+\]'
 echo "--- PipeWire, WirePlumber and proxmicmute: warnings (last 30)"
 t 15 journalctl --user -u pipewire -u wireplumber -u steamvr-proxmicmute -p warning -n 30 --no-pager -o short

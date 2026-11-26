@@ -155,15 +155,15 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
   echo "--- ~/.config/frametop* files: $(cd "$HOME/.config" 2>/dev/null && ls -d frametop* 2>/dev/null | xargs)"
 
   section "Recent warnings and errors"
-  echo "--- this user's (last 80, the last 2 hours)"
+  echo "--- this user's, from the desktop, SteamVR, audio and Frametop (last 80, the last 2 hours)"
   t 20 journalctl --user -p warning --since -2h -n 400 --no-pager -o short 2>/dev/null |
     grep -a -E "$OURS" | grep -a -v -E "$NOISE" | tail -n 80
   echo "--- the system's (last 40, the last 2 hours)"
   t 20 journalctl -p err --since -2h -n 40 --no-pager -o short 2>/dev/null | tail -n 40
   echo "--- SteamVR server: Frametop and errors (last 40)"
   grep -a -i -E 'ft_pointer|frametop|\[error\]' "$logs/vrserver.txt" 2>/dev/null | tail -n 40
-  echo "--- /tmp/frametop-session.log (last 40)"
-  tail -n 40 /tmp/frametop-session.log 2>/dev/null || echo "not there"
+  echo "--- /tmp/frametop-session.log: Frametop's, D-Bus's and the portals' lines (last 40)"
+  sessionlog /tmp/frametop-session.log 40
 
   t 150 bash "$here/debug-features.sh"
   [ $? -eq 124 ] && printf '\n(the feature logs stopped at 150 seconds: the rest of them is missing)\n'
@@ -173,7 +173,9 @@ print(", ".join(str(c.get("name", "?")) for c in cs) or "none")' "$f" 2>&1 | tai
     r=$(t 90 bash "$rel/scripts/report.sh" --system --desktop --gaze --hands </dev/null)
     made=$(printf '%s\n' "$r" | sed -n 's/^wrote //p' | tail -n 1)
     if [ -n "$made" ] && [ -f "$made" ]; then
-      cat "$made"
+      # (an older report.sh has the whole session log, apps' lines too: this report has its own)
+      awk '/^===== /{skip = /^===== \/tmp\/frametop-session\.log/; if (skip) print $0 "\n(left out here: it is above)"}
+           !skip' "$made"
       rm -f "$made"
     else
       echo "it didn't finish:"

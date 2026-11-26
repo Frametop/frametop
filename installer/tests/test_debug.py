@@ -144,6 +144,18 @@ esac
                      "in a room of 3 as <you>, floor laid", "a warning of SteamVR's", "whisper server listening"):
             self.assertIn(kept, text)
 
+    def test_an_older_report_sh_s_whole_session_log_is_left_out(self):
+        scripts = self.home / ".local/share/frametop/releases/current/scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "report.sh").write_text(
+            'f="$HOME/r.txt"\nprintf "\\n===== Versions\\nv1\\n\\n===== /tmp/frametop-session.log (last 60 lines)\\n'
+            'SESSIONAPP said a file\\n\\n===== Screens\\nkept\\n" >"$f"\necho "wrote $f"\n')
+        text = self.run_it()
+        self.assertNotIn("SESSIONAPP", text)
+        self.assertIn("===== /tmp/frametop-session.log (last 60 lines)\n(left out here: it is above)\n", text)
+        self.assertIn("===== Versions\nv1\n", text)
+        self.assertIn("===== Screens\nkept\n", text)
+
     def test_a_cut_off_says_so(self):
         stubs = self.home / "stubs"
         stubs.mkdir()
@@ -164,7 +176,7 @@ esac
 
     def test_what_is_private_is_hidden(self):
         text = self.run_it()
-        for secret in ("abc123", "s3cr3t", "ghp_xyz", "hunter2", "pw9", "curl", "a.person@example.com", "aa:bb:cc:dd:ee:ff", "ABCDEF123456",
+        for secret in ("abc123", "s3cr3t", "ghp_xyz", "hunter2", "pw9", "curl -u", "a.person@example.com", "aa:bb:cc:dd:ee:ff", "ABCDEF123456",
                        "192.168.1.20", "100.101.102.103", "\x1b["):
             self.assertNotIn(secret, text)
         self.assertIn("VIBEPOLLO_TOKEN=<hidden>", text)
@@ -193,6 +205,24 @@ esac
         self.assertIn("\n===== Frametop's own report", text)
         self.assertIn("ft-screens debug: token=<hidden>", text)
         self.assertFalse(made.exists())
+
+
+class SessionLog(unittest.TestCase):
+    def test_only_frametop_s_d_bus_s_and_the_portals_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = pathlib.Path(d) / "session.log"
+            log.write_text("frametop: hand tracking on\n"
+                           "dbus-daemon[5]: [session uid=1000 pid=5] Activating service name='org.kde.x' requested by "
+                           "':1.9' (uid=1000 pid=7 comm=\"/usr/bin/okular /home/x/Documents/Ta\")\n"
+                           "(okular:7): GLib-WARNING **: can't open /home/x/Documents/Taxes.pdf\n"
+                           "APPSTDERR anything at all\n"
+                           "(/usr/lib/xdg-desktop-portal:3): GLib-GObject-CRITICAL **: a portal's\n")
+            r = subprocess.run(["bash", "-c", f'. "{LIB}"; sessionlog "$1" 10', "-", str(log)],
+                               capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout, "frametop: hand tracking on\n"
+                         "dbus-daemon[5]: [session uid=1000 pid=5] Activating service name='org.kde.x' requested by "
+                         "':1.9' (uid=1000 pid=7 comm=\"<hidden>\")\n"
+                         "(/usr/lib/xdg-desktop-portal:3): GLib-GObject-CRITICAL **: a portal's\n")
 
 
 class Mask(unittest.TestCase):
@@ -247,6 +277,8 @@ class Mask(unittest.TestCase):
         self.assertEqual(self.m("bob@passkey and alice@github, not git@github.com"), "<login> and <login>, not <email>")
         self.assertEqual(self.m("18:00 click on 'Inbox (3) - Mail' (window)"), "18:00 click on '<hidden>' (window)")
         self.assertEqual(self.m("""menu on "Bob's Tax Return.pdf" (list)"""), "menu on '<hidden>' (list)")
+        self.assertEqual(self.m("systemd[9]: Failed to start [systemd-run] /usr/bin/mpv /home/x/Videos/a.mkv."),
+                         "systemd[9]: Failed to start [systemd-run] <hidden>")
         self.assertEqual(self.m(r"""click on 'it\'s "quoted" - Writer' (list)"""), "click on '<hidden>' (list)")
         self.assertEqual(self.m("1 /usr/bin/krdpserver --port 3389 -p Ab12Cd34 --certificate x.pem"),
                          "1 /usr/bin/krdpserver --port 3389 -p <hidden> --certificate x.pem")

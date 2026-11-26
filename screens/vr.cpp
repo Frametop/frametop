@@ -7092,6 +7092,7 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
         }
         it = g_imports.emplace(key, h).first;
     }
+    bool retile = false;
     if (b->width != s.width || b->height != s.height) {
         const int oldPx = s.width;
         const double oldW = s.metres, oldH = s.heightMetres();   // (a PC window's panel keeps its corner)
@@ -7135,8 +7136,10 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
         PlaceChrome(s);  // the height changed
         std::printf("screen %d: %dx%d\n", index + 1, s.width, s.height);
         // a tile its new size (a remote display tiled before its stream said its size kept the
-        // default's tile, a quarter too big, till something else laid the strip out again)
-        if (TileAnchored(index)) RetileDash();
+        // default's tile, a quarter too big, till something else laid the strip out again), once it's
+        // shown below: laid out before, it counted as not shown (vrtiles.cpp's TilesAbsent), its
+        // neighbours closed up for a tick and came back
+        retile = TileAnchored(index);
     }
     if (s.heldFloat) ReleaseHold(s);   // the crop that waited for this buffer
     s.key = key, s.buf = *b, s.plain = it->second, ++s.frames;
@@ -7146,6 +7149,7 @@ bool ft_vr_screen_present(int index, const void *key, const struct ft_dmabuf *b)
     vr::Texture_t tex = {&handle, vr::TextureType_SharedTextureHandle, vr::ColorSpace_Gamma};
     for (const auto &[k, sub] : s.subs) vr::VROverlay()->SetOverlayTexture(sub.overlay, &tex);
     s.shown = key;  // UpdateVisibility shows it on the next tick
+    if (retile) RetileDash();
     return true;
 }
 

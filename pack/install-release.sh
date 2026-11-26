@@ -249,12 +249,15 @@ main() {
   prune "$base" "$version" "$prev"
 }
 
-# in_use DIR: a process of this user names a file in DIR. The desktop and its session stay on the
-# release they started from until SteamVR restarts, an install or two later too, in its container.
+# in_use DIR...: a running process names a file in one of the DIRs. The desktop and its session stay
+# on the release they started from until SteamVR restarts, an install or two later too, in its
+# container. Any owner counts: a program with file capabilities (kwin_wayland, ft-camd) has a
+# root-owned /proc entry, and keeping a release a while longer is the safe mistake.
 in_use() {
-  local f
+  local f d pats=()
+  for d; do pats+=(-e "$d/"); done
   for f in /proc/[0-9]*/cmdline; do
-    [ -O "$f" ] && grep -qaF -- "$1/" "$f" 2>/dev/null && return 0
+    grep -qaF "${pats[@]}" "$f" 2>/dev/null && return 0
   done
   return 1
 }
@@ -270,8 +273,9 @@ prune() {
     [ -L "$d" ] && continue  # "current" itself, a link to the release just installed
     [ -f "$d/.frametop-release" ] || continue
     case ${d##*/} in "$version"|"$prev") continue ;; esac
-    if in_use "$d"; then
-      echo "keeping Frametop ${d##*/} for now: it's still running (until SteamVR restarts); a later install removes it"
+    # by the path as given and as resolved: processes name it either way (a --dir with a link or a "//")
+    if in_use "$d" "$(cd -P "$d" && pwd)"; then
+      echo "keeping Frametop ${d##*/} for now: something still runs from it (the desktop stays on its release until SteamVR restarts); a later install removes it"
       continue
     fi
     old_image=$(sed -n 's/^IMAGE=//p' "$d/.frametop-release")

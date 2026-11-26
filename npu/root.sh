@@ -156,7 +156,9 @@ install)
     [ -z "$odd" ] || fail "not files and directories only in the new tree: $odd"
     for e in "$stage"/* "$stage"/.[!.]* "$stage"/..?*; do
         [ -e "$e" ] || continue
-        [[ " ${MEMBERS[*]} " == *" ${e##*/} "* ]] || fail "not part of the tree: ${e##*/}"
+        ok=0
+        for m in "${MEMBERS[@]}"; do [ "${e##*/}" = "$m" ] && ok=1; done
+        [ "$ok" = 1 ] || fail "not part of the tree: ${e##*/}"
     done
     rm -f "$stage/SOURCE" "$stage/MANIFEST"
     printf 'from %s\ngraph sha256 %s\nfor uid %s\ninstalled %s\n' "$SRC" \

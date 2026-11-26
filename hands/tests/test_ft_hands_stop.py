@@ -3,8 +3,8 @@ started with exactly the arguments it's given, and no other process; a stale or 
 nothing, and it always exits 0 (a unit's ExecStartPre and ExecStopPost).
 
 The stand-ins are a copy of python3 named ft-hands (the program ft-hands-stop reads from /proc/PID/exe),
-started as ft-hands (a host one's process name) or through a link named exe (podman starts a program in
-the container so that its process name is "exe"), and a link named ft-other for another program."""
+started as ft-hands or through a link named exe (an ft-hands from before it set its own name is named "exe"
+once it has started again through /proc/self/exe), and a link named ft-other for another program."""
 import pathlib
 import shutil
 import subprocess
@@ -91,8 +91,9 @@ class FtHandsStop(unittest.TestCase):
         self.assertEqual(old.wait(timeout=5), -15)
         for p in (recorder, cutouts, new, host):
             self.assertTrue(self.alive(p))
+        again = self.start("exe", ("--status", "60"))
         self.assertEqual(self.stop(f), 0)   # without them, only the pidfile's
-        self.assertTrue(self.alive(cutouts))
+        self.assertTrue(self.alive(again))
 
     def test_a_linked_or_missing_pidfile_does_nothing(self):
         f = self.tmp / "hands.pid"

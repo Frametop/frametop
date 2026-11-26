@@ -667,9 +667,9 @@ class Panel:
 # Processes
 
 def find_processes(name):
-    """[(pid, argv)] of running processes called name (the container shares the host's PIDs). A program
-    podman starts in the container is called "exe" (Frametop's ft-hands is), so for those the name is
-    the program's, from /proc/PID/exe."""
+    """[(pid, argv)] of running processes called name (the container shares the host's PIDs). An ft-hands
+    from before it set its own name is called "exe" once it has started again through /proc/self/exe (on a
+    new ft-camd), so for those the name is the program's, from /proc/PID/exe."""
     out = []
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
@@ -2079,25 +2079,27 @@ class Session(Controls):
             self._panel.close()
 
     def _finish(self, state, error=""):
-        if self._needed:   # first: nothing records now, and a failure below mustn't keep Frametop's ft-hands unparked
-            self._needed.stop()
-            self._needed = None
-        if self._take:
-            self._end_take({"done": "complete", "stopped": "stopped"}.get(state, "stopped"))
-        if self._session_json is not None:
-            self._session_json["status"] = state
-            self._session_json["ended"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-            if error:
-                self._session_json["error"] = error
+        try:
+            if self._take:
+                self._end_take({"done": "complete", "stopped": "stopped"}.get(state, "stopped"))
+            if self._session_json is not None:
+                self._session_json["status"] = state
+                self._session_json["ended"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                if error:
+                    self._session_json["error"] = error
+                if self._stop_note and state == "stopped":
+                    self._session_json["stop_reason"] = self._stop_note
+                self._save_session()
+                if state == "done" and self.bounty and not self.dry_run:
+                    self._mark_done()
+            self._log("%s%s" % (state, ": " + error if error else ""))
             if self._stop_note and state == "stopped":
-                self._session_json["stop_reason"] = self._stop_note
-            self._save_session()
-            if state == "done" and self.bounty and not self.dry_run:
-                self._mark_done()
-        self._log("%s%s" % (state, ": " + error if error else ""))
-        if self._stop_note and state == "stopped":
-            self._log(self._stop_note)
-        self._stop_units()
+                self._log(self._stop_note)
+            self._stop_units()
+        finally:   # the recording has ended; a failure above mustn't keep Frametop's ft-hands unparked
+            if self._needed:
+                self._needed.stop()
+                self._needed = None
         self._resume_quiet()
         if self._button:
             self._button.stop()

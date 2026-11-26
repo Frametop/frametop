@@ -4,9 +4,10 @@
 # unit's alone. ARG...: also an ft-hands from before pidfiles whose arguments are exactly ARG..., the one the
 # unit ran before an update replaced it (that one can't be stopped otherwise).
 # A signal to scripts/in-box doesn't reach the program in the container; the container shares the host's
-# process ids, so this can signal it. It signals only this user's processes running an ft-hands program:
-# in the container its process name is "exe" (podman starts it that way), so the program is read from
-# /proc/PID/exe. A stale file whose pid went to another program is just removed.
+# process ids, so this can signal it. It signals only this user's processes running an ft-hands program,
+# read from /proc/PID/exe: an ft-hands from before it set its own name is named "exe" once it has started
+# again through /proc/self/exe (on a new ft-camd). A stale file whose pid went to another program is just
+# removed.
 # TERM, then KILL after 3 s (inside the units' TimeoutStopSec=5). Always exits 0 (a unit's ExecStartPre
 # and ExecStopPost).
 pidfile=${1:-}
@@ -17,13 +18,13 @@ old=("$@")
 ft_hands() {   # PID: a process of this user running an ft-hands program
   local comm exe
   [[ $1 =~ ^[0-9]+$ ]] && [ -O "/proc/$1" ] || return 1
-  read -r comm < "/proc/$1/comm" 2>/dev/null || return 1
+  { read -r comm < "/proc/$1/comm"; } 2>/dev/null || return 1
   [ "$comm" = ft-hands ] || [ "$comm" = exe ] || return 1
   exe=$(readlink "/proc/$1/exe" 2>/dev/null) || return 1
   exe=${exe% (deleted)}   # replaced on disk while it runs (an update)
   [ "${exe##*/}" = ft-hands ]
 }
-argv() { tr '\0' '\n' < "/proc/$1/cmdline" 2>/dev/null; }
+argv() { { tr '\0' '\n' < "/proc/$1/cmdline"; } 2>/dev/null; }
 mine() {   # PID: the ft-hands of PIDFILE, or one from before pidfiles started with exactly ARG...
   ft_hands "$1" || return 1
   local a i

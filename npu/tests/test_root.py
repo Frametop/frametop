@@ -2,6 +2,7 @@
 unit without exactly one python3 -I -S -B -c ExecStartPre in [Service], the preflight refuses a tree a
 user owns, install and uninstall refuse to run without root, and the paths it installs to are the
 ones uninstall.sh, update-check.py and handsnpu.py look for."""
+import os
 import pathlib
 import re
 import shutil
@@ -56,16 +57,20 @@ class RootSh(unittest.TestCase):
         code, out = self.root_sh("check", self.unit("[Service]\n#" + line + line), self.tmp / "tree")
         self.assertIn("trust.py not root-only", out)
 
-    def test_bad_paths_and_no_root(self):
+    def test_bad_paths(self):
         code, out = self.root_sh("check", "ft-npud.service", self.tmp / "tree")
         self.assertIn("must be an absolute path", out)
         code, out = self.root_sh("check", UNIT, str(self.tmp / "tree") + "/a b")
         self.assertIn("bad tree path", out)
+        self.assertEqual(self.root_sh("nonsense")[0], 2)
+
+    # The image's tests run as root (in the container): there, install and uninstall would get past the check
+    @unittest.skipIf(os.geteuid() == 0, "as root, install and uninstall would run")
+    def test_install_and_uninstall_need_root(self):
         for args in (("install", self.tmp / "tree", "1000"), ("uninstall",)):
             code, out = self.root_sh(*args)
             self.assertEqual(code, 1, out)
             self.assertIn("run as root", out)
-        self.assertEqual(self.root_sh("nonsense")[0], 2)
 
     def test_its_paths_are_the_ones_the_rest_looks_for(self):
         text = ROOT_SH.read_text()

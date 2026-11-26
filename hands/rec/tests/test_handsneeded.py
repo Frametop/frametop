@@ -74,9 +74,10 @@ class OwnTrackerTest(unittest.TestCase):
 
 
 class FindProcessesTest(unittest.TestCase):
-    def test_it_finds_an_ft_hands_podman_started(self):
-        """In Frametop's container a program's process name is "exe": tracker_running() has to see that
-        ft-hands, or the recorder says hand tracking didn't start while Frametop's runs."""
+    def test_it_finds_an_ft_hands_named_exe(self):
+        """An ft-hands from before it set its own name is named "exe" once it has started again through
+        /proc/self/exe: tracker_running() has to see it, or the recorder says hand tracking didn't start
+        while Frametop's runs."""
         with tempfile.TemporaryDirectory() as d:
             prog = pathlib.Path(d, "ft-hands")
             shutil.copy(pathlib.Path(sys.executable).resolve(), prog)

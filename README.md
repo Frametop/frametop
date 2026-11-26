@@ -203,7 +203,9 @@ This is an early release, tested on one Steam Frame (SteamOS 0.4.5 build 2026100
 
 ## Reporting problems
 
-In a terminal on the headset, run:
+The easiest way is the Frametop Installer's Debug button. In a browser on the headset, download [FrametopInstaller.flatpak](https://github.com/Frametop/frametop/releases/download/v0.3.0-exp.29/FrametopInstaller.flatpak) and open it from Downloads with a double-click (Discover installs it). Open Frametop Installer from the application menu and press Debug at the top of its window. It works with this stable version, from a release or a git checkout, and without Frametop installed too. It saves `frametop-debug-<date>.txt` in Downloads; send that file to `Deej__` on Discord (a direct message), or email it to dj_anuz@protonmail.com, with what you did, what you expected, and what happened.
+
+Or, in a terminal on the headset, run:
 
 ```
 cd ~/frametop && scripts/report.sh

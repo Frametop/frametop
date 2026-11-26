@@ -93,6 +93,8 @@ CASES = [
     "", "  ", "nonsense", "launch", "launch app.desktop", "launch app.desktop action=new", "launch app.desktop screen=2",
     "launch app.desktop screen=3", "launch app.desktop screen=0", "launch app.desktop screen=x",
     "launch app.desktop action=a screen=1", "launch app.desktop bogus=1", "launch app.desktop noequals",
+    "launch Slay the Spire 2.desktop", "launch Slay the Spire 2.desktop screen=1", "launch Slay the Spire 2.desktop bogus=1",
+    "launch Spire 2.desktop.old.desktop", "launch org.kde.dolphin", "launch org.kde.dolphin screen=2",
     "run", 'run ["firefox", "--new-window"]', "run []", 'run [1]', "run {}", "run not json", 'run "x"',
     "dashlaunch", "dashlaunch steam://rungameid/1  extra", "windows", "spotlist", "windows extra",
     "activate", "activate w1", "activate w9", "activate w1 w2", "profile", "profile Work Desk",

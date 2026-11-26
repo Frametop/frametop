@@ -17,6 +17,7 @@ command-line side). Replies go to the sender:
             on remembers the windows floating already, and "dock desktopless" docks the others)
   launch APP.desktop [action=ACTION] [screen=N]   run ["argv", ...]
             (start an app, or one of its desktop file's actions, and float its first window;
+            APP may hold spaces, as Steam's games' desktop files do, when it ends in .desktop;
             with screen=N its first window opens docked on screen N instead)
   dashlaunch CMDLINE   (ft-dashroute: an app picked in the SteamVR dashboard's Launch a program
             list, Steam's command line for it: launch it floating -> "ok", or "steamvr REASON"
@@ -443,6 +444,17 @@ def carry_on_float():
     except (OSError, ValueError):   # (no copy of a broken file: Input Settings says so itself)
         return False
     return isinstance(rules, dict) and rules.get("carry_on_float") is True
+
+def launch_words(text):
+    """A launch request's app and its options: (APP, [WORD, ...]). Steam names a game's desktop file
+    after the game ("Slay the Spire 2.desktop"), so the app runs to the first ".desktop" a space or
+    the end follows; without one, it's the first word."""
+    m = re.match(r"(.+?\.desktop)(?=\s|$)(.*)", text.strip(), re.S)
+    if m:
+        return m.group(1), m.group(2).split()
+    words = text.split()
+    return words[0], words[1:]
+
 
 class Daemon:
     def __init__(self, args):
@@ -1392,13 +1404,14 @@ class Daemon:
             return "error empty"
         cmd, rest = words[0], words[1:]
         if cmd == "launch" and rest:
-            opts = dict(w.split("=", 1) for w in rest[1:] if "=" in w)
-            if len(opts) != len(rest) - 1 or set(opts) - {"action", "screen"}:
+            app, rest = launch_words(text.split(None, 1)[1])
+            opts = dict(w.split("=", 1) for w in rest if "=" in w)
+            if len(opts) != len(rest) or set(opts) - {"action", "screen"}:
                 return "error launch APP.desktop [action=ACTION] [screen=N]"
             screen = opts.get("screen")
             if screen is not None and not (screen.isdigit() and 1 <= int(screen) <= self.screens_n):
                 return f"error no screen {screen}"
-            return self.launch(app=rest[0], action=opts.get("action"),
+            return self.launch(app=app, action=opts.get("action"),
                                dock=f"WL-{int(screen) - 1}" if screen else None)[0]
         if cmd == "run" and rest:
             try:

@@ -602,6 +602,64 @@
   "reply": "error unknown command",
   "tear": null
  },
+ "launch Slay the Spire 2.desktop": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "Slay the Spire 2.desktop",
+     "dock": null
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch Slay the Spire 2.desktop bogus=1": {
+  "calls": [],
+  "idle_add": [],
+  "raised": null,
+  "reply": "error launch APP.desktop [action=ACTION] [screen=N]",
+  "tear": null
+ },
+ "launch Slay the Spire 2.desktop screen=1": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "Slay the Spire 2.desktop",
+     "dock": "WL-0"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch Spire 2.desktop.old.desktop": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "Spire 2.desktop.old.desktop",
+     "dock": null
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
  "launch app.desktop": {
   "calls": [
    [
@@ -703,6 +761,40 @@
   "idle_add": [],
   "raised": null,
   "reply": "error no screen x",
+  "tear": null
+ },
+ "launch org.kde.dolphin": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "org.kde.dolphin",
+     "dock": null
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
+  "tear": null
+ },
+ "launch org.kde.dolphin screen=2": {
+  "calls": [
+   [
+    "launch",
+    [],
+    {
+     "action": null,
+     "app": "org.kde.dolphin",
+     "dock": "WL-1"
+    }
+   ]
+  ],
+  "idle_add": [],
+  "raised": null,
+  "reply": "ok launched",
   "tear": null
  },
  "list": {

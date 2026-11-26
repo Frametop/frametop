@@ -971,6 +971,8 @@ class Frunner:
         reply = self.floatd(cmd)
         if reply is not None:
             log(f"{cmd}: {reply}")
+            if not reply.startswith("ok"):   # (else nothing seems to happen)
+                self.toast(f"Couldn't start {item.title}")
             return
         # No ft-floatd (no floating slots): the desktop opens it as it would from its menu.
         try:

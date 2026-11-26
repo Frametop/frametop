@@ -838,10 +838,10 @@ static void keys_update(struct server *s) {
     // all when streaming without the desktop) a grabbed keyboard would type nowhere.
     const bool target = (s->key_remote >= 0 && ft_remote_is(s->key_remote)) || s->seat->keyboard_state.focused_surface;
     const bool desktop = spot_open(s) || ft_vr_app_typing() || (s->keys_clicked && shown && target);
-    // Gamepad mode's pill goes over the panel typing goes to: the remote screen, or the one KWin has
-    // keyboard focus on (vr.cpp, "the gamepad pill").
-    int pill = -1;
-    if (desktop && !spot_open(s) && !ft_vr_app_typing()) {
+    // Gamepad mode's pill goes over the panel typing goes to: a gamescope app's, the remote screen, or
+    // the one KWin has keyboard focus on (vr.cpp, "the gamepad pill").
+    int pill = spot_open(s) ? -1 : ft_vr_app_typing_panel();
+    if (desktop && !spot_open(s) && pill < 0) {
         if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) pill = s->key_remote;
         for (int i = 0; i < MAX_SCREENS && pill < 0; ++i)
             if (s->screens[i] && s->screens[i]->toplevel &&

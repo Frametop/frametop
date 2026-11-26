@@ -242,6 +242,7 @@ int main() {
         CHECK(x.Logged("raise 9") && !x.Logged("raise 1") && x.Logged("down 1"));
         c.Press(kFirst, 1, 1, false, 50, 60);
         CHECK(c.Typing());
+        CHECK(c.TypingPanel() == kFirst);   // (the dialog's: its app's panel, where the gamepad pill goes)
         CHECK(c.Key(30, 1, false, {}) && x.Logged("key 9 38 0 down"));
         CHECK(c.Key(30, 0, false, {}));
         // Shift held: its own press unshifted, a letter shifted
@@ -254,7 +255,7 @@ int main() {
         CHECK(!c.Key(31, 1, true, {}));
         // a click on Steam: the typing leaves the apps (council, 2026-11-16)
         c.Blur();
-        CHECK(!c.Typing() && !c.Key(30, 1, false, {}));
+        CHECK(!c.Typing() && !c.Key(30, 1, false, {}) && c.TypingPanel() == -1);
         // a key down when it went keeps going to the app until it's up
         c.Press(kFirst + 1, 0, 1, true, 1, 1), c.Press(kFirst + 1, 0, 1, false, 1, 1);
         CHECK(c.Key(32, 1, false, {}));
@@ -262,8 +263,9 @@ int main() {
         CHECK(c.Key(32, 0, false, {}) && x.Logged("key 2 40 0 up"));
         // its panel hidden (the dashboard closed, PIN locked): no typing
         c.Press(kFirst + 1, 0, 1, true, 1, 1), c.Press(kFirst + 1, 0, 1, false, 1, 1);
+        CHECK(c.TypingPanel() == kFirst + 1);
         p.shown.erase(kFirst + 1);
-        CHECK(!c.Typing() && !c.Key(33, 1, false, {}));
+        CHECK(!c.Typing() && !c.Key(33, 1, false, {}) && c.TypingPanel() == -1);
         p.shown.insert(kFirst + 1);
         // a window that goes takes its typing
         c.On(Ev(Event::Gone, Win(2, Kind::Main)), 0);

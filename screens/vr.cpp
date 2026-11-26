@@ -4651,13 +4651,13 @@ void UpdateCarousel() {
 // is one, hidden: no tab (NoDashboardTab), and flag 1 << 4, which gives its page our pid for SteamVR's input
 // (2026-10-25 probes: without it no Enter Gamepad Mode, and SteamVR's controllers never come to us). While the
 // Steam menu is open, the pill shows over the panel typing goes to (compositor.c's keys_update: the desktop
-// screen or floating window KWin has keyboard focus on, or a remote display). A laser's click on it has
+// screen or floating window KWin has keyboard focus on, a remote display, or a gamescope app). A laser's click on it has
 // ft-dashpatch give SteamVR's controllers to frametop.gamepad (pointer/dashpatch/gamepadmode.py): up to SteamVR
 // 2.18 its input focus and the menu closed; from 2.19 its tab in front and the dashboard diminished, the way
 // SteamVR's own pill does it for the tab in front (2.19 ignores the focus for a tab that isn't: headset,
 // 2026-11-18). That tab shows a card, which panel has the pad and how to leave (DrawPadCard), and the panel stays
-// shown though the dashboard is diminished (PadPanel). Not for a Steam game's panel: its View in Theater gives
-// SteamVR's theater the game, with Steam Input's pad (user, 2026-11-18). ft-dashpatch then
+// shown though the dashboard is diminished (PadPanel). A gamescope app's panel gets it too (user, 2026-11-26; on
+// 2026-11-18 a Steam game's was left to View in Theater, Steam Input's pad in SteamVR's theater). ft-dashpatch then
 // says the Gamepad mode is ours ("steamvrmode 1 <app> 1"), and while it is the input relay hears "gamepad
 // desktop|remote" every second (the panel clicked's kind; "gamepad off" as it ends). SteamVR sends no input to an
 // overlay in Gamepad mode, so the relay reads the controllers raw (input/vrpad.py). The grips end it, as
@@ -7303,6 +7303,7 @@ extern "C++" void ftvr::StepPlaces(const Mat &step, const recentre::Stood *reset
 // The gamescope apps' panels: vrgsapps.cpp.
 
 bool ft_vr_app_typing(void) { return g_vr && GsTyping(); }
+int ft_vr_app_typing_panel(void) { return g_vr ? GsTypingPanel() : -1; }
 
 bool ft_vr_app_key(uint32_t code, int value, bool elsewhere) {
     return g_vr && GsKey(code, value, elsewhere, gsforward::Mods{g_shift, g_ctrl, g_alt, g_meta});

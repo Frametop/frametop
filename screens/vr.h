@@ -65,6 +65,8 @@ bool ft_vr_carry_key(uint32_t code, int value);
 bool ft_vr_app_key(uint32_t code, int value, bool elsewhere);
 // An app has the typing, on a panel that's shown (the relay grabs the keyboards for it, as for the desktop).
 bool ft_vr_app_typing(void);
+// ...its panel (-1: none): the gamepad pill goes over it as over a desktop window.
+int ft_vr_app_typing_panel(void);
 // A click on something that isn't an app (Steam's panels): the typing leaves the apps.
 void ft_vr_app_blur(void);
 // Where Full Keyboard opens, for the relay's "kbpanel show" (vrkbspot.cpp): "dash" and the bottom

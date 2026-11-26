@@ -513,6 +513,7 @@ void GsResize(int index, int w, int h);
 void GsSwitch(bool on);
 void GsShutdown();
 bool GsTyping();
+int GsTypingPanel();   // (the app panel with the typing, -1: none)
 bool GsKey(uint32_t code, int value, bool elsewhere, gsforward::Mods now);
 void GsBlur();
 bool GsCanTheater(int index);         // a Steam game's panel, not lent: its grab bar menu offers View in Theater

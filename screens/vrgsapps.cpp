@@ -290,6 +290,7 @@ void GsShutdown() {
 }
 
 bool GsTyping() { return g_gsControl && g_gsControl->Typing(); }
+int GsTypingPanel() { return g_gsControl ? g_gsControl->TypingPanel() : -1; }
 bool GsKey(uint32_t code, int value, bool elsewhere, gsforward::Mods now) {
     return g_gsControl && g_gsControl->Key(code, value, elsewhere, now);
 }

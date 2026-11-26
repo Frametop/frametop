@@ -123,6 +123,8 @@ public:
     }
     // An app has the typing, on a panel that's shown.
     bool Typing() const { return TargetShown(); }
+    // ...that panel's index (-1: none): the gamepad pill goes over it (vr.cpp's "the gamepad pill").
+    int TypingPanel() const { return TargetShown() ? book_.PanelOf(keys_.Target()) : -1; }
     // A key (value 0 up, 1 down, 2 a repeat; `elsewhere`: something else has the typing now):
     // true if it went to an app.
     bool Key(uint32_t code, int value, bool elsewhere, gsforward::Mods now) {

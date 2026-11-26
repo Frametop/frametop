@@ -9,15 +9,16 @@
 # It asks every question first, then your password once if a part you picked needs it (each
 # question that needs it says so), and then installs without asking anything else.
 #
-# Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-hand-recorder] [--no-gaze]
+# Usage: ./install.sh [--yes] [--no-voice] [--no-hands] [--no-npu] [--no-hand-recorder] [--no-gaze]
 #                    [--no-eye-tracker] [--no-eye-recorder] [--no-keyboard]
 #                    [--no-together | --together] [--no-bluetooth | --bluetooth]
 #   --yes           don't ask; installs voice dictation, gaze mode and the Eye Recorder, and hand
-#                   tracking, the Hand Recorder and our eye tracker if sudo can run without a
+#                   tracking, NPU hand tracking, the Hand Recorder and our eye tracker if sudo can run without a
 #                   password prompt; skips the Bluetooth fixes and the SteamVR restart, and
 #                   Frametop Together unless it's installed already
 #   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 320 MB)
-#   --no-hands      don't offer hand tracking or the Hand Recorder
+#   --no-hands      don't offer hand tracking, NPU hand tracking or the Hand Recorder
+#   --no-npu        don't offer NPU hand tracking (ft-npud: hand tracking's model on the NPU)
 #   --no-hand-recorder  don't offer the Hand Recorder (a release's; a clone builds it with
 #                   hands/rec/install.sh)
 #   --no-gaze       don't offer gaze mode (or our eye tracker and the Eye Recorder, which need it)
@@ -37,7 +38,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$root/scripts/_env.sh"
 
-assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 gaze=1 hands=1 hand_recorder=1 keyboard=1 together=1 voice=1
+assume_yes=0 bluetooth=1 eye_tracker=1 eye_recorder=1 gaze=1 hands=1 hand_recorder=1 keyboard=1 npu=1 together=1 voice=1
 for arg in "$@"; do
   case $arg in
     --yes) assume_yes=1 ;;
@@ -47,12 +48,13 @@ for arg in "$@"; do
     --no-eye-tracker) eye_tracker=0 eye_recorder=0 ;;
     --no-eye-recorder) eye_recorder=0 ;;
     --no-voice) voice=0 ;;
-    --no-hands) hands=0 hand_recorder=0 ;;
+    --no-hands) hands=0 hand_recorder=0 npu=0 ;;
+    --no-npu) npu=0 ;;
     --no-hand-recorder) hand_recorder=0 ;;
     --no-keyboard) keyboard=0 ;;
     --no-together) together=0 ;;
     --together) together=2 ;;
-    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -173,6 +175,9 @@ drop_sudo_parts() {
   if [ "$do_hands" = 1 ] && hands_need_sudo; then
     do_hands=0 hands_skip="skipped: $why. Install it later with: hands/run.sh install"
   fi
+  if [ "$do_npu" = 1 ]; then
+    do_npu=0 npu_skip="skipped: $why. Install it later with: npu/install.sh"
+  fi
   if [ "$rec_hands" != 0 ] && ! camd_has_caps; then   # hand tracking was going to set them
     rec_hands=0 rec_hands_skip="$recorder: skipped: $why. Add it later with: hands/rec/install.sh"
   fi
@@ -245,6 +250,27 @@ elif [ "$assume_yes" = 1 ] && ! sudo_quiet; then
   hands_skip="skipped: it needs your password (sudo), and --yes doesn't ask. Install it later with: hands/run.sh install"
 elif ask "Install hand tracking? Poke, pinch and grab the screens with your hands. It runs while the Frametop desktop does (change that on the Hands page of Frametop Settings). Needs your password (sudo): its camera broker gets file capabilities." y; then
   do_hands=1
+fi
+
+# NPU hand tracking (npu/README.md): ft-npud, a root service, runs hand tracking's model on the
+# headset's NPU, so ft-hands needs far less CPU and tracks at a steadier rate. ft-hands uses it by
+# itself while it runs, and its CPU models when it doesn't. Recommended, so yes is the default;
+# one that's installed is renewed (also with --yes, if sudo needs no prompt), as its tree is this
+# release's. A clone builds it first (npu/build.sh: about 40 MB of downloads).
+do_npu=0 npu_skip="skipped. Install it later with: npu/install.sh"
+npu_installed=0
+on_frame 'systemctl is-enabled -q ft-npud.service 2>/dev/null' && npu_installed=1
+if [ "$npu" = 0 ]; then
+  npu_skip="skipped (--no-npu). Install it later with: npu/install.sh"
+  [ "$hands" = 1 ] || npu_skip="skipped (--no-hands). Install it later with: npu/install.sh"
+elif [ "$do_hands" = 0 ]; then
+  npu_skip="skipped: it needs hand tracking. Install both later with: hands/run.sh install, then npu/install.sh"
+elif [ "$assume_yes" = 1 ] && ! sudo_quiet; then
+  npu_skip="skipped: it needs your password (sudo), and --yes doesn't ask. Install it later with: npu/install.sh"
+elif [ "$npu_installed" = 1 ] && ask "Update NPU hand tracking (ft-npud) to this version's? Needs your password (sudo): it's a system service." y; then
+  do_npu=1
+elif [ "$npu_installed" = 0 ] && ask "Install NPU hand tracking? Recommended: hand tracking's model runs on the headset's NPU, so it needs less of the CPU, which VR needs. Needs your password (sudo): it's a system service." y; then
+  do_npu=1
 fi
 
 # The Hand Recorder (hands/rec): a release brings it built, so it's only ft-camd's capabilities
@@ -338,6 +364,9 @@ fi
 sudo_parts=()
 if [ "$do_hands" = 1 ] && hands_need_sudo; then
   sudo_parts+=("hand tracking: file capabilities for its camera broker (setcap)")
+fi
+if [ "$do_npu" = 1 ]; then
+  sudo_parts+=("NPU hand tracking: ft-npud, a system service (/etc/systemd/system, /home/.steamos/offload/var/lib/ft-npud)")
 fi
 if [ "$rec_hands" != 0 ] && [ "$do_hands" = 0 ] && ! camd_has_caps; then
   sudo_parts+=("the Hand Recorder: file capabilities for hand tracking's camera broker (setcap)")
@@ -475,6 +504,18 @@ if [ "$do_hands" = 1 ]; then
   fi
 else
   echo "$hands_skip"
+fi
+# NPU hand tracking, once hand tracking is in (ft-hands finds ft-npud by itself)
+if [ "$do_npu" = 1 ] && [ "$hands_done" = 1 ]; then
+  if "$root/npu/install.sh" install; then
+    echo "NPU hand tracking: on (ft-npud; Frametop Settings' Hands page says when hand tracking uses it)"
+  else
+    echo "NPU hand tracking: not installed (above), so hand tracking uses the CPU. Try again later with: npu/install.sh"
+  fi
+elif [ "$do_npu" = 1 ]; then
+  echo "NPU hand tracking: skipped: hand tracking didn't install. Install both later with: hands/run.sh install, then npu/install.sh"
+else
+  echo "NPU hand tracking: $npu_skip"
 fi
 if [ "$hands_done" = 0 ]; then
   drop_other_folder "hand tracking" "hands/run.sh install" $hand_units

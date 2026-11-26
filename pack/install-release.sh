@@ -21,7 +21,7 @@
 # A release whose folder has fast-installed files is refused until scripts/fast-install undo.
 #
 # Usage: install-release.sh [--yes] [--any-steamos] [--unpack-only] [--dir DIR]
-#                           [--no-voice] [--no-hands] [--no-hand-recorder] [--no-gaze]
+#                           [--no-voice] [--no-hands] [--no-npu] [--no-hand-recorder] [--no-gaze]
 #                           [--no-eye-tracker] [--no-eye-recorder] [--no-keyboard]
 #                           [--no-together | --together] [--no-bluetooth | --bluetooth]
 #        install-release.sh --list-options
@@ -35,7 +35,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 # The options that go on to install.sh: the one list both the parsing and --list-options use.
-INSTALL_OPTIONS=(--no-voice --no-hands --no-hand-recorder --no-gaze --no-eye-tracker --no-eye-recorder
+INSTALL_OPTIONS=(--no-voice --no-hands --no-npu --no-hand-recorder --no-gaze --no-eye-tracker --no-eye-recorder
   --no-keyboard --no-together --together --no-bluetooth --bluetooth)
 TABLE_URL=${FRAMETOP_STEAMOS_TABLE:-https://raw.githubusercontent.com/Frametop/frametop/main/pack/steamos.json}
 

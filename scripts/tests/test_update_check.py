@@ -286,6 +286,35 @@ class HandsRate(unittest.TestCase):
         self.assertIn("isn't running", detail)
 
 
+class Npu(unittest.TestCase):
+    """ft-npud: nothing when it isn't installed; a changed or missing DSP firmware, or a daemon that
+    isn't running, says so."""
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load()
+
+    def test_each_case(self):
+        good = self.m.NPU_FIRMWARE_SHA
+        self.assertIsNone(self.m.npu_verdict(False, "", None))
+        self.assertEqual(self.m.npu_verdict(True, "active", good)[0], "ok")
+        state, detail = self.m.npu_verdict(True, "active", "0" * 64)
+        self.assertEqual(state, "warn")
+        self.assertIn("firmware changed", detail)
+        state, detail = self.m.npu_verdict(True, "activating", good)
+        self.assertEqual(state, "warn")
+        self.assertIn("uses the CPU", detail)
+        self.assertNotIn("firmware", detail)
+        self.assertEqual(self.m.npu_verdict(True, "failed", None)[0], "FAIL")
+
+    def test_the_firmware_hash(self):
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(b"abc")
+            f.flush()
+            self.assertEqual(self.m.file_sha256(f.name),
+                             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        self.assertIsNone(self.m.file_sha256("/nonexistent/cdsp.mbn"))
+
+
 class EyeRate(unittest.TestCase):
     """The eye check: restarting helps only when SteamVR started before Frametop set it."""
     SETTING = "steamvr.gazeDepEyeToHeadEnable2"

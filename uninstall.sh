@@ -11,7 +11,8 @@
 # desktop runs from the repo. So it goes in two steps:
 #   1. Frametop stops starting. The launcher's Desktop entry goes back to the stock desktop, and
 #      Frametop's Native Desktop entry, services, SteamVR driver, menu entries, and system files
-#      (our eye tracker's frame grabber and the Bluetooth fixes, with sudo) are removed, and so
+#      (our eye tracker's frame grabber, NPU hand tracking's ft-npud, which it stops, and the Bluetooth
+#      fixes, with sudo) are removed, and so
 #      are the file capabilities of hand tracking's camera broker (ft-camd, with sudo). The
 #      tracking cameras go back to SteamVR's own mode if 60 fps hand tracking changed it. What
 #      runs now keeps running until you restart the headset.
@@ -52,6 +53,9 @@ xr_settings=$HOME/.config/openvr/config/cv/xrservice/XRServiceSettings.json  # S
 hands_rate=  # 1 when that mode is on (the 60 fps switch: the controllers don't track) and handsrate.py can take it out
 eyegrab_files=(/etc/systemd/system/frametop-eyegrab.service /etc/frametop/ft-eyegrab
                /etc/atomic-update.conf.d/frametop-eyegrab.conf)
+# NPU hand tracking (npu/root.sh): its unit, and its tree on the home partition with the mount point the unit binds it at
+npu_unit=/etc/systemd/system/ft-npud.service
+npu_tree=/home/.steamos/offload/var/lib/ft-npud
 bt_files=(/etc/systemd/system/steamframe-bt-fixups.service /etc/systemd/system/bluetooth.service.d/steamframe.conf
           /etc/steamframe/bt-fixups.sh /etc/atomic-update.conf.d/frametop-bluetooth.conf)
 
@@ -159,7 +163,7 @@ main() {
     echo "  take streamingMode and slamFrameFPSMode out of captureSessionSettings.trackingCameras in that file," >&2
     echo "  then restart SteamVR." >&2
   fi
-  exists "${eyegrab_files[@]}" "${bt_files[@]}" && sys=1
+  exists "${eyegrab_files[@]}" "${bt_files[@]}" "$npu_unit" "$npu_tree" && sys=1
 
   if [ -n "$override" ] || [ -n "$native_copy" ] || [ ${#units[@]} -gt 0 ] || [ ${#entries[@]} -gt 0 ] ||
      [ -d "$driver" ] || [ -n "$handsctl" ] || [ -n "$cmd_link" ] || [ -n "$ondesktop_link" ] || [ "$bashrc_lines" = 1 ] || [ "$sys" = 1 ] || [ -n "$camd_caps" ] || [ -n "$eye_rate" ] || [ -n "$dash_debugger" ] || [ -n "$hands_rate" ]; then
@@ -180,6 +184,7 @@ main() {
     [ -n "$camd_caps" ] && echo "  - the hand camera broker's file capabilities (needs your password)"
     exists "${eyegrab_files[@]}" && echo "  - our eye tracker's frame grabber (a system service: needs your password)"
     exists "${bt_files[@]}" && echo "  - the Bluetooth fixes (system files: needs your password)"
+    exists "$npu_unit" "$npu_tree" && echo "  - NPU hand tracking (ft-npud, a system service: it stops now, and hand tracking goes on with the CPU; needs your password)"
     echo "What runs now keeps running until you restart the headset, so your keyboard, mouse, and"
     echo "this terminal keep working. Your settings and the code stay for now."
     ask "Uninstall Frametop?" n || { echo "Nothing changed."; return 0; }
@@ -216,10 +221,14 @@ main() {
       if ! run sudo bash -c '
         camd=$1; shift
         for u in frametop-eyegrab steamframe-bt-fixups; do systemctl disable $u.service 2>/dev/null; done
+        systemctl disable --now ft-npud.service 2>/dev/null
         rm -f "$@"
+        t=/home/.steamos/offload/var/lib/ft-npud
+        rm -rf "$t" "$t.prev" "$t.new"
+        rmdir /var/lib/ft-npud /var/lib/ft-npud.prev /var/lib/ft-npud.new 2>/dev/null
         rmdir /etc/frametop /etc/steamframe /etc/systemd/system/bluetooth.service.d 2>/dev/null
         [ -n "$camd" ] && [ -x "$camd" ] && setcap -r "$camd" 2>/dev/null
-        systemctl daemon-reload; true' sys "${camd_caps:+$camd}" "${eyegrab_files[@]}" "${bt_files[@]}"; then
+        systemctl daemon-reload; true' sys "${camd_caps:+$camd}" "${eyegrab_files[@]}" "${bt_files[@]}" "$npu_unit"; then
         echo "warning: the system files weren't removed (no password?). Run this again to retry." >&2
       fi
     elif [ -n "$camd_caps" ]; then

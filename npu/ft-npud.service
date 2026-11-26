@@ -1,0 +1,48 @@
+# ft-npud: NPU hand tracking's daemon (npu/README.md). npu/install.sh fills in @UID@ (the one user it serves)
+# and installs it as /etc/systemd/system/ft-npud.service.
+# Everything it loads lives under /var/lib/ft-npud, owned by root (the daemon refuses to start otherwise: trust.py):
+# a read-only bind of /home/.steamos/offload/var/lib/ft-npud (the home partition; /var is too small).
+[Unit]
+Description=Frametop NPU hand tracking (ft-npud)
+After=dsp_service.service
+# no Requires=: a dsp_service restart must not stop ft-npud mid-job
+# It never gives up for the boot (a DSP that isn't ready yet at boot, a dsp_service restart): it tries again,
+# from 5 s apart to 2 min apart (RestartSteps).
+StartLimitIntervalSec=0
+RequiresMountsFor=/home/.steamos/offload/var/lib/ft-npud
+
+[Service]
+Type=simple
+Environment=PATH=/usr/bin
+# before anything from the tree runs: this line (root-only, in the unit) checks trust.py's own path, then trust.py
+# checks the whole tree. The host's python3 for the check only (the standard library: any Python 3.12 or newer).
+# -S: no site, so no .pth file runs. %% is systemd's escape for %.
+ExecStartPre=/usr/bin/python3 -I -S -B -c "import os, sys, runpy; p = '/var/lib/ft-npud/app/npud/trust.py'; bad = [q for q in [p[:i] or '/' for i, c in enumerate(p) if c == '/'] + [p] if os.lstat(q).st_uid or os.lstat(q).st_mode & 0o022 or os.path.islink(q)]; sys.exit('ft-npud preflight: trust.py not root-only: %%s' %% bad) if bad else None; sys.argv[:] = [p, '/var/lib/ft-npud']; runpy.run_path(p, run_name='__main__')"
+# The tree's own CPython and numpy (npu/build.sh), so a SteamOS update doesn't change them. -B: nothing written
+# into the tree; --require-root-owned: the loaded-files audit after the imports. The flat H-net (hdq) on
+# graphs/landmarks.npz.
+ExecStart=/var/lib/ft-npud/python/bin/python3 -I -B /var/lib/ft-npud/app/npud/hnet_serve.py \
+    --graph /var/lib/ft-npud/graphs/landmarks.npz \
+    --cpus 2-4 --uid @UID@ --dir /run/ft-npud --require-root-owned
+CPUAffinity=2-4
+RuntimeDirectory=ft-npud
+RuntimeDirectoryMode=0755
+KillSignal=SIGTERM
+# a DSP job is never cut short; the self-test is the longest wait (~1 s)
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+RestartSteps=5
+RestartMaxDelaySec=120
+NoNewPrivileges=yes
+# keep: the preflight walks only /var/lib/ft-npud, and the audit runs after the imports, so this is what stops a
+# stray path into /home from loading a user's code as root
+ProtectHome=yes
+# the tree, read-only: the daemon can't change what it runs either (set up before ProtectHome hides /home)
+BindReadOnlyPaths=/home/.steamos/offload/var/lib/ft-npud:/var/lib/ft-npud
+# all of / read-only but the run dir (RuntimeDirectory) and /dev, /proc, /sys
+ProtectSystem=strict
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

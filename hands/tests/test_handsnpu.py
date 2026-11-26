@@ -68,6 +68,15 @@ class HandsNpu(unittest.TestCase):
         self.serve()
         self.assertEqual(self.state(), {"npu": True, "available": True, "note": ""})
 
+    def test_not_installed_says_how_to_install_it(self):
+        self.write("")
+        self.assertIn("isn't installed", self.state()["note"])
+        self.assertIn("npu/install.sh", self.state()["note"])
+        os.makedirs(os.path.dirname(self.root + hn.UNIT))
+        open(self.root + hn.UNIT, "w").close()   # installed, not running yet (the DSP at boot)
+        self.assertTrue(hn.service_installed(self.roots))
+        self.assertIn("isn't running", self.state()["note"])
+
     def test_the_service_is_found_from_the_container(self):
         self.serve()
         self.assertTrue(hn.service_there(hn.DEFAULT_DIR, self.roots))

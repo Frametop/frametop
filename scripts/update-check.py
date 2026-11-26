@@ -18,6 +18,7 @@ stops, or restarts anything.
 """
 import base64
 import glob
+import hashlib
 import importlib.util
 import json
 import mmap
@@ -81,7 +82,9 @@ PACKAGES = {
                            "displays off with tracking paused (DISPLAY_OFF_STANDBY=1): with SteamVR taking the headset "
                            "as worn, the Power tab's Turn displays off now logs \"0 - entering standby\" in "
                            "vrserver.txt within 10 s, and a key wakes it (the ft_pointer driver's write to the "
-                           "headset's /proximity, pointer/driver/worn.h)",
+                           "headset's /proximity, pointer/driver/worn.h); NPU hand tracking: ft-npud's "
+                           "self-test passes (journalctl -u ft-npud says self-test ok; it talks to this "
+                           "package's dsp_service and runs on its DSP firmware, npu/README.md)",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "
             "its scale a minute after the desktop starts (KWin's support information shows it; "
             "kscreen-doctor shows 1 from 6.6); every screen comes back "
@@ -599,6 +602,50 @@ ROOT_PARTS = [
     ("eye tracker's frame grabber", "/etc/systemd/system/frametop-eyegrab.service", "/etc/frametop/ft-eyegrab",
      "/etc/atomic-update.conf.d/frametop-eyegrab.conf", "gaze/tracker/install.sh"),
 ]
+
+
+# NPU hand tracking (npu/README.md): ft-npud talks to SteamVR's dsp_service (an undocumented socket) and
+# runs its programs on the DSP firmware SteamVR brings, the build it was tested with. A SteamVR update
+# can change either; the daemon's self-test at start says whether it still works.
+NPU_UNIT = "/etc/systemd/system/ft-npud.service"
+NPU_FIRMWARE = "/opt/steamvr/drivers/cv/bin/linuxarm64/cdsp_sm8650.mbn"
+NPU_FIRMWARE_SHA = "4f9fd567eb582c24f1f960a6525fafb0bd75733223ffa7ce8d6541cfd2a62b1c"
+
+
+def npu_verdict(installed, active, firmware_sha):
+    """(state, detail) for ft-npud, or None when it isn't installed."""
+    if not installed:
+        return None
+    if firmware_sha is None:
+        return ("FAIL", f"{NPU_FIRMWARE} is gone (a SteamVR update moved it): hand tracking uses the CPU")
+    changed = firmware_sha != NPU_FIRMWARE_SHA
+    if active != "active":
+        return ("warn", f"ft-npud isn't running ({active or 'unknown'}), so hand tracking uses the CPU"
+                + ("; the DSP firmware changed since it was tested" if changed else "")
+                + ": journalctl -u ft-npud says why")
+    if changed:
+        return ("warn", "running, but the DSP firmware changed since it was tested (a SteamVR update): "
+                "check journalctl -u ft-npud says self-test ok")
+    return ("ok", "running, on the DSP firmware it was tested with")
+
+
+def file_sha256(path):
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+def check_npu():
+    installed = os.path.exists(NPU_UNIT)
+    active = run("systemctl", "is-active", "ft-npud.service")[1].strip() if installed else ""
+    v = npu_verdict(installed, active, file_sha256(NPU_FIRMWARE) if installed else None)
+    if v:
+        report(v[0], "NPU hand tracking (ft-npud)", v[1])
 
 
 def check_root_files():
@@ -1231,6 +1278,7 @@ def main():
     check_host()
     check_readouts()
     check_root_files()
+    check_npu()
     check_chaperone()
     steamvr_up = run("pgrep", "-x", "vrserver")[0] == 0
     if not steamvr_up:

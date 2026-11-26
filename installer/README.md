@@ -36,6 +36,18 @@ The install's choices are saved in `~/.cache/frametop-installer/state.json` when
 
 Install again is safe: `get.sh` resumes a partial download (`curl -C -`), and the install steps can run again over a finished or half-finished install. An install doesn't start while FrameDrop's install (`frametop-framedrop-install`) is running: the window says so when it opens and again when Install is pressed.
 
+## Debug report
+
+The Debug button in the title bar, on every page, makes a text file to send when something goes wrong: `frametop-debug-<date>.txt` in Downloads. `host/debug-report.sh` collects it on the host, and the window says where it is and who to send it to (`Deej__` on Discord, or dj_anuz@protonmail.com). It has:
+
+- the headset: SteamOS version, build and branch, kernel, memory, disk, heat, battery, whether `sudo` has a password, and whether GitHub answers
+- SteamVR's build and its external drivers, the Frametop Installer's own version and Flatpak, and the last install's state, result and log
+- the installed Frametop: the release folders, `.frametop-release`, a git checkout in `~/frametop` if there is one, which tree the services run from, the containers and images
+- Frametop's services, failed units, what's running, its settings files, and the last two hours' warnings and errors
+- with a release installed, its own `scripts/report.sh --system --desktop --gaze --hands` (without `--voice`, which listens to the microphone for a second)
+
+Before it's saved, the values of settings named like a token, secret, password, credential, cookie or auth are hidden, as are passwords in URLs, email addresses, the last two numbers of IPv4 addresses from `10.x.x.x` up, Bluetooth addresses and the headset's serial number. Nothing is sent anywhere. Copy text puts it on the clipboard, for an email; Show in folder opens the file manager on it. Pages that finish while the report is up (an install's progress, a lookup) wait behind it, and Back shows them. When the window won't open, the same report runs in a terminal: `bash ~/.cache/frametop-installer/bin/debug-report.sh` (the scripts are put there the first time the installer does anything on the host).
+
 ## The password
 
 The install runs on the host, outside the sandbox's PID namespace, so `sudo` there can't ask the window directly. Instead:
@@ -52,6 +64,7 @@ The Flatpak's permissions (`flatpak/build.sh`):
 | --- | --- |
 | `--talk-name=org.freedesktop.Flatpak` | `flatpak-spawn --host`: the install itself, `systemctl --user`, `sudo -v`, `passwd`. This is a full escape from the sandbox, which an installer of user services, a SteamVR driver and root-owned files needs. Flathub would review it. |
 | `--filesystem=~/.cache/frametop-installer:create` | The host scripts it copies there (`bin/`), the log, the state, the result, and a downloaded update (`update/`) |
+| `--filesystem=xdg-download:ro` | Reading the debug report in Downloads, to copy its text and show it in the file manager (the host script writes it) |
 | `--share=network` | GitHub's API and `raw.githubusercontent.com`, for the lookup, and the release's bundle and `SHA256SUMS` for the installer's own update |
 | `--socket=wayland`, `--socket=fallback-x11`, `--device=dri`, `--share=ipc` | The window |
 
@@ -59,8 +72,8 @@ Starting the new version after an update needs no permission of its own: `flatpa
 
 ## Files
 
-- `frametop_installer/`: the app (Python, GTK 4, libadwaita when present). `options.py` holds the parts and what each release can leave out, `releases.py` the lookup and the order of versions, `selfupdate.py` the installer's own update, `host.py` the host commands, and `job.py` the service, its state and the progress. The window is `ui.py` (the version, parts and resume pages), with `password_pages.py`, `progress_page.py` and `update_page.py` mixed into it, `askpass.py` for its end of the askpass socket, and `widgets.py` for the small GTK pieces.
-- `host/`: what runs on the host. `helper.py` (askpass socket, `passwd`), `askpass`, `run-install.sh` (result, then the SteamVR restart), and `fake-install.sh` for test runs.
+- `frametop_installer/`: the app (Python, GTK 4, libadwaita when present). `options.py` holds the parts and what each release can leave out, `releases.py` the lookup and the order of versions, `selfupdate.py` the installer's own update, `host.py` the host commands, and `job.py` the service, its state and the progress. The window is `ui.py` (the version, parts and resume pages), with `password_pages.py`, `progress_page.py`, `update_page.py` and `debug_page.py` mixed into it, `askpass.py` for its end of the askpass socket, and `widgets.py` for the small GTK pieces.
+- `host/`: what runs on the host. `helper.py` (askpass socket, `passwd`), `askpass`, `run-install.sh` (result, then the SteamVR restart), `debug-report.sh` (the Debug button's report), and `fake-install.sh` for test runs.
 - `flatpak/`: the launcher, desktop entry, AppStream metadata, icon, and `build.sh`.
 - `tests/`: offline tests, in `just test` through `scripts/testgate/python-suites.txt`.
 

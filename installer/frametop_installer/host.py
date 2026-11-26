@@ -23,7 +23,7 @@ CACHE = HOME / ".cache" / "frametop-installer"
 BIN = CACHE / "bin"
 PKG = Path(__file__).resolve().parent
 DATA = PKG.parent                       # installer/ in the repo, /app/share/frametop-installer in the app
-HOST_FILES = ("helper.py", "askpass", "run-install.sh", "fake-install.sh")
+HOST_FILES = ("helper.py", "askpass", "run-install.sh", "fake-install.sh", "debug-report.sh")
 
 
 def _get_sh():

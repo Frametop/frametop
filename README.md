@@ -31,7 +31,7 @@ You need a Steam Frame with an internet connection, a keyboard (Bluetooth, or th
 2. In a browser on the headset, download [FrametopInstaller.flatpak](https://github.com/Frametop/frametop/releases/latest/download/FrametopInstaller.flatpak) (also on the [releases](https://github.com/Frametop/frametop/releases) page). Until a stable release includes it, that link finds nothing: take it from the newest experimental release on that page instead.
 3. Open it from Downloads with a double-click. Discover installs Frametop Installer, plus the GNOME runtime it runs on if the headset doesn't have it yet (about 300 MB, from Flathub). Then open Frametop Installer from the application menu.
 
-It asks which version to install, the latest stable release or the latest experimental one, both built already, and shows whether each is tested on your SteamOS. Then it lists the optional parts as checkboxes, all ticked, and asks for your password once if a part you kept needs it. It shows the install's progress, and the install keeps going if you close the window. If the Frame restarts or crashes during the install, open Frametop Installer again and choose Install again. Open it later to update: it says when a newer Frametop is out, and offers to update itself first when there's a newer Frametop Installer. [installer/README.md](installer/README.md) says how it works and what it's allowed to do.
+It asks which version to install, the latest stable release or the latest experimental one, both built already, and shows whether each is tested on your SteamOS. Then it lists the optional parts as checkboxes, all ticked, and asks for your password once if a part you kept needs it. It shows the install's progress, and the install keeps going if you close the window. If the Frame restarts or crashes during the install, open Frametop Installer again and choose Install again. Open it later to update: it says when a newer Frametop is out, and offers to update itself first when there's a newer Frametop Installer. If something goes wrong, press Debug at the top of the window: it saves a report in Downloads to send to `Deej__` on Discord, or to dj_anuz@protonmail.com. [installer/README.md](installer/README.md) says how it works and what it's allowed to do.
 
 ### From a terminal
 
@@ -233,7 +233,9 @@ This is an early release, tested on one Steam Frame (SteamOS 0.5.11 beta build 2
 
 ## Reporting problems
 
-In a terminal on the headset, run:
+With the Frametop Installer, press Debug at the top of its window. It saves `frametop-debug-<date>.txt` in Downloads, with this report inside it and what the installer knows; send that file to `Deej__` on Discord (a direct message), or email it to dj_anuz@protonmail.com.
+
+Or, in a terminal on the headset, run:
 
 ```
 cd ~/frametop && scripts/report.sh

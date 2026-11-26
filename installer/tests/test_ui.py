@@ -30,12 +30,12 @@ class Window(unittest.TestCase):
         self.ui = ui
 
     def test_pages_dont_shadow_gtk(self):
-        for mixin in (self.ui.PasswordPages, self.ui.ProgressPage, self.ui.UpdatePage):
+        for mixin in (self.ui.PasswordPages, self.ui.ProgressPage, self.ui.UpdatePage, self.ui.DebugPage):
             clash = [n for n in vars(mixin) if not n.startswith("__") and hasattr(Gtk.ApplicationWindow, n)]
             self.assertEqual(clash, [], f"{mixin.__name__} shadows {clash}")
 
     def test_every_self_call_resolves(self):
-        for name in ("ui.py", "password_pages.py", "progress_page.py", "update_page.py"):
+        for name in ("ui.py", "password_pages.py", "progress_page.py", "update_page.py", "debug_page.py"):
             tree = ast.parse((PKG / name).read_text())
             called = {n.func.attr for n in ast.walk(tree)
                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)

@@ -8,6 +8,8 @@ headset restarted or crashed), it offers to run the same install again.
 
 Opening it also looks for updates: a newer Frametop Installer is offered first (update_page.py),
 and the version page says when a newer Frametop than the installed one is out.
+
+The Debug button in the title bar, on every page, saves a debug report to send (debug_page.py).
 """
 import os
 import sys
@@ -25,6 +27,7 @@ except (ValueError, ImportError):  # SteamOS's host has GTK 4 but no libadwaita
 
 from . import host, job, options, releases  # noqa: E402
 from .askpass import Helper  # noqa: E402
+from .debug_page import DebugPage  # noqa: E402
 from .password_pages import PasswordPages  # noqa: E402
 from .progress_page import ProgressPage  # noqa: E402
 from .update_page import UpdatePage  # noqa: E402
@@ -36,7 +39,7 @@ CHANNEL_DETAIL = {"stable": "From main: tested releases.",
                   "experimental": "From experimental: the newest features, less tested."}
 
 
-class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
+class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.ApplicationWindow):
     def __init__(self, app, dry_run=False):
         super().__init__(application=app, title="Frametop Installer")
         self.set_default_size(980, 820)
@@ -53,6 +56,9 @@ class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
         self.osr = releases.os_release()
 
         header = Gtk.HeaderBar()
+        debug = button("Debug", self.show_debug)
+        debug.set_tooltip_text("Save a debug report to send to Frametop's developer")
+        header.pack_start(debug)
         self.set_titlebar(header)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vhomogeneous=False)
         outer = vbox(spacing=0)
@@ -85,7 +91,7 @@ class Window(PasswordPages, ProgressPage, UpdatePage, Gtk.ApplicationWindow):
                 row.append(b)
             box.append(row)
         self.stack.add_named(clamp, name)
-        self.stack.set_visible_child_name(name)
+        self.reveal(name)
         return box
 
     def open_where_things_are(self):

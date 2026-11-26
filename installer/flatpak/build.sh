@@ -60,10 +60,12 @@ install -Dm644 "$here/$ID.svg" "$f/share/icons/hicolor/scalable/apps/$ID.svg"
 
 # What the sandbox gets (installer/README.md says why): the network for GitHub, a window, and
 # flatpak-spawn --host, which runs the install on the host. The one host folder it writes is its
-# own cache, where it puts the host scripts, the install's log and its state.
+# own cache, where it puts the host scripts, the install's log and its state. It reads Downloads,
+# where the Debug button's report goes, to copy its text and show it in the file manager.
 flatpak build-finish "$app" --command=frametop-installer \
   --share=network --share=ipc --socket=wayland --socket=fallback-x11 --device=dri \
-  --talk-name=org.freedesktop.Flatpak --filesystem=~/.cache/frametop-installer:create
+  --talk-name=org.freedesktop.Flatpak --filesystem=~/.cache/frametop-installer:create \
+  --filesystem=xdg-download:ro
 
 stamp=$(git -C "$root" log -1 --format=%cI 2>/dev/null || date -u +%FT%TZ)
 # --disable-sandbox: build-export checks the icon in a bwrap sandbox, which CI's runner (Ubuntu

@@ -138,6 +138,7 @@ class Backend(QObject):
         self._ipc = ftipc.Worker(self._ipcDone.emit)
         self._polling = False
         self._running = False
+        self._streams_only = False  # ft-screens runs without the desktop (ft-layout streams)
         self._states = {}   # remote screen number -> its stream's state ("lost can't connect")
         self._online = {}   # host address -> True/False (None: not checked yet)
         self._queue = []    # ft-layout runs waiting their turn: (label, args, stdin)
@@ -166,10 +167,12 @@ class Backend(QObject):
 
     @staticmethod
     def _read_states(client):
-        """On the worker's thread: (whether the desktop runs, {remote screen: state})."""
-        running = os.path.exists(f"/run/user/{os.getuid()}/frametop/wayland-0")
+        """On the worker's thread: (whether ft-screens runs, whether it runs streams only,
+        {remote screen: state}). ft-screens shows the remote displays in the desktop and
+        without it, so it's what's asked; one that's slow to answer still runs."""
+        reply = client.ask(FT_SCREENS, "remotes")
+        running = reply is not None or client.why != ftipc.NOBODY
         states = {}
-        reply = client.ask(FT_SCREENS, "remotes") if running else None
         if reply and reply.startswith("ok"):
             for e in reply.split()[2:]:
                 n, state = int(e.split(":")[0]), e.split(":")[2]
@@ -177,15 +180,15 @@ class Backend(QObject):
                     info = client.ask(FT_SCREENS, f"remote {n} info") or ""
                     state = info[3:].strip() if info.startswith("ok ") else state
                 states[n] = state
-        return running, states
+        return running, running and ft_layout.streams_only(), states
 
     def _checked(self, result):
         self._polling = False
         if result is None:
             return
-        running, states = result
-        if running != self._running or states != self._states:
-            self._running, self._states = running, states
+        running, streams_only, states = result
+        if (running, streams_only, states) != (self._running, self._streams_only, self._states):
+            self._running, self._streams_only, self._states = running, streams_only, states
             self.changed.emit()
 
     def _ping_hosts(self):
@@ -203,7 +206,21 @@ class Backend(QObject):
 
     @Property(bool, notify=changed)
     def desktopRunning(self):
+        """Whether the remote displays can stream now: the desktop runs, or streams only."""
         return self._running
+
+    @Property(bool, notify=changed)
+    def streamsOnly(self):
+        return self._streams_only
+
+    @Slot()
+    def startStreams(self):
+        """The connected displays without the desktop (ft-layout streams start)."""
+        self._run("Streaming without the desktop", "streams", "start")
+
+    @Slot()
+    def stopStreams(self):
+        self._run("Stopping the streams", "streams", "stop")
 
     @Property(str, notify=busyChanged)
     def busy(self):

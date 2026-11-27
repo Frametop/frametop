@@ -4688,6 +4688,20 @@ void TestPinButton() {
     }
 }
 
+// The roll button (DEE-337): a poke on it presses it (vr.cpp levels the screen), not the curve button or
+// the bar beside it, and gives the desktop no press.
+void TestRollButton() {
+    const Panel p = LivePanel();
+    const Spot &roll = p.controls[2];
+    CHECK(PressableButton(Control::Roll));
+    Rig r;
+    r.panels = {p};
+    for (int mm = 50; mm >= -15; mm -= 10) r.Frame({TipAt(roll.u + 0.002, roll.v, mm / 1000.0)});
+    CHECK(r.Count(Event::Control) == 1 && r.Last(Event::Control)->control == Control::Roll && r.Count(Event::Press) == 0);
+    std::printf("buttons: a poke 2 mm right of the roll button: %s\n",
+                r.Count(Event::Control) ? ControlName(r.Last(Event::Control)->control) : "nothing");
+}
+
 // Buttons for hands: the nearest control wins, round ones have a bigger hit area, a pinch presses them.
 void TestButtons() {
     const Panel p = LivePanel();
@@ -5648,6 +5662,7 @@ int main(int argc, char **argv) {
     TestGrabThatAfterThrow();
     TestButtons();
     TestPinButton();
+    TestRollButton();
     TestTouchDot();
     TestGuides();
     TestFistSettle();

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Start, stop, or inspect the multi-screen Plasma desktop in VR on the Frame.
 # Usage: desktops.sh start [screens] | stop | restart | status | log [lines]
+#        desktops.sh streams     # stream the connected remote displays without the desktop
+#                                # (ft-screens alone, no KWin or Plasma); stop ends it
 #        desktops.sh install     # make the VR launcher's "Desktop" entry start Frametop, and add
 #                                # "Native Desktop" for the stock SteamOS desktop
 #        desktops.sh uninstall   # give the launcher back the stock SteamOS desktop
@@ -17,6 +19,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 frame="$root/scripts/frame.sh"
 action=${1:-start}
 screens=${2:-${FT_SCREENS:-}}
+streams_only=
 session=$FRAME_REPO/session
 override=.local/share/applications/deckard-nested-desktop.desktop
 native_copy=.local/share/applications/native-deckard-nested-desktop.desktop
@@ -30,16 +33,19 @@ match='[v]r-overlay-key frametop '
 running="{ pgrep -f '$match' >/dev/null || pgrep -x ft-screens >/dev/null; }"
 
 case $action in
+  streams)
+    # The session with FT_STREAMS_ONLY=1 (session/frametop-session.sh), in the same unit.
+    streams_only=1 screens= ;&
   start)
     # In its own systemd unit, so it outlives this shell (SSH, the settings app's restart).
     "$root/scripts/sync.sh" >/dev/null
     "$frame" --host "$running && { echo 'already running'; exit 0; }
 systemctl --user reset-failed frametop-desktop 2>/dev/null
-systemd-run --user --collect --quiet --unit frametop-desktop \
+systemd-run --user --collect --quiet --unit frametop-desktop ${streams_only:+--setenv=FT_STREAMS_ONLY=1} \
   ${screens:+--setenv=FT_SCREENS=$screens} ${FT_WIDTH:+--setenv=FT_WIDTH=$FT_WIDTH} ${FT_HEIGHT:+--setenv=FT_HEIGHT=$FT_HEIGHT} \
   ${FT_PHYS_WIDTH:+--setenv=FT_PHYS_WIDTH=$FT_PHYS_WIDTH} ${FT_BACKEND:+--setenv=FT_BACKEND=$FT_BACKEND} \
   bash -c 'exec $session/frametop-session.sh > $log 2>&1'
-sleep 12; echo \"plasmashell processes: \$(pgrep -c plasmashell)\"
+sleep 12; [ -n '$streams_only' ] || echo \"plasmashell processes: \$(pgrep -c plasmashell)\"
 $running && echo 'started' || { echo 'failed:'; tail -20 $log; exit 1; }" ;;
   install)
     # Also "Native Desktop", a copy of SteamOS's entry for its own desktop. Optional, so a SteamOS
@@ -136,5 +142,5 @@ $running && { echo 'still running'; exit 1; } || echo 'stopped (forced)'" ;;
   restart) "$0" stop; sleep 3; exec "$0" start ${screens:+"$screens"} ;;
   status) "$frame" --host "if $running; then pgrep -af '$match|[m]d-screens --socket' | cut -c1-120; else echo 'not running'; fi" ;;
   log) "$frame" --host "grep -vE '^\s*$' $log | tail -n ${2:-40}" ;;
-  *) echo "usage: $0 start [screens] | stop | restart | status | log [lines] | install | uninstall | screens N | autostart on|off|status | remote on|off|info | relay install|uninstall|status|log" >&2; exit 2 ;;
+  *) echo "usage: $0 start [screens] | streams | stop | restart | status | log [lines] | install | uninstall | screens N | autostart on|off|status | remote on|off|info | relay install|uninstall|status|log" >&2; exit 2 ;;
 esac

@@ -23,7 +23,8 @@ Kirigami.ApplicationWindow {
     function stateText(state) {
         const words = { live: "streaming", connecting: "connecting", starting: "starting", queued: "waiting its turn",
                         lost: "lost, trying again", disconnected: "disconnected",
-                        "desktop off": "connects when the Frametop desktop starts", "not running": "not running" }
+                        "desktop off": "connects when the Frametop desktop starts, or Stream without the desktop",
+                        "not running": "not running" }
         if (state in words) return words[state]
         if (state.startsWith("live via ")) return "streaming over the " + state.slice(9)
         if (state.startsWith("lost ")) return "lost (" + state.slice(5) + "), trying again"
@@ -322,9 +323,28 @@ Kirigami.ApplicationWindow {
                 position: Kirigami.InlineMessage.Position.Header
                 visible: true
                 type: backend.desktopRunning ? Kirigami.MessageType.Information : Kirigami.MessageType.Warning
+                // Without the desktop, ft-screens can run alone and show just these displays.
+                actions: [
+                    Kirigami.Action {
+                        text: "Stream without the desktop"
+                        icon.name: "media-playback-start"
+                        visible: !backend.desktopRunning
+                        enabled: backend.busy === ""
+                        onTriggered: backend.startStreams()
+                    },
+                    Kirigami.Action {
+                        text: "Stop streaming"
+                        icon.name: "media-playback-stop"
+                        visible: backend.streamsOnly
+                        enabled: backend.busy === ""
+                        onTriggered: backend.stopStreams()
+                    }
+                ]
                 text: !backend.desktopRunning
-                      ? "The Frametop desktop isn't running. The connected displays start with it."
-                      : backend.hosts.length === 0
+                      ? "The Frametop desktop isn't running. The connected displays start with it, or stream them on their own now."
+                      : backend.streamsOnly
+                        ? "Streaming without the desktop: the connected displays are panels on their own. Stop streaming before you start the desktop."
+                        : backend.hosts.length === 0
                         ? "Another computer's monitors as Frametop screens, with the screens' controls, in your layouts and profiles. The computer runs Vibepollo (a Mac: Sunshine, set up with Frametop's host setup): add it, sign in with its Web UI login, then pick its displays."
                         : "Each display is a panel like a screen: move, size, curve and pin it in VR, and Display Settings' Save as profile keeps where it is. A disconnected display keeps its place and settings."
             }

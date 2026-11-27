@@ -100,13 +100,20 @@ struct AsyncLink::Shared {
             case Send::Key: link.Key(s.win, uint8_t(s.a), uint16_t(s.b), s.down); break;
             case Send::Raise: link.Raise(s.win); break;
             case Send::Resize: link.Resize(s.win, s.a, s.b); break;
-            case Send::Focus:
-                if (std::string said = link.FocusSaying(s.win); !said.empty()) {
+            case Send::Focus: {
+                bool got = false;
+                if (std::string said = link.FocusSaying(s.win, &got); !said.empty()) {
                     Update u;
                     u.type = Update::Note, u.why = std::move(said);
                     Say(std::move(u));
+                    if (!got) {
+                        Update un;
+                        un.type = Update::Unfocused, un.win = s.win;
+                        Say(std::move(un));
+                    }
                 }
                 break;
+            }
             case Send::Close: break;
         }
     }

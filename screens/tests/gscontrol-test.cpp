@@ -170,6 +170,20 @@ int main() {
         c.Press(kFirst + 1, 0, 1, false, 5, 5);
         c.Press(kFirst + 1, 0, 1, true, 6, 5), c.Press(kFirst + 1, 0, 1, false, 6, 5);
         CHECK(x.Count("focus 2") == 1);   // (once)
+        // gamescope didn't focus it: moves over it ask nothing, the next press on it asks again,
+        // before the button, and once
+        x.log.clear();
+        c.Unfocused(2);
+        c.Point(kFirst + 1, 0, 7, 5), c.Point(kFirst, 0, 3, 3), c.Point(kFirst + 1, 0, 8, 5);
+        CHECK(!x.Logged("focus 2"));
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Before("focus 2", "down 1") && x.Count("focus 2") == 1);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 1);   // (it worked that time: no more)
+        // ...a window that isn't the one asked for changes nothing
+        c.Unfocused(1), c.Unfocused(0);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 1 && !x.Logged("focus 1"));
         // a press on a menu doesn't take the focus from its app's window
         x.log.clear();
         c.Press(kFirst, 1, 1, true, 30, 30), c.Press(kFirst, 1, 1, false, 30, 30);

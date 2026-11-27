@@ -353,8 +353,9 @@ void Link::Untag(uint32_t win) {
     d_->tags.erase(win);
 }
 
-std::string Link::FocusSaying(uint32_t win) {
+std::string Link::FocusSaying(uint32_t win, bool *gotIt) {
     Impl &d = *d_;
+    if (gotIt) *gotIt = false;
     const auto tag = d.tags.find(win);
     if (!d.c || tag == d.tags.end()) return "";
     std::string why;
@@ -372,9 +373,10 @@ std::string Link::FocusSaying(uint32_t win) {
     char hex[16];
     std::snprintf(hex, sizeof hex, "0x%x", win);
     const long ms = long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    if (gotIt) *gotIt = got;
     if (got) return std::string("gamescope's focus to window ") + hex + " (its pointer with it) in " + std::to_string(ms) + " ms";
     return std::string("gamescope didn't focus window ") + hex + " in " + std::to_string(ms) + " ms" +
-           (d.first ? "" : " (its first Xwayland went)") + ": tagged again; its clicks may go nowhere";
+           (d.first ? "" : " (its first Xwayland went)") + ": tagged again; its clicks may go nowhere until a press on it asks again";
 }
 
 void Link::Pointer(int x, int y) {

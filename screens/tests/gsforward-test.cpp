@@ -213,7 +213,8 @@ static void WithX() {
     }
     std::free(p);
     // Focus with no gamescope to read the focus from (Xvfb): says so, and the tag stays as it was
-    CHECK(link.FocusSaying(w).find("no first Xwayland") != std::string::npos);
+    bool got = true;
+    CHECK(link.FocusSaying(w, &got).find("no first Xwayland") != std::string::npos && !got);
     p = tagged(true);
     CHECK(p && xcb_get_property_value_length(p) == 8 && static_cast<const uint32_t *>(xcb_get_property_value(p))[0] == 7);
     std::free(p);

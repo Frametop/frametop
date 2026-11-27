@@ -189,6 +189,7 @@ void GsStep() {
                     std::printf("gamescope apps: %s (trying again every %d s)\n", u.why.c_str(), gsforward::AsyncLink::kRetryMs / 1000);
                 break;
             case gsforward::Update::Note: std::printf("gamescope apps: %s\n", u.why.c_str()); break;
+            case gsforward::Update::Unfocused: g_gsControl->Unfocused(u.win); break;
             case gsforward::Update::Window:
                 if (g_gsOn) g_gsControl->On(u.event, now);
                 break;

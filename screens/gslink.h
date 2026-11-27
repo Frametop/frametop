@@ -19,8 +19,9 @@ namespace gsforward {
 
 // What happened over there since the last Take.
 struct Update {
-    enum Type { Opened, Closed, Window, Note } type = Window;
+    enum Type { Opened, Closed, Window, Note, Unfocused } type = Window;
     Event event;          // Window: one of the display's
+    uint32_t win = 0;     // Unfocused: the window gamescope didn't focus when asked (Send::Focus)
     uint32_t pid = 0;     // Opened: gamescope's
     std::string why;      // Closed: why (or why it didn't open; said again only when it changes); Note: for the log
     std::string display;  // Opened: which

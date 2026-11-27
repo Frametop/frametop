@@ -221,8 +221,11 @@ public:
     // gamescope's focus where gamescope writes it, GAMESCOPE_FOCUSED_WINDOW on the root of its first
     // Xwayland (Steam's `:0`), over a second connection opened the first time. The tag is put back
     // after kFocusWaitMs even when gamescope never names the window (it might have unmapped).
-    static constexpr int kFocusWaitMs = 250;
-    std::string FocusSaying(uint32_t win);
+    // The first game it focuses in a session takes longest: SteamVR has to show gamescope's own
+    // overlay for it first (236 ms with the dashboard open, over 250 with it closed, 2026-11-27);
+    // after that one, 20 to 60 ms. `got`: whether gamescope named the window.
+    static constexpr int kFocusWaitMs = 1500;
+    std::string FocusSaying(uint32_t win, bool *got = nullptr);
 
 private:
     struct Impl;

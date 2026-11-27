@@ -63,7 +63,7 @@ public:
         tagging_ = false;
         Do(book_.Clear());
         tagging_ = true;
-        buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, keys_ = Keys();
+        buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, unfocused_ = 0, keys_ = Keys();
         typedBefore_.clear(), lent_.clear();
     }
     // Off (GSAPP_PANELS, or ft-screens going): buttons and keys held let go of, each window back to
@@ -73,7 +73,7 @@ public:
         for (const auto &[code, win] : keys_.Down()) x_.Key(win, gsforward::XKeycode(code), 0, false);
         keys_ = Keys();
         Do(book_.Clear());
-        raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0;
+        raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, unfocused_ = 0;
         typedBefore_.clear(), lent_.clear();
     }
     void On(const gsforward::Event &e, int64_t nowMs) {
@@ -85,6 +85,12 @@ public:
             TypeIn(e.win.id);
     }
     void Tick(int64_t nowMs) { Do(book_.Tick(nowMs)); }
+    // gamescope didn't focus `win` when asked (gsforward.h's FocusSaying: its clicks go nowhere):
+    // asked again at the next press on its panel, not at each move over it (each ask takes the
+    // window's picture off its panel while it waits).
+    void Unfocused(uint32_t win) {
+        if (win && win == focused_) unfocused_ = win;
+    }
 
     // The laser at (x, y) on X's screen, on the panel at `index` (sub 0) or its popup `sub`.
     void Point(int index, int sub, int x, int y) {
@@ -100,6 +106,7 @@ public:
         const uint32_t w = WindowAt(index, sub);
         if (!w) return;
         if (down) {
+            if (const uint32_t app = book_.WindowOf(index); app && app == unfocused_) Forget(app), FocusOn(app);
             if (sub) TypeIn(w);
             else keys_.Focus(w), FocusOn(w);
             pressedOn_ = w, blurredFrom_ = 0;
@@ -149,7 +156,7 @@ public:
             if (book_.PanelOf(w) == index) {
                 LetGoOf(w), x_.Untag(w);
                 if (raised_ == w) raised_ = 0;
-                if (focused_ == w) focused_ = 0;   // (gamescope focuses it in the theater: again when it's back)
+                Forget(w);   // (gamescope focuses it in the theater: again when it's back)
             }
         panels_.Hide(index);
         return win;
@@ -180,6 +187,7 @@ private:
     uint32_t buttons_ = 0;    // X buttons held (bit b: button b)
     uint32_t pressedOn_ = 0;  // the window the last press went to
     uint32_t focused_ = 0;    // the app window we had gamescope focus last (0: none, or it went or unmapped)
+    uint32_t unfocused_ = 0;  // ...that gamescope didn't focus then (0: it did): asked again at a press on it
     // a popup that had the typing -> the app window that had it before (erased when the popup goes)
     std::map<uint32_t, uint32_t> typedBefore_;
     uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur (0 after a press)
@@ -190,7 +198,12 @@ private:
     void FocusOn(uint32_t w) {
         if (!w || w == focused_) return;
         x_.Focus(w);
-        focused_ = w;
+        focused_ = w, unfocused_ = 0;
+    }
+    // `w` is no longer the window gamescope was asked to focus: the next laser onto it asks.
+    void Forget(uint32_t w) {
+        if (focused_ == w) focused_ = 0;
+        if (unfocused_ == w) unfocused_ = 0;
     }
     uint32_t WindowAt(int index, int sub) const { return sub ? book_.PopupWindow(index, sub) : book_.WindowOf(index); }
     bool TargetShown() const {
@@ -241,7 +254,7 @@ private:
             keys_.Focus(known(first) ? first : known(then) ? then : owner);
         }
         if (raised_ == win) raised_ = 0;
-        if (focused_ == win) focused_ = 0;
+        Forget(win);
         if (pressedOn_ == win) pressedOn_ = 0;
         if (blurredFrom_ == win) blurredFrom_ = 0;
     }
@@ -258,7 +271,7 @@ private:
                 case Action::Hide:
                     LetGoOf(a.win.id);
                     if (raised_ == a.win.id) raised_ = 0;   // (raised again when it's pointed at)
-                    if (focused_ == a.win.id) focused_ = 0;   // (gamescope may have let go of it: again when it's pointed at)
+                    Forget(a.win.id);   // (gamescope may have let go of it: again when it's pointed at)
                     panels_.Hide(a.index);
                     break;
                 case Action::Drop: Gone(a.win.id, 0, 0, false), panels_.Drop(a.index); break;

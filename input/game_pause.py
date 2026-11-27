@@ -329,8 +329,11 @@ class ControllerWatch(threading.Thread):
     POINTER_HANDS=1), it also sends the pointer helper who holds a controller (TouchTracker).
     In gamepad mode (set_pad) it sends the relay the pad's state ("vrpad B LT RT LX LY RX RY",
     PadReader) on each change and every PAD_REPEAT, and "vrgrips" once both grips have been
-    squeezed for GRIPS_HOLD (the way out). Reconnects every 5 seconds while SteamVR is
-    away. With no gesture set, no touch feed and no gamepad mode, it doesn't connect."""
+    squeezed for GRIPS_HOLD (the way out). vrserver now and then stops answering for a
+    controller (vrws.Hearing), so one that is connected and says nothing is asked for again at
+    each lookup, and in gamepad mode, which looks them up as it starts, any silent one each second.
+    Reconnects every 5 seconds while SteamVR is away. With no gesture set, no touch feed and no
+    gamepad mode, it doesn't connect."""
 
     def __init__(self, log):
         super().__init__(name="pause-gesture", daemon=True)
@@ -420,6 +423,13 @@ class ControllerWatch(threading.Thread):
             alone = None  # the one-controller gesture in use (one_controller), or None
             reader, pad_sent, pad_at = PadReader(), None, 0.0
             grips = GripsHeld()
+            hearing, pad_was = vrws.Hearing(time.monotonic()), False
+
+            def ask(paths, at):
+                # (again, too: a request is harmless to repeat, and one can stop being answered)
+                for path in paths:
+                    ws.subscribe(path)
+                    hearing.ask(path, at)
             while True:
                 g = self.current()
                 touch = self.touch_feed
@@ -436,18 +446,26 @@ class ControllerWatch(threading.Thread):
                 if lookup_at is not None and now >= lookup_at:
                     self.lookup_at = None
                     next_poll = now
+                if pad and (not pad_was or (now - last_poll >= LOOKUP_GAP and hearing.quiet(sides, now))):
+                    # Gamepad mode starts, or a controller says nothing in it: half a pad is none,
+                    # and the grips are the way out. Who is there, and connected, now?
+                    next_poll = now
+                pad_was = pad
                 if now >= next_poll:
                     # A controller connects later, or changes its root path when the 3D mouse's
                     # virtual controller takes or gives back its hand role. Each lookup is an HTTP
                     # request to vrserver, so it's at connect, every LOOKUP_EVERY, when a message
                     # comes from a device not on the list, and when the relay says (recheck).
                     next_poll, last_poll = now + LOOKUP_EVERY, now
-                    found = vrws.controllers()
+                    states = vrws.controller_states()
+                    found = {path: side for path, (side, _) in states.items()}
+                    hearing.looked_up({path for path, (_, connected) in states.items() if connected}, now)
                     if found != sides:
                         for path in sides.keys() - found.keys():
                             ws.subscribe(path, on=False)
-                        for path in found.keys() - sides.keys():
-                            ws.subscribe(path)
+                        # Every one that's left, not only the new: vrserver's cancel ends a
+                        # device's subscription under its other path too (vrws.Hearing).
+                        ask(found, now)
                         sides = found
                         reader.keep(sides)
                         if g is not None:
@@ -455,11 +473,15 @@ class ControllerWatch(threading.Thread):
                         msgs = self.tracker.set_sides(sides)
                         if touch:
                             self.to_helper(msgs)
+                    else:
+                        ask(hearing.quiet(hearing.on.keys() & sides.keys(), now), now)  # connected, and silent
                     if not self.connected:
                         self.connected = True
                         self.log(f"controller reader: following "
                                  f"{' and '.join(sorted(sides.values())) or 'no'} "
                                  f"controller{'s' if len(sides) != 1 else ''} on SteamVR's web socket")
+                if pad:
+                    ask(hearing.quiet(sides, now), now)  # (whatever the lookup says of it: each QUIET)
                 single = None if g is None else one_controller(g.buttons, set(sides.values()))
                 if single is None:
                     if alone is not None and g is not None:
@@ -476,6 +498,10 @@ class ControllerWatch(threading.Thread):
                     device = device_of(text)
                     if device and device not in sides:
                         next_poll = min(next_poll, last_poll + LOOKUP_GAP)  # its root path changed, maybe
+                    elif device and (silent := hearing.message(device, time.monotonic())) is not None:
+                        self.log(f"controller reader: the {sides[device]} controller had said nothing for "
+                                 f"{silent:.0f} s with SteamVR having it connected; asked for its input "
+                                 "again, and it's back")
                     # About 160 messages a second, nearly all capacitive sensing: parse only the
                     # few that carry one of the gesture's buttons, or with the touch feed on, the
                     # touch and click ones.

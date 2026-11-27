@@ -332,7 +332,8 @@ class ControllerWatch(threading.Thread):
     PadReader) on each change and every PAD_REPEAT, and "vrgrips" once both grips have been
     squeezed for GRIPS_HOLD (the way out). Each gamepad mode reads the pad from nothing: it looks
     the controllers up as it starts and asks for each, which answers with its whole state, and
-    sends its first "vrpad" PAD_SETTLE after that, with the answers in it.
+    sends its first "vrpad" PAD_SETTLE after that, with the answers in it. (One that follows
+    another so closely that the reader never saw the mode off keeps the pad it was reading.)
     vrserver now and then stops answering for a controller (vrws.Hearing), so one that is
     connected and says nothing is asked for again at each lookup, and in gamepad mode each second.
     Reconnects every 5 seconds while SteamVR is away. With no gesture set, no touch feed and no
@@ -345,7 +346,7 @@ class ControllerWatch(threading.Thread):
         self.gesture = None
         self.touch_feed = False
         self.pad = False
-        self.pad_starts = 0  # the gamepad modes so far: one that ends and starts within a turn of the session is a new one
+        self.pad_starts = 0  # the gamepad modes so far: one that ends and starts within a turn of the session is a new one too
         self.tracker = TouchTracker()
         self.resend = False  # the helper (re)started: send it the touch state again
         self.changed = threading.Event()
@@ -429,7 +430,7 @@ class ControllerWatch(threading.Thread):
             alone = None  # the one-controller gesture in use (one_controller), or None
             reader, pad_sent, pad_at, pad_from = PadReader(), None, 0.0, 0.0
             grips = GripsHeld()
-            hearing, pad_seen = vrws.Hearing(time.monotonic()), None
+            hearing, pad_seen, pad_was = vrws.Hearing(time.monotonic()), None, False
 
             def ask(paths, at):
                 # (again, too: a request is harmless to repeat, and one can stop being answered)
@@ -452,17 +453,24 @@ class ControllerWatch(threading.Thread):
                 if lookup_at is not None and now >= lookup_at:
                     self.lookup_at = None
                     next_poll = now
-                # (by count, not by the mode being off in between: off and on again while this
-                # loop waited for a message or a lookup is a new mode too)
-                starting = pad and pad_starts != pad_seen
+                # A new mode, by count: one that ended and started again while this loop waited
+                # for a message or a lookup is one too, though the reader never saw the mode off.
+                again = pad and pad_starts != pad_seen
+                starting, pad_was = again and not pad_was, pad
+                if again:
+                    # A squeeze in the last mode says nothing in this one, and the relay keeps
+                    # from the game what is down in the first state it gets: that one goes at once.
+                    pad_seen, pad_sent, grips = pad_starts, None, GripsHeld()
                 if starting:
-                    pad_seen = pad_starts
                     # vrserver tells changes only, and nothing is read with the mode off: a grip
                     # let go after the squeeze that left the last mode would still be down here,
                     # and leave this one, and a stick let go then would still be pushed. So the
                     # pad starts from nothing, and each controller is asked for below: its answer
-                    # is its whole state.
-                    reader, pad_sent, grips = PadReader(), None, GripsHeld()
+                    # is its whole state. (A mode the reader never saw off was read all along: its
+                    # pad stays, where one from nothing would wait on answers it already has, and
+                    # a late answer would make a press of a button that is held: council,
+                    # 2026-11-27.)
+                    reader = PadReader()
                 if starting or (pad and now - last_poll >= LOOKUP_GAP and hearing.quiet(sides, now)):
                     # Gamepad mode starts, or a controller says nothing in it: half a pad is none,
                     # and the grips are the way out. Who is there, and connected, now?

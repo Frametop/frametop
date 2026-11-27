@@ -91,8 +91,9 @@ public:
     // kFocusRefusals in a row a press asks only once kFocusRetryMs have passed since the last
     // refusal: with another game in the theater holding SteamVR's input gamescope refuses every
     // time (docs/design.md), and each click would cost the panel its picture for that wait. Not
-    // never again: nothing here hears that game leave the theater, and the window's clicks would
-    // go nowhere from then on (council, 2026-11-27).
+    // never again: the window's clicks would go nowhere from then on. A change of the theater's
+    // game is told here (TheaterChanged), and the count starts over; the pace is for the refusals
+    // nothing announces, such as nobody wearing the headset (council, 2026-11-27).
     static constexpr int kFocusRefusals = 3;
     static constexpr int64_t kFocusRetryMs = 10000;
     void Unfocused(uint32_t win) {
@@ -102,6 +103,9 @@ public:
     void Focused(uint32_t win) {
         if (win && win == focused_) refusals_ = 0;
     }
+    // SteamVR's theater shows another game now, or none: what made gamescope refuse may be over,
+    // so the next press on a refused window asks at once.
+    void TheaterChanged() { refusals_ = 0; }
 
     // The laser at (x, y) on X's screen, on the panel at `index` (sub 0) or its popup `sub`.
     void Point(int index, int sub, int x, int y) {

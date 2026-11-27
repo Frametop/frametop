@@ -262,13 +262,23 @@ check("...with both controllers asked for as it started", (asks(server, L, 4.9),
 
 
 # The mode ends and starts again within one turn of the reader's loop (council, 2026-11-27): the
-# reader never sees it off, and it is a new mode all the same, read from nothing.
-server, logs, sent = run([], 5.0, pad_at=1.0, pad_then=[(3.0, False), (3.0, True)])
-restart = [t for t, m in sent if m.startswith("vrpad ") and t > 3.0][:1]
-check("off and on again in one turn: every controller is asked for again, and the first state waits for the answers",
-      (asks(server, L, 1.1), asks(server, R, 1.1), [3.0 + gp.PAD_SETTLE <= t <= 3.0 + gp.PAD_SETTLE + 2 * STEP for t in restart]),
-      ([3.0], [3.0], [True]))
+# reader never sees it off, so the pad it was reading is still right and nothing is asked for.
+# It is a new mode all the same: its first state goes at once (the relay keeps from the game the
+# buttons down in it, here A), and a squeeze begun in the last mode counts from this one's start.
+def both_grips(s):
+    s.set(L, grip_click=True, grip_value=1.0)
+    s.set(R, grip_click=True, grip_value=1.0)
 
+
+server, logs, sent = run([(2.0, lambda s: s.set(R, a_click=True)), (2.9, both_grips)], 5.0, pad_at=1.0,
+                         pad_then=[(3.0, False), (3.0, True)], wake=late)
+restart = [(t, int(m.split()[1], 16)) for t, m in sent if m.startswith("vrpad ") and t > 3.0][:1]
+check("off and on again in one turn: nothing asked for again, and the new mode's first state goes at once, the held button in it",
+      (asks(server, L, 1.1), asks(server, R, 1.1), [(t <= 3.0 + 2 * STEP, hex(b)) for t, b in restart]),
+      ([], [], [(True, "0x1000")]))
+squeezed = [t for t, m in sent if m == "vrgrips"]
+check("...and the grips squeezed just before it leave it GRIPS_HOLD after it started, not sooner",
+      (len(squeezed), [3.0 + gp.GRIPS_HOLD <= t <= 3.0 + gp.GRIPS_HOLD + 4 * STEP for t in squeezed]), (1, [True]))
 
 # Left by the grips, then entered again (council, 2026-11-27): the grips are let go, and a stick
 # with them, after the mode is off, when nothing is read. The next mode starts from the

@@ -323,7 +323,12 @@ void GsToTheater(int index) {
     UpdateVisibility();
 }
 
-void GsTheaterWord(unsigned app) { g_gsTheater.Heard(app); }
+void GsTheaterWord(unsigned app) {
+    static unsigned was = 0;
+    if (app != was && g_gsControl) g_gsControl->TheaterChanged();
+    was = app;
+    g_gsTheater.Heard(app);
+}
 bool GsInTheater() { return g_gsTheater.Showing(); }
 
 }  // namespace ftvr

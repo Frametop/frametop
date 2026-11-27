@@ -232,6 +232,20 @@ int main() {
         c.Unfocused(2);
         c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
         CHECK(x.Count("focus 2") == 3 && x.Count("down 1") == 6);
+        // refused past kFocusRefusals again, and the theater's game changes: no wait, the next
+        // press asks (and only that changes it: the press before it didn't)
+        for (int i = 0; i < Control::kFocusRefusals; ++i) {
+            c.Unfocused(2);
+            c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        }
+        const int asked = x.Count("focus 2");
+        c.Unfocused(2);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == asked);
+        c.TheaterChanged();
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == asked + 1);
+        c.Focused(2);
         // the window we focused unmaps: the laser coming back focuses again, once it maps
         x.log.clear();
         c.On(Ev(Event::Unmapped, Win(2, Kind::Main)), 1);

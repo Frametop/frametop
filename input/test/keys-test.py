@@ -1928,6 +1928,9 @@ def tests():
     check("the gaze takes the pointer back in gamepad mode: the helper hides it again each time, the relay's "
           "stays off, and the mode stays", (woke, gazed.again, gazed.active, mode.on, said),
           ([True, True], ["gamepad", "gamepad"], False, True, []))
+    gazed.active = True
+    check("...and never one that's on, aside or not: the mouse woke it, and that's the way out",
+          (mode.gaze_woke(gazed), gazed.again), (False, ["gamepad", "gamepad"]))
     mode.screens_word(None, 32.0)
     # uinput refuses the pad: ft-screens is told, or it would keep its lasers off and say the mode
     # again each second.

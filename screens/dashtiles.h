@@ -19,7 +19,10 @@
 // to put it straight ahead, not the middle of the strip (two as wide: the seam between them); moves by
 // hand keep it where they leave it, as they keep the others. It's the one you chose (a drop right onto the
 // one before: TakeCentre), else Steam's window while it's a tile (it was over its bar), else the
-// widest. It alone may curve (ToggleArc: round the tiles' arc, vrtiles.cpp). Any tile may be nudged
+// widest. One you chose is its column's base, on the desk line (tilegrid.h's Pin; user, 2026-11-27:
+// "We want the desk line to be the display that is in the main slot"): what's let go under it hangs
+// under it, and it and the row it stands in stay where they are. The widest by default isn't held
+// there. It alone may curve (ToggleArc: round the tiles' arc, vrtiles.cpp). Any tile may be nudged
 // up or down on its own (Key::NudgeUp, NudgeDown), the others staying where they are. All three are
 // in its remembered state, so per app and in profiles.
 //
@@ -340,8 +343,10 @@ public:
     bool TakeCentre(int id) {
         if (!grid_.Has(id) || (id == centreNow_ && id == centre_)) return false;
         EndBatch();
+        grid_.Pin(-1);   // (the two trade cells: the old one's is on the desk)
         if (centreNow_ >= 0 && centreNow_ != id) grid_.Swap(id, centreNow_);
         centre_ = id, centreNow_ = id, centreOfProfile_ = false;
+        grid_.Pin(id);
         moved_ = -1, movedAz_ = NAN;
         Recentre();   // (it straight ahead)
         return true;
@@ -416,6 +421,7 @@ public:
     // where it was (Pan).
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
+        grid_.Pin(grid_.Has(centre_) ? centre_ : -1);   // (the centre you chose on the desk line; the widest by default isn't held there)
         const std::vector<tiling::Column> cols = Columns(info);
         fills_.clear(), shownFills_.clear(), underFills_.clear();
         for (size_t ci = 0; ci < cols.size(); ++ci) {   // (each column's shelves so far, from the desk up and down: RoomFor)

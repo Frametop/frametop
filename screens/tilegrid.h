@@ -28,6 +28,11 @@
 // or right edge (`align`; user: "a 600 pixel wide display that I can either set on the right, or the
 // left of below the 1400"; 0: as the tiling packs the strip narrowest, tiling.h's Lean).
 //
+// A pinned panel is always its column's base (Pin; user, 2026-11-27: "We want the desk line to be the
+// display that is in the main slot"): the centre display you chose. Every move keeps it on the desk
+// line, so what's put under it hangs under it and what's put over it stands on it; it never rises
+// or drops because of another panel. Meta+Up/Down on it does nothing, and one beside it crosses it.
+//
 // Header only, so its test runs anywhere.
 #pragma once
 
@@ -75,6 +80,13 @@ public:
     }
     bool Has(int id) const { return Find(id).ok(); }
 
+    // `id` always its column's base from now on (-1: none pinned).
+    void Pin(int id) {
+        pin_ = id;
+        KeepPin();
+    }
+    int Pinned() const { return pin_; }
+
     // A new column of its own, right of `after`'s, on its side of each split (none, or not in the
     // grid: at the right end).
     void Add(int id, int after = -1) {
@@ -97,9 +109,10 @@ public:
         col = std::clamp(col, 0, int(cols_.size()));
         if (newColumn || col == int(cols_.size())) {
             InsertCol(col, Col{{Cell{id, Sc(scale)}}}, leftOfSlot);
-            return;
+            return KeepPin();
         }
         Put(cols_[col], row, Cell{id, Sc(scale)}, below);
+        KeepPin();
     }
     // Column `from`'s top panel into column `to` at `row`, on the desk line or above it (its column
     // goes when it was the last in it). False when there's no such move.
@@ -112,19 +125,21 @@ public:
         Take(cell.id);
         if (gone && from < to) --to;
         Put(cols_[size_t(to)], row, cell, false);
+        KeepPin();
         return true;
     }
     // Panel `id` hung lowest under column `col`'s desk line, out of its own (which goes when it was
     // the last in it). False when there's no such move.
     bool HangUnder(int id, int col) {
         const Where w = Find(id);
-        if (!w.ok() || col == w.col || col < 0 || col >= int(cols_.size())) return false;
+        if (!w.ok() || id == pin_ || col == w.col || col < 0 || col >= int(cols_.size())) return false;   // (pinned: on the desk)
         Cell cell = cols_[size_t(w.col)].cells[size_t(w.row)];
         cell.align = 0, cell.row = false;
         const bool gone = cols_[size_t(w.col)].cells.size() == 1;
         Take(id);
         if (gone && w.col < col) --col;
         Put(cols_[size_t(col)], int(cols_[size_t(col)].cells.size()), cell, true);
+        KeepPin();
         return true;
     }
     // Out of the grid (its column goes when it was the last in it; the splits with the last
@@ -160,27 +175,35 @@ public:
         if (across) {
             // across the slot: into a column of its own, the slot's nearest that side
             InsertCol(split, Col{{cell}}, dir < 0);
-            return true;
+            return KeepPin(), true;
         }
         if (next < 0 || next >= int(cols_.size())) {
             // at the end: out into a column of its own that side
             InsertCol(next < 0 ? 0 : int(cols_.size()), Col{{cell}}, next < 0);
-            return true;
+            return KeepPin(), true;
         }
         Col &into = cols_[next];   // (as far from the desk line, on the same side of it)
         Put(into, below ? into.base + fromBase : into.base + 1 + fromBase, cell, below);
-        return true;
+        return KeepPin(), true;
     }
     // Meta+Up (-1) / Meta+Down (+1): one row up or down its column. Across the desk line it keeps its
     // place and the line moves: the one on it, down under it (the one above it takes the desk); the
     // first under it, back up onto it. The only one on the desk swaps with the one under it, and the
-    // top one, with nothing above it but the desk, stands on the one under it.
+    // top one, with nothing above it but the desk, stands on the one under it. In the pinned one's
+    // column the line stays with it: one next to it trades rows with it, so goes from standing on
+    // it to hanging under it or back; it itself doesn't move.
     bool MoveUpDown(int id, int dir) {
         const Where w = Find(id);
-        if (!w.ok() || dir == 0) return false;
+        if (!w.ok() || dir == 0 || id == pin_) return false;   // (pinned: it stays on the desk)
         Col &col = cols_[w.col];
         auto &cells = col.cells;
         const int n = int(cells.size());
+        if (Find(pin_).col == w.col) {   // (round the pinned one: across it, it staying on the desk)
+            const int to = w.row + (dir < 0 ? -1 : 1);
+            if (to < 0 || to >= n) return false;
+            std::swap(cells[w.row], cells[to]);
+            return KeepPin(), true;
+        }
         if (dir > 0 && w.row == col.base && col.base > 0) return --col.base, true;
         if (dir < 0 && w.row == col.base + 1) return ++col.base, true;
         if (dir < 0 && w.row == 0 && col.base == 0 && n >= 2) return col.base = 1, true;
@@ -220,7 +243,7 @@ public:
         if (!wa.ok() || !wb.ok() || a == b) return false;
         Cell &ca = cols_[wa.col].cells[wa.row], &cb = cols_[wb.col].cells[wb.row];
         std::swap(ca.id, cb.id), std::swap(ca.scale, cb.scale);
-        return true;
+        return KeepPin(), true;
     }
     // A panel's cell, or null.
     const Cell *CellOf(int id) const {
@@ -263,7 +286,12 @@ private:
             cols_.erase(cols_.begin() + w.col);
             for (int &s : split_) s -= w.col < s;
         }
+        KeepPin();
         return true;
+    }
+    // The pinned panel its column's base again (its column's others where they are: up or under it).
+    void KeepPin() {
+        if (const Where w = Find(pin_); w.ok()) cols_[size_t(w.col)].base = w.row;
     }
     // A new column at `at` (at a split: left of its slot when `left`).
     void InsertCol(int at, Col c, bool left) {
@@ -273,6 +301,7 @@ private:
     }
     std::vector<Col> cols_;
     std::array<int, kSplits> split_ = {-1, -1, -1};
+    int pin_ = -1;   // always its column's base (Pin; -1: none)
 };
 
 }  // namespace tilegrid

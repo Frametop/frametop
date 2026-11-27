@@ -39,7 +39,7 @@ constexpr double kLeanSeenDeg = 1;   // a shelf's lean that moves it less than t
 // (*moved: the strip's pan keeps the others' places round it). False when nothing changed.
 inline bool Lift(tilegrid::Grid &g, const View &v, int id, int side, int *moved) {
     const tilegrid::Where w = g.Find(id);
-    if (!w.ok() || g.Cols()[size_t(w.col)].Below(w.row)) return false;
+    if (!w.ok() || id == g.Pinned() || g.Cols()[size_t(w.col)].Below(w.row)) return false;   // (pinned: it stays on the desk)
     for (const int dir : {side < 0 ? -1 : 1, side < 0 ? 1 : -1}) {
         const int c = v.Neighbour(w.col, dir);
         if (c < 0) continue;

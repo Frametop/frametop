@@ -1977,6 +1977,27 @@ int main() {
         check("reset: ...shown: straight ahead, the strip on both sides", near(b.PlacedOf(190)->azDeg, 0, 1e-9) && b.Last().az0 < -30 &&
                                                                               b.Last().az1 > 30 && b.WallCentre() == 190);
     }
+    {   // the centre you chose stays on the desk line (tilegrid.h's Pin)
+        tilegrid::Grid g;
+        g.Insert(1, 0, 0, true), g.Insert(2, 0, 0, false);   // (2 over 1, 1 the base)
+        g.Pin(1);
+        g.Insert(3, 0, 2, false);   // (let go low on it: before, the new base)
+        const auto at = [&](int id) { return g.Find(id).row; };
+        const tilegrid::Col *c = &g.Cols()[0];
+        check("pin: let go low on it, it hangs under it", c->base == at(1) && c->Below(at(3)) && !c->Below(at(2)));
+        check("pin: Meta+Up/Down on it: nothing", !g.MoveUpDown(1, -1) && !g.MoveUpDown(1, +1) && g.Cols()[0].base == at(1));
+        check("pin: Meta+Up on the one under it: stands on it", g.MoveUpDown(3, -1) && at(3) == at(1) - 1 && g.Cols()[0].base == at(1));
+        check("pin: Meta+Down on the one over it: hangs under it", g.MoveUpDown(3, +1) && g.Cols()[0].Below(at(3)) && g.Cols()[0].base == at(1));
+        g.Remove(2);
+        check("pin: one over it gone: still the base", g.Cols()[0].base == at(1) && at(1) == 0);
+        g.Insert(4, 1, 0, true);
+        check("pin: not hung under another column", !g.HangUnder(1, 1) && g.Find(1).col == 0);
+        g.Insert(1, 1, 1, false);   // (into another column, under its base)
+        check("pin: moved to another column, its base there", g.Cols()[size_t(g.Find(1).col)].base == at(1));
+        g.Pin(-1);
+        g.Insert(5, g.Find(1).col, at(1) + 1, false);
+        check("pin: none: let go low on the base, the new base", g.Cols()[size_t(g.Find(5).col)].base == at(5));
+    }
     std::printf(failed ? "%d FAILED\n" : "all ok\n", failed);
     return failed ? 1 : 0;
 }

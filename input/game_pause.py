@@ -329,9 +329,10 @@ class ControllerWatch(threading.Thread):
     POINTER_HANDS=1), it also sends the pointer helper who holds a controller (TouchTracker).
     In gamepad mode (set_pad) it sends the relay the pad's state ("vrpad B LT RT LX LY RX RY",
     PadReader) on each change and every PAD_REPEAT, and "vrgrips" once both grips have been
-    squeezed for GRIPS_HOLD (the way out). vrserver now and then stops answering for a
-    controller (vrws.Hearing), so one that is connected and says nothing is asked for again at
-    each lookup, and in gamepad mode, which looks them up as it starts, any silent one each second.
+    squeezed for GRIPS_HOLD (the way out). Each gamepad mode reads the pad from nothing: it looks
+    the controllers up as it starts and asks for each, which answers with its whole state.
+    vrserver now and then stops answering for a controller (vrws.Hearing), so one that is
+    connected and says nothing is asked for again at each lookup, and in gamepad mode each second.
     Reconnects every 5 seconds while SteamVR is away. With no gesture set, no touch feed and no
     gamepad mode, it doesn't connect."""
 
@@ -446,11 +447,18 @@ class ControllerWatch(threading.Thread):
                 if lookup_at is not None and now >= lookup_at:
                     self.lookup_at = None
                     next_poll = now
-                if pad and (not pad_was or (now - last_poll >= LOOKUP_GAP and hearing.quiet(sides, now))):
+                starting, pad_was = pad and not pad_was, pad
+                if starting:
+                    # vrserver tells changes only, and nothing is read with the mode off: a grip
+                    # let go after the squeeze that left the last mode would still be down here,
+                    # and leave this one, and a stick let go then would still be pushed. So the
+                    # pad starts from nothing, and each controller is asked for below: its answer
+                    # is its whole state.
+                    reader, pad_sent = PadReader(), None
+                if starting or (pad and now - last_poll >= LOOKUP_GAP and hearing.quiet(sides, now)):
                     # Gamepad mode starts, or a controller says nothing in it: half a pad is none,
                     # and the grips are the way out. Who is there, and connected, now?
                     next_poll = now
-                pad_was = pad
                 if now >= next_poll:
                     # A controller connects later, or changes its root path when the 3D mouse's
                     # virtual controller takes or gives back its hand role. Each lookup is an HTTP
@@ -473,6 +481,8 @@ class ControllerWatch(threading.Thread):
                         msgs = self.tracker.set_sides(sides)
                         if touch:
                             self.to_helper(msgs)
+                    elif starting:
+                        ask(sides, now)  # every one: the pad's state as it is now
                     else:
                         ask(hearing.quiet(hearing.on.keys() & sides.keys(), now), now)  # connected, and silent
                     if not self.connected:

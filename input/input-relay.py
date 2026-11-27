@@ -2697,7 +2697,7 @@ class Relay:
         if cmd == "gazewoke":
             # The gaze took the pointer back (gaze mode owns it): it's on, as a wake leaves it.
             p = self.lease.current
-            if p and not p.active:
+            if p and not p.active and not self.gamepad.gaze_woke(p):
                 p.active, p.last_used = True, now
                 log("pointer on (gaze)")
             return

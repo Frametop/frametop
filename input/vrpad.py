@@ -243,6 +243,7 @@ class GamepadMode:
         self.since = 0.0  # on since then
         self.left = None  # ft-screens was asked to end it then (None: not asked)
         self.aside = False  # the relay's pointer stepped aside for this gamepad mode (pointer)
+        self.gaze_said = False  # the gaze took the pointer back in this gamepad mode (logged once)
 
     def sound(self, which):
         path = SOUNDS[which]
@@ -274,7 +275,7 @@ class GamepadMode:
             self.on, self.target, self.app = True, target, app
             self.state, self.seen, self.fresh = NEUTRAL, now, True
             self.dash_opened = False
-            self.since, self.left, self.aside = now, None, False
+            self.since, self.left, self.aside, self.gaze_said = now, None, False, False
             self.log(f"gamepad mode on: the controllers are a gamepad for {self.where()}")
             self.read(True)
             self.sound(True)
@@ -325,6 +326,19 @@ class GamepadMode:
         elif pointer.active:
             self.leave("mouse", now)
 
+    def gaze_woke(self, pointer):
+        """The helper's "gazewoke": the gaze took the pointer back, which gaze mode does by itself
+        a few seconds after a controller last had it (with hand interaction off, nothing tells the
+        helper the controllers are in the hands). That is no mouse used on purpose, so in gamepad
+        mode the helper is told to hide it again and the relay's pointer stays off. True if so."""
+        if not (self.on and self.aside):
+            return False
+        pointer.send("hide gamepad")
+        if not self.gaze_said:
+            self.gaze_said = True
+            self.log("gamepad mode: the gaze took the pointer back; hidden again (the mouse and the grips leave the mode)")
+        return True
+
     def dashboard_state(self, on):
         """The helper's "vrdash 1|0": a dashboard opened during gamepad mode has the controllers
         until it closes."""
@@ -352,8 +366,11 @@ class GamepadMode:
             try:
                 self.pads[self.target] = self.make_pad(identity)
             except OSError as e:
+                # ft-screens has to end it too: it would say the mode again each second, with
+                # its lasers off all the while.
                 self.log(f"gamepad mode: can't make the virtual gamepad: {e}")
                 self.stop("no virtual gamepad")
+                self.send("screens", "padmode off nopad")
                 return None
         return self.pads[self.target]
 

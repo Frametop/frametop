@@ -10,7 +10,7 @@
 namespace barmenuicons {
 
 enum class Icon {
-    None, Curved, Rotate, Desktop, Close, Theater, InRoom, InView, Dashboard, Controller, StayShown, Centre, MoveAll,
+    None, Curved, Rotate, Desktop, Close, Theater, InRoom, InView, Dashboard, Tiled, Controller, StayShown, Centre, MoveAll,
     BarPosition, Reset, Back, Chevron, Check, Scale,
 };
 
@@ -30,6 +30,8 @@ inline std::vector<iconpath::Shape> Shapes(Icon i) {
         case Icon::InRoom: return {{{Rect(4, 3, 16, 11, 1.5)}}, {{Ellipse(12, 20, 7, 1.8)}, false, 0.55}};
         case Icon::InView: return {{Parse("M3 8h18a1 1 0 0 1 1 1v6a2 2 0 0 1-2 2h-4.2l-2-2.6h-3.6l-2 2.6H4a2 2 0 0 1-2-2V9a1 1 0 0 1 1-1z")}};
         case Icon::Dashboard: return {{{Rect(5, 3, 14, 10, 1.5), Rect(2, 16, 20, 5, 1.5)}}};
+        case Icon::Tiled:   // (three panels side by side over the bar)
+            return {{{Rect(2, 4, 6, 9, 1), Rect(9, 3, 6, 10, 1), Rect(16, 4, 6, 9, 1), Rect(2, 16, 20, 5, 1.5)}}};
         case Icon::Controller:
             return {{Parse("M9 2h6a3 3 0 0 1 3 3v3.5a3 3 0 0 1-2 2.8V20a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-8.7a3 3 0 0 1-2-2.8V5a3 3 0 0 1 3-3z")}};
         case Icon::StayShown:

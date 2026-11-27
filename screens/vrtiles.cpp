@@ -393,7 +393,8 @@ void TileGroupTo(const Mat &world) {
     const Mat rel = Mul(Inverse(DashFrame()), world), moved = Mul(rel, Inverse(g_tileGroupRel));
     g_tileGroupRel = rel;
     for (auto &[i, s] : g_screens)
-        if (s.pinned == kDashboard && s.drag == Drag::None) PinIn(s, kDashboard, Mul(moved, s.pinRel), levelpin::Rigid);
+        // (the tiles only: a panel pinned to the dashboard on its own rides the bar, not the group)
+        if (s.pinned == kDashboard && s.drag == Drag::None && g_tiles.Anchored(i)) PinIn(s, kDashboard, Mul(moved, s.pinRel), levelpin::Rigid);
 }
 void TileGroupPut(const Mat *head) {
     Mat group;
@@ -452,6 +453,7 @@ void TileAnchor(int i, dashtiles::Stay stay, const char *by, int leftOf) {
     auto it = g_screens.find(i);
     if (it == g_screens.end() || g_tiles.Anchored(i)) return;
     EndDrag(it->second);
+    it->second.dashWait = false;   // (pinned to the dashboard on its own before it opened: the tiles have it now)
     // (off the head or a wrist: tiled, it's the tiles' only, user 2026-11-19: Keep in View then On
     // Dashboard left it pinned in view, and the menu, reading it tiled, offered nothing to undo it)
     if (Mat p; it->second.pinned != kNone && it->second.pinned != kDashboard && ScreenPose(it->second, &p)) SetAbsolute(it->second, p);

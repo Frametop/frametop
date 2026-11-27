@@ -31,9 +31,12 @@ int main() {
     check("a desktop screen: curve, rotate, placement, move all, bar position, reset",
           has(d, Item::Curve) && has(d, Item::Rotate) && has(d, Item::Placement) && has(d, Item::MoveAll) &&
               has(d, Item::BarPosition) && has(d, Item::Reset));
-    check("a desktop screen's placement: back, in the room, in view, dashboard",
-          dp.size() == 4 && dp[0].item == Item::Back && dp[1].item == Item::InRoom && dp[2].item == Item::KeepInView &&
-              dp[3].item == Item::OnDashboard);
+    check("a desktop screen's placement: back, in the room, in view, on the dashboard, tiled",
+          dp.size() == 5 && dp[0].item == Item::Back && dp[1].item == Item::InRoom && dp[2].item == Item::KeepInView &&
+              dp[3].item == Item::OnDashboard && dp[4].item == Item::Tiled);
+    check("a floating window's placement: no pin of its own on the dashboard, tiled", !has(fp, Item::OnDashboard) && has(fp, Item::Tiled));
+    check("On Dashboard and Tiled are two choices", panelmenu::Label({Item::OnDashboard}) == "On Dashboard" &&
+          panelmenu::Label({Item::Tiled}) == "Tiled" && panelmenu::Choice(Item::Tiled));
     check("a desktop screen: no window or theater rows", !has(d, Item::Dock) && !has(d, Item::Close) && !has(d, Item::Theater));
     check("a floating window: to desktop and close tiles, move all, no reset",
           has(f, Item::Dock) && has(f, Item::Close) && !has(fp, Item::KeepInView) && has(f, Item::MoveAll) && !has(f, Item::Reset));
@@ -50,7 +53,7 @@ int main() {
     anchored.anchored = true;
     check("anchored: Stay Shown, right after Tiled, a rule above it", [&] {
         const auto a = panelmenu::Placement(anchored);
-        const auto on = std::find(a.begin(), a.end(), panelmenu::Row{Item::OnDashboard});
+        const auto on = std::find(a.begin(), a.end(), panelmenu::Row{Item::Tiled});
         return on != a.end() && on + 1 != a.end() && (on + 1)->item == Item::StayShown && panelmenu::RuleAbove(a, size_t(on + 1 - a.begin()));
     }());
     check("a tile that can be the centre: Centre Display, right after Stay Shown, no rule above it", [&] {

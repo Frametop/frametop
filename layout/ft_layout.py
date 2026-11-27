@@ -107,8 +107,8 @@ Usage (on the Frame host; Frametop Settings calls it too):
   ft-layout hide N|all               hide a screen on its own (it stays hidden whatever the
   ft-layout show N|all               visibility mode or the hotkey say), or show it again
   ft-layout hidden                   the screens hidden on their own
-  ft-layout pin all|N left|right|head|dashboard  pin screens to a wrist, your head, or the
-                                     SteamVR dashboard as they are; unpin all|N
+  ft-layout pin all|N left|right|head|dashboard|tiled  pin screens to a wrist, your head, or the
+                                     SteamVR dashboard as they are, or onto its tiles; unpin all|N
   ft-layout remote list              the remote displays, their numbers and their streams' state
   ft-layout remote monitors ADDRESS  the host's displays (Vibepollo's /api/display-devices, JSON)
   ft-layout remote auth ADDRESS [--login | --user USER --password-stdin]

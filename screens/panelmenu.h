@@ -22,7 +22,8 @@ enum class Item {
     Placement,     // the placement page (its value: where the panel lives)
     InRoom,        // placement: left in the room
     KeepInView,    // placement: pinned to the head (desktop screens and remote displays)
-    OnDashboard,   // placement: anchored to the SteamVR dashboard
+    OnDashboard,   // placement: pinned to the SteamVR dashboard on its own, a panel in the room that rides on it (desktop screens and remote displays)
+    Tiled,         // placement: on the dashboard's tiles (dashtiles.h)
     StayShown,     // ...and shown with the dashboard closed too (checked when on, while anchored)
     CentreDisplay, // ...and the tiles' centre display, straight ahead (checked when it is; a tile)
     MoveAll,       // held: carry every panel, in the room and on the dashboard, as they stand (not from one on the head or a wrist)
@@ -82,15 +83,15 @@ inline std::vector<Row> Main(const Kind &k) {
     return r;
 }
 
-// Where the panel lives: in the room, in view (the layout's panels), on the dashboard, and Stay Shown
-// while it's on the dashboard; a tile, Centre Display (user, 2026-11-26: a drop onto the centre display
+// Where the panel lives: in the room, in view and on the dashboard (the layout's panels), tiled, and
+// Stay Shown while it's tiled (user, 2026-11-27: the dashboard pin "completely separate from tiled mode"); a tile, Centre Display (user, 2026-11-26: a drop onto the centre display
 // took it only within 4 degrees of its middle, hard to hit with a big panel).
 inline std::vector<Row> Placement(const Kind &k) {
     std::vector<Row> r;
-    r.reserve(6);
+    r.reserve(7);
     r.push_back({Item::Back}), r.push_back({Item::InRoom});
-    if (LayoutRows(k)) r.push_back({Item::KeepInView});
-    r.push_back({Item::OnDashboard});
+    if (LayoutRows(k)) r.push_back({Item::KeepInView}), r.push_back({Item::OnDashboard});
+    r.push_back({Item::Tiled});
     if (k.anchored) r.push_back({Item::StayShown});
     if (k.anchored && k.centres) r.push_back({Item::CentreDisplay});
     return r;
@@ -130,7 +131,8 @@ inline std::string Label(const Row &r) {
         case Item::Placement: return "Placement";
         case Item::InRoom: return "In the Room";
         case Item::KeepInView: return "Keep in View";
-        case Item::OnDashboard: return "Tiled";
+        case Item::OnDashboard: return "On Dashboard";
+        case Item::Tiled: return "Tiled";
         case Item::StayShown: return "Stay Shown";
         case Item::CentreDisplay: return "Centre Display";
         case Item::MoveAll: return "Move All Windows";
@@ -149,7 +151,7 @@ inline std::string Label(const Row &r) {
 
 // One of a page's choices: the one picked gets a check.
 inline bool Choice(Item i) {
-    return i == Item::InRoom || i == Item::KeepInView || i == Item::OnDashboard || i == Item::Edge || i == Item::Inside ||
+    return i == Item::InRoom || i == Item::KeepInView || i == Item::OnDashboard || i == Item::Tiled || i == Item::Edge || i == Item::Inside ||
            i == Item::Outside || i == Item::ScaleStep;
 }
 // On or off (Curved's tile blue, Stay Shown and Centre Display checked; Centre Display once on is

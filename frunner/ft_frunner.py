@@ -962,6 +962,8 @@ class Frunner:
             self.toast(f"{name} is pinned to your view")
         elif pin == "dashboard":
             self.toast(f"{name} is pinned to the dashboard")
+        elif pin == "tiled":
+            self.toast(f"{name} is on the dashboard's tiles")
 
     def launch(self, item, action=None, screen=None):
         self.close("launch")

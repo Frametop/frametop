@@ -109,15 +109,16 @@ panelmenu::Kind KindOf(const Screen &s, int i) {
     k.theater = i == SteamDashIndex() || GsCanTheater(i);
     k.anchored = TileAnchored(i);
     k.scales = AppScale(i) > 0;
-    k.rides = s.pinned != kNone && s.pinned != kDashboard;
+    k.rides = s.pinned != kNone && !TileAnchored(i);   // (a dashboard pin of its own too: it stays on it, as a wrist's does)
     k.centres = TileTiled(i) && i != SteamDashIndex();
     return k;
 }
 
 // Where the panel lives (Placement's value and its check).
-enum class Where { Room, View, Dashboard, Wrist };
+enum class Where { Room, View, Dashboard, Tiled, Wrist };
 Where Placed(const Screen &s, int i) {
-    if (TileAnchored(i) || s.pinned == kDashboard) return Where::Dashboard;   // (a tile, or `ft-layout pin N dashboard`)
+    if (TileAnchored(i)) return Where::Tiled;
+    if (s.pinned == kDashboard || s.dashWait) return Where::Dashboard;   // (`ft-layout pin N dashboard`, or waiting for it to open)
     if (s.pinned == vr::k_unTrackedDeviceIndex_Hmd) return Where::View;
     if (s.pinned != kNone) return Where::Wrist;
     return Where::Room;
@@ -130,6 +131,7 @@ bool On(const panelmenu::Row &r, const Screen &s, int i) {
         case panelmenu::Item::InRoom: return Placed(s, i) == Where::Room;
         case panelmenu::Item::KeepInView: return Placed(s, i) == Where::View;
         case panelmenu::Item::OnDashboard: return Placed(s, i) == Where::Dashboard;
+        case panelmenu::Item::Tiled: return Placed(s, i) == Where::Tiled;
         case panelmenu::Item::StayShown: return TileStays(s, i);
         case panelmenu::Item::CentreDisplay: return TileIsCentre(i);
         case panelmenu::Item::Edge: return s.barSide == r.side;
@@ -153,13 +155,22 @@ barmenuart::RowLook Look(const panelmenu::Row &r, const Screen &s, int i, const 
         case Item::Dock: l.icon = Icon::Desktop; break;
         case Item::Close: l.icon = Icon::Close, l.red = true; break;
         case Item::Placement:
-            l.icon = w == Where::View ? Icon::InView : w == Where::Dashboard ? Icon::Dashboard : w == Where::Wrist ? Icon::Controller : Icon::InRoom;
-            l.value = w == Where::View ? "Keep in View" : w == Where::Dashboard ? "Tiled" : w == Where::Wrist ? "On a Wrist" : "In the Room";
+            l.icon = w == Where::View        ? Icon::InView
+                     : w == Where::Dashboard ? Icon::Dashboard
+                     : w == Where::Tiled     ? Icon::Tiled
+                     : w == Where::Wrist     ? Icon::Controller
+                                             : Icon::InRoom;
+            l.value = w == Where::View        ? "Keep in View"
+                      : w == Where::Dashboard ? "On Dashboard"
+                      : w == Where::Tiled     ? "Tiled"
+                      : w == Where::Wrist     ? "On a Wrist"
+                                              : "In the Room";
             l.valueBlue = w != Where::Room;
             break;
         case Item::InRoom: l.icon = Icon::InRoom; break;
         case Item::KeepInView: l.icon = Icon::InView; break;
         case Item::OnDashboard: l.icon = Icon::Dashboard; break;
+        case Item::Tiled: l.icon = Icon::Tiled; break;
         case Item::StayShown: l.icon = Icon::StayShown; break;
         case Item::CentreDisplay: l.icon = Icon::Centre; break;
         case Item::MoveAll: l.icon = Icon::MoveAll, l.value = "Hold"; break;   // (a click alone carries nothing)
@@ -258,7 +269,10 @@ void PressRow(int row, vr::TrackedDeviceIndex_t dev, const char *by) {
             if (s.pinned != vr::k_unTrackedDeviceIndex_Hmd) TogglePinView(s, i, by);   // (off the dashboard or a wrist too)
             break;
         case Item::OnDashboard:
-            if (Placed(s, i) != Where::Dashboard) TileAnchor(i, dashtiles::Stay::Default, by);   // (the choice it is: nothing)
+            if (Placed(s, i) != Where::Dashboard) PinToDash(s, i, by);   // (the choice it is: nothing)
+            break;
+        case Item::Tiled:
+            if (Placed(s, i) != Where::Tiled) TileAnchor(i, dashtiles::Stay::Default, by);
             break;
         case Item::StayShown: TileStay(i, !TileStays(s, i), by); break;
         case Item::CentreDisplay: TileTakeCentre(i, by); break;   // (the one it is: nothing)

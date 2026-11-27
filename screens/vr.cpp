@@ -2115,11 +2115,25 @@ void TogglePinView(Screen &s, int index, const char *by) {
 // room where it is.
 void PlaceInRoom(Screen &s, int index, const char *by) {
     TileInRoom(index, by);   // (a window's app stays in the room next time too: not tiled when it comes)
+    s.dashWait = false;      // (waiting for the dashboard's first opening: not now)
     Mat p;
     if (s.pinned == kNone || !ScreenPose(s, &p)) return;
     EndDrag(s);
     SetAbsolute(s, p);
     std::printf("screen %d: left in the room where it is (its bar's menu, %s)\n", index + 1, by);
+    if (s.Desktop()) ArrangeDesktopSoon();
+}
+
+// Placement's On Dashboard (user, 2026-11-27: "floating in world displays but justified to when the dashboard
+// opens ... completely separate from tiled mode"): off the tiles, the head or a wrist, a panel in the room
+// where it is that rides on Steam's bar from now on (PinAt), so each time the dashboard opens it's where it was
+// beside it. Not tiled: Move All Windows and the tiles' regroups leave it on its pin, as a wrist's.
+void PinToDash(Screen &s, int index, const char *by) {
+    EndDrag(s);
+    TileInRoom(index, by);   // (its app isn't tiled next time either)
+    Mat p;
+    if (!ScreenPose(s, &p) || !PinAt(s, kDashboard, p)) return;
+    std::printf("screen %d: pinned to the dashboard where it is%s (%s)\n", index + 1, s.dashWait ? ", when it first opens" : "", by);
     if (s.Desktop()) ArrangeDesktopSoon();
 }
 
@@ -7557,13 +7571,30 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
         return;
     }
     case vrcmd::Pin: {
-        if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head") && std::strcmp(hand, "dashboard"))
-            return (void)std::snprintf(reply, size, "error pin to left, right, head, or dashboard");
+        if (std::strcmp(hand, "left") && std::strcmp(hand, "right") && std::strcmp(hand, "head") && std::strcmp(hand, "dashboard") &&
+            std::strcmp(hand, "tiled"))
+            return (void)std::snprintf(reply, size, "error pin to left, right, head, dashboard, or tiled");
+        if (!std::strcmp(hand, "tiled")) {
+            // On the dashboard's tiles (dashtiles.h): they place it. Not seen yet this run: in the room until it first opens.
+            const bool found = EachScreen(word, [&](Screen &s) { TileAnchor(ScreenIndexOf(s), dashtiles::Stay::Default, "pin tiled"); });
+            std::snprintf(reply, size, !found ? "error no such screen" : g_dash.a.ever ? "ok" : "ok waiting for the dashboard to open");
+            return;
+        }
         const vr::TrackedDeviceIndex_t dev = HandDevice(hand);
         if (dev == kDashboard) {
-            // To the dashboard: anchored, and so tiled (a pose given with it, an older profile's, is
-            // the tiles' to choose now). Not seen yet this run: in the room until it first opens.
-            const bool found = EachScreen(word, [&](Screen &s) { TileAnchor(ScreenIndexOf(s), dashtiles::Stay::Default, "pin dashboard"); });
+            // To the dashboard, off the tiles (user, 2026-11-27: "floating in world displays but justified to when
+            // the dashboard opens ... completely separate from tiled mode"): a panel in the room that rides on
+            // Steam's bar's frame, where it is now or at the pose given (a profile's). Not seen yet this run: in
+            // the room until it first opens (WaitForDash).
+            const bool found = EachScreen(word, [&](Screen &s) {
+                Mat p, rel = Identity();
+                if (got != 14) return PinToDash(s, ScreenIndexOf(s), "pin dashboard");
+                EndDrag(s);
+                TileInRoom(ScreenIndexOf(s), "pin dashboard");
+                for (int k = 0; k < 12; ++k) rel.m[k / 4][k % 4] = r[k];
+                if (g_dash.a.ever) PinIn(s, kDashboard, rel, levelpin::Rigid);
+                else if (ScreenPose(s, &p)) WaitForDash(s, p, &rel);
+            });
             std::snprintf(reply, size, !found ? "error no such screen" : g_dash.a.ever ? "ok" : "ok waiting for the dashboard to open");
             return;
         }
@@ -7604,10 +7635,13 @@ static void PanelCommand(vrcmd::Verb verb, vrcmd::Cmd &parsed, const char *cmd, 
                                 "ok %.4f %.4f %.4f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.5f %.5f %.5f  %.4f %.4f %.3f %s",
                                 m.m[0][3], m.m[1][3], m.m[2][3], m.m[0][0], m.m[1][0], m.m[2][0], m.m[0][1], m.m[1][1],
                                 m.m[2][1], m.m[0][2], m.m[1][2], m.m[2][2], s->metres, s->heightMetres(), s->curve,
-                                s->pinned != kNone ? HandName(s->pinned) : s->dashWait ? "dashboard" : "none");
+                                TileAnchored(n - 1)  ? "tiled"   // (the tiles place it: no pin of its own to report)
+                                : s->pinned != kNone ? HandName(s->pinned)
+                                : s->dashWait        ? "dashboard"
+                                                     : "none");
         // pinned: what it rides on -> it (a floor pin: the headset; the dashboard: its bar); waiting for the
         // dashboard: the pin it came with, if any
-        if (s->pinned != kNone || (s->dashWait && s->dashHasRel)) {
+        if (!TileAnchored(n - 1) && (s->pinned != kNone || (s->dashWait && s->dashHasRel))) {
             const Mat rel = s->pinned != kNone ? HeadRel(*s) : s->dashRel;
             for (int k = 0; k < 12 && len < size; ++k)
                 len += std::snprintf(reply + len, size - len, " %.5f", rel.m[k / 4][k % 4]);

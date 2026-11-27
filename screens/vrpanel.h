@@ -549,6 +549,7 @@ void TurnWord(const char *words, char *reply, int size);   // the pointer helper
 bool RollClick(const Screen &s);   // a roll pressed and let go, not turned: a click (levels it)
 void TogglePinView(Screen &s, int index, const char *by);
 void PlaceInRoom(Screen &s, int index, const char *by);   // off the dashboard, the head or a wrist
+void PinToDash(Screen &s, int index, const char *by);     // on the dashboard on its own, where it is (not tiled)
 void PaintBar(Screen &s);   // its bar's texture: blue while armed to dock or its menu is open
 void SendFloat(const std::string &msg);   // to ft-floatd
 bool HandsFrame();   // hand input had a new hands frame this tick

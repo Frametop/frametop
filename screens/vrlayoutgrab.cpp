@@ -3,10 +3,9 @@
 // underneath a display, and not just with a key binding": carry_toggle's carry-all, the 3D mouse's, was
 // the only way to move the room's panels together; 2026-11-24: "an option to drag all windows which lets
 // you drag and move your whole set of tiled or free floating windows at the same time"). Held by a laser
-// on any panel, it moves every panel in the room (shown or not) and everything on the dashboard, the
-// tiles as one, each in its place in a level frame at that panel (layoutgrab.h): the set turns about you,
+// on any panel, it moves every panel in the room (shown or not) and the dashboard's tiles as one, each in its place in a level frame at that panel (layoutgrab.h): the set turns about you,
 // rises and comes nearer with the laser in one piece, and nothing in it tilts. The front slot's home and
-// a stopped remote display's place are in it too. What's pinned to the head or a wrist stays on its pin,
+// a stopped remote display's place are in it too. What's pinned to the head, a wrist or the dashboard on its own stays on its pin,
 // and one held otherwise meanwhile stays where that has it. The panels it moves wear carry-all's fuchsia
 // border (UpdateCarryGlow). The held panel arms no wrist pin, docks nowhere and isn't dropped on the
 // tiles' grid. It ends when the row is let go. The tiles stay where they're put while you're there
@@ -27,8 +26,9 @@ Mat g_layoutFrom = Identity();   // where the held panel was when it started
 constexpr int kBoard = -1;
 constexpr double kMovedM = 0.02;   // let go nearer where it was: not moved, the tiles stay as they were kept (or not)
 
-// Everything on the dashboard moves with it: not a panel another laser has, nor what's glued to one.
-bool OnBoard(const Screen &s) { return s.pinned == kDashboard && s.drag == Drag::None && s.glueTo < 0; }
+// The dashboard's tiles move with it: not a panel another laser has, nor what's glued to one. One pinned
+// to the dashboard on its own stays on its pin, as a wrist's does.
+bool OnBoard(const Screen &s, int i) { return s.pinned == kDashboard && TileAnchored(i) && s.drag == Drag::None && s.glueTo < 0; }
 
 void LayoutGrabEnd() {
     const int panel = g_layoutGrab.panel;
@@ -49,7 +49,7 @@ void LayoutGrabEnd() {
 bool LayoutCarrying() { return g_layoutGrab.on(); }
 bool LayoutMoves(int i) {
     const auto it = g_screens.find(i);
-    return g_layoutGrab.Moves(i) || (it != g_screens.end() && g_layoutGrab.Moves(kBoard) && OnBoard(it->second));
+    return g_layoutGrab.Moves(i) || (it != g_screens.end() && g_layoutGrab.Moves(kBoard) && OnBoard(it->second, i));
 }
 
 void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
@@ -65,7 +65,7 @@ void LayoutGrabStart(Screen &s, int index, vr::TrackedDeviceIndex_t dev) {
     g_layoutFrom = p;
     size_t tiles = 0;
     for (auto &[i, o] : g_screens) {
-        if (OnBoard(o)) ++tiles;
+        if (OnBoard(o, i)) ++tiles;
         if (o.pinned != kNone || o.glueTo >= 0 || !ScreenPose(o, &p)) continue;
         g.Take(i, p);
         SpinForget(i);   // (turning: it goes on from where this leaves it)

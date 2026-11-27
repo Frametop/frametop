@@ -1089,14 +1089,15 @@ Item {
                         delegate: Controls.ComboBox {
                             id: pinBox
                             required property int index
-                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head", "dashboard"].indexOf(backend.pins[index]))
+                            readonly property int pinIndex: Math.max(0, ["none", "left", "right", "head", "dashboard", "tiled"].indexOf(backend.pins[index]))
                             Kirigami.FormData.label: "Screen " + (index + 1) + ":"
                             model: [
                                 { text: "In the room", value: "none" },
                                 { text: "On the left wrist", value: "left" },
                                 { text: "On the right wrist", value: "right" },
                                 { text: "On your head", value: "head" },
-                                { text: "On the dashboard", value: "dashboard" }
+                                { text: "On the dashboard", value: "dashboard" },
+                                { text: "Tiled on the dashboard", value: "tiled" }
                             ]
                             textRole: "text"
                             valueRole: "value"
@@ -1167,6 +1168,11 @@ Item {
                             text: "Dashboard"
                             enabled: backend.desktopRunning
                             onClicked: backend.pin("all", "dashboard")
+                        }
+                        Controls.Button {
+                            text: "Tiles"
+                            enabled: backend.desktopRunning
+                            onClicked: backend.pin("all", "tiled")
                         }
                         Controls.Button {
                             text: "Unpin all"

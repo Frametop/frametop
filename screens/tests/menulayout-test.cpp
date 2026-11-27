@@ -73,7 +73,7 @@ int main() {
     check("placement: no tiles, back on top", !P.tiles[0] && P.rows[0].y0 == menulayout::kTop);
     check("placement: a caption over in the room", P.captions[1] >= P.rows[0].y1 && P.captions[1] + menulayout::kCaptionH == P.rows[1].y0);
     check("placement: the caption's band is no row", At(P, 100, P.h - (P.captions[1] + 10)) == -1);
-    check("placement: a rule above stay shown", P.rules.size() == 1 && P.rules[0] > P.rows[3].y1 && P.rules[0] < P.rows[4].y0);
+    check("placement: a rule above stay shown", P.rules.size() == 1 && P.rules[0] > P.rows[4].y1 && P.rules[0] < P.rows[5].y0);   // (back, in the room, in view, on the dashboard, tiled, stay shown)
 
     const auto E = menulayout::Lay(Specs(panelmenu::Edges(game, false)));
     check("edges from a right click: caption first", E.captions[0] == menulayout::kTop && E.rows[0].y0 == menulayout::kTop + menulayout::kCaptionH);

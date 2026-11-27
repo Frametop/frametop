@@ -119,7 +119,9 @@ typing goes to while the Steam menu is open) takes its lasers off every panel, a
 controller reader (game_pause.py, vrserver's web socket) then reads every controller button, both
 sticks and both triggers raw, and says the pad's state here ("vrpad B LT RT LX LY RX RY"). A
 remote display gets it through ft-screens ("pad ..."), a desktop panel as a virtual Xbox 360 pad
-on uinput, a game's panel as a second one under Steam's ids. Both grips squeezed (the reader's
+on uinput, a game's panel as a second one under Steam's ids; for a Steam game that reads its
+controller through Steam Input's actions ("gamepad game <app id>"; steamactions.py) the left stick
+presses that pad's d-pad too. Both grips squeezed (the reader's
 "vrgrips") or the mouse waking the pointer ask ft-screens to end it ("padmode off grips|mouse"):
 the pointer steps aside as the mode comes on, since an awake one keeps SteamVR's laser on for the
 controllers too. It ends too when Frametop pauses or a VR game starts, and with the dashboard open
@@ -286,9 +288,10 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     ignored from another user
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
                     hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
-  gamepad desktop|game|remote|off   from ft-screens: gamepad mode is on, for a desktop panel, a
-                    gamescope app's panel or a remote display (every second while it is), or it
-                    ended (above); ignored from another user
+  gamepad desktop|game [app id]|remote|off   from ft-screens: gamepad mode is on, for a desktop
+                    panel, a gamescope app's panel (with the game's Steam app id, when it has one)
+                    or a remote display (every second while it is), or it ended (above); ignored
+                    from another user
   vrpad B LT RT LX LY RX RY   from the controller reader in gamepad mode: the pad's state (above);
                     ignored from another user
   vrgrips           from the controller reader in gamepad mode: both grips were squeezed, the way
@@ -364,6 +367,7 @@ from ft_evdev import (  # the Linux input ABI (input.h, uinput.h)
     eviocgname,
     eviocguniq,
 )
+import steamactions
 import vrpad
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands"))
@@ -1493,7 +1497,8 @@ class Relay:
         self.pc_game = pc_game.PcGame(log)
         self.gamepad = vrpad.GamepadMode(log, self.pad_send,
                                          lambda identity: vrpad.VirtualPad(log, self.stored, notify, identity),
-                                         lambda on: self.pause.set_pad(on))
+                                         lambda on: self.pause.set_pad(on),
+                                         steam_actions=steamactions.native)
         self.load_config()
 
     def pause_changed(self, paused):
@@ -2498,13 +2503,15 @@ class Relay:
             self.pause.dashboard_state(words[1] == "1")
             self.gamepad.dashboard_state(words[1] == "1")
             return
-        if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "game", "remote", "off"):
-            # From ft-screens (no reply): gamepad mode is on or ended. It presses buttons, so
-            # only from this user.
+        if cmd == "gamepad" and (len(words) == 2 and words[1] in ("desktop", "game", "remote", "off")
+                                 or len(words) == 3 and words[1] == "game" and words[2].isascii() and words[2].isdigit()):
+            # From ft-screens (no reply): gamepad mode is on (for a Steam game's panel, with the
+            # game's app id) or ended. It presses buttons, so only from this user.
             if uid != os.getuid():
                 log(f"gamepad from another user ({uid}): ignored")
             else:
-                self.gamepad.screens_word(None if words[1] == "off" else words[1], now, self.gamepad_blocked())
+                self.gamepad.screens_word(None if words[1] == "off" else words[1], now, self.gamepad_blocked(),
+                                          int(words[2]) if len(words) == 3 else 0)
             return
         if cmd == "vrpad" and len(words) == 8:
             # From the controller reader in gamepad mode. It presses buttons, so only from

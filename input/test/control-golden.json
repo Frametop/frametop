@@ -635,7 +635,8 @@
     [
      "desktop",
      100.0,
-     "a VR game runs"
+     "a VR game runs",
+     0
     ],
     {}
    ]
@@ -671,13 +672,51 @@
     [
      "game",
      100.0,
-     "a VR game runs"
+     "a VR game runs",
+     0
     ],
     {}
    ]
   ],
   "changed": {},
   "datagram": "gamepad game",
+  "log": [],
+  "raised": null
+ },
+ "gamepad game with its app": {
+  "calls": [
+   [
+    "gamepad.screens_word",
+    [
+     "game",
+     100.0,
+     "a VR game runs",
+     2868840
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad game 2868840",
+  "log": [],
+  "raised": null
+ },
+ "gamepad game, app no number": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gamepad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad game x",
   "log": [],
   "raised": null
  },
@@ -688,13 +727,33 @@
     [
      null,
      100.0,
-     "a VR game runs"
+     "a VR game runs",
+     0
     ],
     {}
    ]
   ],
   "changed": {},
   "datagram": "gamepad off",
+  "log": [],
+  "raised": null
+ },
+ "gamepad remote with an app": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'gamepad'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad remote 2868840",
   "log": [],
   "raised": null
  },

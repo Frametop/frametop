@@ -196,6 +196,8 @@ CASES += [
     ("vrdash 1", "vrdash 1", {}), ("vrdash 0", "vrdash 0", {}), ("vrdash long", "vrdash 1 2", {}),
     ("gamepad desktop", "gamepad desktop", {}), ("gamepad game", "gamepad game", {}), ("gamepad off", "gamepad off", {}),
     ("gamepad remote, other user", "gamepad remote", {"uid": OTHER}), ("gamepad bad", "gamepad nope", {}),
+    ("gamepad game with its app", "gamepad game 2868840", {}), ("gamepad game, app no number", "gamepad game x", {}),
+    ("gamepad remote with an app", "gamepad remote 2868840", {}),
     ("vrpad ok", "vrpad 1 0 0 0 0 0 0", {}), ("vrpad other user", "vrpad 1 0 0 0 0 0 0", {"uid": OTHER}),
     ("vrpad junk", "vrpad a b c d e f g", {}), ("vrpad short", "vrpad 1 0", {}),
     ("vrgrips", "vrgrips", {}), ("vrgrips other user", "vrgrips", {"uid": OTHER}), ("vrgrips with more", "vrgrips 1", {}),

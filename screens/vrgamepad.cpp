@@ -9,8 +9,10 @@
 // panel: no laser of ours on any panel (vr.cpp's LasersByMode), so SteamVR leaves the controllers alone, and the
 // input relay hears "gamepad desktop|game|remote" every second (the panel's kind; "gamepad off" as it ends) and
 // reads the controllers raw into a pad (input/vrpad.py). A gamescope app has a pad of its own there ("game"): a
-// game Steam started opens no other (2026-11-27). Steam's own page reads the desktop's. With the Steam menu
-// open at the click, ft-dashpatch closes it first ("gamepad"): an open dashboard lasers everything.
+// game Steam started opens no other (2026-11-27). A Steam game's word has its app id ("gamepad game 2868840"):
+// for one that reads its controller through Steam Input, which has nothing for a game on a panel, the relay has
+// the left stick press the d-pad too (input/steamactions.py). Steam's own page reads the desktop's. With the
+// Steam menu open at the click, ft-dashpatch closes it first ("gamepad"): an open dashboard lasers everything.
 //
 // While it's on the pill says how to leave: both grips squeezed. The relay sees them and says "padmode off"
 // here, as it does when the mouse is used; ft-dashpatch then has SteamVR bring its laser back ("laser"). The
@@ -169,7 +171,9 @@ void UpdatePad() {
             ft_remote_pad(g_pill.pad, "pad off");
     }
     g_pill.pad = want, g_pill.padSaidMs = now;
-    SendRelay(want < 0 ? "gamepad off" : remote ? "gamepad remote" : game ? "gamepad game" : "gamepad desktop");
+    const uint32_t app = game ? GsSteamApp(want) : 0;
+    SendRelay(want < 0 ? "gamepad off" : remote ? "gamepad remote" : !game ? "gamepad desktop" :
+              app ? "gamepad game " + std::to_string(app) : "gamepad game");
 }
 
 // "padmode off <why>" on @ft_screens: the relay's (both grips, the mouse).

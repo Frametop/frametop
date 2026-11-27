@@ -16,7 +16,11 @@ change and every 250 ms. The relay sends it on:
   - a gamescope app's panel (a Steam game left on a Frametop panel): a second VirtualPad under the
     identity of Steam's own virtual gamepad (STEAM), there only while gamepad mode is on for it.
     Steam starts a game with every other pad on SDL's ignore list, the desktop's 045e:028e among
-    them (2026-11-27, Slay the Spire 2: it never opened that one, and opened this one).
+    them (2026-11-27, Slay the Spire 2: it never opened that one, and opened this one). For a game
+    that reads its controller through Steam Input's actions (steamactions.py; ft-screens says the
+    game's app id) the left stick presses that pad's d-pad as well (StickDpad): Steam Input has
+    nothing for a game on a panel, and such a game reads no stick from a pad itself (the same day:
+    the d-pad and buttons moved Slay the Spire 2, the sticks didn't).
 The way out is the relay's to see: both grips squeezed (the reader's "vrgrips"), or the mouse
 waking the pointer, which stepped aside as the mode came on (pointer), has it ask ft-screens to end
 the mode ("padmode off grips|mouse"; leave), and the pad lets go at once. Until 2026-11-27 the mode was SteamVR's own Gamepad mode for a dashboard overlay of
@@ -40,6 +44,7 @@ STALE = 1.0  # no "vrpad" line from the controller reader this long: everything 
 LEASE = 3.0  # no "gamepad desktop|game|remote" from ft-screens this long: gamepad mode ends
 LEAVING = 1.0  # ft-screens was asked to end the mode: the pad takes nothing this long, then asks anew
 NEUTRAL = (0, 0, 0, 0, 0, 0, 0)  # buttons, LT, RT, LX, LY, RX, RY
+STICK_ON, STICK_OFF = 19660, 13107  # a stick pressing the d-pad: from 0.6 of its travel, until under 0.4
 SOUNDS = {True: "/usr/share/sounds/ocean/stereo/message-contact-in.oga",
           False: "/usr/share/sounds/ocean/stereo/message-contact-out.oga",
           None: "/usr/share/sounds/ocean/stereo/completion-fail.oga"}  # couldn't start
@@ -126,6 +131,24 @@ def screens_line(state):
     return "pad %x %d %d %d %d %d %d" % state
 
 
+class StickDpad:
+    """The left stick as d-pad presses, for a game that takes directions from the d-pad only:
+    feed(x, y) (up-positive) is the d-pad's bits. A direction is down from STICK_ON until the stick
+    is back under STICK_OFF, so one held at the edge doesn't chatter, and a diagonal is two."""
+
+    def __init__(self):
+        self.bits = 0
+
+    def feed(self, x, y):
+        for value, low, high in ((x, PAD_LEFT, PAD_RIGHT), (y, PAD_DOWN, PAD_UP)):
+            for bit, travel in ((high, value), (low, -value)):
+                if travel >= STICK_ON:
+                    self.bits |= bit
+                elif travel < STICK_OFF:
+                    self.bits &= ~bit
+        return self.bits
+
+
 class VirtualPad:
     """An Xbox pad on uinput under `identity`, made on first use."""
 
@@ -198,12 +221,16 @@ class VirtualPad:
 class GamepadMode:
     """Gamepad mode's state, as ft-screens says it. send(to, message): to "screens".
     make_pad(identity): a VirtualPad (made as a panel on this machine gets the pad). read(on): the
-    controller reader follows the pad or stops. sound: play the cues."""
+    controller reader follows the pad or stops. sound: play the cues. steam_actions(app): the Steam
+    game reads its controller through Steam Input's actions (steamactions.native)."""
 
-    def __init__(self, log, send, make_pad, read, sound=True):
+    def __init__(self, log, send, make_pad, read, sound=True, steam_actions=lambda app: False):
         self.log, self.send, self.make_pad, self.read, self.sound_on = log, send, make_pad, read, sound
+        self.steam_actions = steam_actions
         self.on = False
         self.target = None  # "desktop", "game" or "remote" while on
+        self.app = 0  # the game's Steam app id (target "game"; 0: none, or not Steam's)
+        self.dpad = None  # a StickDpad while the left stick presses the d-pad too
         self.until = 0.0  # ft-screens' word lapses then
         self.state = NEUTRAL
         self.seen = 0.0  # the reader's last state came then
@@ -226,9 +253,9 @@ class GamepadMode:
             except OSError:
                 pass
 
-    def screens_word(self, target, now, blocked=None):
-        """ft-screens' "gamepad desktop|game|remote|off" (target None: off). blocked: why it can't
-        be on now (a VR game, a pause), or None."""
+    def screens_word(self, target, now, blocked=None, app=0):
+        """ft-screens' "gamepad desktop|game [app id]|remote|off" (target None: off). blocked: why
+        it can't be on now (a VR game, a pause), or None."""
         if target is None:
             self.refused = None
             self.stop("ft-screens ended it")
@@ -244,19 +271,24 @@ class GamepadMode:
         self.refused = None
         self.until = now + LEASE
         if not self.on:
-            self.on, self.target, self.state, self.seen, self.fresh = True, target, NEUTRAL, now, True
+            self.on, self.target, self.app = True, target, app
+            self.state, self.seen, self.fresh = NEUTRAL, now, True
             self.dash_opened = False
             self.since, self.left, self.aside = now, None, False
             self.log(f"gamepad mode on: the controllers are a gamepad for {self.where()}")
             self.read(True)
             self.sound(True)
-        elif target != self.target:
+        elif (target, app) != (self.target, self.app):
             self.let_go()
             self.drop()
-            self.target, self.fresh = target, True
+            self.target, self.app, self.fresh = target, app, True
             self.log(f"gamepad mode: now for {self.where()}")
         else:
             return
+        self.dpad = StickDpad() if target == "game" and app and self.steam_actions(app) else None
+        if self.dpad:
+            self.log(f"gamepad mode: steam:{app} reads its controller through Steam Input, which has nothing "
+                     "for a game on a panel: the left stick presses the d-pad too")
         # A game needs a moment to find a new pad: its panel's is there before the first press.
         self.local_pad()
 
@@ -265,7 +297,7 @@ class GamepadMode:
             return
         self.let_go()
         self.drop()
-        self.on, self.target = False, None
+        self.on, self.target, self.app, self.dpad = False, None, 0, None
         self.read(False)
         self.log(f"gamepad mode off ({why})")
         self.sound(False)
@@ -349,7 +381,7 @@ class GamepadMode:
         self.seen = now
         if self.dash_opened or (self.left is not None and now - self.left < LEAVING):
             return
-        buttons = state[0]
+        buttons = state[0] | (self.dpad.feed(state[3], state[4]) if self.dpad else 0)
         if self.fresh:
             self.held, self.fresh = buttons, False
         self.held &= buttons

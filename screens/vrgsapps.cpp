@@ -299,12 +299,10 @@ void GsBlur() {
     if (g_gsControl) g_gsControl->Blur();
 }
 
-namespace {
 uint32_t GsSteamApp(int index) {
     const gsforward::Window *w = g_gsControl ? g_gsControl->Windows().MainRect(index) : nullptr;
     return w ? w->steamApp : 0;
 }
-}  // namespace
 
 bool GsCanTheater(int index) { return g_gsOn && GsSteamApp(index) && !g_gsControl->Lent(index); }
 

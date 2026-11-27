@@ -87,7 +87,10 @@ PACKAGES = {
                            "package's dsp_service and runs on its DSP firmware, npu/README.md); the Enter Gamepad "
                            "Mode pill on a Steam game's panel (no Steam menu needed) and, with the Steam menu "
                            "open, on a desktop panel (the menu closes: CLOSE in pointer/dashpatch/gamepadmode.py): "
-                           "no laser on any panel, sticks and buttons drive the panel's app, and both grips "
+                           "no laser on any panel, sticks and buttons drive the panel's app (in a Steam Input "
+                           "game such as Slay the Spire 2 the left stick moves the highlight as the d-pad does: "
+                           "input/steamactions.py finds such a game by Steam's libraryfolders.vdf, its "
+                           "appmanifest and the game's controller_config/game_actions file), and both grips "
                            "squeezed bring the lasers back within a second (SteamVR's "
                            "inputFocusStore.ForceActivateLaserMouse, LASER there; screens/padmode.h)",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "

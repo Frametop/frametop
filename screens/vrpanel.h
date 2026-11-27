@@ -518,6 +518,7 @@ bool GsTyping();
 int GsTypingPanel();   // (the app panel with the typing, -1: none)
 bool GsKey(uint32_t code, int value, bool elsewhere, gsforward::Mods now);
 void GsBlur();
+uint32_t GsSteamApp(int index);      // the Steam app id of the game on an app panel (0: none, or not Steam's)
 bool GsCanTheater(int index);         // a Steam game's panel, not lent: its grab bar menu offers View in Theater
 void GsToTheater(int index);          // View in Theater: its window lent to SteamVR's theater (gstheater.h)
 void GsTheaterWord(unsigned app);     // ft-dashpatch: the game SteamVR's theater shows (0: none)

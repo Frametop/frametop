@@ -99,7 +99,7 @@ stateDiagram-v2
     m1: hands/models.json: HANDS_MODEL latest, stock or a version, from Hugging Face DeeJanuz/frametop-hands-models into the tree's hands/models/versions
     m2: gaze/tracker/models.json: EYES_MODEL classic, latest or a version, from DeeJanuz/frametop-eyes-models into gaze/tracker/models
     m3: ft-models auto at service start: the catalog from GitHub raw, the branch by channel (.frametop-release CHANNEL, a clone's own branch), at most every 15 min. Each file pinned to a Hugging Face commit and a sha256, format gated
-    m4: voice/models.sh: about 340 MB into ~/.local/share/frametop/voice/models, shared by every release: whisper small.en q5_1, Moonshine base, kws zipformer, silero VAD, from fixed Hugging Face and sherpa-onnx URLs with sha256
+    m4: voice/models.sh: about 870 MB into ~/.local/share/frametop/voice/models, shared by every release: whisper small.en q5_1, Parakeet TDT v3, kws zipformer, silero VAD, from fixed Hugging Face and sherpa-onnx URLs with sha256
   }
   state "Upkeep (scripts/, uninstall.sh)" as up {
     u0: update-check.py: SteamOS drift against what Frametop leans on, read-only, --mark-good
@@ -182,7 +182,7 @@ stateDiagram-v2
   m0 --> o5: G5: the pinned student
   m2 --> o4: G4: ft-gaze loads the pick
   s2 --> m4: voice/models.sh
-  m4 --> o3: G3: Moonshine and whisper
+  m4 --> o3: G3: Parakeet and whisper
   o8 --> u0: G8: doctor.sh runs it
   s1 --> u2: every install
   s3 --> u1: uninstall.sh

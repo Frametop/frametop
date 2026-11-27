@@ -310,7 +310,7 @@ class Window(Gtk.ApplicationWindow):
                               "mode, and Frametop's settings apps. Optional: voice dictation, and "
                               "parts that need your SteamOS password (sudo):")
         self.voice = Gtk.CheckButton(label="Voice dictation: a Right Ctrl tap or holding the left d-pad down, and "
-                                           "what you say is typed (downloads about 320 MB)", active=True)
+                                           "what you say is typed (downloads about 870 MB)", active=True)
         self.hands = Gtk.CheckButton(label="Hand tracking (experimental): poke, pinch and grab the screens with "
                                            "your hands. It uses a lot of the headset's CPU", active=True)
         # A release brings it built; a clone builds it with hands/rec/install.sh, so isn't offered it

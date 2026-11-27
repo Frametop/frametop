@@ -1846,8 +1846,9 @@ class Relay:
                         and not self.pc_tap(mod, code, now)):
                     # Hold to talk: dictation starts on the press, not the release. The desktop
                     # doesn't get the press (cancel_talk sends it after all for a shortcut), so
-                    # live text is typed there while it's held. Steam and games read the keyboard
-                    # themselves: there the text waits for the release (typing_tick).
+                    # text that arrives while it's held (the dictation before this one, still being
+                    # recognised) is typed there. Steam and games read the keyboard themselves:
+                    # there the text waits for the release (typing_tick).
                     self.held.talk_code, self.held.talk_hidden, hide = code, True, True
                     self.do_action("dictate_hold", 1, now, "keyboard")
                     log(f"key combination {self.tap_action(mod, code)[0]}: dictate_hold (held)")

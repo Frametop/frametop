@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """ft-voiced's input and output, offline: the text it has the relay type, push-to-talk from the
-relay, and controller push-to-talk read from a stand-in for SteamVR's web socket. No mic, no
-models, no SteamVR; its sockets get names of their own, so it's safe next to the live service.
+relay, a recording's way to its text (in one decode, or in pieces), and controller push-to-talk
+read from a stand-in for SteamVR's web socket. No mic, no models, no SteamVR; its sockets get
+names of their own, so it's safe next to the live service.
 Needs its Python packages (numpy, sherpa-onnx; the image has them).
 Run: python3 voice/test/test_daemon.py"""
 import asyncio
@@ -77,22 +78,192 @@ class Text(unittest.TestCase):
         self.assertTrue(v.relay_said)
 
 
-class Windows(unittest.TestCase):
-    def test_spellings_line_up(self):
-        self.assertEqual(fv.norm("Dishonoured,"), fv.norm("dishonored"))
-        self.assertEqual(fv.norm("organisation"), fv.norm("organization"))
-        self.assertNotEqual(fv.norm("our"), fv.norm("or"))
-        self.assertNotEqual(fv.norm("four"), fv.norm("for"))
+class Recording(unittest.IsolatedAsyncioTestCase):
+    """A dictation from its audio to its text: nothing is typed until it's over, a long one is
+    decoded in pieces while it's made, and the pieces are typed as one text."""
 
-    def test_full_window_closes_at_its_longest_pause(self):
-        # 96 ms chunks: speech, a 0.38 s pause, speech, a 0.58 s pause, speech.
-        per = fv.CHUNK / fv.RATE
-        speech = [True] * 40 + [False] * 4 + [True] * 20 + [False] * 6 + [True] * 10
-        v = bare_daemon(dcfg={"min_pause_seconds": 0.3})
-        cut = v._pause_cut({"win": 0, "speech": speech}, len(speech))
-        self.assertEqual(cut, 64 + int(0.15 / per))
-        # No pause that long in the second half: None (the window is cut mid-speech).
-        self.assertIsNone(v._pause_cut({"win": 0, "speech": [True] * 60 + [False] * 2 + [True] * 20}, 82))
+    def daemon(self, **dcfg):
+        import numpy as np
+        v = bare_daemon(recording=None, recording_source=None, take=None, command=None, start_chime=None,
+                        sounds={}, loop=asyncio.get_running_loop(), decoding=0, typed=[], heard=[], events=[],
+                        dcfg={"min_seconds": 0.3, "max_seconds": 120, "max_piece_seconds": 2.0,
+                              "min_pause_seconds": 0.3, "trailing_space": True, "save_clips": 0, **dcfg})
+        v.piece_vad = type("V", (), {"reset": lambda self: None})()
+        v.notice = fv.notice.Notice(send=lambda text: None)
+        v.update_mic = v.warm_engine = lambda: None
+        v.chime = lambda name: v.events.append(("chime", name))
+        v.broadcast = lambda event, **kw: v.events.append((event, kw.get("text")))
+
+        async def type_text(text):
+            v.typed.append(text)
+        v.type_text = type_text
+
+        async def transcribe(samples):
+            v.heard.append(len(samples) // fv.CHUNK)  # in chunks
+            await asyncio.sleep(0)
+            return v.says.pop(0)
+        v.transcribe = transcribe
+        v.chunk = np.zeros(fv.CHUNK, np.float32)
+        return v
+
+    def talk(self, v, speech):
+        """The mic's chunks, with what the VAD says of each: on_audio, without its VAD."""
+        for said in speech:
+            v.recording.append(v.chunk)
+            v.take["speech"].append(said)
+            v.take["level"].append(0.1 if said else 0.001)
+            v._cut_piece(v.take)
+
+    async def test_typed_once_when_its_over(self):
+        v = self.daemon()
+        v.says = ["Hello there."]
+        v.start_dictation("keyboard")
+        self.talk(v, [True] * 15)  # 1.4 s: under max_piece_seconds, one decode
+        self.assertEqual((v.heard, v.typed), ([], []))  # nothing while it records
+        await v.stop_dictation()
+        self.assertEqual((v.heard, v.typed), ([15], ["Hello there. "]))
+        self.assertIn(("dictation", "Hello there."), v.events)
+
+    async def test_long_one_goes_in_pieces(self):
+        v = self.daemon()
+        v.says = ["We walked to the.", "Old bridge and.", "Back."]
+        v.start_dictation("keyboard")
+        # 2 s is 21 chunks: at the 21st, the pause in the first piece's second half ends it.
+        self.talk(v, [True] * 14 + [False] * 4 + [True] * 3)
+        self.assertEqual(len(v.take["pieces"]), 1)
+        self.assertEqual(v.take["cut"], 16)  # the middle of the pause
+        await asyncio.sleep(0.01)
+        self.assertEqual((v.heard, v.typed), ([16], []))  # decoded while it records, typed later
+        self.talk(v, [True] * 11 + [False] * 5 + [True] * 5 + [False] * 2)
+        self.assertEqual(v.take["cut"], 16 + 5 + 11 + 3)
+        await v.stop_dictation()
+        self.assertEqual(v.heard, [16, 19, 9])  # every chunk, once
+        self.assertEqual(v.typed, ["We walked to the old bridge and back. "])  # the seams aren't sentence ends
+
+    async def test_no_speech_types_nothing(self):
+        v = self.daemon()
+        v.says = [""]
+        v.start_dictation("keyboard")
+        self.talk(v, [False] * 10)
+        await v.stop_dictation()
+        self.assertEqual(v.typed, [])
+        self.assertIn(("dictation", ""), v.events)
+
+    async def test_a_slip_isnt_decoded(self):
+        v = self.daemon()
+        v.start_dictation("keyboard")
+        self.talk(v, [True] * 2)  # 0.19 s
+        await v.stop_dictation()
+        self.assertEqual((v.heard, v.typed), ([], []))
+        self.assertIn(("chime", "cancel"), v.events)
+
+    async def test_cancel_drops_the_pieces(self):
+        v = self.daemon()
+        v.says = ["Never typed."]
+        v.start_dictation("keyboard")
+        self.talk(v, [True] * 14 + [False] * 4 + [True] * 3)
+        piece = v.take["pieces"][0]
+        v.cancel_dictation()
+        await asyncio.sleep(0.01)
+        self.assertTrue(piece.cancelled())
+        self.assertEqual(v.typed, [])
+        self.assertIsNone(v.take)
+
+    async def test_a_failed_decode_is_said(self):
+        v = self.daemon()
+
+        async def transcribe(samples):
+            raise OSError("whisper-server isn't there")
+        v.transcribe = transcribe
+        v.start_dictation("keyboard")
+        self.talk(v, [True] * 10)
+        await v.stop_dictation()
+        self.assertEqual(v.typed, [])
+        self.assertEqual(v.events[-2:], [("chime", "cancel"), ("error", None)])
+
+
+class Transcribe(unittest.IsolatedAsyncioTestCase):
+    """transcribe(): the VAD's speech only, to the engine the language has."""
+
+    def daemon(self, engine, spans):
+        v = bare_daemon(decode_lock=asyncio.Lock(), language="en", dcfg={"engine": engine}, got=[], used=0)
+        v._speech = lambda samples: fv.voice_engine.squeeze(samples, spans, 0)
+
+        def decode(speech):
+            v.got.append(("parakeet", len(speech)))
+            return "  Two  words. "
+        v.parakeet = type("P", (), {"decode": staticmethod(decode)})()
+
+        async def whisper(speech):
+            v.got.append(("whisper", len(speech)))
+            return "From whisper."
+        v._whisper = whisper
+
+        def used():
+            v.used += 1
+        v.engine_used = used
+        return v
+
+    async def test_parakeet_hears_the_speech_only(self):
+        samples = fv.np.zeros(3 * fv.RATE, fv.np.float32)
+        v = self.daemon("parakeet", [(1000, 9000), (30000, 31000)])
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: True):
+            self.assertEqual(await v.transcribe(samples), "Two words.")
+        self.assertEqual((v.got, v.used), ([("parakeet", 9000)], 1))
+
+    async def test_silence_isnt_decoded(self):
+        v = self.daemon("parakeet", [])
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: True):
+            self.assertEqual(await v.transcribe(fv.np.zeros(fv.RATE, fv.np.float32)), "")
+        self.assertEqual(v.got, [])
+
+    async def test_whisper_where_parakeet_isnt(self):
+        samples = fv.np.zeros(fv.RATE, fv.np.float32)
+        v = self.daemon("parakeet", [(0, 8000)])
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: False):  # not fetched
+            self.assertEqual(await v.transcribe(samples), "From whisper.")
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: True):
+            v.language = "ja"  # not one of its languages
+            await v.transcribe(samples)
+            v.language, v.dcfg["engine"] = "en", "whisper"  # the advanced settings ask for whisper
+            await v.transcribe(samples)
+        self.assertEqual((v.got, v.used), ([("whisper", 8000)] * 3, 0))
+
+
+class Unload(unittest.IsolatedAsyncioTestCase):
+    """The recognizer's model leaves memory once nothing has used it for a while."""
+
+    def daemon(self, after):
+        v = bare_daemon(loop=asyncio.get_running_loop(), unload_timer=None, recording=None, command=None,
+                        decoding=0, decode_lock=asyncio.Lock(), dcfg={"unload_after_seconds": after}, asked=[])
+
+        def unload_idle(seconds):
+            v.asked.append(seconds)
+            return True
+        v.parakeet = type("P", (), {"unload_idle": staticmethod(unload_idle)})()
+        return v
+
+    async def test_after_the_wait(self):
+        v = self.daemon(0.02)
+        v.engine_used()
+        v.engine_used()  # used again: one wait, started over
+        await asyncio.sleep(0.05)
+        self.assertEqual(v.asked, [0.02])
+        self.assertIsNone(v.unload_timer)
+
+    async def test_not_while_recording(self):
+        v = self.daemon(0.02)
+        v.recording = []
+        v.engine_used()
+        await asyncio.sleep(0.05)
+        self.assertEqual(v.asked, [])
+        self.assertIsNotNone(v.unload_timer)  # it asks again later
+        v.unload_timer.cancel()
+
+    async def test_zero_keeps_it(self):
+        v = self.daemon(0)
+        v.engine_used()
+        self.assertIsNone(v.unload_timer)
 
 
 class FromRelay(unittest.IsolatedAsyncioTestCase):
@@ -170,60 +341,46 @@ class Controller(unittest.TestCase):
         self.assertEqual(calls, ["start", "stop"])
 
 
-class ShortWords(unittest.IsolatedAsyncioTestCase):
-    """Moonshine hearing nothing in a lone short word, or looping on it."""
-
-    def daemon(self, heard):
-        v = bare_daemon(moonshine=object(), language="en", whisper_lock=asyncio.Lock(), tried=[])
-        v.trim_to_speech = lambda audio: audio[100:-100]
-
-        def decode(audio):
-            v.tried.append(len(audio))
-            return heard(audio)
-        v._moonshine_decode = decode
-        return v
-
-    async def test_retries_cut_then_after_silence(self):
-        audio = fv.np.ones(fv.RATE, fv.np.float32)
-        v = self.daemon(lambda a: "Way." if len(a) > fv.RATE else "")  # only with the 0.2 s lead
-        self.assertEqual(await v._decode(audio, ""), "Way.")
-        self.assertEqual(v.tried, [fv.RATE, fv.RATE - 200, int(0.2 * fv.RATE) + fv.RATE - 200])
-        v = self.daemon(lambda a: "")
-        self.assertEqual(await v._decode(audio, ""), "")
-        v = self.daemon(lambda a: "")
-        await v._decode(fv.np.ones(4 * fv.RATE, fv.np.float32), "")
-        self.assertEqual(v.tried, [4 * fv.RATE])  # a long window isn't a lone word
-
-    async def test_one_word_looped(self):
-        v = self.daemon(lambda a: "Way, way, way,")
-        self.assertEqual(await v._decode(fv.np.ones(fv.RATE, fv.np.float32), ""), "Way,")
-        v = self.daemon(lambda a: "no no")  # two can be meant
-        self.assertEqual(await v._decode(fv.np.ones(fv.RATE, fv.np.float32), ""), "no no")
-        v = self.daemon(lambda a: "very, very, very")
-        self.assertEqual(await v._decode(fv.np.ones(5 * fv.RATE, fv.np.float32), ""), "very, very, very")
-
-
 class Whisper(unittest.TestCase):
+    """whisper-server runs only while it's what recognizes the speech."""
+
     def daemon(self, language, **cfg):
-        v = bare_daemon(moonshine=object(), language=language, wake_enabled=False, whisper_wanted=False,
-                        dcfg={"engine": "moonshine", "streaming": True, **cfg}, ran=[])
+        v = bare_daemon(language=language, wake_enabled=False, whisper_wanted=False,
+                        dcfg={"engine": "parakeet", **cfg}, ran=[])
         v._run = lambda argv, **kw: argv
         v.spawn = v.ran.append
         return v
 
-    def test_wanted_for_other_languages(self):
-        v = self.daemon("en")
-        v.update_whisper()
-        self.assertEqual(v.ran, [])  # Moonshine types English; nothing uses whisper
-        v.language = "de"
-        self.assertFalse(v.live_moonshine())
-        v.update_whisper()
-        self.assertEqual(v.ran[-1][-2:], ["start", "frametop-voice-whisper.service"])
-        v.update_whisper(restart=True)
-        self.assertEqual(v.ran[-1][-2:], ["restart", "frametop-voice-whisper.service"])
-        v.language = "en"
-        v.update_whisper(restart=True)  # not wanted: stopped, not restarted
-        self.assertEqual(v.ran[-1][-2:], ["stop", "frametop-voice-whisper.service"])
+    def test_wanted_for_languages_parakeet_doesnt_know(self):
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: True):
+            v = self.daemon("en")
+            v.update_whisper()
+            self.assertEqual(v.ran, [])  # Parakeet knows English; nothing uses whisper
+            v.wake_enabled = True
+            v.update_whisper()
+            self.assertEqual(v.ran, [])  # wake word commands go to Parakeet too
+            v.language = "de"
+            v.update_whisper()
+            self.assertEqual(v.ran, [])
+            for language in ("ja", "auto"):
+                v.language, v.whisper_wanted = language, False
+                v.update_whisper()
+                self.assertEqual(v.ran[-1][-2:], ["start", "frametop-voice-whisper.service"])
+            v.update_whisper(restart=True)
+            self.assertEqual(v.ran[-1][-2:], ["restart", "frametop-voice-whisper.service"])
+            v.language = "en"
+            v.update_whisper(restart=True)  # not wanted: stopped, not restarted
+            self.assertEqual(v.ran[-1][-2:], ["stop", "frametop-voice-whisper.service"])
+
+    def test_wanted_without_parakeet(self):
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: False):
+            v = self.daemon("en")  # its model not fetched: whisper recognizes English
+            v.update_whisper()
+            self.assertEqual(v.ran[-1][-2:], ["start", "frametop-voice-whisper.service"])
+        with mock.patch.object(fv.voice_settings, "parakeet_installed", lambda: True):
+            v = self.daemon("en", engine="whisper")  # or the advanced settings ask for whisper
+            v.update_whisper()
+            self.assertEqual(v.ran[-1][-2:], ["start", "frametop-voice-whisper.service"])
 
 
 class Chimes(unittest.IsolatedAsyncioTestCase):
@@ -294,14 +451,14 @@ class Clips(unittest.TestCase):
 
 class NoticePill(unittest.IsolatedAsyncioTestCase):
     """The pill in the headset (notice.py) when dictations and a wake command overlap: the one
-    listening keeps it, and "Typing…" comes back while words are still decoded."""
+    listening keeps it, and "Typing…" comes back while a dictation is still decoded."""
 
     def daemon(self, sent):
         import numpy as np
-        v = bare_daemon(recording=None, recording_source=None, stream=None, command=None, start_chime=None,
+        v = bare_daemon(recording=None, recording_source=None, take=None, command=None, start_chime=None,
                         dcfg={"min_seconds": 0.1})
         v.chime = v.broadcast = lambda *a, **kw: None
-        v.update_mic = v.drop_start_chime = lambda: None
+        v.update_mic = v.drop_start_chime = v.warm_engine = lambda: None
         v.cmd_vad = type("V", (), {"reset": lambda self: None})()
         v.notice = fv.notice.Notice(send=sent.append, clock=lambda: 100.0)
         v.chunks = lambda: [np.zeros(fv.CHUNK, np.float32)] * 20

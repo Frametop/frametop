@@ -1,9 +1,10 @@
-"""Frametop Settings' Voice page: dictation keys' tap or hold, the language, and the
-whisper model (a missing one is fetched first). HOME is a temporary directory and nothing
+"""Frametop Settings' Voice page: dictation keys' tap or hold, the language, what recognizes
+it, and the whisper model (a missing one is fetched first). HOME is a temporary directory and nothing
 reaches the relay, systemd or the network. Needs PySide6 (the image's python3).
 Run: python3 voice/test/test_settings_page.py"""
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -34,6 +35,13 @@ def install(name):
     Path(f"{path}.sha256").write_text("sum\n")
 
 
+def install_parakeet():
+    voice_settings.PARAKEET_DIR.mkdir(parents=True, exist_ok=True)
+    for name in voice_settings.PARAKEET_FILES:
+        (voice_settings.PARAKEET_DIR / name).write_bytes(b"model")
+        (voice_settings.PARAKEET_DIR / f"{name}.sha256").write_text("sum\n")
+
+
 class Page(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -42,8 +50,7 @@ class Page(unittest.TestCase):
     def setUp(self):
         for p in (RULES, voice_settings.PATH):
             p.unlink(missing_ok=True)
-        for f in Path(HOME, "models").glob("*") if Path(HOME, "models").exists() else ():
-            f.unlink()
+        shutil.rmtree(Path(HOME, "models"), ignore_errors=True)
         install("small.en")
         self.ran, self.sent, self.messages = [], [], []
         fis.host = self.fake_host
@@ -99,6 +106,22 @@ class Page(unittest.TestCase):
         self.assertNotIn("small.en", [m["value"] for m in self.b.voiceModels])
         self.assertEqual(self.b.voiceModel, "small")  # small.en, stored, means small for German
         self.assertEqual(self.ran, [])  # already there: nothing fetched
+
+    def test_parakeets_languages_need_no_whisper_model(self):
+        self.assertEqual(self.b.voiceEngine, "whisper")  # Parakeet isn't fetched: whisper, as before it
+        install_parakeet()
+        self.assertEqual(self.b.voiceEngine, "parakeet")
+        self.b.setVoiceLanguage("de")
+        self.wait_fetch()
+        self.assertEqual((voice_settings.load()["language"], self.b.voiceEngine), ("de", "parakeet"))
+        self.assertEqual(self.ran, [])  # no whisper model fetched for it
+        self.assertEqual(self.messages[-1], ("Dictation language: Deutsch", False))
+        self.b.setVoiceLanguage("ja")  # not one of Parakeet's: whisper, and its model
+        self.wait_fetch()
+        self.assertEqual(self.b.voiceEngine, "whisper")
+        self.assertEqual(self.ran, [(str(ROOT / "voice/models.sh"), "model", "small")])
+        voice_settings.PATH.write_text(json.dumps({"language": "en", "advanced": {"dictation": {"engine": "whisper"}}}))
+        self.assertEqual(self.b.voiceEngine, "whisper")  # the advanced settings ask for whisper
 
     def test_language_fetches_its_model(self):
         self.b.setVoiceLanguage("fr")

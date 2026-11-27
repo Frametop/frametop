@@ -235,13 +235,34 @@ class Settings(unittest.TestCase):
         finally:
             del os.environ["FRAMETOP_VOICE_MODELS"]
 
+    def test_engine_by_language(self):
+        os.environ["FRAMETOP_VOICE_MODELS"] = self.tmp.name
+        try:
+            sys.modules.pop("voice_settings", None)
+            import voice_settings as vs
+            self.assertEqual(vs.engine_for("en"), "whisper")  # Parakeet not fetched: whisper has to
+            vs.PARAKEET_DIR.mkdir()
+            for name in vs.PARAKEET_FILES:
+                (vs.PARAKEET_DIR / name).write_bytes(b"x")
+            self.assertFalse(vs.parakeet_installed())  # not checked yet: no .sha256
+            for name in vs.PARAKEET_FILES:
+                (vs.PARAKEET_DIR / f"{name}.sha256").write_text("sum\n")
+            self.assertEqual([vs.engine_for(lang) for lang in ("en", "de", "uk", "ja", "no", "auto")],
+                             ["parakeet", "parakeet", "parakeet", "whisper", "whisper", "whisper"])
+            self.assertEqual(vs.engine_for("en", "whisper"), "whisper")  # the advanced settings' choice
+            self.assertEqual(vs.engine_for("en", None), "parakeet")
+            self.assertLessEqual(vs.PARAKEET_LANGUAGES, set(vs.LANGUAGES))  # each one is on the page
+        finally:
+            del os.environ["FRAMETOP_VOICE_MODELS"]
+
     def test_frame_voice_carried_over(self):
         old = {"keyboard": ["KEY_RIGHTCTRL"], "controller": [{"device": "/user/hand/left",
                                                               "input": "/input/dpad_left/click"}],
                "keyboard_mode": "toggle", "controller_mode": "hold", "live_typing": True, "sounds": True,
                "wake_word": True, "wake_phrases": ["HEY SCARLET"], "commands": [FLAG]}
         new, bindings, notes = self.vs.from_frame_voice(old)
-        self.assertEqual(new, {"live_typing": True, "sounds": True, "wake_word": True, "wake_phrases": ["HEY SCARLET"],
+        # live_typing: frame-voice typed as you talked; Frametop Voice types when you stop.
+        self.assertEqual(new, {"sounds": True, "wake_word": True, "wake_phrases": ["HEY SCARLET"],
                                "commands": [FLAG], "controller_mode": "hold", "controller": ["left/dpad_left"]})
         self.assertEqual((bindings, notes), ({"97": "dictate"}, []))
         new, bindings, notes = self.vs.from_frame_voice({"keyboard": ["KEY_F13", "BTN_SIDE"], "keyboard_mode": "hold",
@@ -265,6 +286,9 @@ class Settings(unittest.TestCase):
         fetched = dict(line.strip().strip('"').split()[:2] for line in extra.strip().splitlines()[1:])
         self.assertEqual(fetched, {n: f for n, (f, _, _) in self.vs.WHISPER_MODELS.items() if n != "small.en"})
         self.assertIn(self.vs.WHISPER_MODELS["small.en"][0], src)  # fetched with the others
+        for name in self.vs.PARAKEET_FILES:  # and Parakeet, file by file, into its folder
+            self.assertIn(f'"$para/{name} ', src)
+        self.assertIn(f"para={self.vs.PARAKEET_DIR.name}\n", src)
 
     def test_defaults_are_the_relays(self):
         """The relay and this page read one copy of these (conf/ft_input_actions.py)."""

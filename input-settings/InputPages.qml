@@ -1026,7 +1026,7 @@ Item {
                     visible: !backend.voiceInstalled
                     type: Kirigami.MessageType.Information
                     text: "Voice dictation isn't installed yet. Run voice/run.sh install from the Frametop folder in a "
-                          + "terminal to download the offline speech models (~320 MB, runs completely on the headset)."
+                          + "terminal to download the offline speech models (~870 MB, runs completely on the headset)."
                 }
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
@@ -1137,6 +1137,7 @@ Item {
                     }
                     Controls.ComboBox {
                         Kirigami.FormData.label: "Speech model:"
+                        visible: backend.voiceEngine === "whisper"
                         model: backend.voiceModels
                         textRole: "text"
                         valueRole: "value"
@@ -1150,21 +1151,15 @@ Item {
                         onActivated: backend.setVoiceModel(currentValue)
                     }
                     Controls.Label {
-                        text: vpage.vs.language === "en"
-                              ? "Fast live English dictation is used when \"Type as you speak\" is on. The speech model above is used for full-sentence dictation and voice commands."
-                              : "Larger models improve accuracy for non-English languages but respond slower. The largest model (large-v3-turbo) may cause VR stutter."
+                        text: backend.voiceEngine === "parakeet"
+                              ? "Recognized by Parakeet on the headset, once you stop talking. Nothing is typed while you talk: the pill in the headset shows that it's listening, then that it's typing."
+                              : "Recognized by whisper on the headset's GPU, once you stop talking. Larger models are more accurate but respond slower. The largest model (large-v3-turbo) may cause VR stutter."
                         wrapMode: Text.Wrap
                         opacity: 0.7
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 24
                     }
 
-                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Typing" }
-                    Controls.Switch {
-                        Kirigami.FormData.label: "Live typing:"
-                        text: "Type words as you speak (off: type after you finish)"
-                        checked: vpage.vs.live_typing
-                        onToggled: backend.setVoiceOption("live_typing", checked)
-                    }
+                    Kirigami.Separator { Kirigami.FormData.isSection: true; Kirigami.FormData.label: "Sounds" }
                     Controls.Switch {
                         Kirigami.FormData.label: "Sounds:"
                         text: "A short tone when dictation starts and stops"

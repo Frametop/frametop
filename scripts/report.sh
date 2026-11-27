@@ -278,8 +278,9 @@ import sys
 sys.path.insert(0, sys.argv[1] + "/voice")
 import voice_settings as v
 s = v.load()
+engine = v.engine_for(s['language'], (s['advanced'].get('dictation') or {}).get('engine', 'parakeet'))
 print(f"settings ({v.PATH}{'' if v.PATH.exists() else ', not there: the defaults'}): controller {s['controller']} "
-      f"{s['controller_mode']}, live typing {s['live_typing']}, sounds {s['sounds']}, wake word {s['wake_word']} "
+      f"{s['controller_mode']}, language {s['language']} (recognised by {engine}), sounds {s['sounds']}, wake word {s['wake_word']} "
       f"({len(s['wake_phrases'])} phrase(s)), {len(s['commands'])} command(s), advanced: {sorted(s['advanced']) or 'none'}")
 PY
   [ -x "$repo/voice/models.sh" ] && timeout 60 "$repo/voice/models.sh" check 2>&1 | tail -n 4

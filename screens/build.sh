@@ -58,6 +58,7 @@ obj $cxx -c -o build/vrrecentre.o vrrecentre.cpp
 obj $cxx -c -o build/vrbarside.o vrbarside.cpp
 obj $cxx -c -o build/vrresetask.o vrresetask.cpp
 obj $cxx -c -o build/vrvoice.o vrvoice.cpp
+obj $cxx -c -o build/vrgamepad.o vrgamepad.cpp
 obj $cxx -c -o build/vrquick.o vrquick.cpp
 obj $cxx -c -o build/vrgazemode.o vrgazemode.cpp
 obj $cxx -c -o build/vrstats.o vrstats.cpp
@@ -106,7 +107,7 @@ for f in micear ownface; do   # the face of the avatar you wear: its mouth from 
 done
 objs_done
 vrlibs="$(pkg-config --libs egl glesv2 gbm) $OPENVR_LIBS"
-g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrtilecentre.o build/vrbarmenu.o build/vrappscale.o build/vrbarhold.o build/vrturn.o build/vrlayoutgrab.o build/vrrecentre.o build/vrbarside.o build/vrresetask.o build/vrvoice.o build/vrquick.o build/vrgazemode.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/vrkbspot.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/gamecores.o build/steamcdp.o \
+g++ -o build/ft-screens build/compositor.o build/remote.o build/share.o build/child.o build/vr.o build/vrgsapps.o build/vrtiles.o build/vrtilecentre.o build/vrbarmenu.o build/vrappscale.o build/vrbarhold.o build/vrturn.o build/vrlayoutgrab.o build/vrrecentre.o build/vrbarside.o build/vrresetask.o build/vrvoice.o build/vrgamepad.o build/vrquick.o build/vrgazemode.o build/vrstats.o build/vrsteamwin.o build/vrsteamfollow.o build/vrsteamhit.o build/vrkbspot.o build/label.o build/overlaytex.o build/handcut.o build/handrender.o build/rendernode.o build/handinput.o build/palmmenu.o build/grabthat.o build/steampanels.o build/gsforward.o build/gslink.o build/gamecores.o build/steamcdp.o \
   $(pkg-config --libs wlroots-0.20 wayland-server xkbcommon pixman-1 xcb xcb-xtest xcb-icccm) $vrlibs -pthread
 g++ -o build/ft-handtest build/handtest.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs
 g++ -o build/ft-handview build/handview.o build/vroutput.o build/handmesh.o build/handskin.o build/handmodels.o build/modelfile.o build/handasset.o build/handrobot.o build/handcut.o build/handrender.o build/rendernode.o $vrlibs

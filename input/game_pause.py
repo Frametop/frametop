@@ -245,7 +245,9 @@ class TouchTracker:
 
 # Gamepad mode's pad (vrpad.py) from the raw components: each side's buttons as XInput's bits (the
 # Frame controllers are a split pad: View, the d-pad, a bumper, trigger and stick on the left; Menu,
-# A, B, X, Y, a bumper, trigger and stick on the right; the grips are SteamVR's way out).
+# A, B, X, Y, a bumper, trigger and stick on the right). The grips are no pad buttons: both squeezed
+# for GRIPS_HOLD is the way out of gamepad mode (GripsHeld; SteamVR 2.19's own Gamepad mode has no
+# grip switch, headset 2026-11-27).
 PAD_BUTTONS = {
     "left": {"/input/view/click": 0x0020, "/input/dpad_up/click": 0x0001, "/input/dpad_down/click": 0x0002,
              "/input/dpad_left/click": 0x0004, "/input/dpad_right/click": 0x0008,
@@ -255,6 +257,8 @@ PAD_BUTTONS = {
               "/input/thumbstick/click": 0x0080},
 }
 PAD_REPEAT = 0.25  # the pad's state again this often while nothing changes (vrpad.STALE)
+GRIP_SQUEEZED = 0.9  # a grip's value from here counts as its click
+GRIPS_HOLD = 0.3  # both grips squeezed this long leave gamepad mode (not a clench in passing)
 
 
 def _number(v):
@@ -293,13 +297,39 @@ class PadReader:
                 stick[side] = xy
         return (buttons, pull["left"], pull["right"], *stick["left"], *stick["right"])
 
+    def grips(self, sides):
+        """Both hands' grips are squeezed (a side with two devices: either's)."""
+        squeezed = {sides.get(path) for path, comps in self.devices.items()
+                    if comps.get("/input/grip/click") or _number(comps.get("/input/grip/value")) >= GRIP_SQUEEZED}
+        return {"left", "right"} <= squeezed
+
+
+class GripsHeld:
+    """Both grips held for GRIPS_HOLD: feed(both, now) is True once for each such squeeze."""
+
+    def __init__(self):
+        self.since = None  # both squeezed since then
+        self.said = False
+
+    def feed(self, both, now):
+        if not both:
+            self.since, self.said = None, False
+            return False
+        if self.since is None:
+            self.since = now
+        if self.said or now - self.since < GRIPS_HOLD:
+            return False
+        self.said = True
+        return True
+
 
 class ControllerWatch(threading.Thread):
     """Follows the Frame controllers on vrserver's web socket for the pause gesture, and sends
     the relay "pause toggle gesture" when it's made. With the touch feed on (hand interaction,
     POINTER_HANDS=1), it also sends the pointer helper who holds a controller (TouchTracker).
     In gamepad mode (set_pad) it sends the relay the pad's state ("vrpad B LT RT LX LY RX RY",
-    PadReader) on each change and every PAD_REPEAT. Reconnects every 5 seconds while SteamVR is
+    PadReader) on each change and every PAD_REPEAT, and "vrgrips" once both grips have been
+    squeezed for GRIPS_HOLD (the way out). Reconnects every 5 seconds while SteamVR is
     away. With no gesture set, no touch feed and no gamepad mode, it doesn't connect."""
 
     def __init__(self, log):
@@ -389,6 +419,7 @@ class ControllerWatch(threading.Thread):
             touch_was = False
             alone = None  # the one-controller gesture in use (one_controller), or None
             reader, pad_sent, pad_at = PadReader(), None, 0.0
+            grips = GripsHeld()
             while True:
                 g = self.current()
                 touch = self.touch_feed
@@ -440,7 +471,8 @@ class ControllerWatch(threading.Thread):
                 use = alone or g
                 wanted = {} if use is None else \
                     {b: (b.split("/", 1)[0], f"/input/{b.split('/', 1)[1]}/click") for b in use.buttons}
-                for text in ws.messages(timeout=PAD_REPEAT if pad else 1.0):
+                # (a squeeze under way is timed: looked at again as GRIPS_HOLD runs out)
+                for text in ws.messages(timeout=(GRIPS_HOLD / 3 if grips.since is not None else PAD_REPEAT) if pad else 1.0):
                     device = device_of(text)
                     if device and device not in sides:
                         next_poll = min(next_poll, last_poll + LOOKUP_GAP)  # its root path changed, maybe
@@ -481,6 +513,14 @@ class ControllerWatch(threading.Thread):
                             self.sock.sendto(("vrpad %x %d %d %d %d %d %d" % st).encode(), RELAY)
                         except OSError:
                             pass
+                    if grips.feed(reader.grips(sides), at):
+                        self.log("gamepad mode: both grips squeezed")
+                        try:
+                            self.sock.sendto(b"vrgrips", RELAY)
+                        except OSError:
+                            pass
+                else:
+                    grips = GripsHeld()  # (a squeeze from the last gamepad mode says nothing in the next)
         finally:
             ws.close()
 

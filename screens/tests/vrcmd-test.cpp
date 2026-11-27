@@ -32,7 +32,7 @@ int main() {
         {"gamepadpill", GamepadPill}, {"concealed", Concealed}, {"conceal 2", ConcealReveal},
         {"reveal all", ConcealReveal}, {"hide", HideShowToggle}, {"show", HideShowToggle},
         {"toggle", HideShowToggle}, {"pause on", Pause}, {"ingames hide", InGames},
-        {"steamvrmode 1 0 1", SteamvrMode}, {"controllers on", Controllers},
+        {"steamvrmode 1 0 1", SteamvrMode}, {"controllers on", Controllers}, {"padmode off grips", PadMode},
         {"handsetting HANDS_PALM_MENU 1", HandSetting}, {"spindistance 1.2", SpinDistance},
         {"hands hand controller 1", Hands}, {"steamvr 12 dashboard", SteamvrList}, {"typing 1 0", Typing},
         {"calpanel 1", CalPanel}, {"ray 0 1", Ray}, {"handinput force", HandInput}, {"palmmenu state", PalmMenu},
@@ -115,6 +115,12 @@ int main() {
     check("shift needs its three numbers and no more", V("shift 1 2") == Unknown && V("shift 1 2 3 4") == Unknown && V("shift a b c") == Unknown && V("shift") == Unknown);
     check("shift back is exact", V("shift back") == ShiftBack && V("shift back 1") == Unknown && V("shift backwards") == Unknown);
     bool refused = true;
+    c = {};
+    check("padmode off: its why", Parse("padmode off grips", c) == PadMode && !std::strcmp(c.word, "grips"));
+    std::strcpy(c.word, "stale");
+    check("padmode off: no why is none, not the last command's", Parse("padmode off", c) == PadMode && !c.word[0]);
+    check("padmode with anything else is unknown", V("padmode on") == Unknown && V("padmode offline") == Unknown);
+
     for (const char *bad : {"shift nan 0 0", "shift 0 inf 0", "shift 0 0 nan", "shift 5001 0 0", "shift 0 -5001 0", "shift 0 0 361", "shift 0 0 -361"})
         refused &= Parse(bad, c) == Shift && !ShiftOk(c);
     check("a shift too far, more than a turn, or of no number is refused", refused);

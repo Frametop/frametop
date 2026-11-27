@@ -1720,8 +1720,8 @@ def tests():
     check("gone: its keys reach nothing until it says hello again", (typed(), emitted()), ([], []))
     kb.close()
 
-    # Gamepad mode (vrpad.py): ft-screens says "gamepad desktop|game|remote" while SteamVR's Gamepad
-    # mode is Frametop's (the gamepad pill), and the controller reader's pad goes to that kind of panel.
+    # Gamepad mode (vrpad.py): ft-screens says "gamepad desktop|game|remote" while it is on (the
+    # gamepad pill), and the controller reader's pad goes to that kind of panel.
     pads = []
     made = []  # each pad's identity
 
@@ -1789,9 +1789,23 @@ def tests():
     check("...and ft-screens gets the pad", typed()[-1:], ["pad 2000 0 0 0 0 0 0"])
     time.sleep(1.2)
     check("no word from the reader for a second: it lets go", typed(), ["pad off"])
+    # The way out: both grips squeezed (the reader's "vrgrips"). ft-screens is asked to end the
+    # mode, and the pad takes nothing meanwhile; its "gamepad off" ends it here.
+    to_relay("vrpad 2000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    typed()
+    to_relay("vrgrips")
+    to_relay("vrpad 2000 0 0 0 0 0 0")
+    to_relay("vrgrips")
+    time.sleep(0.05)
+    check("both grips: the pad lets go and ft-screens is asked to end gamepad mode, once",
+          (typed(), pad_log(), reader()), (["pad off", "padmode off grips"], ["gamepad mode: leaving (grips)"], []))
     to_relay("gamepad off")
-    check("SteamVR's Gamepad mode ended: off", (reader(), pad_log()),
-          ([False], ["gamepad mode off (SteamVR's Gamepad mode ended)"]))
+    check("ft-screens ended it: off", (reader(), pad_log()), ([False], ["gamepad mode off (ft-screens ended it)"]))
+    typed()
+    to_relay("vrgrips")
+    time.sleep(0.05)
+    check("grips with gamepad mode off: nothing", typed(), [])
     # Issue 105: on SteamOS 0.4.5 the helper still calls the dashboard open after the pill closed it.
     to_relay("vrdash 1")
     to_relay("gamepad remote")
@@ -1842,8 +1856,77 @@ def tests():
     time.sleep(0.05)
     check("back on the game's panel: a new pad", (len(pads) - before, made[-1]), (2, relay.vrpad.STEAM))
     to_relay("gamepad off")
-    check("SteamVR's Gamepad mode ended: the game's pad is removed", (reader(), pads[-1]),
+    check("gamepad mode ended: the game's pad is removed", (reader(), pads[-1]),
           ([False], [relay.vrpad.NEUTRAL, "removed"]))
+    # The pointer (vrpad.GamepadMode.pointer): it steps aside as gamepad mode comes on, since an
+    # awake one keeps SteamVR's laser on, and the mouse waking it after that is the way out.
+    said = []
+
+    class FakePointer:
+        def __init__(self, active, held=False):
+            self.active, self.held, self.asked = active, held, []
+
+        def step_aside(self, why):
+            self.asked.append(why)
+            if self.held:
+                return False
+            self.active = False
+            return True
+
+    mode = relay.vrpad.GamepadMode(lambda m: None, lambda to, m: said.append(m),
+                                   lambda identity: FakePad(None, None, None, identity), lambda on: None, sound=False)
+    ptr = FakePointer(active=True)
+    mode.pointer(ptr, 0.0)
+    check("gamepad mode off: the pointer is left alone", (ptr.asked, ptr.active), ([], True))
+    mode.screens_word("remote", 10.0)
+    ptr.held = True  # the mouse clicked the pill, its button still down
+    mode.pointer(ptr, 10.0)
+    check("on, a mouse button down: the pointer can't step aside yet, and that's no way out", (ptr.asked, said), (["gamepad"], []))
+    ptr.held = False
+    mode.pointer(ptr, 10.1)
+    mode.pointer(ptr, 10.2)
+    check("the button up: it steps aside, once", (ptr.asked, ptr.active, said), (["gamepad", "gamepad"], False, []))
+    ptr.active = True  # the mouse moved on purpose: the relay woke it
+    mode.pointer(ptr, 12.0)
+    mode.pointer(ptr, 12.1)
+    check("the mouse wakes it: ft-screens is asked to end gamepad mode, once", said, ["pad off", "padmode off mouse"])
+    mode.pointer(ptr, 12.0 + relay.vrpad.LEAVING)
+    check("no answer from ft-screens: asked anew", said[2:], ["pad off", "padmode off mouse"])
+    mode.screens_word(None, 15.0)
+    del said[:]
+    mode.screens_word("desktop", 20.0)
+    mode.pointer(ptr, 20.0)
+    check("the next gamepad mode: the pointer steps aside again", (ptr.asked[2:], ptr.active, said), (["gamepad"], False, []))
+    asleep = FakePointer(active=False)
+    mode.screens_word(None, 21.0)
+    mode.screens_word("desktop", 22.0)
+    mode.pointer(asleep, 22.0)
+    asleep.active = True
+    mode.pointer(asleep, 23.0)
+    check("a pointer that was off already: nothing to step aside, and its waking is the way out",
+          (asleep.asked, said[-1:]), ([], ["padmode off mouse"]))
+    mode.pointer(None, 24.0)
+    check("no pointer mode: nothing", mode.aside, False)
+    mode.screens_word(None, 25.0)
+    # The grips (game_pause.py): either device of a side counts, by its click or its value, and
+    # both sides must hold for GRIPS_HOLD.
+    gp = relay.game_pause
+    pad_reader = gp.PadReader()
+    sides = {"/c/l": "left", "/c/r": "right"}
+    pad_reader.feed("/c/l", {"/input/grip/click": True})
+    check("one grip: not both", pad_reader.grips(sides), False)
+    pad_reader.feed("/c/r", {"/input/grip/value": gp.GRIP_SQUEEZED})
+    check("the other by its value: both", pad_reader.grips(sides), True)
+    pad_reader.feed("/c/r", {"/input/grip/value": 0.5})
+    check("half squeezed: not both", pad_reader.grips(sides), False)
+    held = gp.GripsHeld()
+    check("both grips, held: said once GRIPS_HOLD has passed, and once only",
+          [held.feed(True, 0.0), held.feed(True, gp.GRIPS_HOLD / 2), held.feed(True, gp.GRIPS_HOLD), held.feed(True, 5.0)],
+          [False, False, True, False])
+    check("let go and squeezed again: said again",
+          [held.feed(False, 6.0), held.feed(True, 6.1), held.feed(True, 6.2 + gp.GRIPS_HOLD)], [False, False, True])
+    check("a clench in passing: nothing", [held.feed(False, 7.0), held.feed(True, 7.1), held.feed(False, 7.2), held.feed(True, 9.0)],
+          [False, False, False, False])
     stub["pause"].game = True
     to_relay("gamepad desktop")
     check("a VR game runs: ft-screens' word doesn't start it", (reader(), pad_log()), ([], ["gamepad mode: not on (a VR game runs)"]))

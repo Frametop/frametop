@@ -1,170 +1,48 @@
-"""Gamepad mode for a Frametop panel: ft-screens' gamepad pill (screens/vr.cpp, "gamepad pill").
+"""Gamepad mode for a Frametop panel: what ft-screens asks of SteamVR's dashboard for it
+(screens/vrgamepad.cpp; when the mode is on is screens/padmode.h's).
 
-The pill's click ("gamepad" on @ft_dashpatch) gives SteamVR's controllers to frametop.gamepad, the
-dashboard overlay ft-screens owns, which hands the pad to the input relay (input/vrpad.py).
+The mode is Frametop's own: ft-screens takes its lasers off every panel and the input relay reads
+the controllers raw (input/vrpad.py). SteamVR has two small parts in it, both asked on
+@ft_dashpatch:
 
-Up to SteamVR 2.18 that was SteamVR's own Enter Gamepad Mode for a tab that isn't in front: push
-the page's input focus, then close the dashboard. Some 2.18 builds (SteamOS 0.4.5, issue 105) keep
-the focus on the panel clicked last, though closing the dashboard still puts the controllers in
-Gamepad mode: then the click arms it (ARM), and ft-dashpatch counts SteamVR's next Gamepad mode as
-Frametop's until it ends, or for ARM_S if it never starts. SteamVR 2.19 (SteamOS 0.5) ignores a focus push
-for a page that isn't showing, so that closed the dashboard and nothing took the pad (headset,
-2026-11-18: lasers stuck, grips dead). 2.19 has a diminished dashboard instead, which is what its
-pill does for the tab in front: so this switches the dashboard to frametop.gamepad's tab (ft-screens
-paints a card on it saying which panel has the pad), waits for SteamVR to allow the diminished
-mode there, and enters it (testbench 2026-11-18: our page on top of the focus stack, ft-screens'
-pid for the input). Either way the dashboard closes or dims only once our page has the focus; if
-it never does, the dashboard goes back to the tab it showed.
+  "gamepad"  the pill was clicked with the Steam menu open: the dashboard closes (CLOSE). An open
+             dashboard lasers everything, whatever our panels ask.
+  "laser"    the mode ended on the wearer's word (both grips, the mouse): SteamVR, if it is in its
+             own Gamepad mode, brings its laser back (LASER), as its "laser mouse required" prompt
+             does. It would by itself once a controller points at a panel that takes a laser; this
+             doesn't wait for that.
 
-When the diminished mode ends (a grip, the system button, the dashboard closing), `Session.leave`
-switches the dashboard back to that tab, so the card isn't what the dashboard shows next.
-
-2.19 keeps our page on top of the focus stack only until its Gamepad mode starts: then the panel
-clicked last is on top again, with the dashboard still diminished on our tab (headset, 2026-11-27,
-a Steam game on a Frametop panel: our page on top for 3 s in laser mode, then the game's panel for
-the 12 s of Gamepad mode; 2026-11-26 with no game: ours for 4 s of 2.5 minutes). So what says the
-Gamepad mode is still the pill's is DIMMED, not the stack: ft-dashpatch's STEAMVR_STATE reads it.
+Until 2026-11-27 the pill used SteamVR's own Gamepad mode instead, for a dashboard overlay of ours
+(frametop.gamepad): a focus push and a closed dashboard up to SteamVR 2.18, and on 2.19, which
+ignores a push for a page that isn't showing, the dashboard dimmed on that overlay's tab. That put
+a card in front of the wearer for as long as the mode lasted, and the grips didn't end it (headset,
+2026-11-27). The dimming bought nothing: SteamVR's input focus was the panel clicked last all
+through it, as with the dashboard closed.
 """
 
-import json
-
-KEY = "frametop.gamepad"
-WAIT_S = 2.0   # for the switch and the focus (well under a second on the testbench, 2026-11-18)
-OLD_WAIT_S = 0.5  # 2.18: the focus push takes at once or never (issue 105)
-ARM_S = 15     # 2.18, the push not taken: the next Gamepad mode is ours if it starts this soon
-STEP_S = 0.1
-HOME_KEY = "valve.steam.gamepadui.main"   # the tab to go back to when the one before isn't known
-
-_PAGE = """
-  let page = null;
-  for (const fr of (window.FrameStore && window.FrameStore.frames) || [])
-    for (const p of fr.pages || []) if (p.summonOverlayKey == '%s') page = p;
-  const d = window.DashboardStore, dash = window.Dashboard;
-  const f = window.inputFocusStore && window.inputFocusStore.computedInputFocus;
-  const top = f && f.m_entryAtTopOfStack && f.m_entryAtTopOfStack.m_unPanelSGID;
-  const took = !!(page && page.mainPanelSGID && top == page.mainPanelSGID);
-  const active = d && d.activeFrame && d.activeFrame.activePage && d.activeFrame.activePage.summonOverlayKey;
-""" % KEY
-
-
-def _switch(key_js):
-    """A request that shows tab `key_js` (a JS expression) in the open dashboard, without opening it."""
-    return ("dash.showOrHideDashboardOrFrameInternal({dashboard_visibility_action: 0, target: {overlay_key: %s},"
-            " vrlink_request_split: 0, relatch_dashboard: {condition: 0, deadzone: 8},"
-            " reason: 'Frametop gamepad mode'})" % key_js)
-
-
-# One step of entering Gamepad mode: a word, a space, and what to say.
-#   "old <said>"   SteamVR 2.18: the focus is pushed; check it with TOOK (else ARM), then HIDE
-#   "wait <key>"   2.19: switching to our tab (from <key>, the tab it showed): ask again
-#   "dim <key>"    2.19: diminished on our tab; check the focus with TOOK
-#   anything else: why it can't
-STEP = """(() => {%s
-  if (!page || !page.inputFocus) return 'no frametop.gamepad page (ft-screens not running?)';
-  if (dash && dash.hideDashboard) { page.inputFocus.PushInputFocus(); return 'old pushed'; }
-  if (!d || !d.EnterDiminishedState || !dash || !dash.showOrHideDashboardOrFrameInternal)
-    return 'no way into Gamepad mode in this SteamVR';
-  if (!d.isFullyVisible) return 'no dashboard open';
-  if (active != '%s') { %s; return 'wait ' + (active || '-'); }
-  if (!d.canBeInDiminishedModeForActiveFrame) return 'wait -';
-  d.EnterDiminishedState();
-  return 'dim -';
-})()""" % (_PAGE, KEY, _switch(json.dumps(KEY)))
-
-# "1" once our page tops SteamVR's focus stack (the pad is ours).
-TOOK = """(() => {%s
-  return took ? '1' : '0';
-})()""" % _PAGE
-
-# SteamVR 2.18 that kept the focus where it was: ft-dashpatch's STEAMVR_STATE takes the next
-# Gamepad mode as ours (window.__ftPadArmed), as long as it lasts.
-ARM = """(() => {
-  window.__ftPadArmed = {at: Date.now(), active: false};
-  return 'armed';
+# The dashboard closes: SteamVR 2.18's own call, or 2.19's request (its HideDashboard is
+# {dashboard_visibility_action: 3, reason}).
+CLOSE = """(() => {
+  const dash = window.Dashboard;
+  if (dash && dash.hideDashboard) { dash.hideDashboard('Frametop gamepad mode'); return 'the dashboard closes'; }
+  if (dash && dash.showOrHideDashboardOrFrameInternal) {
+    dash.showOrHideDashboardOrFrameInternal({dashboard_visibility_action: 3, vrlink_request_split: 0,
+      relatch_dashboard: {condition: 0, deadzone: 8}, reason: 'Frametop gamepad mode'});
+    return 'the dashboard closes';
+  }
+  return 'no way to close the dashboard in this SteamVR';
 })()"""
 
-# SteamVR 2.18: close the dashboard as its Enter Gamepad Mode does.
-HIDE = """(() => {
-  const d = window.Dashboard;
-  if (d && d.hideDashboard) d.hideDashboard('Frametop gamepad mode');
-  return 'hidden';
+# SteamVR's laser comes back, when it is in its Gamepad mode (m_eSystemPanelInteractionMode 2).
+LASER = """(() => {
+  const s = window.inputFocusStore, f = s && s.computedInputFocus;
+  if (!f) return 'no input focus to read';
+  if (f.m_eSystemPanelInteractionMode != 2) return 'SteamVR has its laser already';
+  if (!s.ForceActivateLaserMouse) return 'no way to ask for the laser in this SteamVR';
+  if (!s.canForceActivateLaserMouse) return 'SteamVR sees no hand controller';
+  s.ForceActivateLaserMouse();
+  return 'SteamVR asked for its laser';
 })()"""
 
-
-def back(key):
-    """Switches the dashboard back to tab `key` if it still shows ours: 'back' or 'left'."""
-    return """(() => {%s
-  if (active != '%s' || !dash || !dash.showOrHideDashboardOrFrameInternal) return 'left';
-  %s;
-  return 'back';
-})()""" % (_PAGE, KEY, _switch(json.dumps(key)))
-
-
-# True while the dashboard is diminished on our tab: the pill's Gamepad mode, from its click until
-# a grip, the system button or the dashboard closing ends it. Only the pill gets the dashboard
-# there (the tab has no button).
-DIMMED = """(() => {%s
-  return !!(d && d.visibilityState == 2 && active == '%s');
-})()""" % (_PAGE, KEY)
-
-# "on" while the diminished mode on our tab lasts, else "off".
-STILL = "(%s ? 'on' : 'off')" % DIMMED
-
-
-def enter(evaluate, sleep):
-    """Gives SteamVR's controllers to frametop.gamepad, or leaves the dashboard as it was.
-    `evaluate(expr)` runs an expression on SteamVR's dashboard page. Returns (what came of it,
-    the tab to go back to once the diminished mode ends, or None when there's nothing to undo).
-    At most WAIT_S for SteamVR to switch and dim, and WAIT_S more for the focus."""
-    tries = int(WAIT_S / STEP_S)
-    prev = None
-    for _ in range(tries):
-        said = evaluate(STEP) or ""
-        word, _, rest = said.partition(" ")
-        if word == "old":
-            for _ in range(int(OLD_WAIT_S / STEP_S)):
-                if evaluate(TOOK) == "1":
-                    evaluate(HIDE)
-                    return "focus on frametop.gamepad, dashboard closed", None
-                sleep(STEP_S)
-            evaluate(ARM)
-            evaluate(HIDE)
-            return "SteamVR kept the focus where it was: the next Gamepad mode is Frametop's, dashboard closed", None
-        if word == "wait":
-            if prev is None and rest not in ("-", KEY):
-                prev = rest
-            sleep(STEP_S)
-            continue
-        if word == "dim":
-            prev = prev or HOME_KEY
-            for _ in range(tries):
-                if evaluate(TOOK) == "1":
-                    return "Gamepad mode on frametop.gamepad (dashboard diminished)", prev
-                sleep(STEP_S)
-            evaluate(back(prev))
-            return f"SteamVR didn't give frametop.gamepad the focus: back to {prev}", None
-        return said or "no reply", None
-    if prev is not None:
-        evaluate(back(prev))
-    return f"SteamVR didn't let frametop.gamepad's tab dim: back to {prev or 'where it was'}", None
-
-
-class Session:
-    """The tab to go back to while Frametop's diminished Gamepad mode lasts (set by the pill's
-    thread, read by the watch's: one attribute, swapped whole)."""
-
-    def __init__(self):
-        self.prev = None
-
-    def start(self, prev):
-        self.prev = prev
-
-    def leave(self, evaluate):
-        """While a session lasts: once SteamVR has left it, the dashboard back to its tab.
-        True when it ended now."""
-        prev = self.prev
-        if prev is None or evaluate(STILL) != "off":
-            return False
-        evaluate(back(prev))
-        self.prev = None
-        return True
+# ft-screens' messages on @ft_dashpatch: what each is called in the log, and what it runs.
+ASKS = {b"gamepad": ("gamepad pill", CLOSE), b"laser": ("gamepad mode", LASER)}

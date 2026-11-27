@@ -502,7 +502,7 @@ double AppScale(int i);
 void SetAppScale(int i, double scale);
 void ForgetAppScale(int i);   // its panel went
 void UpdateAppScale();   // each tick: Meta+scroll's, once the wheel rests
-int TypingPanel();       // the panel typing goes to (compositor.c's keys_update), -1 Steam
+int TypingPanel();       // the panel typing goes to (compositor.c's keys_update), -1 Steam (vrgamepad.cpp's)
 void UpdateVoice();      // each tick: dictation's notice (vrvoice.cpp)
 void PollBarMenu(void (*handle)(const struct ft_event *, void *), void *data);
 
@@ -555,11 +555,18 @@ bool IndexTipIn(int side, const Mat &frame, double out[3]);   // that hand's ind
 bool PinchPointIn(int side, const Mat &frame, double out[3]);   // ...its pinch's contact, between thumb and index tips
 std::string DeviceLabel(vr::TrackedDeviceIndex_t dev);
 
-// ---------------------------------------------------------------- vr.cpp's gamepad pill
+// ---------------------------------------------------------------- vrgamepad.cpp's
 
-// The panel Frametop's Gamepad mode drives now, -1 none. It stays shown while the dashboard is
-// diminished (SteamVR 2.19), which otherwise hides the dashboard's panels.
+// The panel gamepad mode is on or starting for, -1 none. It stays shown where the panels show only
+// with the Steam menu, which the mode closes.
 int PadPanel();
+bool PadHoldsLasers();   // gamepad mode is on or starting: no laser of ours on any panel
+bool PadLaserGrace();    // ...just over: our lasers are on whatever SteamVR's mode says
+void UpdatePill();       // each tick: the pill over its panel
+void PollPill(void (*handle)(const struct ft_event *, void *), void *data);
+void UpdatePad();        // each tick: the mode's ends, and its word to the input relay
+bool PadLeave(const char *why);          // "padmode off": false when it wasn't on
+void PadState(char *reply, int size);    // "gamepadpill"'s reply
 
 // ---------------------------------------------------------------- vrkbspot.cpp's
 

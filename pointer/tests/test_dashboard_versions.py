@@ -1,5 +1,5 @@
 """The update check passes both of SteamVR's dashboards: 2.18 (SteamOS 0.4) closes with
-hideDashboard, 2.19 (SteamOS 0.5) takes a request. The gamepad pill on each is
+hideDashboard, 2.19 (SteamOS 0.5) takes a request. Gamepad mode's asks on each are
 pointer/tests/test_gamepadmode.py.
 
   python3 pointer/tests/test_dashboard_versions.py
@@ -43,11 +43,11 @@ class UpdateCheck(unittest.TestCase):
         self.assertEqual(self.missing(rest), update_check.DASHBOARD_CLOSERS)
 
     def test_another_missing_name_is_reported_alone(self):
-        rest = " ".join(sorted(update_check.DASHBOARD_MARKERS - {"PushInputFocus"}))
-        self.assertEqual(self.missing(rest, "hideDashboard"), {"PushInputFocus"})
+        rest = " ".join(sorted(update_check.DASHBOARD_MARKERS - {"m_entryAtTopOfStack"}))
+        self.assertEqual(self.missing(rest, "hideDashboard"), {"m_entryAtTopOfStack"})
 
-    def test_the_click_uses_the_names_the_check_looks_for(self):
-        expressions = gamepadmode.STEP + gamepadmode.TOOK + gamepadmode.HIDE
+    def test_gamepad_mode_uses_the_names_the_check_looks_for(self):
+        expressions = gamepadmode.CLOSE + gamepadmode.LASER
         for name in update_check.DASHBOARD_CLOSERS | update_check.GAMEPAD_MARKERS:
             self.assertIn(name, expressions)
 

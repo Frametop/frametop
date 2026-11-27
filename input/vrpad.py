@@ -1,17 +1,15 @@
 """Gamepad mode for Frametop panels: the Frame controllers as one Xbox pad for a panel (the input
 relay runs it; input-relay.py's "Gamepad mode").
 
-SteamVR's own Gamepad mode decides when it's on, as for a game: with the Steam menu open,
-ft-screens shows an "Enter Gamepad Mode" pill above the panel typing goes to. Its click has
-ft-dashpatch push SteamVR's input focus onto ft-screens' hidden dashboard overlay frametop.gamepad
-and close the Steam menu, so SteamVR's controllers go to Gamepad mode for it; the grips bring the
-laser back, as anywhere in SteamVR. ft-dashpatch reads which it is in the dashboard's page, and
-ft-screens tells the relay "gamepad desktop|game|remote" each second while Gamepad mode is Frametop's
-(for the panel clicked), "gamepad off" as it ends. SteamVR gives an overlay no input in Gamepad
-mode (2026-10-25: no actions, no button events), so the relay's controller reader
-(game_pause.ControllerWatch, vrserver's web socket) reads every controller button, both sticks and
-both triggers raw, and says the pad's state ("vrpad B LT RT LX LY RX RY", XInput's buttons and
-up-positive sticks) on each change and every 250 ms. The relay sends it on:
+The mode is Frametop's own, and ft-screens decides when it's on (screens/padmode.h): its "Enter
+Gamepad Mode" pill shows above a game's panel, and above the panel typing goes to while the Steam
+menu is open. Its click takes ft-screens' lasers off every panel, so SteamVR leaves the controllers
+alone, and ft-screens tells the relay "gamepad desktop|game|remote" each second (the panel's kind),
+"gamepad off" as it ends. SteamVR gives an overlay no controller input without a laser (2026-10-25:
+no actions, no button events), so the relay's controller reader (game_pause.ControllerWatch,
+vrserver's web socket) reads every controller button, both sticks and both triggers raw, and says
+the pad's state ("vrpad B LT RT LX LY RX RY", XInput's buttons and up-positive sticks) on each
+change and every 250 ms. The relay sends it on:
   - a remote display: to ft-screens ("pad ..."), which hands it to that display's ft-stream, which
     gives the host a Moonlight Xbox controller (stream/ft-stream.cpp)
   - a Frametop desktop panel: VirtualPad, an Xbox 360 pad on uinput, which its apps read.
@@ -19,6 +17,10 @@ up-positive sticks) on each change and every 250 ms. The relay sends it on:
     identity of Steam's own virtual gamepad (STEAM), there only while gamepad mode is on for it.
     Steam starts a game with every other pad on SDL's ignore list, the desktop's 045e:028e among
     them (2026-11-27, Slay the Spire 2: it never opened that one, and opened this one).
+The way out is the relay's to see: both grips squeezed (the reader's "vrgrips"), or the mouse
+waking the pointer, which stepped aside as the mode came on (pointer), has it ask ft-screens to end
+the mode ("padmode off grips|mouse"; leave), and the pad lets go at once. Until 2026-11-27 the mode was SteamVR's own Gamepad mode for a dashboard overlay of
+ours, which the grips didn't leave on SteamVR 2.19.
 It ends too when Frametop pauses, a VR game starts, or ft-screens goes quiet for LEASE. With the
 dashboard opening during gamepad mode (the helper's "vrdash 1") the pad lets go until it closes, and
 buttons held as it comes on or the dashboard closes (the pill's click) wait for their release. Only
@@ -36,6 +38,7 @@ from typing import NamedTuple
 
 STALE = 1.0  # no "vrpad" line from the controller reader this long: everything comes up
 LEASE = 3.0  # no "gamepad desktop|game|remote" from ft-screens this long: gamepad mode ends
+LEAVING = 1.0  # ft-screens was asked to end the mode: the pad takes nothing this long, then asks anew
 NEUTRAL = (0, 0, 0, 0, 0, 0, 0)  # buttons, LT, RT, LX, LY, RX, RY
 SOUNDS = {True: "/usr/share/sounds/ocean/stereo/message-contact-in.oga",
           False: "/usr/share/sounds/ocean/stereo/message-contact-out.oga",
@@ -210,6 +213,9 @@ class GamepadMode:
         self.fresh = False  # the next state's buttons are held from before: they wait for release
         self.held = 0
         self.refused = None  # why the last "gamepad" from ft-screens was turned down (logged once)
+        self.since = 0.0  # on since then
+        self.left = None  # ft-screens was asked to end it then (None: not asked)
+        self.aside = False  # the relay's pointer stepped aside for this gamepad mode (pointer)
 
     def sound(self, which):
         path = SOUNDS[which]
@@ -225,7 +231,7 @@ class GamepadMode:
         be on now (a VR game, a pause), or None."""
         if target is None:
             self.refused = None
-            self.stop("SteamVR's Gamepad mode ended")
+            self.stop("ft-screens ended it")
             return
         if blocked:
             if self.refused != blocked:
@@ -240,6 +246,7 @@ class GamepadMode:
         if not self.on:
             self.on, self.target, self.state, self.seen, self.fresh = True, target, NEUTRAL, now, True
             self.dash_opened = False
+            self.since, self.left, self.aside = now, None, False
             self.log(f"gamepad mode on: the controllers are a gamepad for {self.where()}")
             self.read(True)
             self.sound(True)
@@ -262,6 +269,29 @@ class GamepadMode:
         self.read(False)
         self.log(f"gamepad mode off ({why})")
         self.sound(False)
+
+    def leave(self, why, now):
+        """The wearer wants out (`why`: grips, mouse): the pad lets go, and ft-screens is asked to
+        end the mode. Its "gamepad off" ends it here."""
+        if not self.on or (self.left is not None and now - self.left < LEAVING):
+            return
+        self.left = now
+        self.log(f"gamepad mode: leaving ({why})")
+        self.let_go()
+        self.send("screens", f"padmode off {why}")
+
+    def pointer(self, pointer, now):
+        """The relay's pointer each tick (None: no pointer mode, or paused). Gamepad mode has no
+        laser, and an awake pointer keeps SteamVR's laser on for the controllers as well (the
+        helper's laser-mode overlay), so it steps aside as the mode comes on, as an idle one does;
+        with a mouse button still down (the pill's click) once that's up. One that wakes after
+        that, the mouse used on purpose, takes the lasers back: the way out."""
+        if not self.on or pointer is None:
+            self.aside = False
+        elif not self.aside:
+            self.aside = not pointer.active or pointer.step_aside("gamepad")
+        elif pointer.active:
+            self.leave("mouse", now)
 
     def dashboard_state(self, on):
         """The helper's "vrdash 1|0": a dashboard opened during gamepad mode has the controllers
@@ -317,7 +347,7 @@ class GamepadMode:
         if not self.on:
             return
         self.seen = now
-        if self.dash_opened:
+        if self.dash_opened or (self.left is not None and now - self.left < LEAVING):
             return
         buttons = state[0]
         if self.fresh:

@@ -85,9 +85,11 @@ PACKAGES = {
                            "headset's /proximity, pointer/driver/worn.h); NPU hand tracking: ft-npud's "
                            "self-test passes (journalctl -u ft-npud says self-test ok; it talks to this "
                            "package's dsp_service and runs on its DSP firmware, npu/README.md); the Enter Gamepad "
-                           "Mode pill on a desktop panel and on a Steam game's panel: sticks and buttons drive the "
-                           "panel's app until a grip (the dashboard dimmed on frametop.gamepad's tab, "
-                           "DashboardStore.visibilityState 2: DIMMED in pointer/dashpatch/gamepadmode.py)",
+                           "Mode pill on a Steam game's panel (no Steam menu needed) and, with the Steam menu "
+                           "open, on a desktop panel (the menu closes: CLOSE in pointer/dashpatch/gamepadmode.py): "
+                           "no laser on any panel, sticks and buttons drive the panel's app, and both grips "
+                           "squeezed bring the lasers back within a second (SteamVR's "
+                           "inputFocusStore.ForceActivateLaserMouse, LASER there; screens/padmode.h)",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "
             "its scale a minute after the desktop starts (KWin's support information shows it; "
             "kscreen-doctor shows 1 from 6.6); every screen comes back "
@@ -1234,16 +1236,16 @@ def check_hands_rate(hr=None):
 # What pointer/dashpatch needs of SteamVR's dashboard, by name. treadmill-move.js wraps the first;
 # ft-dashpatch's SteamVR watch reads the rest (Gamepad mode, the theater game and Steam's page in the
 # theater, for ft-screens; steampage.py hides the controls under Steam's page by their frame's id),
-# and the gamepad pill's click (pointer/dashpatch/gamepadmode.py) uses GAMEPAD_MARKERS too.
-GAMEPAD_MARKERS = {"PushInputFocus", "summonOverlayKey", "mainPanelSGID", "m_entryAtTopOfStack", "m_unPanelSGID"}
-DASHBOARD_MARKERS = GAMEPAD_MARKERS | {"startFloatingWindowMove", "window.inputFocusStore=", "m_eSystemPanelInteractionMode",
-                     "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
-                     "window.FrameStore=", "summonOverlayKey", "unVRInputPID", "m_unPIDForVRInput",
-                     "m_unSteamInputAppID", "PushInputFocus", "window.Dashboard=",
+# and Frametop's gamepad mode (pointer/dashpatch/gamepadmode.py) uses GAMEPAD_MARKERS too. Not its
+# ForceActivateLaserMouse: without it SteamVR's laser comes back a moment later by itself.
+GAMEPAD_MARKERS = {"computedInputFocus", "m_eSystemPanelInteractionMode"}
+DASHBOARD_MARKERS = GAMEPAD_MARKERS | {"startFloatingWindowMove", "window.inputFocusStore=", "m_entryAtTopOfStack",
+                     "m_unPanelSGID", "window.OverlayStore=", "m_mapAllOverlays", "sOverlayKey",
+                     "window.FrameStore=", "summonOverlayKey", "window.Dashboard=",
                      "window.DashboardStore=", "m_rgTheaterFrameStack", "m_unFrameID", "legacy-frame-controls-",
                      "SetInTheater", '".ResizeHandle"'}
-# ...and the pill closes the dashboard with either of these: the first up to SteamVR 2.18, the
-# second from 2.19 (SteamOS 0.5).
+# ...and the pill, clicked with the Steam menu open, closes the dashboard with either of these: the
+# first up to SteamVR 2.18, the second from 2.19 (SteamOS 0.5).
 DASHBOARD_CLOSERS = {"hideDashboard", "showOrHideDashboardOrFrameInternal"}
 
 
@@ -1280,8 +1282,9 @@ def check_dashpatch():
     if missing:
         report("FAIL", label, f"SteamVR's dashboard lacks {', '.join(sorted(missing))}, so ft-dashpatch can't tell "
                "ft-screens about Gamepad mode or a theater game (pointing at a screen may take the pad from a game), "
-               "give a panel Gamepad mode (the gamepad pill), or hand Steam's page to SteamVR's theater; STEAMVR_STATE "
-               "and GAMEPAD_PUSH in pointer/dashpatch/ft-dashpatch.py or pointer/dashpatch/steampage.py need updating")
+               "close the Steam menu for a panel's gamepad mode (the gamepad pill), or hand Steam's page to SteamVR's "
+               "theater; STEAMVR_STATE in pointer/dashpatch/ft-dashpatch.py, pointer/dashpatch/gamepadmode.py or "
+               "pointer/dashpatch/steampage.py need updating")
         return
     import urllib.request
     try:

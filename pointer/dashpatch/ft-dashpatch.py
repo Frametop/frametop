@@ -9,16 +9,15 @@ those windows but couldn't move them. treadmill-move.js wraps the grab bar's han
 with no device moves the window with /user/treadmill. This puts it into the dashboard over the
 Chrome DevTools Protocol, again whenever the dashboard's page is new (SteamVR restarted).
 
-It also tells ft-screens (@ft_screens, "steamvrmode <gamepad> <theater app> <frametop>") what only the
+It also tells ft-screens (@ft_screens, "steamvrmode <gamepad> <theater app> 0 ...") what only the
 dashboard's page knows: whether SteamVR's controllers are in Gamepad mode (Enter Gamepad Mode, so
 the pad goes to a game), which Steam game shows in a theater window (a flatscreen game, which
-isn't a scene app), whether the Gamepad mode is Frametop's (its hidden dashboard overlay
-frametop.gamepad has the pad), and whether SteamVR's theater shows Steam's own page (steampage.py,
+isn't a scene app), and whether SteamVR's theater shows Steam's own page (steampage.py,
 which also hides SteamVR's controls under that page while ft-screens has Steam's window). ft-screens then keeps its panels from turning SteamVR's laser on
-while the pad is in a game (screens/vr.cpp, "controllers on the screens"), and in Frametop's own
-the input relay reads the pad for a panel (input/vrpad.py). That's read only, five times a second,
-on one connection. The one thing it does there is for ft-screens' gamepad pill: "gamepad" on
-@ft_dashpatch (from this user) gives SteamVR's controllers to frametop.gamepad (gamepadmode.py).
+while the pad is in a game (screens/vr.cpp, "controllers on the screens"). That's read only, five
+times a second, on one connection. What it does there is on ft-screens' word, on @ft_dashpatch
+(from this user): for Frametop's gamepad mode, "gamepad" closes the dashboard and "laser" has
+SteamVR bring its laser back (gamepadmode.py); steampage.py's and gametheater.py's asks.
 
 The dashboard's debugger is off by default. SteamVR turns it on with VRWebHelper.DebuggerEnabled
 and listens on VRWebHelper.DebuggerPort, on 127.0.0.1 only. Not 8087: SteamOS's
@@ -143,59 +142,32 @@ SCREENS = "\0ft_screens"
 # Keyboard, clicked last) counts as laser mode: SteamVR goes to Gamepad mode by itself when the
 # system focus goes (the Steam menu closing), and the pad can't drive a Frametop screen, so the
 # screens turning the laser back on is what gets the controllers back (2026-10-25: stuck in Gamepad
-# mode on a clicked screen, the grips dead, until the Steam menu opened). Not frametop.gamepad: the
-# dashboard overlay that takes the pad for a Frametop screen. And not while SteamVR 2.19's dashboard
-# is diminished on frametop.gamepad's tab (gamepadmode.DIMMED): that Gamepad mode is the pill's, and
-# 2.19 puts the screen clicked last back on top as it starts (headset, 2026-11-27: laser mode was
-# said for all of it, and the relay never heard of the pad).
-# The third word: Gamepad mode is Frametop's, SteamVR's controllers going to frametop.gamepad's owner
-# (ft-screens) with no Steam app's input in the way (2026-10-24: in a probe's, Steam Input 0; while the
-# Steam UI's panel took it, 769). In SteamVR 2.19's diminished dashboard (gamepadmode.py) Steam Input
-# stays the Steam UI's (769) with our page on top of the focus stack, so that page on top counts too,
-# and so does a Frametop screen on top while the dashboard is diminished on our tab.
+# mode on a clicked screen, the grips dead, until the Steam menu opened). Frametop's own gamepad
+# mode for a panel is not read here: ft-screens holds its lasers off itself for that
+# (screens/padmode.h).
+# The third word is always 0. Until 2026-11-27 it said SteamVR's Gamepad mode was Frametop's (its
+# dashboard overlay frametop.gamepad had the pad); ft-screens still reads a number there.
 # The fourth: the app id of the game whose frame SteamVR's theater shows (0 for none). A game on a
 # Frametop panel lent to the theater (View in Theater, screens/gstheater.h) comes back when it isn't.
-GAMEPAD_KEY = "frametop.gamepad"
 STEAMVR_STATE = """(() => {
   const f = window.inputFocusStore && window.inputFocusStore.computedInputFocus;
   if (!f || !window.OverlayStore) return '';
-  let pid = 0;
-  for (const fr of (window.FrameStore && window.FrameStore.frames) || [])
-    for (const p of fr.pages || [])
-      if (p.summonOverlayKey == '%s' && p.inputFocus && p.inputFocus.inputFocusParams)
-        pid = p.inputFocus.inputFocusParams.unVRInputPID || 0;
   let app = 0;
   for (const o of window.OverlayStore.m_mapAllOverlays.values()) {
     const m = /^valve\\.steam\\.desktopgame\\.(\\d+)$/.exec(o.sOverlayKey || '');
     if (m && +m[1] > 0) { app = +m[1]; break; }
   }
-  let ours = false, padTop = false;
+  let ours = false;
   const entry = f.m_entryAtTopOfStack;
   const top = entry && entry.m_unPanelSGID;
-  for (const fr of (window.FrameStore && window.FrameStore.frames) || [])
-    for (const p of fr.pages || [])
-      if (p.summonOverlayKey == '%s' && top && p.mainPanelSGID == top) padTop = true;
   let key = '-';
   for (const o of window.OverlayStore.m_mapAllOverlays.values())
     if (top && o.unStandalonePanelSGID == top) {
-      ours = /^(frametop\\.|org\\.framekeyboard\\.)/.test(o.sOverlayKey || '')
-        && !/^frametop\\.(probe\\.)?gamepad$/.test(o.sOverlayKey || '');
+      ours = /^(frametop\\.|org\\.framekeyboard\\.)/.test(o.sOverlayKey || '');
       // One token: a key with a space in it would fail the reply's check and drop the Gamepad update too.
       if (entry.m_bPanelVisible && entry.m_bCanTakeKeyboardFocus && /^\\S+$/.test(o.sOverlayKey || '')) key = o.sOverlayKey;
     }
-  // Armed by the gamepad pill on a SteamVR 2.18 that kept the focus where it was (gamepadmode.ARM):
-  // its next Gamepad mode is ours however the stack looks, until it ends, or ARM_S if it never starts.
-  const gp = f.m_eSystemPanelInteractionMode == 2;
-  const a = window.__ftPadArmed;
-  let armed = false;
-  if (a) {
-    if (gp) { a.active = true; armed = true; }
-    else if (a.active || Date.now() - a.at > %d) window.__ftPadArmed = null;
-  }
-  const dimmed = %s;
-  const pad = gp && (!ours || armed || dimmed);
-  const mine = pad && (armed || (dimmed && ours)
-                       || (pid && f.m_unPIDForVRInput == pid && (!f.m_unSteamInputAppID || padTop)));
+  const pad = f.m_eSystemPanelInteractionMode == 2 && !ours;
   const inTheater = new Set(((window.DashboardStore && window.DashboardStore.m_rgTheaterFrameStack) || [])
                             .map(t => t && t.m_unFrameID).filter(Boolean));
   let shown = 0;
@@ -205,11 +177,11 @@ STEAMVR_STATE = """(() => {
         const m = /^valve\\.steam\\.desktopgame\\.(\\d+)$/.exec(p.summonOverlayKey || '');
         if (m && +m[1] > 0) shown = +m[1];
       }
-  return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0) + ' ' + shown + ' ' + key;
-})()""" % (GAMEPAD_KEY, GAMEPAD_KEY, gamepadmode.ARM_S * 1000, gamepadmode.DIMMED)
+  return (pad ? 1 : 0) + ' ' + app + ' 0 ' + shown + ' ' + key;
+})()"""
 DASHPATCH = "\0ft_dashpatch"
 STRIP = steampage.StripLease()  # ft-screens' "steamstrip" (listen), read by the watch
-PAD = gamepadmode.Session()  # the pill's diminished Gamepad mode (listen), ended by the watch
+ASKS = {**steampage.ASKS, **gamepadmode.ASKS}  # ft-screens' one-shot asks (listen)
 
 
 class NativeFocus:
@@ -252,7 +224,7 @@ def watch_steamvr():
                     continue
                 ws = _WebSocket(url)
             rid += 1
-            # "<Steam's page in theater> <pad> <app> <mine> <game in theater> <key>"
+            # "<Steam's page in theater> <pad> <app> 0 <game in theater> <key>"
             expression = f"{steampage.expression(STRIP.held(time.monotonic()))} + ' ' + {STEAMVR_STATE}"
             ws.send(json.dumps({"id": rid, "method": "Runtime.evaluate",
                                 "params": {"expression": expression, "returnByValue": True}}))
@@ -272,21 +244,14 @@ def watch_steamvr():
         if not isinstance(value, str) or not re.fullmatch(r"[01] [01] \d+ [01] \d+ \S+", value):
             continue
         value, key = value.rsplit(" ", 1)
-        theater, pad, app, mine, shown = value.split(" ")
-        # ft-screens: "steamvrmode <pad> <app> <mine> <Steam's page in theater> <game in theater>"
-        value = f"{pad} {app} {mine} {theater} {shown}"
+        theater, pad, app, unused, shown = value.split(" ")
+        # ft-screens: "steamvrmode <pad> <app> 0 <Steam's page in theater> <game in theater>"
+        value = f"{pad} {app} {unused} {theater} {shown}"
         focus.update(key, out)
-        if PAD.prev is not None:
-            try:
-                if PAD.leave(lambda e: watch_eval(ws, e)):
-                    print("gamepad pill: Gamepad mode over, the dashboard back on its tab", flush=True)
-            except (OSError, ValueError):
-                pass  # tried again on the next sample
         now = time.monotonic()
         if value != last or now - sent >= 1:
             if value != last:
-                print(f"SteamVR: {'gamepad' if pad == '1' else 'laser'} mode"
-                      f"{' (for a Frametop panel)' if mine == '1' else ''}, "
+                print(f"SteamVR: {'gamepad' if pad == '1' else 'laser'} mode, "
                       f"{'theater game ' + app if app != '0' else 'no theater game'}"
                       f"{', Steam page in theater' if theater == '1' else ''}"
                       f"{', game ' + shown + ' shown in the theater' if shown != '0' else ''}", flush=True)
@@ -295,31 +260,6 @@ def watch_steamvr():
             except OSError:
                 pass  # the desktop isn't running
             last, sent = value, now
-
-
-def watch_eval(ws, expression):
-    """An expression on the watch's own connection to the dashboard page: its value."""
-    rid = int(time.monotonic() * 1000)
-    ws.send(json.dumps({"id": rid, "method": "Runtime.evaluate",
-                        "params": {"expression": expression, "returnByValue": True}}))
-    while True:
-        reply = json.loads(ws.recv())
-        if reply.get("id") == rid:
-            return reply.get("result", {}).get("result", {}).get("value")
-
-
-def gamepad_mode():
-    """The gamepad pill's click: SteamVR's controllers to frametop.gamepad (gamepadmode.py)."""
-    def ask(expr):
-        url = dashboard()
-        return evaluate(url, expr) if url else "the dashboard is not reachable"
-    try:
-        said, prev = gamepadmode.enter(ask, time.sleep)
-    except (OSError, ValueError) as e:
-        said, prev = f"can't reach the dashboard ({e})", None
-    if prev is not None:
-        PAD.start(prev)
-    print(f"gamepad pill: {said}", flush=True)
 
 
 def game_to_theater(app):
@@ -336,15 +276,15 @@ def game_to_theater(app):
 
 def listen():
     """ft-screens on @ft_dashpatch, only from this user (SO_PASSCRED gives the sender's): the
-    gamepad pill's "gamepad" (gamepadmode.py), "steamstrip 1|0", "steamtheater" and "steamtab"
-    (steampage.py), and "gametheater <app id>" (gametheater.py)."""
+    gamepad mode's "gamepad" and "laser" (gamepadmode.py), "steamstrip 1|0", "steamtheater" and
+    "steamtab" (steampage.py), and "gametheater <app id>" (gametheater.py)."""
     creds = struct.Struct("3i")  # pid, uid, gid
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
     try:
         sock.bind(DASHPATCH)
     except OSError as e:
-        print(f"gamepad pill: can't listen on @ft_dashpatch ({e})", flush=True)
+        print(f"can't listen on @ft_dashpatch ({e}): no gamepad mode from the Steam menu, no View in Theater", flush=True)
         return
     while True:
         data, anc, _, _ = sock.recvmsg(256, socket.CMSG_SPACE(creds.size))
@@ -352,19 +292,17 @@ def listen():
                     if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS), None)
         message = data.strip()
         game = gametheater.ask(message)
-        if (message != b"gamepad" and message not in steampage.ASKS and not message.startswith(b"steamstrip")
-                and game is None):
+        if message not in ASKS and not message.startswith(b"steamstrip") and game is None:
             continue
         if uid != os.getuid():
             print(f"{message[:16]!r} from another user ({uid}): ignored", flush=True)
             continue
         if STRIP.take(message, time.monotonic()):
             continue
-        if game is not None or message == b"gamepad":  # these wait on SteamVR: not on this thread
-            threading.Thread(target=game_to_theater if game is not None else gamepad_mode,
-                             args=(game,) if game is not None else (), daemon=True).start()
+        if game is not None:  # it waits on SteamVR: not on this thread
+            threading.Thread(target=game_to_theater, args=(game,), daemon=True).start()
             continue
-        what, expr = steampage.ASKS[message]
+        what, expr = ASKS[message]
         url = dashboard()
         try:
             said = evaluate(url, expr) if url else "the dashboard is not reachable"

@@ -3119,6 +3119,51 @@
   "log": [],
   "raised": null
  },
+ "vrgrips": {
+  "calls": [
+   [
+    "gamepad.leave",
+    [
+     "grips",
+     100.0
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrgrips",
+  "log": [],
+  "raised": null
+ },
+ "vrgrips other user": {
+  "calls": [],
+  "changed": {},
+  "datagram": "vrgrips",
+  "log": [
+   "vrgrips from another user (OTHER): ignored"
+  ],
+  "raised": null,
+  "uid": "OTHER"
+ },
+ "vrgrips with more": {
+  "calls": [
+   [
+    "reply",
+    [
+     "\u0000ft_control_test_client",
+     {
+      "error": "unknown command 'vrgrips'",
+      "t": "error"
+     }
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "vrgrips 1",
+  "log": [],
+  "raised": null
+ },
  "vrhello": {
   "calls": [
    [

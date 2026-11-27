@@ -198,6 +198,7 @@ CASES += [
     ("gamepad remote, other user", "gamepad remote", {"uid": OTHER}), ("gamepad bad", "gamepad nope", {}),
     ("vrpad ok", "vrpad 1 0 0 0 0 0 0", {}), ("vrpad other user", "vrpad 1 0 0 0 0 0 0", {"uid": OTHER}),
     ("vrpad junk", "vrpad a b c d e f g", {}), ("vrpad short", "vrpad 1 0", {}),
+    ("vrgrips", "vrgrips", {}), ("vrgrips other user", "vrgrips", {"uid": OTHER}), ("vrgrips with more", "vrgrips 1", {}),
     ("pause on", "pause on", {}), ("pause off gesture", "pause off gesture", {}),
     ("pause toggle", "pause toggle", {}), ("pause ?", "pause ?", {}), ("pause ? unbound", "pause ?", {"addr": b""}),
     ("pause on, other user", "pause on", {"uid": OTHER}),

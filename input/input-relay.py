@@ -112,16 +112,18 @@ still clicks where you look. A rules file without the table gets ft_remote_keys.
 default Meta combinations but the gaze clicks, each as itself. release_keys never goes to the
 computer, whatever the table says: it's the way out of stuck keys.
 
-Gamepad mode (input/vrpad.py) makes the Frame controllers one Xbox pad for a Frametop panel, through
-SteamVR's own Gamepad mode: ft-screens' "Enter Gamepad Mode" pill above the panel typing goes to
-(with the Steam menu open) has ft-dashpatch give SteamVR's input focus to ft-screens' hidden
-dashboard overlay, and ft-screens says "gamepad desktop|game|remote" here every second while SteamVR's
-Gamepad mode is Frametop's, "gamepad off" as it ends (the grips, as anywhere in SteamVR). The
+Gamepad mode (input/vrpad.py) makes the Frame controllers one Xbox pad for a Frametop panel. It is
+Frametop's own: ft-screens' "Enter Gamepad Mode" pill (above a game's panel, and above the panel
+typing goes to while the Steam menu is open) takes its lasers off every panel, and ft-screens says
+"gamepad desktop|game|remote" here every second while the mode is on, "gamepad off" as it ends. The
 controller reader (game_pause.py, vrserver's web socket) then reads every controller button, both
 sticks and both triggers raw, and says the pad's state here ("vrpad B LT RT LX LY RX RY"). A
 remote display gets it through ft-screens ("pad ..."), a desktop panel as a virtual Xbox 360 pad
-on uinput. It ends when Frametop pauses or a VR game starts, and with the dashboard open the pad
-lets go.
+on uinput, a game's panel as a second one under Steam's ids. Both grips squeezed (the reader's
+"vrgrips") or the mouse waking the pointer ask ft-screens to end it ("padmode off grips|mouse"):
+the pointer steps aside as the mode comes on, since an awake one keeps SteamVR's laser on for the
+controllers too. It ends too when Frametop pauses or a VR game starts, and with the dashboard open
+the pad lets go.
 
 In gaze mode outside games, the helper keeps the pointer ("gazeawake 1", repeated every 5
 seconds; "gazeawake 0" or silence ends it): the pointer isn't released when the mouse is idle.
@@ -284,11 +286,13 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     ignored from another user
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
                     hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
-  gamepad desktop|game|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a
-                    desktop panel, a gamescope app's panel or a remote display (every second while
-                    it is), or it ended (above); ignored from another user
+  gamepad desktop|game|remote|off   from ft-screens: gamepad mode is on, for a desktop panel, a
+                    gamescope app's panel or a remote display (every second while it is), or it
+                    ended (above); ignored from another user
   vrpad B LT RT LX LY RX RY   from the controller reader in gamepad mode: the pad's state (above);
                     ignored from another user
+  vrgrips           from the controller reader in gamepad mode: both grips were squeezed, the way
+                    out (ft-screens hears "padmode off grips"); ignored from another user
   calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
                     lapses 3 s after the last), so Enter answers it (above)
   textfield 1|0     from the desktop's input method (above); "commit TEXT" goes back to it.
@@ -2495,8 +2499,8 @@ class Relay:
             self.gamepad.dashboard_state(words[1] == "1")
             return
         if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "game", "remote", "off"):
-            # From ft-screens (no reply): SteamVR's Gamepad mode is Frametop's or ended. It
-            # presses buttons, so only from this user.
+            # From ft-screens (no reply): gamepad mode is on or ended. It presses buttons, so
+            # only from this user.
             if uid != os.getuid():
                 log(f"gamepad from another user ({uid}): ignored")
             else:
@@ -2509,6 +2513,14 @@ class Relay:
                 log(f"vrpad from another user ({uid}): ignored")
             elif (pad_state := vrpad.parse(words[1:])) is not None:
                 self.gamepad.reader_state(pad_state, now)
+            return
+        if cmd == "vrgrips" and len(words) == 1:
+            # From the controller reader in gamepad mode: both grips squeezed. It ends the
+            # mode, so only from this user.
+            if uid != os.getuid():
+                log(f"vrgrips from another user ({uid}): ignored")
+            else:
+                self.gamepad.leave("grips", now)
             return
         if cmd == "pause" and len(words) >= 2 and words[1] in ("on", "off", "toggle", "?"):
             # From input/ft-pause, the settings app, or the gesture reader (unbound, no reply).
@@ -2845,6 +2857,7 @@ class Relay:
         self.kb_tell(now)
         self.pause.tick(now)
         self.gamepad.tick(now)
+        self.gamepad.pointer(self.lease.current, now)
         if self.vr_capture_until and now >= self.vr_capture_until:
             self.vr_bind(now)  # capture over: back to the mapped buttons
         if (now < self.desktop_until) != self.typing_applied or self.grab_waiting:

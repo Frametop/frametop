@@ -17,7 +17,7 @@ enum Verb {
     Unknown,
     Place, Width, CurveOnOff, Curve, Pin, Unpin, Get, Screens, Universe, Head, Reach,
     Visibility, Wrist, Gesture, GamepadPill, Concealed, ConcealReveal, HideShowToggle,
-    Pause, InGames, SteamvrMode, Controllers, HandSetting, SpinDistance, Hands,
+    Pause, InGames, SteamvrMode, Controllers, PadMode, HandSetting, SpinDistance, Hands,
     SteamvrList, Typing, CalPanel, Ray, Turn, HandInput, PalmMenu, GrabThat, Cutouts, Wallpaper,
     Float, Hold, Unfloat, Pose, Sub, Minimized, Moving, Torn, CarryToggle, CarryTake, CarryTurn, Carry, Up,
     WindowDrag, Pulled,
@@ -34,7 +34,7 @@ struct Cmd {
     char word[16] = {}, hand[16] = {};
     float r[12] = {};
     int got = 0;                          // pin: how many it scanned (2, or 14 with a pose)
-    unsigned pad = 0, app = 0, mine = 0, steamTheater = 0, gameTheater = 0;  // steamvrmode (the fourth and fifth: optional, 0)
+    unsigned pad = 0, app = 0, mine = 0, steamTheater = 0, gameTheater = 0;  // steamvrmode (mine: read by nobody now; the fourth and fifth: optional, 0)
     char key[48] = {};                    // handsetting
     double m = 0;                         // spindistance
     char sl[16] = {}, sr[16] = {};        // hands
@@ -65,7 +65,7 @@ inline Group GroupOf(Verb v) {
     case Screens: case Universe: case Head: case Reach: case GamepadPill: case Concealed: case Debug: case State:
         return ReadoutGroup;
     case Visibility: case Wrist: case Gesture: case ConcealReveal: case HideShowToggle: case Pause: case InGames:
-    case SteamvrMode: case Controllers:
+    case SteamvrMode: case Controllers: case PadMode:
         return VisibilityGroup;
     case HandSetting: case SpinDistance: case Hands: case SteamvrList: case Typing: case CalPanel: case Ray: case Turn:
         return HelperWordGroup;
@@ -118,6 +118,12 @@ inline Verb Parse(const char *cmd, Cmd &c) {
     if (std::sscanf(cmd, "ingames %15s", c.word) == 1) return InGames;
     if (std::sscanf(cmd, "steamvrmode %u %u %u %u %u", &c.pad, &c.app, &c.mine, &c.steamTheater, &c.gameTheater) >= 3) return SteamvrMode;
     if (std::sscanf(cmd, "controllers %15s", c.word) == 1) return Controllers;
+    // "padmode off [<why>]": the why is one word, or none
+    if (!std::strcmp(cmd, "padmode off") || !std::strncmp(cmd, "padmode off ", 12)) {
+        c.word[0] = 0;
+        std::sscanf(cmd + 11, " %15s", c.word);
+        return PadMode;
+    }
     if (!std::strncmp(cmd, "handsetting ", 12) && std::sscanf(cmd, "handsetting %47s %15s", c.key, c.word) == 2)
         return HandSetting;
     if (std::sscanf(cmd, "spindistance %lf", &c.m) == 1) return SpinDistance;

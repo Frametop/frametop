@@ -26,8 +26,10 @@ A snapshot of the `dashboard-tiling` branch for picking the work back up. The de
 - **Theater.** A Steam game's panel has a theater button and a View in Theater menu row. With a
   game in SteamVR's theater, the dashboard opens on Steam's tab and the tiles show over the game.
   With the dashboard closed they hide, unless `DASH_TILE_STAY_THEATER` is on (default off).
-- **Gamepad pill.** The desktop pill uses SteamVR 2.19's diminished Gamepad mode with a card on
-  Frametop's tab, and falls back to Steam's tab if SteamVR doesn't hand over focus within 2 s.
+- **Gamepad pill.** Replaced on 2026-11-27: gamepad mode is Frametop's own, with no card and no
+  dimmed dashboard, and both grips leave it ([reference.md](reference.md), "Gamepad mode works
+  for Frametop panels too"). The pill here used SteamVR 2.19's diminished Gamepad mode with a
+  card on Frametop's tab.
 - **Steam sidebar.** ft-screens takes the menu window Steam shows (checked every second), not
   resizable by hand. It slides open on hover and shrinks only after Steam has shut its labels
   (`kShutWaitMs` = 2.5 s at most) so the icons are back before it narrows.
@@ -52,8 +54,8 @@ Steps for each are in `~/Desktop/Projects/HEADSET-TESTS.md`, newest first.
    then stay with "In the theater" on. Stay Shown off in one panel's bar menu: only that panel hides.
 2. **Steam sidebar, its corners, the front tile's height** (~2 min). Sidebar icons show, no corner
    glow or resize from the sidebar, front tile clear above the bar (say if higher or lower).
-3. **Gamepad mode round 2, steps 4-7** (desktop pill): the dashboard dims with the card, the pad
-   drives the desktop, a grip ends it.
+3. ~~Gamepad mode round 2, steps 4-7~~: overtaken by Frametop's own gamepad mode, tested in the
+   headset on 2026-11-27 (no card, the pad reaches a game on its panel, both grips end it).
 4. **View in Theater** and **clicks reach a game's panel**, if not already covered by the rounds
    above.
 

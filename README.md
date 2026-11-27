@@ -171,7 +171,7 @@ Steam opens flatscreen games in SteamVR's theater, where Frametop can't rotate o
 `~/.local/bin/ft-ondesktop --launch-option` prints that line with your home folder in it. While the Frametop desktop runs, the game then opens as one of its windows: move it to a portrait screen (add one in Frametop Settings), or float it with Meta+Shift+F and roll it there. When the desktop isn't running, the game opens in the theater as before. `ft-ondesktop --check` says which one a game will get.
 
 - Restarting the Frametop desktop ends a game running on it.
-- Mouse and keyboard reach the game like any desktop app. For the controllers as a gamepad, click the game's window, open the Steam menu and press Frametop's Enter Gamepad Mode pill: ft-ondesktop leaves Frametop's virtual pad visible to the game. Steam's own Gamepad mode, which goes with the theater, may not reach it.
+- Mouse and keyboard reach the game like any desktop app. For the controllers as a gamepad, click the game's window and press the Enter Gamepad Mode pill above it: the lasers go, and the buttons and the d-pad reach the game. Squeeze both grips to leave. A game that reads its controller through Steam Input gets the left stick as its d-pad too; what it binds to the right stick and the triggers works only in the theater (the game's View in Theater button). ft-ondesktop leaves Frametop's virtual pad visible to the game.
 - Each start adds a line to `~/.local/state/frametop/ondesktop.log`.
 
 ### Gaze mode (experimental)

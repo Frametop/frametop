@@ -1,5 +1,5 @@
 // gamecores.h: the processes under a game's launcher, parents first, and their soft core limit
-// set to 0 with each hard limit kept.
+// set to kNoDump with each hard limit kept.
 //
 //   g++ -std=c++17 -Iscreens screens/tests/gamecores-test.cpp screens/gamecores.cpp
 #include "gamecores.h"
@@ -75,7 +75,7 @@ int main() {
         CHECK(Under(many, 2).size() == kMaxProcesses);
     }
 
-    // real processes: both get a soft limit of 0 and keep their hard limit; this one keeps its own
+    // real processes: both get a soft limit of kNoDump and keep their hard limit; this one keeps its own
     rlimit mine;
     getrlimit(RLIMIT_CORE, &mine);
     if (mine.rlim_max == 0) {
@@ -89,8 +89,8 @@ int main() {
             CHECK(Soft(parent) == soft && Soft(child) == soft);
             CHECK(Off(uint32_t(parent)) == 2);
             rlimit p, c;
-            CHECK(prlimit(parent, RLIMIT_CORE, nullptr, &p) == 0 && p.rlim_cur == 0 && p.rlim_max == mine.rlim_max);
-            CHECK(prlimit(child, RLIMIT_CORE, nullptr, &c) == 0 && c.rlim_cur == 0 && c.rlim_max == mine.rlim_max);
+            CHECK(prlimit(parent, RLIMIT_CORE, nullptr, &p) == 0 && p.rlim_cur == kNoDump && p.rlim_max == mine.rlim_max);
+            CHECK(prlimit(child, RLIMIT_CORE, nullptr, &c) == 0 && c.rlim_cur == kNoDump && c.rlim_max == mine.rlim_max);
             CHECK(Off(uint32_t(parent)) == 0);   // (none left to change)
             CHECK(Soft(getpid()) == mine.rlim_cur);
         }
@@ -98,7 +98,12 @@ int main() {
         if (parent > 0) kill(parent, SIGKILL), waitpid(parent, nullptr, 0);
         // only the child, not its parent
         if (Family(soft, &parent, &child)) {
-            CHECK(Off(uint32_t(child)) == 1 && Soft(child) == 0 && Soft(parent) == soft);
+            CHECK(Off(uint32_t(child)) == 1 && Soft(child) == kNoDump && Soft(parent) == soft);
+            kill(child, SIGKILL), kill(parent, SIGKILL), waitpid(parent, nullptr, 0);
+        }
+        // a limit of 0 still pipes the dump: to kNoDump too
+        if (Family(0, &parent, &child)) {
+            CHECK(Off(uint32_t(parent)) == 2 && Soft(parent) == kNoDump && Soft(child) == kNoDump);
             kill(child, SIGKILL), kill(parent, SIGKILL), waitpid(parent, nullptr, 0);
         }
     }

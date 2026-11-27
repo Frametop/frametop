@@ -5,6 +5,7 @@
 #include <sys/resource.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,14 +39,16 @@ std::map<uint32_t, uint32_t> Parents() {
     return parents;
 }
 
-// The soft core limit of each of `pids` that has one to 0; how many it changed.
+// The soft core limit of each of `pids` to kNoDump, or to its hard limit if that's lower; how many
+// it changed.
 int OffEach(const std::vector<uint32_t> &pids) {
     int changed = 0;
     for (const uint32_t p : pids) {
         const pid_t pid = pid_t(p);
         rlimit now;
-        if (prlimit(pid, RLIMIT_CORE, nullptr, &now) != 0 || now.rlim_cur == 0) continue;
-        const rlimit off = {0, now.rlim_max};
+        if (prlimit(pid, RLIMIT_CORE, nullptr, &now) != 0) continue;
+        const rlimit off = {std::min<rlim_t>(kNoDump, now.rlim_max), now.rlim_max};
+        if (now.rlim_cur == off.rlim_cur) continue;
         if (prlimit(pid, RLIMIT_CORE, &off, nullptr) == 0) ++changed;
     }
     return changed;

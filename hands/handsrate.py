@@ -15,11 +15,13 @@ slow one at 15. On, three settings change together:
 Off takes the two camera keys out again (SteamVR's own mode) and writes ft-hands' defaults,
 HANDS_MAX_HZ=30 and HANDS_FULL_RATE=0.
 
-XRService and ft-hands read these as they start. --now restarts ft-hands if it runs and stops
-XRService, so SteamVR starts a new one: head tracking drops for about 15 seconds (SteamVR waits
-that long without tracking before it starts XRService again), and with the headset off SteamVR
-starts it when the headset is next worn. The new XRService tracks in a new world, turned from the
-old one, so ft-screens moves what you had open with it (screens/universefix.h). Without --now the
+XRService and ft-hands read these as they start. --now stops ft-hands and ft-camd if they run,
+stops XRService so SteamVR starts a new one, and starts ft-camd and ft-hands again once it is back
+(waiting for ft-camd's ring before starting ft-hands so neither sits in systemd's RestartSec=5
+backoff while XRService restarts): head tracking drops for about 15 seconds (SteamVR waits that
+long without tracking before it starts XRService again), and with the headset off SteamVR starts
+it when the headset is next worn. The new XRService tracks in a new world, turned from the old
+one, so ft-screens moves what you had open with it (screens/universefix.h). Without --now the
 cameras change when SteamVR next starts. SteamVR gives up on an XRService that stops more than
 five times in a minute, so Frametop Settings holds the switch for a while after each use.
 
@@ -43,6 +45,7 @@ distrobox-host-exec and imports it to read the state; uninstall.sh runs `off`).
 import json
 import os
 import re
+import struct
 import sys
 import time
 
@@ -59,7 +62,9 @@ SECTION, CAMERAS = "captureSessionSettings", "trackingCameras"
 HIGH = {"streamingMode": 0, "slamFrameFPSMode": 3}  # 60 Hz, no dark frames
 CONF_ON = {"HANDS_MAX_HZ": "60", "HANDS_FULL_RATE": "1"}
 CONF_OFF = {"HANDS_MAX_HZ": "30", "HANDS_FULL_RATE": "0"}  # ft-hands' defaults
-HANDS_UNIT = handsmode.TRACKING[1]
+TRACKING_UNITS = handsmode.TRACKING
+CAMD_UNIT = TRACKING_UNITS[0]
+HANDS_UNIT = TRACKING_UNITS[1]
 # By its command line, as scripts/update-check.py finds it: XRService renames its main thread.
 XRSERVICE = "^(/[^ ]*/)?XRService( |$)"
 WARNING = ("While it's on the controllers don't track: the cameras stop taking the dark frames that "
@@ -70,6 +75,13 @@ WARNING = ("While it's on the controllers don't track: the cameras stop taking t
 # How long --now waits for SteamVR's new XRService: its own timer is 15 s (16.5 s from the stop,
 # worn 2026-11-23). Frametop Settings gives the whole switch twice this.
 RESTART_WAIT = 30.0
+# How long --now waits for ft-camd to publish a live cam-ring before starting ft-hands:
+# camstart_attach waits up to 10 s for XRService's 4 cameras (hands/camd/camstart.h), and ft-hands
+# exits 1 into RestartSec=5 if the ring isn't alive when it starts (hands/track/main.cpp).
+CAMD_WAIT = 12.0
+RING_MAGIC = b"FHRING01"
+RING_VERSION = 1
+RING_STALE_NS = 1_000_000_000
 
 
 class RateError(RuntimeError):
@@ -183,6 +195,16 @@ def camera_rates(status):
     return {"best": best, "minutes": minutes, "dark": dark / (bright + dark) if bright + dark >= 600 else None}
 
 
+def ring_is_live(header, now_ns):
+    """Whether cam-ring's first 48 bytes (hands/camd/fhring.h) show a live ft-camd writer:
+    magic FHRING01, version 1, positive writer_pid, and heartbeat_ns within RING_STALE_NS."""
+    if len(header) < 48:
+        return False
+    magic, version, writer_pid, heartbeat_ns = struct.unpack_from("<8sI20xqQ", header, 0)
+    return (magic == RING_MAGIC and version == RING_VERSION and writer_pid > 0 and heartbeat_ns > 0
+            and 0 <= now_ns - heartbeat_ns < RING_STALE_NS)
+
+
 class Host:
     """The processes this restarts. Tests replace it, or its `user` (handsmode.Host)."""
 
@@ -194,6 +216,45 @@ class Host:
         (exit 5 is systemctl's for a unit that isn't installed: nothing to restart)."""
         r = self.user.systemctl("try-restart", "--no-block", HANDS_UNIT)
         return "" if r.returncode in (0, 5) else (r.stderr.strip() or f"systemctl exit {r.returncode}")
+
+    def running_tracking(self):
+        """Which of TRACKING_UNITS are active, activating or reloading, in order: (units, err)."""
+        r = self.user.systemctl("show", "-p", "Id,ActiveState", *TRACKING_UNITS)
+        if r.returncode != 0:
+            return (), r.stderr.strip() or f"systemctl exit {r.returncode}"
+        states = {}
+        for block in r.stdout.strip().split("\n\n"):
+            props = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            if props.get("Id"):
+                states[props["Id"]] = props.get("ActiveState", "")
+        running = tuple(u for u in TRACKING_UNITS if states.get(u) in ("active", "activating", "reloading"))
+        return running, ""
+
+    def stop_tracking(self, units):
+        """Stop running tracking units cleanly (ft-hands before ft-camd). "" or what went wrong."""
+        if not units:
+            return ""
+        r = self.user.systemctl("stop", *reversed(units))
+        return "" if r.returncode in (0, 5) else (r.stderr.strip() or f"systemctl exit {r.returncode}")
+
+    def start_tracking(self, units):
+        """Start tracking units in order (ft-camd before ft-hands). "" or what went wrong."""
+        if not units:
+            return ""
+        r = self.user.systemctl("start", "--no-block", *units)
+        return "" if r.returncode in (0, 5) else (r.stderr.strip() or f"systemctl exit {r.returncode}")
+
+    def ring_alive(self, ring_path=None):
+        """Whether ft-camd's shared-memory ring has a fresh heartbeat (hands/camd/fhring.md)."""
+        if ring_path is None:
+            runtime = getattr(self.user, "env", {}).get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+            ring_path = os.path.join(runtime, "frametop-hands", "cam-ring")
+        try:
+            with open(ring_path, "rb") as f:
+                header = f.read(48)
+        except OSError:
+            return False
+        return ring_is_live(header, time.clock_gettime_ns(time.CLOCK_MONOTONIC))
 
     def xrservice(self):
         """XRService's process ids (an old one may still be going while a new one starts)."""
@@ -214,12 +275,12 @@ class Host:
         time.sleep(seconds)
 
 
-def restart_tracking(host, wait=RESTART_WAIT, step=0.2):
+def restart_tracking(host, wait=RESTART_WAIT, step=0.2, old=None):
     """Stop XRService so SteamVR starts a new one, which reads the camera mode: it does after 15 s
     without tracking (its own timer; 16.5 s from the stop, worn 2026-11-23). (restarted, text):
     restarted is None when it wasn't running, False when SteamVR hasn't started a new one yet.
     RateError when XRService couldn't be stopped."""
-    old = host.xrservice()
+    old = host.xrservice() if old is None else old
     if not old:
         return None, "The cameras change when SteamVR next starts."
     problem = host.stop(old)
@@ -232,6 +293,17 @@ def restart_tracking(host, wait=RESTART_WAIT, step=0.2):
             return True, "Head tracking restarted with the new camera mode."
     return False, ("SteamVR hasn't restarted head tracking yet: it does when the headset is next worn. "
                    "If the view stays frozen while you wear it, restart SteamVR.")
+
+
+def wait_for_ring(host, wait=CAMD_WAIT, step=0.2):
+    """Wait for ft-camd to publish a live cam-ring before starting ft-hands."""
+    if host.ring_alive():
+        return True
+    for _ in range(int(wait / step)):
+        host.wait(step)
+        if host.ring_alive():
+            return True
+    return False
 
 
 def switch(on, host=None, conf_path=CONF_PATH, xr_path=XR_PATH):
@@ -264,14 +336,43 @@ def switch(on, host=None, conf_path=CONF_PATH, xr_path=XR_PATH):
             else "60 fps hand tracking off: the controllers track again.")
     if host is None:
         return said + " It counts from SteamVR's next start."
-    problem = host.restart_hands()
+    running, problem = host.running_tracking()
     if problem:
-        raise RateError(f"The settings are written, but ft-hands couldn't be restarted ({problem}): "
+        raise RateError(f"The settings are written, but hand tracking couldn't be queried ({problem}): "
                         "restart SteamVR to apply them")
+    old = host.xrservice()
+    if not old:
+        if HANDS_UNIT in running:
+            problem = host.restart_hands()
+            if problem:
+                raise RateError(f"The settings are written, but ft-hands couldn't be restarted ({problem}): "
+                                "restart SteamVR to apply them")
+        return said + " The cameras change when SteamVR next starts."
+    if running:
+        problem = host.stop_tracking(running)
+        if problem:
+            raise RateError(f"The settings are written, but hand tracking couldn't be stopped ({problem}): "
+                            "restart SteamVR to apply them")
     try:
-        return said + " " + restart_tracking(host)[1]
+        restarted, tracking_said = restart_tracking(host, old=old)
     except RateError as e:
+        if running:
+            host.start_tracking(running)
         raise RateError(f"The settings are written, but {e}") from None
+    if running:
+        if restarted and CAMD_UNIT in running and HANDS_UNIT in running:
+            problem = host.start_tracking((CAMD_UNIT,))
+            if problem:
+                raise RateError(f"The settings are written, but hand tracking couldn't be started ({problem}): "
+                                "restart SteamVR to apply them")
+            wait_for_ring(host)
+            problem = host.start_tracking((HANDS_UNIT,))
+        else:
+            problem = host.start_tracking(running)
+        if problem:
+            raise RateError(f"The settings are written, but hand tracking couldn't be started ({problem}): "
+                            "restart SteamVR to apply them")
+    return said + " " + tracking_said
 
 
 def main(argv, conf_path=CONF_PATH, xr_path=XR_PATH):

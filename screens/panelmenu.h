@@ -22,7 +22,7 @@ enum class Item {
     Placement,     // the placement page (its value: where the panel lives)
     InRoom,        // placement: left in the room
     KeepInView,    // placement: pinned to the head (desktop screens and remote displays)
-    OnDashboard,   // placement: pinned to the SteamVR dashboard on its own, a panel in the room that rides on it (desktop screens and remote displays)
+    OnDashboard,   // placement: pinned to the SteamVR dashboard on its own, a panel in the room that rides on it (any panel)
     Tiled,         // placement: on the dashboard's tiles (dashtiles.h)
     StayShown,     // ...and shown with the dashboard closed too (checked when on, while anchored)
     CentreDisplay, // ...and the tiles' centre display, straight ahead (checked when it is; a tile)
@@ -83,15 +83,16 @@ inline std::vector<Row> Main(const Kind &k) {
     return r;
 }
 
-// Where the panel lives: in the room, in view and on the dashboard (the layout's panels), tiled, and
-// Stay Shown while it's tiled (user, 2026-11-27: the dashboard pin "completely separate from tiled mode"); a tile, Centre Display (user, 2026-11-26: a drop onto the centre display
+// Where the panel lives: in the room, in view (the layout's panels), on the dashboard (any panel, user
+// 2026-11-27: "All displays should be able to do the on dashboard option. Even if they're just single
+// apps"), tiled, and Stay Shown while it's tiled (the dashboard pin "completely separate from tiled mode"); a tile, Centre Display (user, 2026-11-26: a drop onto the centre display
 // took it only within 4 degrees of its middle, hard to hit with a big panel).
 inline std::vector<Row> Placement(const Kind &k) {
     std::vector<Row> r;
     r.reserve(7);
     r.push_back({Item::Back}), r.push_back({Item::InRoom});
-    if (LayoutRows(k)) r.push_back({Item::KeepInView}), r.push_back({Item::OnDashboard});
-    r.push_back({Item::Tiled});
+    if (LayoutRows(k)) r.push_back({Item::KeepInView});
+    r.push_back({Item::OnDashboard}), r.push_back({Item::Tiled});
     if (k.anchored) r.push_back({Item::StayShown});
     if (k.anchored && k.centres) r.push_back({Item::CentreDisplay});
     return r;

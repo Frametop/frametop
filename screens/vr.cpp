@@ -2127,7 +2127,8 @@ void PlaceInRoom(Screen &s, int index, const char *by) {
 // Placement's On Dashboard (user, 2026-11-27: "floating in world displays but justified to when the dashboard
 // opens ... completely separate from tiled mode"): off the tiles, the head or a wrist, a panel in the room
 // where it is that rides on Steam's bar from now on (PinAt), so each time the dashboard opens it's where it was
-// beside it. Not tiled: Move All Windows and the tiles' regroups leave it on its pin, as a wrist's.
+// beside it. Not tiled: Move All Windows and the tiles' regroups leave it on its pin, as a wrist's. Any panel:
+// a desktop screen, a remote display, a floating window or a single app's (the tiles pin those to the same frame).
 void PinToDash(Screen &s, int index, const char *by) {
     EndDrag(s);
     TileInRoom(index, by);   // (its app isn't tiled next time either)

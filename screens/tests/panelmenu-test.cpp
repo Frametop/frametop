@@ -34,7 +34,8 @@ int main() {
     check("a desktop screen's placement: back, in the room, in view, on the dashboard, tiled",
           dp.size() == 5 && dp[0].item == Item::Back && dp[1].item == Item::InRoom && dp[2].item == Item::KeepInView &&
               dp[3].item == Item::OnDashboard && dp[4].item == Item::Tiled);
-    check("a floating window's placement: no pin of its own on the dashboard, tiled", !has(fp, Item::OnDashboard) && has(fp, Item::Tiled));
+    check("a floating window's and a Steam game's placement: on the dashboard and tiled too",
+          has(fp, Item::OnDashboard) && has(fp, Item::Tiled) && has(gp, Item::OnDashboard) && has(gp, Item::Tiled));
     check("On Dashboard and Tiled are two choices", panelmenu::Label({Item::OnDashboard}) == "On Dashboard" &&
           panelmenu::Label({Item::Tiled}) == "Tiled" && panelmenu::Choice(Item::Tiled));
     check("a desktop screen: no window or theater rows", !has(d, Item::Dock) && !has(d, Item::Close) && !has(d, Item::Theater));

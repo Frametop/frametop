@@ -104,6 +104,21 @@ class Start(unittest.TestCase):
         self.assertEqual((state["kind"], state["flags"], state["sudo"], state["restart"]),
                          ("uninstall", ["--keep", "settings"], True, False))
 
+    def test_the_app_carries_it(self):
+        """The bundle has its own uninstall.sh, staged from there with no repo or release about:
+        uninstalling never depends on Frametop being (properly) installed."""
+        build = (REPO / "installer/flatpak/build.sh").read_text()
+        self.assertRegex(build, r'\ninstall -m755 "\$root/uninstall\.sh" "\$share/uninstall\.sh"\n')
+        app = pathlib.Path(self.tmp.name, "app/share/frametop-installer")   # as /app/share/frametop-installer
+        (app / "host").mkdir(parents=True)
+        for name in host.HOST_FILES:
+            (app / "host" / name).write_text(name)
+        (app / "get.sh").write_text("get")
+        (app / "uninstall.sh").write_text("the app's own")
+        with mock.patch.object(host, "DATA", app):
+            host.stage()
+        self.assertEqual((host.BIN / "uninstall.sh").read_text(), "the app's own")
+
     def test_a_test_run_is_uninstall_sh_dry_run(self):
         job.start_uninstall([], False, dry_run=True)
         cmd = next(c for c in self.calls if c[0] == "systemd-run")

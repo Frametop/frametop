@@ -6,8 +6,9 @@ the install's progress, which follows the install's service until it ends. Opene
 install runs, it goes straight to the progress; opened after one stopped without finishing (the
 headset restarted or crashed), it offers to run the same install again.
 
-The version page's Uninstall Frametop, there when something of Frametop is installed, runs
-uninstall.sh from the window (uninstall_page.py).
+The version page's Uninstall Frametop runs uninstall.sh, which the app carries, from the window
+(uninstall_page.py). It's always there, offline too, so a broken or half-done install can still
+be taken out; uninstall.sh --plan says when nothing is left.
 
 Opening it also looks for updates: a newer Frametop Installer is offered first (update_page.py),
 and the version page says when a newer Frametop than the installed one is out.
@@ -146,11 +147,11 @@ class Window(PasswordPages, ProgressPage, UninstallPages, UpdatePage, DebugPage,
                   label("Looking up the newest Frametop releases on GitHub...", css=("title-3",), xalign=0.5))
         # This look shares the answers the look for a newer installer got; the next asks afresh.
         build, get, self.get = self.osr.get("BUILD_ID", ""), self.get, releases.memo()
-        in_thread(lambda: (releases.lookup_both(build, get), host.installed(), host.has_frametop()),
-                  self.versions_found, self.went_wrong)
+        in_thread(lambda: (releases.lookup_both(build, get), host.installed()), self.versions_found,
+                  self.went_wrong)
 
     def versions_found(self, found):
-        self.releases, (inst_version, inst_channel), self.has_frametop = found
+        self.releases, (inst_version, inst_channel) = found
         osver = self.osr.get("VERSION_ID", "?")
         intro = label("Frametop turns your Steam Frame into a multi-screen desktop, with a 3D mouse, "
                       "Frametop Settings, and the optional parts on the next page. Pick the version to "
@@ -190,8 +191,7 @@ class Window(PasswordPages, ProgressPage, UninstallPages, UpdatePage, DebugPage,
             buttons = [button("Try again", self.show_versions, css=("suggested-action",))]
         else:
             buttons = [button("Next", self.version_picked, css=("suggested-action",))]
-        if inst_version or self.has_frametop:
-            buttons.insert(0, button("Uninstall Frametop", self.show_uninstall))
+        buttons.insert(0, button("Uninstall Frametop", self.show_uninstall))
         self.page("version", *widgets, buttons=buttons)
 
     def version_picked(self):
@@ -239,7 +239,7 @@ class Window(PasswordPages, ProgressPage, UninstallPages, UpdatePage, DebugPage,
 
     def show_versions_again(self):
         if self.releases:
-            self.versions_found((self.releases, host.installed(), host.has_frametop()))
+            self.versions_found((self.releases, host.installed()))
         else:
             self.show_versions()
 

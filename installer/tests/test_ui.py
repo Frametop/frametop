@@ -327,7 +327,7 @@ class Updates(unittest.TestCase):
         self.patch(ui, in_thread=lambda work, done, failed: work(), Gtk=types.SimpleNamespace(Spinner=lambda **k: None),
                    label=lambda text="", **k: text)
         self.patch(ui.releases, lookup_both=lambda build, get: gets.append(get) or {})
-        self.patch(ui.host, installed=lambda: ("", ""), has_frametop=lambda: False)
+        self.patch(ui.host, installed=lambda: ("", ""))
         win = types.SimpleNamespace(osr={}, dry_run=True, page=lambda *a, **k: None, get="the opening look's",
                                     versions_found=None, went_wrong=None)
         ui.Window.show_versions(win)

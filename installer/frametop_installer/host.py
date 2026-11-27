@@ -108,15 +108,6 @@ def installed():
     return (lines[0] if lines else "", lines[1] if len(lines) > 1 else "")
 
 
-def has_frametop():
-    """Is any of Frametop installed: a release, its services, or its folder? (What the version
-    page's Uninstall Frametop button goes by; uninstall.sh --plan says what exactly.)"""
-    code, _, _ = run(["bash", "-c", 'shopt -s nullglob; f=("$HOME"/.config/systemd/user/frametop-*.service); '
-                      '[ ${#f[@]} -gt 0 ] || [ -d "$HOME/.local/share/frametop" ] || '
-                      'grep -qs Frametop "$HOME/.local/share/applications/deckard-nested-desktop.desktop"'], timeout=15)
-    return code == 0
-
-
 def password_set():
     """Does this user have a password sudo can take? SteamOS starts without one."""
     out = text(["passwd", "-S", os.environ.get("USER") or HOME.name]).split()

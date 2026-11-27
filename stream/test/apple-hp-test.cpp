@@ -191,9 +191,11 @@ void TestSrpAndNonSrpAuth() {
     CHECK(std::strcmp(reinterpret_cast<const char *>(plain_creds + 64), "s3cr3t-pass!") == 0);
 
     // 2. Test SRP-6a 4096-bit challenge/proof agreement against server math.
+    CHECK(std::strlen(kRfc5054Prime4096Hex) == kSrpModulusLen * 2);
     BIGNUM *raw_N = nullptr;
     CHECK(BN_hex2bn(&raw_N, kRfc5054Prime4096Hex) > 0);
     UniqueBn bn_N(raw_N);
+    CHECK(BN_num_bits(bn_N.get()) == int(kSrpModulusLen * 8));
     UniqueBn bn_g(BN_new());
     BN_set_word(bn_g.get(), 5);
     UniqueBnCtx ctx(BN_CTX_new());
@@ -211,6 +213,13 @@ void TestSrpAndNonSrpAuth() {
 
     std::array<uint8_t, kSrpModulusLen> N_bytes{}, g_pad{}, B_pad{};
     BN_bn2binpad(bn_N.get(), N_bytes.data(), kSrpModulusLen);
+    CHECK(N_bytes[0] == 0xff && N_bytes[kSrpModulusLen - 1] == 0xff);
+    static constexpr uint8_t kRfc5054Prime4096Sha256[32] = {
+        0x4e, 0xe9, 0x51, 0x87, 0x68, 0x2b, 0xcb, 0x23, 0x0a, 0xd2, 0x6a, 0x95, 0x20, 0x5f, 0x69, 0x20,
+        0xe8, 0x47, 0x08, 0xf6, 0x25, 0x1b, 0x38, 0x94, 0x32, 0x9b, 0x09, 0xec, 0x23, 0x91, 0x9e, 0x33,
+    };
+    const auto n_sha256 = Sha256(N_bytes.data(), N_bytes.size());
+    CHECK(std::memcmp(n_sha256.data(), kRfc5054Prime4096Sha256, 32) == 0);
     BN_bn2binpad(bn_g.get(), g_pad.data(), kSrpModulusLen);
     const auto k_hash = Sha512Parts({{N_bytes.data(), kSrpModulusLen}, {g_pad.data(), kSrpModulusLen}});
     UniqueBn bn_k(BN_bin2bn(k_hash.data(), kSrpHashLen, nullptr));
@@ -241,11 +250,14 @@ void TestSrpAndNonSrpAuth() {
     CHECK(SolveSrp(parsed, "wrong-password", &bad_proof));
     {
         // Only the RFC 5054 4096-bit group with g = 5: a spoofed server picking a
-        // weak N or another g gets no proof.
+        // weak N, a zero-padded 3072-bit prime, or another g gets no proof.
         SrpChallenge weak = parsed;
         weak.N[kSrpModulusLen - 1] ^= 0x02;
         SrpClientProof unused{};
         CHECK(!SolveSrp(weak, pw, &unused));
+        SrpChallenge n3072 = parsed;
+        std::fill(n3072.N.begin(), n3072.N.begin() + 128, 0);
+        CHECK(!SolveSrp(n3072, pw, &unused));
         SrpChallenge other_g = parsed;
         other_g.g = {2};
         CHECK(!SolveSrp(other_g, pw, &unused));

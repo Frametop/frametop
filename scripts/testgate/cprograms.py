@@ -211,8 +211,9 @@ def items(root, env=os.environ):
         P("gscontrol-test", "screens/tests/gscontrol-test.cpp", "screens/gsforward.cpp", flags=CXX2, cflags="-Iscreens",
           pkgs=XCB),
         single("screens/tests/gstheater-test.cpp", CXX2, cflags="-Iscreens"),
+        P("gamecores-test", "screens/tests/gamecores-test.cpp", "screens/gamecores.cpp", flags=CXX2, cflags="-Iscreens"),
         P("gslink-test", "screens/tests/gslink-test.cpp", "screens/gslink.cpp", "screens/gsforward.cpp",
-          flags=f"{CXX2} -pthread", cflags="-Iscreens", pkgs=XCB),
+          "screens/gamecores.cpp", flags=f"{CXX2} -pthread", cflags="-Iscreens", pkgs=XCB),
     ]
     for name in ("universefix", "posemath", "roomshift", "layoutgrab", "recentre", "tilekeep", "chromepool", "vrcmd", "windowdrag", "remoteaway"):
         out.append(single(f"screens/tests/{name}-test.cpp", CXX2))

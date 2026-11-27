@@ -1,5 +1,6 @@
 // gslink.h's thread.
 #include "gslink.h"
+#include "gamecores.h"
 
 #include <atomic>
 #include <chrono>
@@ -72,6 +73,17 @@ struct AsyncLink::Shared {
                 break;
             }
         sends.push_back(s);
+    }
+    // A Steam game's app window, as it maps: its processes' core dumps off (gamecores.h).
+    void NoCores(const Window &w) {
+        if (role != Role::Apps || w.kind != Kind::Main || !w.launcher) return;
+        const int n = gamecores::Off(w.launcher);
+        if (!n) return;
+        Update u;
+        u.type = Update::Note;
+        u.why = "steam:" + std::to_string(w.steamApp) + ": core dumps off for " + std::to_string(n) +
+                " of its processes (a crashing game's dump takes SteamVR's compositor down)";
+        Say(u);
     }
     void Say(Update u) {
         std::lock_guard<std::mutex> l(m);
@@ -159,7 +171,10 @@ struct AsyncLink::Shared {
                 std::vector<Event> events = link.Poll();
                 more = !events.empty() && link.IsOpen();
                 for (Event &e : events) {
-                    if (e.type == Event::Mapped) link.Describe(&e.win);
+                    if (e.type == Event::Mapped) {
+                        link.Describe(&e.win);
+                        NoCores(e.win);
+                    }
                     Update u;
                     u.event = std::move(e);
                     Say(u);

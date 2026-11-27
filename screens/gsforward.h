@@ -150,6 +150,8 @@ struct Window {
     uint32_t steamApp = 0;            // Steam's app id (read when it maps): STEAM_GAME's, else the SteamLaunch
                                       // of a process it runs under (SteamLaunchApp), 0 for none
     uint64_t target = 0;              // Role::Steam only: the overlay its target names (0: none)
+    uint32_t launcher = 0;            // the process Steam launched it under (`reaper SteamLaunch AppId=...`;
+                                      // read when it maps), 0 for none
 };
 
 struct Event {

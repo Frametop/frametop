@@ -289,8 +289,8 @@ std::vector<Event> Link::Poll() {
 
 namespace {
 // The Steam app id a process runs under: its own command line's or one of its parents', as
-// gamescope looks for it (up to 16 up, before init).
-uint32_t SteamAppOfProcess(uint32_t pid) {
+// gamescope looks for it (up to 16 up, before init); `launcher` the process that says it.
+uint32_t SteamAppOfProcess(uint32_t pid, uint32_t *launcher) {
     for (int hops = 0; pid > 1 && hops < 16; ++hops) {
         const std::string dir = "/proc/" + std::to_string(pid);
         std::string cmdline;
@@ -300,7 +300,7 @@ uint32_t SteamAppOfProcess(uint32_t pid) {
             std::fclose(f);
             cmdline.assign(buf, n);
         }
-        if (const uint32_t app = SteamLaunchApp(cmdline)) return app;
+        if (const uint32_t app = SteamLaunchApp(cmdline)) return *launcher = pid, app;
         uint32_t parent = 0;
         if (std::FILE *f = std::fopen((dir + "/stat").c_str(), "r")) {
             char buf[512];
@@ -331,7 +331,8 @@ void Link::Describe(Window *w) {
     }
     const uint32_t steamGame = d.Cardinal(w->id, d.steamGame);
     w->key = AppKey(steamGame, klass, instance);
-    w->steamApp = steamGame ? steamGame : SteamAppOfProcess(d.Cardinal(w->id, d.netPid));
+    const uint32_t launched = SteamAppOfProcess(d.Cardinal(w->id, d.netPid), &w->launcher);
+    w->steamApp = steamGame ? steamGame : launched;
     w->title = d.Text(w->id, d.netName, d.utf8);
     if (w->title.empty()) w->title = d.Text(w->id, XCB_ATOM_WM_NAME, XCB_ATOM_STRING);
     if (w->title.empty()) w->title = !klass.empty() ? klass : "App";

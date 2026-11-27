@@ -1127,7 +1127,8 @@ int main() {
             }
             return o;
         };
-        const auto same = [](int) { return dashtiles::Info{1.6, 0.9}; };
+        // (3 a hair wider: the centre display, held on the desk line, so 2 isn't: tilegrid.h's Pin)
+        const auto same = [](int id) { return dashtiles::Info{id == 3 ? 1.61 : 1.6, 0.9}; };
         dashtiles::Board b;
         for (const int i : {1, 2, 3}) b.Anchor(i, -1, dashtiles::Stay::Default);
         b.Arrange(same);
@@ -1502,6 +1503,7 @@ int main() {
                                                                                                  !jn.Settle() && cols(jn) == "[ 10 1 ][ 4 60 2 ][ 30 3 ]");
             // (council pass 8) reordered, resized or leaned in a stack made for you: still made for you
             const char *edits[] = {"reordered by key", "resized by its corner", "made smaller by key"};
+            const auto same = [](int id) { return dashtiles::Info{id == 3 ? 1.61 : 1.6, 0.9}; };   // (3 the centre, held on the desk: 2 can be reordered)
             for (int e = 0; e < 6; ++e) {   // (2, then 60 itself: the one put there for you)
                 const int who = e < 3 ? 2 : 60;
                 dashtiles::Board ed;   // [ 10 1 ][ 4 2 ][ 30 3 ], 4 goes (no gap fill), 60 put on 2 for you
@@ -1653,16 +1655,18 @@ int main() {
                                                                          s.FillGap(tilegap::kQuietMs) && cols(s) == "[ 1 ][ 3 2 ]" && s.Grid().Split(0) == 1);
         // the keys alone in a column keep to their side of the slot, step over a column with nothing
         // shown, and leave the strip where it was (council, 2026-11-20)
+        const auto right = [](int id) { return dashtiles::Info{id == 3 ? 1.61 : 1.6, 0.9}; };   // (3 the centre, held on the desk: 2 isn't)
+        const auto left = [](int id) { return dashtiles::Info{id == 1 ? 1.61 : 1.6, 0.9}; };     // (1 the centre: the slot's split stays 1)
         dashtiles::Board k;   // [ 1 ] |slot| [ 2 ][ 3 ]
         k.params.reserveAzDeg = 0, k.params.reserveDeg = 66;
         for (const int i : {1, 2, 3}) k.Anchor(i, -1, dashtiles::Stay::Default);
-        k.Arrange(same);
+        k.Arrange(left);
         check("keys: down next to the slot: under the right one, not across",
               k.Grid().Split(0) == 1 && k.Press(2, dashtiles::Key::Down) && cols(k) == "[ 1 ][ 3 2 ]" && k.Grid().Split(0) == 1);
         dashtiles::Board k2;
         k2.params.reserveAzDeg = 0, k2.params.reserveDeg = 66;
         for (const int i : {1, 2, 3}) k2.Anchor(i, -1, dashtiles::Stay::Default);
-        k2.Arrange(same);
+        k2.Arrange(left);
         check("keys: up next to the slot: the right one in under it, not across",
               k2.Press(2, dashtiles::Key::Up) && cols(k2) == "[ 1 ][ 2 3 ]" && k2.Grid().Split(0) == 1);
         dashtiles::Board g;   // [ 1 ][ 2 ][ 3 ], 2 not shown
@@ -1680,14 +1684,14 @@ int main() {
         dashtiles::Board g2;
         for (const int i : {1, 2, 3}) g2.Anchor(i, -1, dashtiles::Stay::Default);
         g2.absent = {1};
-        g2.Arrange(same);
+        g2.Arrange(right);
         check("keys: down, nothing shown to the left: under the right one", g2.Press(2, dashtiles::Key::Down) && cols(g2) == "[ 1 ][ 3 2 ]");
         dashtiles::Board pan;
         for (const int i : {1, 2, 3}) pan.Anchor(i, -1, dashtiles::Stay::Default);
-        pan.Arrange(same);
+        pan.Arrange(right);
         const double az2 = pan.PlacedOf(2)->azDeg, az3 = pan.PlacedOf(3)->azDeg;
         pan.Press(2, dashtiles::Key::Up);
-        pan.Arrange(same);
+        pan.Arrange(right);
         check("keys: up: it and the others stay where they were (the pulled one moves)",
               cols(pan) == "[ 2 1 ][ 3 ]" && std::fabs(pan.PlacedOf(2)->azDeg - az2) < 1 && std::fabs(pan.PlacedOf(3)->azDeg - az3) < 1);
         dashtiles::Board tall;   // a stack two high already: a third under it would pass 50 degrees
@@ -1976,6 +1980,22 @@ int main() {
         b.Arrange(mine);
         check("reset: ...shown: straight ahead, the strip on both sides", near(b.PlacedOf(190)->azDeg, 0, 1e-9) && b.Last().az0 < -30 &&
                                                                               b.Last().az1 > 30 && b.WallCentre() == 190);
+    }
+    {   // the centre display, the widest by default, stays on the desk line (user, 2026-11-27: a panel let
+        // go low on it took the desk line and pushed it and its row up)
+        dashtiles::Board b;
+        for (int i = 1; i <= 3; ++i) b.Anchor(i, i - 1, dashtiles::Stay::Default);
+        b.Arrange(desk);
+        const tiling::Placed *c = b.PlacedOf(b.Centre());
+        const int centre = b.Centre();
+        const double el0 = c->el0, low = (c->el0 + c->elDeg) / 2, az = c->azDeg;
+        const int other = centre == 1 ? 3 : 1;
+        b.Drop(other, b.DropFor(other, az, low, desk), az);
+        b.Arrange(desk);
+        const tiling::Placed *after = b.PlacedOf(centre), *dropped = b.PlacedOf(other);
+        check("centre pin: none chosen, let go low on the widest: it hangs under it",
+              b.Centre() == centre && near(after->el0, el0, 1e-9) && dropped->below && dropped->el1 < after->el0);
+        check("centre pin: ...in its column", b.Grid().Find(other).col == b.Grid().Find(centre).col);
     }
     {   // the centre you chose stays on the desk line (tilegrid.h's Pin)
         tilegrid::Grid g;

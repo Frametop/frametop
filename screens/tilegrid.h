@@ -29,7 +29,7 @@
 // left of below the 1400"; 0: as the tiling packs the strip narrowest, tiling.h's Lean).
 //
 // A pinned panel is always its column's base (Pin; user, 2026-11-27: "We want the desk line to be the
-// display that is in the main slot"): the centre display you chose. Every move keeps it on the desk
+// display that is in the main slot"): the centre display, chosen or the widest. Every move keeps it on the desk
 // line, so what's put under it hangs under it and what's put over it stands on it; it never rises
 // or drops because of another panel. Meta+Up/Down on it does nothing, and one beside it crosses it.
 //

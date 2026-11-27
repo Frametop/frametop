@@ -19,10 +19,10 @@
 // to put it straight ahead, not the middle of the strip (two as wide: the seam between them); moves by
 // hand keep it where they leave it, as they keep the others. It's the one you chose (a drop right onto the
 // one before: TakeCentre), else Steam's window while it's a tile (it was over its bar), else the
-// widest. One you chose is its column's base, on the desk line (tilegrid.h's Pin; user, 2026-11-27:
-// "We want the desk line to be the display that is in the main slot"): what's let go under it hangs
-// under it, and it and the row it stands in stay where they are. The widest by default isn't held
-// there. It alone may curve (ToggleArc: round the tiles' arc, vrtiles.cpp). Any tile may be nudged
+// widest. It's its column's base, on the desk line (tilegrid.h's Pin; user, 2026-11-27: "We want the
+// desk line to be the display that is in the main slot", chosen or the widest by default: "keep it
+// consistent"): what's let go under it hangs under it, and it and the row it stands in stay where
+// they are. It alone may curve (ToggleArc: round the tiles' arc, vrtiles.cpp). Any tile may be nudged
 // up or down on its own (Key::NudgeUp, NudgeDown), the others staying where they are. All three are
 // in its remembered state, so per app and in profiles.
 //
@@ -421,7 +421,7 @@ public:
     // where it was (Pan).
     template <typename InfoOf>
     const tiling::Layout &Arrange(InfoOf info) {
-        grid_.Pin(grid_.Has(centre_) ? centre_ : -1);   // (the centre you chose on the desk line; the widest by default isn't held there)
+        grid_.Pin(CentreOf(info));   // (the centre display on the desk line, chosen or the widest)
         const std::vector<tiling::Column> cols = Columns(info);
         fills_.clear(), shownFills_.clear(), underFills_.clear();
         for (size_t ci = 0; ci < cols.size(); ++ci) {   // (each column's shelves so far, from the desk up and down: RoomFor)
@@ -641,13 +641,21 @@ private:
         if (grid_.Has(centre_)) return centre_;
         int best = grid_.Has(steam) ? steam : -1;
         double widest = 0, off = 0;
+        int fromDesk = 0;
         const double mid = (double(grid_.Cols().size()) - 1) / 2;
-        for (size_t c = 0; c < grid_.Cols().size(); ++c)
-            for (const tilegrid::Cell &cell : grid_.Cols()[c].cells) {
+        for (size_t c = 0; c < grid_.Cols().size(); ++c) {
+            const tilegrid::Col &col = grid_.Cols()[c];
+            for (size_t r = 0; r < col.cells.size(); ++r) {
+                const tilegrid::Cell &cell = col.cells[r];
                 if (cell.id == steam) continue;
+                // (of ones as wide in one column, the one on the desk line, else the nearest it: the
+                // centre is held there, Pin, so the top of a stack of them took the desk from the rest)
                 const double w = info(cell.id).widthM * cell.scale, o = std::fabs(double(c) - mid);
-                if (w > widest + 1e-6 || (w > widest - 1e-6 && o < off - 1e-9)) widest = w, off = o, best = cell.id;
+                const int d = std::abs(int(r) - col.base);
+                if (w > widest + 1e-6 || (w > widest - 1e-6 && (o < off - 1e-9 || (o < off + 1e-9 && d < fromDesk))))
+                    widest = w, off = o, fromDesk = d, best = cell.id;
             }
+        }
         return best;
     }
     int centre_ = -1;             // the centre display chosen (-1: none: CentreOf's default)

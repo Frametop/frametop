@@ -103,6 +103,8 @@ def plain(v):
         return [plain(x) for x in v]
     if isinstance(v, float):
         return round(v, 6)
+    if isinstance(v, types.SimpleNamespace):
+        return "the pointer"  # (new_relay's, handed to a recorded part)
     return v
 
 

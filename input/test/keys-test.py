@@ -1864,7 +1864,10 @@ def tests():
 
     class FakePointer:
         def __init__(self, active, held=False):
-            self.active, self.held, self.asked = active, held, []
+            self.active, self.held, self.asked, self.sent = active, held, [], []
+
+        def send(self, command):
+            self.sent.append(command)
 
         def step_aside(self, why):
             self.asked.append(why)
@@ -1908,6 +1911,29 @@ def tests():
     mode.pointer(None, 24.0)
     check("no pointer mode: nothing", mode.aside, False)
     mode.screens_word(None, 25.0)
+    # Gaze mode takes the pointer back by itself (the helper's "gazewoke"): no mouse, no way out.
+    gazed = FakePointer(active=True)
+    check("the gaze wakes the pointer with gamepad mode off: the relay's to wake", (mode.gaze_woke(gazed), gazed.sent), (False, []))
+    mode.screens_word("desktop", 26.0)
+    check("...and in a mode whose pointer hasn't stepped aside yet", (mode.gaze_woke(gazed), gazed.sent), (False, []))
+    mode.pointer(gazed, 26.0)
+    del said[:]
+    woke = [mode.gaze_woke(gazed), mode.gaze_woke(gazed)]
+    mode.pointer(gazed, 31.0)
+    check("the gaze takes the pointer back in gamepad mode: the helper hides it again each time, the relay's "
+          "stays off, and the mode stays", (woke, gazed.sent, gazed.active, mode.on, said),
+          ([True, True], ["hide gamepad", "hide gamepad"], False, True, []))
+    mode.screens_word(None, 32.0)
+    # uinput refuses the pad: ft-screens is told, or it would keep its lasers off and say the mode
+    # again each second.
+    del said[:]
+
+    def refused(identity):
+        raise PermissionError(13, "Permission denied", "/dev/uinput")
+
+    nopad = relay.vrpad.GamepadMode(lambda m: None, lambda to, m: said.append(m), refused, lambda on: None, sound=False)
+    nopad.screens_word("game", 40.0)
+    check("the pad can't be made: gamepad mode is off, and ft-screens is asked to end its own", (nopad.on, said), (False, ["padmode off nopad"]))
     # The grips (game_pause.py): either device of a side counts, by its click or its value, and
     # both sides must hold for GRIPS_HOLD.
     gp = relay.game_pause

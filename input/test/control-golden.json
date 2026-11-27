@@ -854,7 +854,15 @@
   "raised": null
  },
  "gazewoke": {
-  "calls": [],
+  "calls": [
+   [
+    "gamepad.gaze_woke",
+    [
+     "the pointer"
+    ],
+    {}
+   ]
+  ],
   "changed": {
    "pointer": [
     true,
@@ -870,7 +878,15 @@
   "raised": null
  },
  "gazewoke 1, arity": {
-  "calls": [],
+  "calls": [
+   [
+    "gamepad.gaze_woke",
+    [
+     "the pointer"
+    ],
+    {}
+   ]
+  ],
   "changed": {
    "pointer": [
     true,

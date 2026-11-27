@@ -158,16 +158,18 @@ class Sock:
         self.sent.append((round(Clock.t, 2), data.decode()))
 
 
-def run(events, end, pad_at=None, wake=None):
+def run(events, end, pad_at=None, wake=None, pad_then=()):
     """A session of the reader with the pause gesture set (so it reads from the start), gamepad
-    mode from pad_at. Returns (server, log lines, datagrams sent)."""
+    mode from pad_at, then off and on as pad_then says ([(time, on)]). Returns (server, log lines,
+    datagrams sent)."""
     Clock.n, Clock.t = 0, 0.0
     logs, sock = [], Sock()
     watch = gp.ControllerWatch(logs.append)
     watch.sock.close()
     watch.sock = sock
     watch.set_gesture((("left/thumbstick", "right/thumbstick"), 2))
-    server = Server(events + ([(pad_at, lambda s: watch.set_pad(True))] if pad_at is not None else []), end)
+    pad = ([(pad_at, True)] if pad_at is not None else []) + list(pad_then)
+    server = Server(events + [(t, lambda s, on=on: watch.set_pad(on)) for t, on in pad], end)
     if wake:
         wake(server)
     vrws.VrSocket = lambda: server
@@ -209,7 +211,7 @@ events = [(2.0, lambda s: s.drop(L)),
           (7.0, lambda s: s.set(R, grip_click=True, grip_value=1.0))]
 server, logs, sent = run(events, 9.0, pad_at=5.0)
 check("gamepad mode starts with the left controller lost: it's asked for again as the mode starts, "
-      "the one that talks isn't", (asks(server, L, 0.0), asks(server, R, 0.0)), ([5.0], []))
+      "as every controller is, once", (asks(server, L, 0.0), asks(server, R, 0.0)), ([5.0], [5.0]))
 check("...the d-pad arrives", 0x0001 in pads(sent, 6.0), True)
 check("...and both grips leave the mode", [m for t, m in sent if m == "vrgrips"], ["vrgrips"])
 check("...and the log says the left one was back (the mode's own lookup saw it connected)",
@@ -240,6 +242,33 @@ check("asleep in gamepad mode: asked for about each QUIET while it sleeps, and n
       (5 <= len(sleeping) <= 7, min(sleeping, default=0) >= 3.0, max(sleeping, default=99) <= 9.0 + STEP), (True, True, True))
 check("...nothing said about it, and its d-pad arrives once it's awake",
       ([m for m in logs if "said nothing" in m], 0x0001 in pads(sent, 9.5)), ([], True))
+
+
+
+# Left by the grips, then entered again (council, 2026-11-27): the grips are let go, and a stick
+# with them, after the mode is off, when nothing is read. The next mode starts from the
+# controllers' state as it is then, not from the squeeze that ended the last one.
+def sticks(sent, after):
+    return {int(m.split()[4]) for t, m in sent if m.startswith("vrpad ") and t > after}
+
+
+events = [(1.5, lambda s: s.set(L, thumbstick_x=1.0)),
+          (2.0, lambda s: s.set(L, grip_click=True, grip_value=1.0)),
+          (2.0, lambda s: s.set(R, grip_click=True, grip_value=1.0)),
+          (2.8, lambda s: s.set(L, grip_click=False, grip_value=0, thumbstick_x=0)),
+          (2.8, lambda s: s.set(R, grip_click=False, grip_value=0)),
+          (7.0, lambda s: s.set(L, dpad_up_click=True)),
+          (8.0, lambda s: s.set(L, grip_click=True, grip_value=1.0)),
+          (8.0, lambda s: s.set(R, grip_click=True, grip_value=1.0))]
+server, logs, sent = run(events, 9.0, pad_at=1.0, pad_then=[(2.4, False), (6.0, True)])
+left = [t for t, m in sent if m == "vrgrips"]
+check("the grips leave one mode, and are let go with it off: the next mode isn't left by them",
+      (len(left), [2.0 + gp.GRIPS_HOLD <= left[0] <= 2.4] if left else None, [m for t, m in sent if m == "vrgrips" and 6.0 <= t < 8.0]),
+      (2, [True], []))
+check("...nor is the stick let go then still pushed", (32767 in sticks(sent, 1.6), sticks(sent, 6.0)), (True, {0}))
+check("...each controller was asked for as the second mode started, and its d-pad arrives",
+      (asks(server, L, 5.9), asks(server, R, 5.9), 0x0001 in pads(sent, 7.0)), ([6.0], [6.0], True))
+check("...and a squeeze in it leaves it", [8.0 + gp.GRIPS_HOLD <= t <= 8.0 + gp.GRIPS_HOLD + 0.1 for t in left[1:]], [True])
 
 print(f"{len(failures)} failed" if failures else "all passed")
 sys.exit(1 if failures else 0)

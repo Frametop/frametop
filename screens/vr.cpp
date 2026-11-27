@@ -4659,8 +4659,9 @@ void UpdateCarousel() {
 // shown though the dashboard is diminished (PadPanel). A gamescope app's panel gets it too (user, 2026-11-26; on
 // 2026-11-18 a Steam game's was left to View in Theater, Steam Input's pad in SteamVR's theater). ft-dashpatch then
 // says the Gamepad mode is ours ("steamvrmode 1 <app> 1"), and while it is the input relay hears "gamepad
-// desktop|remote" every second (the panel clicked's kind; "gamepad off" as it ends). SteamVR sends no input to an
-// overlay in Gamepad mode, so the relay reads the controllers raw (input/vrpad.py). The grips end it, as
+// desktop|game|remote" every second (the panel clicked's kind; "gamepad off" as it ends). SteamVR sends no input to an
+// overlay in Gamepad mode, so the relay reads the controllers raw (input/vrpad.py). A gamescope app has a pad of its
+// own there ("game"): a game Steam started opens no other (2026-11-27). Steam's own page reads the desktop's. The grips end it, as
 // anywhere in SteamVR. Its size is the same angle at any distance, as the carousel's.
 struct GamepadPill {
     vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;  // the pill, frametop.gamepad.pill
@@ -4820,8 +4821,11 @@ void UpdatePad() {
     const int64_t now = NowMs();
     if (want == g_pill.pad && (want < 0 || now - g_pill.padSaidMs < 1000)) return;
     const bool remote = want >= 0 && g_screens[want].remote;
+    const bool game = want >= 0 && g_screens[want].gsapp && !g_screens[want].steamDash;
     if (want != g_pill.pad) {
-        if (want >= 0) std::printf("gamepad mode: the pad is for panel %d (%s)\n", want + 1, remote ? "a remote display" : "the desktop");
+        if (want >= 0)
+            std::printf("gamepad mode: the pad is for panel %d (%s)\n", want + 1,
+                        remote ? "a remote display" : game ? "a gamescope app" : "the desktop");
         else std::printf("gamepad mode: off%s\n", PadMine() ? " (no panel for it)" : "");
         std::fflush(stdout);
         // The remote display that had the pad lets it go now: the relay's own "pad off" comes after
@@ -4831,7 +4835,7 @@ void UpdatePad() {
             ft_remote_pad(g_pill.pad, "pad off");
     }
     g_pill.pad = want, g_pill.padSaidMs = now;
-    SendRelay(want < 0 ? "gamepad off" : remote ? "gamepad remote" : "gamepad desktop");
+    SendRelay(want < 0 ? "gamepad off" : remote ? "gamepad remote" : game ? "gamepad game" : "gamepad desktop");
 }
 
 // Each tick: the one in the slot goes home when you turn away from it (unless kept: clicks, scrolls, drags or

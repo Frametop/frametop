@@ -144,11 +144,15 @@ SCREENS = "\0ft_screens"
 # system focus goes (the Steam menu closing), and the pad can't drive a Frametop screen, so the
 # screens turning the laser back on is what gets the controllers back (2026-10-25: stuck in Gamepad
 # mode on a clicked screen, the grips dead, until the Steam menu opened). Not frametop.gamepad: the
-# dashboard overlay that takes the pad for a Frametop screen.
+# dashboard overlay that takes the pad for a Frametop screen. And not while SteamVR 2.19's dashboard
+# is diminished on frametop.gamepad's tab (gamepadmode.DIMMED): that Gamepad mode is the pill's, and
+# 2.19 puts the screen clicked last back on top as it starts (headset, 2026-11-27: laser mode was
+# said for all of it, and the relay never heard of the pad).
 # The third word: Gamepad mode is Frametop's, SteamVR's controllers going to frametop.gamepad's owner
 # (ft-screens) with no Steam app's input in the way (2026-10-24: in a probe's, Steam Input 0; while the
 # Steam UI's panel took it, 769). In SteamVR 2.19's diminished dashboard (gamepadmode.py) Steam Input
-# stays the Steam UI's (769) with our page on top of the focus stack, so that page on top counts too.
+# stays the Steam UI's (769) with our page on top of the focus stack, so that page on top counts too,
+# and so does a Frametop screen on top while the dashboard is diminished on our tab.
 # The fourth: the app id of the game whose frame SteamVR's theater shows (0 for none). A game on a
 # Frametop panel lent to the theater (View in Theater, screens/gstheater.h) comes back when it isn't.
 GAMEPAD_KEY = "frametop.gamepad"
@@ -188,8 +192,10 @@ STEAMVR_STATE = """(() => {
     if (gp) { a.active = true; armed = true; }
     else if (a.active || Date.now() - a.at > %d) window.__ftPadArmed = null;
   }
-  const pad = gp && (!ours || armed);
-  const mine = pad && (armed || (pid && f.m_unPIDForVRInput == pid && (!f.m_unSteamInputAppID || padTop)));
+  const dimmed = %s;
+  const pad = gp && (!ours || armed || dimmed);
+  const mine = pad && (armed || (dimmed && ours)
+                       || (pid && f.m_unPIDForVRInput == pid && (!f.m_unSteamInputAppID || padTop)));
   const inTheater = new Set(((window.DashboardStore && window.DashboardStore.m_rgTheaterFrameStack) || [])
                             .map(t => t && t.m_unFrameID).filter(Boolean));
   let shown = 0;
@@ -200,7 +206,7 @@ STEAMVR_STATE = """(() => {
         if (m && +m[1] > 0) shown = +m[1];
       }
   return (pad ? 1 : 0) + ' ' + app + ' ' + (mine ? 1 : 0) + ' ' + shown + ' ' + key;
-})()""" % (GAMEPAD_KEY, GAMEPAD_KEY, gamepadmode.ARM_S * 1000)
+})()""" % (GAMEPAD_KEY, GAMEPAD_KEY, gamepadmode.ARM_S * 1000, gamepadmode.DIMMED)
 DASHPATCH = "\0ft_dashpatch"
 STRIP = steampage.StripLease()  # ft-screens' "steamstrip" (listen), read by the watch
 PAD = gamepadmode.Session()  # the pill's diminished Gamepad mode (listen), ended by the watch

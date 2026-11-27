@@ -664,6 +664,23 @@
   "log": [],
   "raised": null
  },
+ "gamepad game": {
+  "calls": [
+   [
+    "gamepad.screens_word",
+    [
+     "game",
+     100.0,
+     "a VR game runs"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gamepad game",
+  "log": [],
+  "raised": null
+ },
  "gamepad off": {
   "calls": [
    [

@@ -115,7 +115,7 @@ computer, whatever the table says: it's the way out of stuck keys.
 Gamepad mode (input/vrpad.py) makes the Frame controllers one Xbox pad for a Frametop panel, through
 SteamVR's own Gamepad mode: ft-screens' "Enter Gamepad Mode" pill above the panel typing goes to
 (with the Steam menu open) has ft-dashpatch give SteamVR's input focus to ft-screens' hidden
-dashboard overlay, and ft-screens says "gamepad desktop|remote" here every second while SteamVR's
+dashboard overlay, and ft-screens says "gamepad desktop|game|remote" here every second while SteamVR's
 Gamepad mode is Frametop's, "gamepad off" as it ends (the grips, as anywhere in SteamVR). The
 controller reader (game_pause.py, vrserver's web socket) then reads every controller button, both
 sticks and both triggers raw, and says the pad's state here ("vrpad B LT RT LX LY RX RY"). A
@@ -284,9 +284,9 @@ Control socket (abstract datagram @frametop_relay, JSON replies to the sender):
                     ignored from another user
   vrdash 1|0        from the pointer helper: the dashboard is open (on a change and every 5 s), so
                     hand tracking parked for a game wakes (game_pause.py, PARK_PATH), and gamepad mode's pad lets go
-  gamepad desktop|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a desktop
-                    panel or a remote display (every second while it is), or it ended (above);
-                    ignored from another user
+  gamepad desktop|game|remote|off   from ft-screens: SteamVR's Gamepad mode is Frametop's, for a
+                    desktop panel, a gamescope app's panel or a remote display (every second while
+                    it is), or it ended (above); ignored from another user
   vrpad B LT RT LX LY RX RY   from the controller reader in gamepad mode: the pad's state (above);
                     ignored from another user
   calpanel 1|0      from the pointer helper: a gaze calibration panel is up (renewed every second,
@@ -1487,7 +1487,8 @@ class Relay:
 
         self.pause = game_pause.GamePause(log, self.pause_changed, VR_BUTTONS)
         self.pc_game = pc_game.PcGame(log)
-        self.gamepad = vrpad.GamepadMode(log, self.pad_send, lambda: vrpad.VirtualPad(log, self.stored, notify),
+        self.gamepad = vrpad.GamepadMode(log, self.pad_send,
+                                         lambda identity: vrpad.VirtualPad(log, self.stored, notify, identity),
                                          lambda on: self.pause.set_pad(on))
         self.load_config()
 
@@ -2493,7 +2494,7 @@ class Relay:
             self.pause.dashboard_state(words[1] == "1")
             self.gamepad.dashboard_state(words[1] == "1")
             return
-        if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "remote", "off"):
+        if cmd == "gamepad" and len(words) == 2 and words[1] in ("desktop", "game", "remote", "off"):
             # From ft-screens (no reply): SteamVR's Gamepad mode is Frametop's or ended. It
             # presses buttons, so only from this user.
             if uid != os.getuid():

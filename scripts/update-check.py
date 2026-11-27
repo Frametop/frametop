@@ -84,7 +84,10 @@ PACKAGES = {
                            "vrserver.txt within 10 s, and a key wakes it (the ft_pointer driver's write to the "
                            "headset's /proximity, pointer/driver/worn.h); NPU hand tracking: ft-npud's "
                            "self-test passes (journalctl -u ft-npud says self-test ok; it talks to this "
-                           "package's dsp_service and runs on its DSP firmware, npu/README.md)",
+                           "package's dsp_service and runs on its DSP firmware, npu/README.md); the Enter Gamepad "
+                           "Mode pill on a desktop panel and on a Steam game's panel: sticks and buttons drive the "
+                           "panel's app until a grip (the dashboard dimmed on frametop.gamepad's tab, "
+                           "DashboardStore.visibilityState 2: DIMMED in pointer/dashpatch/gamepadmode.py)",
     "kwin": "clicks near the far edge of a screen whose scale isn't 1, and that screen still has "
             "its scale a minute after the desktop starts (KWin's support information shows it; "
             "kscreen-doctor shows 1 from 6.6); every screen comes back "
@@ -916,6 +919,39 @@ def check_launch_list():
         report("ok", label, f"{len(hidden)} of Frametop's entries are in the Frametop menu, not in the list")
 
 
+def steam_game_envs(proc="/proc"):
+    """The environment of each of this user's processes Steam started as a game: the ones with
+    Steam's list of pads for SDL to ignore."""
+    envs = []
+    for pid in os.listdir(proc):
+        if not pid.isdigit():
+            continue
+        try:
+            if os.stat(os.path.join(proc, pid)).st_uid != UID:
+                continue
+            with open(os.path.join(proc, pid, "environ"), "rb") as f:
+                env = dict(v.split("=", 1) for v in f.read().decode(errors="replace").split("\0") if "=" in v)
+        except OSError:
+            continue  # gone, or not ours to read
+        if "SDL_GAMECONTROLLER_IGNORE_DEVICES" in env:
+            envs.append(env)
+    return envs
+
+
+def game_pad_verdict(envs):
+    """Gamepad mode's pad for a Steam game on a Frametop panel (input/vrpad.py, STEAM) goes by the
+    ids of Steam's own virtual gamepad, 28de:11ff. A game Steam started reads it because Steam sets
+    SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1 next to its ignore list, which names those
+    ids too. A Steam client update can change that, not just a SteamOS one."""
+    if not envs:
+        return "skip", "no Steam game runs: run this again with one open to check the pad a game on a panel reads"
+    if all(e.get("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD") == "1" for e in envs):
+        return "ok", "Steam starts games with its virtual gamepad (28de:11ff) allowed: gamepad mode's pad for a game goes by those ids"
+    return "warn", ("Steam started a game without SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1: gamepad mode's pad for "
+                    "a game on a Frametop panel (28de:11ff, STEAM in input/vrpad.py) may be on its ignore list now. Retest "
+                    "the Enter Gamepad Mode pill on a Steam game's panel")
+
+
 def check_native_focus():
     """The relay's GamescopeFocus reads gamescope's GAMESCOPE_FOCUSED_WINDOW and
     GAMESCOPE_FOCUSABLE_WINDOWS (window, app id, pid) on its first Xwayland, an undocumented
@@ -1294,6 +1330,8 @@ def main():
         check_launch_list()
         check_vr_socket()
         check_native_focus()
+        state, detail = game_pad_verdict(steam_game_envs())
+        report(state, "gamepad mode's pad for a game", detail)
         check_eye_tracker()
         check_eye_rate()
         check_hands_rate()

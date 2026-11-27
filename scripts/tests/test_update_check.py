@@ -157,6 +157,35 @@ class Readouts(unittest.TestCase):
         self.assertIn("CPU core", detail)
 
 
+class GamePad(unittest.TestCase):
+    """Gamepad mode's pad for a Steam game goes by Steam's virtual gamepad's ids (input/vrpad.py STEAM)."""
+    m = load()
+    IGNORE = {"SDL_GAMECONTROLLER_IGNORE_DEVICES": "0x28de/0x11ff,0x045e/0x028e"}
+
+    def test_no_game_running_is_skipped(self):
+        self.assertEqual(self.m.game_pad_verdict([])[0], "skip")
+
+    def test_steams_virtual_gamepad_allowed_is_ok(self):
+        envs = [{**self.IGNORE, "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD": "1"}] * 2
+        self.assertEqual(self.m.game_pad_verdict(envs)[0], "ok")
+
+    def test_a_game_without_the_allowance_warns(self):
+        envs = [{**self.IGNORE, "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD": "1"}, dict(self.IGNORE)]
+        state, detail = self.m.game_pad_verdict(envs)
+        self.assertEqual(state, "warn")
+        self.assertIn("28de:11ff", detail)
+
+    def test_only_this_users_processes_with_steams_ignore_list_count(self):
+        with tempfile.TemporaryDirectory(prefix="ft-proc-test-") as proc:
+            for pid, env in (("10", b"A=1\0SDL_GAMECONTROLLER_IGNORE_DEVICES=0x1/0x2\0B=x=y\0"), ("11", b"A=1\0"),
+                             ("self", b"SDL_GAMECONTROLLER_IGNORE_DEVICES=1\0")):
+                os.mkdir(os.path.join(proc, pid))
+                Path(proc, pid, "environ").write_bytes(env)
+            os.mkdir(os.path.join(proc, "12"))  # gone before its environment was read
+            self.assertEqual(self.m.steam_game_envs(proc),
+                             [{"A": "1", "SDL_GAMECONTROLLER_IGNORE_DEVICES": "0x1/0x2", "B": "x=y"}])
+
+
 class HandsRate(unittest.TestCase):
     """The 60 fps hand tracking check: what it says of the cameras (the numbers are ft-camd's,
     2026-11-22 and 23), what it asks the host, and that it says nothing with the switch off. The

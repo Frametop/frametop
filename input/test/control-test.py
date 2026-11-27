@@ -194,7 +194,7 @@ CASES += [
     ("vrhello", "vrhello", {}), ("vrhello unbound", "vrhello", {"addr": b""}),
     ("vrgame 1", "vrgame 1", {}), ("vrgame 0", "vrgame 0", {}), ("vrgame bare", "vrgame", {}),
     ("vrdash 1", "vrdash 1", {}), ("vrdash 0", "vrdash 0", {}), ("vrdash long", "vrdash 1 2", {}),
-    ("gamepad desktop", "gamepad desktop", {}), ("gamepad off", "gamepad off", {}),
+    ("gamepad desktop", "gamepad desktop", {}), ("gamepad game", "gamepad game", {}), ("gamepad off", "gamepad off", {}),
     ("gamepad remote, other user", "gamepad remote", {"uid": OTHER}), ("gamepad bad", "gamepad nope", {}),
     ("vrpad ok", "vrpad 1 0 0 0 0 0 0", {}), ("vrpad other user", "vrpad 1 0 0 0 0 0 0", {"uid": OTHER}),
     ("vrpad junk", "vrpad a b c d e f g", {}), ("vrpad short", "vrpad 1 0", {}),

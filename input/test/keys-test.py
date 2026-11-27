@@ -1720,16 +1720,22 @@ def tests():
     check("gone: its keys reach nothing until it says hello again", (typed(), emitted()), ([], []))
     kb.close()
 
-    # Gamepad mode (vrpad.py): ft-screens says "gamepad desktop|remote" while SteamVR's Gamepad mode
-    # is Frametop's (the gamepad pill), and the controller reader's pad goes to that kind of panel.
+    # Gamepad mode (vrpad.py): ft-screens says "gamepad desktop|game|remote" while SteamVR's Gamepad
+    # mode is Frametop's (the gamepad pill), and the controller reader's pad goes to that kind of panel.
     pads = []
+    made = []  # each pad's identity
 
     class FakePad:
-        def __init__(self, *args):
-            pads.append([])
+        def __init__(self, log, stored, notify, identity):
+            self.sent = []
+            pads.append(self.sent)
+            made.append(identity)
 
         def send(self, pad_state):
-            pads[-1].append(pad_state)
+            self.sent.append(pad_state)
+
+        def close(self):
+            self.sent.append("removed")
 
     relay.vrpad.VirtualPad = FakePad
 
@@ -1814,6 +1820,30 @@ def tests():
         time.sleep(0.05)
         check(f"{why}: it ends", (reader(), pad_log()), ([False], [f"gamepad mode off ({why})"]))
         pause("off")
+    # A gamescope app's panel (a Steam game on a Frametop panel): a pad of its own under Steam's
+    # virtual gamepad's ids, there only while gamepad mode is on for it.
+    reader()
+    before = len(pads)
+    to_relay("gamepad game")
+    check("a gamescope app's panel: its own pad, made as gamepad mode comes on",
+          (reader(), pad_log(), len(pads) - before, made[-1], made[0]),
+          ([True], ["gamepad mode on: the controllers are a gamepad for a gamescope app's panel"], 1,
+           relay.vrpad.STEAM, relay.vrpad.XBOX))
+    to_relay("vrpad 0 0 0 0 0 0 0")
+    to_relay("vrpad 1000 0 0 0 0 0 0")
+    time.sleep(0.05)
+    check("...gets the reader's state", pads[-1], [relay.vrpad.NEUTRAL, (0x1000, 0, 0, 0, 0, 0, 0)])
+    to_relay("gamepad desktop")
+    time.sleep(0.05)
+    check("now for a desktop panel: the game's pad lets go and is removed, the desktop's is the one from before",
+          (pads[-1][-2:], len(pads) - before, pad_log()),
+          ([relay.vrpad.NEUTRAL, "removed"], 1, ["gamepad mode: now for a Frametop desktop panel"]))
+    to_relay("gamepad game")
+    time.sleep(0.05)
+    check("back on the game's panel: a new pad", (len(pads) - before, made[-1]), (2, relay.vrpad.STEAM))
+    to_relay("gamepad off")
+    check("SteamVR's Gamepad mode ended: the game's pad is removed", (reader(), pads[-1]),
+          ([False], [relay.vrpad.NEUTRAL, "removed"]))
     stub["pause"].game = True
     to_relay("gamepad desktop")
     check("a VR game runs: ft-screens' word doesn't start it", (reader(), pad_log()), ([], ["gamepad mode: not on (a VR game runs)"]))

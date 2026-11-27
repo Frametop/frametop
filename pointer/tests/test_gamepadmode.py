@@ -208,5 +208,45 @@ class Armed(unittest.TestCase):
         self.assertEqual(out, ["0 0 0", "1 0 1", "0 0 0", "null", "0 0 0"])
 
 
+# STEAMVR_STATE on a 2.19 dashboard after the pill: SteamVR puts the panel clicked last (here a
+# game's Frametop panel, SGID 3) back on top of the focus stack as its Gamepad mode starts, with the
+# dashboard still diminished on our tab (headset, 2026-11-27).
+DIMMED = r"""
+const st = {mode: 2, vis: 2, active: 'frametop.gamepad', top: 3};
+globalThis.window = {
+  FrameStore: {frames: [{pages: [{summonOverlayKey: 'frametop.gamepad', mainPanelSGID: 7}]}]},
+  OverlayStore: {m_mapAllOverlays: new Map([[1, {sOverlayKey: 'frametop.app.200', unStandalonePanelSGID: 3}],
+                                            [2, {sOverlayKey: 'valve.steam.gamepadui.main', unStandalonePanelSGID: 5}]])},
+  DashboardStore: {get visibilityState() { return st.vis; },
+                   get activeFrame() { return {activePage: {summonOverlayKey: st.active}}; }},
+  get inputFocusStore() { return {computedInputFocus: {m_eSystemPanelInteractionMode: st.mode,
+    m_unPIDForVRInput: 0, m_unSteamInputAppID: 769,
+    m_entryAtTopOfStack: {m_unPanelSGID: st.top, m_bPanelVisible: true, m_bCanTakeKeyboardFocus: true}}}; },
+};
+const state = change => { Object.assign(st, {mode: 2, vis: 2, active: 'frametop.gamepad', top: 3}, change);
+                          return eval(%s).split(' ').slice(0, 3).join(' ') + ' ' + eval(%s); };
+process.stdout.write(JSON.stringify([state({}), state({mode: 1}), state({vis: 1}),
+                                     state({active: 'valve.steam.gamepadui.main'}), state({top: 5}), state({vis: 0})]));
+"""
+
+
+@unittest.skipUnless(NODE, "the expressions are JavaScript: no node here")
+class Dimmed(unittest.TestCase):
+    def test_gamepad_mode_in_our_dimmed_tab_is_ours_with_a_frametop_panel_on_top(self):
+        dspec = importlib.util.spec_from_file_location("dashpatch", ROOT / "pointer/dashpatch/ft-dashpatch.py")
+        dashpatch = importlib.util.module_from_spec(dspec)
+        dspec.loader.exec_module(dashpatch)
+        js = DIMMED % (json.dumps(dashpatch.STEAMVR_STATE), json.dumps(gamepadmode.STILL))
+        out = json.loads(subprocess.run([NODE, "-e", js], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(out, [
+            "1 0 1 on",    # Gamepad mode, dimmed on our tab, the game's panel on top: Frametop's
+            "0 0 0 on",    # before SteamVR's Gamepad mode starts: laser mode
+            "0 0 0 off",   # the dashboard fully open: a Frametop panel on top is laser mode (2026-10-25)
+            "0 0 0 off",   # dimmed on Steam's tab (SteamVR's own pill): the same
+            "1 0 0 on",    # Steam's panel on top: Gamepad mode, not Frametop's
+            "0 0 0 off",   # the dashboard closed: laser mode again
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

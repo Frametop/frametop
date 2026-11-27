@@ -18,6 +18,12 @@ it never does, the dashboard goes back to the tab it showed.
 
 When the diminished mode ends (a grip, the system button, the dashboard closing), `Session.leave`
 switches the dashboard back to that tab, so the card isn't what the dashboard shows next.
+
+2.19 keeps our page on top of the focus stack only until its Gamepad mode starts: then the panel
+clicked last is on top again, with the dashboard still diminished on our tab (headset, 2026-11-27,
+a Steam game on a Frametop panel: our page on top for 3 s in laser mode, then the game's panel for
+the 12 s of Gamepad mode; 2026-11-26 with no game: ours for 4 s of 2.5 minutes). So what says the
+Gamepad mode is still the pill's is DIMMED, not the stack: ft-dashpatch's STEAMVR_STATE reads it.
 """
 
 import json
@@ -94,10 +100,15 @@ def back(key):
 })()""" % (_PAGE, KEY, _switch(json.dumps(key)))
 
 
-# "on" while the diminished mode on our tab lasts, else "off".
-STILL = """(() => {%s
-  return d && d.visibilityState == 2 && active == '%s' ? 'on' : 'off';
+# True while the dashboard is diminished on our tab: the pill's Gamepad mode, from its click until
+# a grip, the system button or the dashboard closing ends it. Only the pill gets the dashboard
+# there (the tab has no button).
+DIMMED = """(() => {%s
+  return !!(d && d.visibilityState == 2 && active == '%s');
 })()""" % (_PAGE, KEY)
+
+# "on" while the diminished mode on our tab lasts, else "off".
+STILL = "(%s ? 'on' : 'off')" % DIMMED
 
 
 def enter(evaluate, sleep):

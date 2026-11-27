@@ -17,9 +17,11 @@ import io
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -36,14 +38,40 @@ STATUS = ("[{t} s]  og01a1b_4-0036_video9 {a:.1f} fps (dark {d} at 3.6 stale 0 t
 
 
 class FakeHost:
-    """XRService as a test sets it up: the process ids each look finds, the last one from then on."""
+    """XRService and tracking units as a test sets them up: the process ids each look finds,
+    the last one from then on, plus which tracking units are running and when cam-ring is live."""
 
-    def __init__(self, *looks, hands="", stopping=""):
-        self.looks, self.hands, self.stopping, self.calls = [set(look) for look in looks], hands, stopping, []
+    def __init__(self, *looks, hands="", stopping="", running=hr.TRACKING_UNITS, querying="",
+                 stop_units="", start_units="", ring=(True,)):
+        self.looks = [set(look) for look in looks]
+        self.hands, self.stopping = hands, stopping
+        self.running, self.querying = tuple(running), querying
+        self.stop_units = stop_units
+        self.start_units = start_units if isinstance(start_units, dict) else {"*": start_units}
+        self.ring = list(ring)
+        self.calls = []
 
     def restart_hands(self):
         self.calls.append("restart_hands")
         return self.hands
+
+    def running_tracking(self):
+        self.calls.append("running_tracking")
+        return (() if self.querying else self.running), self.querying
+
+    def stop_tracking(self, units):
+        self.calls.append(("stop_tracking", list(units)))
+        return self.stop_units
+
+    def start_tracking(self, units):
+        units = list(units)
+        self.calls.append(("start_tracking", units))
+        key = tuple(units)
+        return self.start_units.get(key, self.start_units.get("*", ""))
+
+    def ring_alive(self):
+        self.calls.append("ring_alive")
+        return self.ring.pop(0) if len(self.ring) > 1 else (self.ring[0] if self.ring else False)
 
     def xrservice(self):
         return self.looks.pop(0) if len(self.looks) > 1 else (self.looks[0] if self.looks else set())
@@ -54,6 +82,10 @@ class FakeHost:
 
     def wait(self, seconds):
         self.calls.append("wait")
+
+
+def make_ring_header(magic=hr.RING_MAGIC, version=hr.RING_VERSION, writer_pid=1234, heartbeat_ns=10_000_000_000):
+    return struct.pack("<8sI20xqQ", magic, version, writer_pid, heartbeat_ns)
 
 
 class FakeUser:
@@ -270,19 +302,58 @@ class Switch(Files):
                 self.switch(True)
         self.assertTrue(self.state()["on"])
 
-    def test_now_restarts_the_hands_and_xrservice(self):
-        host = FakeHost({41}, {41}, {52})
+    def test_now_stops_tracking_restarts_xrservice_and_starts_camd_before_hands(self):
+        host = FakeHost({41}, {41}, {52}, ring=(False, True))
         said = self.switch(True, host)
-        self.assertEqual(host.calls[:2], ["restart_hands", ("stop", [41])])
+        self.assertEqual(host.calls, [
+            "running_tracking",
+            ("stop_tracking", list(hr.TRACKING_UNITS)),
+            ("stop", [41]),
+            "wait",
+            "wait",
+            ("start_tracking", [hr.CAMD_UNIT]),
+            "ring_alive",
+            "wait",
+            "ring_alive",
+            ("start_tracking", [hr.HANDS_UNIT]),
+        ])
+        self.assertIn("Head tracking restarted", said)
+
+    def test_now_still_starts_hands_if_ring_wait_times_out(self):
+        host = FakeHost({41}, {52}, ring=(False,))
+        with mock.patch.object(hr, "CAMD_WAIT", 0.4):
+            said = self.switch(True, host)
+        self.assertIn("Head tracking restarted", said)
+        self.assertEqual(host.calls[-4:], ["ring_alive", "wait", "ring_alive", ("start_tracking", [hr.HANDS_UNIT])])
+
+    def test_now_with_no_tracking_running_skips_tracking_units(self):
+        host = FakeHost({41}, {52}, running=())
+        said = self.switch(True, host)
+        self.assertEqual(host.calls, ["running_tracking", ("stop", [41]), "wait"])
+        self.assertIn("Head tracking restarted", said)
+
+    def test_now_with_only_one_tracking_unit_skips_ring_wait(self):
+        host = FakeHost({41}, {52}, running=(hr.CAMD_UNIT,))
+        said = self.switch(True, host)
+        self.assertEqual(host.calls, [
+            "running_tracking",
+            ("stop_tracking", [hr.CAMD_UNIT]),
+            ("stop", [41]),
+            "wait",
+            ("start_tracking", [hr.CAMD_UNIT]),
+        ])
         self.assertIn("Head tracking restarted", said)
 
     def test_a_new_xrservice_counts_while_the_old_one_is_still_going(self):
         self.assertEqual(hr.restart_tracking(FakeHost({41, 42}, {41, 42}, {42, 52}))[0], True)
 
-    def test_now_without_xrservice_waits_for_steamvr(self):
+    def test_now_without_xrservice_restarts_hands_if_running_and_waits_for_steamvr(self):
         host = FakeHost()
         self.assertIn("when SteamVR next starts", self.switch(False, host))
-        self.assertEqual(host.calls, ["restart_hands"])
+        self.assertEqual(host.calls, ["running_tracking", "restart_hands"])
+        idle = FakeHost(running=())
+        self.assertIn("when SteamVR next starts", self.switch(False, idle))
+        self.assertEqual(idle.calls, ["running_tracking"])
 
     def test_xrservice_that_stays_down_says_so(self):
         host = FakeHost({41}, set())
@@ -292,25 +363,62 @@ class Switch(Files):
         self.assertIn("hasn't restarted", said)
         self.assertEqual(host.calls, [("stop", [41]), "wait", "wait"])
 
+    def test_now_when_xrservice_stays_down_restores_tracking_units_without_ring_wait(self):
+        host = FakeHost({41}, set())
+        with mock.patch.object(hr, "RESTART_WAIT", 0.4):
+            said = self.switch(True, host)
+        self.assertIn("hasn't restarted", said)
+        self.assertEqual(host.calls[-1], ("start_tracking", list(hr.TRACKING_UNITS)))
+        self.assertNotIn("ring_alive", host.calls)
+
     def test_the_wait_outlasts_steamvrs_timer(self):
         host = FakeHost({41}, set())
         self.assertIs(hr.restart_tracking(host)[0], False)
         # 30 s in steps of 0.2 s: SteamVR starts a new XRService after 15 s (16.5 measured)
         self.assertEqual(host.calls.count("wait"), 150)
 
-    def test_hands_that_cannot_be_restarted_stop_it_there(self):
-        host = FakeHost({41}, hands="Failed to connect to bus")
-        with self.assertRaisesRegex(hr.RateError, "settings are written, but ft-hands couldn't be restarted"):
+    def test_query_or_stop_tracking_failure_leaves_xrservice_alone(self):
+        host = FakeHost({41}, querying="Failed to connect to bus")
+        with self.assertRaisesRegex(hr.RateError, "settings are written, but hand tracking couldn't be queried"):
             self.switch(True, host)
-        self.assertEqual(host.calls, ["restart_hands"])   # XRService is left running
+        self.assertEqual(host.calls, ["running_tracking"])
         self.assertTrue(self.state()["on"])
 
-    def test_xrservice_that_cannot_be_stopped_says_so(self):
+        host = FakeHost({41}, stop_units="Access denied")
+        with self.assertRaisesRegex(hr.RateError, "settings are written, but hand tracking couldn't be stopped"):
+            self.switch(False, host)
+        self.assertEqual(host.calls, ["running_tracking", ("stop_tracking", list(hr.TRACKING_UNITS))])
+        self.assertFalse(self.state()["on"])
+
+    def test_hands_that_cannot_be_restarted_without_xrservice_says_so(self):
+        host = FakeHost(hands="Failed to connect to bus")
+        with self.assertRaisesRegex(hr.RateError, "settings are written, but ft-hands couldn't be restarted"):
+            self.switch(True, host)
+        self.assertEqual(host.calls, ["running_tracking", "restart_hands"])
+
+    def test_xrservice_that_cannot_be_stopped_restores_tracking_and_says_so(self):
         host = FakeHost({41}, stopping="Operation not permitted")
         with self.assertRaisesRegex(hr.RateError, r"settings are written, but XRService couldn't be stopped "
                                                   r"\(Operation not permitted\)"):
             self.switch(True, host)
         self.assertNotIn("wait", host.calls)
+        self.assertEqual(host.calls, [
+            "running_tracking",
+            ("stop_tracking", list(hr.TRACKING_UNITS)),
+            ("stop", [41]),
+            ("start_tracking", list(hr.TRACKING_UNITS)),
+        ])
+
+    def test_start_tracking_failure_after_restart_says_so(self):
+        host = FakeHost({41}, {52}, start_units={(hr.CAMD_UNIT,): "bus gone"})
+        with self.assertRaisesRegex(hr.RateError, r"settings are written, but hand tracking couldn't be started \(bus gone\)"):
+            self.switch(True, host)
+        self.assertNotIn("ring_alive", host.calls)
+
+        host = FakeHost({41}, {52}, start_units={(hr.HANDS_UNIT,): "unit masked"})
+        with self.assertRaisesRegex(hr.RateError, r"settings are written, but hand tracking couldn't be started \(unit masked\)"):
+            self.switch(False, host)
+        self.assertIn("ring_alive", host.calls)
 
 
 class TheHost(unittest.TestCase):
@@ -356,6 +464,58 @@ class TheHost(unittest.TestCase):
         self.assertEqual(hr.Host(FakeUser(1, stderr="Failed to connect to bus\n")).restart_hands(),
                          "Failed to connect to bus")
         self.assertEqual(hr.Host(FakeUser(5, stderr="Unit frametop-hands.service not found.")).restart_hands(), "")
+
+    def test_running_tracking_parses_active_units_in_order(self):
+        out = ("Id=frametop-camd.service\nActiveState=active\n\n"
+               "Id=frametop-hands.service\nActiveState=activating\n")
+        user = FakeUser(stdout=out)
+        self.assertEqual(hr.Host(user).running_tracking(), (hr.TRACKING_UNITS, ""))
+        self.assertEqual(user.ran, [["systemctl", "--user", "show", "-p", "Id,ActiveState", *hr.TRACKING_UNITS]])
+
+        only_camd = ("Id=frametop-camd.service\nActiveState=reloading\n\n"
+                     "Id=frametop-hands.service\nActiveState=inactive\n")
+        self.assertEqual(hr.Host(FakeUser(stdout=only_camd)).running_tracking(), ((hr.CAMD_UNIT,), ""))
+        self.assertEqual(hr.Host(FakeUser(1, stderr="Failed to connect to bus\n")).running_tracking(),
+                         ((), "Failed to connect to bus"))
+
+    def test_stop_and_start_tracking_order_and_errors(self):
+        user = FakeUser()
+        host = hr.Host(user)
+        self.assertEqual(host.stop_tracking(()), "")
+        self.assertEqual(host.start_tracking(()), "")
+        self.assertEqual(user.ran, [])
+        self.assertEqual(host.stop_tracking(hr.TRACKING_UNITS), "")
+        self.assertEqual(host.start_tracking(hr.TRACKING_UNITS), "")
+        self.assertEqual(user.ran, [
+            ["systemctl", "--user", "stop", hr.HANDS_UNIT, hr.CAMD_UNIT],
+            ["systemctl", "--user", "start", "--no-block", hr.CAMD_UNIT, hr.HANDS_UNIT],
+        ])
+        self.assertEqual(hr.Host(FakeUser(5, stderr="not found")).stop_tracking(hr.TRACKING_UNITS), "")
+        self.assertEqual(hr.Host(FakeUser(5, stderr="not found")).start_tracking(hr.TRACKING_UNITS), "")
+        self.assertEqual(hr.Host(FakeUser(1, stderr="bus gone\n")).stop_tracking(hr.TRACKING_UNITS), "bus gone")
+        self.assertEqual(hr.Host(FakeUser(1, stderr="bus gone\n")).start_tracking(hr.TRACKING_UNITS), "bus gone")
+
+    def test_ring_is_live_and_host_ring_alive(self):
+        now = 10_500_000_000
+        self.assertTrue(hr.ring_is_live(make_ring_header(heartbeat_ns=now - 100_000_000), now))
+        self.assertFalse(hr.ring_is_live(make_ring_header(heartbeat_ns=0), now))
+        self.assertFalse(hr.ring_is_live(make_ring_header(heartbeat_ns=now - hr.RING_STALE_NS), now))
+        self.assertFalse(hr.ring_is_live(make_ring_header(heartbeat_ns=now + 1), now))
+        self.assertFalse(hr.ring_is_live(make_ring_header(writer_pid=0, heartbeat_ns=now), now))
+        self.assertFalse(hr.ring_is_live(make_ring_header(magic=b"WRONG001", heartbeat_ns=now), now))
+        self.assertFalse(hr.ring_is_live(make_ring_header(version=2, heartbeat_ns=now), now))
+        self.assertFalse(hr.ring_is_live(b"short", now))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ring = os.path.join(tmp, "cam-ring")
+            host = hr.Host(FakeUser())
+            self.assertFalse(host.ring_alive(ring))
+            with open(ring, "wb") as f:
+                f.write(make_ring_header(heartbeat_ns=time.clock_gettime_ns(time.CLOCK_MONOTONIC)))
+            self.assertTrue(host.ring_alive(ring))
+            with open(ring, "wb") as f:
+                f.write(make_ring_header(heartbeat_ns=0))
+            self.assertFalse(host.ring_alive(ring))
 
 
 class Rates(unittest.TestCase):
@@ -444,7 +604,7 @@ class Main(Files):
         code, out, err = self.main("off")
         self.assertEqual((code, out), (1, ""))
         self.assertIn("doesn't read", err)
-        with mock.patch.object(hr, "Host", return_value=FakeHost({41}, hands="no bus")):
+        with mock.patch.object(hr, "Host", return_value=FakeHost({41}, querying="no bus")):
             self.write_xr("{}")
             code, out, err = self.main("on", "--now")
         self.assertEqual((code, out), (1, ""))

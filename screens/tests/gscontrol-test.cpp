@@ -184,6 +184,23 @@ int main() {
         c.Unfocused(1), c.Unfocused(0);
         c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
         CHECK(x.Count("focus 2") == 1 && !x.Logged("focus 1"));
+        // refused, asked again at a press, and that one goes through: as often as that happens
+        x.log.clear();
+        c.Focused(2);
+        for (int i = 0; i < 5; ++i) {
+            c.Unfocused(2);
+            c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+            c.Focused(2);
+        }
+        CHECK(x.Count("focus 2") == 5);
+        // gamescope keeps refusing (another game in the theater has SteamVR's input): after
+        // kFocusRefusals in a row a press asks no more, and each ask costs the panel its picture
+        x.log.clear();
+        for (int i = 0; i < Control::kFocusRefusals + 3; ++i) {
+            c.Unfocused(2);
+            c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        }
+        CHECK(x.Count("focus 2") == Control::kFocusRefusals - 1 && x.Count("down 1") == Control::kFocusRefusals + 3);
         // a press on a menu doesn't take the focus from its app's window
         x.log.clear();
         c.Press(kFirst, 1, 1, true, 30, 30), c.Press(kFirst, 1, 1, false, 30, 30);

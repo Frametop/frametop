@@ -63,7 +63,7 @@ public:
         tagging_ = false;
         Do(book_.Clear());
         tagging_ = true;
-        buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, unfocused_ = 0, keys_ = Keys();
+        buttons_ = 0, raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, unfocused_ = 0, refusals_ = 0, keys_ = Keys();
         typedBefore_.clear(), lent_.clear();
     }
     // Off (GSAPP_PANELS, or ft-screens going): buttons and keys held let go of, each window back to
@@ -73,7 +73,7 @@ public:
         for (const auto &[code, win] : keys_.Down()) x_.Key(win, gsforward::XKeycode(code), 0, false);
         keys_ = Keys();
         Do(book_.Clear());
-        raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, unfocused_ = 0;
+        raised_ = 0, pressedOn_ = 0, blurredFrom_ = 0, focused_ = 0, unfocused_ = 0, refusals_ = 0;
         typedBefore_.clear(), lent_.clear();
     }
     void On(const gsforward::Event &e, int64_t nowMs) {
@@ -87,9 +87,17 @@ public:
     void Tick(int64_t nowMs) { Do(book_.Tick(nowMs)); }
     // gamescope didn't focus `win` when asked (gsforward.h's FocusSaying: its clicks go nowhere):
     // asked again at the next press on its panel, not at each move over it (each ask takes the
-    // window's picture off its panel while it waits).
+    // window's picture off its panel while it waits, up to gsforward.h's kFocusWaitMs). After
+    // kFocusRefusals in a row it's left alone until the window goes or comes back from the
+    // theater: with another game in the theater holding SteamVR's input gamescope refuses every
+    // time (docs/design.md), and each click would cost the panel its picture for that wait.
+    static constexpr int kFocusRefusals = 3;
     void Unfocused(uint32_t win) {
-        if (win && win == focused_) unfocused_ = win;
+        if (win && win == focused_) unfocused_ = win, ++refusals_;
+    }
+    // ...and it did: the refusals before don't count.
+    void Focused(uint32_t win) {
+        if (win && win == focused_) refusals_ = 0;
     }
 
     // The laser at (x, y) on X's screen, on the panel at `index` (sub 0) or its popup `sub`.
@@ -106,7 +114,8 @@ public:
         const uint32_t w = WindowAt(index, sub);
         if (!w) return;
         if (down) {
-            if (const uint32_t app = book_.WindowOf(index); app && app == unfocused_) Forget(app), FocusOn(app);
+            if (const uint32_t app = book_.WindowOf(index); app && app == unfocused_ && refusals_ < kFocusRefusals)
+                focused_ = 0, FocusOn(app);   // (not Forget: the refusals so far still count)
             if (sub) TypeIn(w);
             else keys_.Focus(w), FocusOn(w);
             pressedOn_ = w, blurredFrom_ = 0;
@@ -188,6 +197,7 @@ private:
     uint32_t pressedOn_ = 0;  // the window the last press went to
     uint32_t focused_ = 0;    // the app window we had gamescope focus last (0: none, or it went or unmapped)
     uint32_t unfocused_ = 0;  // ...that gamescope didn't focus then (0: it did): asked again at a press on it
+    int refusals_ = 0;        // ...how many times in a row (Unfocused, Focused)
     // a popup that had the typing -> the app window that had it before (erased when the popup goes)
     std::map<uint32_t, uint32_t> typedBefore_;
     uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur (0 after a press)
@@ -198,12 +208,13 @@ private:
     void FocusOn(uint32_t w) {
         if (!w || w == focused_) return;
         x_.Focus(w);
+        if (w != unfocused_) refusals_ = 0;   // (another window, or this one after it went: a new count)
         focused_ = w, unfocused_ = 0;
     }
     // `w` is no longer the window gamescope was asked to focus: the next laser onto it asks.
     void Forget(uint32_t w) {
         if (focused_ == w) focused_ = 0;
-        if (unfocused_ == w) unfocused_ = 0;
+        if (unfocused_ == w) unfocused_ = 0, refusals_ = 0;
     }
     uint32_t WindowAt(int index, int sub) const { return sub ? book_.PopupWindow(index, sub) : book_.WindowOf(index); }
     bool TargetShown() const {

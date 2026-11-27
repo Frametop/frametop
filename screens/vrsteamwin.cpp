@@ -330,6 +330,8 @@ void SteamDashStep() {
                 fresh = fresh || u.event.type == gsforward::Event::Mapped;
                 break;
             }
+            case gsforward::Update::Unfocused:
+            case gsforward::Update::Focused: break;   // (nothing here asks gamescope for its focus)
         }
     if (!g_link->IsOpen()) return steamhit::Clear();
     const bool all = now >= g_findAt;

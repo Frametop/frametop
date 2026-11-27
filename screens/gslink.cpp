@@ -106,11 +106,9 @@ struct AsyncLink::Shared {
                     Update u;
                     u.type = Update::Note, u.why = std::move(said);
                     Say(std::move(u));
-                    if (!got) {
-                        Update un;
-                        un.type = Update::Unfocused, un.win = s.win;
-                        Say(std::move(un));
-                    }
+                    Update went;   // (how the ask went: gscontrol.h asks again at a press only so often)
+                    went.type = got ? Update::Focused : Update::Unfocused, went.win = s.win;
+                    Say(std::move(went));
                 }
                 break;
             }

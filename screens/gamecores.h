@@ -8,7 +8,10 @@
 // SteamOS counts as a failed SteamVR session. It did at each of Slay the Spire 2's five crashes
 // that wrote a dump (2026-11-26 and 27); its four crashes with core dumps off left SteamVR alone.
 // So the processes Steam launched the game under get a soft core limit of 1 (kNoDump). The hard
-// limit stays, so nothing is lost but the dump, and processes they start later inherit it.
+// limit stays, and processes they start later inherit it. What's lost with the dump is
+// systemd-coredump's record of the crash: at 1 the kernel never starts the handler, so
+// coredumpctl lists nothing for the game. The kernel's own lines in the journal (the signal, the
+// thread's name, "aborting core") are what a crash leaves.
 //
 // 1, not 0: SteamOS pipes core dumps to a program (kernel.core_pattern), and for a pipe the kernel
 // ignores the limit, 0 too, except 1, which it takes as "no dump" and ends the process at once

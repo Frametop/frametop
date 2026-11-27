@@ -261,6 +261,15 @@ check("a button held as gamepad mode starts is down in the mode's first state, s
 check("...with both controllers asked for as it started", (asks(server, L, 4.9), asks(server, R, 4.9)), ([5.0], [5.0]))
 
 
+# The mode ends and starts again within one turn of the reader's loop (council, 2026-11-27): the
+# reader never sees it off, and it is a new mode all the same, read from nothing.
+server, logs, sent = run([], 5.0, pad_at=1.0, pad_then=[(3.0, False), (3.0, True)])
+restart = [t for t, m in sent if m.startswith("vrpad ") and t > 3.0][:1]
+check("off and on again in one turn: every controller is asked for again, and the first state waits for the answers",
+      (asks(server, L, 1.1), asks(server, R, 1.1), [3.0 + gp.PAD_SETTLE <= t <= 3.0 + gp.PAD_SETTLE + 2 * STEP for t in restart]),
+      ([3.0], [3.0], [True]))
+
+
 # Left by the grips, then entered again (council, 2026-11-27): the grips are let go, and a stick
 # with them, after the mode is off, when nothing is read. The next mode starts from the
 # controllers' state as it is then, not from the squeeze that ended the last one.

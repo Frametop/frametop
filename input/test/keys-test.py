@@ -1916,7 +1916,12 @@ def tests():
     check("the gaze wakes the pointer with gamepad mode off: the relay's to wake", (mode.gaze_woke(gazed), gazed.again), (False, []))
     mode.screens_word("desktop", 26.0)
     check("...and in a mode whose pointer hasn't stepped aside yet", (mode.gaze_woke(gazed), gazed.again), (False, []))
-    mode.pointer(gazed, 26.0)
+    early = FakePointer(active=False)
+    check("...but one that was off as the mode came on, before the relay's next turn: hidden again, and aside",
+          (mode.gaze_woke(early), early.again, mode.aside), (True, ["gamepad"], True))
+    mode.screens_word(None, 26.2)
+    mode.screens_word("desktop", 26.5)
+    mode.pointer(gazed, 26.5)
     del said[:]
     woke = [mode.gaze_woke(gazed), mode.gaze_woke(gazed)]
     mode.pointer(gazed, 31.0)

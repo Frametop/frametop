@@ -331,8 +331,11 @@ class GamepadMode:
         a few seconds after a controller last had it (with hand interaction off, nothing tells the
         helper the controllers are in the hands). That is no mouse used on purpose, so in gamepad
         mode the helper is told to hide it again and the relay's pointer stays off. True if so."""
-        if not (self.on and self.aside):
-            return False
+        if not self.on or (not self.aside and pointer.active):
+            return False  # (one still on in the mode has a button down: pointer() sees to it)
+        # (a mode that just came on with the pointer off has nothing to step aside: aside, as
+        # pointer() would have said at the relay's next turn, and this arrived before it)
+        self.aside = True
         pointer.aside_again("gamepad")
         if not self.gaze_said:
             self.gaze_said = True

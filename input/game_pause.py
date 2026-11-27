@@ -345,6 +345,7 @@ class ControllerWatch(threading.Thread):
         self.gesture = None
         self.touch_feed = False
         self.pad = False
+        self.pad_starts = 0  # the gamepad modes so far: one that ends and starts within a turn of the session is a new one
         self.tracker = TouchTracker()
         self.resend = False  # the helper (re)started: send it the touch state again
         self.changed = threading.Event()
@@ -362,6 +363,8 @@ class ControllerWatch(threading.Thread):
 
     def set_pad(self, on):
         if on != self.pad:
+            if on:
+                self.pad_starts += 1  # (before pad: the session never sees a mode without its start)
             self.pad = on
             self.changed.set()
 
@@ -426,7 +429,7 @@ class ControllerWatch(threading.Thread):
             alone = None  # the one-controller gesture in use (one_controller), or None
             reader, pad_sent, pad_at, pad_from = PadReader(), None, 0.0, 0.0
             grips = GripsHeld()
-            hearing, pad_was = vrws.Hearing(time.monotonic()), False
+            hearing, pad_seen = vrws.Hearing(time.monotonic()), None
 
             def ask(paths, at):
                 # (again, too: a request is harmless to repeat, and one can stop being answered)
@@ -436,7 +439,7 @@ class ControllerWatch(threading.Thread):
             while True:
                 g = self.current()
                 touch = self.touch_feed
-                pad = self.pad
+                pad, pad_starts = self.pad, self.pad_starts
                 if g is None and not touch and not pad:
                     return
                 if touch and (not touch_was or self.resend):
@@ -449,14 +452,17 @@ class ControllerWatch(threading.Thread):
                 if lookup_at is not None and now >= lookup_at:
                     self.lookup_at = None
                     next_poll = now
-                starting, pad_was = pad and not pad_was, pad
+                # (by count, not by the mode being off in between: off and on again while this
+                # loop waited for a message or a lookup is a new mode too)
+                starting = pad and pad_starts != pad_seen
                 if starting:
+                    pad_seen = pad_starts
                     # vrserver tells changes only, and nothing is read with the mode off: a grip
                     # let go after the squeeze that left the last mode would still be down here,
                     # and leave this one, and a stick let go then would still be pushed. So the
                     # pad starts from nothing, and each controller is asked for below: its answer
                     # is its whole state.
-                    reader, pad_sent = PadReader(), None
+                    reader, pad_sent, grips = PadReader(), None, GripsHeld()
                 if starting or (pad and now - last_poll >= LOOKUP_GAP and hearing.quiet(sides, now)):
                     # Gamepad mode starts, or a controller says nothing in it: half a pad is none,
                     # and the grips are the way out. Who is there, and connected, now?

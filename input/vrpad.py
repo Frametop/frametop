@@ -333,7 +333,7 @@ class GamepadMode:
         mode the helper is told to hide it again and the relay's pointer stays off. True if so."""
         if not (self.on and self.aside):
             return False
-        pointer.send("hide gamepad")
+        pointer.aside_again("gamepad")
         if not self.gaze_said:
             self.gaze_said = True
             self.log("gamepad mode: the gaze took the pointer back; hidden again (the mouse and the grips leave the mode)")

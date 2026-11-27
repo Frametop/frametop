@@ -100,14 +100,16 @@ class Server:
     def __init__(self, events, end):
         self.devices = {L: ["left", True, dict(REST["left"])], R: ["right", True, dict(REST["right"])]}
         self.subscribed, self.requests, self.queue = set(), [], []
+        self.late, self.answers = False, []  # late: an answer comes a read after what was already on its way
         self.events, self.end, self.tick = sorted(events, key=lambda e: e[0]), end, 0
 
     def states(self):
         return {path: (side, on) for path, (side, on, _) in self.devices.items()}
 
-    def push(self, path, components):
+    def push(self, path, components, answer=False):
         if path in self.subscribed:
-            self.queue.append(json.dumps({"type": "update_component_states", "device": path, "components": components}))
+            (self.answers if answer else self.queue).append(
+                json.dumps({"type": "update_component_states", "device": path, "components": components}))
 
     def set(self, path, **components):
         """A controller's inputs change (grip_click=True -> /input/grip/click)."""
@@ -133,7 +135,7 @@ class Server:
             self.subscribed.discard(path)
         elif path in self.devices:
             self.subscribed.add(path)
-            self.push(path, dict(self.devices[path][2]))  # each request: the whole state
+            self.push(path, dict(self.devices[path][2]), self.late)  # each request: the whole state
 
     def messages(self, timeout=None):
         Clock.n += 1
@@ -146,7 +148,7 @@ class Server:
         for path, (_, on, _) in self.devices.items():
             if on:  # an awake controller is never silent: its capacitive sensing
                 self.push(path, {"/input/capsense/grip": self.tick % 7 / 10})
-        out, self.queue = self.queue, []
+        out, self.queue, self.answers = self.queue, self.answers, []
         return out
 
 
@@ -243,6 +245,20 @@ check("asleep in gamepad mode: asked for about each QUIET while it sleeps, and n
 check("...nothing said about it, and its d-pad arrives once it's awake",
       ([m for m in logs if "said nothing" in m], 0x0001 in pads(sent, 9.5)), ([], True))
 
+
+
+# A button held as the mode starts (council, 2026-11-27): the relay keeps from the game what is
+# down in a mode's first "vrpad", so that one has to carry the controllers' answers. vrserver's
+# answer to a request comes after the messages it had already sent: here, one read later.
+def late(server):
+    server.late = True
+
+
+server, logs, sent = run([(2.0, lambda s: s.set(R, a_click=True))], 7.0, pad_at=5.0, wake=late)
+first = [(t, int(m.split()[1], 16)) for t, m in sent if m.startswith("vrpad ")][:1]
+check("a button held as gamepad mode starts is down in the mode's first state, sent PAD_SETTLE after it starts",
+      [(5.0 + gp.PAD_SETTLE <= t <= 5.0 + gp.PAD_SETTLE + 2 * STEP, hex(b)) for t, b in first], [(True, "0x1000")])
+check("...with both controllers asked for as it started", (asks(server, L, 4.9), asks(server, R, 4.9)), ([5.0], [5.0]))
 
 
 # Left by the grips, then entered again (council, 2026-11-27): the grips are let go, and a stick

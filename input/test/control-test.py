@@ -131,11 +131,11 @@ HANDOFFS = ("vr_button", "vr_bind", "text_field", "host_message", "type_text", "
             "load_config", "apply_roles")
 
 
-def new_relay():
+def new_relay(gamepad_returns=None):
     r = relay.Relay(FakeVirtual(), FakeVirtual(), control, screens_sock, can_grab=False, stored={})
     calls = []
     r.pause = Recorder("pause", calls, returns={"status": {"t": "pause", "paused": False}}, paused=False)
-    r.gamepad = Recorder("gamepad", calls)
+    r.gamepad = Recorder("gamepad", calls, returns=gamepad_returns)
     r.screens_sock = Recorder("screens_sock", calls)
     for name in HANDOFFS:
         setattr(r, name, (lambda n: lambda *a, **k: calls.append([n, plain(list(a)), plain(k)]))(name))
@@ -159,9 +159,10 @@ def state(r, pointer, sent):
     }
 
 
-def run(text, uid=UID, addr=ADDR, kb_addr=None, paused=False, no_pointer=False):
-    """One datagram, text, on a new relay: what it did."""
-    r, calls, pointer, sent = new_relay()
+def run(text, uid=UID, addr=ADDR, kb_addr=None, paused=False, no_pointer=False, gamepad_returns=None):
+    """One datagram, text, on a new relay: what it did. gamepad_returns: what its gamepad mode's
+    methods give back, by name (nothing, else)."""
+    r, calls, pointer, sent = new_relay(gamepad_returns)
     r.pause.paused = paused
     if kb_addr is not None:
         r.kb.addr = kb_addr
@@ -238,6 +239,8 @@ CASES += [
     ("gazeawake 1", "gazeawake 1", {}), ("gazeawake 0", "gazeawake 0", {}),
     ("gazeawake no pointer", "gazeawake 1", {"no_pointer": True}),
     ("gazewoke", "gazewoke", {}), ("gazewoke no pointer", "gazewoke", {"no_pointer": True}),
+    # (gamepad mode keeps the pointer aside: the relay's stays off, where the one above comes on)
+    ("gazewoke, gamepad mode has the pointer aside", "gazewoke", {"gamepad_returns": {"gaze_woke": True}}),
     ("devices", "devices", {}), ("devices unbound", "devices", {"addr": b""}),
     ("watch", "watch", {}), ("watch 5", "watch 5", {}), ("watch long", "watch 9999", {}), ("watch junk", "watch x", {}),
     ("reload", "reload", {}), ("reload no pointer", "reload", {"no_pointer": True}),

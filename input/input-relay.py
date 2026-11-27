@@ -1193,6 +1193,11 @@ class Pointer:
         log(f"pointer off ({why})")
         return True
 
+    def aside_again(self, why):
+        """The helper woke by itself (the gaze took the pointer back) while this one is off and
+        is to stay off: the helper is told to hide again. Nothing here changes: it was off."""
+        self.send(f"hide {why}")
+
     def end_pulses(self):
         """A press or push under way (the dashboard's system button, the claim, a scroll) ends
         now, its release sent, and the presses not made yet and the motion waiting to go are

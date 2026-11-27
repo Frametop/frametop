@@ -205,6 +205,33 @@ int main() {
         x.log.clear();
         c.Press(kFirst, 1, 1, true, 30, 30), c.Press(kFirst, 1, 1, false, 30, 30);
         CHECK(!x.Logged("focus 1") && !x.Logged("focus 9") && x.Logged("down 1"));
+        // a window past kFocusRefusals isn't left for good: what made gamescope refuse can end (the
+        // other game leaves the theater) with nothing said here, so once kFocusRetryMs have passed
+        // a press asks again, once for each such wait while it's still refused. (After the menu's
+        // check: the time that passes drops that menu, which never mapped.)
+        x.log.clear();
+        int64_t now = 5000;
+        c.Tick(now);
+        c.Unfocused(2);   // (the last refusal, at a time the test knows)
+        c.Tick(now += Control::kFocusRetryMs - 1);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 0);
+        c.Tick(now += 1);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 1);
+        c.Unfocused(2);   // still refused: the next wait starts
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        c.Tick(now += Control::kFocusRetryMs - 1);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 1);
+        c.Tick(now += 1);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 2);
+        // ...and this one goes through: the window is asked for at once the next time it's refused
+        c.Focused(2);
+        c.Unfocused(2);
+        c.Press(kFirst + 1, 0, 1, true, 8, 5), c.Press(kFirst + 1, 0, 1, false, 8, 5);
+        CHECK(x.Count("focus 2") == 3 && x.Count("down 1") == 6);
         // the window we focused unmaps: the laser coming back focuses again, once it maps
         x.log.clear();
         c.On(Ev(Event::Unmapped, Win(2, Kind::Main)), 1);

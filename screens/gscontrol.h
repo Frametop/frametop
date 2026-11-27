@@ -84,16 +84,19 @@ public:
             Typed() == e.win.transientFor && book_.PanelOf(e.win.id) >= 0)
             TypeIn(e.win.id);
     }
-    void Tick(int64_t nowMs) { Do(book_.Tick(nowMs)); }
+    void Tick(int64_t nowMs) { now_ = nowMs, Do(book_.Tick(nowMs)); }
     // gamescope didn't focus `win` when asked (gsforward.h's FocusSaying: its clicks go nowhere):
     // asked again at the next press on its panel, not at each move over it (each ask takes the
     // window's picture off its panel while it waits, up to gsforward.h's kFocusWaitMs). After
-    // kFocusRefusals in a row it's left alone until the window goes or comes back from the
-    // theater: with another game in the theater holding SteamVR's input gamescope refuses every
-    // time (docs/design.md), and each click would cost the panel its picture for that wait.
+    // kFocusRefusals in a row a press asks only once kFocusRetryMs have passed since the last
+    // refusal: with another game in the theater holding SteamVR's input gamescope refuses every
+    // time (docs/design.md), and each click would cost the panel its picture for that wait. Not
+    // never again: nothing here hears that game leave the theater, and the window's clicks would
+    // go nowhere from then on (council, 2026-11-27).
     static constexpr int kFocusRefusals = 3;
+    static constexpr int64_t kFocusRetryMs = 10000;
     void Unfocused(uint32_t win) {
-        if (win && win == focused_) unfocused_ = win, ++refusals_;
+        if (win && win == focused_) unfocused_ = win, ++refusals_, refusedAt_ = now_;
     }
     // ...and it did: the refusals before don't count.
     void Focused(uint32_t win) {
@@ -114,7 +117,8 @@ public:
         const uint32_t w = WindowAt(index, sub);
         if (!w) return;
         if (down) {
-            if (const uint32_t app = book_.WindowOf(index); app && app == unfocused_ && refusals_ < kFocusRefusals)
+            if (const uint32_t app = book_.WindowOf(index); app && app == unfocused_ &&
+                (refusals_ < kFocusRefusals || now_ - refusedAt_ >= kFocusRetryMs))
                 focused_ = 0, FocusOn(app);   // (not Forget: the refusals so far still count)
             if (sub) TypeIn(w);
             else keys_.Focus(w), FocusOn(w);
@@ -198,6 +202,8 @@ private:
     uint32_t focused_ = 0;    // the app window we had gamescope focus last (0: none, or it went or unmapped)
     uint32_t unfocused_ = 0;  // ...that gamescope didn't focus then (0: it did): asked again at a press on it
     int refusals_ = 0;        // ...how many times in a row (Unfocused, Focused)
+    int64_t refusedAt_ = 0;   // ...the last of them then (now_'s clock)
+    int64_t now_ = 0;         // the last Tick's time: one a frame
     // a popup that had the typing -> the app window that had it before (erased when the popup goes)
     std::map<uint32_t, uint32_t> typedBefore_;
     uint32_t blurredFrom_ = 0;   // the app window that had the typing at the last Blur (0 after a press)

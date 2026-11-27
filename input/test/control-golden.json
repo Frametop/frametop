@@ -909,6 +909,24 @@
   "no_pointer": true,
   "raised": null
  },
+ "gazewoke, gamepad mode has the pointer aside": {
+  "calls": [
+   [
+    "gamepad.gaze_woke",
+    [
+     "the pointer"
+    ],
+    {}
+   ]
+  ],
+  "changed": {},
+  "datagram": "gazewoke",
+  "gamepad_returns": {
+   "gaze_woke": true
+  },
+  "log": [],
+  "raised": null
+ },
  "hostbye": {
   "calls": [
    [

@@ -10,8 +10,9 @@
 // So the processes Steam launched the game under get a soft core limit of 1 (kNoDump). The hard
 // limit stays, and processes they start later inherit it. What's lost with the dump is
 // systemd-coredump's record of the crash: at 1 the kernel never starts the handler, so
-// coredumpctl lists nothing for the game. The kernel's own lines in the journal (the signal, the
-// thread's name, "aborting core") are what a crash leaves.
+// coredumpctl lists nothing for the game. The kernel's own line in the journal (the pid, the
+// thread's name, "RLIMIT_CORE is set to 1, aborting core") is what a crash leaves: no signal,
+// with the kernel's exception trace off as SteamOS has it.
 //
 // 1, not 0: SteamOS pipes core dumps to a program (kernel.core_pattern), and for a pipe the kernel
 // ignores the limit, 0 too, except 1, which it takes as "no dump" and ends the process at once

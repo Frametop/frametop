@@ -1864,10 +1864,10 @@ def tests():
 
     class FakePointer:
         def __init__(self, active, held=False):
-            self.active, self.held, self.asked, self.sent = active, held, [], []
+            self.active, self.held, self.asked, self.again = active, held, [], []
 
-        def send(self, command):
-            self.sent.append(command)
+        def aside_again(self, why):
+            self.again.append(why)
 
         def step_aside(self, why):
             self.asked.append(why)
@@ -1913,16 +1913,16 @@ def tests():
     mode.screens_word(None, 25.0)
     # Gaze mode takes the pointer back by itself (the helper's "gazewoke"): no mouse, no way out.
     gazed = FakePointer(active=True)
-    check("the gaze wakes the pointer with gamepad mode off: the relay's to wake", (mode.gaze_woke(gazed), gazed.sent), (False, []))
+    check("the gaze wakes the pointer with gamepad mode off: the relay's to wake", (mode.gaze_woke(gazed), gazed.again), (False, []))
     mode.screens_word("desktop", 26.0)
-    check("...and in a mode whose pointer hasn't stepped aside yet", (mode.gaze_woke(gazed), gazed.sent), (False, []))
+    check("...and in a mode whose pointer hasn't stepped aside yet", (mode.gaze_woke(gazed), gazed.again), (False, []))
     mode.pointer(gazed, 26.0)
     del said[:]
     woke = [mode.gaze_woke(gazed), mode.gaze_woke(gazed)]
     mode.pointer(gazed, 31.0)
     check("the gaze takes the pointer back in gamepad mode: the helper hides it again each time, the relay's "
-          "stays off, and the mode stays", (woke, gazed.sent, gazed.active, mode.on, said),
-          ([True, True], ["hide gamepad", "hide gamepad"], False, True, []))
+          "stays off, and the mode stays", (woke, gazed.again, gazed.active, mode.on, said),
+          ([True, True], ["gamepad", "gamepad"], False, True, []))
     mode.screens_word(None, 32.0)
     # uinput refuses the pad: ft-screens is told, or it would keep its lasers off and say the mode
     # again each second.

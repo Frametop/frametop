@@ -257,6 +257,7 @@ PAD_BUTTONS = {
               "/input/thumbstick/click": 0x0080},
 }
 PAD_REPEAT = 0.25  # the pad's state again this often while nothing changes (vrpad.STALE)
+PAD_SETTLE = 0.2  # a gamepad mode's first state goes out this long after its controllers were asked for
 GRIP_SQUEEZED = 0.9  # a grip's value from here counts as its click
 GRIPS_HOLD = 0.3  # both grips squeezed this long leave gamepad mode (not a clench in passing)
 
@@ -330,7 +331,8 @@ class ControllerWatch(threading.Thread):
     In gamepad mode (set_pad) it sends the relay the pad's state ("vrpad B LT RT LX LY RX RY",
     PadReader) on each change and every PAD_REPEAT, and "vrgrips" once both grips have been
     squeezed for GRIPS_HOLD (the way out). Each gamepad mode reads the pad from nothing: it looks
-    the controllers up as it starts and asks for each, which answers with its whole state.
+    the controllers up as it starts and asks for each, which answers with its whole state, and
+    sends its first "vrpad" PAD_SETTLE after that, with the answers in it.
     vrserver now and then stops answering for a controller (vrws.Hearing), so one that is
     connected and says nothing is asked for again at each lookup, and in gamepad mode each second.
     Reconnects every 5 seconds while SteamVR is away. With no gesture set, no touch feed and no
@@ -422,7 +424,7 @@ class ControllerWatch(threading.Thread):
             self.tracker = TouchTracker()
             touch_was = False
             alone = None  # the one-controller gesture in use (one_controller), or None
-            reader, pad_sent, pad_at = PadReader(), None, 0.0
+            reader, pad_sent, pad_at, pad_from = PadReader(), None, 0.0, 0.0
             grips = GripsHeld()
             hearing, pad_was = vrws.Hearing(time.monotonic()), False
 
@@ -485,6 +487,14 @@ class ControllerWatch(threading.Thread):
                         ask(sides, now)  # every one: the pad's state as it is now
                     else:
                         ask(hearing.quiet(hearing.on.keys() & sides.keys(), now), now)  # connected, and silent
+                    if starting:
+                        # The answers come after what vrserver had already sent, and the relay
+                        # keeps from the game the buttons that are down in a mode's first state
+                        # (vrpad.GamepadMode: they wait for their release). A first state sent
+                        # before the answers has none down, and a button held as the mode starts
+                        # is then a press in the game (council, 2026-11-27). So the first one
+                        # waits for them.
+                        pad_from = time.monotonic()
                     if not self.connected:
                         self.connected = True
                         self.log(f"controller reader: following "
@@ -543,7 +553,7 @@ class ControllerWatch(threading.Thread):
                                 g.ignored = None
                 if pad:
                     st, at = reader.state(sides), time.monotonic()
-                    if st != pad_sent or at - pad_at >= PAD_REPEAT:
+                    if at - pad_from >= PAD_SETTLE and (st != pad_sent or at - pad_at >= PAD_REPEAT):
                         pad_sent, pad_at = st, at
                         try:
                             self.sock.sendto(("vrpad %x %d %d %d %d %d %d" % st).encode(), RELAY)

@@ -1,5 +1,6 @@
 """The install itself: get.sh --release, run on the host in a transient user service, and what
-the window reads back from it.
+the window reads back from it. Uninstalling runs the same way (uninstall.sh --yes), in the same
+service, with state.json's "kind" saying which it was.
 
 The service (UNIT) is what makes the install outlive the window: closing the window, or the
 window dying with a SteamVR restart, leaves it running, and opening the installer again finds it.
@@ -7,7 +8,7 @@ A reboot or a crash ends it; state.json still says what was picked, and with no 
 it, the window offers to run the same install again. get.sh resumes a download cut short, and
 install.sh finishes an install cut short, so running it again picks up where it stopped.
 
-  ~/.cache/frametop-installer/state.json   what was picked, written when an install starts
+  ~/.cache/frametop-installer/state.json   what was picked, written when an install or uninstall starts
   ~/.cache/frametop-installer/install.log  the install's output (the service's stdout)
   ~/.cache/frametop-installer/result       its exit status, written by run-install.sh at the end
 """
@@ -40,9 +41,29 @@ def install_args(version, flags, dry_run=False):
     return ["/usr/bin/bash", str(host.BIN / "get.sh"), "--release", "--version", version, *flags]
 
 
+def uninstall_args(flags, dry_run=False):
+    """uninstall.sh asking nothing, leaving the installer's cache (this script and its log) alone."""
+    return ["/usr/bin/bash", str(host.BIN / "uninstall.sh"), "--yes", "--from-installer",
+            *(["--dry-run"] if dry_run else []), *flags]
+
+
 def start(version, channel, flags, restart, askpass, dry_run=False):
     """Start the install's service. Returns "" or why it didn't start. ("" too when systemd-run
     took too long to say: the install may be running, and the progress page finds out.)"""
+    return _launch({"kind": "install", "version": version, "channel": channel, "flags": list(flags),
+                    "restart": bool(restart)}, install_args(version, flags, dry_run),
+                   restart and not dry_run, askpass, dry_run, "Frametop install (Frametop Installer)")
+
+
+def start_uninstall(flags, askpass, dry_run=False):
+    """Start uninstall.sh in the same service, with the --delete and --keep FLAGS picked. It ends
+    with 3 when the headset has to restart before the rest can go (uninstall.py's outcome)."""
+    return _launch({"kind": "uninstall", "version": "", "flags": list(flags), "restart": False},
+                   uninstall_args(flags, dry_run), False, askpass, dry_run,
+                   "Frametop uninstall (Frametop Installer)")
+
+
+def _launch(picked, argv, restart, askpass, dry_run, description):
     if unit_state(FRAMEDROP_UNIT) == "activating":
         return ("FrameDrop is installing Frametop. Let it finish, then open Frametop Installer "
                 "again.")
@@ -52,17 +73,15 @@ def start(version, channel, flags, restart, askpass, dry_run=False):
     host.run(["systemctl", "--user", "reset-failed", f"{UNIT}.service"], timeout=10)
     RESULT.unlink(missing_ok=True)
     LOG.write_bytes(b"")
-    save_state({"version": version, "channel": channel, "flags": list(flags), "restart": bool(restart),
-                "sudo": bool(askpass), "dry_run": bool(dry_run), "started": int(time.time()), "seen": False})
-    cmd = ["systemd-run", "--user", f"--unit={UNIT}", "--description=Frametop install (Frametop Installer)",
+    save_state(dict(picked, sudo=bool(askpass), dry_run=bool(dry_run), started=int(time.time()), seen=False))
+    cmd = ["systemd-run", "--user", f"--unit={UNIT}", f"--description={description}",
            "--property=Type=oneshot", "--property=RemainAfterExit=yes",
            f"--property=StandardOutput=truncate:{LOG}", "--property=StandardError=inherit",
            f"--setenv=HOME={host.HOME}", "--setenv=PATH=/usr/local/bin:/usr/bin:/bin", "--setenv=TERM=dumb",
            f"--working-directory={host.HOME}", "--quiet", "--no-block"]
     if askpass:
         cmd += [f"--setenv=SUDO_ASKPASS={host.BIN / 'askpass'}", f"--setenv=FRAMETOP_ASKPASS_SOCKET={SOCKET}"]
-    cmd += ["/usr/bin/bash", str(host.BIN / "run-install.sh"), str(host.CACHE),
-            "1" if restart and not dry_run else "0", "--", *install_args(version, flags, dry_run)]
+    cmd += ["/usr/bin/bash", str(host.BIN / "run-install.sh"), str(host.CACHE), "1" if restart else "0", "--", *argv]
     code, _, err = host.run(cmd, timeout=30)
     if code in (0, 124):   # (124, host.run's timeout: it may have started, so its state stays)
         return ""
@@ -114,6 +133,7 @@ def where_things_are(state, unit, rc, now=None):
 # --- reading the log
 
 STEP = re.compile(r"^== (\d+)/(\d+) (.*)$")
+UNINSTALL_STEP = re.compile(r"^== Step (\d+) of (\d+): (.*)$")   # uninstall.sh's
 # curl's progress meter: % Total % Received % Xferd Dload Upload Total Spent Left Speed
 METER = re.compile(r"^\s*(\d{1,3})\s+([\d.]+[kMGT]?)\s+\d{1,3}\s+([\d.]+[kMGT]?)\s+\d")
 METER_HEAD = re.compile(r"^\s*(% Total|Dload\s+Upload)")
@@ -169,6 +189,12 @@ class Progress:
                     self.fraction = max(self.fraction, LOAD_AT + (1 - LOAD_AT - 0.04) * (n - 1) / total)
                     self.step = f"Step {n} of {total}: {what}"
                 self.download = ""
+            elif u := UNINSTALL_STEP.match(line):
+                n, total = int(u[1]), max(int(u[2]), 1)
+                self.fraction = max(self.fraction, (n - 0.5) / total)
+                self.step = f"Step {n} of {total}: {u[3][:1].upper() + u[3][1:]}"
+            elif line.startswith("== Restart the headset"):
+                self.step = "Restart the headset to finish"
             elif line.startswith("Downloading "):
                 self.step = "Downloading Frametop (about 1.2 GB)"
             elif line.startswith("Checked Frametop.zip"):

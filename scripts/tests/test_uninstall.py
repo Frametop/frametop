@@ -53,10 +53,14 @@ class Uninstall(unittest.TestCase):
         for name, pattern in (
                 ("FrameDrop's cache, with the rebuilt caches",
                  r'run rm -rf [^\n]*\\\n[^\n#]*"\$HOME/\.cache/frametop-framedrop"'),
-                ("the Frametop Installer's scripts, log and state, with the rebuilt caches",
-                 r'run rm -rf [^\n]*\\\n[^\n#]*"\$HOME/\.cache/frametop-installer"'),
+                ("the Frametop Installer's scripts, log and state, unless it runs this",
+                 r'\[ "\$from_installer" = 1 \] \|\| run rm -rf "\$HOME/\.cache/frametop-installer"'),
+                ("the stereo wallpaper, with the settings",
+                 r'local settings=\([^)#]*"\$HOME/\.local/share/frametop/wallpaper"\)'),
+                ("distrobox, while no other container uses it",
+                 r'others=\$\(other_boxes "\$kept_releases" "\$kept_dev"(?:.*\n)*\s*run rm -rf "\$\{dbx\[@\]\}"'),
                 ("the trial's saved files, with the settings",
-                 r'local settings=\([^)#]*"\$HOME/\.local/state/frametop-trial"\)'),
+                 r'local settings=\([^)#]*"\$HOME/\.local/state/frametop-trial"[^)#]*\)'),
                 ("the gaze bench's runs, with the recordings",
                  r'for f in [^;\n#]*"\$HOME/\.local/share/frametop/gaze/bench"; do\s*\[ -e "\$f" \] && recs\+='),
                 ("the ft-ondesktop link Steam games' launch options call",
@@ -93,7 +97,46 @@ class Uninstall(unittest.TestCase):
                 self.assertEqual(r.stdout.strip(), want, r.stderr)
         text = SCRIPT.read_text()
         self.assertRegex(text, r'\[ -n "\$hands_rate" \] && \{ run python3 "\$repo/hands/handsrate\.py" off \|\|')
-        self.assertRegex(text, r'\[ -n "\$eye_rate" \] \|\| \[ -n "\$dash_debugger" \] \|\| \[ -n "\$hands_rate" \]; then\s+step "Step 1')
+        self.assertRegex(text, r'\[ -n "\$eye_rate" \] \|\| \[ -n "\$dash_debugger" \] \|\| \[ -n "\$hands_rate" \]; then\s+said step1 yes\s+step "Step 1')
+
+
+    def test_plan_lines(self):
+        """--plan's questions are lines on fd 3, with their default and size, and ask nothing."""
+        r = self.bash('plan=1 dry=1 yes=1; { ask voice "Delete?" y 1.2G; ask code "Delete?" n; '
+                      'said step1 yes; } 3>&1 >/dev/null; echo "[$?]"')
+        self.assertEqual(r.stdout, "ask voice y 1.2G\nask code n -\nstep1 yes\n[0]\n", r.stderr)
+
+    def test_yes_takes_the_default_or_the_choice(self):
+        r = self.bash('yes=1; choice[settings]=y choice[releases]=n; '
+                      'for k in settings releases voice avatars; do '
+                      'if ask "$k" "Q $k" "$([ $k = voice ] && echo y || echo n)" >/dev/null; then echo "$k y"; else echo "$k n"; fi; done')
+        self.assertEqual(r.stdout.split("\n")[:4], ["settings y", "releases n", "voice y", "avatars n"], r.stderr)
+
+    def test_a_wrong_key(self):
+        r = self.bash('main --yes --delete everything || echo "[$?]"')
+        self.assertIn("[2]", r.stdout)
+        self.assertIn("--delete takes releases", r.stderr)
+
+    def test_sudo_asks_askpass_when_there_is_one(self):
+        """Both sudo calls go through sudo_, which adds -A when SUDO_ASKPASS is set (the window's helper)."""
+        text = SCRIPT.read_text()
+        outside = "\n".join(line for line in text.splitlines() if not line.startswith("sudo_()"))
+        self.assertNotRegex(outside, r'run sudo ')
+        self.assertEqual(len(__import__("re").findall(r'sudo_ (?:bash|setcap)', text)), 2)
+        r = self.bash('dry=1; sudo_ true; SUDO_ASKPASS=/x sudo_ true')
+        self.assertEqual(r.stdout, "  would run: sudo true\n  would run: sudo -A true\n", r.stderr)
+
+    def test_other_boxes(self):
+        """distrobox stays while a container besides the ones being deleted uses it."""
+        bin_ = self.home / "bin"
+        bin_.mkdir()
+        (bin_ / "podman").write_text("#!/bin/sh\nprintf 'dev\\nframetop-229b33a32503\\nmine\\n'\n")
+        (bin_ / "podman").chmod(0o755)
+        for keep_rel, keep_dev, want in (("0", "0", ["mine"]), ("1", "0", ["frametop-229b33a32503", "mine"]),
+                                         ("0", "1", ["dev", "mine"])):
+            with self.subTest(keep_releases=keep_rel, keep_dev=keep_dev):
+                r = self.bash(f'PATH="$HOME/bin:$PATH"; other_boxes {keep_rel} {keep_dev}')
+                self.assertEqual(sorted(r.stdout.split()), want, r.stderr)
 
 
 if __name__ == "__main__":

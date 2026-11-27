@@ -54,6 +54,7 @@ install -m644 "$root"/installer/frametop_installer/*.py "$share/frametop_install
 # (files only: a test run leaves host/__pycache__)
 find "$root/installer/host" -maxdepth 1 -type f -exec install -m755 -t "$share/host/" {} +
 install -m755 "$root/get.sh" "$share/get.sh"
+install -m755 "$root/uninstall.sh" "$share/uninstall.sh"
 printf 'VERSION=%s\nCOMMIT=%s\n' "$version" "$commit" >"$share/VERSION"
 install -Dm644 "$here/$ID.desktop" "$f/share/applications/$ID.desktop"
 install -Dm644 "$here/$ID.metainfo.xml" "$f/share/metainfo/$ID.metainfo.xml"

@@ -30,12 +30,13 @@ class Window(unittest.TestCase):
         self.ui = ui
 
     def test_pages_dont_shadow_gtk(self):
-        for mixin in (self.ui.PasswordPages, self.ui.ProgressPage, self.ui.UpdatePage, self.ui.DebugPage):
+        for mixin in (self.ui.PasswordPages, self.ui.ProgressPage, self.ui.UninstallPages, self.ui.UpdatePage,
+                      self.ui.DebugPage):
             clash = [n for n in vars(mixin) if not n.startswith("__") and hasattr(Gtk.ApplicationWindow, n)]
             self.assertEqual(clash, [], f"{mixin.__name__} shadows {clash}")
 
     def test_every_self_call_resolves(self):
-        for name in ("ui.py", "password_pages.py", "progress_page.py", "update_page.py"):
+        for name in ("ui.py", "password_pages.py", "progress_page.py", "uninstall_page.py", "update_page.py"):
             tree = ast.parse((PKG / name).read_text())
             called = {n.func.attr for n in ast.walk(tree)
                       if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
@@ -76,6 +77,7 @@ class Window(unittest.TestCase):
     def begun(self, win_dry_run=False, ready=True, **kw):
         """Window.begin with a password on a stand-in window: (the helper's arguments, what job.start
         got, the messages shown)."""
+        from frametop_installer import progress_page as pp
         ui, made, started, shown = self.ui, [], [], []
 
         class FakeHelper:
@@ -83,9 +85,9 @@ class Window(unittest.TestCase):
                 made.append(a)
             give = close = lambda self, *a: None
             wait_ready = lambda self: ready   # noqa: E731
-        saved = ui.Helper, ui.in_thread, ui.Gtk, ui.label, ui.host.stage, ui.job.start
-        ui.Helper, ui.in_thread = FakeHelper, lambda work, done, failed: done(work())
-        ui.Gtk, ui.label = types.SimpleNamespace(Spinner=lambda **k: None), lambda *a, **k: None
+        saved = pp.Helper, pp.in_thread, pp.Gtk, pp.label, ui.host.stage, ui.job.start
+        pp.Helper, pp.in_thread = FakeHelper, lambda work, done, failed: done(work())
+        pp.Gtk, pp.label = types.SimpleNamespace(Spinner=lambda **k: None), lambda *a, **k: None
         ui.host.stage = lambda: None
         ui.job.start = lambda *a, **k: started.append((a, k)) or ""
         try:
@@ -93,9 +95,10 @@ class Window(unittest.TestCase):
                                         ask_again="ask_again", helper_gone="helper_gone",
                                         forget_password=lambda: None, show_progress=lambda: shown.append("progress"),
                                         show_message=lambda *a: shown.append(a))
+            win.launch = types.MethodType(ui.Window.launch, win)
             ui.Window.begin(win, "pw", "0.3.0", "stable", ["--yes"], False, **kw)
         finally:
-            ui.Helper, ui.in_thread, ui.Gtk, ui.label, ui.host.stage, ui.job.start = saved
+            pp.Helper, pp.in_thread, pp.Gtk, pp.label, ui.host.stage, ui.job.start = saved
         return made, started, shown
 
     def test_an_install_hears_when_its_password_helper_goes(self):
@@ -284,19 +287,20 @@ class Updates(unittest.TestCase):
         self.assertEqual(seen[-2:], [("download", "0.3.0-exp.27"), ("then",)])
         self.assertFalse(any(s[0] in ("install", "reopen", "quit") for s in seen))
 
-    def opening(self, where):
+    def opening(self, where, state=None, rc=0):
         """What the window opens on when job.where_things_are says where: the calls, in order."""
         seen, ui = [], self.ui
         self.patch(ui, in_thread=self.run_now(), Gtk=types.SimpleNamespace(Spinner=lambda **k: None),
                    label=lambda text="", **k: text)
-        self.patch(ui.job, unit_state=lambda unit=None: "inactive", load_state=lambda: {"version": "1"},
-                   result=lambda: 0, where_things_are=lambda state, unit, rc: where)
+        self.patch(ui.job, unit_state=lambda unit=None: "inactive", load_state=lambda: state or {"version": "1"},
+                   result=lambda: rc, where_things_are=lambda state, unit, rc: where)
 
         def says(name):
             return lambda *a, **k: seen.append(name)
         win = types.SimpleNamespace(page=lambda *a, **k: None, went_wrong=says("went_wrong"),
                                     show_message=says("message"), show_progress=says("progress"),
                                     show_resume=says("resume"), show_versions=says("versions"),
+                                    show_uninstall_state=says("uninstall"),
                                     look_for_installer_update=lambda then: seen.append("update?") or then())
         ui.Window.open_where_things_are(win)
         return seen
@@ -306,6 +310,15 @@ class Updates(unittest.TestCase):
         for where in ("unfinished", "failed", "done"):
             self.assertEqual(self.opening(where), ["update?", "resume"])
 
+    def test_after_an_uninstall(self):
+        """It finishes an uninstall that waits for a restart, even once seen; a result is shown once."""
+        un = {"kind": "uninstall", "version": "", "flags": []}
+        self.assertEqual(self.opening("new", un, rc=3), ["update?", "uninstall"])
+        for where, rc in (("failed", 3), ("failed", 5), ("done", 0), ("unfinished", None), ("failed", 1)):
+            self.assertEqual(self.opening(where, un, rc=rc), ["update?", "uninstall"], (where, rc))
+        self.assertEqual(self.opening("new", un, rc=5), ["update?", "versions"])   # (seen)
+        self.assertEqual(self.opening("running", un, rc=None), ["progress"])
+
     def test_an_install_under_way_isnt_interrupted_for_it(self):
         self.assertEqual(self.opening("running"), ["progress"])
 
@@ -314,7 +327,7 @@ class Updates(unittest.TestCase):
         self.patch(ui, in_thread=lambda work, done, failed: work(), Gtk=types.SimpleNamespace(Spinner=lambda **k: None),
                    label=lambda text="", **k: text)
         self.patch(ui.releases, lookup_both=lambda build, get: gets.append(get) or {})
-        self.patch(ui.host, installed=lambda: ("", ""))
+        self.patch(ui.host, installed=lambda: ("", ""), has_frametop=lambda: False)
         win = types.SimpleNamespace(osr={}, dry_run=True, page=lambda *a, **k: None, get="the opening look's",
                                     versions_found=None, went_wrong=None)
         ui.Window.show_versions(win)

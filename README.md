@@ -271,7 +271,7 @@ If an install or update stops part-way (an error, Ctrl-C, a closed terminal, the
 
 ## Uninstall
 
-In a terminal on the headset, run:
+The Frametop Installer can do it without a terminal: its first page has an Uninstall Frametop button, which asks what to keep, runs the steps below, offers to restart the headset, and finishes after the restart when you open it again ([how it works](installer/README.md#uninstall)). Or, in a terminal on the headset, run:
 
 ```
 curl -fsSL https://frametop.github.io/frametop/uninstall.sh | bash
@@ -280,13 +280,15 @@ curl -fsSL https://frametop.github.io/frametop/uninstall.sh | bash
 It works in two steps, so it never takes away the keyboard, mouse, or desktop you're using while it runs:
 
 1. It stops Frametop from starting. Launch a program → Desktop opens the stock desktop again, and the Native Desktop entry, Frametop's services, its SteamVR driver, and its menu entries are removed, along with the system files of our eye tracker and the Bluetooth fixes and the file capabilities of hand tracking's camera broker (those need your `sudo` password). If 60 fps hand tracking was on, the tracking cameras go back to SteamVR's own mode, so the controllers track again. Everything running now keeps running until you restart the headset, and it offers to restart it for you.
-2. After the restart, run the same command again. It deletes the code in `~/frametop`, and asks whether to delete your settings, any eye or hand recordings, voice dictation's speech models, the avatar and hand models you imported, and the build container (1–2 GB) too.
+2. After the restart, run the same command again. It deletes the code in `~/frametop` (or the releases, with their containers and images), and asks whether to delete your settings (the stereo wallpaper too), any eye or hand recordings, voice dictation's speech models, the avatar and hand models you imported, and the build container (1–2 GB) too. Once no other container needs it, it also offers to remove distrobox, which the install put in `~/.local/bin`.
 
-To see what it would do without changing anything, add `-s -- --dry-run` after `bash`. If the code isn't in `~/frametop`, add `-s -- --dir <folder>`. From the repo, the same script is `./uninstall.sh`.
+To see what it would do without changing anything, add `-s -- --dry-run` after `bash`. `--yes` asks nothing and takes each question's default (`--delete KEY` and `--keep KEY` change one), which is what the Frametop Installer uses. If the code isn't in `~/frametop`, add `-s -- --dir <folder>`. From the repo, the same script is `./uninstall.sh`.
 
 Don't delete `~/frametop` by hand before you uninstall and restart: the desktop and the input relay run from it, and without it Launch a program → Desktop no longer opens anything. If you've already deleted it, the command above still works, since it doesn't need the repo.
 
 Unless you ask for them to go, your settings stay: `~/.config/frametop.conf`, `frametop-input.json` (button maps and key combinations), `frametop-layout.json` (the layout and profiles), `frametop-float.json`, and `frametop-remote/` in `~/.config`, the gaze calibration and where the screens were last arranged from in `~/.local/state/frametop`, and the desktop's own Plasma setup in `~/.config/frametop`. A later install picks them up again.
+
+The Frametop Installer app stays, so you can install Frametop again. To remove it and its files too, run `flatpak uninstall --delete-data io.github.frametop.Installer`.
 
 ## How it works
 

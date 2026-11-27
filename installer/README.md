@@ -34,7 +34,19 @@ The install's choices are saved in `~/.cache/frametop-installer/state.json` when
 | A result it hasn't shown | Done, or failed with the end of the log |
 | Nothing, or a result it has shown | The version page |
 
+An uninstall's state says `"kind": "uninstall"`, and the window opens on its own pages for it (see [Uninstall](#uninstall)).
+
 Install again is safe: `get.sh` resumes a partial download (`curl -C -`), and the install steps can run again over a finished or half-finished install. An install doesn't start while FrameDrop's install (`frametop-framedrop-install`) is running: the window says so when it opens and again when Install is pressed.
+
+## Uninstall
+
+The version page has an Uninstall Frametop button when anything of Frametop is installed (a release, its services, or `~/.local/share/frametop`). The window runs the same `uninstall.sh` as a terminal, staged into `bin/` with the other host scripts, so the two can't drift apart:
+
+1. `uninstall.sh --plan` changes nothing and prints what there is to do: whether step 1 has anything to remove, whether that needs `sudo`, which of Frametop's programs are running, and each question step 2 would ask, with its default and size (`uninstall.py` reads it). The window shows those questions as checkboxes with uninstall.sh's defaults. The releases always go, and distrobox is ticked only while the build container goes too, since the container needs it.
+2. If step 1 needs `sudo` (our eye tracker's frame grabber, NPU hand tracking, the Bluetooth fixes, ft-camd's capabilities), it asks for the password the way an install does, through the askpass helper. "Skip those" leaves those files in place and removes the rest.
+3. It runs `uninstall.sh --yes --from-installer --delete KEY ... --keep KEY ...` in the same `frametop-installer` service, so the progress page, the log and the result work as they do for an install. `--from-installer` leaves `~/.cache/frametop-installer` alone, since the script, its log and its result live there.
+
+uninstall.sh never stops what's running, so while Frametop runs it does only step 1 and exits with status 3. The window then offers Restart now (`systemctl reboot`). Opened again after the restart, it offers Finish uninstalling, which runs step 2 with the saved choices, every time it opens until that's done. Pressed before the restart, it says to restart first. Exit status 5 means everything went except what needed `sudo`, and Try again runs it again. When it's all done, the window removes `~/.cache/frametop-installer` itself. The Frametop Installer app stays, so Frametop can be installed again; `flatpak uninstall --delete-data io.github.frametop.Installer` removes it too. With `--dry-run`, the window runs `uninstall.sh --dry-run`, which changes nothing, and Restart now doesn't restart.
 
 ## Debug report
 
@@ -76,8 +88,8 @@ Starting the new version after an update needs no permission of its own: `flatpa
 
 ## Files
 
-- `frametop_installer/`: the app (Python, GTK 4, libadwaita when present). `options.py` holds the parts and what each release can leave out, `releases.py` the lookup and the order of versions, `selfupdate.py` the installer's own update, `host.py` the host commands, and `job.py` the service, its state and the progress. The window is `ui.py` (the version, parts and resume pages), with `password_pages.py`, `progress_page.py`, `update_page.py` and `debug_page.py` mixed into it, `askpass.py` for its end of the askpass socket, and `widgets.py` for the small GTK pieces.
-- `host/`: what runs on the host. `helper.py` (askpass socket, `passwd`), `askpass`, `run-install.sh` (result, then the SteamVR restart), `debug-report.sh`, `debug-features.sh`, `debug-lib.sh` and `debug-mask.py` (the Debug button's report), and `fake-install.sh` for test runs.
+- `frametop_installer/`: the app (Python, GTK 4, libadwaita when present). `options.py` holds the parts and what each release can leave out, `releases.py` the lookup and the order of versions, `selfupdate.py` the installer's own update, `host.py` the host commands, `job.py` the service, its state and the progress, and `uninstall.py` what `uninstall.sh --plan` says and the flags the choices give. The window is `ui.py` (the version, parts and resume pages), with `password_pages.py`, `progress_page.py`, `uninstall_page.py`, `update_page.py` and `debug_page.py` mixed into it, `askpass.py` for its end of the askpass socket, and `widgets.py` for the small GTK pieces.
+- `host/`: what runs on the host. `helper.py` (askpass socket, `passwd`), `askpass`, `run-install.sh` (result, then the SteamVR restart), `debug-report.sh`, `debug-features.sh`, `debug-lib.sh` and `debug-mask.py` (the Debug button's report), and `fake-install.sh` for test runs. `get.sh` and `uninstall.sh` come from the repo's top.
 - `flatpak/`: the launcher, desktop entry, AppStream metadata, icon, and `build.sh`.
 - `tests/`: offline tests, in `just test` through `scripts/testgate/python-suites.txt`.
 

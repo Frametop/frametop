@@ -6,7 +6,7 @@ sandbox; everything that installs runs on the host through flatpak-spawn --host 
 --talk-name=org.freedesktop.Flatpak). Started outside a Flatpak (from the repo, for testing),
 the same commands run directly.
 
-The host scripts (installer/host/, and get.sh) are copied to ~/.cache/frametop-installer/bin,
+The host scripts (installer/host/, get.sh and uninstall.sh) are copied to ~/.cache/frametop-installer/bin,
 the one host folder the sandbox can write (--filesystem=~/.cache/frametop-installer:create), so
 the host can run them: it can't see the app's /app.
 """
@@ -27,11 +27,12 @@ HOST_FILES = ("helper.py", "askpass", "run-install.sh", "fake-install.sh", "debu
              "debug-features.sh", "debug-mask.py")
 
 
-def _get_sh():
-    for p in (DATA / "get.sh", DATA.parent / "get.sh"):
+def _script(name):
+    """get.sh or uninstall.sh: beside the package in the app, at the repo's top from the repo."""
+    for p in (DATA / name, DATA.parent / name):
         if p.is_file():
             return p
-    raise FileNotFoundError("get.sh isn't in the installer")
+    raise FileNotFoundError(f"{name} isn't in the installer")
 
 
 def env_prefix():
@@ -94,7 +95,8 @@ def stage():
     os.chmod(CACHE, 0o700)
     for name in HOST_FILES:
         _put(DATA / "host" / name, BIN / name)
-    _put(_get_sh(), BIN / "get.sh")
+    for name in ("get.sh", "uninstall.sh"):
+        _put(_script(name), BIN / name)
     return BIN
 
 
@@ -104,6 +106,15 @@ def installed():
                 str(HOME / ".local/share/frametop/releases/current/.frametop-release")])
     lines = out.splitlines()
     return (lines[0] if lines else "", lines[1] if len(lines) > 1 else "")
+
+
+def has_frametop():
+    """Is any of Frametop installed: a release, its services, or its folder? (What the version
+    page's Uninstall Frametop button goes by; uninstall.sh --plan says what exactly.)"""
+    code, _, _ = run(["bash", "-c", 'shopt -s nullglob; f=("$HOME"/.config/systemd/user/frametop-*.service); '
+                      '[ ${#f[@]} -gt 0 ] || [ -d "$HOME/.local/share/frametop" ] || '
+                      'grep -qs Frametop "$HOME/.local/share/applications/deckard-nested-desktop.desktop"'], timeout=15)
+    return code == 0
 
 
 def password_set():

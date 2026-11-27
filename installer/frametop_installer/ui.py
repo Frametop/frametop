@@ -6,6 +6,9 @@ the install's progress, which follows the install's service until it ends. Opene
 install runs, it goes straight to the progress; opened after one stopped without finishing (the
 headset restarted or crashed), it offers to run the same install again.
 
+The version page's Uninstall Frametop, there when something of Frametop is installed, runs
+uninstall.sh from the window (uninstall_page.py).
+
 Opening it also looks for updates: a newer Frametop Installer is offered first (update_page.py),
 and the version page says when a newer Frametop than the installed one is out.
 
@@ -27,10 +30,11 @@ except (ValueError, ImportError):  # SteamOS's host has GTK 4 but no libadwaita
     Adw = None
 
 from . import host, job, options, releases  # noqa: E402
-from .askpass import Helper  # noqa: E402
 from .debug_page import DebugPage  # noqa: E402
 from .password_pages import PasswordPages  # noqa: E402
 from .progress_page import ProgressPage  # noqa: E402
+from .uninstall import outcome as uninstall_outcome  # noqa: E402
+from .uninstall_page import UninstallPages  # noqa: E402
 from .update_page import UpdatePage  # noqa: E402
 from .widgets import boxed_list, button, check_row, in_thread, label, vbox  # noqa: E402
 
@@ -40,7 +44,7 @@ CHANNEL_DETAIL = {"stable": "From main: tested releases.",
                   "experimental": "From experimental: the newest features, less tested."}
 
 
-class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.ApplicationWindow):
+class Window(PasswordPages, ProgressPage, UninstallPages, UpdatePage, DebugPage, Gtk.ApplicationWindow):
     def __init__(self, app, dry_run=False):
         super().__init__(application=app, title="Frametop Installer")
         self.set_default_size(980, 820)
@@ -53,6 +57,8 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
         self.helper = None
         self.keypads = []
         self.busy = False
+        self.state = None
+        self.plan, self.un_picks, self.un_finishing, self.un_dry, self.un_syncing = None, {}, False, False, False
         self.get = releases.memo()      # GitHub's answers, each asked for once per look
         self.osr = releases.os_release()
 
@@ -116,6 +122,8 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
                 return self.show_progress(reattach=True)   # (an install isn't interrupted for an update)
 
             def go_on():
+                if (state or {}).get("kind") == "uninstall" and (where != "new" or uninstall_outcome(rc) == "restart"):
+                    return self.show_uninstall_state(where, state, rc)
                 if where in ("unfinished", "failed", "done"):
                     return self.show_resume(where, state, rc)
                 self.show_versions()
@@ -138,11 +146,11 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
                   label("Looking up the newest Frametop releases on GitHub...", css=("title-3",), xalign=0.5))
         # This look shares the answers the look for a newer installer got; the next asks afresh.
         build, get, self.get = self.osr.get("BUILD_ID", ""), self.get, releases.memo()
-        in_thread(lambda: (releases.lookup_both(build, get), host.installed()), self.versions_found,
-                  self.went_wrong)
+        in_thread(lambda: (releases.lookup_both(build, get), host.installed(), host.has_frametop()),
+                  self.versions_found, self.went_wrong)
 
     def versions_found(self, found):
-        self.releases, (inst_version, inst_channel) = found
+        self.releases, (inst_version, inst_channel), self.has_frametop = found
         osver = self.osr.get("VERSION_ID", "?")
         intro = label("Frametop turns your Steam Frame into a multi-screen desktop, with a 3D mouse, "
                       "Frametop Settings, and the optional parts on the next page. Pick the version to "
@@ -182,6 +190,8 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
             buttons = [button("Try again", self.show_versions, css=("suggested-action",))]
         else:
             buttons = [button("Next", self.version_picked, css=("suggested-action",))]
+        if inst_version or self.has_frametop:
+            buttons.insert(0, button("Uninstall Frametop", self.show_uninstall))
         self.page("version", *widgets, buttons=buttons)
 
     def version_picked(self):
@@ -229,7 +239,7 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
 
     def show_versions_again(self):
         if self.releases:
-            self.versions_found((self.releases, host.installed()))
+            self.versions_found((self.releases, host.installed(), host.has_frametop()))
         else:
             self.show_versions()
 
@@ -275,46 +285,8 @@ class Window(PasswordPages, ProgressPage, UpdatePage, DebugPage, Gtk.Application
             version, channel = self.release.version, self.release.channel
             flags = options.install_flags(self.picked, self.release.supported)
             restart = self.restart
-        self.page("loading", Gtk.Spinner(spinning=True, height_request=48),
-                  label("Starting the install...", css=("title-3",), xalign=0.5))
-
-        def work():
-            try:
-                host.stage()
-            except OSError as e:
-                return f"couldn't put the installer's scripts in {host.BIN}: {e}"
-            return ""
-
-        def staged(err):
-            if err:
-                return started(err)
-            # The helper listens before the install starts, so its first sudo finds it.
-            if pw is not None and self.helper is None:
-                try:
-                    self.helper = Helper(self.ask_again, self.helper_gone)
-                    self.helper.give(pw)
-                except OSError as e:
-                    return started(f"the password helper didn't start: {e}")
-            helper = self.helper if pw is not None else None
-
-            def start():
-                if helper and not helper.wait_ready():
-                    return "the password helper didn't start, so nothing could answer sudo"
-                return job.start(version, channel, flags, restart, pw is not None, dry_run=dry_run)
-            in_thread(start, started, failed)
-
-        def started(err):
-            if err:
-                self.forget_password()
-                if self.helper:
-                    self.helper.close()
-                    self.helper = None
-                return self.show_message("The install didn't start", err)
-            self.show_progress()
-
-        def failed(e):
-            started(f"{e.__class__.__name__}: {e}")
-        in_thread(work, staged, failed)
+        self.launch(pw, lambda: job.start(version, channel, flags, restart, pw is not None, dry_run=dry_run),
+                    "Starting the install...", "The install didn't start")
 
     def show_resume(self, where, state, rc):
         version = state.get("version", "")

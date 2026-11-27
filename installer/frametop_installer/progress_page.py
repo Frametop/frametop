@@ -1,5 +1,6 @@
-"""The progress page: follows the install's service through its log until it ends, answers a
-sudo that comes after the window was opened again, and shows done or failed."""
+"""The progress page: follows the install's (or uninstall's) service through its log until it
+ends, answers a sudo that comes after the window was opened again, and shows done or failed. An
+uninstall's end is uninstall_page.py's."""
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -11,11 +12,57 @@ from .widgets import button, in_thread, label, password_field, vbox  # noqa: E40
 
 CRASH_NOTE = ("If your Steam Frame restarts or crashes while Frametop installs, just open Frametop "
               "Installer again and choose Install again: it picks up where it stopped.")
+UNINSTALL_CRASH_NOTE = ("If your Steam Frame restarts or crashes while Frametop uninstalls, open Frametop "
+                        "Installer again and choose Try again: it removes what's left.")
 
 
 class ProgressPage:
     """Mixed into the Window: uses its page(), stack, helper, password, busy, keypads, dry_run,
-    close(), show_versions(), install_again() and forget_password()."""
+    close(), show_versions(), install_again(), uninstall_finished() and forget_password()."""
+
+    def launch(self, pw, start_job, waiting, failed_title):
+        """Put the scripts on the host, start the password helper when there's a password, then
+        start_job() (job.start or job.start_uninstall: "" or why it didn't start), then the progress."""
+        self.page("loading", Gtk.Spinner(spinning=True, height_request=48),
+                  label(waiting, css=("title-3",), xalign=0.5))
+
+        def work():
+            try:
+                host.stage()
+            except OSError as e:
+                return f"couldn't put the installer's scripts in {host.BIN}: {e}"
+            return ""
+
+        def staged(err):
+            if err:
+                return started(err)
+            # The helper listens before the install starts, so its first sudo finds it.
+            if pw is not None and self.helper is None:
+                try:
+                    self.helper = Helper(self.ask_again, self.helper_gone)
+                    self.helper.give(pw)
+                except OSError as e:
+                    return started(f"the password helper didn't start: {e}")
+            helper = self.helper if pw is not None else None
+
+            def start():
+                if helper and not helper.wait_ready():
+                    return "the password helper didn't start, so nothing could answer sudo"
+                return start_job()
+            in_thread(start, started, failed)
+
+        def started(err):
+            if err:
+                self.forget_password()
+                if self.helper:
+                    self.helper.close()
+                    self.helper = None
+                return self.show_message(failed_title, err)
+            self.show_progress()
+
+        def failed(e):
+            started(f"{e.__class__.__name__}: {e}")
+        in_thread(work, staged, failed)
 
     def show_progress(self, reattach=False):
         self.progress = job.Progress()
@@ -24,7 +71,10 @@ class ProgressPage:
         state = job.load_state() or {}
         self.state = state
         version = state.get("version", "")
-        self.status = label(f"Installing Frametop {version}", css=("title-1",))
+        uninstalling = state.get("kind") == "uninstall"
+        what = "uninstall" if uninstalling else "install"
+        self.status = label("Uninstalling Frametop" if uninstalling else f"Installing Frametop {version}",
+                            css=("title-1",))
         self.step = label("Starting...", css=("heading",))
         self.bar = Gtk.ProgressBar(show_text=False)
         self.download = label("", css=("dim-label",))
@@ -32,10 +82,10 @@ class ProgressPage:
         note.add_css_class("card")
         for w in (label("If it restarts or crashes", css=("heading",), margin_top=10, margin_start=14,
                         margin_end=14),
-                  label(CRASH_NOTE, margin_start=14, margin_end=14),
-                  label("You can close this window and take the headset off: the install keeps going. "
+                  label(UNINSTALL_CRASH_NOTE if uninstalling else CRASH_NOTE, margin_start=14, margin_end=14),
+                  label(f"You can close this window and take the headset off: the {what} keeps going. "
                         "Open Frametop Installer again to see how it's doing."
-                        + (" Keep this window open if the install asks for your password."
+                        + (f" Keep this window open if the {what} asks for your password."
                            if state.get("sudo") else ""),
                         css=("dim-label",), margin_bottom=10, margin_start=14, margin_end=14)):
             note.append(w)
@@ -55,7 +105,7 @@ class ProgressPage:
                                  "that need it.", css=("warning",), visible=False)
         self.ask_error = label("", css=("error",), visible=False)
         self.ask_box = vbox(spacing=8, visible=False)
-        for w in (label("The install needs your password for its next step.", css=("heading",)), ask_field,
+        for w in (label(f"The {what} needs your password for its next step.", css=("heading",)), ask_field,
                   self.ask_error, Gtk.Box(spacing=8, halign=Gtk.Align.END)):
             self.ask_box.append(w)
         btns = self.ask_box.get_last_child()
@@ -184,6 +234,8 @@ class ProgressPage:
         self.state = state
         while (child := self.done_buttons.get_first_child()) is not None:
             self.done_buttons.remove(child)
+        if state.get("kind") == "uninstall":
+            return self.uninstall_finished(rc)
         if where == "done":
             self.bar.set_fraction(1)
             self.status.set_label(f"Frametop {state.get('version', '')} is installed")

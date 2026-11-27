@@ -4,7 +4,7 @@
 # are frametop-image.tar (Frametop, built, as a container image) and frametop-release.json (its
 # version, commit, the image file's sha256 and the image's ID, and the SteamOS table). Nothing
 # builds on the headset, and nothing else is downloaded, but voice dictation's speech models
-# (about 320 MB, fixed URLs checked by sha256: voice/models.sh) if you install it. Hand tracking
+# (about 870 MB, fixed URLs checked by sha256: voice/models.sh) if you install it. Hand tracking
 # and the Hand Recorder come built too: their installs only set their camera broker's file
 # capabilities (sudo), and the recorder's adds its menu entry.
 #

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Fetch Frametop Voice's models (about 340 MB) into ~/.local/share/frametop/voice/models on the
+# Fetch Frametop Voice's models (about 870 MB) into ~/.local/share/frametop/voice/models on the
 # Frame, each from a fixed URL (a Hugging Face commit or a sherpa-onnx release asset) and checked
 # against its sha256. They stay there across releases and reinstalls; uninstall.sh removes them.
-#   ggml-small.en-q5_1.bin   whisper small.en (whisper.cpp's), wake word commands      MIT
-#   sherpa-onnx-moonshine-base-en-quantized-2026-02-27/   Moonshine base, live dictation  MIT
+#   sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/   Parakeet TDT 0.6B v3 (NVIDIA's, sherpa-onnx's
+#                            int8 export): dictation and commands, 25 languages   CC BY 4.0
+#   ggml-small.en-q5_1.bin   whisper small.en (whisper.cpp's): what whisper-server loads
+#                            when the model the settings choose isn't there             MIT
 #   sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/ the wake word spotter      Apache-2.0
 #   silero_vad.onnx          Silero VAD, where speech starts and stops                  MIT
 # And whisper models for other languages, fetched only when chosen on the Voice page (or here):
@@ -24,14 +26,16 @@ want=$2
 dir=$HOME/.local/share/frametop/voice/models
 hf=https://huggingface.co
 gh=https://github.com/k2-fsa/sherpa-onnx/releases/download
-moon=sherpa-onnx-moonshine-base-en-quantized-2026-02-27
+para=sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
+pk=$hf/csukuangfj/$para/resolve/ed5d745623472f97cfc2e6c2916ee248798fc5a8
 kws=sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01
 # file, sha256, URL (an archive's files: its own entry, from "tar:" plus the archive's name)
 files=(
   "ggml-small.en-q5_1.bin bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30 $hf/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en-q5_1.bin"
-  "$moon/encoder_model.ort 7c66495948d0d08ec1af454cd4b5514862ae6511e94712a60e6d83eaec8dc8cf $hf/csukuangfj2/$moon/resolve/8f4d6c58c03d40bcea40043bb7120a878f2bbef6/encoder_model.ort"
-  "$moon/decoder_model_merged.ort d9d7b333af34bc552580576ddcf248a1c6c839e0d3b43b09afb9376ed009899d $hf/csukuangfj2/$moon/resolve/8f4d6c58c03d40bcea40043bb7120a878f2bbef6/decoder_model_merged.ort"
-  "$moon/tokens.txt 2870d843e14c1e187bf1913a521562a63b53933814bd7f2145120468f494a049 $hf/csukuangfj2/$moon/resolve/8f4d6c58c03d40bcea40043bb7120a878f2bbef6/tokens.txt"
+  "$para/encoder.int8.onnx 1afbe69c1ffdabee94755f42e4daf1d93549131a3da11356bda84fcef0f2c479 $pk/encoder.int8.onnx"
+  "$para/decoder.int8.onnx 0222a86147299d4dee90edf95b6d13827edb42ad8b7c9cf0b2582f030937c0b5 $pk/decoder.int8.onnx"
+  "$para/joiner.int8.onnx cbd02f3696e9944970111fb439d9c3fd365a80374565f13f2b9c7007d253fc98 $pk/joiner.int8.onnx"
+  "$para/tokens.txt d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d $pk/tokens.txt"
   "silero_vad.onnx 9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6 $gh/asr-models/silero_vad.onnx"
   "$kws.tar.bz2 f170013b4716e41b62b9bfd809687c207cef798ef9bc6534d524e17af9b6561a $gh/kws-models/$kws.tar.bz2"
 )
@@ -62,7 +66,7 @@ if [ "$1" = check ]; then
 fi
 # What ft-voiced uses from the wake word archive (int8, the tokens and the BPE model).
 kws_files="tokens.txt bpe.model encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
-mkdir -p "$dir/$moon" "$dir/$kws"
+mkdir -p "$dir/$para" "$dir/$kws"
 cd "$dir"
 bad=0
 for entry in "${files[@]}"; do

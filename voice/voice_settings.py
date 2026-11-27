@@ -5,7 +5,7 @@ the installer. Standard library only: the installer runs it with the host's pyth
 ~/.config/frametop-voice.json (written by Frametop Settings):
   {"controller": ["left/dpad_down"], "controller_mode": "hold",
    "language": "de", "model": "small",
-   "live_typing": true, "sounds": false, "wake_word": false,
+   "sounds": false, "wake_word": false,
    "wake_phrases": ["HEY COMPUTER"],
    "commands": [{"say": ["flag that", "flag"], "run": ["~/.local/bin/my-tool", "flag"]}],
    "advanced": {"dictation": {"min_seconds": 0.5}}}
@@ -15,10 +15,11 @@ controller: Frame controller buttons for push-to-talk, as the input relay names 
   in games.
 controller_mode: "hold" records while held; "toggle" starts on one press and stops on the next.
 language: what you speak (LANGUAGES): "en", another language's code, or "auto" (whisper tells, per
-  piece of speech). English types live with Moonshine; the others with whisper on the GPU.
-model: the whisper model (WHISPER_MODELS). One that knows only English is taken as "small" for
-  another language. The ones not installed with Frametop Voice are fetched when chosen:
-  voice/models.sh model NAME.
+  piece of speech). Parakeet recognizes the ones it knows (PARAKEET_LANGUAGES, English among
+  them) on the CPU; whisper on the GPU the others and "auto" (engine_for).
+model: the whisper model (WHISPER_MODELS), for the languages whisper recognizes. One that knows
+  only English is taken as "small" for another language. The ones not installed with Frametop
+  Voice are fetched when chosen: voice/models.sh model NAME.
 wake_phrases: what to say before a command; any English words, spelled out at load time.
 commands: wake word commands that run a program (voice_commands.py). Edited by hand; the
   settings app keeps them as they are, and every other key it doesn't manage too.
@@ -53,7 +54,6 @@ DEFAULT = {
     "controller_mode": "hold",
     "language": "en",
     "model": "small.en",
-    "live_typing": True,
     "sounds": False,
     # Off until you turn it on: it keeps the mic open, and does nothing without commands of your own.
     "wake_word": False,
@@ -69,14 +69,24 @@ WHISPER_MODELS = {
     "large-v3-turbo": ("ggml-large-v3-turbo-q5_0.bin", 574, "all"),
 }
 MULTILINGUAL_DEFAULT = "small"
-# Languages to dictate in, by whisper's codes (it knows about 100; these are on the Voice dictation page).
+# Languages to dictate in, by whisper's codes (it knows about 100; these are on the Voice dictation
+# page: every one Parakeet knows, and whisper's most spoken others).
 LANGUAGES = {"en": "English", "auto": "Detect it", "de": "Deutsch", "fr": "Fran\u00e7ais", "es": "Espa\u00f1ol",
              "it": "Italiano", "pt": "Portugu\u00eas", "nl": "Nederlands", "pl": "Polski",
              "cs": "\u010ce\u0161tina", "sv": "Svenska", "da": "Dansk", "no": "Norsk", "fi": "Suomi",
              "tr": "T\u00fcrk\u00e7e", "ru": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
              "uk": "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
-             "ja": "\u65e5\u672c\u8a9e", "zh": "\u4e2d\u6587", "ko": "\ud55c\uad6d\uc5b4"}
-OPTIONS = ("live_typing", "sounds", "wake_word")
+             "ja": "\u65e5\u672c\u8a9e", "zh": "\u4e2d\u6587", "ko": "\ud55c\uad6d\uc5b4",
+             # The rest of Parakeet's (PARAKEET_LANGUAGES).
+             "bg": "\u0411\u044a\u043b\u0433\u0430\u0440\u0441\u043a\u0438", "el": "\u0395\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac",
+             "et": "Eesti", "hr": "Hrvatski", "hu": "Magyar", "lt": "Lietuvi\u0173", "lv": "Latvie\u0161u",
+             "mt": "Malti", "ro": "Rom\u00e2n\u0103", "sk": "Sloven\u010dina", "sl": "Sloven\u0161\u010dina"}
+OPTIONS = ("sounds", "wake_word")
+# Parakeet TDT 0.6B v3 (voice_engine.py), fetched by voice/models.sh with the rest: its folder
+# in MODELS_DIR, its files, and the languages it knows. It tells them apart itself.
+PARAKEET_DIR = MODELS_DIR / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+PARAKEET_FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+PARAKEET_LANGUAGES = frozenset("bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk".split())
 DICTATION_ACTIONS = ("dictate", "dictate_hold")
 # frame-voice's keys, by evdev name: the modifiers (a left one taps either side, a right one only
 # itself, as the relay reads them) and the keys a push-to-talk key usually is.
@@ -124,8 +134,23 @@ def load():
     return out
 
 
+def parakeet_installed():
+    """Fetched and checked, like model_installed."""
+    return all((PARAKEET_DIR / f).is_file() and (PARAKEET_DIR / f"{f}.sha256").is_file() for f in PARAKEET_FILES)
+
+
+def engine_for(language, choice="parakeet"):
+    """What recognizes speech in a language: "parakeet" where it knows the language and is
+    installed, else "whisper" ("auto" too: only whisper says which language it heard). choice:
+    the advanced settings' dictation engine (ft-voiced's DEFAULTS); "whisper" there means
+    whisper for every language."""
+    if choice == "whisper":
+        return "whisper"
+    return "parakeet" if language in PARAKEET_LANGUAGES and parakeet_installed() else "whisper"
+
+
 def model_for(settings):
-    """The whisper model dictation uses: the chosen one, or MULTILINGUAL_DEFAULT when that one
+    """The whisper model whisper-server loads: the chosen one, or MULTILINGUAL_DEFAULT when that one
     knows only English and the language isn't English."""
     name = settings["model"]
     if WHISPER_MODELS[name][2] == "en" and settings["language"] != "en":

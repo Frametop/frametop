@@ -1198,7 +1198,7 @@ def tests():
     key(RCTRL, 1)
     to_relay("type ok")
     time.sleep(0.3)
-    check("held to talk: live text reaches the desktop while Right Ctrl is held, without it",
+    check("held to talk: text reaches the desktop while Right Ctrl is held, without it",
           typed(), [f"key {c} {v}" for c, v in keys_for("ok")])
     key(RCTRL, 2); key(RCTRL, 0)
     check("...nor its repeats or release", typed(), [])

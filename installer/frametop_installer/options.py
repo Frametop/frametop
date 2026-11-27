@@ -27,7 +27,7 @@ class Part:
 PARTS = (
     Part("voice", "Voice dictation",
          "A Right Ctrl tap or holding the left d-pad down, and what you say is typed. Nothing leaves "
-         "the headset. Downloads about 320 MB of speech models.", off="--no-voice"),
+         "the headset. Downloads about 870 MB of speech models.", off="--no-voice"),
     Part("hands", "Hand tracking (experimental)",
          "Poke, pinch and grab the screens with your hands. It uses a lot of the headset's CPU.",
          off="--no-hands", sudo=True),

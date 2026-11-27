@@ -1758,8 +1758,7 @@ class Backend(QObject):
 
     @Slot(str, bool)
     def setVoiceOption(self, key, on):
-        texts = {"live_typing": ("Typing as you talk", "Typing when you stop talking"),
-                 "sounds": ("A tone when dictation starts and stops", "No dictation sounds"),
+        texts = {"sounds": ("A tone when dictation starts and stops", "No dictation sounds"),
                  "wake_word": ("Listening for the wake word", "Wake word off")}
         if key in texts:
             self._set_voice(key, bool(on), texts[key][0 if on else 1])
@@ -1842,11 +1841,22 @@ class Backend(QObject):
         if language in voice_settings.LANGUAGES:
             s = voice_settings.load()
             s["language"] = language
+            whisper = self._voice_engine(s) == "whisper"  # else Parakeet: no whisper model to have
             want = voice_settings.model_for(s)
             self._set_voice("language", language, "Dictation language: " + voice_settings.LANGUAGES[language]
-                            + ("" if want == s["model"] else f" (with whisper {want})"))
-            if not voice_settings.model_installed(want):
+                            + (f" (with whisper {want})" if whisper and want != s["model"] else ""))
+            if whisper and not voice_settings.model_installed(want):
                 self._fetch_model(want)
+
+    @staticmethod
+    def _voice_engine(s):
+        return voice_settings.engine_for(s["language"], s["advanced"].get("dictation", {}).get("engine"))
+
+    @Property(str, notify=voiceChanged)
+    def voiceEngine(self):
+        """What recognizes the language (voice_settings.engine_for): "parakeet" or "whisper".
+        The page offers whisper's models only for whisper."""
+        return self._voice_engine(voice_settings.load())
 
     @Property("QVariantList", notify=voiceChanged)
     def voiceModels(self):
@@ -1859,7 +1869,7 @@ class Backend(QObject):
 
     @Property(str, notify=voiceChanged)
     def voiceModel(self):
-        """The model ft-voiced uses (voice_settings.model_for)."""
+        """The model whisper-server loads (voice_settings.model_for)."""
         return voice_settings.model_for(voice_settings.load())
 
     @Property(str, notify=voiceChanged)

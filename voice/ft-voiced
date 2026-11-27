@@ -2,10 +2,15 @@
 """ft-voiced: Frametop Voice, local dictation and wake words (frametop-voice.service).
 
 One PipeWire capture stream (pw-record) feeds two consumers:
-  * dictation: push-to-talk -> record -> Moonshine (live, on the CPU) or whisper-server -> the
-    input relay types the text where typing goes
-  * wake word: sherpa-onnx keyword spotter -> capture the spoken command -> whisper-server ->
+  * dictation: push-to-talk -> record -> the recognizer, once the recording is over -> the input
+    relay types the text where typing goes
+  * wake word: sherpa-onnx keyword spotter -> capture the spoken command -> the recognizer ->
     a voice command (voice_commands.py), or the command hook and event subscribers
+
+Nothing is typed while you talk: the pill in the headset (notice.py) shows that it listens, then
+that it's typing. The recognizer hears the whole recording at once, with its silences cut out
+(the VAD), which is what makes it accurate; a long one goes to it in pieces cut at pauses while
+it's still being made, so the wait after the release stays a second or two.
 
 Push-to-talk comes from the input relay (a key combination or mouse button with the dictate or
 dictate_hold action: "toggle|start|stop|cancel <source> [quiet]" on @frametop_voice, taken only
@@ -14,8 +19,9 @@ socket (input/vrws.py), so they still do what they do in games. Text goes to the
 TEXT" on @frametop_relay, any language's characters: it types them with the keys of the desktop's
 keyboard layout, and only while no modifier is held, so letters never turn into shortcuts.
 
-The language ("language" in the settings) picks the live engine: English is Moonshine on the
-CPU, any other language whisper-server on the GPU, with the model the settings choose
+The language ("language" in the settings) picks the recognizer (voice_settings.engine_for):
+Parakeet on the CPU (voice_engine.py) for the 25 languages it knows, English among them, and
+whisper-server on the GPU for the others and for "auto", with the model the settings choose
 (voice_settings.model_for, loaded by voice/whisper-run).
 
 Runs in Frametop's container (scripts/in-box: numpy, sherpa-onnx and pw-record are there),
@@ -56,6 +62,7 @@ import ft_commands
 import ft_pinlock
 import notice
 import voice_commands
+import voice_engine
 import voice_settings
 import vrws
 
@@ -76,11 +83,11 @@ TYPE_CHUNK = 2000  # bytes of text per "type" datagram, at most
 # the host's tools. distrobox-host-exec passes no environment, so it goes through env there.
 IN_BOX = Path("/run/.containerenv").exists() and shutil.which("distrobox-host-exec") is not None
 HOST = ["distrobox-host-exec"] if IN_BOX else []
-# Audio kept before speech that starts after a silence: the VAD flags speech ~0.27 s late.
-LEAD_IN_SECONDS = 0.5
-# Committed words a window's decode is lined up against: more than its context can hold.
-ALIGN_WORDS = 12
 LOOKUP_EVERY = 5.0  # seconds between looking up the controllers' root paths (they change)
+# Seconds kept around each stretch of speech the VAD finds; the rest of a silence is cut. The
+# VAD finds a soft first word late, 0.4 to 0.7 s after it starts: at 0.25, "The quick brown fox"
+# after a pause came out as "Quick brown fox" in half the tries, at 0.4 and 0.6 in none.
+SPEECH_PAD = 0.6
 
 log = logging.getLogger("ft-voiced")
 
@@ -97,31 +104,22 @@ DEFAULTS = {
         # Shorter recordings are dropped, not transcribed: a press that was a slip. A single word
         # takes ~0.3-0.5 s; a recording without speech in it types nothing anyway (the VAD).
         "min_seconds": 0.3,
-        "live_after_seconds": 2.0,  # no live typing before this far in (as when it was min_seconds)
         "max_seconds": 120,
         "trailing_space": True,
-        # Transcribe while recording: pieces split at pauses go to whisper as soon as they end,
-        # so only the last piece is left after release.
-        "streaming": True,
-        # Live text by agreement: the current window of speech is re-decoded every
-        # step_seconds and words two decodes in a row agree on are typed. A window closes at a
-        # pause (its last words are typed then) or at its quietest point by max_window_seconds.
-        # moonshine runs on the CPU (~0.1-0.3 s per decode, returns nothing past ~9 s of audio);
-        # "whisper" uses the whisper-server on the GPU (better punctuation, ~0.5-0.8 s per decode).
-        "engine": "moonshine",
-        "moonshine_model": "sherpa-onnx-moonshine-base-en-quantized-2026-02-27",  # in MODELS
-        "moonshine_threads": 2,
-        "step_seconds": 0.8,
-        # A pause this long ends the window (its last word is typed then). Shorter ones stay inside
-        # it, as in Faceclaw's dictation, so the model hears the sentence go on: at 0.8 s, pauses
-        # inside a sentence ended it with "." and a capital ("light up. Here and there").
-        "pause_seconds": 1.5,
-        # A full window (max_window_seconds) closes at its longest pause at least this long.
+        # parakeet: voice_engine.py on the CPU for the languages it knows, whisper-server for
+        # the rest. "whisper": whisper-server for every language.
+        "engine": "parakeet",
+        "threads": 2,  # the recognizer's, on the CPU
+        # A recording longer than this is decoded in pieces, each cut at a pause while the
+        # recording goes on. One decode's time and memory grow with its audio: 17 s took 1.9 s
+        # on one thread, 50 s took 7.5 s and 2 GB.
+        "max_piece_seconds": 20.0,
+        # A piece ends in the middle of its longest pause at least this long, or failing one
+        # after its quietest moment.
         "min_pause_seconds": 0.3,
-        "max_window_seconds": 8.0,  # audio per decode, context included
-        # Each window is decoded after this much of the previous one's end, so a sentence that
-        # goes on after a pause isn't heard as a new one (no stray "." and capital at the seam).
-        "context_seconds": 1.5,
+        # The recognizer's model leaves memory (1 to 1.5 GB) after this long unused, and loads
+        # again (2 s, while you talk) when the next recording starts. 0 keeps it.
+        "unload_after_seconds": 120,
         # Keep the audio of the last N dictations in ~/.local/state/frametop/voice/clips for
         # comparing models and settings. 0 = never write audio to disk.
         "save_clips": 0,
@@ -204,90 +202,6 @@ def drop_repeats(text):
     return " ".join(out)
 
 
-SAME_WORD = {"okay": "ok"}  # spellings Moonshine switches between from one decode to the next
-
-
-def norm(word):
-    word = re.sub(r"[^\w']", "", word.lower())
-    if len(word) > 5:  # British and US spellings, which Moonshine also switches between
-        word = re.sub(r"our(ed|ing|s|able)?$", r"or\1", word)  # dishonoured, colours
-        word = re.sub(r"is(e|ed|es|ing|ation)$", r"iz\1", word)  # realised, organisation
-    return SAME_WORD.get(word, word)
-
-
-def split_marks(word):
-    """("the.", ...) -> ("the", "."): a word and the punctuation after it."""
-    m = re.fullmatch(r"(.*?)([.,!?;:]*)", word)
-    return m[1], m[2]
-
-
-SENTENCE_END = (".", "?", "!")
-# Words a sentence rarely ends on, so a pause after one is a pause inside a sentence.
-DANGLING = set("""a an the to of for in on at by with from into onto about as than and or but nor
-    because if when while where whether that which whose my our your their its i we they he she
-    i'm we're you're they're it's are were be been being am have has had will would can
-    could should shall may might must very""".split())
-
-
-def settle_mark(word, held, heard):
-    """Punctuation after `word`, the last one before a pause. held: what the window decoded
-    alone put there (every window it ends reads as a finished sentence). heard: what the next
-    decode put there after hearing what followed (None if it didn't line up), which in turn
-    tends to run finished sentences together."""
-    if heard is None:
-        return held
-    if heard.endswith(SENTENCE_END) or norm(word) in DANGLING:
-        return heard
-    return held or heard
-
-
-def common_prefix(a, b):
-    """How many leading words two hypotheses share, ignoring case and punctuation."""
-    n = 0
-    for x, y in zip(a, b):
-        if norm(x) != norm(y):
-            break
-        n += 1
-    return n
-
-
-def agreement(prev, cur):
-    """How many leading words of `cur` the previous hypothesis backs up. One word that
-    differs (a filler heard as "A" one time and "Uh," the next) doesn't hold back the rest
-    when the three words after it agree again; cur's version of it wins."""
-    i = j = 0
-    while True:
-        k = common_prefix(prev[i:], cur[j:])
-        i, j = i + k, j + k
-        if i >= len(prev) or j >= len(cur):
-            return j
-        for di, dj in ((1, 1), (0, 1), (1, 0)):
-            if common_prefix(prev[i + di:], cur[j + dj:]) >= 3:
-                i, j = i + di, j + dj
-                break
-        else:
-            return j
-
-
-def align(ref, hyp):
-    """Where the words after `ref` start in `hyp`, a decode whose audio starts inside the
-    audio of ref's last words. Lines ref's end up with hyp's start (same word +2, anything
-    else -1, ref may start anywhere); on a tie the earlier start wins, so a phrase said twice
-    in a row isn't taken for the copy already typed. Returns (start, hyp's form of ref's last
-    word or None when that word didn't line up), or None when nothing lines up."""
-    a, b = [norm(w) for w in ref], [norm(w) for w in hyp]
-    row = [-j for j in range(len(b) + 1)]
-    for i in range(1, len(a) + 1):
-        nxt = [0]
-        for j in range(1, len(b) + 1):
-            nxt.append(max(row[j - 1] + (2 if a[i - 1] == b[j - 1] else -1), row[j] - 1, nxt[j - 1] - 1))
-        row = nxt
-    start = max(range(len(b) + 1), key=lambda j: (row[j], -j))
-    if not a or row[start] < 2:
-        return None
-    return start, hyp[start - 1] if start and b[start - 1] == a[-1] else None
-
-
 def feed_vad(vad, samples):
     """Silero VAD only handles input correctly in whole 512-sample windows."""
     size = vad.config.silero_vad.window_size
@@ -351,8 +265,10 @@ class Voice:
 
         self.recording = None  # list of chunks while dictating
         self.recording_source = None
-        self.stream = None  # streaming state of the current dictation, see start_dictation
-        self.whisper_lock = asyncio.Lock()  # one request at a time, in order
+        self.take = None  # what's known of the recording so far, see start_dictation
+        self.decode_lock = asyncio.Lock()  # one decode at a time, in order
+        self.vad_lock = threading.Lock()  # clip_vad: a cancelled decode's thread may still be in it
+        self.unload_timer = None  # drops the recognizer's model once it's idle (engine_used)
         self.command = None  # dict while capturing a post-wake command
         self.notice = notice.Notice()  # the pill in the headset while it listens (notice.py)
         self.voice_commands = []  # from "commands" in the settings, see voice_commands.py
@@ -372,14 +288,8 @@ class Voice:
         self.wake_phrases = []
         self.cmd_vad = self._make_vad(self.wcfg["end_silence"])
         self.clip_vad = self._make_vad(0.5)
-        self.piece_vad = self._make_vad(0.1)  # per-chunk speech/silence labels for live windows
-        self.moonshine = None
-        if self.dcfg["engine"] == "moonshine":
-            m = resolve(self.dcfg["moonshine_model"], MODELS)
-            self.moonshine = sherpa_onnx.OfflineRecognizer.from_moonshine_v2(
-                encoder=str(m / "encoder_model.ort"), decoder=str(m / "decoder_model_merged.ort"),
-                tokens=str(m / "tokens.txt"), num_threads=self.dcfg["moonshine_threads"])
-            log.info("live dictation engine: moonshine (%s)", m.name)
+        self.piece_vad = self._make_vad(0.1)  # speech or silence per chunk, for cutting pieces
+        self.parakeet = voice_engine.Parakeet(voice_settings.PARAKEET_DIR, self.dcfg["threads"])
         self.apply_options(b)
 
     # --- models
@@ -569,18 +479,18 @@ class Voice:
 
     def on_audio(self, chunk):
         if self.recording is not None or self.command is not None:
-            self.notice.level(float(np.sqrt(np.mean(chunk ** 2))))
+            level = float(np.sqrt(np.mean(chunk ** 2)))
+            self.notice.level(level)
         if self.recording is not None:
             self.recording.append(chunk)
             if self.start_chime:
                 self.chime_start()
-            if self.stream:
-                feed_vad(self.piece_vad, chunk)
-                self.stream["speech"].append(self.piece_vad.is_speech_detected())
-                self.stream["level"].append(float(np.sqrt(np.mean(chunk ** 2))))
-                while not self.piece_vad.empty():
-                    self.piece_vad.pop()
-                self.stream["wake"].set()
+            feed_vad(self.piece_vad, chunk)
+            self.take["speech"].append(self.piece_vad.is_speech_detected())
+            self.take["level"].append(level)
+            while not self.piece_vad.empty():
+                self.piece_vad.pop()
+            self._cut_piece(self.take)
             if len(self.recording) * CHUNK / RATE >= self.dcfg["max_seconds"]:
                 asyncio.create_task(self.stop_dictation())
         elif self.command is not None:
@@ -597,53 +507,81 @@ class Voice:
 
     # --- transcription
 
-    def trim_to_speech(self, samples):
-        """Cut leading/trailing silence. Returns None when there is no speech at all."""
-        vad = self.clip_vad
-        vad.reset()
-        feed_vad(vad, samples)
-        vad.flush()
-        first = last = None
-        while not vad.empty():
-            seg = vad.front
-            first = seg.start if first is None else first
-            last = seg.start + len(seg.samples)
-            vad.pop()
-        if first is None:
-            return None
-        pad = int(0.25 * RATE)
-        return samples[max(0, first - pad):last + pad]
+    def engine(self):
+        """What recognizes speech now: "parakeet" (voice_engine.py, on the CPU) or "whisper"
+        (whisper-server), by the language and by what's installed."""
+        return voice_settings.engine_for(self.language, self.dcfg["engine"])
+
+    def warm_engine(self):
+        """Something to recognize is on its way: have the model loaded by then."""
+        if self.engine() == "parakeet":
+            self.parakeet.warm()
+            self.engine_used()
+
+    def engine_used(self):
+        """Start over the wait after which the idle recognizer's model leaves memory."""
+        if self.unload_timer:
+            self.unload_timer.cancel()
+        after = self.dcfg["unload_after_seconds"]
+        self.unload_timer = self.loop.call_later(after, self._unload_idle) if after > 0 else None
+
+    def _unload_idle(self):
+        self.unload_timer = None
+        busy = (self.recording is not None or self.command is not None or self.decoding
+                or self.decode_lock.locked())
+        if busy or not self.parakeet.unload_idle(self.dcfg["unload_after_seconds"]):
+            self.engine_used()
+
+    def _speech(self, samples):
+        """A recording's speech, its silences cut short (voice_engine.squeeze). None when
+        there's none in it. Runs the VAD over all of it: for a thread."""
+        with self.vad_lock:
+            vad = self.clip_vad
+            vad.reset()
+            feed_vad(vad, samples)
+            vad.flush()
+            spans = []
+            while not vad.empty():
+                seg = vad.front
+                spans.append((seg.start, seg.start + len(seg.samples)))
+                vad.pop()
+        return voice_engine.squeeze(samples, spans, int(SPEECH_PAD * RATE))
 
     async def transcribe(self, samples):
-        speech = self.trim_to_speech(samples)
-        if speech is None:
-            log.info("no speech detected; skipping transcription")
-            return ""
-        return await self.transcribe_speech(speech)
+        """The text of a recording, or of a piece of one: "" when nobody speaks in it."""
+        async with self.decode_lock:
+            speech = await asyncio.to_thread(self._speech, samples)
+            if speech is None:
+                log.info("no speech detected; skipping transcription")
+                return ""
+            engine, t0 = self.engine(), time.monotonic()
+            if engine == "whisper":
+                text = await self._whisper(speech)
+            else:
+                text = voice_engine.clean(await asyncio.to_thread(self.parakeet.decode, speech))
+                self.engine_used()
+        log.info("transcribed %.1fs of speech (%.1fs recorded) in %.2fs with %s: %r", len(speech) / RATE,
+                 len(samples) / RATE, time.monotonic() - t0, engine, text)
+        return text
 
-    async def transcribe_speech(self, speech, context="", quiet=False):
-        """Transcribe audio that is already speech. `context` is the text said just before."""
+    async def _whisper(self, speech):
+        """whisper-server's text for audio that is speech."""
         dur = len(speech) / RATE
         # Whisper's encoder always runs a 30 s window (1500 frames, 50/s). Shrinking it to the
         # clip length is the main latency win on the Adreno GPU. It must still cover the whole
         # clip, and very small contexts make the decoder loop, hence the floor.
         audio_ctx = 0 if dur > 28 else min(1500, max(self.cfg["whisper"]["min_audio_ctx"], int(dur * 50 * 1.1) + 64))
-        async with self.whisper_lock:
-            t0 = time.monotonic()
-            text = await asyncio.to_thread(self._post, to_wav(speech), audio_ctx, context)
+        text = await asyncio.to_thread(self._post, to_wav(speech), audio_ctx)
         text = re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]|\([^)]*\)", "", text)).strip()
-        text = drop_repeats(text)
-        (log.debug if quiet else log.info)("transcribed %.1fs audio in %.2fs: %r", dur, time.monotonic() - t0, text)
-        return text
+        return drop_repeats(text)
 
-    def _post(self, wav_bytes, audio_ctx, context=""):
+    def _post(self, wav_bytes, audio_ctx):
         w = self.cfg["whisper"]
         # temperature_inc 0: no fallback re-decodes, which cost 10+ s on short pieces with turbo.
         fields = {"response_format": "json", "temperature": "0", "temperature_inc": "0",
                   "no_timestamps": "true", "language": self.language, "audio_ctx": str(audio_ctx)}
-        prompt = " ".join(filter(None, [w["prompt"] if self.language == "en" else "", context]))
-        if prompt:
-            fields["prompt"] = prompt
+        if w["prompt"] and self.language == "en":
+            fields["prompt"] = w["prompt"]
         boundary = uuid.uuid4().hex
         parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
                  for k, v in fields.items()]
@@ -683,24 +621,29 @@ class Voice:
         if self.command is not None:
             self.command = None  # dictation wins over a pending wake command
         self.recording, self.recording_source = [], source
-        if self.dcfg["streaming"]:
-            self.piece_vad.reset()
-            # win: first chunk of the current window. lead: the end of the previous window,
-            # decoded ahead of it. deferred: lead holds a word not committed yet (a window cut
-            # without a pause). words: committed, text: the same as typed, held: punctuation
-            # after the last word, waiting to hear if the sentence goes on. typed: chars typed.
-            self.stream = {"source": source, "t0": time.monotonic(), "chunks": self.recording,
-                           "speech": [], "level": [], "wake": asyncio.Event(), "final": False,
-                           "win": 0, "decoded_at": 0, "lead": np.zeros(0, np.float32),
-                           "deferred": False, "prev": [], "base": 0,
-                           "words": [], "text": "", "held": None, "typed": 0}
-            self.stream["worker"] = asyncio.create_task(self._stream_worker(self.stream))
+        self.piece_vad.reset()
+        # speech, level: per chunk, whether the VAD hears speech in it and how loud it is.
+        # cut: the first chunk no piece has yet. pieces: the decodes of those cut so far.
+        self.take = {"speech": [], "level": [], "cut": 0, "pieces": []}
+        self.warm_engine()
         self.update_mic()
         self.notice.listening(mode)
         if "start" in self.sounds:
             self.start_chime = self.loop.call_later(0.6, self.chime_start)
         self.broadcast("dictation_start", source=source)
         log.info("dictation start (%s)", source)
+
+    def _cut_piece(self, take):
+        """A recording past max_piece_seconds goes to the recognizer in pieces while it's still
+        being made, each ending in a pause (voice_engine.piece_cut): a decode stays short, and
+        the release waits for the last piece only."""
+        first, end, per = take["cut"], len(self.recording), CHUNK / RATE
+        if (end - first) * per < self.dcfg["max_piece_seconds"]:
+            return
+        cut = voice_engine.piece_cut(take["speech"], take["level"], first, end,
+                                     max(1, round(self.dcfg["min_pause_seconds"] / per)))
+        take["pieces"].append(asyncio.create_task(self.transcribe(np.concatenate(self.recording[first:cut]))))
+        take["cut"] = cut
 
     def drop_start_chime(self):
         """A dictation over before its mic sent audio gets no start tone after all."""
@@ -712,9 +655,9 @@ class Voice:
         if self.recording is None:
             return
         self.recording = self.recording_source = None
-        if self.stream:
-            self.stream["worker"].cancel()
-            self.stream = None
+        take, self.take = self.take, None
+        for piece in take["pieces"]:
+            piece.cancel()
         self.drop_start_chime()
         if chime:
             self.chime("cancel")
@@ -727,7 +670,7 @@ class Voice:
         if self.recording is None:
             return
         chunks, self.recording, self.recording_source = self.recording, None, None
-        stream, self.stream = self.stream, None
+        take, self.take = self.take, None
         self.drop_start_chime()
         seconds = len(chunks) * CHUNK / RATE
         too_short = seconds < self.dcfg["min_seconds"]
@@ -737,7 +680,7 @@ class Voice:
             self.decoding += 1
         self.notice_settle()  # "Typing…", or off for one too short
         try:
-            await self._finish_dictation(chunks, stream, seconds, too_short)
+            await self._finish_dictation(chunks, take, seconds, too_short)
         finally:
             if not too_short:
                 self.decoding -= 1
@@ -745,7 +688,7 @@ class Voice:
 
     def notice_settle(self):
         """The pill (notice.py) for what's going on now: listening (a dictation or a wake command)
-        keeps its own; else "Typing…" while a dictation's words are still decoded, else none."""
+        keeps its own; else "Typing…" while a dictation is decoded and typed, else none."""
         if self.recording is not None or self.command is not None:
             return
         if self.decoding:
@@ -753,40 +696,26 @@ class Voice:
         else:
             self.notice.off()
 
-    async def _finish_dictation(self, chunks, stream, seconds, too_short):
+    async def _finish_dictation(self, chunks, take, seconds, too_short):
         if too_short:
-            if stream:
-                stream["worker"].cancel()
             log.info("dictation discarded: %.1fs is under the %.1fs minimum", seconds, self.dcfg["min_seconds"])
             self.broadcast("dictation_cancel", reason="too_short", seconds=seconds)
             return
-        if stream:
-            per = CHUNK / RATE
-            log.info("recorded %.1fs: %.1fs labeled speech, peak level %.4f", seconds,
-                     sum(stream["speech"]) * per, max(stream["level"], default=0))
+        log.info("recorded %.1fs: %.1fs labeled speech, peak level %.4f, %d piece(s) cut", seconds,
+                 sum(take["speech"]) * CHUNK / RATE, max(take["level"], default=0), len(take["pieces"]))
         if self.dcfg["save_clips"]:
             self.save_clip(np.concatenate(chunks))
         try:
-            if stream:
-                stream["final"] = True
-                stream["wake"].set()
-                await stream["worker"]
-                stream["text"] += stream["held"] or ""
-                stream["held"] = None
-                text = stream["text"]
-                if not text:
-                    log.info("no speech detected")
-            else:
-                text = await self.transcribe(np.concatenate(chunks))
+            rest = chunks[take["cut"]:]
+            last = [self.transcribe(np.concatenate(rest))] if rest else []
+            text = voice_engine.join_pieces(await asyncio.gather(*take["pieces"], *last))
         except Exception as err:
             log.error("transcription failed: %s", err)
             self.chime("cancel")
             self.broadcast("error", message=str(err))
             return
         self.broadcast("dictation", text=text)
-        if stream:
-            await self._flush_typing(stream, final=True)
-        elif text:
+        if text:
             await self.type_text(text + (" " if self.dcfg["trailing_space"] else ""))
 
     def save_clip(self, samples):
@@ -799,272 +728,6 @@ class Voice:
             f.write(to_wav(samples))
         for old in sorted(CLIP_DIR.glob("*.wav"))[:-self.dcfg["save_clips"]]:
             old.unlink()
-
-    async def _decode(self, audio, context):
-        """Text for a window of audio from the live engine, without the "..." whisper puts on
-        text that stops mid-sentence."""
-        if self.live_moonshine():
-            async with self.whisper_lock:
-                text = await asyncio.to_thread(self._moonshine_decode, audio)
-                if not text.strip() and len(audio) <= 3 * RATE:
-                    # trim_to_speech's VAD is shared, so it runs here; the decodes in a thread
-                    text = await asyncio.to_thread(self._moonshine_retry, audio, self.trim_to_speech(audio))
-            text = drop_repeats(re.sub(r"\s+", " ", text).strip())
-            words = text.split()
-            if len(words) >= 3 and len(audio) <= 3 * RATE and len({norm(w) for w in words}) == 1:
-                # a lone short word Moonshine looped on ("Way, way, way,"); costs a spoken "no, no, no"
-                log.info("short window: %r is one word looped; keeping one", text)
-                text = words[-1][:1].upper() + words[-1][1:] if words[0][:1].isupper() else words[-1]
-        else:
-            text = await self.transcribe_speech(audio, context, quiet=True)
-        text = re.sub(r"([,;:!?])\1+", r"\1", text)  # "so,," -> "so,"
-        text = re.sub(r"(?<![\w'])i(?=['\s.,!?;:]|$)", "I", text)  # audio starting mid-phrase can give "i"
-        return re.sub(r"^(\.\.\.|\u2026)\s*|\s*(\.\.\.|\u2026)$", "", text)
-
-    def _moonshine_retry(self, audio, speech):
-        """Moonshine often hears nothing in a lone short word with silence around it, and which
-        framing it does hear differs from clip to clip. Try a few: cut to the speech, then each
-        after 0.2 s of silence. The first text wins. `speech` is trim_to_speech(audio)."""
-        if speech is None:
-            return ""
-        lead = np.zeros(int(0.2 * RATE), np.float32)
-        tries = [speech] if len(speech) < len(audio) else []
-        tries += [np.concatenate([lead, speech])]
-        for n, clip in enumerate(tries, 1):
-            text = self._moonshine_decode(clip)
-            if text.strip():
-                log.info("short window heard nothing; try %d of %d: %r", n, len(tries), text)
-                return text
-        log.info("short window heard nothing in %d more tries", len(tries))
-        return ""
-
-    def _moonshine_decode(self, audio):
-        # Quiet speech is scaled up to a fixed peak first, as Faceclaw does (helped at low levels).
-        peak = float(np.abs(audio).max()) or 1.0
-        audio = audio * min(10.0, 0.5 / peak)
-        stream = self.moonshine.create_stream()
-        stream.accept_waveform(RATE, audio)
-        self.moonshine.decode_stream(stream)
-        return stream.result.text
-
-    async def _stream_worker(self, stream):
-        """Live transcription by agreement.
-
-        The current window (speech since the last pause) is re-decoded every step_seconds of
-        new audio, after the last context_seconds of the previous window, so it is heard as the
-        continuation it is. Each decode is lined up with the words already committed; of the
-        words after them, those two decodes in a row agree on are committed and typed, except
-        the last, whose punctuation can still change. At a pause, or at the window's quietest
-        point once max_window_seconds of audio is decoded, the window closes: it is decoded
-        once more and the rest of its words are committed. The punctuation after a pause waits
-        for the next window, which hears whether the sentence went on.
-        """
-        per = CHUNK / RATE
-        step = max(1, round(self.dcfg["step_seconds"] / per))
-        while True:
-            await stream["wake"].wait()
-            stream["wake"].clear()
-            speech, win = stream["speech"], stream["win"]
-            end = len(speech)
-            window = speech[win:end]
-            last = max((i for i, v in enumerate(window) if v), default=None)
-            if last is None and stream["deferred"]:
-                last = -1  # no new speech, but the context holds a word still to commit
-            full = len(stream["lead"]) / RATE + len(window) * per >= self.dcfg["max_window_seconds"]
-            if stream["final"]:
-                if last is None and not self._short_speech(stream, end):
-                    return
-                if full:  # Moonshine returns nothing for more than ~9 s of audio
-                    await self._close_full(stream, end)
-                    stream["wake"].set()
-                    continue
-                await self._close_window(stream, end)
-                return
-            if last is None:
-                if len(window) * per > 1.0:
-                    stream["win"] = stream["decoded_at"] = self._lead_in(stream, end)
-                continue
-            silence = len(window) - (last + 1)
-            if silence * per >= self.dcfg["pause_seconds"]:
-                await self._close_window(stream, end - silence + int(0.15 / per))
-            elif full:
-                await self._close_full(stream, end)
-            elif end - stream["decoded_at"] >= step:
-                stream["decoded_at"] = end
-                hyp = (await self._decode(self._window_audio(stream, end), self._context(stream))).split()
-                found = self._uncommitted(stream, hyp)
-                if found is None:
-                    log.info("decode skipped, doesn't line up with the words typed: %s", " ".join(hyp))
-                    continue
-                new, boundary = found
-                before = self._uncommitted(stream, stream["prev"])
-                stream["prev"] = hyp
-                agreed = agreement(before[0], new) if before else 0
-                if agreed > 1:
-                    self._commit(stream, new[:agreed - 1], boundary)
-
-    def _short_speech(self, stream, end):
-        """Speech the live labels missed in the window: they come ~0.27 s late, so a lone short
-        word ("yes") released right away can end before any chunk is labeled speech. The window's
-        audio through the VAD to its end (trim_to_speech flushes it) says."""
-        if end <= stream["win"]:
-            return False
-        found = self.trim_to_speech(np.concatenate(stream["chunks"][stream["win"]:end])) is not None
-        if found:
-            log.info("speech the live labels missed (a short word): decoding it")
-        return found
-
-    async def _close_window(self, stream, cut, forced=False):
-        """Decode the window once more and commit the rest of its words. After a pause the last
-        word's punctuation is held for the next window. Without one (forced), the audio stops
-        mid-speech, and Moonshine can garble or repeat the cut-off words ("on a dot on a dot"),
-        so only words the last live decode agrees on are committed; the rest (up to 5) are
-        carried in the next window's context, sized to hold them."""
-        audio = self._window_audio(stream, cut)
-        hyp = (await self._decode(audio, self._context(stream))).split()
-        found = self._uncommitted(stream, hyp)
-        if found is None:
-            # Go by position within this window's own audio, as before context was added.
-            log.info("window decode doesn't line up with the words typed: %s", " ".join(hyp))
-            hyp = (await self._decode(np.concatenate(stream["chunks"][stream["win"]:cut]), self._context(stream))).split()
-            found = hyp[len(stream["words"]) - stream["base"]:], None
-        new, boundary = found
-        start = len(hyp) - len(new)
-        context = self.dcfg["context_seconds"]
-        if forced:
-            before = self._uncommitted(stream, stream["prev"])
-            keep = max(0, agreement(before[0], new) - 1 if before else 0, len(new) - 5)
-            context = max(context, min(3.5, 0.45 * (len(new) - keep + 2)))  # ~0.3-0.4 s per word
-            new = new[:keep]
-        self._commit(stream, new, boundary, hold=not forced)
-        log.info("window %.1fs + %.1fs context: %s", (cut - stream["win"]) * CHUNK / RATE,
-                 len(stream["lead"]) / RATE, " ".join(hyp[:start] + ["|"] + hyp[start:]) if start else " ".join(hyp))
-        stream.update(win=cut, decoded_at=cut, lead=self._lead(audio, context), deferred=forced, prev=[],
-                      base=len(stream["words"]))
-
-    def _window_audio(self, stream, end):
-        return np.concatenate([stream["lead"], *stream["chunks"][stream["win"]:end]])
-
-    def _lead(self, audio, seconds):
-        """Context for the next window: about `seconds` from the end of this one, from the
-        quietest 30 ms nearby, so it rarely starts inside a word."""
-        n = int(seconds * RATE)
-        if n <= 0:
-            return audio[:0]
-        if len(audio) <= n:
-            return audio
-        frame = RATE * 30 // 1000
-        starts = range(max(0, len(audio) - n - RATE // 2), len(audio) - n + RATE // 4, frame)
-        return audio[min(starts, key=lambda i: float(np.mean(audio[i:i + frame] ** 2))):]
-
-    def _lead_in(self, stream, end):
-        """Start of a window with no speech yet: LEAD_IN_SECONDS before now, or before a sound
-        in the last second the VAD didn't flag (a lone short word like "I" is too brief)."""
-        per = CHUNK / RATE
-        win, level = stream["win"], stream["level"]
-        start = end - round(LEAD_IN_SECONDS / per)
-        floor = float(np.percentile(level[win:end], 20))
-        loud = next((i for i in range(max(win, end - round(1.0 / per)), end)
-                     if level[i] > max(3 * floor, 0.005)), None)
-        if loud is not None:
-            start = min(start, loud - round(0.2 / per))
-        return max(win, start)
-
-    async def _close_full(self, stream, end):
-        """Close a window that reached max_window_seconds. Like Faceclaw's segments, a pause
-        shorter than pause_seconds doesn't end a window, so a full one usually holds one: close
-        it there as at a pause (every word committed, the punctuation held). Only a window with
-        no pause in its second half is cut mid-speech (forced)."""
-        cut = self._pause_cut(stream, end)
-        if cut is not None:
-            await self._close_window(stream, cut)
-        else:
-            await self._close_window(stream, self._quiet_cut(stream, end), forced=True)
-
-    def _pause_cut(self, stream, end):
-        """Where the longest pause of at least min_pause_seconds in the window's second half
-        starts (0.15 s in, as a pause close cuts), or None when there isn't one."""
-        per = CHUNK / RATE
-        speech = stream["speech"]
-        runs, start = [], None
-        for i in range(stream["win"] + (end - stream["win"]) // 2, end):
-            if not speech[i]:
-                start = i if start is None else start
-            elif start is not None:
-                runs.append((start, i - start))
-                start = None
-        if start is not None:
-            runs.append((start, end - start))
-        runs = [r for r in runs if r[1] * per >= self.dcfg["min_pause_seconds"]]
-        if not runs:
-            return None
-        start, length = max(runs, key=lambda r: (r[1], r[0]))
-        return start + min(length - 1, int(0.15 / per))
-
-    def _quiet_cut(self, stream, end):
-        """Where to close a window with no pause: after the quietest chunk of its second half,
-        preferring ones the VAD calls non-speech (a breath between words, not inside one)."""
-        speech, level = stream["speech"], stream["level"]
-        first = stream["win"] + (end - stream["win"]) // 2
-        return min(range(first, end), key=lambda i: (speech[i], level[i], -i)) + 1
-
-    def _uncommitted(self, stream, hyp):
-        """hyp's words after the committed ones, and hyp's form of the last committed word
-        (None when it didn't line up). None when hyp doesn't line up with them at all."""
-        # Without context, only words committed in this window are in hyp. With it, a decode too
-        # short to line up ("Post. The" for "...pose. The") is skipped rather than guessed at.
-        ref = stream["words"][max(0, stream["base"] - ALIGN_WORDS) if len(stream["lead"]) else stream["base"]:]
-        if not ref:
-            return hyp, None
-        found = align(ref, hyp)
-        return (hyp[found[0]:], found[1]) if found else None
-
-    def _context(self, stream):
-        return " ".join(stream["words"][-30:])
-
-    def _commit(self, stream, words, boundary=None, hold=False):
-        """Queue words for typing. boundary: this decode's form of the last committed word,
-        which settles punctuation held back at a pause. hold: keep the last new word's
-        punctuation back until the next window hears whether the sentence goes on."""
-        if not words:
-            return
-        piece = ""
-        if stream["held"] is not None:
-            heard = None if boundary is None else split_marks(boundary)[1]
-            mark = settle_mark(stream["words"][-1] if stream["words"] else "", stream["held"], heard)
-            piece, stream["held"] = mark, None
-            if mark.endswith(SENTENCE_END) and words[0][:1].islower():
-                words = [words[0][:1].upper() + words[0][1:], *words[1:]]
-        if hold:
-            word, stream["held"] = split_marks(words[-1])
-            words = words[:-1] + ([word] if word else [])
-        if words:
-            piece += (" " if stream["text"] else "") + " ".join(words)
-        stream["words"].extend(words)
-        stream["text"] += piece
-        if not piece:
-            return
-        self.broadcast("dictation_piece", text=piece.strip())
-        task = asyncio.create_task(self._flush_typing(stream))
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
-
-    async def _flush_typing(self, stream, final=False):
-        """Type committed text not typed yet: live while recording when allowed, else at the end.
-        (The relay holds it back while a modifier is held.)"""
-        if not final:
-            live = (self.dcfg["live_typing"] and stream is self.stream
-                    and time.monotonic() - stream["t0"] >= self.dcfg["live_after_seconds"])
-            if not live:
-                return
-        text = stream["text"][stream["typed"]:]
-        stream["typed"] = len(stream["text"])
-        if final and stream["text"] and self.dcfg["trailing_space"]:
-            text += " "
-        if text:
-            if not final:
-                log.info("typing %d words live (%.1fs in)", len(text.split()), time.monotonic() - stream["t0"])
-            await self.type_text(text)
 
     async def toggle_dictation(self, source):
         if self.recording is None:
@@ -1088,6 +751,7 @@ class Voice:
         self.command = {"chunks": [], "t0": time.monotonic(), "heard": False, "wake_unix": wake_unix,
                         "again": again}
         self.cmd_vad.reset()
+        self.warm_engine()
         self.update_mic()
         self.notice.listening("command")
 
@@ -1325,8 +989,6 @@ class Voice:
         if "controller" in changed or "controller_mode" in changed:
             self.controller = (tuple(b["controller"]), b["controller_mode"])
             self.controller_changed.set()
-        if "live_typing" in changed:
-            self.dcfg["live_typing"] = changed["live_typing"]
         if "sounds" in changed:
             sc = self.cfg["sounds"]
             self.sounds = make_sounds(sc["volume"], sc["lead_seconds"], sc["tail_seconds"]) if changed["sounds"] else {}
@@ -1339,11 +1001,16 @@ class Voice:
             model = voice_settings.model_for(b)
             restart = model != voice_settings.model_for({"language": self.language, "model": self.model})
             self.language, self.model = b["language"], b["model"]
-            if not voice_settings.model_installed(model):
-                log.warning("whisper model %s isn't there (%s): whisper-server loads small.en instead; "
-                            "fetch it with voice/models.sh model %s", model, voice_settings.model_path(model), model)
-            log.info("language %s: %s live, whisper model %s", self.language,
-                     "moonshine" if self.live_moonshine() else "whisper", model)
+            if self.engine() == "parakeet":
+                log.info("language %s: recognized by Parakeet, on the CPU", self.language)
+            else:
+                if (self.dcfg["engine"] != "whisper" and self.language in voice_settings.PARAKEET_LANGUAGES):
+                    log.warning("Parakeet isn't there (%s): whisper-server recognizes %s instead; fetch it with "
+                                "voice/models.sh", voice_settings.PARAKEET_DIR, self.language)
+                if not voice_settings.model_installed(model):
+                    log.warning("whisper model %s isn't there (%s): whisper-server loads small.en instead; "
+                                "fetch it with voice/models.sh model %s", model, voice_settings.model_path(model), model)
+                log.info("language %s: recognized by whisper-server, model %s", self.language, model)
             if running:
                 self.update_whisper(restart=restart and not first)
         if "wake_word" in changed and changed["wake_word"] != self.wake_enabled:
@@ -1351,7 +1018,6 @@ class Voice:
             self.reset_kws()
             if running:
                 self.update_mic()
-                self.update_whisper()
         if "wake_phrases" in changed:
             if running:
                 self.spawn(self._rebuild_kws(changed["wake_phrases"]))
@@ -1361,16 +1027,12 @@ class Voice:
         if changed:
             log.info("settings: %s", ", ".join(f"{k}={v}" for k, v in changed.items()))
 
-    def live_moonshine(self):
-        """Live dictation with Moonshine: it knows only English."""
-        return self.moonshine is not None and self.language == "en"
-
     def update_whisper(self, restart=False):
         """Run whisper-server (frametop-voice-whisper.service: ~300 MB of the GPU's memory, more
-        for a bigger model) only while something uses it: wake word commands, or dictation set
-        to use it (another language than English, or the engine). restart: the model changed."""
-        want = (self.wake_enabled or not self.live_moonshine() or self.dcfg["engine"] == "whisper"
-                or not self.dcfg["streaming"])
+        for a bigger model) only while it recognizes the speech: a language Parakeet doesn't
+        know, "auto", Parakeet not installed, or the engine set to it. restart: the model
+        changed."""
+        want = self.engine() == "whisper"
         if restart and want and self.whisper_wanted:
             log.info("whisper-server: restarting for the model the settings chose")
             self.spawn(self._run(["systemctl", "--user", "restart", "frametop-voice-whisper.service"],
@@ -1439,7 +1101,7 @@ class Voice:
         server = await asyncio.start_unix_server(self.handle_client, path=str(SOCKET_PATH))
         os.umask(old_umask)
         log.info("control socket: %s", SOCKET_PATH)
-        log.info("dictation: min %.1fs, live typing %s", self.dcfg["min_seconds"], self.dcfg["live_typing"])
+        log.info("dictation: min %.1fs, recognized by %s", self.dcfg["min_seconds"], self.engine())
         relay = self.listen_relay()
         threading.Thread(target=self.controller_loop, name="controller", daemon=True).start()
         self.update_whisper()
@@ -1462,8 +1124,7 @@ class Voice:
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     set_process_name("ft-voiced")
-    m = resolve(DEFAULTS["dictation"]["moonshine_model"], MODELS)
-    missing = [str(p) for p in (KWS_DIR, VAD_MODEL, m) if not p.exists()]
+    missing = [str(p) for p in (KWS_DIR, VAD_MODEL) if not p.exists()]
     if missing:
         log.error("models missing (%s): fetch them with voice/models.sh", ", ".join(missing))
         sys.exit(1)

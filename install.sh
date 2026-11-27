@@ -16,7 +16,7 @@
 #                   tracking, NPU hand tracking, the Hand Recorder and our eye tracker if sudo can
 #                   run without a password prompt; skips the Bluetooth fixes, the SteamVR
 #                   restart, and Frametop Together unless it's installed already
-#   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 320 MB)
+#   --no-voice      don't offer voice dictation (Frametop Voice: it downloads about 870 MB)
 #   --no-hands      don't offer hand tracking, NPU hand tracking or the Hand Recorder
 #   --no-npu        don't offer NPU hand tracking (ft-npud: hand tracking's model on the NPU)
 #   --no-hand-recorder  don't offer the Hand Recorder (a release's; a clone builds it with
@@ -237,7 +237,7 @@ fi
 do_voice=0 voice_skip="skipped. Install later with: voice/run.sh install"
 if [ "$voice" = 0 ]; then
   voice_skip="skipped (--no-voice). Install later with: voice/run.sh install"
-elif ask "Install voice dictation? A Right Ctrl tap or holding the left d-pad down starts it; it downloads about 320 MB of speech models." y; then
+elif ask "Install voice dictation? A Right Ctrl tap or holding the left d-pad down starts it; it downloads about 870 MB of speech models." y; then
   do_voice=1
 fi
 

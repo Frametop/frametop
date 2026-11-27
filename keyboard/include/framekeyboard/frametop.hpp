@@ -12,13 +12,15 @@
 
 namespace framekeyboard {
 // Frametop integration (FRAMETOP.md). Frametop runs Full Keyboard as its keyboard: its
-// input relay says where typing goes (the Frametop desktop or Steam) and when the panel
-// should open for a desktop text field, and takes the desktop's typing.
+// input relay says where typing goes (the Frametop desktop, Native Desktop or Steam) and when
+// the panel should open for a desktop text field, and takes the desktops' typing.
 //
 // Datagrams on the relay's abstract socket @frametop_relay; it replies to our autobound
 // address. We send "kbhello OPEN" (the panel is up for Frametop 0|1) every second and on a
-// change, "kbkey CODE 0|1" and "kbtext TEXT". It sends "kb DESKTOP SURFACE" (typing goes
-// to the desktop 0|1, the desktop's screens show and Frametop isn't paused 0|1) in reply
+// change, "kbkey CODE 0|1" and "kbtext TEXT". It sends "kb DESKTOP SURFACE [LAYOUT]" (typing
+// goes through the relay 0|1: to the Frametop desktop, or to Native Desktop while gamescope
+// focuses it; the desktop's screens show and Frametop isn't paused 0|1; with DESKTOP 1, that
+// desktop's keyboard layout, "fr" or "de(nodeadkeys)") in reply
 // and on a change, "kb show|hide|toggle", and "kb poke SIDE VERB [x y z]" (a fingertip on
 // the panel, from ft-screens' hand input: its point in the standing universe).
 // Only messages from that name and this user count, and typing goes there only while
@@ -47,6 +49,9 @@ class FrametopLink {
     bool fresh() const;
     bool desktop() const { return fresh() && desktop_; }
     bool surface() const { return fresh() && surface_; }
+    // The layout of the desktop typing goes to ("fr", "de(nodeadkeys)"), empty when the relay
+    // didn't say (Steam, or an older relay).
+    const std::string& layout() const { return layout_; }
     Request take_request();
     std::vector<HandPoke> take_pokes() { return std::exchange(pokes_, {}); }
     // Whether the panel is up for Frametop: said in the next hello, at once on a change.
@@ -61,12 +66,33 @@ class FrametopLink {
     int fd_{-1};
     double heard_{-1e9}, hello_{-1e9};
     bool desktop_{}, surface_{}, open_{};
+    std::string layout_;
     Request request_{Request::None};
     std::vector<HandPoke> pokes_;
 };
 
-// Desktop typing goes to the relay (which types it on the desktop's seat, in the desktop's
-// layout); everything else goes to `steam` (gamescope). A held key is released where it
+// The key a letter is on in a named XKB layout ("fr", "de(nodeadkeys)"), for Ctrl+letter
+// shortcuts on a desktop the relay types on: that desktop reads keys with its own layout, so
+// Ctrl+A on a French one is the key US keyboards have Q on. The last layout's keymap is kept.
+class LayoutCodes {
+  public:
+    LayoutCodes() = default;
+    ~LayoutCodes();
+    LayoutCodes(const LayoutCodes&) = delete;
+    LayoutCodes& operator=(const LayoutCodes&) = delete;
+    // The evdev code whose first-level symbol, lowercased, is `symbol` in the layout's first
+    // group; fallback for an empty or unknown layout, or one without that letter (Cyrillic).
+    int code(const std::string& layout, xkb_keysym_t symbol, int fallback);
+
+  private:
+    std::string name_;
+    xkb_context* context_{};
+    xkb_keymap* keymap_{};
+};
+
+// Desktop typing goes to the relay (which types it on the Frametop desktop's seat, or on
+// Native Desktop through its virtual keyboard, in that desktop's layout); everything else goes
+// to `steam` (gamescope). A held key is released where it
 // was pressed, whichever way typing goes by then. A release the relay didn't take (its socket
 // full) is owed and sent again, before the next key and at each pump, until it goes, so a key
 // never stays down on the desktop. A relay that restarts has let go of
@@ -89,8 +115,9 @@ class FrametopSink : public KeySink {
     // Releases still owed to the desktop (tests).
     const std::set<int>& owed() const { return owed_; }
     int shortcut_code(xkb_keysym_t symbol, int fallback) override {
-        // The desktop types keys by their place, like a real keyboard on it.
-        return link_.desktop() ? fallback : steam_.shortcut_code(symbol, fallback);
+        // The desktop reads keys by their place, with its own layout, like a real keyboard on it.
+        return link_.desktop() ? layout_codes_.code(link_.layout(), symbol, fallback)
+                               : steam_.shortcut_code(symbol, fallback);
     }
     std::optional<bool> num_lock_state() override {
         return link_.desktop() ? std::nullopt : steam_.num_lock_state();
@@ -103,5 +130,6 @@ class FrametopSink : public KeySink {
     void send_owed();
     std::map<int, bool> held_; // code -> pressed on the desktop
     std::set<int> owed_;       // releases the relay didn't take yet
+    LayoutCodes layout_codes_;
 };
 } // namespace framekeyboard

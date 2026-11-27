@@ -355,6 +355,31 @@ int main() {
         require(pokes[2].verb == HandPoke::Verb::Up && !pokes[2].point, "an up without a point");
         require(link.take_pokes().empty(), "taken once");
 
+        // The desktop's layout: Ctrl+letter shortcuts press the key the letter is on there.
+        require(link.layout().empty() && sink.shortcut_code(XKB_KEY_a, KEY_A) == KEY_A,
+                "no layout said: the letter's US place");
+        relay.say("kb 1 1 fr");
+        link.poll();
+        require(link.layout() == "fr", "a French desktop");
+        require(sink.shortcut_code(XKB_KEY_a, KEY_A) == KEY_Q && sink.shortcut_code(XKB_KEY_z, KEY_Z) == KEY_W &&
+                    sink.shortcut_code(XKB_KEY_c, KEY_C) == KEY_C,
+                "French: Ctrl+A on Q's key, Ctrl+Z on W's, Ctrl+C where it was");
+        relay.say("kb 1 1 de(nodeadkeys)");
+        link.poll();
+        require(sink.shortcut_code(XKB_KEY_z, KEY_Z) == KEY_Y, "German with a variant: Ctrl+Z on Y's key");
+        relay.say("kb 1 1 ru");
+        link.poll();
+        require(sink.shortcut_code(XKB_KEY_c, KEY_C) == KEY_C, "Cyrillic: the Latin letter's US place");
+        relay.say("kb 1 1 no-such-layout");
+        link.poll();
+        require(sink.shortcut_code(XKB_KEY_a, KEY_A) == KEY_A, "an unknown layout: the US place");
+        relay.say("kb 1 1 fr;rm");
+        link.poll();
+        require(link.layout().empty(), "a malformed name is dropped");
+        relay.say("kb 0 1 fr");
+        link.poll();
+        require(link.layout().empty(), "Steam: no desktop layout");
+
         // Silence: the word goes stale, and typing goes back to Steam.
         relay.say("kb 1 1");
         link.poll();

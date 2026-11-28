@@ -112,6 +112,19 @@ still clicks where you look. A rules file without the table gets ft_remote_keys.
 default Meta combinations but the gaze clicks, each as itself. release_keys never goes to the
 computer, whatever the table says: it's the way out of stuck keys.
 
+The table is all the Meta the computer gets from a keyboard (user, 2026-11-27: "all meta/super
+input forwards to remote displays when they are focussed, not just the ones that are bound in
+settings"). While a remote display has the typing (pc_typing: the sixth word 1 to 3), Meta's
+press goes nowhere at first, and nor does a modifier pressed after it ("key <code> 1 held":
+ft-screens only notes them; holds_back). The key they are for decides. A combination in the table
+is the computer's, and it gets the modifiers first. One of Frametop's does its action, and the
+computer hears nothing, no F24 either. Any other one with Meta (Meta+E, Meta+Tab, a tap that
+does nothing) is typed on the Frame's own desktop, where KWin has the keyboard ("key <code>
+<value> here"), as it would be off the remote display, and comes up there. Without Meta
+nothing changes: Ctrl+C and Alt+Tab are the computer's. A laser's click or a wheel never passes
+here, so ft-screens sends the modifiers it noted ahead of one (screens/waiting-keys.h): Super+drag
+on the computer's screen stays its own.
+
 Gamepad mode (input/vrpad.py) makes the Frame controllers one Xbox pad for a Frametop panel. It is
 Frametop's own: ft-screens' "Enter Gamepad Mode" pill (above a game's panel, and above the panel
 typing goes to while the Steam menu is open) takes its lasers off every panel, and ft-screens says
@@ -1390,6 +1403,9 @@ class HeldKeys:
         self.combos = {}  # key code -> the action its combination started (released with it)
         self.cal = set()  # Enter keys whose press answered the gaze calibration panel (cal_enter)
         self.desktop = set()  # keys the desktop was told went down and not yet up (to_screens)
+        self.mod_codes = set()  # the modifier keys held, as they are (a right-hand code isn't folded)
+        self.waiting = set()  # held modifiers nothing was told went down: a PC has the typing (hold_back)
+        self.here = set()  # keys the Frame's own desktop was told went down while a PC has it (to_here)
 
     def forget_up(self, down):
         """The Meta keys and modifiers no device holds are forgotten (down: the keys the devices hold)."""
@@ -1397,6 +1413,7 @@ class HeldKeys:
             self.meta.discard(code)
             self.meta_hidden.discard(code)
         self.lifted.intersection_update(down)
+        self.mod_codes.intersection_update(down)
         self.modifiers.intersection_update({MODIFIERS[c] for c in down if c in MODIFIERS})
 
 
@@ -1466,7 +1483,7 @@ class Relay:
         self.desktop_until, self.typing_applied = 0.0, None
         self.vr_capture_until, self.vr_bind_retry = 0.0, False
         self.calpanel_until, self.shown_until, self.wheel_until = 0.0, 0.0, 0.0
-        self.pc_word = "0"  # ft-screens' "keyboard" sixth word: a PC's desktop has the keys (pc_keys)
+        self.pc_word = "0"  # ft-screens' "keyboard" sixth word: a PC has the typing (pc_typing, pc_keys)
         self.remote_keys = {}  # the rules' "remote_key_bindings" (ft_remote_keys): pressed -> sent
         self.tile_focus_until = 0.0  # ft-screens' "tilefocus 1" or "2": the tiling keys are its until then
         self.tile_focus_app = False  # ...1: an app's tile (every tiling key); 2: a display's (the nudges)
@@ -1811,6 +1828,8 @@ class Relay:
             else:
                 lifted.add(code)
         self.held.lifted = lifted
+        for code in sorted(c for c in self.held.waiting if c in codes):
+            self.hold_back(code, 1)  # (ft-screens forgot it with the tap's press: it's still held, and still waits)
         log(f"keys {'+'.join(map(str, codes))} to {'the desktop' if desktop else 'Steam'}")
 
     def cal_enter(self, code, value, now):
@@ -1857,11 +1876,19 @@ class Relay:
                     # sends nothing meanwhile (mice don't repeat): it isn't a tap either.
                     self.held.tap = None
             (self.held.modifiers.add if value else self.held.modifiers.discard)(mod)
+            (self.held.mod_codes.add if value else self.held.mod_codes.discard)(code)
+            if value == 0 and code in self.held.here:
+                self.to_here(code, 0)  # the Frame's own desktop had it too, for a combination that was its
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
                 (self.held.meta.add if value else self.held.meta.discard)(code)
                 if value == 0 and code in self.held.meta_hidden:
                     self.held.meta_hidden.discard(code)
                     return True  # the desktop already had it come up (below)
+            if value == 1 and not hide and self.holds_back(mod, now):
+                # A PC has the typing: nothing gets Meta, or a modifier after it, until the key
+                # they're for says whose the combination is (see the top).
+                self.hold_back(code, 1)
+                return True
             if value == 0 and code == self.held.talk_code:
                 self.held.talk_code, self.held.tap = None, None
                 hide, self.held.talk_hidden = self.held.talk_hidden, False
@@ -1874,29 +1901,46 @@ class Relay:
             if value == 0 and self.held.tap == mod:
                 self.held.tap = None
                 self.modifier_tap(mod, self.held.tap_code, now)
+            if value == 0 and code in self.held.waiting:
+                self.hold_back(code, 0)
+                return True  # nothing had it go down
             if value == 0 and code in self.held.lifted:
                 self.held.lifted.discard(code)
                 return True  # the desktop already had it come up (tap_keys)
             return hide
+        if value != 1 and code in self.held.here:
+            if value == 0:
+                self.to_here(code, 0)
+            return True  # (a held one's repeats are KWin's own)
         if value == 0 and code in self.held.combos:
             action = self.held.combos.pop(code)
             if self.lease.current or not needs_pointer(action):
                 self.do_action(action, 0, now, "keyboard")
             return True
         combo, action = self.combo_for(code) if value == 1 else (None, None)
-        if value == 1 and action is None and (self.held.meta_hidden or self.held.lifted):
-            # Another key while Meta is still held after a combination, or a modifier a "keys:"
-            # action's tap lifted: the desktop gets them back first, so Meta+that key still works
-            # there. Not for one that's a combination too (H again with Meta+Shift held): they
-            # stay up there, with nothing sent.
-            for c in sorted(self.held.meta_hidden | self.held.lifted):
+        if value == 1 and action is None and self.headset_combo(combo, now):
+            # A Meta combination that is neither Frametop's nor in the PC's list: typed on the
+            # Frame's own desktop, with the modifiers held, and the PC hears none of it.
+            for c in sorted(self.held.mod_codes - self.held.here):
+                self.to_here(c, 1)
+            self.to_here(code, 1)
+            log(f"key combination {combo}: the Frame's desktop's (a PC has the typing, and its list hasn't this one)")
+            return True
+        if value == 1 and action is None and (self.held.meta_hidden or self.held.lifted or self.held.waiting):
+            # Another key while Meta is still held after a combination, a modifier a "keys:"
+            # action's tap lifted, or one held back for a PC's sake: the desktop gets them first,
+            # so Meta+that key still works there. Not for one that's a combination too (H again
+            # with Meta+Shift held): they stay up there, with nothing sent.
+            for c in sorted(self.held.meta_hidden | self.held.lifted | self.held.waiting):
                 self.to_screens(c, 1)
             self.held.meta_hidden.clear()
             self.held.lifted.clear()
+            self.held.waiting.clear()  # (ft-screens forgets one with its press)
         if action is None:
             return value == 2 and code in self.held.combos
         self.held.combos[code] = action
-        if self.held.meta - self.held.meta_hidden:
+        shown = self.held.meta - self.held.meta_hidden - self.held.waiting
+        if shown:
             # The desktop saw Meta go down. Its release mustn't open Plasma's launcher, and Meta
             # comes up there now: KWin takes Meta with a mouse button for moving or resizing
             # windows, which would swallow a gaze click. Its real release is dropped (above).
@@ -1907,13 +1951,20 @@ class Relay:
             if not any(c < BTN_MISC and c not in self.held.meta for c in self.held.desktop):
                 self.to_screens(KEY_F24, 1)
                 self.to_screens(KEY_F24, 0)
-            for c in sorted(self.held.meta - self.held.meta_hidden):
+            for c in sorted(shown):
                 self.to_screens(c, 0)
-            self.held.meta_hidden.update(self.held.meta)
+            self.held.meta_hidden.update(shown)
         if self.lease.current or not needs_pointer(action):
             self.do_action(action, 1, now, "keyboard")
         log(f"key combination {combo}: {action}")
         return True
+
+    def pc_typing(self, now):
+        """Whether what's typed goes to a PC now: a remote display's desktop has the typing
+        (ft-screens' sixth word, 1 to 3). A Meta combination goes there only when the rules give
+        it one (pc_keys, pc_combo): every other one is Frametop's, or the Frame's own desktop's
+        (headset_combo)."""
+        return now < self.desktop_until and self.pc_word != "0"
 
     def pc_keys(self, now):
         """Whether a PC's desktop has the keys now: typing goes to a remote display's desktop, and
@@ -1922,6 +1973,20 @@ class Relay:
         back. (Asleep: not active; the lease's Pointer stays while pointer mode is on.)"""
         asleep = not (self.lease.current and self.lease.current.active)
         return now < self.desktop_until and (self.pc_word == "1" or (self.pc_word == "2" and asleep))
+
+    def holds_back(self, mod, now):
+        """Whether a modifier's press (folded) is kept from everything for now: a PC has the
+        typing, and it's Meta, or a modifier pressed while one is already held back. The key it
+        is for says where it goes (key_binding), a tap what it does (modifier_tap), and a laser's
+        click takes it along (ft-screens, screens/waiting-keys.h)."""
+        return self.pc_typing(now) and (mod == KEY_LEFTMETA or bool(self.held.waiting))
+
+    def headset_combo(self, combo, now):
+        """Whether a combination nothing here acts on is typed on the Frame's own desktop
+        instead of where typing goes: Meta is in it, a PC has the typing, and the rules don't
+        give the PC this one (pc_combo)."""
+        return (combo is not None and KEY_LEFTMETA in self.held.modifiers and self.pc_typing(now)
+                and not self.pc_combo(combo, now))
 
     def pc_combo(self, combo, now):
         """A combination that is a PC's now ("remote_key_bindings", ft_remote_keys; its desktop has
@@ -1948,7 +2013,7 @@ class Relay:
         (combo, action), the action None when it does nothing now."""
         combo = "+".join(str(c) for c in sorted(self.held.modifiers) + [code])
         if not self.rules["key_bindings"]:
-            return self.pc_combo(combo, time.monotonic()) or (None, None)
+            return self.pc_combo(combo, time.monotonic()) or (combo, None)
         action = self.rules["key_bindings"].get(combo)
         focused = time.monotonic() < self.tile_focus_until
         tile = focused and self.tile_focus_app
@@ -1991,7 +2056,9 @@ class Relay:
         """A key, mouse button or scroll while a hold-to-talk modifier is held: it was a shortcut
         (Ctrl+C), so the dictation it started is dropped, without its cancel tone."""
         if self.held.talk_code is not None:
-            if self.held.talk_hidden:
+            if self.held.talk_hidden and self.holds_back(MODIFIERS[self.held.talk_code], time.monotonic()):
+                self.hold_back(self.held.talk_code, 1)  # a PC has the typing: the key it's for says where it goes
+            elif self.held.talk_hidden:
                 self.to_screens(self.held.talk_code, 1)  # the desktop gets the modifier before the key it's for
             self.held.talk_code, self.held.talk_hidden = None, False
             try:
@@ -2004,17 +2071,29 @@ class Relay:
         """A modifier pressed and released alone: its binding, if it has one ("125": Meta tap)."""
         combo, action = self.tap_action(mod, code)
         pc = None if action == "release_keys" else self.pc_tap(mod, code, now)
+        waited = code in self.held.waiting  # nothing has had its press (hold_back)
         if pc and pc[1] is None:
+            if waited:
+                self.held.waiting.discard(code)  # (ft-screens forgets it with its press)
+                self.to_screens(code, 1)  # the PC gets the press now, and the release as it comes
             log(f"key combination {pc[0]}: the PC's (its desktop has the keys)")
             return  # the PC's own tap (Windows' Start menu on Meta), with no F24 in between
         if pc:
             combo, action = pc  # another combination for the PC, tapped as a keys: action is
+        if action is None and waited:
+            # Nothing of Frametop's and not in the PC's list: a tap on the Frame's own desktop
+            # (Plasma's launcher on Meta), as it is off a PC.
+            self.to_here(code, 1)
+            self.to_here(code, 0)
+            log(f"key combination {combo}: the Frame's desktop's (a PC has the typing, and its list hasn't this one)")
         if action is None or action == "dictate_hold":
             return  # nothing, or hold to talk (key_binding), which started on the press
-        # The desktop gets a key in between before the release goes there, so the tap isn't one
-        # there too: a Meta tap would open Plasma's launcher.
-        self.to_screens(KEY_F24, 1)
-        self.to_screens(KEY_F24, 0)
+        if not waited:
+            # The desktop gets a key in between before the release goes there, so the tap isn't
+            # one there too: a Meta tap would open Plasma's launcher. (One held back never went
+            # down anywhere.)
+            self.to_screens(KEY_F24, 1)
+            self.to_screens(KEY_F24, 0)
         if self.lease.current or not needs_pointer(action):
             self.do_action(action, 1, now, "keyboard")
             self.do_action(action, 0, now, "keyboard")
@@ -2037,6 +2116,27 @@ class Relay:
                 # Any release ends a "keys:" tap's mark, a mouse's key's too, which key_binding never
                 # sees: a mark left behind would put the modifier down again with nobody holding it.
                 self.held.lifted.discard(code)
+
+    def to_here(self, code, value):
+        """A key for the Frame's own desktop while a PC has the typing ("key <code> <value>
+        here": ft-screens gives it to the screen KWin has the keyboard on, not the remote one).
+        A Meta combination the PC's list hasn't goes this way, and comes up this way."""
+        try:
+            self.screens_sock.sendto(f"key {code} {value} here".encode(), SCREENS)
+        except OSError:
+            return  # ft-screens not running
+        (self.held.here.add if value else self.held.here.discard)(code)
+
+    def hold_back(self, code, value):
+        """A modifier nothing is told went down ("key <code> 1 held"; holds_back), or its release
+        ("... 0 held"). ft-screens only notes it, for its own Super+drag and for a laser's click,
+        which takes it where the click goes; its release after that is a key's like any other
+        there, so nothing stays down that this relay never sent."""
+        try:
+            self.screens_sock.sendto(f"key {code} {value} held".encode(), SCREENS)
+        except OSError:
+            pass  # ft-screens not running
+        (self.held.waiting.add if value else self.held.waiting.discard)(code)
 
     def type_text(self, text, quiet=False):
         """Queue dictation's text (see the top), or with quiet, Full Keyboard's. Which keys type
@@ -2259,12 +2359,18 @@ class Relay:
         its device vanishes with it held (release_held only lets go of it here) or a release
         goes astray: on 2026-10-01, after a calibration, Meta stayed down in KWin, so typing
         opened the overview and clicks on the desktop did other things."""
-        if not self.held.desktop and not self.held.meta and not self.held.modifiers and not self.held.lifted:
+        if not (self.held.desktop or self.held.meta or self.held.modifiers or self.held.lifted or self.held.here
+                or self.held.waiting):
             return
         down = self.physically_down()
         for code in sorted(self.held.desktop - down - self.typed_down()):
             self.to_screens(code, 0)
             log(f"key {code} released on the desktop: no keyboard holds it")
+        for code in sorted(self.held.here - down):
+            self.to_here(code, 0)
+            log(f"key {code} released on the Frame's desktop: no keyboard holds it")
+        for code in sorted(self.held.waiting - down):
+            self.hold_back(code, 0)
         self.held.forget_up(down)
 
     def release_all_keys(self):
@@ -2286,6 +2392,9 @@ class Relay:
             self.screens_sock.sendto(b"keys release", SCREENS)
         except OSError:
             pass  # the Frametop desktop isn't running
+        self.held.here.clear()  # (ft-screens let go of them)
+        for code in sorted(self.held.waiting):
+            self.hold_back(code, 1)  # (...and forgot these: still held, they still wait)
         log("release_keys: every key let go")
 
     def keys_down(self, node):
@@ -2459,13 +2568,14 @@ class Relay:
             # From ft-screens (unbound, no reply): where typing goes, repeated every second.
             # "keyboard desktop|steam 1|0 1|0 1|0 0|1|2": the third word, whether the screens show;
             # the fourth, whether it's paused, the fifth whether the 3D mouse's laser is on a panel
-            # so ft-screens takes its wheel, the sixth whether a PC's desktop has the keys (pc_keys)
+            # so ft-screens takes its wheel, the sixth whether a PC has the typing (pc_typing: 1 to
+            # 3) and its desktop the key combinations the rules give it (pc_keys: 1, 2)
             # (an older ft-screens leaves them out).
             desktop = len(words) > 1 and words[1] == "desktop" and not self.pause.paused
             self.desktop_until = now + 3.0 if desktop else 0.0
             self.shown_until = now + 3.0 if len(words) > 2 and words[2] == "1" else 0.0
             self.wheel_until = now + 3.0 if len(words) > 4 and words[4] == "1" else 0.0
-            self.pc_word = words[5] if len(words) > 5 and words[5] in ("1", "2") else "0"
+            self.pc_word = words[5] if len(words) > 5 and words[5] in ("1", "2", "3") else "0"
             if uid == os.getuid():
                 self.pause.screens_seen(pid)  # a desktop started while paused hides too
                 if len(words) > 3 and words[3] in ("0", "1"):
@@ -2479,7 +2589,7 @@ class Relay:
             # combination, so letting go of Meta doesn't open Plasma's launcher. Not with another
             # key it holds (Shift): that already stops it, and a terminal would type F24.
             self.held.tap = None
-            if self.held.meta - self.held.meta_hidden and not any(
+            if self.held.meta - self.held.meta_hidden - self.held.waiting and not any(
                     c < BTN_MISC and c not in self.held.meta for c in self.held.desktop):
                 self.to_screens(KEY_F24, 1)
                 self.to_screens(KEY_F24, 0)

@@ -1,8 +1,11 @@
 """ft_remote_keys: the key combinations a remote display's computer gets.
 
-While you type on a remote display, Frametop's own key combinations ("key_bindings" in the input
-rules, ~/.config/frametop-input.json) still work: Meta+J clicks where you look, Meta+Space opens
-frunner. The rules' "remote_key_bindings" names the combinations that go to the computer instead:
+While you type on a remote display, what you type goes to its computer, but no combination with
+Meta does on its own: Frametop's ("key_bindings" in the input rules,
+~/.config/frametop-input.json) still work, so Meta+J clicks where you look and Meta+Space opens
+frunner, and any other is the Frame's own desktop's, as it is off the remote display. The rules'
+"remote_key_bindings" names the combinations that go to the computer instead, and it is all of
+them (a combination without Meta that Frametop doesn't bind is typed there as ever):
 
     "remote_key_bindings": {"<pressed>": "<sent>"}
 
@@ -13,6 +16,13 @@ and an entry for the left code leaves a right-hand key that key_bindings binds o
 is what the computer gets: the same combination (it's typed there as it is, and held as long as
 you hold it), or another one, which is tapped there once ("125+57": Meta+Space, so
 Meta+Shift+Space on the Frame opens the computer's launcher while Meta+Space stays frunner's).
+An entry for a combination Frametop doesn't bind is what sends it ("125+28": Meta+Enter, for a
+computer whose window manager opens a terminal with it).
+
+The computer hears nothing of a combination that isn't its own: the relay holds Meta's press
+back, and the modifiers pressed after it, until the key they are for says whose it is
+(screens/waiting-keys.h). A click or a wheel on the remote display takes them along, so Meta+drag
+there is still the computer's.
 
 The input relay (input/input-relay.py) acts on the table and Frametop Settings' Remote display
 keys page (input-settings/remote_keys.py) edits it; both read it here, so they agree on what a

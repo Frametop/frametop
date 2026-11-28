@@ -74,6 +74,7 @@ def items(root, env=os.environ):
         single("screens/tests/relay-buttons-test.c", C11),
         P("peerinput-test", "screens/tests/peerinput-test.c", cc="gcc", flags=f"{C11} -fsanitize=address,undefined -g"),
         single("screens/tests/held-keys-test.c", C11),
+        single("screens/tests/waiting-keys-test.c", C11),
         P("held-keys-wlr-test", "screens/tests/held-keys-wlr-test.c", cc="gcc", flags=C11,
           pkgs="wlroots-0.20 xkbcommon wayland-server"),
         P("remote-test", "screens/tests/remote-test.c", "screens/remote.c", "screens/child.c", cc="gcc", flags=GNU11_NUP,

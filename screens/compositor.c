@@ -87,6 +87,7 @@
 #include "relay-buttons.h"
 #include "peerinput.h"
 #include "held-keys.h"
+#include "waiting-keys.h"
 #include "rendernode.h"
 
 #define MAX_SCREENS 24  // screens and spare outputs
@@ -144,6 +145,7 @@ struct server {
     struct wlr_seat *seat;
     struct wlr_keyboard keyboard;
     struct ft_lost_keys lost_keys;  // releases that came with no screen focused (held-keys.h)
+    struct ft_waiting_keys waiting;  // modifiers held that nothing has down yet (waiting-keys.h)
     struct wlr_xdg_shell *xdg_shell;
     struct wlr_xdg_decoration_manager_v1 *decoration;
     struct wl_listener new_toplevel, new_decoration, new_surface;
@@ -716,6 +718,21 @@ static void seat_event(struct server *s, const struct ft_event *e) {
     wlr_seat_pointer_notify_frame(s->seat);
 }
 
+static void send_key(struct server *s, uint32_t code, int pressed);
+
+// A click or a wheel on its way to a panel takes the modifiers that wait with it
+// (waiting-keys.h): down first on remote screen `remote`, or on the desktop (-1), so it's the
+// Meta+click or Meta+wheel it was pressed as. Their releases come from the relay like any key's.
+static void waiting_keys_go(struct server *s, int remote) {
+    uint32_t code;
+    while ((code = ft_waiting_keys_take(&s->waiting))) {
+        if (remote >= 0) ft_remote_key(remote, code, true);
+        else send_key(s, code, 1);
+        wlr_log(WLR_INFO, "key %u, held for its combination: down on %s with a click or the wheel", code,
+                remote >= 0 ? "the remote screen" : "the desktop");
+    }
+}
+
 static void handle_vr_event(const struct ft_event *e, void *data) {
     if (e->type != FT_QUIT && !ft_pin_allowed()) return;
     struct server *s = data;
@@ -740,6 +757,9 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         }
         if (e->type == FT_BUTTON && e->pressed && e->button == BTN_LEFT) remote_clicked(s, e->screen);   // (as relay_button)
         if (e->type == FT_SCROLL && ft_vr_app_scale_wheel(e->screen, e->dy)) return;
+        // (a wheel only where the typing is: the releases go where typing goes)
+        if ((e->type == FT_BUTTON && e->pressed) || (e->type == FT_SCROLL && s->key_remote == e->screen))
+            waiting_keys_go(s, e->screen);
         ft_remote_event(e);
         return;
     }
@@ -767,6 +787,7 @@ static void handle_vr_event(const struct ft_event *e, void *data) {
         float_send(s, msg);
         return;
     }
+    if ((e->type == FT_BUTTON && e->pressed) || e->type == FT_SCROLL) waiting_keys_go(s, -1);
     seat_event(s, e);
     if (e->type == FT_BUTTON && e->pressed) {  // the wearer's click: typing goes to this screen
         spot_dismiss(s, "click");
@@ -859,7 +880,9 @@ static void keys_update(struct server *s) {
     // it was (2: the relay takes that for the PC's while the 3D mouse sleeps). Then the key
     // combinations in the rules' "remote_key_bindings" are the PC's (Super+Space opens its
     // launcher, not frunner; the gaze clicks stay ours): input-relay.py's pc_keys. The 3D mouse on
-    // another panel, or awake off every panel, gives them back.
+    // another panel, or awake off every panel, gives them back (3: the PC still gets what's
+    // typed, but no Meta combination). Whichever it is, a Meta combination the rules don't give
+    // the PC never goes there: the relay sends those keys "here" (handle_key).
     const int mouse = ft_vr_mouse_panel();
     if (mouse >= 0) s->mouse_last = mouse;
     const bool remote = desktop && !spot_open(s) && !ft_vr_app_typing() && s->key_remote >= 0 &&
@@ -867,7 +890,7 @@ static void keys_update(struct server *s) {
     // (a 3D mouse parked on another panel while a hand's tap took typing there counts as on it: the
     // letters go to the PC, so Meta does too)
     const int pc = !remote ? 0 : mouse == s->key_remote || (s->mouse_parked && mouse >= 0) ? 1
-                 : mouse < 0 && (s->mouse_last == s->key_remote || s->mouse_parked) ? 2 : 0;
+                 : mouse < 0 && (s->mouse_last == s->key_remote || s->mouse_parked) ? 2 : 3;
     if (desktop == s->keys_desktop && shown == s->keys_shown && paused == s->keys_paused && wheel == s->keys_wheel &&
         pc == s->keys_pc && t - s->relay_sent < 1000)
         return;
@@ -876,7 +899,8 @@ static void keys_update(struct server *s) {
     s->keys_shown = shown;
     s->keys_paused = paused;
     s->keys_wheel = wheel;
-    if (pc != s->keys_pc) wlr_log(WLR_INFO, "Meta goes to %s", pc ? "the PC" : "Frametop");
+    if ((pc == 1 || pc == 2) != (s->keys_pc == 1 || s->keys_pc == 2))
+        wlr_log(WLR_INFO, "Meta goes to %s", pc == 1 || pc == 2 ? "the PC" : "Frametop");
     s->keys_pc = pc;
     s->relay_sent = t;
     char msg[40];
@@ -1082,6 +1106,7 @@ static void release_all_keys(struct server *s, char *reply, int size) {
     const uint32_t stuck = s->keyboard.modifiers.depressed;
     if (spot_open(s)) spot_send(s, "keys release");
     if (s->key_remote >= 0 && ft_remote_is(s->key_remote)) ft_remote_blur(s->key_remote);
+    s->waiting.n = 0;  // (nothing has them down: there is nothing to let go)
     release_keys(s, "release all keys");
     // ...and ft-screens' own idea of them (window drag's Super, a carry's Ctrl and Alt): a relay that
     // restarted with one held never sends its release
@@ -1264,8 +1289,26 @@ static const char *peer_command(struct server *s, const char *words) {
 // always goes through, or the key stays held there (a modifier held as typing moves to
 // Steam would otherwise modify every key typed after it). Mouse buttons go where the
 // pointer is instead (relay_button), and codes that are neither go nowhere.
-static void handle_key(struct server *s, uint32_t code, int value, char *reply, int size) {
+// A word after the value says otherwise (waiting-keys.h): "here" is for the desktop though a
+// remote screen has the typing (a Meta combination its computer isn't given), and "held" is a
+// modifier nothing gets yet, noted only, until a click takes it along or the relay sends it.
+static void handle_key(struct server *s, uint32_t code, int value, enum ft_key_to to, char *reply, int size) {
     if (s->vr && !ft_pin_allowed()) return (void)snprintf(reply, size, "error Steam PIN locked");
+    if (to == FT_KEY_HELD) {
+        if (value == 1 && !ft_is_modifier(code)) return (void)snprintf(reply, size, "error only a modifier waits");
+        if (value == 1 && ft_waiting_keys_add(&s->waiting, code)) {
+            ft_vr_key(code, 1);
+            return (void)snprintf(reply, size, "ok held");
+        }
+        if (value == 0 && ft_waiting_keys_drop(&s->waiting, code)) {
+            ft_vr_key(code, 0);
+            return (void)snprintf(reply, size, "ok held");
+        }
+        if (value) return (void)snprintf(reply, size, "ok repeat ignored");
+        to = FT_KEY_TYPING;  // the release of one a click took where it went: as any key's
+    }
+    // (one the relay sends after all, with the key it was for, no longer waits)
+    if (to == FT_KEY_TYPING) ft_waiting_keys_drop(&s->waiting, code);
     ft_vr_key(code, value);
     // a gamescope app repeats nothing itself (synthetic keys): its repeats go to it as presses
     if (value == 2) return (void)snprintf(reply, size, ft_vr_app_key(code, 2, spot_open(s)) ? "ok app" : "ok repeat ignored");  // KWin repeats itself
@@ -1285,7 +1328,8 @@ static void handle_key(struct server *s, uint32_t code, int value, char *reply, 
         return (void)snprintf(reply, size, "ok frunner");
     }
     // A remote screen has the typing, except for the release of a key the desktop holds.
-    if (s->key_remote >= 0 && ft_remote_is(s->key_remote) && (value || !key_held(&s->keyboard, code))) {
+    if (to != FT_KEY_HERE && s->key_remote >= 0 && ft_remote_is(s->key_remote) &&
+        (value || !key_held(&s->keyboard, code))) {
         if (value && peer_at_host(s, s->key_remote)) own_hand(s);
         ft_remote_key(s->key_remote, code, value != 0);
         return (void)snprintf(reply, size, "ok remote");
@@ -1366,22 +1410,25 @@ static const char *typing_target(struct server *s) {
 }
 
 // "keys": what ft-screens holds down and where it goes, for reports on stuck keys:
-// "ok focus=<screen>|none typing=<where> keys=<codes>|- mods=<names>|- lost=<codes>|-". keys are
-// the keys ft-screens has down (and KWin with them, unless it lost one), mods the modifiers in
-// effect with them (locked ones too: Caps, NumLock), and lost the releases still owed to KWin,
-// sent with the next focus. Only the modifiers, Esc and Tab are named (ft_key_list).
+// "ok focus=<screen>|none typing=<where> keys=<codes>|- mods=<names>|- lost=<codes>|-
+// waiting=<codes>|-". keys are the keys ft-screens has down (and KWin with them, unless it lost
+// one), mods the modifiers in effect with them (locked ones too: Caps, NumLock), lost the
+// releases still owed to KWin, sent with the next focus, and waiting the modifiers held that
+// nothing has down yet (waiting-keys.h). Only the modifiers, Esc and Tab are named (ft_key_list).
 static void keys_state(struct server *s, char *reply, int size) {
     static const char *const mod_names[] = {"Shift", "Caps", "Ctrl", "Alt", "NumLock", "Mod3", "Meta", "AltGr"};
-    char keys[128], mods[96] = "-", lost[160];
+    char keys[128], mods[96] = "-", lost[160], waiting[48];
     ft_key_list(s->keyboard.keycodes, s->keyboard.num_keycodes, keys, sizeof keys);
     ft_key_list(s->lost_keys.code, s->lost_keys.n, lost, sizeof lost);
+    ft_key_list(s->waiting.code, s->waiting.n, waiting, sizeof waiting);
     const uint32_t m = wlr_keyboard_get_modifiers(&s->keyboard);
     for (unsigned i = 0, at = 0; i < 8 && at < sizeof mods; ++i)
         if (m & (1u << i)) at += snprintf(mods + at, sizeof mods - at, "%s%s", at ? "," : "", mod_names[i]);
     const int focus = s->seat->keyboard_state.focused_surface ? focused_screen(s) : -1;
     char where[16] = "none";
     if (focus >= 0) snprintf(where, sizeof where, "%d", focus + 1);
-    snprintf(reply, size, "ok focus=%s typing=%s keys=%s mods=%s lost=%s", where, typing_target(s), keys, mods, lost);
+    snprintf(reply, size, "ok focus=%s typing=%s keys=%s mods=%s lost=%s waiting=%s", where, typing_target(s), keys, mods,
+             lost, waiting);
 }
 
 // Control socket: abstract datagram @ft_screens. Here: "size <screen> <w> <h>" (a new
@@ -1509,7 +1556,9 @@ static int control_readable(int fd, uint32_t mask, void *data) {
             len = sizeof from;
             continue;
         } else if (sscanf(buf, "key %u %d", &code, &value) == 2) {
-            handle_key(s, code, value, reply, sizeof reply);
+            char word[8] = "";
+            sscanf(buf, "key %*u %*d %7s", word);
+            handle_key(s, code, value, ft_key_to_word(word), reply, sizeof reply);
             len = sizeof from;
             continue;  // no reply: keys are fire-and-forget
         } else if (strncmp(buf, "peer ", 5) == 0) {

@@ -823,17 +823,20 @@ def tests():
 
     # A PC's desktop has the keys (ft-screens' sixth "keyboard" word: 1 the 3D mouse on it, 2 on
     # no panel since and asleep): Meta+Space and a Meta tap are the PC's, typed through, not
-    # frunner's or Steam's menu. 0 (the 3D mouse moved off it) gives them back.
+    # frunner's or Steam's menu. 0 (the 3D mouse moved off it) gives them back. While a PC has the
+    # typing, Meta's press is held back ("held": ft-screens only notes it) until the key it's for,
+    # or its release, says whose it is: the PC gets it then, with the key.
     SPACE = 57
+    META_WAITS, META_FREE = "key 125 1 held", "key 125 0 held"
     menus = len(lines(steam_log))
     for word in ("1", "2"):
         to_relay(f"keyboard desktop 1 0 1 {word}")
         time.sleep(0.05)
         got = meta(SPACE)
         check(f"PC has the keys ({word}): Meta+Space is typed there, frunner hears nothing",
-              (frunner_got(), got), ([], ["key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
+              (frunner_got(), got), ([], [META_WAITS, "key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
         check(f"PC has the keys ({word}): a Meta tap is the PC's, no F24, no Steam menu",
-              (meta(), len(lines(steam_log))), (["key 125 1", "key 125 0"], menus))
+              (meta(), len(lines(steam_log))), ([META_WAITS, "key 125 1", "key 125 0"], menus))
     # Pointer mode on (the Frame's usual): "2" goes by the 3D mouse being asleep, not by pointer mode.
     conf["POINTER"] = "1"
     use(None)
@@ -841,7 +844,7 @@ def tests():
     time.sleep(0.05)
     got = meta(SPACE)
     check("pointer mode, the 3D mouse asleep (2): Meta+Space is the PC's",
-          (frunner_got(), got), ([], ["key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
+          (frunner_got(), got), ([], [META_WAITS, "key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0"]))
     RELAYS[0].lease.current.active, RELAYS[0].lease.current.last_used = True, time.monotonic()
     meta(SPACE)
     check("pointer mode, the 3D mouse awake off the PC (2): Meta+Space is frunner's", frunner_got(), ["toggle keyboard"])
@@ -859,8 +862,8 @@ def tests():
     # Which combinations are the PC's is the rules' "remote_key_bindings" (ft_remote_keys). A file
     # without it gets Frametop's default Meta combinations but the gaze clicks (above: Meta+Space
     # and a Meta tap), so Meta+J still clicks where you look on a remote display.
-    check("PC has the keys: Meta+J is still Frametop's gaze click, J isn't typed there",
-          meta(J), ["key 125 1"] + F24 + ["key 125 0"])
+    check("PC has the keys: Meta+J is still Frametop's gaze click, and the PC hears nothing, no F24 either",
+          meta(J), [META_WAITS, META_FREE])
 
     def pc_table(table, key_bindings=None):
         remote_keys["now"] = table
@@ -872,38 +875,90 @@ def tests():
 
     # A table of its own: only what it names is the PC's. One sent as another combination is
     # tapped there on the press, with the modifiers the PC holds up meanwhile.
-    pc_table({"42+125+57": "125+57"})
+    pc_table({"42+125+57": "125+57", "42+125+30": "42+125+30"})
     got = meta(SPACE)
     check("own table without Meta+Space: it's frunner's on the PC too",
-          (frunner_got(), f"key {SPACE} 1" in got), (["toggle keyboard"], False))
-    check("Meta+Shift+Space sent as Meta+Space: the PC gets Meta+Space alone, and no Shift tap after",
+          (frunner_got(), got), (["toggle keyboard"], [META_WAITS, META_FREE]))
+    check("Meta+Shift+Space sent as Meta+Space: the PC gets Meta+Space alone, no Shift, and Meta waits again",
           meta(SHIFT, SPACE),
-          ["key 125 1", f"key {SHIFT} 1", "key 125 0", f"key {SHIFT} 0", "key 125 1", f"key {SPACE} 1",
-           f"key {SPACE} 0", "key 125 0"])
+          [META_WAITS, f"key {SHIFT} 1 held", "key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0", META_WAITS,
+           f"key {SHIFT} 0 held", META_FREE])
     key(META, 1); key(SHIFT, 1); key(SPACE, 1); key(SPACE, 0); typed()
     key(A, 1); key(A, 0); key(SHIFT, 0); key(META, 0)
-    check("...Meta and Shift still held, then A: the PC gets them back first, so it's Meta+Shift+A there",
+    check("...Meta and Shift still held, then the listed Meta+Shift+A: the PC gets them first",
           typed(), [f"key {SHIFT} 1", "key 125 1", f"key {A} 1", f"key {A} 0", f"key {SHIFT} 0", "key 125 0"])
     frunner_got()
-    check("it isn't frunner's, and Meta+J stays the gaze click", (frunner_got(), meta(J)),
-          ([], ["key 125 1"] + F24 + ["key 125 0"]))
+    check("it isn't frunner's, and Meta+J stays the gaze click", (frunner_got(), meta(J)), ([], [META_WAITS, META_FREE]))
     to_relay("keyboard desktop 1 0 1 1")  # (ft-screens renews it; the checks above took a while)
     menus = len(lines(steam_log))
-    check("own table without the Meta tap: it's the Steam menu on the PC too",
-          (meta(), len(lines(steam_log))), (["key 125 1"] + F24 + ["key 125 0"], menus + 1))
+    check("own table without the Meta tap: it's the Steam menu on the PC too, and the PC hears nothing",
+          (meta(), len(lines(steam_log))), ([META_WAITS, META_FREE], menus + 1))
+    # The table is all the Meta a PC gets from a keyboard. A combination with Meta that is neither
+    # in it nor Frametop's is typed on the Frame's own desktop ("here": the screen KWin has the
+    # keyboard on), with the modifiers held, and comes up there.
+    E_KEY, C_KEY = 18, 46
+    check("Meta+E, not in the table and not Frametop's: the Frame's desktop's, the PC hears nothing",
+          meta(E_KEY), [META_WAITS, "key 125 1 here", f"key {E_KEY} 1 here", f"key {E_KEY} 0 here", "key 125 0 here", META_FREE])
+    key(META, 1); key(E_KEY, 1); typed()
+    key(E_KEY, 2); key(E_KEY, 2)
+    check("...held: its repeats are KWin's own, nothing is sent", typed(), [])
+    key(E_KEY, 0); key(META, 0); typed()
+    key(SHIFT, 1); key(META, 1); key(E_KEY, 1); key(E_KEY, 0); key(META, 0); key(SHIFT, 0)
+    check("Shift first (the PC has it), then Meta+E: the Frame's desktop gets Shift too, and both let it go",
+          typed(), [f"key {SHIFT} 1", META_WAITS, f"key {SHIFT} 1 here", "key 125 1 here", f"key {E_KEY} 1 here",
+                    f"key {E_KEY} 0 here", "key 125 0 here", META_FREE, f"key {SHIFT} 0 here", f"key {SHIFT} 0"])
+    key(META, 1); key(E_KEY, 1); key(E_KEY, 0); typed()
+    key(SHIFT, 1); key(A, 1); key(A, 0); key(SHIFT, 0); key(META, 0)
+    check("Meta still held after Meta+E, then the listed Meta+Shift+A: the PC gets Meta and Shift, and every side lets go",
+          typed(), [f"key {SHIFT} 1 held", f"key {SHIFT} 1", "key 125 1", f"key {A} 1", f"key {A} 0",
+                    f"key {SHIFT} 0", "key 125 0 here", "key 125 0"])
+    key(CTRL, 1); key(C_KEY, 1); key(C_KEY, 0); key(CTRL, 0)
+    check("no Meta: Ctrl+C is typed to the PC as ever",
+          typed(), [f"key {CTRL} 1", f"key {C_KEY} 1", f"key {C_KEY} 0", f"key {CTRL} 0"])
+    key(META, 1); typed()
+    to_relay("notap")
+    time.sleep(0.05)
+    key(META, 0)
+    check("a laser's click with Meta held back: no F24 (nothing has Meta down here), and its release is no tap",
+          (typed(), len(lines(steam_log))), ([META_FREE], menus + 1))
+    key(META, 1); key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(1, 1); key(1, 0)
+    got = typed()
+    check("Ctrl+Alt+Shift+Esc with Meta held back: every key let go, and Meta and the rest wait again",
+          got[got.index("keys release"):] if "keys release" in got else got,
+          ["keys release", f"key {CTRL} 1 held", f"key {SHIFT} 1 held", f"key {ALT} 1 held", META_WAITS])
+    key(SHIFT, 0); key(ALT, 0); key(CTRL, 0); key(META, 0)
+    typed()
+    # The 3D mouse awake off the PC ("3"): what's typed still goes there, but no Meta combination
+    # does, in the table or not. Frametop's are Frametop's, the rest the Frame's desktop's.
+    to_relay("keyboard desktop 1 0 1 3")
+    time.sleep(0.05)
+    check("3: the listed Meta+Shift+A is the Frame's desktop's (the table rests), the PC hears nothing",
+          meta(SHIFT, A), [META_WAITS, f"key {SHIFT} 1 held", f"key {SHIFT} 1 here", "key 125 1 here", f"key {A} 1 here",
+                           f"key {A} 0 here", f"key {SHIFT} 0 here", f"key {SHIFT} 0 held", "key 125 0 here", META_FREE])
+    meta(SPACE)
+    check("3: Meta+Space is frunner's", frunner_got(), ["toggle keyboard"])
+    key(A, 1); key(A, 0)
+    check("3: a letter is typed where typing goes", typed(), [f"key {A} 1", f"key {A} 0"])
+    # A Meta tap that does nothing (Meta taps turned off) and isn't in the table: the Frame's
+    # desktop's, as it is off a PC (Plasma's launcher).
+    meta_tap["on"] = False
+    pc_table({})
+    check("Meta taps off, the tap not in the table: tapped on the Frame's desktop, not the PC's",
+          meta(), [META_WAITS, "key 125 1 here", "key 125 0 here", META_FREE])
+    meta_tap["on"] = None
+    pc_table({"42+125+57": "125+57", "42+125+30": "42+125+30"})
     to_relay("keyboard desktop 1 0 1 0")
     time.sleep(0.05)
-    check("off the PC: Meta+Shift+Space is typed as it is (no binding of Frametop's)",
+    check("no PC has the typing: Meta+Shift+Space is typed as it is (no binding of Frametop's)",
           meta(SHIFT, SPACE), ["key 125 1", f"key {SHIFT} 1", f"key {SPACE} 1", f"key {SPACE} 0",
                                f"key {SHIFT} 0", "key 125 0"])
-    # A tap sent as another combination: the modifier is down on the PC, so an F24 before it comes
-    # up there for the other keys. Its real release is dropped.
+    # A tap sent as another combination: the PC never had the modifier go down (it was held
+    # back), so the other keys are tapped there alone, with no F24.
     menus = len(lines(steam_log))
     pc_table({"125": "29+57"})
     check("a Meta tap sent as Ctrl+Space: tapped there, no Meta tap of the PC's, no Steam menu",
           (meta(), len(lines(steam_log))),
-          (["key 125 1"] + F24 + ["key 125 0", f"key {CTRL} 1", f"key {SPACE} 1", f"key {SPACE} 0",
-                                  f"key {CTRL} 0"], menus))
+          ([META_WAITS, f"key {CTRL} 1", f"key {SPACE} 1", f"key {SPACE} 0", f"key {CTRL} 0", META_FREE], menus))
     # Entries the relay can't use are left out; the way out of stuck keys is never the PC's.
     pc_table({"125+57": "115", "57+125": "125+57", "29+42+56+1": "29+42+56+1"})
     meta(SPACE)
@@ -917,10 +972,12 @@ def tests():
     to_relay("keyboard desktop 1 0 1 1")
     time.sleep(0.05)
     typed()
-    check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space, Shift up meanwhile",
+    check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space, without Shift",
           meta(SHIFT, SPACE),
-          ["key 125 1", f"key {SHIFT} 1", "key 125 0", f"key {SHIFT} 0", "key 125 1", f"key {SPACE} 1",
-           f"key {SPACE} 0", "key 125 0"])
+          [META_WAITS, f"key {SHIFT} 1 held", "key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0", META_WAITS,
+           f"key {SHIFT} 0 held", META_FREE])
+    check("no key_bindings: Meta+E, not in the table, is the Frame's desktop's",
+          meta(E_KEY), [META_WAITS, "key 125 1 here", f"key {E_KEY} 1 here", f"key {E_KEY} 0 here", "key 125 0 here", META_FREE])
     # A combination of the user's own that the PC gets as it is: held there as long as it's held.
     pc_table({}, {"29+125+30": "frunner"})
     got = meta(CTRL, A)
@@ -929,7 +986,7 @@ def tests():
     pc_table({"29+125+30": "29+125+30"}, {"29+125+30": "frunner"})
     key(META, 1); key(CTRL, 1); key(A, 1); key(A, 2)
     check("...listed as itself: down on the PC while held (its repeats are the PC's own), no frunner",
-          (typed(), frunner_got()), (["key 125 1", f"key {CTRL} 1", f"key {A} 1"], []))
+          (typed(), frunner_got()), ([META_WAITS, f"key {CTRL} 1 held", f"key {CTRL} 1", "key 125 1", f"key {A} 1"], []))
     key(A, 0); key(CTRL, 0); key(META, 0)
     check("...and up when let go", (typed(), frunner_got()), ([f"key {A} 0", f"key {CTRL} 0", "key 125 0"], []))
     # An entry comes before a tile's keys (the rules name it), which are ft-screens' otherwise.
@@ -956,7 +1013,7 @@ def tests():
     pc_table({"125": "125"}, {"125": "dictate_hold"})
     dictation()
     check("Meta bound to dictate_hold, its tap listed for the PC: no dictation, the PC's Meta tap",
-          (meta(), dictation()), (["key 125 1", "key 125 0"], []))
+          (meta(), dictation()), ([META_WAITS, "key 125 1", "key 125 0"], []))
     pc_table({}, {"125": "dictate_hold"})
     key(META, 1)
     check("...not listed: dictation starts on the press on the PC too", dictation(), ["start keyboard"])

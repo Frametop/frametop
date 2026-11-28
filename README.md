@@ -142,7 +142,7 @@ To add a computer:
 2. On the Frame, open Frametop Settings, pick Remote displays (or Remote displays in the Frametop menu), and choose Add computer.
 3. Sign in with the computer's Web UI login, and pick its displays.
 
-Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. While you type on a remote display, Frametop's own key combinations still work, so Meta+J clicks where you look; the Remote PC shortcuts page lists the ones the computer gets instead, as they are or as other keys (Meta+Shift+Space can open the computer's launcher while Meta+Space stays frunner's). A PC with a Steam Link dongle can stream over it, which skips your router.
+Each display has a Connected switch, a Shown switch, and its stream's resolution, frame rate and bitrate. Meta+Space finds a remote display by name and brings it to the front. While you type on a remote display, Frametop's own key combinations still work, so Meta+J clicks where you look; the Remote PC shortcuts page lists the ones the computer gets instead, as they are or as other keys (Meta+Shift+Space can open the computer's launcher while Meta+Space stays frunner's). The computer gets no other Meta combination from your keyboard, so add the ones you use there (Meta+E, or a tiling window manager's Meta+Enter). A PC with a Steam Link dongle can stream over it, which skips your router.
 
 With Share the clipboard on a computer's card (Vibepollo on Windows or Linux), text or an image you copy on the desktop can be pasted on the computer once you click one of its displays, and what you copy there can be pasted on the desktop once you click back.
 

@@ -26,8 +26,8 @@ Kirigami.ScrollablePage {
     Kirigami.FormLayout {
         Ft.Hint {
             objectName: "remoteKeysIntro"
-            text: "When you type on a remote PC or Mac display, Frametop shortcuts normally still control "
-                  + "the headset. Any shortcut listed here is forwarded to the remote computer instead "
+            text: "When you type on a remote PC or Mac display, Meta (Super, Windows, Cmd) shortcuts stay on "
+                  + "the headset. Only the shortcuts listed here are forwarded to the remote computer "
                   + "(either as-is, or remapped to a different key combo)."
         }
         Repeater {
@@ -119,10 +119,12 @@ Kirigami.ScrollablePage {
     }
 
     footer: Ft.HelpFooter {
-        text: "Applies whenever your pointer is on a remote PC or Mac display. Shortcuts that Frametop doesn't "
-              + "use already go straight to the remote computer; you only need to add rules here to override a "
-              + "Frametop shortcut or remap one (for example, sending Meta+Space when you press Meta+Shift+Space). "
-              + "Ctrl+Alt+Shift+Esc always stays on the headset to release stuck keys. Manage headset shortcuts "
-              + "in Keyboard & shortcuts."
+        text: "Applies whenever your pointer is on a remote PC or Mac display. This list is every Meta shortcut "
+              + "the remote computer gets from your keyboard: add each one you use there (Meta+Enter, Meta+1, "
+              + "Meta+E), or remap one (for example, sending Meta+Space when you press Meta+Shift+Space). A Meta "
+              + "shortcut that isn't listed does what it does off the remote: Frametop's action, or the headset "
+              + "desktop's own. Meta held while you click or scroll on the remote display still reaches it, and "
+              + "so does everything typed without Meta. Ctrl+Alt+Shift+Esc always stays on the headset to "
+              + "release stuck keys. Manage headset shortcuts in Keyboard & shortcuts."
     }
 }

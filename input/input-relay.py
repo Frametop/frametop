@@ -118,7 +118,8 @@ settings"). While a remote display has the typing (pc_typing: the sixth word 1 t
 press goes nowhere at first, and nor does a modifier pressed after it ("key <code> 1 held":
 ft-screens only notes them; holds_back). The key they are for decides. A combination in the table
 is the computer's, and it gets the modifiers first. One of Frametop's does its action, and the
-computer hears nothing, no F24 either. Any other one with Meta (Meta+E, Meta+Tab, a tap that
+computer hears nothing, no F24 either: the modifiers stop waiting as it starts, so a gaze click
+isn't the computer's Meta+click. Any other one with Meta (Meta+E, Meta+Tab, a tap that
 does nothing) is typed on the Frame's own desktop, where KWin has the keyboard ("key <code>
 <value> here"), as it would be off the remote display, and comes up there. Without Meta
 nothing changes: Ctrl+C and Alt+Tab are the computer's. A laser's click or a wheel never passes
@@ -1939,7 +1940,14 @@ class Relay:
         if action is None:
             return value == 2 and code in self.held.combos
         self.held.combos[code] = action
-        shown = self.held.meta - self.held.meta_hidden - self.held.waiting
+        # Modifiers held back for a PC's sake were for this, Frametop's own: they wait no longer
+        # (ft-screens forgets them), so a click the action makes (a gaze click) isn't the PC's
+        # Meta+click. Their releases are dropped, as the desktop's Meta's is below, and a key
+        # typed next while they're still held puts them down first (above).
+        for c in sorted(self.held.waiting):
+            self.hold_back(c, 0)
+            (self.held.meta_hidden if c in self.held.meta else self.held.lifted).add(c)
+        shown = self.held.meta - self.held.meta_hidden
         if shown:
             # The desktop saw Meta go down. Its release mustn't open Plasma's launcher, and Meta
             # comes up there now: KWin takes Meta with a mouse button for moving or resizing

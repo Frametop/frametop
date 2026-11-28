@@ -864,6 +864,11 @@ def tests():
     # and a Meta tap), so Meta+J still clicks where you look on a remote display.
     check("PC has the keys: Meta+J is still Frametop's gaze click, and the PC hears nothing, no F24 either",
           meta(J), [META_WAITS, META_FREE])
+    key(META, 1); key(J, 1)
+    check("...and Meta waits no longer once J is down: the gaze click isn't the PC's Meta+click",
+          typed(), [META_WAITS, META_FREE])
+    key(J, 0); key(META, 0)
+    check("...so its release sends nothing more", typed(), [])
 
     def pc_table(table, key_bindings=None):
         remote_keys["now"] = table
@@ -879,10 +884,10 @@ def tests():
     got = meta(SPACE)
     check("own table without Meta+Space: it's frunner's on the PC too",
           (frunner_got(), got), (["toggle keyboard"], [META_WAITS, META_FREE]))
-    check("Meta+Shift+Space sent as Meta+Space: the PC gets Meta+Space alone, no Shift, and Meta waits again",
+    check("Meta+Shift+Space sent as Meta+Space: Meta and Shift wait no longer, and the PC gets Meta+Space alone",
           meta(SHIFT, SPACE),
-          [META_WAITS, f"key {SHIFT} 1 held", "key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0", META_WAITS,
-           f"key {SHIFT} 0 held", META_FREE])
+          [META_WAITS, f"key {SHIFT} 1 held", f"key {SHIFT} 0 held", META_FREE, "key 125 1", f"key {SPACE} 1",
+           f"key {SPACE} 0", "key 125 0"])
     key(META, 1); key(SHIFT, 1); key(SPACE, 1); key(SPACE, 0); typed()
     key(A, 1); key(A, 0); key(SHIFT, 0); key(META, 0)
     check("...Meta and Shift still held, then the listed Meta+Shift+A: the PC gets them first",
@@ -923,9 +928,10 @@ def tests():
           (typed(), len(lines(steam_log))), ([META_FREE], menus + 1))
     key(META, 1); key(CTRL, 1); key(ALT, 1); key(SHIFT, 1); key(1, 1); key(1, 0)
     got = typed()
-    check("Ctrl+Alt+Shift+Esc with Meta held back: every key let go, and Meta and the rest wait again",
-          got[got.index("keys release"):] if "keys release" in got else got,
-          ["keys release", f"key {CTRL} 1 held", f"key {SHIFT} 1 held", f"key {ALT} 1 held", META_WAITS])
+    check("Ctrl+Alt+Shift+Esc with Meta held back: they wait no longer (it's Frametop's), and every key is let go",
+          got,
+          [META_WAITS, f"key {CTRL} 1 held", f"key {ALT} 1 held", f"key {SHIFT} 1 held", f"key {CTRL} 0 held",
+           f"key {SHIFT} 0 held", f"key {ALT} 0 held", META_FREE, "keys release"])
     key(SHIFT, 0); key(ALT, 0); key(CTRL, 0); key(META, 0)
     typed()
     # The 3D mouse awake off the PC ("3"): what's typed still goes there, but no Meta combination
@@ -974,8 +980,8 @@ def tests():
     typed()
     check("no key_bindings: Meta+Shift+Space still sends the PC Meta+Space, without Shift",
           meta(SHIFT, SPACE),
-          [META_WAITS, f"key {SHIFT} 1 held", "key 125 1", f"key {SPACE} 1", f"key {SPACE} 0", "key 125 0", META_WAITS,
-           f"key {SHIFT} 0 held", META_FREE])
+          [META_WAITS, f"key {SHIFT} 1 held", f"key {SHIFT} 0 held", META_FREE, "key 125 1", f"key {SPACE} 1",
+           f"key {SPACE} 0", "key 125 0"])
     check("no key_bindings: Meta+E, not in the table, is the Frame's desktop's",
           meta(E_KEY), [META_WAITS, "key 125 1 here", f"key {E_KEY} 1 here", f"key {E_KEY} 0 here", "key 125 0 here", META_FREE])
     # A combination of the user's own that the PC gets as it is: held there as long as it's held.

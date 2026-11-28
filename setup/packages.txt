@@ -21,8 +21,12 @@ both: libstdc++-static
 # the image and aren't here otherwise: Fedora's python3-opencv pulls in over a gigabyte
 both: jsoncpp-devel glibc-static
 # hand recorder (hands/rec): its export compresses recordings with zstd; its Upload page and
-# hub.py upload to Hugging Face with huggingface_hub (the image has it from uv.lock)
-both: zstd
+# hub.py upload to Hugging Face with huggingface_hub (the image has it from uv.lock). zstd is
+# the release of the base's libzstd, by version: Fedora's updates have a newer zstd that needs
+# its own library's symbols and doesn't require it, so dnf leaves the base's library and the
+# program can't start ("undefined symbol: ZSTD_isDeterministicBuild", 2026-11-27). With a new
+# base digest, name its libzstd's version here (rpm -q libzstd)
+both: zstd-1.5.7-5.fc44
 dev: python3-huggingface-hub
 # eye recorder (gaze/rec): its export encrypts to the dataset's keys with age (recorder/age.py),
 # on Python's cryptography (the image has it from uv.lock)

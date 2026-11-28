@@ -256,6 +256,8 @@ bool measured_frame(const V3 p[21], int side, Rot &R) {
 
 double angle(V3 a, V3 b) { return std::acos(std::clamp(dot(unit(a), unit(b)), -1.0, 1.0)); }
 
+constexpr int kMaxSamples = 1'000'000'000;   // a count is only "settled or not" past kSettle
+
 double median(const std::vector<float> &v) {
     if (v.empty()) return 0;
     float tmp[Calibration::kSettle];
@@ -310,9 +312,13 @@ void Calibration::add(const V3 local[21], const bool ok[21], const bool finger_o
             }
         } else if (std::fabs(x[k] - est_[k]) < 0.3 * std::fabs(est_[k]) + 0.003) {
             est_[k] += std::clamp(x[k] - est_[k], -2e-5, 2e-5);   // a running median, at most 0.02 mm a sample
-            ++n_[k];
+            n_[k] += n_[k] < kMaxSamples;
         }
     }
+}
+
+void Calibration::quantities(double q[kQuantities], int n[kQuantities]) const {
+    for (int k = 0; k < kQuantities; ++k) q[k] = est_[k], n[k] = n_[k];
 }
 
 Shape Calibration::shape(const Shape &prior) const {
@@ -349,6 +355,7 @@ Shape Skeleton::canonical(double scale) {
 
 Shape Skeleton::shape(int side, double scale) const {
     const Calibration &me = cal_[side > 0], &other = cal_[side <= 0];
+    if (has_prior_[side > 0]) return me.shape(prior_[side > 0]);   // the wearer's, from a profile
     // the other hand, when it knows more: left and right hands are mirror images
     const Shape prior = other.settled() > me.settled() ? other.shape(canonical(scale)) : canonical(scale);
     return me.shape(prior);

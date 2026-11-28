@@ -10,6 +10,8 @@
 #   ft-handsctl gestures               watch pinches and grips live (Ctrl+C to stop)
 #   ft-handsctl flag [note...]         flag a tracking failure: the last seconds of hand crops and
 #                                      ft-hands' output go to HANDS_FLAG_DIR/flag-<time> (handsflag.py)
+#   ft-handsctl profile [forget]       the hand profile: what ft-hands has learned about your hands
+#                                      (numbers only, hands/tracking.md); forget deletes it
 #
 # Needs the services installed once: hands/run.sh install (it sets ft-camd's capabilities).
 set -euo pipefail
@@ -52,5 +54,24 @@ case ${1:-status} in
     ask_screens "cutouts ${2:-state}" ;;
   gestures) exec python3 "$here/tools/watch_gestures.py" --distance ;;
   flag) shift; exec python3 "$here/handsflag.py" "$@" ;;
-  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  profile)
+    file=${XDG_STATE_HOME:-$HOME/.local/state}/frametop/hands/profile
+    case ${2:-show} in
+      show)
+        if [ -r "$file" ]; then
+          cat "$file"
+          echo "# in $file, last written $(date -r "$file" '+%Y-%m-%d %H:%M')"
+        else
+          echo "no hand profile yet ($file): ft-hands writes one after a few minutes of tracking"
+        fi ;;
+      forget)
+        # ft-hands writes what it knows as it stops, so it stops first, and learns afresh when it starts
+        was=$(systemctl --user is-active frametop-hands.service || true)
+        [ "$was" != active ] || systemctl --user stop frametop-hands.service
+        rm -f "$file" "$file.tmp"
+        [ "$was" != active ] || systemctl --user start frametop-hands.service
+        echo "hand profile forgotten" ;;
+      *) echo "usage: ft-handsctl profile [forget]" >&2; exit 2 ;;
+    esac ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

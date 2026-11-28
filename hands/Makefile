@@ -18,9 +18,9 @@ LDLIBS    = $(NCNN)/lib/libncnn.a -ljsoncpp -fopenmp -lpthread
 LDFLAGS  ?=
 
 CAMD  = camd/camd.c camd/camstart.c camd/tp.c camd/xrcams.c
-TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp track/calibfile.cpp \
+TRACK = track/calib.cpp track/nets.cpp track/tracker.cpp track/io.cpp track/record.cpp track/pinch.cpp track/sides.cpp track/skeleton.cpp track/flagbuf.cpp track/calibfile.cpp track/profile.cpp \
         track/npuheads.cpp track/npuclient.cpp track/npuserver.cpp track/npusession.cpp track/npulandmarks.cpp track/npurequests.cpp track/npudetector.cpp track/detrounds.cpp track/park.cpp track/pidfile.cpp
-HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h include/fh_calib.h ../conf/ft_conf.h
+HDR   = $(wildcard track/*.h) camd/fhring.h include/fh_hands.h include/fh_gestures.h include/fh_calib.h include/fh_verdicts.h include/fh_shm.hpp ../conf/ft_conf.h
 
 all: build/ft-camd build/ft-hands
 tools: build/ft-handreplay build/ft-ringplay
@@ -45,6 +45,10 @@ build/skeleton-test: tests/skeleton_test.cpp track/skeleton.cpp track/skeleton.h
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/skeleton_test.cpp track/skeleton.cpp
 
+build/profile-test: tests/profile_test.cpp track/profile.cpp track/profile.h track/skeleton.cpp track/skeleton.h track/geom.h include/fh_verdicts.h include/fh_shm.hpp
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/profile_test.cpp track/profile.cpp track/skeleton.cpp
+
 build/pinch-test: tests/pinch_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/pinch_test.cpp $(TRACK) $(LDLIBS)
@@ -53,7 +57,7 @@ build/flagbuf-test: tests/flagbuf_test.cpp $(TRACK) $(HDR) $(NCNN)/lib/libncnn.a
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ tests/flagbuf_test.cpp $(TRACK) $(LDLIBS)
 
-check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/calibfile-test build/npuheads-test \
+check: build/sides-test build/skeleton-test build/profile-test build/pinch-test build/flagbuf-test build/calibfile-test build/npuheads-test \
        build/npudetector-test build/npuclient-test build/npuserver-test build/npurequests-test build/trackerdet-test \
        build/cpus-test build/park-test
 	build/cpus-test
@@ -66,6 +70,7 @@ check: build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test 
 	build/trackerdet-test
 	build/sides-test
 	build/skeleton-test
+	build/profile-test
 	build/pinch-test
 	build/flagbuf-test
 	build/calibfile-test
@@ -123,6 +128,6 @@ build/ncnn/install/lib/libncnn.a:
 	cmake --build build/ncnn/build --target install > build/ncnn/build.log
 
 clean:
-	rm -f build/ft-camd build/ft-hands build/ft-handreplay build/ft-ringplay build/sides-test build/skeleton-test build/pinch-test build/flagbuf-test build/npudetector-test build/npuclient-test build/trackerdet-test
+	rm -f build/ft-camd build/ft-hands build/ft-handreplay build/ft-ringplay build/sides-test build/skeleton-test build/profile-test build/pinch-test build/flagbuf-test build/npudetector-test build/npuclient-test build/trackerdet-test
 
 .PHONY: all tools check clean

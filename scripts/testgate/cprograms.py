@@ -236,6 +236,8 @@ def items(root, env=os.environ):
         # hands/build.sh builds (minutes, and a download), so they run where it's built
         P("skeleton-test", "hands/tests/skeleton_test.cpp", "hands/track/skeleton.cpp",
           flags=f"{CXX2} -Wno-unused-parameter -Wno-psabi"),
+        P("profile-test", "hands/tests/profile_test.cpp", "hands/track/profile.cpp", "hands/track/skeleton.cpp",
+          flags=f"{CXX2} -Wno-unused-parameter -Wno-psabi"),
         single("hands/tests/shm_test.cpp", CXX2, out="shm-test"),
         P("calibfile-test", "hands/tests/calibfile_test.cpp", "hands/track/calibfile.cpp",
           flags=f"{CXX2} -Wno-unused-parameter"),
